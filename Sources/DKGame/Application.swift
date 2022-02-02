@@ -1,6 +1,5 @@
-public class Application {
-
-    public init() {
-
+public class Application: PlatformApplication {
+    public override init () {
+        
     }
 }
