@@ -1,27 +1,29 @@
-
+public struct Platform {
+    
 #if os(macOS)
-#warning("Build DKGL/DKGame for macOS platform.")
-public typealias PlatformWindow = macOS.Window
-public typealias PlatformApplication = macOS.Application
+    public static let name = "macOS"
+    public typealias Window = macOS.Window
+    public typealias Application = macOS.Application
 
 #elseif os(iOS)
-#warning("Build DKGL/DKGame for iOS platform.")
-public typealias PlatformWindow = iOS.Window
-public typealias PlatformApplication = iOS.Application
+    public static let name = "iOS"
+    public typealias Window = iOS.Window
+    public typealias Application = iOS.Application
 
 #elseif os(Android)
-#warning("Build DKGL/DKGame for Android platform.")
-public typealias PlatformWindow = Android.Window
-public typealias PlatformApplication = Android.Application
+    public static let name = "Android"
+    public typealias Window = Android.Window
+    public typealias Application = Android.Application
 
 #elseif os(Windows)
-#warning("Build DKGL/DKGame for Win32 platform.")
-public typealias PlatformWindow = Win32.Window
-public typealias PlatformApplication = Win32.Application
+    public static let name = "Win32"
+    public typealias Window = Win32.Window
+    public typealias Application = Win32.Application
 
 #elseif os(Linux)
-#warning("Build DKGL/DKGame for Linux platform.")
-public typealias PlatformWindow = Linux.Window
-public typealias PlatformApplication = Linux.Application
+    public static let name = "Linux"
+    public typealias Window = Linux.Window
+    public typealias Application = Linux.Application
 
 #endif
+}

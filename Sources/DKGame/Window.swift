@@ -1,5 +1,5 @@
 
-public class Window : PlatformWindow {
+public class Window : Platform.Window {
 
     public override init() {
     }
