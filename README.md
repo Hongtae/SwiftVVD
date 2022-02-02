@@ -1,3 +1,8 @@
-# TestApp1
+# DKGL/DKGame for swift
 
-A description of this package.
+
+Game Engine for swift programming language.
+
+- Cross-platform game engine
+- GPGPU Library with Vulkan / Metal / D3D12
+- Audio & Physics for game development
