@@ -1,8 +1,8 @@
-import cpp_test
+import cpp_test // from Packages.Externals
 
 public class Window : Platform.Window {
 
     public override init() {
-        DKGameCppTest()
+        cpp_test12()
     }
 }
