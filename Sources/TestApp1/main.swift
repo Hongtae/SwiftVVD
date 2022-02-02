@@ -1,5 +1,4 @@
 
-typealias Window = Win32.Window
 
 print("Hello, world!")
 
