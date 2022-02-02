@@ -1,5 +1,8 @@
 import WinSDK
 
+private let IDC_ARROW: UnsafePointer<WCHAR> = UnsafePointer<WCHAR>(bitPattern: 32512)!
+private let IDI_APPLICATION: UnsafePointer<WCHAR> = UnsafePointer<WCHAR>(bitPattern: 32512)!
+
 private func WindowProc(
   _ hWnd: HWND?, _ uMsg: UINT, _ wParam: WPARAM,
   _ lParam: LPARAM
@@ -8,23 +11,20 @@ private func WindowProc(
     return DefWindowProcW(hWnd, uMsg, wParam, lParam)
 }
 
-class Window {
-    var hWnd : HWND?
+public class Window {
+    public private(set) var hWnd : HWND?
+    private let windowClass = "_DKWindowClass"
 
-    init() {
+    public init() {
 
         OleInitialize(nil)
 
-        let wcName = "DKWindowClass"
-        let name : Array<WCHAR> = wcName.withCString(encodedAs: UTF16.self) { buffer in 
-            Array<WCHAR>(unsafeUninitializedCapacity: wcName.utf16.count + 1) {
+        let name : Array<WCHAR> = windowClass.withCString(encodedAs: UTF16.self) { buffer in 
+            Array<WCHAR>(unsafeUninitializedCapacity: windowClass.utf16.count + 1) {
                 wcscpy_s($0.baseAddress, $0.count, buffer)
                 $1 = $0.count
             }
         }
-
-        let IDC_ARROW: UnsafePointer<WCHAR> = UnsafePointer<WCHAR>(bitPattern: 32512)!
-        let IDI_APPLICATION: UnsafePointer<WCHAR> = UnsafePointer<WCHAR>(bitPattern: 32512)!
 
         var wc : WNDCLASSEXW = name.withUnsafeBufferPointer {
             WNDCLASSEXW(
@@ -46,12 +46,12 @@ class Window {
         if atom == nil { 
             print("RegisterClassExW failed.")
         } else {
-            print("DKWondowClass registered!")
+            print("WindowClass: \"\(windowClass)\" registered!")
         }
-
-        print("Create DK-Window!")
     }
-    func Create() -> Bool {
+
+    public func Create() -> Bool {
+        print("Create DK-Window!")
         return false
     }
 }

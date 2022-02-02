@@ -1,7 +1,9 @@
 
+import DKGame
 
 print("Hello, world!")
 
 var a = Window()
-a.Create()
-
+if a.Create() == false {
+    print("Create Window Failed")
+}
