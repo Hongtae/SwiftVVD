@@ -14,7 +14,14 @@ let package = Package(
         // Targets can depend on other targets in this package, and on products in packages this package depends on.
         .executableTarget(
             name: "TestApp1",
-            dependencies: []),
+            dependencies: [],
+            linkerSettings: [
+                .linkedLibrary("User32"),
+                .linkedLibrary("Ole32"),
+                .linkedLibrary("Imm32"),
+                .linkedLibrary("Shcore"),
+                ]
+            ),
         .testTarget(
             name: "TestApp1Tests",
             dependencies: ["TestApp1"]),
