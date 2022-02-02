@@ -1,0 +1,33 @@
+{
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug TestApp1",
+            "program": "${workspaceFolder:TestApp1}/.build/debug/TestApp1",
+            "args": [],
+            "cwd": "${workspaceFolder:TestApp1}",
+            "preLaunchTask": "swift: Build Debug TestApp1"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Release TestApp1",
+            "program": "${workspaceFolder:TestApp1}/.build/release/TestApp1",
+            "args": [],
+            "cwd": "${workspaceFolder:TestApp1}",
+            "preLaunchTask": "swift: Build Release TestApp1"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Test TestApp1",
+            "program": "${workspaceFolder:TestApp1}/.build/debug/TestApp1PackageTests.xctest",
+            "cwd": "${workspaceFolder:TestApp1}",
+            "env": {
+                "path": "C:\\Library\\Developer\\Platforms\\Windows.platform\\Developer\\Library\\XCTest-development\\usr\\bin;${env:PATH}"
+            },
+            "preLaunchTask": "swift: Build All"
+        }
+    ]
+}
