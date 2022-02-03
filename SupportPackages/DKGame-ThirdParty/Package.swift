@@ -4,17 +4,17 @@
 import PackageDescription
 
 let package = Package(
-    name: "Externals",
+    name: "DKGame-ThirdParty",
     products: [
         // Products define the executables and libraries a package produces, and make them visible to other packages.
         .library(
-            name: "Externals",
-            targets: ["Externals", "cpp_test"]),
+            name: "DKGame-ThirdParty",
+            targets: ["DKGameSupport", "cpp_test"]),
     ],
     dependencies: [],
     targets: [
         .target(
-            name: "Externals",
+            name: "DKGameSupport",
             dependencies: []),
         .target(
             name: "cpp_test",
