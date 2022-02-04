@@ -96,6 +96,9 @@ let package = Package(
                 .define("FT_DEBUG_LEVEL_ERROR", .when(configuration:.debug)),
                 .define("FT_DEBUG_LEVEL_TRACE", .when(configuration:.debug)),
                 .headerSearchPath("include"),
+                .unsafeFlags([
+                    "-Wno-format"
+                ]),
             ]),
         .target(
             name: "jpeg",
@@ -148,8 +151,10 @@ let package = Package(
                 "jquant2.c",
                 "jutils.c",
             ],
-            publicHeadersPath: "."
-            ),
+            publicHeadersPath: ".",
+            cSettings: [
+                .define("_CRT_SECURE_NO_WARNINGS", .when(platforms: [.windows])),
+            ]),
         .target(
             name: "libpng",
             dependencies: [.target(name: "zlib")],
@@ -176,6 +181,9 @@ let package = Package(
                 .define("_CRT_SECURE_NO_WARNINGS", .when(platforms: [.windows])),
                 //.define("PNG_INTEL_SSE", .when(platforms: [.windows])),
                 //.headerSearchPath("../zlib/src"),
+                .unsafeFlags([
+                    "-Wno-tautological-constant-out-of-range-compare",
+                ])
             ]),
         .target(
             name: "libogg",
@@ -218,7 +226,18 @@ let package = Package(
             dependencies: [.target(name: "libogg")],
             path: "Sources/libFLAC",
             sources: ["src/libFLAC"],
-            publicHeadersPath: "include"),
+            publicHeadersPath: "include",
+            cSettings: [
+                .define("fseeko", to: "fseek", .when(platforms: [.windows, .android])),    
+                .define("ftello", to: "ftell", .when(platforms: [.windows, .android])),
+                .define("_CRT_SECURE_NO_WARNINGS", .when(platforms: [.windows])),
+                .define("_CRT_NONSTDC_NO_WARNINGS", .when(platforms: [.windows])),
+                .unsafeFlags([
+                    "-Wno-enum-conversion",
+                    "-Wno-tautological-constant-out-of-range-compare",
+                    "-Wno-sizeof-pointer-memaccess"
+                ])
+            ]),
         .target(
             name: "lz4",
             path: "Sources/lz4",
@@ -297,7 +316,14 @@ let package = Package(
                 "src/trees.c",
                 "src/uncompr.c",
                 "src/zutil.c"],
-            publicHeadersPath: "include"),
+            publicHeadersPath: "include",
+            cSettings: [
+                .define("_CRT_SECURE_NO_WARNINGS", .when(platforms: [.windows])),
+                .define("_CRT_NONSTDC_NO_WARNINGS", .when(platforms: [.windows])),
+                .unsafeFlags([
+                    "-Wno-shift-negative-value",
+                ])
+            ]),
         .target(
             name: "zstd",
             path: "Sources/zstd",
