@@ -12,6 +12,7 @@ let package = Package(
             targets: [
                 "DKGameSupport",
                 "FreeType",
+                "lz4",
                 "zlib",
                 "cpp_test"]),
     ],
@@ -73,6 +74,15 @@ let package = Package(
                 .define("FT_DEBUG_LEVEL_TRACE", .when(configuration:.debug)),
                 .headerSearchPath("include"),
             ]),
+        .target(
+            name: "lz4",
+            path: "Sources/lz4",
+            sources: [
+                "lib/lz4.c",
+                "lib/lz4frame.c",
+                "lib/lz4hc.c",
+                "lib/xxhash.c"],
+            publicHeadersPath: "lib"),
         .target(
             name: "zlib",
             path: "Sources/zlib",
