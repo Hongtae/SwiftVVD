@@ -14,6 +14,7 @@ let package = Package(
                 "FreeType",
                 "jpeg",
                 "libpng",
+                "libogg",
                 "lz4",
                 "lzma",
                 "zlib",
@@ -157,6 +158,12 @@ let package = Package(
                 //.define("PNG_INTEL_SSE", .when(platforms: [.windows])),
                 //.headerSearchPath("../zlib/src"),
             ]),
+        .target(
+            name:"libogg",
+            path: "Sources/libogg",
+            sources : ["src"],
+            publicHeadersPath: "include"
+            ),
         .target(
             name: "lz4",
             path: "Sources/lz4",
