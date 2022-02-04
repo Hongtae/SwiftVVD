@@ -11,6 +11,7 @@ let package = Package(
             name: "DKGame-ThirdParty",
             targets: [
                 "DKGameSupport",
+                "SPIRV-Cross",
                 "FreeType",
                 "jpeg",
                 "libpng",
@@ -27,6 +28,22 @@ let package = Package(
         .target(
             name: "DKGameSupport",
             dependencies: []),
+        .target(
+            name: "SPIRV-Cross",
+            path: "Sources/SPIRV-Cross",
+            sources: [
+                "spirv_cfg.cpp",
+                "spirv_cpp.cpp",
+                "spirv_cross.cpp",
+                "spirv_cross_c.cpp",
+                "spirv_cross_parsed_ir.cpp",
+                "spirv_cross_util.cpp",
+                "spirv_glsl.cpp",
+                "spirv_hlsl.cpp",
+                "spirv_msl.cpp",
+                "spirv_parser.cpp",
+                "spirv_reflect.cpp"],
+            publicHeadersPath: "include"),
         .target(
             name: "FreeType",
             path: "Sources/FreeType",
