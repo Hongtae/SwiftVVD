@@ -13,6 +13,7 @@ let package = Package(
                 "DKGameSupport",
                 "FreeType",
                 "jpeg",
+                "libpng",
                 "lz4",
                 "lzma",
                 "zlib",
@@ -129,6 +130,33 @@ let package = Package(
             ],
             publicHeadersPath: "."
             ),
+        .target(
+            name: "libpng",
+            dependencies: [.target(name: "zlib")],
+            path: "Sources/libpng",
+            sources: [
+                "png.c",
+                "pngerror.c",
+                "pngget.c",
+                "pngmem.c",
+                "pngpread.c",
+                "pngread.c",
+                "pngrio.c",
+                "pngrtran.c",
+                "pngrutil.c",
+                "pngset.c",
+                "pngtrans.c",
+                "pngwio.c",
+                "pngwrite.c",
+                "pngwtran.c",
+                "pngwutil.c"
+            ],
+            publicHeadersPath: ".",
+            cSettings: [
+                .define("_CRT_SECURE_NO_WARNINGS", .when(platforms: [.windows])),
+                //.define("PNG_INTEL_SSE", .when(platforms: [.windows])),
+                //.headerSearchPath("../zlib/src"),
+            ]),
         .target(
             name: "lz4",
             path: "Sources/lz4",
