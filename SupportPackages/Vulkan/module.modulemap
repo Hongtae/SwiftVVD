@@ -1,0 +1,5 @@
+module Vulkan [system] {
+  umbrella header "include/vulkan/vulkan.h"
+  link "vulkan-1"
+  export *
+}
