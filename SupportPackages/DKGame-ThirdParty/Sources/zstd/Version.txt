@@ -1,0 +1,6 @@
+https://github.com/facebook/zstd.git
+
+Commit: acbd6c0341237f177628a1888daaea892b442402 [acbd6c0]
+Date: Thursday, December 27, 2018 10:38:31 AM
+
+v1.3.8

@@ -155,6 +155,21 @@ let package = Package(
                 "src/zutil.c"],
             publicHeadersPath: "include"),
         .target(
+            name: "zstd",
+            path: "Sources/zstd",
+            sources: [
+                "lib/common",
+                "lib/compress",
+                "lib/decompress",
+                "lib/dictBuilder",
+            ],
+            publicHeadersPath: "include",
+            cSettings: [
+                .headerSearchPath("lib"),
+                .headerSearchPath("lib/common"),
+                .headerSearchPath("lib/dictBuilder")]
+        ),
+        .target(
             name: "cpp_test",
             path: "Sources/cpp/cpp_test",
             cSettings: [
