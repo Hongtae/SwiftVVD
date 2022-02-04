@@ -16,6 +16,7 @@ let package = Package(
                 "libpng",
                 "libogg",
                 "libvorbis",
+                "libFLAC",
                 "lz4",
                 "lzma",
                 "zlib",
@@ -160,7 +161,7 @@ let package = Package(
                 //.headerSearchPath("../zlib/src"),
             ]),
         .target(
-            name:"libogg",
+            name: "libogg",
             path: "Sources/libogg",
             sources : ["src"],
             publicHeadersPath: "include"),
@@ -195,6 +196,12 @@ let package = Package(
             cSettings: [
                 .define("_CRT_SECURE_NO_WARNINGS", .when(platforms: [.windows])),
             ]),
+        .target(
+            name: "libFLAC",
+            dependencies: [.target(name: "libogg")],
+            path: "Sources/libFLAC",
+            sources: ["src/libFLAC"],
+            publicHeadersPath: "include"),
         .target(
             name: "lz4",
             path: "Sources/lz4",
