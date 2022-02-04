@@ -38,8 +38,7 @@ let package = Package(
                 ],
             exclude: [],
             cSettings: [
-                //.headerSearchPath("SupportPackages/DKGame-ThirdParty/Sources/FreeType/include"),
-                //.unsafeFlags(["-ISupportPackages/DKGame-ThirdParty/Sources/FreeType/include"]),
+                .unsafeFlags(["-ISupportPackages/DKGame-ThirdParty/Sources/FreeType/include"]),
             ],
             linkerSettings: [
                 .linkedLibrary("User32", .when(platforms: [.windows])),

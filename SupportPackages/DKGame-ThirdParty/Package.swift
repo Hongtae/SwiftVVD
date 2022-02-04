@@ -11,7 +11,7 @@ let package = Package(
             name: "DKGame-ThirdParty",
             targets: [
                 "DKGameSupport",
-                "SPIRV-Cross",
+                // "SPIRV_Cross",
                 "FreeType",
                 "jpeg",
                 "libpng",
@@ -21,7 +21,8 @@ let package = Package(
                 "lz4",
                 "lzma",
                 "zlib",
-                "cpp_test"]),
+                "zstd",
+                ]),
     ],
     dependencies: [],
     targets: [
@@ -29,7 +30,7 @@ let package = Package(
             name: "DKGameSupport",
             dependencies: []),
         .target(
-            name: "SPIRV-Cross",
+            name: "SPIRV_Cross",
             path: "Sources/SPIRV-Cross",
             sources: [
                 "spirv_cfg.cpp",
@@ -46,6 +47,7 @@ let package = Package(
             publicHeadersPath: "include"),
         .target(
             name: "FreeType",
+            dependencies: [.target(name: "zlib")],
             path: "Sources/FreeType",
             sources: [
                 "src/autofit/autofit.c",
@@ -176,11 +178,10 @@ let package = Package(
                 "pngwtran.c",
                 "pngwutil.c"
             ],
-            publicHeadersPath: ".",
+            publicHeadersPath: "include",
             cSettings: [
                 .define("_CRT_SECURE_NO_WARNINGS", .when(platforms: [.windows])),
                 //.define("PNG_INTEL_SSE", .when(platforms: [.windows])),
-                //.headerSearchPath("../zlib/src"),
                 .unsafeFlags([
                     "-Wno-tautological-constant-out-of-range-compare",
                 ])
@@ -232,10 +233,11 @@ let package = Package(
                 .define("ftello", to: "ftell", .when(platforms: [.windows, .android])),
                 .define("_CRT_SECURE_NO_WARNINGS", .when(platforms: [.windows])),
                 .define("_CRT_NONSTDC_NO_WARNINGS", .when(platforms: [.windows])),
+                .headerSearchPath("include"),
                 .unsafeFlags([
                     "-Wno-enum-conversion",
                     "-Wno-tautological-constant-out-of-range-compare",
-                    "-Wno-sizeof-pointer-memaccess"
+                    "-Wno-sizeof-pointer-memaccess",
                 ])
             ]),
         .target(
@@ -246,7 +248,7 @@ let package = Package(
                 "lib/lz4frame.c",
                 "lib/lz4hc.c",
                 "lib/xxhash.c"],
-            publicHeadersPath: "lib"),
+            publicHeadersPath: "include"),
         .target(
             name: "lzma",
             path: "Sources/lzma",
@@ -327,6 +329,7 @@ let package = Package(
         .target(
             name: "zstd",
             path: "Sources/zstd",
+            exclude: ["lib/common/xxhash.c"], // duplicated, use lz4 instead
             sources: [
                 "lib/common",
                 "lib/compress",
@@ -339,31 +342,7 @@ let package = Package(
                 .headerSearchPath("lib/common"),
                 .headerSearchPath("lib/dictBuilder")]
         ),
-        .target(
-            name: "cpp_test",
-            path: "Sources/cpp/cpp_test",
-            cSettings: [
-                // just test!
-                .define("DKGL_CPP_TEST", to:"1234"),
-
-                .define("DKGL_DEBUG_ENABLED", to:"1", .when(configuration: .debug)),
-                .define("DKGL_DEBUG_ENABLED", to:"0", .when(configuration: .release)),
-
-                // Graphics API selection
-                .define("ENABLE_VULKAN", .when(platforms: [.windows, .linux, .android])),
-                .define("ENABLE_METAL", .when(platforms: [.macOS, .iOS])),
-                .define("ENABLE_D3D", .when(platforms: [.windows])),
-
-                // GUI Platform
-                .define("ENABLE_UIKIT", .when(platforms: [.iOS, .macOS])),
-                .define("ENABLE_APPKIT", .when(platforms: [.macOS])),
-                .define("ENABLE_WIN32", .when(platforms: [.windows])),
-                .define("ENABLE_WAYLAND", .when(platforms: [.linux])),
-
-            ],
-            cxxSettings: [
-                .define("DKGL_CPP_TEST2", to:"1234"),
-                .headerSearchPath("include")
-            ]),
-    ]
+    ],
+    cLanguageStandard: .c11,
+    cxxLanguageStandard: .cxx20
 )
