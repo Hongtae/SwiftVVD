@@ -17,6 +17,7 @@ public class Window : Platform.Window {
 
     public override init() {
         // Vulkan test.
-        let device = GraphicsDevice()
+        let graphicsDevice = GraphicsDevice()
+        let audioDevice = AudioDevice()
     }
 }
