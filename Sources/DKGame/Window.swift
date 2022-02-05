@@ -16,6 +16,7 @@ import zstd
 public class Window : Platform.Window {
 
     public override init() {
-
+        // Vulkan test.
+        let device = GraphicsDevice()
     }
 }
