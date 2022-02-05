@@ -63,7 +63,7 @@ let package = Package(
                 "core/mixer/mixer_sse3.cpp",
                 "core/mixer/mixer_sse41.cpp",
             ],
-            publicHeadersPath: "swift_umbrella/mixer_sse",
+            publicHeadersPath: "build/swift_umbrella/mixer_sse",
             cxxSettings: [
                 .headerSearchPath("."),
                 .headerSearchPath("build"),
@@ -75,7 +75,7 @@ let package = Package(
             sources: [
                 "core/mixer/mixer_neon.cpp",
             ],
-            publicHeadersPath: "swift_umbrella/mixer_neon",
+            publicHeadersPath: "build/swift_umbrella/mixer_neon",
             cxxSettings: [
                 .headerSearchPath("."),
                 .headerSearchPath("build"),
@@ -90,7 +90,7 @@ let package = Package(
                 "alc/backends/null.cpp",
                 "alc/backends/wave.cpp",
             ],
-            publicHeadersPath: "swift_umbrella/backend",
+            publicHeadersPath: "build/swift_umbrella/backend",
             cxxSettings: [
                 .headerSearchPath("alc"),
                 .headerSearchPath("build"),
@@ -106,7 +106,7 @@ let package = Package(
                 "alc/backends/winmm.cpp",
                 "alc/backends/wasapi.cpp"
             ],
-            publicHeadersPath: "swift_umbrella/backend_windows",
+            publicHeadersPath: "build/swift_umbrella/backend_windows",
             cxxSettings: [
                 .headerSearchPath("alc"),
                 .headerSearchPath("build"),
