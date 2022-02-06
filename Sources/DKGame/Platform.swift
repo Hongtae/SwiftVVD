@@ -20,4 +20,7 @@ public class Platform {
     public class func runApplication(delegate: ApplicationDelegate?) -> Int {
         return 0
     }
+    public class func applicationInstance() -> Application? {
+        return nil
+    }
 }

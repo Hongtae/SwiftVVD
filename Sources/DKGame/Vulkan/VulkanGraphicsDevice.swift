@@ -1,7 +1,7 @@
 import Vulkan
 import Foundation
 
-public class VulkanGraphicsDevice {
+public class VulkanGraphicsDevice : GraphicsDevice {
 
     private let VK_MAKE_VERSION = { (major: UInt32, minor: UInt32, patch: UInt32)->UInt32 in
         (((major) << 22) | ((minor) << 12) | (patch))
@@ -50,5 +50,9 @@ public class VulkanGraphicsDevice {
         } else {
             print("vkEnumerateInstanceVersion failed.")
         }
+    }
+
+    public func makeCommandQueue() -> CommandQueue? {
+        return nil
     }
 }
