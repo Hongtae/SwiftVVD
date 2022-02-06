@@ -1,1 +1,3 @@
-public struct macOS {}
+public struct macOS {
+    static let name = "macOS"
+}

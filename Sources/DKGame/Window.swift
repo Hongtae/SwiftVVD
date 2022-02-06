@@ -1,23 +1,12 @@
+public protocol WindowDelegate {
+    func shouldClose() -> Bool
+}
 
+public protocol Window {
+    func show()
+    func hide()
+}
 
-import DKGameSupport
-import Vulkan
-import FreeType
-import jpeg
-import libpng
-import libogg
-import libvorbis
-import libFLAC
-import lz4
-import lzma
-import zlib
-import zstd
-
-public class Window : Platform.Window {
-
-    public override init() {
-        // Vulkan test.
-        let graphicsDevice = GraphicsDevice()
-        let audioDevice = AudioDevice()
-    }
+public func makeWindow(name: String = "", delegate: WindowDelegate? = nil) -> Window { 
+    return Platform.makeWindow(name: name, delegate: delegate)
 }

@@ -1,29 +1,23 @@
-public struct Platform {
-    
+public class Platform {
+
 #if os(macOS)
-    public static let name = "macOS"
-    public typealias Window = macOS.Window
-    public typealias Application = macOS.Application
-
+    typealias Impl = macOS
 #elseif os(iOS)
-    public static let name = "iOS"
-    public typealias Window = iOS.Window
-    public typealias Application = iOS.Application
-
+    typealias Impl = iOS
 #elseif os(Android)
-    public static let name = "Android"
-    public typealias Window = Android.Window
-    public typealias Application = Android.Application
-
+    typealias Impl = Android
 #elseif os(Windows)
-    public static let name = "Win32"
-    public typealias Window = Win32.Window
-    public typealias Application = Win32.Application
-
+    typealias Impl = Win32
 #elseif os(Linux)
-    public static let name = "Linux"
-    public typealias Window = Linux.Window
-    public typealias Application = Linux.Application
-
+    typealias Impl = Linux
 #endif
+
+    public class var name : String { Impl.name }
+
+    public class func makeWindow(name: String, delegate: WindowDelegate?) -> Window {
+        return Impl.Window()
+    }
+    public class func runApplication(delegate: ApplicationDelegate?) -> Int {
+        return 0
+    }
 }

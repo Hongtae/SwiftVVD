@@ -1,1 +1,3 @@
-public struct Win32 {}
+public struct Win32 {
+    static let name = "Win32"
+}

@@ -11,9 +11,10 @@ private func WindowProc(
     return DefWindowProcW(hWnd, uMsg, wParam, lParam)
 }
 
+private typealias WindowProtocol = Window
+
 extension Win32 {
-    
-    public class Window {
+    public class Window : WindowProtocol {
         public private(set) var hWnd : HWND?
         private let windowClass = "_DKWindowClass"
 
@@ -52,10 +53,8 @@ extension Win32 {
             }
         }
 
-        public func Create() -> Bool {
-            print("Create DK-Window!")
-            return false
-        }
+        public func show() {}
+        public func hide() {}
     }
 
 }

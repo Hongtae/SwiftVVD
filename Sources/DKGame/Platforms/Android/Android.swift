@@ -1,1 +1,3 @@
-public struct Android {}
+public struct Android {
+    static let name = "Android"
+}
