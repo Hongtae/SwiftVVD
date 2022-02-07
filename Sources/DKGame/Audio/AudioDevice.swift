@@ -7,7 +7,7 @@ public class AudioDevice {
         let context = alcCreateContext(device, nil)
 
         alcMakeContextCurrent(context);
-        let deviceName = alcGetString(device, ALC_DEVICE_SPECIFIER);
+        let deviceName = String(validatingUTF8: alcGetString(device, ALC_DEVICE_SPECIFIER)) ?? "Null"
         var majorVersion : Int32 = 0;
         var minorVersion : Int32 = 0;
         alcGetIntegerv(device, ALC_MAJOR_VERSION, Int32(MemoryLayout<Int32>.size), &majorVersion);

@@ -15,10 +15,17 @@ public class RenderPassAttachmentDescriptor {
 }
 
 public class RenderPassColorAttachmentDescriptor : RenderPassAttachmentDescriptor {
-    var clearColor: Color = Color(red:0.0, green:0.0, blue:0.0, alpha:0.0)
+    var clearColor: Color = .black
 }
 
 public class RenderPassDepthStencilAttachmentDescriptor : RenderPassAttachmentDescriptor {
     var clearDepth: Float = 1.0
     var clearStencil: UInt32 = 0
+}
+
+public struct RenderPassDescriptor {
+    var colorAttachments: [RenderPassColorAttachmentDescriptor]
+    var depthStencilAttachment: RenderPassDepthStencilAttachmentDescriptor
+
+    var numberOfActiveLayers: UInt64 = 0
 }

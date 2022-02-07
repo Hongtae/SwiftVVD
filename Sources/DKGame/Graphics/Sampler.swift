@@ -24,7 +24,7 @@ public struct SamplerDescriptor {
     var mipFilter: MipFilter = .notMipmapped
 
     var minLod: Float = 0.0
-    var maxLod: Float = 3.402823466e+38 // FLT_MAX
+    var maxLod: Float = .greatestFiniteMagnitude // 3.402823466e+38 // FLT_MAX
 
     var maxAnisotropy: UInt32 = 1
     var normalizedCoordinates: Bool = true
