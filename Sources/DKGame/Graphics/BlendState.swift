@@ -24,13 +24,15 @@ public enum BlendOperation {
     case max
 }
 
-public enum ColorWriteMask : UInt8 {
-    case none = 0
-    case red = 8
-    case green = 4
-    case blue = 2
-    case alpha = 1
-    case all = 15
+public struct ColorWriteMask: OptionSet {
+    public let rawValue: UInt
+    public init(rawValue: UInt) { self.rawValue = rawValue }
+
+    public static let red      = ColorWriteMask(rawValue: 0x1 << 3)
+    public static let green    = ColorWriteMask(rawValue: 0x1 << 2)
+    public static let blue     = ColorWriteMask(rawValue: 0x1 << 1)
+    public static let alpha    = ColorWriteMask(rawValue: 0x1)
+    public static let all      = ColorWriteMask(rawValue: 0xf)
 }
 
 public struct BlendState {

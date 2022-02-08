@@ -13,8 +13,8 @@ public enum PrimitiveType {
 }
 
 public enum IndexType {
-    case UInt16
-    case UInt32
+    case uint16
+    case uint32
 }
 
 public enum TriangleFillMode {

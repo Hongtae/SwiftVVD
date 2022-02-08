@@ -1,33 +1,33 @@
 public enum VertexFormat {
     case invalid
     
-    case uChar2
-    case uChar3
-    case uChar4
+    case uchar2
+    case uchar3
+    case uchar4
     
     case char2
     case char3
     case char4
     
-    case uChar2Normalized
-    case uChar3Normalized
-    case uChar4Normalized
+    case uchar2Normalized
+    case uchar3Normalized
+    case uchar4Normalized
     
     case char2Normalized
     case char3Normalized
     case char4Normalized
     
-    case uShort2
-    case uShort3
-    case uShort4
+    case ushort2
+    case ushort3
+    case ushort4
     
     case short2
     case short3
     case short4
     
-    case uShort2Normalized
-    case uShort3Normalized
-    case uShort4Normalized
+    case ushort2Normalized
+    case ushort3Normalized
+    case ushort4Normalized
     
     case short2Normalized
     case short3Normalized
@@ -53,7 +53,7 @@ public enum VertexFormat {
     case uInt4
     
     case int1010102Normalized
-    case uInt1010102Normalized
+    case uint1010102Normalized
 }
 
 public enum VertexStepRate {

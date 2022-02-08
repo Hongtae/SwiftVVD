@@ -1,27 +1,30 @@
+public enum SamplerMinMagFilter {
+    case nearest
+    case linear
+}
+
+public enum SamplerMipFilter {
+    case notMipmapped
+    case nearest
+    case linear
+}
+
+public enum SamplerAddressMode {
+    case clampToEdge
+    case `repeat`
+    case mirrorRepeat
+    case clampToZero
+}
+
 public struct SamplerDescriptor {
-	public enum MinMagFilter {
-        case nearest
-        case linear
-    }
-	public enum MipFilter {
-        case notMipmapped
-        case nearest
-        case linear
-    }
-    public enum AddressMode {
-        case clampToEdge
-        case `repeat`
-        case mirrorRepeat
-        case clampToZero
-    }
 
-    var addressModeU: AddressMode = .clampToEdge
-    var addressModeV: AddressMode = .clampToEdge
-    var addressModeW: AddressMode = .clampToEdge
+    var addressModeU: SamplerAddressMode = .clampToEdge
+    var addressModeV: SamplerAddressMode = .clampToEdge
+    var addressModeW: SamplerAddressMode = .clampToEdge
 
-    var minFilter: MinMagFilter = .nearest
-    var magFilter: MinMagFilter = .nearest
-    var mipFilter: MipFilter = .notMipmapped
+    var minFilter: SamplerMinMagFilter = .nearest
+    var magFilter: SamplerMinMagFilter = .nearest
+    var mipFilter: SamplerMipFilter = .notMipmapped
 
     var minLod: Float = 0.0
     var maxLod: Float = .greatestFiniteMagnitude // 3.402823466e+38 // FLT_MAX
