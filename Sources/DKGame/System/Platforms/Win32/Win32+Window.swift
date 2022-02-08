@@ -29,8 +29,8 @@ extension Win32 {
                 }
             }
 
-            var wc : WNDCLASSEXW = name.withUnsafeBufferPointer {
-                WNDCLASSEXW(
+            let atom: ATOM? = name.withUnsafeBufferPointer {
+                var wc = WNDCLASSEXW(
                     cbSize: UINT(MemoryLayout<WNDCLASSEXW>.size),
                     style: UINT(CS_OWNDC),
                     lpfnWndProc: WindowProc,
@@ -43,14 +43,15 @@ extension Win32 {
                     lpszMenuName: nil,
                     lpszClassName: $0.baseAddress!,
                     hIconSm: nil)
+
+                return RegisterClassExW(&wc)
             }
-        
-            let atom: ATOM? = RegisterClassExW(&wc)
+
             if atom == nil { 
                 print("RegisterClassExW failed.")
             } else {
                 print("WindowClass: \"\(windowClass)\" registered!")
-            }
+            }         
         }
 
         public func show() {}
