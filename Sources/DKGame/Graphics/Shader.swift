@@ -1,3 +1,5 @@
+import SPIRV_Cross
+
 public struct ShaderAttribute {
     var name : String
     var location : UInt32
@@ -23,5 +25,9 @@ public class Shader {
         var type : DescriptorType
     }
 
-    public init() {}
+    public init() {
+        // spirv-cross test
+        var context: spvc_context? = nil
+        spvc_context_create(&context);
+    }
 }
