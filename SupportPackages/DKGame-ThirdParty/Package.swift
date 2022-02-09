@@ -98,7 +98,7 @@ let package = Package(
                 "src/type1/type1.c",
                 "src/type42/type42.c",
                 "src/winfonts/winfnt.c"],
-            publicHeadersPath: "public",
+            publicHeadersPath: "include",
             cSettings: [
                 .define("_CRT_SECURE_NO_WARNINGS", .when(platforms:[.windows])),
                 .define("FT2_BUILD_LIBRARY"),
