@@ -1,0 +1,3 @@
+module SPIRV_Cross {
+    header "spirv_cross_c.h"
+}

@@ -51,7 +51,7 @@ let package = Package(
                 "spirv_msl.cpp",
                 "spirv_parser.cpp",
                 "spirv_reflect.cpp"],
-            publicHeadersPath: "swift_public_headers"),
+            publicHeadersPath: "."),
         .target(
             name: "FreeType",
             dependencies: [.target(name: "zlib")],

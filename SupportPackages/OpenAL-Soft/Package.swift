@@ -63,7 +63,7 @@ let package = Package(
                 "openal-soft/core/mixer/mixer_sse3.cpp",
                 "openal-soft/core/mixer/mixer_sse41.cpp",
             ],
-            publicHeadersPath: "swift_public_headers/mixer_sse",
+            publicHeadersPath: "swift_module",
             cxxSettings: [
                 .headerSearchPath("openal-soft"),
                 .headerSearchPath("openal-soft/build"),
@@ -75,7 +75,7 @@ let package = Package(
             sources: [
                 "openal-soft/core/mixer/mixer_neon.cpp",
             ],
-            publicHeadersPath: "swift_public_headers/mixer_neon",
+            publicHeadersPath: "swift_module",
             cxxSettings: [
                 .headerSearchPath("openal-soft"),
                 .headerSearchPath("openal-soft/build"),
@@ -90,7 +90,7 @@ let package = Package(
                 "openal-soft/alc/backends/null.cpp",
                 "openal-soft/alc/backends/wave.cpp",
             ],
-            publicHeadersPath: "swift_public_headers/backend",
+            publicHeadersPath: "swift_module",
             cxxSettings: [
                 .headerSearchPath("openal-soft/alc"),
                 .headerSearchPath("openal-soft/build"),
@@ -106,7 +106,7 @@ let package = Package(
                 "openal-soft/alc/backends/winmm.cpp",
                 "openal-soft/alc/backends/wasapi.cpp"
             ],
-            publicHeadersPath: "swift_public_headers/backend_windows",
+            publicHeadersPath: "swift_module",
             cxxSettings: [
                 .headerSearchPath("openal-soft/alc"),
                 .headerSearchPath("openal-soft/build"),
