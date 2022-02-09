@@ -29,13 +29,13 @@ let package = Package(
     targets: [
         .target(
             name: "DKGameSupport",
-            dependencies: []),
+            dependencies: [],
+            path: "Sources/DKGameSupport"),
         .target(
             name: "DKGameUtils",
             dependencies: ["libpng", "jpeg", "zlib", "lz4", "lzma", "zstd", "libvorbis", "libFLAC"],
             path: "Sources/DKGameUtils",
-            publicHeadersPath: "."
-            ),
+            publicHeadersPath: "."),
         .target(
             name: "SPIRV_Cross",
             path: "Sources/SPIRV-Cross",
