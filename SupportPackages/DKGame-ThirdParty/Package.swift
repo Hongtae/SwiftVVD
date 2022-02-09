@@ -11,6 +11,7 @@ let package = Package(
             name: "DKGame-ThirdParty",
             targets: [
                 "DKGameSupport",
+                "DKGameUtils",
                 "SPIRV_Cross",
                 "FreeType",
                 "jpeg",
@@ -29,6 +30,12 @@ let package = Package(
         .target(
             name: "DKGameSupport",
             dependencies: []),
+        .target(
+            name: "DKGameUtils",
+            dependencies: ["libpng", "jpeg", "zlib", "lz4", "lzma", "zstd", "libvorbis", "libFLAC"],
+            path: "Sources/DKGameUtils",
+            publicHeadersPath: "."
+            ),
         .target(
             name: "SPIRV_Cross",
             path: "Sources/SPIRV-Cross",
