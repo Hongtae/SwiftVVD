@@ -1,0 +1,3 @@
+module zlib {
+    header "zlib.h"
+}

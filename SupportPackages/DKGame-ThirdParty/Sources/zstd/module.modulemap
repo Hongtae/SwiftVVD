@@ -1,0 +1,3 @@
+module zstd {
+    header "lib/zstd.h"
+}

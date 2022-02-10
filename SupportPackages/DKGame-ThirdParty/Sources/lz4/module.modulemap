@@ -1,0 +1,3 @@
+module lz4 {
+    header "lib/lz4.h"
+}
