@@ -33,9 +33,27 @@ let package = Package(
             path: "Sources/DKGameSupport"),
         .target(
             name: "DKGameUtils",
-            dependencies: ["libpng", "jpeg", "zlib", "lz4", "lzma", "zstd", "libvorbis", "libFLAC"],
+            dependencies: [
+                "libpng",
+                "jpeg",
+                "zlib",
+                "lz4",
+                "lzma",
+                "zstd",
+                "libogg",
+                "libvorbis",
+                "libFLAC",
+                ],
             path: "Sources/DKGameUtils",
-            publicHeadersPath: "."),
+            publicHeadersPath: ".",
+            cSettings: [],
+            cxxSettings: [
+                .headerSearchPath("../libogg/include"),
+                .unsafeFlags([
+                    "-Wno-module-import-in-extern-c",
+                ])
+            ],
+            linkerSettings: []),
         .target(
             name: "SPIRV_Cross",
             path: "Sources/SPIRV-Cross",
@@ -351,5 +369,5 @@ let package = Package(
         ),
     ],
     cLanguageStandard: .c11,
-    cxxLanguageStandard: .cxx20
+    cxxLanguageStandard: .cxx17
 )
