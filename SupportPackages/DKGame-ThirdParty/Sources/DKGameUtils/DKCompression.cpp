@@ -936,7 +936,7 @@ DKCompressionResult DKCompressionDecode(DKCompressionAlgorithm a, DKStream* inpu
 }
 
 extern "C"
-DKCompressionResult DKCompressionDecodeAutoDetect(DKStream* input, DKStream* output, DKCompressionAlgorithm* pm)
+DKCompressionResult DKCompressionDecodeAutoDetect(DKStream* input, DKStream* output, DKCompressionAlgorithm* pAlg)
 {
     if (input == nullptr || input->read == nullptr)
         return DKCompressionResult_InputStreamError;
@@ -1028,5 +1028,8 @@ DKCompressionResult DKCompressionDecodeAutoDetect(DKStream* input, DKStream* out
         // DKLogE("DKCompressor Error: Unable to identify format.");
         return DKCompressionResult_UnknownFormat;
     }
-    return DKCompressionDecode(algo, &bufferedInputStream, output);
+    DKCompressionResult result = DKCompressionDecode(algo, &bufferedInputStream, output);
+    if (result == DKCompressionResult_Success && pAlg)
+        *pAlg = algo;
+    return result;
 }
