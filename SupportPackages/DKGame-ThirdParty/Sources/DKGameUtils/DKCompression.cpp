@@ -14,6 +14,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <algorithm>
 
 #include "../zlib/zlib.h"
 #include "../zstd/lib/zstd.h"
@@ -29,11 +30,6 @@
 #include "DKCompression.h"
 #include "DKEndianness.h"
 #include "DKMalloc.h"
-
-template <typename T> inline auto Min(T&& lhs, T&& rhs)->T&&
-{
-    return std::forward<T>((lhs < rhs) ? lhs : rhs);
-}
 
 #define COMPRESSION_CHUNK_SIZE 0x40000
 
@@ -548,7 +544,7 @@ static DKCompressionResult DecodeLz4(DKStream* input, DKStream* output)
                     processed = 0;
                     if (nextToLoad)
                     {
-                        inputSize = DKSTREAM_READ(input, inputBuffer.buffer, Min(nextToLoad, inputBuffer.bufferSize));
+                        inputSize = DKSTREAM_READ(input, inputBuffer.buffer, std::min(nextToLoad, inputBuffer.bufferSize));
                         if (inputSize == DKSTREAM_ERROR)
                         {
                             result = DKCompressionResult_InputStreamError;
@@ -984,7 +980,7 @@ DKCompressionResult DKCompressionDecodeAutoDetect(DKStream* input, DKStream* out
         size_t totalRead = 0;
         while (s > 0 && ctxt->preloadedLength > 0)
         {
-            size_t read = Min(s, ctxt->preloadedLength);
+            size_t read = std::min(s, ctxt->preloadedLength);
             // DKASSERT_DEBUG(read > 0);
 
             memcpy(p, ctxt->preloadedData, read);
