@@ -1,3 +1,17 @@
+/*******************************************************************************
+ File: DKImage.h
+ Author: Hongtae Kim (tiff2766@gmail.com)
+
+ Copyright (c) 2004-2022 Hongtae Kim. All rights reserved.
+ 
+ Copyright notice:
+ - This is a simplified part of DKGL.
+ - The full version of DKGL can be found at https://github.com/Hongtae/DKGL
+
+ License: https://github.com/Hongtae/DKGL/blob/master/LICENSE
+
+*******************************************************************************/
+
 #pragma once
 #include <stdint.h>
 
@@ -9,22 +23,22 @@ extern "C"
 typedef enum _DKImagePixelFormat
 {
     DKImagePixelFormat_Invalid = 0,
-    DKImagePixelFormat_R8,      ///< 1 byte per pixel, uint8
-    DKImagePixelFormat_RG8,     ///< 2 bytes per pixel, uint8
-    DKImagePixelFormat_RGB8,    ///< 3 bytes per pixel, uint8
-    DKImagePixelFormat_RGBA8,   ///< 4 bytes per pixel, uint8
-    DKImagePixelFormat_R16,     ///< 2 byte per pixel, uint16
-    DKImagePixelFormat_RG16,    ///< 4 bytes per pixel, uint16
-    DKImagePixelFormat_RGB16,   ///< 6 bytes per pixel, uint16
-    DKImagePixelFormat_RGBA16,  ///< 8 bytes per pixel, uint16
-    DKImagePixelFormat_R32,     ///< 4 byte per pixel, uint32
-    DKImagePixelFormat_RG32,    ///< 8 bytes per pixel, uint32
-    DKImagePixelFormat_RGB32,   ///< 12 bytes per pixel, uint32
-    DKImagePixelFormat_RGBA32,  ///< 16 bytes per pixel, uint32
-    DKImagePixelFormat_R32F,    ///< 4 bytes per pixel, float32
-    DKImagePixelFormat_RG32F,   ///< 8 bytes per pixel, float32
-    DKImagePixelFormat_RGB32F,  ///< 12 bytes per pixel, float32
-    DKImagePixelFormat_RGBA32F, ///< 16 bytes per pixel, float32
+    DKImagePixelFormat_R8,      /*   1 byte per pixel, uint8    */
+    DKImagePixelFormat_RG8,     /*  2 bytes per pixel, uint8    */
+    DKImagePixelFormat_RGB8,    /*  3 bytes per pixel, uint8    */
+    DKImagePixelFormat_RGBA8,   /*  4 bytes per pixel, uint8    */
+    DKImagePixelFormat_R16,     /*  2 bytes per pixel, uint16   */
+    DKImagePixelFormat_RG16,    /*  4 bytes per pixel, uint16   */
+    DKImagePixelFormat_RGB16,   /*  6 bytes per pixel, uint16   */
+    DKImagePixelFormat_RGBA16,  /*  8 bytes per pixel, uint16   */
+    DKImagePixelFormat_R32,     /*  4 bytes per pixel, uint32   */
+    DKImagePixelFormat_RG32,    /*  8 bytes per pixel, uint32   */
+    DKImagePixelFormat_RGB32,   /* 12 bytes per pixel, uint32   */
+    DKImagePixelFormat_RGBA32,  /* 16 bytes per pixel, uint32   */
+    DKImagePixelFormat_R32F,    /*  4 bytes per pixel, float32  */
+    DKImagePixelFormat_RG32F,   /*  8 bytes per pixel, float32  */
+    DKImagePixelFormat_RGB32F,  /* 12 bytes per pixel, float32  */
+    DKImagePixelFormat_RGBA32F, /* 16 bytes per pixel, float32  */
 } DKImagePixelFormat;
 
 typedef enum _DKImageFormat

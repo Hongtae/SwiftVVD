@@ -1,5 +1,5 @@
 /*******************************************************************************
- File: DKAudioStreamVorbis.cpp
+ File: DKMalloc.h
  Author: Hongtae Kim (tiff2766@gmail.com)
 
  Copyright (c) 2004-2022 Hongtae Kim. All rights reserved.
@@ -12,10 +12,10 @@
 
 *******************************************************************************/
 
-#include "DKAudioStream.h"
+#pragma once
+#include <stdlib.h>
 
-#include <ogg/ogg.h>
-#include "../libvorbis/include/vorbis/codec.h"
-#include "../libvorbis/include/vorbis/vorbisfile.h"
-
-#include "DKAudioStream.h"
+#ifdef __cplusplus
+inline auto DKMalloc(size_t s)  { return malloc(s); }
+inline auto DKFree(void* p)     { return free(p); }
+#endif /* __cplusplus */
