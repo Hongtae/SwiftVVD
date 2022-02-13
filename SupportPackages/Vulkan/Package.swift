@@ -10,7 +10,7 @@ let package = Package(
     ],
     dependencies: [],
     targets: [
-        .systemLibrary(name: "Vulkan"),
+        .systemLibrary(name: "Vulkan", path: "."),
     ],
     cLanguageStandard: .c11
 )
