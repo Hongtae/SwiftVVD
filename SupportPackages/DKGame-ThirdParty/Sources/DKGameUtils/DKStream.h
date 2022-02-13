@@ -26,6 +26,7 @@ typedef void* DKStreamContext;
 typedef uint64_t (*DKStreamSetPosition)(DKStreamContext, uint64_t);
 typedef uint64_t (*DKStreamGetPosition)(DKStreamContext);
 typedef uint64_t (*DKStreamRemainLength)(DKStreamContext);
+typedef uint64_t (*DKStreamTotalLength)(DKStreamContext);
 
 typedef uint64_t (*DKStreamRead)(DKStreamContext, void*, size_t);
 typedef uint64_t (*DKStreamWrite)(DKStreamContext, const void*, size_t);
@@ -38,15 +39,22 @@ typedef struct _DKStream
     DKStreamWrite write;
     DKStreamSetPosition setPosition;
     DKStreamGetPosition getPosition;
-    DKStreamRemainLength remainLength;
 
+    DKStreamRemainLength remainLength;
+    DKStreamTotalLength totalLength;
 } DKStream;
 
-#define DKSTREAM_READ(stream, p, s)         stream->read(stream->userContext, p, s)
-#define DKSTREAM_WRITE(stream, p, s)        stream->write(stream->userContext, p, s)
-#define DKSTREAM_SET_POSITION(stream, p)    stream->setPosition(stream->userContext, p)
-#define DKSTREAM_GET_POSITION(stream)       stream->getPosition(stream->userContext)
-#define DKSTREAM_REMAIN_LENGTH(stream)      stream->remainLength(stream->userContext)
+#define DKSTREAM_READ(stream, p, s)         (stream)->read((stream)->userContext, (p), (s))
+#define DKSTREAM_WRITE(stream, p, s)        (stream)->write((stream)->userContext, (p), (s))
+#define DKSTREAM_SET_POSITION(stream, p)    (stream)->setPosition((stream)->userContext, (p))
+#define DKSTREAM_GET_POSITION(stream)       (stream)->getPosition((stream)->userContext)
+#define DKSTREAM_REMAIN_LENGTH(stream)      (stream)->remainLength((stream)->userContext)
+#define DKSTREAM_TOTAL_LENGTH(stream)       (stream)->totalLength((stream)->userContext)
+
+#define DKSTREAM_IS_READABLE(stream)        ((stream)->read)
+#define DKSTREAM_IS_WRITABLE(stream)        ((stream)->write)
+#define DKSTREAM_IS_SEEKABLE(stream)        ((stream)->setPosition && (stream)->getPosition)
+#define DKSTREAM_HAS_LENGTH(stream)         ((stream)->remainLength && (stream)->totalLength)
 
 #ifdef __cplusplus
 }

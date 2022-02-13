@@ -25,35 +25,36 @@ extern "C"
 
 typedef enum _DKAudioStreamEncodingFormat
 {
-    DKAudioStreamEncodingFormatUnknown = 0,
-    DKAudioStreamEncodingFormatOggVorbis,
-    DKAudioStreamEncodingFormatOggFLAC,
-    DKAudioStreamEncodingFormatFLAC,
-    DKAudioStreamEncodingFormatWave,
+    DKAudioStreamEncodingFormat_Unknown = 0,
+    DKAudioStreamEncodingFormat_OggVorbis,
+    DKAudioStreamEncodingFormat_OggFLAC,
+    DKAudioStreamEncodingFormat_FLAC,
+    DKAudioStreamEncodingFormat_Wave,
 } DKAudioStreamEncodingFormat;
 
 #define DKAUDIO_IDENTIFY_FORMAT_HEADER_LENGTH 35 /* 32 for oggS-fLaC, 35 for oggS-vorbis */
 #define DKAUDIO_IDENTIFY_FORMAT_HEADER_MINIMUM_LENGTH 4 /* oggS, fLaC, RIFF */
 
-DKAudioStreamEncodingFormat DKAudioDetermineFormatFromHeader(char*, size_t);
+DKAudioStreamEncodingFormat DKAudioStreamDetermineFormatFromHeader(char*, size_t);
 
-typedef void* DKAudioStreamContext;
-typedef uint64_t (*DKAudioStreamRead)(DKAudioStreamContext, void*, size_t);
-typedef uint64_t (*DKAudioStreamSeekRaw)(DKAudioStreamContext, uint64_t);
-typedef uint64_t (*DKAudioStreamSeekPcm)(DKAudioStreamContext, uint64_t);
-typedef double   (*DKAudioStreamSeekTime)(DKAudioStreamContext, double);
+struct _DKAudioStream;
+typedef uint64_t (*DKAudioStreamReadFn)(struct _DKAudioStream*, void*, size_t);
 
-typedef uint64_t (*DKAudioStreamRawPosition)(DKAudioStreamContext);
-typedef uint64_t (*DKAudioStreamPcmPosition)(DKAudioStreamContext);
-typedef double   (*DKAudioStreamTimePosition)(DKAudioStreamContext);
+typedef uint64_t (*DKAudioStreamSeekRawFn)(struct _DKAudioStream*, uint64_t);
+typedef uint64_t (*DKAudioStreamSeekPcmFn)(struct _DKAudioStream*, uint64_t);
+typedef double   (*DKAudioStreamSeekTimeFn)(struct _DKAudioStream*, double);
 
-typedef uint64_t (*DKAudioStreamRawTotal)(DKAudioStreamContext);
-typedef uint64_t (*DKAudioStreamPcmTotal)(DKAudioStreamContext);
-typedef double (*DKAudioStreamTimeTotal)(DKAudioStreamContext);
+typedef uint64_t (*DKAudioStreamRawPositionFn)(struct _DKAudioStream*);
+typedef uint64_t (*DKAudioStreamPcmPositionFn)(struct _DKAudioStream*);
+typedef double   (*DKAudioStreamTimePositionFn)(struct _DKAudioStream*);
+
+typedef uint64_t (*DKAudioStreamRawTotalFn)(struct _DKAudioStream*);
+typedef uint64_t (*DKAudioStreamPcmTotalFn)(struct _DKAudioStream*);
+typedef double (*DKAudioStreamTimeTotalFn)(struct _DKAudioStream*);
 
 typedef struct _DKAudioStream
 {
-    DKAudioStreamContext userContext;
+    void* userContext;
     
     bool seekable;
     uint32_t frequency;
@@ -61,21 +62,32 @@ typedef struct _DKAudioStream
     uint32_t bits;
     DKAudioStreamEncodingFormat mediaType;
 
-    DKAudioStreamRead read;
-    DKAudioStreamSeekRaw seekRaw;
-    DKAudioStreamSeekPcm seekPcm;
-    DKAudioStreamSeekTime seekTime;
+    DKAudioStreamReadFn read;
+    DKAudioStreamSeekRawFn seekRaw;
+    DKAudioStreamSeekPcmFn seekPcm;
+    DKAudioStreamSeekTimeFn seekTime;
 
-    DKAudioStreamRawPosition rawPosition;
-    DKAudioStreamPcmPosition pcmPosition;
-    DKAudioStreamTimePosition timePosition;
+    DKAudioStreamRawPositionFn rawPosition;
+    DKAudioStreamPcmPositionFn pcmPosition;
+    DKAudioStreamTimePositionFn timePosition;
 
-    DKAudioStreamRawTotal rawTotal;
-    DKAudioStreamPcmTotal pcmTotal;
-    DKAudioStreamTimeTotal timeTotal;
+    DKAudioStreamRawTotalFn rawTotal;
+    DKAudioStreamPcmTotalFn pcmTotal;
+    DKAudioStreamTimeTotalFn timeTotal;
 
     void* decoder;
 } DKAudioStream;
+
+#define DKAUDIO_STREAM_READ(stream, p, s)     (stream)->read((stream), (p), (s))
+#define DKAUDIO_STREAM_SEEK_RAW(stream, s)    (stream)->seekRaw((stream), (s))
+#define DKAUDIO_STREAM_SEEK_PCM(stream, s)    (stream)->seekPcm((stream), (s))
+#define DKAUDIO_STREAM_SEEK_TIME(stream, t)   (stream)->seekTime((stream), (t))
+#define DKAUDIO_STREAM_RAW_POSITION(stream)   (stream)->rawPosition((stream))
+#define DKAUDIO_STREAM_PCM_POSITION(stream)   (stream)->pcmPosition((stream))
+#define DKAUDIO_STREAM_TIME_POSITION(stream)  (stream)->timePosition((stream))
+#define DKAUDIO_STREAM_RAW_TOTAL(stream)      (stream)->rawTotal((stream))
+#define DKAUDIO_STREAM_PCM_TOTAL(stream)      (stream)->pcmTotal((stream))
+#define DKAUDIO_STREAM_TIME_TOTAL(stream)     (stream)->timeTotal((stream))
 
 DKAudioStream* DKAudioStreamCreate(DKStream*);
 void DKAudioStreamDestroy(DKAudioStream*);

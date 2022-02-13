@@ -20,6 +20,7 @@
 #include "DKImage.h"
 #include "DKMalloc.h"
 #include "DKEndianness.h"
+#include "DKLog.h"
 
 #define JPEG_BUFFER_SIZE 4096
 #define BMP_DEFAULT_PPM 96
@@ -461,7 +462,7 @@ static DKImageDecodeContext DecodeBmp(const void* p, size_t s)
         {
             if (s < pos)
             {
-                // DKLogE("[DKImage::Create] Error: BMP data overflow!");
+                DKLogE("[DKImage::Create] Error: BMP data overflow!");
                 return false;
             }
             return true;
