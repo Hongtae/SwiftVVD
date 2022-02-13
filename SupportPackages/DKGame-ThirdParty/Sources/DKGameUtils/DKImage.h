@@ -96,8 +96,6 @@ typedef struct _DKImageEncodeContext
     size_t encodedDataLength;
     DKImageFormat imageFormat;
     DKImagePixelFormat pixelFormat;
-    uint32_t width;
-    uint32_t height;
 } DKImageEncodeContext;
 
 #define DKIMAGE_IDENTIFY_FORMAT_MINIMUM_LENGTH 8
@@ -106,6 +104,7 @@ uint32_t DKImagePixelFormatBytesPerPixel(DKImagePixelFormat);
 DKImageFormat DKImageIdentifyImageFormatFromHeader(const void*, size_t);
 DKImageDecodeContext DKImageDecodeFromMemory(const void*, size_t);
 DKImageEncodeContext DKImageEncodeFromMemory(DKImageFormat format, uint32_t width, uint32_t height, DKImagePixelFormat pixelFormat, const void*, size_t);
+DKImagePixelFormat DKImagePixelFormatEncodingSupported(DKImageFormat, DKImagePixelFormat);
 
 void DKImageReleaseDecodeContext(DKImageDecodeContext*);
 void DKImageReleaseEncodeContext(DKImageEncodeContext*);

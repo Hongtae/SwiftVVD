@@ -1,5 +1,5 @@
 /*******************************************************************************
- File: DKImage.h
+ File: DKImage.cpp
  Author: Hongtae Kim (tiff2766@gmail.com)
 
  Copyright (c) 2004-2022 Hongtae Kim. All rights reserved.
@@ -14,6 +14,7 @@
 
 #include <string.h>
 #include <algorithm>
+#include <vector>
 #include "../libpng/png.h"
 #include "../jpeg/jpeglib.h"
 #include "DKImage.h"
@@ -142,15 +143,80 @@ DKImageFormat DKImageIdentifyImageFormatFromHeader(const void * p, size_t s)
     return DKImageFormat_Unknown;
 }
 
+extern "C"
+DKImagePixelFormat DKImagePixelFormatEncodingSupported(DKImageFormat format,
+                                                       DKImagePixelFormat pixelFormat)
+{
+    switch (format)
+    {
+    case DKImageFormat_PNG:
+        switch (pixelFormat)
+        {
+        case DKImagePixelFormat_R8:
+        case DKImagePixelFormat_RG8:
+        case DKImagePixelFormat_RGB8:
+        case DKImagePixelFormat_RGBA8:
+        case DKImagePixelFormat_R16:
+        case DKImagePixelFormat_RG16:
+        case DKImagePixelFormat_RGB16:
+        case DKImagePixelFormat_RGBA16:
+            return pixelFormat;
+            /* below formats are not able to encode directly, resample required */
+        case DKImagePixelFormat_R32:
+        case DKImagePixelFormat_R32F:
+            return DKImagePixelFormat_R8;
+        case DKImagePixelFormat_RG32:
+        case DKImagePixelFormat_RG32F:
+            return DKImagePixelFormat_RG8;
+        case DKImagePixelFormat_RGB32:
+        case DKImagePixelFormat_RGB32F:
+            return DKImagePixelFormat_RGB8;
+        case DKImagePixelFormat_RGBA32:
+        case DKImagePixelFormat_RGBA32F:
+            return DKImagePixelFormat_RGBA8;
+        default:
+            return DKImagePixelFormat_RGBA8;
+        }
+        break;
+    case DKImageFormat_JPEG:
+        switch (pixelFormat)
+        {
+        case DKImagePixelFormat_R8:				
+        case DKImagePixelFormat_R16:
+        case DKImagePixelFormat_R32:
+        case DKImagePixelFormat_R32F:
+            return DKImagePixelFormat_R8;
+        default:
+            return DKImagePixelFormat_RGB8;
+        }
+        break;
+    case DKImageFormat_BMP:
+        switch (pixelFormat)
+        {
+        case DKImagePixelFormat_RGBA8:
+        case DKImagePixelFormat_RGBA16:
+        case DKImagePixelFormat_RGBA32:
+        case DKImagePixelFormat_RGBA32F:
+            return DKImagePixelFormat_RGBA8;
+        default:
+            return DKImagePixelFormat_RGB8;
+        }
+        break;
+    default:
+        break;
+    }
+    return DKImagePixelFormat_Invalid;
+}
+
 inline char* CopyString(const char* text)
 {
     if (text && text[0])
     {
         size_t len = strlen(text);
         char* mesg = (char*)DKMalloc(len+2);
-        if (strcpy_s(mesg, len+2, text) == 0)
+        if (mesg && strcpy_s(mesg, len+2, text) == 0)
             return mesg;
-        else
+        if (mesg)
             DKFree((void*)mesg);
     }
     return nullptr;
@@ -1019,21 +1085,306 @@ static DKImageDecodeContext DecodeBmp(const void* p, size_t s)
     return ctx;
 }
 
-static DKImageEncodeContext EncodePng(const void* p, size_t s)
+static DKImageEncodeContext EncodePng(uint32_t width,
+                                      uint32_t height,
+                                      DKImagePixelFormat pixelFormat,
+                                      const void* data)
 {
     DKImageEncodeContext ctx = {DKImageEncodeError_DataError};
+
+    if (DKImagePixelFormatEncodingSupported(DKImageFormat_PNG, pixelFormat) != pixelFormat)
+    {
+        // resample required
+        ctx.error = DKImageEncodeError_UnsupportedPixelFormat;
+        return ctx;
+    }
+
+    png_uint_32 pngFormat;
+    switch (pixelFormat)
+    {
+    case DKImagePixelFormat_R8:
+        pngFormat = PNG_FORMAT_GRAY;
+        break;
+    case DKImagePixelFormat_RG8:
+        pngFormat = PNG_FORMAT_GA;
+        break;
+    case DKImagePixelFormat_RGB8:
+        pngFormat = PNG_FORMAT_RGB;
+        break;
+    case DKImagePixelFormat_RGBA8:
+        pngFormat = PNG_FORMAT_RGBA;
+        break;
+    case DKImagePixelFormat_R16:
+        pngFormat = PNG_FORMAT_LINEAR_Y;
+        break;
+    case DKImagePixelFormat_RG16:
+        pngFormat = PNG_FORMAT_LINEAR_Y_ALPHA;
+        break;
+    case DKImagePixelFormat_RGB16:
+        pngFormat = PNG_FORMAT_LINEAR_RGB;
+        break;
+    case DKImagePixelFormat_RGBA16:
+        pngFormat = PNG_FORMAT_LINEAR_RGB_ALPHA;
+        break;
+    default:
+        ctx.error = DKImageEncodeError_UnsupportedPixelFormat;
+        return ctx;
+    }
+
+    png_image image = {};
+    image.version = PNG_IMAGE_VERSION;
+    image.width = width;
+    image.height = height;
+    image.format = pngFormat;
+
+    png_alloc_size_t bufferSize = 0;
+    if (png_image_write_get_memory_size(image, bufferSize, 0, data, 0, nullptr) &&
+        bufferSize > 0)
+    {
+        void* output = DKMalloc(bufferSize);
+        if (output)
+        {
+            if (png_image_write_to_memory(&image, output, &bufferSize, 0, data, 0, nullptr))
+            {
+                ctx.encodedData = output;
+                ctx.encodedDataLength = bufferSize;
+                ctx.imageFormat = DKImageFormat_PNG;
+                ctx.pixelFormat = pixelFormat;
+                return ctx;
+            }
+            else 
+            {
+                DKFree(output);
+                ctx.error = DKImageEncodeError_PNG_WriteError;
+                ctx.errorDescription = CopyString(image.message);
+            }
+        }
+        else
+        {
+            ctx.error = DKImageEncodeError_OutOfMemory;
+        }
+    }
     return ctx;
 }
 
-static DKImageEncodeContext EncodeJpeg(const void* p, size_t s)
+static DKImageEncodeContext EncodeJpeg(uint32_t width,
+                                       uint32_t height,
+                                       DKImagePixelFormat pixelFormat,
+                                       const void* data)
 {
     DKImageEncodeContext ctx = {DKImageEncodeError_DataError};
+
+    if (DKImagePixelFormatEncodingSupported(DKImageFormat_JPEG, pixelFormat) != pixelFormat)
+    {
+        // resample required
+        ctx.error = DKImageEncodeError_UnsupportedPixelFormat;
+        return ctx;
+    }
+
+    switch (pixelFormat)
+    {
+    case DKImagePixelFormat_R8:
+    case DKImagePixelFormat_RGB8:
+        break;
+    default:
+        ctx.error = DKImageEncodeError_UnsupportedPixelFormat;
+        return ctx;
+    }
+
+    struct JpegDestination
+    {
+        struct jpeg_destination_mgr pub;
+        JOCTET* buffer;
+        std::vector<uint8_t> encoded;
+    };
+
+    jpeg_compress_struct cinfo = {};
+    JpegErrorMgr err = {};
+    JpegDestination dest;
+
+    dest.pub.init_destination = [](j_compress_ptr cinfo)
+    {
+        JpegDestination* dest = reinterpret_cast<JpegDestination*>(cinfo->dest);
+        dest->buffer = (JOCTET*)(*cinfo->mem->alloc_small)((j_common_ptr)cinfo,
+                                                            JPOOL_IMAGE,
+                                                            JPEG_BUFFER_SIZE * sizeof(JOCTET));
+        dest->pub.next_output_byte = dest->buffer;
+        dest->pub.free_in_buffer = JPEG_BUFFER_SIZE;
+    };
+    dest.pub.empty_output_buffer = [](j_compress_ptr cinfo)->boolean
+    {
+        JpegDestination* dest = reinterpret_cast<JpegDestination*>(cinfo->dest);
+        dest->encoded.insert(dest->encoded.end(), &dest->buffer[0], &dest->buffer[JPEG_BUFFER_SIZE]);
+        dest->pub.next_output_byte = dest->buffer;
+        dest->pub.free_in_buffer = JPEG_BUFFER_SIZE;
+        return TRUE;
+    };
+    dest.pub.term_destination = [](j_compress_ptr cinfo)
+    {
+        JpegDestination* dest = reinterpret_cast<JpegDestination*>(cinfo->dest);
+        size_t length = JPEG_BUFFER_SIZE - dest->pub.free_in_buffer;
+        if (length > 0)
+            dest->encoded.insert(dest->encoded.end(), &dest->buffer[0], &dest->buffer[length]);
+    };
+
+    JSAMPLE* buffer;
+    int32_t rowStride;
+
+    cinfo.err = jpeg_std_error(&err.pub);
+    err.pub.error_exit = [](j_common_ptr cinfo)
+    {
+        JpegErrorMgr* err = (JpegErrorMgr*)cinfo->err;
+        err->pub.format_message(cinfo, err->buffer);
+        longjmp(err->setjmpBuffer, 1);
+    };
+
+    if (setjmp(err.setjmpBuffer))
+    {
+        ctx.error = DKImageEncodeError_JPG_Error;
+        ctx.errorDescription = CopyString(err.buffer);
+        jpeg_destroy_compress(&cinfo);
+        return ctx;
+    }
+
+    jpeg_create_compress(&cinfo);
+
+    cinfo.dest = (jpeg_destination_mgr*)&dest;
+
+    cinfo.image_width = width;
+    cinfo.image_height = height;
+    if (pixelFormat == DKImagePixelFormat_RGB8)
+    {
+        cinfo.input_components = 3;
+        cinfo.in_color_space = JCS_RGB;
+        rowStride = width * 3; // bytesPerPixel = 3
+    }
+    else // DKImagePixelFormat_R8
+    {
+        cinfo.input_components = 1;
+        cinfo.in_color_space = JCS_GRAYSCALE;
+        rowStride = width * 1; // bytesPerPixel = 1
+    }
+
+    jpeg_set_defaults(&cinfo);
+    //jpeg_set_quality(&cinfo, 75, true);
+
+    jpeg_start_compress(&cinfo, TRUE);
+    buffer = (JSAMPLE*)(data);
+    JSAMPROW row[1];
+    while (cinfo.next_scanline < cinfo.image_height)
+    {
+        row[0] = &buffer[cinfo.next_scanline * rowStride];
+        jpeg_write_scanlines(&cinfo, row, 1);
+    }
+    jpeg_finish_compress(&cinfo);
+    jpeg_destroy_compress(&cinfo);
+
+    void* output = DKMalloc(dest.encoded.size());
+    if (output)
+    {
+        memcpy(output, dest.encoded.data(), dest.encoded.size());
+        ctx.error = DKImageEncodeError_Success;
+        ctx.encodedData = output;
+        ctx.encodedDataLength = dest.encoded.size();
+        ctx.imageFormat = DKImageFormat_JPEG;
+        ctx.pixelFormat = pixelFormat;
+        return ctx;
+    }
+    ctx.error = DKImageEncodeError_OutOfMemory;
     return ctx;
 }
 
-static DKImageEncodeContext EncodeBmp(const void *, size_t)
+static DKImageEncodeContext EncodeBmp(uint32_t width,
+                                      uint32_t height,
+                                      DKImagePixelFormat pixelFormat,
+                                      const void* data)
 {
     DKImageEncodeContext ctx = {DKImageEncodeError_DataError};
+
+    if (DKImagePixelFormatEncodingSupported(DKImageFormat_BMP, pixelFormat) != pixelFormat)
+    {
+        // resample required
+        ctx.error = DKImageEncodeError_UnsupportedPixelFormat;
+        return ctx;
+    }
+
+    switch (pixelFormat)
+    {
+    case DKImagePixelFormat_RGB8:
+    case DKImagePixelFormat_RGBA8:
+        break;
+    default:
+        ctx.error = DKImageEncodeError_UnsupportedPixelFormat;
+        return ctx;
+    }
+
+    size_t bytesPerPixel = DKImagePixelFormatBytesPerPixel(pixelFormat);
+    // DKASSERT_DEBUG(bytesPerPixel == 3 || bytesPerPixel == 4);
+
+    size_t rowBytes = bytesPerPixel * width;
+    if (rowBytes % 4)
+        rowBytes = (rowBytes | 0x3) + 1;
+    size_t imageSize = rowBytes * height;
+    size_t dataSize = sizeof(BMPFileHeader) + sizeof(BMPInfoHeader) + imageSize;
+
+    void* output = DKMalloc(dataSize);
+    if (output)
+    {
+        uint16_t bitCount = uint16_t(bytesPerPixel) * 8;
+
+        uint8_t* buffer = reinterpret_cast<uint8_t*>(output);
+        BMPFileHeader* header = reinterpret_cast<BMPFileHeader*>(buffer);	buffer += sizeof(BMPFileHeader);
+        BMPInfoHeader* info = reinterpret_cast<BMPInfoHeader*>(buffer);		buffer += sizeof(BMPInfoHeader);
+
+        size_t fileSize = sizeof(BMPFileHeader) + sizeof(BMPInfoHeader) + imageSize;
+        header->b = 'B'; header->m = 'M';
+        header->size = DKSystemToLittleEndian<uint32_t>(uint32_t(fileSize));
+        header->reserved1 = 0;
+        header->reserved2 = 0;
+        header->offBits = DKSystemToLittleEndian<uint32_t>(sizeof(BMPFileHeader) + sizeof(BMPInfoHeader));
+
+        info->size = DKSystemToLittleEndian<uint32_t>(sizeof(BMPInfoHeader));
+        info->width = DKSystemToLittleEndian<int32_t>(static_cast<int32_t>(width));
+        info->height = DKSystemToLittleEndian<int32_t>(static_cast<int32_t>(height));
+        info->planes = DKSystemToLittleEndian<uint16_t>(1);
+        info->bitCount = DKSystemToLittleEndian<uint16_t>(bitCount);
+        info->compression = DKSystemToLittleEndian<uint32_t>(BMPCompressionRGB);
+        info->sizeImage = 0;
+        info->xPelsPerMeter = DKSystemToLittleEndian<int32_t>(BMP_DEFAULT_PPM);
+        info->yPelsPerMeter = DKSystemToLittleEndian<int32_t>(BMP_DEFAULT_PPM);
+        info->clrUsed = 0;
+        info->clrImportant = 0;
+
+        const uint32_t colorIndices[] = { 2, 1, 0, 3 }; // BGRA -> RGBA
+
+        for (int32_t y = height -1; y >= 0; --y)
+        {
+            const uint8_t* pixelData = &reinterpret_cast<const uint8_t*>(data)[width * y * bytesPerPixel];
+            size_t bytesPerRow = 0;
+            for (uint32_t x = 0; x < width; ++x)
+            {
+                for (uint32_t i = 0; i < bytesPerPixel; ++i)
+                    buffer[i] = pixelData[colorIndices[i]]; // BGR(A)
+
+                buffer += bytesPerPixel;
+                pixelData += bytesPerPixel;
+                bytesPerRow += bytesPerPixel;
+            }
+            while (bytesPerRow < rowBytes)
+            {
+                buffer[0] = 0;
+                buffer++;
+                bytesPerRow++;
+            }
+        }
+        ctx.error = DKImageEncodeError_Success;
+        ctx.encodedData = output;
+        ctx.encodedDataLength = dataSize;
+        ctx.imageFormat = DKImageFormat_BMP;
+        ctx.pixelFormat = pixelFormat;
+        return ctx;
+    }
+    ctx.error = DKImageEncodeError_OutOfMemory;
     return ctx;
 }
 
@@ -1065,10 +1416,27 @@ DKImageEncodeContext DKImageEncodeFromMemory(DKImageFormat format,
                                              uint32_t width,
                                              uint32_t height,
                                              DKImagePixelFormat pixelFormat,
-                                             const void *,
-                                             size_t)
+                                             const void* p,
+                                             size_t s)
 {
     DKImageEncodeContext ctx = {DKImageEncodeError_DataError};
+
+    size_t bpp = DKImagePixelFormatBytesPerPixel(pixelFormat);
+    size_t dataSize = bpp * size_t(width) * size_t(height);
+    if (p && dataSize > 0 && s >= dataSize)
+    {
+        switch (format)
+        {
+        case DKImageFormat_PNG:
+            return EncodePng(width, height, pixelFormat, p);
+        case DKImageFormat_JPEG:
+            return EncodeJpeg(width, height, pixelFormat, p);
+        case DKImageFormat_BMP:
+            return EncodeBmp(width, height, pixelFormat, p);
+        default:
+            ctx.error = DKImageEncodeError_UnknownFormat;
+        }
+    }
     return ctx;
 }
 
