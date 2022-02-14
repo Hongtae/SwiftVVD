@@ -224,7 +224,7 @@ static DKCompressionResult EncodeZstd(DKStream* input, DKStream* output, int lev
         size_t const initResult = ZSTD_initCStream(cstream, level);
         if (ZSTD_isError(initResult))
         {
-            DKLogE("DKCompressor::Compress error: ZSTD_initCStream failed: %s",
+            DKLogE("DKCompression Encode-Error: ZSTD_initCStream failed: %s",
                     ZSTD_getErrorName(initResult));
             result = DKCompressionResult_UnknownError;
         }
@@ -248,7 +248,7 @@ static DKCompressionResult EncodeZstd(DKStream* input, DKStream* output, int lev
                         size_t toRead = ZSTD_compressStream(cstream, &zOutput, &zInput);
                         if (ZSTD_isError(toRead))
                         {
-                            DKLogE("DKCompressor::Compress error: %s",
+                            DKLogE("DKCompression Encode-Error: %s",
                                     ZSTD_getErrorName(toRead));
                             result = DKCompressionResult_DataError;
                             break;
@@ -277,7 +277,7 @@ static DKCompressionResult EncodeZstd(DKStream* input, DKStream* output, int lev
                 size_t const remainingToFlush = ZSTD_endStream(cstream, &zOutput); // close frame.
                 if (remainingToFlush)
                 {
-                    DKLogE("DKCompressor::Compress error: Unable to flush stream.");
+                    DKLogE("DKCompression Encode-Error: Unable to flush stream.");
                     result = DKCompressionResult_OutputStreamError;
                 }
                 else
@@ -326,7 +326,7 @@ static DKCompressionResult DecodeZstd(DKStream* input, DKStream* output)
         size_t const initResult = ZSTD_initDStream(dstream);
         if (ZSTD_isError(initResult))
         {
-            DKLogE("DKCompressor::Compress error: ZSTD_initDStream failed: %s",
+            DKLogE("DKCompression Decode-Error: ZSTD_initDStream failed: %s",
                     ZSTD_getErrorName(initResult));
             result = DKCompressionResult_UnknownError;
         }
@@ -350,7 +350,7 @@ static DKCompressionResult DecodeZstd(DKStream* input, DKStream* output)
                         toRead = ZSTD_decompressStream(dstream, &zOutput, &zInput);
                         if (ZSTD_isError(toRead))
                         {
-                            DKLogE("DKCompressor::Decompress error: %s",
+                            DKLogE("DKCompression Decode-Error: %s",
                                     ZSTD_getErrorName(toRead));
                             result = DKCompressionResult_DataError;
                             break;
@@ -424,7 +424,7 @@ static DKCompressionResult EncodeLz4(DKStream* input, DKStream* output, int leve
                         size_t outputSize = LZ4F_compressUpdate(ctx, outputBuffer.buffer, outputBuffer.bufferSize, inputBuffer.buffer, inputSize, NULL);
                         if (LZ4F_isError(outputSize))
                         {
-                            DKLogE("DKCompressor Error: LZ4 Encoding error: %s", LZ4F_getErrorName(outputSize));
+                            DKLogE("DKCompression Encode-Error: LZ4 error: %s", LZ4F_getErrorName(outputSize));
                             result = DKCompressionResult_DataError;
                             break;
                         }
@@ -459,7 +459,7 @@ static DKCompressionResult EncodeLz4(DKStream* input, DKStream* output, int leve
             }
             else
             {
-                DKLogE("DKCompressor Error: LZ4 Encoder error: %s", LZ4F_getErrorName(headerSize));
+                DKLogE("DKCompression Encode-Error: LZ4 error: %s", LZ4F_getErrorName(headerSize));
                 result = DKCompressionResult_DataError;
             }
         }
@@ -472,7 +472,7 @@ static DKCompressionResult EncodeLz4(DKStream* input, DKStream* output, int leve
             return DKCompressionResult_UnknownError;
         return result;
     }
-    DKLogE("DKCompressor Error: LZ4 Encoder error: %s", LZ4F_getErrorName(err));
+    DKLogE("DKCompression Encode-Error: LZ4 Encoder error: %s", LZ4F_getErrorName(err));
     return DKCompressionResult_UnknownError;
 }
 
@@ -525,7 +525,7 @@ static DKCompressionResult DecodeLz4(DKStream* input, DKStream* output)
                         nextToLoad = LZ4F_decompress(ctx, outputBuffer.buffer, &outSize, &inData[processed], &inSize, NULL);
                         if (LZ4F_isError(nextToLoad))
                         {
-                            DKLogE("Decompress Error: Lz4 Header Error: %s\n", LZ4F_getErrorName(nextToLoad));
+                            DKLogE("DKCompression Decode-Error: Lz4 Header Error: %s\n", LZ4F_getErrorName(nextToLoad));
                             result = DKCompressionResult_DataError;
                             nextToLoad = 0;
                             break;
@@ -566,7 +566,7 @@ static DKCompressionResult DecodeLz4(DKStream* input, DKStream* output)
                     }
                     else if (n == 0) // end stream? 
                     {
-                        DKLogE("DKCompressor Error: Lz4 input stream ended before processing skip frame!\n");
+                        DKLogE("DKCompression Decode-Error: Lz4 input stream ended before processing skip frame!\n");
                         result = DKCompressionResult_DataError;
                         break;
                     }
@@ -580,13 +580,33 @@ static DKCompressionResult DecodeLz4(DKStream* input, DKStream* output)
                     if (bytesToSkip > remains)
                     {
                         size_t offset = bytesToSkip - remains;
-                        if (DKSTREAM_SET_POSITION(input, (DKSTREAM_GET_POSITION(input) + offset)) == DKSTREAM_ERROR)
+                        if (DKSTREAM_IS_SEEKABLE(input))
                         {
-                            DKLogE("DKCompressor Error: Lz4 input stream cannot process skip frame!\n");
+                            if (DKSTREAM_SET_POSITION(input, (DKSTREAM_GET_POSITION(input) + offset)) != DKSTREAM_ERROR)
+                            {
+                                inputSize = 0;
+                            }
+                        }
+                        else
+                        {
+                            DKLogW("DKCompression Decode-Warning: Lz4 stream seeking is not available!");
+                            uint64_t r = 0;
+                            while (r < offset)
+                            {
+                                uint64_t t = DKSTREAM_READ(input, inputBuffer.buffer, std::min((offset - r), inputBuffer.bufferSize));
+                                if (t == DKSTREAM_ERROR)
+                                    break;
+                                r += t;
+                            }
+                            if (r == offset)
+                                inputSize = 0;
+                        }
+                        if (inputSize) // seek failed.
+                        {
+                            DKLogE("DKCompression Decode-Error: Lz4 input stream cannot process skip frame!");
                             result = DKCompressionResult_InputStreamError;
                             break;
                         }
-                        inputSize = 0;
                     }
                     else
                         processed += bytesToSkip;
@@ -594,13 +614,13 @@ static DKCompressionResult DecodeLz4(DKStream* input, DKStream* output)
             }
             else
             {
-                DKLogE("Decompress Error: Lz4 stream followed by unrecognized data.\n");
+                DKLogE("DKCompression Decode-Error: Lz4 stream followed by unrecognized data.");
                 result = DKCompressionResult_DataError;
                 break;
             }
         }
         err = LZ4F_freeDecompressionContext(ctx);
-        if (LZ4F_isError(err))
+        if (result != DKCompressionResult_Success && LZ4F_isError(err))
             return DKCompressionResult_UnknownError;
         return result;
     }
@@ -733,7 +753,7 @@ static DKCompressionResult EncodeLzma(DKStream* input, DKStream* output, int lev
     }
     else
     {
-        DKLogE("DKCompressor Error: Invalid parameters!");
+        DKLogE("DKCompression Encode-Error: Invalid parameters!");
     }
     LzmaEnc_Destroy(enc, &alloc, &alloc);
     if (res != SZ_OK)
@@ -886,16 +906,6 @@ static bool DetectAlgorithm(void* p, size_t n, DKCompressionAlgorithm& algo)
     return false;
 }
 
-inline bool ValidateInputStreamForDecode(DKStream* stream, DKCompressionAlgorithm a)
-{
-    if (stream && stream->read)
-    {
-        if (a != DKCompressionAlgorithm_Lz4 || (stream->getPosition && stream->setPosition))
-        return true;
-    }
-    return false;
-}
-
 extern "C"
 DKCompressionResult DKCompressionEncode(DKCompressionAlgorithm a, DKStream* input, DKStream* output, int level)
 {
@@ -1034,7 +1044,7 @@ DKCompressionResult DKCompressionDecodeAutoDetect(DKStream* input, DKStream* out
     DKCompressionAlgorithm algo;
     if (!DetectAlgorithm(inputStreamContext.preloadedData, inputStreamContext.preloadedLength, algo))
     {
-        DKLogE("DKCompressor Error: Unable to identify format.");
+        DKLogE("DKCompression Decode-Error: Unable to identify format.");
         return DKCompressionResult_UnknownFormat;
     }
     DKCompressionResult result = DKCompressionDecode(algo, &bufferedInputStream, output);
