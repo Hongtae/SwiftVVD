@@ -1,4 +1,5 @@
 import WinSDK
+import Foundation
 
 private let IDC_ARROW: UnsafePointer<WCHAR> = UnsafePointer<WCHAR>(bitPattern: 32512)!
 private let IDI_APPLICATION: UnsafePointer<WCHAR> = UnsafePointer<WCHAR>(bitPattern: 32512)!
@@ -14,8 +15,35 @@ private func WindowProc(
 private typealias WindowProtocol = Window
 
 extension Win32 {
+    public struct DropTarget {
+        var vtbl: IDropTargetVtbl?
+
+        func queryInterface(_ riid: GUID?, _ ppv:UnsafeMutableRawPointer) {
+            NSLog("queryInterface")
+        }
+        func addRef() {
+            NSLog("addRef")
+        }
+        func release() {
+            NSLog("release")
+        }
+        func dragEnter(_ pdto: IDataObject?, _ grfKeyState: DWORD, _ ptl: POINTL, _ pdwEffect: DWORD?) {
+            NSLog("dragEnter")
+        }
+        func dragOver(_ grfKeyState: DWORD, _ ptl: POINTL, _ pdwEffect: DWORD?) {
+            NSLog("dragOver")
+        }
+        func dragLeave() {
+            NSLog("dragLeave")
+        }
+        func drop(_ pdto: IDataObject?, _ grfKeyState: DWORD, _ ptl: POINTL, _ pdwEffect: DWORD?) {
+            NSLog("drop")
+        }
+    }
     public class Window : WindowProtocol {
         public private(set) var hWnd : HWND?
+
+        var dropTarget: DropTarget?
 
         public init() {
 
@@ -45,7 +73,8 @@ extension Win32 {
                 print("RegisterClassExW failed.")
             } else {
                 print("WindowClass: \"\(windowClass)\" registered!")
-            }         
+            }
+
         }
 
         public func show() {}
