@@ -16,20 +16,14 @@ private typealias WindowProtocol = Window
 extension Win32 {
     public class Window : WindowProtocol {
         public private(set) var hWnd : HWND?
-        private let windowClass = "_DKWindowClass"
 
         public init() {
 
             OleInitialize(nil)
 
-            let name : Array<WCHAR> = windowClass.withCString(encodedAs: UTF16.self) { buffer in 
-                Array<WCHAR>(unsafeUninitializedCapacity: windowClass.utf16.count + 1) {
-                    wcscpy_s($0.baseAddress, $0.count, buffer)
-                    $1 = $0.count
-                }
-            }
-
-            let atom: ATOM? = name.withUnsafeBufferPointer {
+            let windowClass = "_SwiftDKGame_WndClass"
+            let atom: ATOM? = windowClass.withCString(encodedAs: UTF16.self) {
+                className in
                 var wc = WNDCLASSEXW(
                     cbSize: UINT(MemoryLayout<WNDCLASSEXW>.size),
                     style: UINT(CS_OWNDC),
@@ -41,7 +35,7 @@ extension Win32 {
                     hCursor: LoadCursorW(nil, IDC_ARROW),
                     hbrBackground: nil,
                     lpszMenuName: nil,
-                    lpszClassName: $0.baseAddress!,
+                    lpszClassName: className,
                     hIconSm: nil)
 
                 return RegisterClassExW(&wc)

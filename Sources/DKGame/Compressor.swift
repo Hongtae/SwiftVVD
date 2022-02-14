@@ -1,4 +1,5 @@
 import DKGameUtils
+import Foundation
 
 public class Compressor {
     public enum Algorithm {
@@ -21,7 +22,7 @@ public class Compressor {
 
     public init() {
     }
-    static public func Compress(method: Method) -> Bool {
+    static public func Compress(in: InputStream, out: OutputStream, method: Method) -> Bool {
        var stream: DKStream = DKStream()
 
         let compressionResult: DKCompressionResult = withUnsafeMutablePointer(to: &stream) {
@@ -30,7 +31,7 @@ public class Compressor {
         }
         return compressionResult == DKCompressionResult_Success
     }
-    static public func Decompress() {
+    static public func Decompress(in: InputStream, out: OutputStream) {
 
     }
 }
