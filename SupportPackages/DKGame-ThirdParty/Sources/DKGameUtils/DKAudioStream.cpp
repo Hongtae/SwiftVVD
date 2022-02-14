@@ -70,14 +70,16 @@ extern "C" DKAudioStream* DKAudioStreamCreate(DKStream* stream)
 		DKAudioStreamEncodingFormat format = DKAudioStreamDetermineFormatFromHeader(header, AUDIO_FORMAT_HEADER_LENGTH);
         switch (format)
         {
-            case DKAudioStreamEncodingFormat_OggVorbis:
-                return DKAudioStreamVorbisCreate(stream);
-            case DKAudioStreamEncodingFormat_OggFLAC:
-                return DKAudioStreamOggFLACCreate(stream);
-            case DKAudioStreamEncodingFormat_FLAC:
-                return DKAudioStreamFLACCreate(stream);
-	        case DKAudioStreamEncodingFormat_Wave:
-                return DKAudioStreamWaveCreate(stream);
+        case DKAudioStreamEncodingFormat_OggVorbis:
+            return DKAudioStreamVorbisCreate(stream);
+        case DKAudioStreamEncodingFormat_OggFLAC:
+            return DKAudioStreamOggFLACCreate(stream);
+        case DKAudioStreamEncodingFormat_FLAC:
+            return DKAudioStreamFLACCreate(stream);
+        case DKAudioStreamEncodingFormat_Wave:
+            return DKAudioStreamWaveCreate(stream);
+        default:
+            break;
     	}
     }
 	return nullptr;
@@ -98,6 +100,8 @@ extern "C" void DKAudioStreamDestroy(DKAudioStream* stream)
         break;
     case DKAudioStreamEncodingFormat_Wave:
         DKAudioStreamWaveDestroy(stream);
+        break;
+    default:
         break;
     }
 }
