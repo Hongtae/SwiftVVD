@@ -1,16 +1,6 @@
 import WinSDK
 import Foundation
 
-    enum DragOperation {
-        case none, copy, move, link
-    }
-    protocol DropTargetDelegate {
-        func draggingEntered(files:[String], keyState: DWORD, pt: POINTL) -> DragOperation
-        func draggingUpdated(files:[String], keyState: DWORD, pt: POINTL) -> DragOperation
-        func draggingExited(files:[String], pt: POINTL) -> DragOperation
-        func draggingDropped(files:[String], pt: POINTL) -> DragOperation
-    }
-
 extension Win32 {
 
     struct DropTarget {
