@@ -63,41 +63,34 @@ extension Win32 {
         static func makeMutablePointer() -> UnsafeMutablePointer<DropTarget> {
             let dt: UnsafeMutablePointer<DropTarget> = .allocate(capacity: 1)
             dt.initialize(to: DropTarget())
-            dt.pointee.vtbl.QueryInterface = { dt, riid, ppv in
-                dt!.withMemoryRebound(to: DropTarget.self, capacity:1) {
-                    dropTarget in dropTarget.pointee.queryInterface(riid, ppv)
-                }
-                // return S_OK
+            // setup IDropTarget interface
+            dt.pointee.vtbl.QueryInterface = { ptr, riid, ppv in
+                let dt = UnsafeMutableRawPointer(ptr!).bindMemory(to: DropTarget.self, capacity: 1)
+                return dt.pointee.queryInterface(riid, ppv)
             }
-            dt.pointee.vtbl.AddRef = { dt in 
-                dt!.withMemoryRebound(to: DropTarget.self, capacity:1) {
-                    dropTarget in dropTarget.pointee.addRef()
-                }
+            dt.pointee.vtbl.AddRef = { ptr in 
+                let dt = UnsafeMutableRawPointer(ptr!).bindMemory(to: DropTarget.self, capacity: 1)
+                return dt.pointee.addRef()
             }
-            dt.pointee.vtbl.Release = { dt in 
-                dt!.withMemoryRebound(to: DropTarget.self, capacity:1) {
-                    dropTarget in dropTarget.pointee.release()
-                }
+            dt.pointee.vtbl.Release = { ptr in 
+                let dt = UnsafeMutableRawPointer(ptr!).bindMemory(to: DropTarget.self, capacity: 1)
+                return dt.pointee.release()
             }
-            dt.pointee.vtbl.DragEnter = { dt, pDataObj, grfKeyState, pt, pdwEffect in 
-                dt!.withMemoryRebound(to: DropTarget.self, capacity:1) {
-                    dropTarget in dropTarget.pointee.dragEnter(pDataObj, grfKeyState, pt, pdwEffect)
-                }
+            dt.pointee.vtbl.DragEnter = { ptr, pDataObj, grfKeyState, pt, pdwEffect in 
+                let dt = UnsafeMutableRawPointer(ptr!).bindMemory(to: DropTarget.self, capacity: 1)
+                return dt.pointee.dragEnter(pDataObj, grfKeyState, pt, pdwEffect)
             }
-            dt.pointee.vtbl.DragOver = { dt, grfKeyState, pt, pdwEffect in 
-                dt!.withMemoryRebound(to: DropTarget.self, capacity:1) {
-                    dropTarget in dropTarget.pointee.dragOver(grfKeyState, pt, pdwEffect)
-                }
+            dt.pointee.vtbl.DragOver = { ptr, grfKeyState, pt, pdwEffect in 
+                let dt = UnsafeMutableRawPointer(ptr!).bindMemory(to: DropTarget.self, capacity: 1)
+                return dt.pointee.dragOver(grfKeyState, pt, pdwEffect)
             }
-            dt.pointee.vtbl.DragLeave = { dt in 
-                dt!.withMemoryRebound(to: DropTarget.self, capacity:1) {
-                    dropTarget in dropTarget.pointee.dragLeave()
-                }
+            dt.pointee.vtbl.DragLeave = { ptr in 
+                let dt = UnsafeMutableRawPointer(ptr!).bindMemory(to: DropTarget.self, capacity: 1)
+                return dt.pointee.dragLeave()
             }
-            dt.pointee.vtbl.Drop = { dt, pDataObj, grfKeyState, pt, pdwEffect in 
-                dt!.withMemoryRebound(to: DropTarget.self, capacity:1) {
-                    dropTarget in dropTarget.pointee.drop(pDataObj, grfKeyState, pt, pdwEffect)
-                }
+            dt.pointee.vtbl.Drop = { ptr, pDataObj, grfKeyState, pt, pdwEffect in 
+                let dt = UnsafeMutableRawPointer(ptr!).bindMemory(to: DropTarget.self, capacity: 1)
+                return dt.pointee.drop(pDataObj, grfKeyState, pt, pdwEffect)
             }
             withUnsafeMutablePointer(to: &dt.pointee.vtbl) {
                 dt.pointee.dropTarget.lpVtbl = $0
