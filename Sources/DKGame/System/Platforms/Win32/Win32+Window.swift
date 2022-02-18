@@ -4,10 +4,7 @@ import Foundation
 private let IDC_ARROW: UnsafePointer<WCHAR> = UnsafePointer<WCHAR>(bitPattern: 32512)!
 private let IDI_APPLICATION: UnsafePointer<WCHAR> = UnsafePointer<WCHAR>(bitPattern: 32512)!
 
-private func WindowProc(
-  _ hWnd: HWND?, _ uMsg: UINT, _ wParam: WPARAM,
-  _ lParam: LPARAM
-) -> LRESULT {
+private func windowProc(_ hWnd: HWND?, _ uMsg: UINT, _ wParam: WPARAM, _ lParam: LPARAM) -> LRESULT {
 
     return DefWindowProcW(hWnd, uMsg, wParam, lParam)
 }
@@ -28,7 +25,7 @@ extension Win32 {
                 var wc = WNDCLASSEXW(
                     cbSize: UINT(MemoryLayout<WNDCLASSEXW>.size),
                     style: UINT(CS_OWNDC),
-                    lpfnWndProc: WindowProc,
+                    lpfnWndProc: windowProc,
                     cbClsExtra: 0,
                     cbWndExtra: 0,
                     hInstance: GetModuleHandleW(nil),
