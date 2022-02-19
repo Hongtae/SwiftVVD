@@ -39,6 +39,9 @@ extension Win32 {
 
         var running: Bool = false
         var threadId: DWORD = 0
+        var exitCode: Int = 0
+
+        static var sharedInstance: Application? = nil
 
         private init() {
 
@@ -47,11 +50,18 @@ extension Win32 {
         public func terminate(exitCode: Int) {
             if self.running && threadId != 0 {
                 self.running = false
+                self.exitCode = exitCode
                 PostThreadMessageW(threadId, UINT(WM_NULL), 0, 0);
             }
         }
 
-        static public func run(delegate: ApplicationDelegate?) {
+        static public func run(delegate: ApplicationDelegate?) -> Int{
+
+            let app: Application = Application()
+            sharedInstance = app
+            app.running = true
+    		app.threadId = GetCurrentThreadId()
+            delegate?.initialize(application: app)
 
             if IsDebuggerPresent() == false {
 			    if keyboardHook != nil {
@@ -73,11 +83,6 @@ extension Win32 {
             // Setup thread DPI
             SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE)   
 
-            let app: Application = Application()
-            app.running = true
-    		app.threadId = GetCurrentThreadId()
-            delegate?.initialize(application: app)
-
             var timerId: UINT_PTR = 0
             var msg: MSG = MSG()
 
@@ -96,8 +101,12 @@ extension Win32 {
                     } while (next?.timeIntervalSinceNow ?? 1) <= 0
                     
                     if let nextInterval = next?.timeIntervalSinceNow {
-						// install timer for next pending event.
-                        let elapse: UINT = UINT(max(nextInterval, 0.0) * 1000)
+                        var elapse: UINT = 0
+                        if nextInterval * 1000 > Double(USER_TIMER_MAXIMUM) {
+                            elapse = UINT(USER_TIMER_MAXIMUM)
+                        } else {
+                            elapse = UINT(max(nextInterval, 0.0) * 1000)
+                        }
                         timerId = SetTimer(nil, timerId, elapse, nil)
                     } else {
                         if app.eventLoopMaximumInterval > 0.0 {
@@ -125,8 +134,10 @@ extension Win32 {
     		    keyboardHook = nil
             }
 
+            sharedInstance = nil
             app.threadId = 0
 		    app.running = false
+            return app.exitCode
         }
     }
 }

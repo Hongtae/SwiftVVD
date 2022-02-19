@@ -31,7 +31,22 @@ public protocol WindowDelegate: DragTargetDelegate {
 }
 
 extension WindowDelegate {
-    public func shouldClose() { true }
+    public func shouldClose() -> Bool { true }
+}
+
+public struct WindowStyle: OptionSet {
+    public let rawValue: UInt
+    public init(rawValue: UInt) { self.rawValue = rawValue }
+
+    public static let title             = WindowStyle(rawValue: 1)
+    public static let closeButton       = WindowStyle(rawValue: 1 << 1)
+    public static let minimizeButton    = WindowStyle(rawValue: 1 << 2)
+    public static let maximizeButton    = WindowStyle(rawValue: 1 << 3)
+    public static let resizableBorder   = WindowStyle(rawValue: 1 << 4)
+    public static let autoResize        = WindowStyle(rawValue: 1 << 5) // resize on rotate or DPI change, etc.
+
+    public static let genericWindow     = WindowStyle(rawValue: 0xff)   // includes all but StyleAcceptFileDrop
+    public static let acceptFileDrop    = WindowStyle(rawValue: 1 << 8) // enables file drag & drop
 }
 
 public protocol Window {
@@ -39,6 +54,6 @@ public protocol Window {
     func hide()
 }
 
-public func makeWindow(name: String = "", delegate: WindowDelegate? = nil) -> Window { 
-    return Platform.makeWindow(name: name, delegate: delegate)
+public func makeWindow(name: String = "", style: WindowStyle = .genericWindow, delegate: WindowDelegate? = nil) -> Window { 
+    return Platform.makeWindow(name: name, style: style, delegate: delegate)
 }

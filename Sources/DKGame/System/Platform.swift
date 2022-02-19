@@ -14,13 +14,13 @@ public class Platform {
 
     public class var name : String { Impl.name }
 
-    public class func makeWindow(name: String, delegate: WindowDelegate?) -> Window {
-        return Impl.Window()
+    public class func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?) -> Window {
+        return Impl.Window(name: name, style: style, delegate: delegate)
     }
     public class func runApplication(delegate: ApplicationDelegate?) -> Int {
-        return 0
+        return Impl.Application.run(delegate: delegate)
     }
     public class func applicationInstance() -> Application? {
-        return nil
+        return Impl.Application.sharedInstance
     }
 }
