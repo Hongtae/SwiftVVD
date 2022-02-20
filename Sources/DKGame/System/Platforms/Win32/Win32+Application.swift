@@ -3,7 +3,7 @@ import Foundation
 
 private var keyboardHook: HHOOK? = nil
 private let disableWindowKey: Bool = true
-private let numActiveWindows: Int = 0
+internal var numActiveWindows: Int = 0
 
 private func keyboardHookProc(_ nCode: Int32, _ wParam: WPARAM, _ lParam: LPARAM) -> LRESULT {
     let hook = disableWindowKey && numActiveWindows > 0

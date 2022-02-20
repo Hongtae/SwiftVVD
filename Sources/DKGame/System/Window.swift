@@ -53,15 +53,21 @@ public enum KeyboardEventType {
 public struct KeyboardEvent {
     var type: KeyboardEventType
     var deviceId: Int
-    var key: UInt8 // virtual-key
+    var key: VirtualKey
     var text: String
 }
 
 public enum WindowEventType {
-    case created, closed
-    case hidden, shown
-    case activated, inactivated
-    case minimized, moved, resized, updated
+    case created
+    case closed
+    case hidden
+    case shown
+    case activated
+    case inactivated
+    case minimized
+    case moved
+    case resized
+    case update
 }
 
 public struct WindowEvent {
@@ -114,6 +120,6 @@ extension Window {
     public func isTextInputEnabled(forDeviceId: Int) -> Bool { return false }
 }
 
-public func makeWindow(name: String = "", style: WindowStyle = .genericWindow, delegate: WindowDelegate? = nil) -> Window { 
+public func makeWindow(name: String, style: WindowStyle = .genericWindow, delegate: WindowDelegate? = nil) -> Window { 
     return Platform.makeWindow(name: name, style: style, delegate: delegate)
 }

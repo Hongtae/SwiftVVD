@@ -1,7 +1,6 @@
 import WinSDK
 import Foundation
 
-
 private func win32ErrorString(_ code: DWORD) -> String {
 
     var buffer: UnsafeMutablePointer<WCHAR>?
@@ -65,16 +64,19 @@ private typealias WindowProtocol = Window
 extension Win32 {
     public class Window : WindowProtocol {
         public private(set) var hWnd : HWND?
-        public var name: String = ""
         public private(set) var style: WindowStyle
         public private(set) var contentRect: CGRect = .null
         public private(set) var windowRect: CGRect = .null
         public private(set) var contentScaleFactor: Float = 1.0
 
+        public var name: String
+
         public private(set) weak var delegate: WindowDelegate?
 
         public private(set) var resizing: Bool = false
         public private(set) var activated: Bool = false
+        public private(set) var visible: Bool = false
+        public private(set) var minimized: Bool = false
         
         private var mousePosition: CGPoint = .zero
         private var holdingMousePosition: CGPoint = .zero
@@ -245,6 +247,31 @@ extension Win32 {
             self.hWnd = nil
         }
 
+        public var title: String {
+            get {
+                if let hWnd = self.hWnd {
+                    let len = GetWindowTextLengthW(hWnd)
+                    if len > 0 {
+                        var tmp = [WCHAR](repeating: 0, count: Int(len + 2))
+                        return tmp.withUnsafeMutableBufferPointer { (ptr) -> String in
+                            GetWindowTextW(hWnd, ptr.baseAddress, len + 2)
+                            return String(decodingCString: ptr.baseAddress!, as: UTF16.self)
+                        }
+                    }
+                    return String()             
+                }
+                return self.name
+            }
+            set (value) {
+                if let hWnd = self.hWnd {
+                    _ = value.withCString(encodedAs: UTF16.self) {
+                        SetWindowTextW(hWnd, $0)
+                    }
+                }
+                self.name = value
+            }
+        }
+
         public func showMouse(_ show: Bool, forDeviceId deviceId: Int) {
             if let hWnd = self.hWnd, deviceId == 0 {
                 let wParam = show ? WPARAM(1) : WPARAM(0)
@@ -315,6 +342,35 @@ extension Win32 {
             return false
         }
 
+        private func synchronizeMouse() {
+            guard !self.activated else { return }
+        	// check mouse has gone out of window region.
+            if let hWnd = self.hWnd, GetCapture() != hWnd {
+                var pt: POINT = POINT()
+                GetCursorPos(&pt)
+                ScreenToClient(hWnd, &pt)
+
+                var rc: RECT = RECT()
+                GetClientRect(hWnd, &rc)
+                if pt.x < rc.left || pt.x > rc.right || pt.y > rc.bottom || pt.y < rc.top {
+
+                    let MAKELPARAM = {(a:Int32, b:Int32) -> LPARAM in
+                        LPARAM(a & 0xffff) | (LPARAM(b & 0xffff) << 16)
+                    }
+                    PostMessageW(hWnd, UINT(WM_MOUSEMOVE), 0, MAKELPARAM(pt.x, pt.y))
+                }
+            }
+        }
+
+        private func resetMouse() {
+            if let hWnd = self.hWnd {
+                var pt: POINT = POINT()
+                GetCursorPos(&pt)
+                ScreenToClient(hWnd, &pt)
+                mousePosition = CGPoint(x: Int(pt.x), y: Int(pt.y))
+            }
+        }
+
         private func synchronizeKeyStates() {
             guard !self.activated else { return }
 
@@ -324,187 +380,416 @@ extension Win32 {
             for key in 0..<256 {
                 if key == VK_CAPITAL { continue }
 
+                let virtualKey: VirtualKey = .fromWin32VK(key)
+                if virtualKey == .none { continue }
+
                 if keyStates[key] & 0x80 != self.keyboardStates[key] & 0x80 {
                     if keyStates[key] & 0x80 != 0 {
                         // post keydown event
-
-                        /* PostKeyboardEvent({ KeyboardEvent::KeyDown, 0,lKey, "" }); */
+                        postKeyboardEvent(KeyboardEvent(type: .keyDown,
+                                                        deviceId: 0,
+                                                        key: virtualKey,
+                                                        text: ""))
                     } else {
                         // post keyup event
-
-                        /* PostKeyboardEvent({ KeyboardEvent::KeyUp, 0, lKey, "" }); */
+                        postKeyboardEvent(KeyboardEvent(type: .keyUp,
+                                                        deviceId: 0,
+                                                        key: virtualKey,
+                                                        text: ""))
                     }
                 }
             } 
 
-            let capsLock = Int(VK_CAPITAL)
-            if keyStates[capsLock] & 0x01 != self.keyboardStates[capsLock] & 0x01 {
-                if keyStates[capsLock] & 0x01 != 0 {
+            let capslock = Int(VK_CAPITAL)
+            if keyStates[capslock] & 0x01 != self.keyboardStates[capslock] & 0x01 {
+                if keyStates[capslock] & 0x01 != 0 {
                     // capslock on
-
-                    /* PostKeyboardEvent({ KeyboardEvent::KeyDown, 0, DKVirtualKey::Capslock, "" }); */ 
+                    postKeyboardEvent(KeyboardEvent(type: .keyDown,
+                                                    deviceId: 0,
+                                                    key: .capslock,
+                                                    text: ""))
                 } else {
                     // capslock off
-
-                    /* PostKeyboardEvent({ KeyboardEvent::KeyUp, 0, DKVirtualKey::Capslock, "" }); */
+                    postKeyboardEvent(KeyboardEvent(type: .keyUp,
+                                                    deviceId: 0,
+                                                    key: .capslock,
+                                                    text: ""))
                 }
             }
             self.keyboardStates = keyStates
         }
 
-        func postWindowEvent(_ event: WindowEvent) {
+        private func resetKeyStates() {
+            for key in 0..<256 {
+                if key == VK_CAPITAL { continue }
 
+                let virtualKey: VirtualKey = .fromWin32VK(key)
+                if virtualKey == .none { continue }
+
+                if keyboardStates[key] & 0x80 != 0 {
+                    postKeyboardEvent(KeyboardEvent(type: .keyUp,
+                                                    deviceId: 0,
+                                                    key: virtualKey,
+                                                    text: ""))
+                }
+            }
+
+            let capslock = Int(VK_CAPITAL)
+            if keyboardStates[capslock] & 0x01 != 0 {
+                postKeyboardEvent(KeyboardEvent(type: .keyUp,
+                                                deviceId: 0,
+                                                key: .capslock,
+                                                text: ""))
+            }
+
+            GetKeyboardState(&keyboardStates) // to empty keyboard queue
+            self.keyboardStates = [UInt8](repeating: 0, count: 256)
+        }
+
+        func postWindowEvent(type: WindowEventType) {
+            self.postWindowEvent(WindowEvent(type: type,
+                                             windowRect: self.windowRect,
+                                             contentRect: self.contentRect,
+                                             contentScaleFactor: self.contentScaleFactor))
+        }
+
+        func postWindowEvent(_ event: WindowEvent) {
+            NSLog("Win32.Window.postWindowEvent: \(event)")
         }
 
         func postKeyboardEvent(_ event: KeyboardEvent) {
-
+            NSLog("Win32.Window.postKeyboardEvent: \(event)")
         }
 
         func postMouseEvent(_ event: MouseEvent) {
-
+            NSLog("Win32.Window.postMouseEvent: \(event)")
         }
 
         private static func windowProc(_ hWnd: HWND?, _ uMsg: UINT, _ wParam: WPARAM, _ lParam: LPARAM) -> LRESULT {
             let userData = GetWindowLongPtrW(hWnd, GWLP_USERDATA)
             let obj: AnyObject? = unsafeBitCast(userData, to: AnyObject.self)
 
+            let MAKEPOINTS = { (lParam: LPARAM) -> POINTS in
+                var pt: POINTS = POINTS()
+                withUnsafeBytes(of: lParam) {
+                    let pts = $0.bindMemory(to: POINTS.self)
+                    pt = pts[0]
+                }
+                return pt
+            }
+
             if let window = obj as? Win32.Window, window.hWnd == hWnd {
                 switch (uMsg){
                 case UINT(WM_ACTIVATE):
+                    if wParam == WA_ACTIVE || wParam == WA_CLICKACTIVE {
+                        if window.activated == false {
+                            numActiveWindows += 1
+                            window.activated = true
+                            window.postWindowEvent(type: .activated)
+                            window.resetKeyStates()
+                            window.resetMouse()
+                            NSLog("DKGame.numActiveWindows: \(numActiveWindows)")
+                        }
+                    } else {
+                        if window.activated {
+                            numActiveWindows -= 1
+                            window.resetKeyStates()
+                            window.resetMouse()
+                            window.activated = false
+                            window.postWindowEvent(type: .inactivated)                            
+                            NSLog("DKGame.numActiveWindows: \(numActiveWindows)")
+                        }
+                    }
                     return 0
                 case UINT(WM_SHOWWINDOW):
+                    if wParam != 0 {
+                        if window.visible == false {
+                            window.visible = true
+                            window.minimized = false
+                            window.postWindowEvent(type: .shown)
+                        }
+                    } else {
+                        if window.visible {
+                            window.visible = false
+                            window.postWindowEvent(type: .hidden)
+                        }
+                    }
                     return 0
                 case UINT(WM_ENTERSIZEMOVE):
                     window.resizing = true;
                     return 0
                 case UINT(WM_EXITSIZEMOVE):
                     window.resizing = false;
+                    var rcClient: RECT = RECT(), rcWindow: RECT = RECT()
+                    GetClientRect(hWnd, &rcClient)
+                    GetWindowRect(hWnd, &rcWindow)
+                    var resized = false
+                    var moved = false
+                    if (rcClient.right - rcClient.left) != LONG(window.contentRect.width) ||
+                       (rcClient.bottom - rcClient.top) != LONG(window.contentRect.height) {
+						resized = true
+                    }
+                    if rcWindow.left != LONG(window.windowRect.origin.x) || rcWindow.top != LONG(window.windowRect.origin.y) {
+						moved = true
+                    }
+                    if resized || moved {
+                        window.windowRect = CGRect(x: Int(rcWindow.left),
+                                                   y: Int(rcWindow.top),
+                                                   width: Int(rcWindow.right - rcWindow.left),
+                                                   height: Int(rcWindow.bottom - rcWindow.top))
+                        window.contentRect = CGRect(x: Int(rcClient.left),
+                                                    y: Int(rcClient.top),
+                                                    width: Int(rcClient.right - rcClient.left),
+                                                    height: Int(rcClient.bottom - rcClient.top))
+
+                        if resized {
+                            window.postWindowEvent(type: .resized)
+                        }
+                        if moved {
+                            window.postWindowEvent(type: .moved)
+                        }
+                    }
                     return 0
     			case UINT(WM_SIZE):
+                    if wParam == SIZE_MAXHIDE {
+    					if window.visible {
+						    window.visible = false
+                            window.postWindowEvent(type: .hidden)
+					    }
+    				} else if wParam == SIZE_MINIMIZED {
+		    			if window.minimized == false {
+			    			window.minimized = true
+                            window.postWindowEvent(type: .minimized)
+    					}
+	    			} else {
+                        if window.minimized || window.visible == false {
+                            window.minimized = false
+                            window.visible = true
+                            window.postWindowEvent(type: .shown)
+                        } else {
+                            let w: Int = Int(lParam & 0xffff)
+                            let h: Int = Int((lParam >> 16) & 0xffff)
+                            let size: CGSize = CGSize(width: w, height: h)
+                            window.contentRect.size = size
+
+                            var rc: RECT = RECT()
+                            GetWindowRect(hWnd, &rc)
+                            window.windowRect = CGRect(x: Int(rc.left),
+                                                       y: Int(rc.top),
+                                                       width: Int(rc.right - rc.left),
+                                                       height: Int(rc.bottom - rc.top))
+                            window.postWindowEvent(type: .resized)
+                        }
+                    }
                     return 0
                 case UINT(WM_MOVE):
+                    if window.resizing == false {
+                        let x: Int = Int(lParam & 0xffff)         // horizontal position 
+                        let y: Int = Int((lParam >> 16) & 0xffff) // vertical position 
+
+                        window.windowRect.origin = CGPoint(x: x, y: y);
+                        window.postWindowEvent(type: .moved)
+    				}
                     return 0
                 case UINT(WM_DPICHANGED):
+					// Note: xDPI, yDPI are identical for Windows apps
+                    let xDPI: Int = Int(wParam & 0xffff)
+                    let yDPI: Int = Int((wParam >> 16) & 0xffff)
+
+                    let tmp: UnsafePointer<RECT>? = UnsafePointer<RECT>(bitPattern: UInt(lParam))
+                    let suggestedWindowRect: RECT = tmp!.pointee
+
+                    let scaleFactor: Float = Float(max(xDPI, yDPI)) / 96.0
+                    window.contentScaleFactor = scaleFactor
+
+                    if window.style.contains(.autoResize) {
+                        SetWindowPos(hWnd, nil,
+                            suggestedWindowRect.left,
+                            suggestedWindowRect.top,
+                            suggestedWindowRect.right - suggestedWindowRect.left,
+                            suggestedWindowRect.bottom - suggestedWindowRect.top,
+                            UINT(SWP_NOZORDER | SWP_NOACTIVATE))
+                    } else {
+                        window.postWindowEvent(type: .resized)
+                    }
                     return 0    
                 case UINT(WM_GETMINMAXINFO):
                     break
                 case UINT(WM_TIMER):
+                    if wParam == updateKeyboardMouseTimerId {
+                        window.synchronizeKeyStates()
+                        window.synchronizeMouse()
+                        return 0;
+                    }
                     break
                 case UINT(WM_MOUSEMOVE):
+                    if window.activated {
+                        let pt = MAKEPOINTS(lParam)
+                        if pt.x != LONG(window.mousePosition.x) || pt.y != LONG(window.mousePosition.y) {
+                            let delta: CGPoint = CGPoint(x: CGFloat(pt.x) - window.mousePosition.x,
+                                                         y: CGFloat(pt.y) - window.mousePosition.y)
+
+                            var postEvent = true
+                            if window.holdMouse {
+                                if pt.x == LONG(window.holdingMousePosition.x) &&
+                                pt.y == LONG(window.holdingMousePosition.y) {
+                                    postEvent = false
+                                } else {
+                                    window.setMousePosition(window.mousePosition, forDeviceId: 0)
+                                    // In Windows8 (or later) with scaled-DPI mode, setting mouse position generate inaccurate result.
+                                    // We need to keep new position in hold-mouse state. (non-movable mouse)
+                                    window.holdingMousePosition = window.mousePosition(forDeviceId: 0);
+                                }
+                            } else {
+                                window.mousePosition = CGPoint(x: Int(pt.x), y: Int(pt.y))
+                            }
+
+                            if postEvent {
+                                window.postMouseEvent(MouseEvent(type: .move,
+                                                                device: .genericMouse,
+                                                                deviceId: 0,
+                                                                buttonId: 0,
+                                                                location: window.mousePosition,
+                                                                delta: delta))
+                            }
+                        }
+                    }
                     return 0
                 case UINT(WM_LBUTTONDOWN):
                     window.mouseButtonDownMask.insert(.button1)
-                    withUnsafeBytes(of: lParam) {
-                        let pts = $0.bindMemory(to: POINTS.self)
-                        let pos: CGPoint = CGPoint(x: Int(pts[0].x), y: Int(pts[0].y))
+                    let pts = MAKEPOINTS(lParam)
+                    let pos: CGPoint = CGPoint(x: Int(pts.x), y: Int(pts.y))
 
-                        NSLog("WM_LBUTTONDOWN: \(pos)")
-                        /* PostMouseEvent({ MouseEvent::ButtonDown, MouseEvent::GenericMouse, 0, 0, pt, DKVector2(0,0), 0, 0 }); */
-                    }
+                    window.postMouseEvent(MouseEvent(type: .buttonDown,
+                                                     device: .genericMouse,
+                                                     deviceId: 0,
+                                                     buttonId: 0,
+                                                     location: pos))
                     PostMessageW(hWnd, UINT(WM_DKWINDOW_UPDATEMOUSECAPTURE), 0, 0);
                     return 0
                 case UINT(WM_LBUTTONUP):
                     window.mouseButtonDownMask.remove(.button1)
-                    withUnsafeBytes(of: lParam) {
-                        let pts = $0.bindMemory(to: POINTS.self)
-                        let pos: CGPoint = CGPoint(x: Int(pts[0].x), y: Int(pts[0].y))
+                    let pts = MAKEPOINTS(lParam)
+                    let pos: CGPoint = CGPoint(x: Int(pts.x), y: Int(pts.y))
 
-                        NSLog("WM_LBUTTONUP: \(pos)")
-                        /* PostMouseEvent({ MouseEvent::ButtonUp, MouseEvent::GenericMouse, 0, 0, pt, DKVector2(0,0), 0, 0 }); */
-                    }
+                    window.postMouseEvent(MouseEvent(type: .buttonUp,
+                                                     device: .genericMouse,
+                                                     deviceId: 0,
+                                                     buttonId: 0,
+                                                     location: pos))
                     PostMessageW(hWnd, UINT(WM_DKWINDOW_UPDATEMOUSECAPTURE), 0, 0);
                     return 0
                 case UINT(WM_RBUTTONDOWN):
                     window.mouseButtonDownMask.insert(.button2)
-                    withUnsafeBytes(of: lParam) {
-                        let pts = $0.bindMemory(to: POINTS.self)
-                        let pos: CGPoint = CGPoint(x: Int(pts[0].x), y: Int(pts[0].y))
+                    let pts = MAKEPOINTS(lParam)
+                    let pos: CGPoint = CGPoint(x: Int(pts.x), y: Int(pts.y))
 
-                        NSLog("WM_RBUTTONDOWN: \(pos)")
-                        /* PostMouseEvent({ MouseEvent::ButtonDown, MouseEvent::GenericMouse, 0, 1, pt, DKVector2(0, 0), 0, 0 }); */
-                    }
+                    window.postMouseEvent(MouseEvent(type: .buttonDown,
+                                                     device: .genericMouse,
+                                                     deviceId: 0,
+                                                     buttonId: 1,
+                                                     location: pos))
                     PostMessageW(hWnd, UINT(WM_DKWINDOW_UPDATEMOUSECAPTURE), 0, 0);
                     return 0
                 case UINT(WM_RBUTTONUP):
                     window.mouseButtonDownMask.remove(.button2)
-                    withUnsafeBytes(of: lParam) {
-                        let pts = $0.bindMemory(to: POINTS.self)
-                        let pos: CGPoint = CGPoint(x: Int(pts[0].x), y: Int(pts[0].y))
+                    let pts = MAKEPOINTS(lParam)
+                    let pos: CGPoint = CGPoint(x: Int(pts.x), y: Int(pts.y))
 
-                        NSLog("WM_RBUTTONUP: \(pos)")
-                        /* PostMouseEvent({ MouseEvent::ButtonUp, MouseEvent::GenericMouse, 0, 1, pt, DKVector2(0, 0), 0,0 }); */
-                    }
+                    window.postMouseEvent(MouseEvent(type: .buttonUp,
+                                                     device: .genericMouse,
+                                                     deviceId: 0,
+                                                     buttonId: 1,
+                                                     location: pos))
                     PostMessageW(hWnd, UINT(WM_DKWINDOW_UPDATEMOUSECAPTURE), 0, 0);
                     return 0
                 case UINT(WM_MBUTTONDOWN):
                     window.mouseButtonDownMask.insert(.button3)
-                    withUnsafeBytes(of: lParam) {
-                        let pts = $0.bindMemory(to: POINTS.self)
-                        let pos: CGPoint = CGPoint(x: Int(pts[0].x), y: Int(pts[0].y))
+                    let pts = MAKEPOINTS(lParam)
+                    let pos: CGPoint = CGPoint(x: Int(pts.x), y: Int(pts.y))
 
-                        NSLog("WM_MBUTTONDOWN: \(pos)")
-                        /* PostMouseEvent({ MouseEvent::ButtonDown, MouseEvent::GenericMouse, 0, 2, pt, DKVector2(0,0), 0, 0 }); */
-                    }
+                    window.postMouseEvent(MouseEvent(type: .buttonDown,
+                                                     device: .genericMouse,
+                                                     deviceId: 0,
+                                                     buttonId: 2,
+                                                     location: pos))
                     PostMessageW(hWnd, UINT(WM_DKWINDOW_UPDATEMOUSECAPTURE), 0, 0);
                     return 0
                 case UINT(WM_MBUTTONUP):
                     window.mouseButtonDownMask.remove(.button3)
-                    withUnsafeBytes(of: lParam) {
-                        let pts = $0.bindMemory(to: POINTS.self)
-                        let pos: CGPoint = CGPoint(x: Int(pts[0].x), y: Int(pts[0].y))
+                    let pts = MAKEPOINTS(lParam)
+                    let pos: CGPoint = CGPoint(x: Int(pts.x), y: Int(pts.y))
 
-                        NSLog("WM_MBUTTONUP: \(pos)")
-                        /* PostMouseEvent({ MouseEvent::ButtonUp, MouseEvent::GenericMouse, 0, 2, pt, DKVector2(0, 0), 0,0 }); */
-                    }
+                    window.postMouseEvent(MouseEvent(type: .buttonUp,
+                                                     device: .genericMouse,
+                                                     deviceId: 0,
+                                                     buttonId: 2,
+                                                     location: pos))
                     PostMessageW(hWnd, UINT(WM_DKWINDOW_UPDATEMOUSECAPTURE), 0, 0);
                     return 0
                 case UINT(WM_XBUTTONDOWN):
-                    withUnsafeBytes(of: lParam) {
-                        let pts = $0.bindMemory(to: POINTS.self)
-                        let pos: CGPoint = CGPoint(x: Int(pts[0].x), y: Int(pts[0].y))
+                    let pts = MAKEPOINTS(lParam)
+                    let pos: CGPoint = CGPoint(x: Int(pts.x), y: Int(pts.y))
 
-                        let xButton = DWORD_PTR(wParam) >> 16 & 0xffff
-                        if xButton == XBUTTON1 {
-                            window.mouseButtonDownMask.insert(.button4)
-                            NSLog("WM_XBUTTONDOWN (XBUTTON1): \(pos)")
-                            /* PostMouseEvent({ MouseEvent::ButtonDown, MouseEvent::GenericMouse, 0, 3, pt, DKVector2(0, 0), 0,0 }); */
-                        } else if xButton == XBUTTON2 {
-                            window.mouseButtonDownMask.insert(.button5)
-                            NSLog("WM_XBUTTONDOWN (XBUTTON2): \(pos)")
-                            /* PostMouseEvent({ MouseEvent::ButtonDown, MouseEvent::GenericMouse, 0, 4, pt, DKVector2(0, 0), 0,0 }); */
-                        }
+                    let xButton = DWORD_PTR(wParam) >> 16 & 0xffff
+                    if xButton == XBUTTON1 {
+                        window.mouseButtonDownMask.insert(.button4)
+
+                        window.postMouseEvent(MouseEvent(type: .buttonDown,
+                                                         device: .genericMouse,
+                                                         deviceId: 0,
+                                                         buttonId: 3,
+                                                         location: pos))
+                    } else if xButton == XBUTTON2 {
+                        window.mouseButtonDownMask.insert(.button5)
+
+                        window.postMouseEvent(MouseEvent(type: .buttonDown,
+                                                         device: .genericMouse,
+                                                         deviceId: 0,
+                                                         buttonId: 4,
+                                                         location: pos))
                     }
                     PostMessageW(hWnd, UINT(WM_DKWINDOW_UPDATEMOUSECAPTURE), 0, 0);                    
                     return 1 // should return TRUE
                 case UINT(WM_XBUTTONUP):
-                    withUnsafeBytes(of: lParam) {
-                        let pts = $0.bindMemory(to: POINTS.self)
-                        let pos: CGPoint = CGPoint(x: Int(pts[0].x), y: Int(pts[0].y))
+                    let pts = MAKEPOINTS(lParam)
+                    let pos: CGPoint = CGPoint(x: Int(pts.x), y: Int(pts.y))
 
-                        let xButton = DWORD_PTR(wParam) >> 16 & 0xffff
-                        if xButton == XBUTTON1 {
-                            window.mouseButtonDownMask.remove(.button4)
-                            NSLog("WM_XBUTTONUP (XBUTTON1): \(pos)")
-                            /* PostMouseEvent({ MouseEvent::ButtonUp, MouseEvent::GenericMouse, 0, 3, pt, DKVector2(0, 0), 0,0 }); */
-                        } else if xButton == XBUTTON2 {
-                            window.mouseButtonDownMask.remove(.button5)
-                            NSLog("WM_XBUTTONUP (XBUTTON2): \(pos)")
-                            /* PostMouseEvent({ MouseEvent::ButtonUp, MouseEvent::GenericMouse, 0, 4, pt, DKVector2(0, 0), 0,0 }); */
-                        }
+                    let xButton = DWORD_PTR(wParam) >> 16 & 0xffff
+                    if xButton == XBUTTON1 {
+                        window.mouseButtonDownMask.remove(.button4)
+
+                        window.postMouseEvent(MouseEvent(type: .buttonUp,
+                                                         device: .genericMouse,
+                                                         deviceId: 0,
+                                                         buttonId: 3,
+                                                         location: pos))
+                    } else if xButton == XBUTTON2 {
+                        window.mouseButtonDownMask.remove(.button5)
+
+                        window.postMouseEvent(MouseEvent(type: .buttonUp,
+                                                         device: .genericMouse,
+                                                         deviceId: 0,
+                                                         buttonId: 4,
+                                                         location: pos))
                     }
                     PostMessageW(hWnd, UINT(WM_DKWINDOW_UPDATEMOUSECAPTURE), 0, 0);                    
                     return 1 // should return TRUE
                 case UINT(WM_MOUSEWHEEL):
                     var origin: POINT = POINT(x:0, y:0)
                     ClientToScreen(hWnd, &origin)
-                    withUnsafeBytes(of: lParam) {
-                        let pts = $0.bindMemory(to: POINTS.self)
-                        let pos: CGPoint = CGPoint(x: Int(pts[0].x) - Int(origin.x), y: Int(pts[0].y) - Int(origin.y))
-                        let delta: Int16 = Int16(bitPattern: UInt16(DWORD_PTR(wParam) >> 16 & 0xffff))
 
-                        NSLog("WM_MOUSEWHEEL pos:\(pos), delta:\(delta)")
-                        /* PostMouseEvent({ MouseEvent::Wheel, MouseEvent::GenericMouse, 0, 2, pt, delta, 0,0 }); */
-                    }
+                    let pts = MAKEPOINTS(lParam)
+                    let pos: CGPoint = CGPoint(x: Int(pts.x), y: Int(pts.y))
+
+                    let deltaY: Int16 = Int16(bitPattern: UInt16(DWORD_PTR(wParam) >> 16 & 0xffff))
+
+                    window.postMouseEvent(MouseEvent(type: .wheel,
+                                                     device: .genericMouse,
+                                                     deviceId: 0,
+                                                     buttonId: 2,
+                                                     location: pos,
+                                                     delta: CGPoint(x: 0, y: Int(deltaY))))
                     return 0
                 case UINT(WM_CHAR):
                     window.synchronizeKeyStates()
@@ -514,9 +799,11 @@ extension Win32 {
                         str[0] = WCHAR(wParam)
 
                         let inputText = String(decodingCString: str, as: UTF16.self)
-                        NSLog("WM_CHAR: \(inputText)")
 
-                        /* PostKeyboardEvent({ KeyboardEvent::TextInput, 0, DKVirtualKey::None, text }); */
+                        window.postKeyboardEvent(KeyboardEvent(type: .textInput,
+                                                               deviceId: 0,
+                                                               key: .none,
+                                                               text: inputText))
                     }
                     return 0
                 case UINT(WM_IME_STARTCOMPOSITION):
@@ -529,8 +816,10 @@ extension Win32 {
                         // composition finished.
                         // Result characters will be received via WM_CHAR,
 					    // reset input-candidate characters here.
-
-                        /* PostKeyboardEvent({ KeyboardEvent::TextComposition, 0, DKVirtualKey::None, "" }); */
+                        window.postKeyboardEvent(KeyboardEvent(type: .textComposition,
+                                                               deviceId: 0,
+                                                               key: .none,
+                                                               text: ""))  
                     }
                     if lParam & LPARAM(GCS_COMPSTR) != 0 {
                         // composition in progress.
@@ -546,13 +835,16 @@ extension Win32 {
                                                       as: UTF16.self)
                                     }
 
-                                    /* PostKeyboardEvent({ KeyboardEvent::TextComposition, 0, DKVirtualKey::None, compositionText }); */
-
-                                    NSLog("WM_IME_COMPOSITION: \(compositionText)")
+                                    window.postKeyboardEvent(KeyboardEvent(type: .textComposition,
+                                                                           deviceId: 0,
+                                                                           key: .none,
+                                                                           text: compositionText))  
 
                                 } else {    // composition character's length become 0. (erased)
-
-                                    /* PostKeyboardEvent({ KeyboardEvent::TextComposition, 0, DKVirtualKey::None, "" }); */
+                                    window.postKeyboardEvent(KeyboardEvent(type: .textComposition,
+                                                                           deviceId: 0,
+                                                                           key: .none,
+                                                                           text: ""))  
                                 }
                             } else {        // not text-input mode.
                                 ImmNotifyIME(hIMC, DWORD(NI_COMPOSITIONSTR), DWORD(CPS_CANCEL), 0)
@@ -563,7 +855,10 @@ extension Win32 {
                     break
                 case UINT(WM_PAINT):
                     if window.resizing == false {
-					    /* PostWindowEvent({ WindowEvent::WindowUpdate, window->windowRect, window->contentRect, window->contentScaleFactor }); */
+                        window.postWindowEvent(WindowEvent(type: .update, 
+                                                           windowRect: window.windowRect,
+                                                           contentRect: window.contentRect,
+                                                           contentScaleFactor: window.contentScaleFactor))
                     }
                     break                   
                 case UINT(WM_CLOSE):

@@ -21,7 +21,7 @@ class MyApplicationDelegate: ApplicationDelegate {
         _ = makeGraphicsDevice()
 
         self.windowDelegate = MyWindowDelegate()
-        self.window = makeWindow(delegate: self.windowDelegate)
+        self.window = makeWindow(name: "TestApp1", delegate: self.windowDelegate)
         self.window?.show()
     }
 
