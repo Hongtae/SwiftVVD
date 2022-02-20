@@ -4,8 +4,8 @@ import Foundation
 extension Win32 {
 
     struct DropTarget {
-        private var dropTarget: IDropTarget = IDropTarget()
-        private var vtbl: IDropTargetVtbl = IDropTargetVtbl()
+        internal private(set) var dropTarget: IDropTarget = IDropTarget()
+        internal private(set) var vtbl: IDropTargetVtbl = IDropTargetVtbl()
         private var refCount: Int = 1
         private var thisPointer: UnsafeMutablePointer<DropTarget>?
 

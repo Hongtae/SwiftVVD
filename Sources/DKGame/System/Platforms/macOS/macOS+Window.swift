@@ -1,7 +1,15 @@
+import Foundation
+
 private typealias WindowProtocol = Window
 
 extension macOS {
     public class Window : WindowProtocol {
+
+        public var contentRect: CGRect = .null
+        public var windowRect: CGRect = .null
+        public var contentScaleFactor: Float = 1.0
+        public private(set) weak var delegate: WindowDelegate?
+
         public init () {
             
         }

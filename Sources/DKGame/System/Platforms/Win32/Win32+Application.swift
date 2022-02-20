@@ -11,15 +11,15 @@ private func keyboardHookProc(_ nCode: Int32, _ wParam: WPARAM, _ lParam: LPARAM
         let pkbhs = UnsafeMutablePointer<KBDLLHOOKSTRUCT>(bitPattern: UInt(lParam))?.pointee
         if let code = pkbhs?.vkCode {
             if code == VK_LWIN || code == VK_RWIN {
-                var keyState: [UInt8] = [UInt8](repeating: 0, count: 256)
+                var keyStates: [UInt8] = [UInt8](repeating: 0, count: 256)
                 if wParam == WM_KEYDOWN {
-                    GetKeyboardState(&keyState)
-                    keyState[Int(code)] = 0x80
-                    SetKeyboardState(&keyState)
+                    GetKeyboardState(&keyStates)
+                    keyStates[Int(code)] = 0x80
+                    SetKeyboardState(&keyStates)
                 } else if wParam == WM_KEYUP {
-                    GetKeyboardState(&keyState)
-                    keyState[Int(code)] = 0x00
-                    SetKeyboardState(&keyState)
+                    GetKeyboardState(&keyStates)
+                    keyStates[Int(code)] = 0x00
+                    SetKeyboardState(&keyStates)
                 }
                 return 1
             }
@@ -98,7 +98,7 @@ extension Win32 {
                     var next: Date? = nil
                    repeat {
                         next = RunLoop.main.limitDate(forMode: .default)
-                    } while (next?.timeIntervalSinceNow ?? 1) <= 0
+                    } while (next?.timeIntervalSinceNow ?? 1.0) <= 0.0
                     
                     if let nextInterval = next?.timeIntervalSinceNow {
                         var elapse: UINT = 0

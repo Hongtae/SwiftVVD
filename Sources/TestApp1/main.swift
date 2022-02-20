@@ -1,30 +1,38 @@
 
 import DKGame
 
-print("Hello, world!")
-
 class MyWindowDelegate: WindowDelegate {
-    func shouldClose() -> Bool { 
+    func shouldClose(window: Window) -> Bool { 
         let app = applicationInstance()
         app!.terminate(exitCode: 1234)
+        print("window closed, request app exit!")
         return true
      }
 }
 
-let gd = makeGraphicsDevice()
-var window = makeWindow(delegate: nil)
-window.show()
+class MyApplicationDelegate: ApplicationDelegate {
 
-class MyApplicatoin: ApplicationDelegate {
+    var window: Window?
+    var windowDelegate: WindowDelegate?
+
     func initialize(application: Application) {
         print("app initialize")
+
+        _ = makeGraphicsDevice()
+
+        self.windowDelegate = MyWindowDelegate()
+        self.window = makeWindow(delegate: self.windowDelegate)
+        self.window?.show()
     }
 
     func finalize(application: Application) {
         print("app finalize")
+
+        self.window = nil
     }
 }
 
-let exitCode = runApplication(delegate: MyApplicatoin())
+let appDelegate = MyApplicationDelegate()
+let exitCode = runApplication(delegate: appDelegate)
 
 print("exitCode: \(exitCode)")

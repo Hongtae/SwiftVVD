@@ -26,12 +26,57 @@ extension DragTargetDelegate {
     }
 }
 
-public protocol WindowDelegate: DragTargetDelegate {
-    func shouldClose() -> Bool
+public enum MouseEventType {
+    case buttonDown, buttonUp, move, wheel, pointing
+}
+
+public enum MouseEventDevice {
+    case unknown
+    case genericMouse, stylus, touch
+}
+
+public struct MouseEvent {
+    var type: MouseEventType
+    var device: MouseEventDevice
+    var deviceId: Int
+    var buttonId: Int
+    var location: CGPoint
+    var delta: CGPoint = .zero
+    var pressure: Float = 0.0
+    var tilt: Float = 0.0
+}
+
+public enum KeyboardEventType {
+    case keyDown, keyUp, textInput, textComposition
+}
+
+public struct KeyboardEvent {
+    var type: KeyboardEventType
+    var deviceId: Int
+    var key: UInt8 // virtual-key
+    var text: String
+}
+
+public enum WindowEventType {
+    case created, closed
+    case hidden, shown
+    case activated, inactivated
+    case minimized, moved, resized, updated
+}
+
+public struct WindowEvent {
+    var type: WindowEventType
+    var windowRect: CGRect
+    var contentRect: CGRect
+    var contentScaleFactor: Float
+}
+
+public protocol WindowDelegate: AnyObject, DragTargetDelegate {
+    func shouldClose(window: Window) -> Bool
 }
 
 extension WindowDelegate {
-    public func shouldClose() -> Bool { true }
+    public func shouldClose(window: Window) -> Bool { true }
 }
 
 public struct WindowStyle: OptionSet {
@@ -50,8 +95,23 @@ public struct WindowStyle: OptionSet {
 }
 
 public protocol Window {
+
+    var delegate: WindowDelegate? { get }
+
     func show()
     func hide()
+
+    var contentRect: CGRect { get }
+    var windowRect: CGRect { get }
+    var contentScaleFactor: Float { get }
+
+    func enableTextInput(_: Bool, forDeviceId: Int)
+    func isTextInputEnabled(forDeviceId: Int) -> Bool
+}
+
+extension Window {
+    public func enableTextInput(_: Bool, forDeviceId: Int) {}
+    public func isTextInputEnabled(forDeviceId: Int) -> Bool { return false }
 }
 
 public func makeWindow(name: String = "", style: WindowStyle = .genericWindow, delegate: WindowDelegate? = nil) -> Window { 
