@@ -24,7 +24,8 @@ class MyApplicationDelegate: ApplicationDelegate {
 
         self.windowDelegate = MyWindowDelegate()
         self.window = makeWindow(name: "TestApp1", delegate: self.windowDelegate)
-        self.window?.show()
+        self.window?.contentSize = CGSize(width: 800, height: 600)
+        self.window?.activate()
     }
 
     func finalize(application: Application) {

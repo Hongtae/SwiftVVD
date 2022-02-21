@@ -45,6 +45,8 @@ private let updateKeyboardMouseTimeInterval: UINT = 10
 private let WM_DKWINDOW_SHOWCURSOR = (WM_USER + 0x1175)
 private let WM_DKWINDOW_UPDATEMOUSECAPTURE = (WM_USER + 0x1180)
 
+private let HWND_TOP:HWND = HWND(bitPattern: 32512)!
+
 private typealias WindowProtocol = Window
 
 extension Win32 {
@@ -145,9 +147,62 @@ extension Win32 {
                 }
             }
         }
+
         public func hide() {
             if let hWnd = self.hWnd {
                 ShowWindow(hWnd, SW_HIDE);
+            }
+        }
+
+        public func activate() {
+            if let hWnd = self.hWnd {
+                if IsIconic(hWnd) {
+                    ShowWindow(hWnd, SW_RESTORE);
+                }
+                ShowWindow(hWnd, SW_SHOW);
+                SetWindowPos(hWnd, HWND_TOP, 0, 0, 0, 0, UINT(SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW));
+                SetForegroundWindow(hWnd);
+            }
+        }
+
+        public var origin: CGPoint {
+            get { self.windowRect.origin }
+            set (value) {
+                if let hWnd = self.hWnd {
+                    let x = Int32(value.x)
+                    let y = Int32(value.y)
+                    SetWindowPos(hWnd, HWND_TOP, x, y, 0, 0, UINT(SWP_NOSIZE | SWP_NOOWNERZORDER | SWP_NOACTIVATE));
+                }
+            }
+        }
+
+        public var contentSize: CGSize {
+            get { self.contentRect.size }
+            set (value) {
+                if let hWnd = self.hWnd {
+                    var w = Int32(value.width)
+                    var h = Int32(value.height)
+
+                    let style: DWORD = DWORD(GetWindowLongW(hWnd, GWL_STYLE))
+                    let styleEx: DWORD = DWORD(GetWindowLongW(hWnd, GWL_EXSTYLE))
+                    let menu: Bool = GetMenu(hWnd) != nil
+
+                    var rc = RECT(left: 0,
+                                  top: 0,
+                                  right: LONG(max(w, 1)),
+                                  bottom: LONG(max(h, 1)))
+                    if AdjustWindowRectEx(&rc, style, menu, styleEx) {
+                        w = rc.right - rc.left
+                        h = rc.bottom - rc.top
+                        SetWindowPos(hWnd, HWND_TOP, 0, 0, w, h, UINT(SWP_NOMOVE | SWP_NOOWNERZORDER | SWP_NOACTIVATE));
+                    }
+                }  
+            }
+        }
+
+        public func minimize() {
+            if let hWnd = self.hWnd {
+                ShowWindow(hWnd, SW_MINIMIZE);
             }
         }
 
@@ -205,16 +260,18 @@ extension Win32 {
             GetWindowRect(hWnd, &rc2)
 
             self.contentRect = CGRect(x: Int(rc1.left),
-                                        y: Int(rc1.top),
-                                        width: Int(rc1.right - rc1.left),
-                                        height: Int(rc1.bottom - rc1.top))
+                                      y: Int(rc1.top),
+                                      width: Int(rc1.right - rc1.left),
+                                      height: Int(rc1.bottom - rc1.top))
             self.windowRect = CGRect(x: Int(rc2.left),
-                                        y: Int(rc2.top),
-                                        width: Int(rc2.right - rc2.left),
-                                        height: Int(rc2.bottom - rc2.top))
+                                     y: Int(rc2.top),
+                                     width: Int(rc2.right - rc2.left),
+                                     height: Int(rc2.bottom - rc2.top))
             self.contentScaleFactor = dpiScaleForWindow(hWnd!)
             
             SetTimer(hWnd, updateKeyboardMouseTimerId, updateKeyboardMouseTimeInterval, nil);
+            postWindowEvent(type: .created)
+
             return hWnd
         }
 
@@ -234,7 +291,6 @@ extension Win32 {
 
 			    // set GWLP_USERDATA to 0, to forwarding messages to DefWindowProc.
                 SetWindowLongPtrW(hWnd, GWLP_USERDATA, 0);
-                let HWND_TOP:HWND = HWND(bitPattern: 32512)!
                 SetWindowPos(hWnd, HWND_TOP, 0, 0, 0, 0, UINT(SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED));
 
 			    // Post WM_CLOSE to destroy window from DefWindowProc().
@@ -463,7 +519,9 @@ extension Win32 {
         }
 
         func postMouseEvent(_ event: MouseEvent) {
-            NSLog("Win32.Window.postMouseEvent: \(event)")
+            if event.type != .move {
+                NSLog("Win32.Window.postMouseEvent: \(event)")
+            }
         }
 
         private static func windowProc(_ hWnd: HWND?, _ uMsg: UINT, _ wParam: WPARAM, _ lParam: LPARAM) -> LRESULT {

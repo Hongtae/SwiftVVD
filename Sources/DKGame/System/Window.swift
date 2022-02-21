@@ -106,20 +106,39 @@ public struct WindowStyle: OptionSet {
 
 public protocol Window {
 
+    var contentRect: CGRect { get }
+    var windowRect: CGRect { get }
+    var contentScaleFactor: Float { get }
+
+    var origin: CGPoint { get set }
+    var contentSize: CGSize { get set }
+
     var delegate: WindowDelegate? { get }
 
     func show()
     func hide()
+    func activate()
+    func minimize()
 
-    var contentRect: CGRect { get }
-    var windowRect: CGRect { get }
-    var contentScaleFactor: Float { get }
+    func showMouse(_: Bool, forDeviceId: Int)
+    func isMouseVisible(forDeviceId: Int) -> Bool
+    func holdMouse(_: Bool, forDeviceId: Int)
+    func isMouseHeld(forDeviceId: Int) -> Bool
+    func setMousePosition(_: CGPoint, forDeviceId: Int)
+    func mousePosition(forDeviceId: Int) -> CGPoint
 
     func enableTextInput(_: Bool, forDeviceId: Int)
     func isTextInputEnabled(forDeviceId: Int) -> Bool
 }
 
 extension Window {
+    public func showMouse(_: Bool, forDeviceId: Int) {}
+    public func isMouseVisible(forDeviceId: Int) -> Bool { false }
+    public func holdMouse(_: Bool, forDeviceId: Int) {}
+    public func isMouseHeld(forDeviceId: Int) -> Bool { false }
+    public func setMousePosition(_: CGPoint, forDeviceId: Int) {}
+    public func mousePosition(forDeviceId: Int) -> CGPoint { .zero }
+
     public func enableTextInput(_: Bool, forDeviceId: Int) {}
     public func isTextInputEnabled(forDeviceId: Int) -> Bool { return false }
 }
