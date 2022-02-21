@@ -1,4 +1,4 @@
-
+import Foundation
 import DKGame
 
 class MyWindowDelegate: WindowDelegate {
@@ -7,7 +7,9 @@ class MyWindowDelegate: WindowDelegate {
         app!.terminate(exitCode: 1234)
         print("window closed, request app exit!")
         return true
-     }
+    }
+    func restrictedContentMininumSize(window: Window) -> CGSize? { CGSize(width: 200, height: 200) }
+    func restrictedContentMaxinumSize(window: Window) -> CGSize? { nil }
 }
 
 class MyApplicationDelegate: ApplicationDelegate {

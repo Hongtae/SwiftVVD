@@ -61,7 +61,6 @@ extension Win32 {
             sharedInstance = app
             app.running = true
     		app.threadId = GetCurrentThreadId()
-            delegate?.initialize(application: app)
 
             if IsDebuggerPresent() == false {
 			    if keyboardHook != nil {
@@ -82,6 +81,8 @@ extension Win32 {
 
             // Setup thread DPI
             SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE)   
+
+            delegate?.initialize(application: app)
 
             var timerId: UINT_PTR = 0
             var msg: MSG = MSG()

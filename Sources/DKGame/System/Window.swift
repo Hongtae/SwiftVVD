@@ -79,10 +79,14 @@ public struct WindowEvent {
 
 public protocol WindowDelegate: AnyObject, DragTargetDelegate {
     func shouldClose(window: Window) -> Bool
+    func restrictedContentMininumSize(window: Window) -> CGSize?
+    func restrictedContentMaxinumSize(window: Window) -> CGSize?
 }
 
 extension WindowDelegate {
     public func shouldClose(window: Window) -> Bool { true }
+    public func restrictedContentMininumSize(window: Window) -> CGSize? { nil }
+    public func restrictedContentMaxinumSize(window: Window) -> CGSize? { nil }
 }
 
 public struct WindowStyle: OptionSet {

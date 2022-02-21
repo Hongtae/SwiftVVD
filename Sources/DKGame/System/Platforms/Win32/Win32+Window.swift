@@ -36,20 +36,6 @@ private func dpiScaleForWindow(_ hWnd: HWND) -> Float {
     return 1.0
 }
 
-struct MouseButtonDownMask: OptionSet {
-    let rawValue: UInt8
-    init(rawValue: UInt8) { self.rawValue = rawValue }
-
-    static let button1 = MouseButtonDownMask(rawValue: 1)
-    static let button2 = MouseButtonDownMask(rawValue: 1 << 1)
-    static let button3 = MouseButtonDownMask(rawValue: 1 << 2)
-    static let button4 = MouseButtonDownMask(rawValue: 1 << 3)
-    static let button5 = MouseButtonDownMask(rawValue: 1 << 4)
-    static let button6 = MouseButtonDownMask(rawValue: 1 << 5)
-    static let button7 = MouseButtonDownMask(rawValue: 1 << 6)
-    static let button8 = MouseButtonDownMask(rawValue: 1 << 7)
-}
-
 private let windowClass = "_SwiftDKGame_WndClass"
 
 // TIMER ID
@@ -62,6 +48,21 @@ private let WM_DKWINDOW_UPDATEMOUSECAPTURE = (WM_USER + 0x1180)
 private typealias WindowProtocol = Window
 
 extension Win32 {
+
+    struct MouseButtonDownMask: OptionSet {
+        let rawValue: UInt8
+        init(rawValue: UInt8) { self.rawValue = rawValue }
+
+        static let button1 = MouseButtonDownMask(rawValue: 1)
+        static let button2 = MouseButtonDownMask(rawValue: 1 << 1)
+        static let button3 = MouseButtonDownMask(rawValue: 1 << 2)
+        static let button4 = MouseButtonDownMask(rawValue: 1 << 3)
+        static let button5 = MouseButtonDownMask(rawValue: 1 << 4)
+        static let button6 = MouseButtonDownMask(rawValue: 1 << 5)
+        static let button7 = MouseButtonDownMask(rawValue: 1 << 6)
+        static let button8 = MouseButtonDownMask(rawValue: 1 << 7)
+    }
+
     public class Window : WindowProtocol {
         public private(set) var hWnd : HWND?
         public private(set) var style: WindowStyle
@@ -614,7 +615,40 @@ extension Win32 {
                     }
                     return 0    
                 case UINT(WM_GETMINMAXINFO):
-                    break
+                    let style: DWORD = DWORD(GetWindowLongW(hWnd, GWL_STYLE))
+                    let styleEx: DWORD = DWORD(GetWindowLongW(hWnd, GWL_EXSTYLE))
+                    let menu: Bool = GetMenu(hWnd) != nil
+
+                    var minSize: CGSize = CGSize(width: 1, height: 1)
+                    if let size = window.delegate?.restrictedContentMininumSize(window: window) {
+                        minSize.width = size.width
+                        minSize.height = size.height
+                    }
+                    var rc = RECT(left: 0,
+                                  top: 0,
+                                  right: LONG(max(minSize.width, 1)),
+                                  bottom: LONG(max(minSize.height, 1)))
+                    if AdjustWindowRectEx(&rc, style, menu, styleEx) {
+                        let tmp: UnsafeMutablePointer<MINMAXINFO> = UnsafeMutablePointer<MINMAXINFO>(bitPattern: UInt(lParam))!
+                        tmp.pointee.ptMinTrackSize.x = rc.right - rc.left
+                        tmp.pointee.ptMinTrackSize.y = rc.bottom - rc.top
+                    }
+                    if let maxSize = window.delegate?.restrictedContentMaxinumSize(window: window) {
+                        rc = RECT(left: 0,
+                                  top: 0,
+                                  right: LONG(max(maxSize.width, 1)),
+                                  bottom: LONG(max(maxSize.height, 1)))
+                        if AdjustWindowRectEx(&rc, style, menu, styleEx) {
+                            let tmp: UnsafeMutablePointer<MINMAXINFO> = UnsafeMutablePointer<MINMAXINFO>(bitPattern: UInt(lParam))!
+                            if maxSize.width > 0 {
+                                tmp.pointee.ptMaxTrackSize.x = rc.right - rc.left
+                            }
+                            if maxSize.height > 0 {
+                                tmp.pointee.ptMaxTrackSize.y = rc.bottom - rc.top
+                            }
+                        }
+                    }
+                    return 0
                 case UINT(WM_TIMER):
                     if wParam == updateKeyboardMouseTimerId {
                         window.synchronizeKeyStates()
@@ -855,12 +889,9 @@ extension Win32 {
                     break
                 case UINT(WM_PAINT):
                     if window.resizing == false {
-                        window.postWindowEvent(WindowEvent(type: .update, 
-                                                           windowRect: window.windowRect,
-                                                           contentRect: window.contentRect,
-                                                           contentScaleFactor: window.contentScaleFactor))
+                        window.postWindowEvent(type: .update)
                     }
-                    break                   
+                    break
                 case UINT(WM_CLOSE):
                     var close = true
                     if let answer = window.delegate?.shouldClose(window: window) {
