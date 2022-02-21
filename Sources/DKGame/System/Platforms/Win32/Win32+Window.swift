@@ -283,8 +283,10 @@ extension Win32 {
             if let hWnd = self.hWnd {
                 if let dt = self.dropTarget {
                     RevokeDragDrop(hWnd)
-                    var dropTarget: IDropTarget = dt.pointee.dropTarget
-                    let refCount = dt.pointee.vtbl.Release(&dropTarget)
+                    let refCount = dt.withMemoryRebound(to: IDropTarget.self, capacity: 1) {
+                        // $0.pointee.lpVtbl.pointee.Release($0)
+                        dt.pointee.vtbl.Release($0)
+                    }
                     if refCount > 0 {
                         NSLog("Warning! DropTarget for Window:\(self.name) in use! refCount:\(refCount)")
                     }

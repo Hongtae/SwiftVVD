@@ -27,15 +27,15 @@ extension Win32 {
             return HRESULT(bitPattern:0x80004002) // E_NOINTERFACE
         }
         private mutating func addRef() -> ULONG {
-            NSLog("addRef")
             self.refCount += 1
+            NSLog("DropTarget.addRef: \(self.refCount)")
             return ULONG(self.refCount)
         }
         private mutating func release() -> ULONG {
-            NSLog("release")
             self.refCount -= 1
+            NSLog("DropTarget.release: \(self.refCount)")
             if self.refCount == 0 {
-                NSLog("dealloc!")
+                NSLog("DropTarget deallocate!")
 
                 let ptr: UnsafeMutablePointer<DropTarget> = self.thisPointer!
                 ptr.deinitialize(count: 1)
