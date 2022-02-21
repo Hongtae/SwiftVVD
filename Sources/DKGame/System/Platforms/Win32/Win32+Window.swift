@@ -45,7 +45,9 @@ private let updateKeyboardMouseTimeInterval: UINT = 10
 private let WM_DKWINDOW_SHOWCURSOR = (WM_USER + 0x1175)
 private let WM_DKWINDOW_UPDATEMOUSECAPTURE = (WM_USER + 0x1180)
 
-private let HWND_TOP:HWND = HWND(bitPattern: 32512)!
+private let HWND_TOP:HWND? = nil
+private let HWND_TOPMOST:HWND = HWND(bitPattern: -1)!
+private let HWND_NOTOPMOST:HWND = HWND(bitPattern: -2)!
 
 private typealias WindowProtocol = Window
 
@@ -194,7 +196,7 @@ extension Win32 {
                     if AdjustWindowRectEx(&rc, style, menu, styleEx) {
                         w = rc.right - rc.left
                         h = rc.bottom - rc.top
-                        SetWindowPos(hWnd, HWND_TOP, 0, 0, w, h, UINT(SWP_NOMOVE | SWP_NOOWNERZORDER | SWP_NOACTIVATE));
+                        SetWindowPos(hWnd, HWND_TOP, 0, 0, w, h, UINT(SWP_NOMOVE | SWP_NOOWNERZORDER | SWP_NOACTIVATE))
                     }
                 }  
             }
@@ -254,6 +256,7 @@ extension Win32 {
                     NSLog("RegisterDragDrop failed: \(win32ErrorString(DWORD(result)))")
                 }
             }
+            
             var rc1: RECT = RECT()
             var rc2: RECT = RECT()
             GetClientRect(hWnd, &rc1)
@@ -269,6 +272,7 @@ extension Win32 {
                                      height: Int(rc2.bottom - rc2.top))
             self.contentScaleFactor = dpiScaleForWindow(hWnd!)
             
+            SetWindowPos(hWnd, HWND_TOP, 0, 0, 0, 0, UINT(SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED))
             SetTimer(hWnd, updateKeyboardMouseTimerId, updateKeyboardMouseTimeInterval, nil);
             postWindowEvent(type: .created)
 
