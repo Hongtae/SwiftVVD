@@ -1,3 +1,4 @@
+#if os(Windows)
 import WinSDK
 import Foundation
 
@@ -246,7 +247,7 @@ extension Win32 {
             self.hWnd = hWnd
 
             if style.contains(.acceptFileDrop) {
-                let dropTargetPtr = DropTarget.makeMutablePointer()
+                let dropTargetPtr = DropTarget.makeMutablePointer(target: self)
                 let result = dropTargetPtr.withMemoryRebound(to: IDropTarget.self, capacity:1) {
                     RegisterDragDrop(hWnd, $0)
                 }
@@ -684,7 +685,7 @@ extension Win32 {
                     let menu: Bool = GetMenu(hWnd) != nil
 
                     var minSize: CGSize = CGSize(width: 1, height: 1)
-                    if let size = window.delegate?.restrictedContentMininumSize(window: window) {
+                    if let size = window.delegate?.minimumContentSize(window: window) {
                         minSize.width = size.width
                         minSize.height = size.height
                     }
@@ -697,7 +698,7 @@ extension Win32 {
                         tmp.pointee.ptMinTrackSize.x = rc.right - rc.left
                         tmp.pointee.ptMinTrackSize.y = rc.bottom - rc.top
                     }
-                    if let maxSize = window.delegate?.restrictedContentMaxinumSize(window: window) {
+                    if let maxSize = window.delegate?.maximumContentSize(window: window) {
                         rc = RECT(left: 0,
                                   top: 0,
                                   right: LONG(max(maxSize.width, 1)),
@@ -1013,3 +1014,4 @@ extension Win32 {
         }
     }
 }
+#endif //if os(Windows)

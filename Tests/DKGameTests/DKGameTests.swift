@@ -1,11 +1,11 @@
 import XCTest
-@testable import DKGL
+@testable import DKGame
 
-final class DKGLTests: XCTestCase {
+final class DKGameTests: XCTestCase {
     func testExample() throws {
         // This is an example of a functional test case.
         // Use XCTAssert and related functions to verify your tests produce the correct
         // results.
-        XCTAssertEqual(DKGL().text, "Hello, DKGL!")
+        XCTAssertEqual(DKGame().text, "Hello, World!")
     }
 }

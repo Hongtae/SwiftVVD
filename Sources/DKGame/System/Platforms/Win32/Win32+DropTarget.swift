@@ -1,3 +1,4 @@
+#if os(Windows)
 import WinSDK
 import Foundation
 
@@ -9,7 +10,8 @@ extension Win32 {
         private var refCount: Int = 1
         private var thisPointer: UnsafeMutablePointer<DropTarget>?
 
-        private mutating func queryInterface(_ riid: UnsafePointer<IID>?, _  ppv: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> HRESULT {
+        private mutating func queryInterface(_ riid: UnsafePointer<IID>?,
+                                             _ ppv: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> HRESULT {
             NSLog("queryInterface")
             let isEqualIID = { (iid1: UnsafePointer<IID>, id2: IID)->Bool in
                 withUnsafePointer(to: id2) { ptr2 in
@@ -44,26 +46,120 @@ extension Win32 {
             }
             return ULONG(self.refCount)
         }
-        private func dragEnter(_ pDataObj: UnsafeMutablePointer<IDataObject>?, _ grfKeyState: DWORD, _ pt: POINTL, _ pdwEffect: UnsafeMutablePointer<DWORD>?) -> HRESULT {
-            NSLog("dragEnter")
+
+        private weak var target: Win32.Window?
+        private var files: [String] = []
+        private var dropAllowed = false
+        private var lastEffectMask: DWORD = DWORD(DROPEFFECT_NONE)
+        private var lastPosition: POINT = POINT()
+        private var lastKeyState: DWORD = DWORD(0)
+        private var periodicUpdate: Bool = false
+
+        private static func filesFromDataObject(_ dataObject: inout IDataObject) -> [String] {
+            var files: [String] = []
+            var fmtetc: FORMATETC = FORMATETC(cfFormat: UInt16(CF_HDROP),
+                                                 ptd: nil,
+                                            dwAspect: DWORD(DVASPECT_CONTENT.rawValue),
+                                              lindex: -1,
+                                               tymed: DWORD(TYMED_HGLOBAL.rawValue))
+            var stgm: STGMEDIUM = STGMEDIUM()
+            if dataObject.lpVtbl.pointee.GetData(&dataObject, &fmtetc, &stgm) >= 0 {
+                let hdrop: HDROP = unsafeBitCast(stgm.hGlobal, to:HDROP.self)
+                let numFiles = DragQueryFileW(hdrop, 0xFFFFFFFF, nil, 0)
+                for index in 0..<numFiles {
+                    let len = DragQueryFileW(hdrop, index, nil, 0)
+                    var buff = [WCHAR](repeating:0, count:Int(len+2))
+                    let file = buff.withUnsafeMutableBufferPointer { ptr -> String in
+                        let r = DragQueryFileW(hdrop, index, ptr.baseAddress, len+1)
+                        ptr[Int(r)] = WCHAR(0)
+                        return String(decodingCString: ptr.baseAddress!, as: UTF16.self)
+                    }
+                    files.append(file)
+                }
+            }
+            return files
+        }
+        private mutating func dragEnter(_ pDataObj: UnsafeMutablePointer<IDataObject>?,
+                                        _ grfKeyState: DWORD,
+                                        _ pt: POINTL,
+                                        _ pdwEffect: UnsafeMutablePointer<DWORD>?) -> HRESULT {
+            self.files = [String]()
+            self.dropAllowed = false
+            self.lastEffectMask = DWORD(DROPEFFECT_NONE)
+
+            var fmtetc: FORMATETC = FORMATETC(cfFormat: UInt16(CF_HDROP),
+                                                   ptd: nil,
+                                              dwAspect: DWORD(DVASPECT_CONTENT.rawValue),
+                                                lindex: -1,
+                                                 tymed: DWORD(TYMED_HGLOBAL.rawValue))
+            if pDataObj!.pointee.lpVtbl.pointee.QueryGetData(pDataObj, &fmtetc) == S_OK {
+                self.files = Self.filesFromDataObject(&pDataObj!.pointee)
+                if self.files.count > 0 {
+                    self.dropAllowed = true
+                }
+            }
+
+            if self.dropAllowed {
+                var point: POINT = POINT(x: pt.x, y: pt.y)
+                ScreenToClient(target!.hWnd, &point)
+
+                self.lastKeyState = grfKeyState
+                self.lastPosition = point
+
+                if let op = self.target?.delegate?.draggingEntered(target: self.target!, 
+                                                                 position: CGPoint(x: Int(point.x),
+                                                                                   y: Int(point.y)),
+                                                                    files: self.files) {
+                    switch op {
+                    case .copy: self.lastEffectMask = DWORD(DROPEFFECT_COPY)
+                    case .move: self.lastEffectMask = DWORD(DROPEFFECT_MOVE)
+                    case .link: self.lastEffectMask = DWORD(DROPEFFECT_LINK)
+                    case .none: self.lastEffectMask = DWORD(DROPEFFECT_NONE)  
+                    default: // .reject
+                        self.lastEffectMask = DWORD(DROPEFFECT_NONE)
+                        self.dropAllowed = false
+                    }
+                }
+                pdwEffect!.pointee = self.lastEffectMask
+            } else {
+                pdwEffect!.pointee = DWORD(DROPEFFECT_NONE)
+            }
             return S_OK;
         }
-        private func dragOver(_ grfKeyState: DWORD, _ pt: POINTL, _ pdwEffect: UnsafeMutablePointer<DWORD>?) -> HRESULT {
-            NSLog("dragOver")
+        private mutating func dragOver(_ grfKeyState: DWORD,
+                                       _ pt: POINTL,
+                                       _ pdwEffect: UnsafeMutablePointer<DWORD>?) -> HRESULT {
+            if self.dropAllowed {
+
+            } else {
+                pdwEffect!.pointee = DWORD(DROPEFFECT_NONE)
+            }
             return S_OK;
         }
-        private func dragLeave() -> HRESULT {
-            NSLog("dragLeave")
+        private mutating func dragLeave() -> HRESULT {
+            if self.dropAllowed {
+
+            }
+            self.files = [String]()
+            self.lastEffectMask = DWORD(DROPEFFECT_NONE)        
             return S_OK;
         }
-        private func drop(_ pDataObj: UnsafeMutablePointer<IDataObject>?, _ grfKeyState: DWORD, _ pt: POINTL, _ pdwEffect: UnsafeMutablePointer<DWORD>?) -> HRESULT {
-            NSLog("drop")
+        private mutating func drop(_ pDataObj: UnsafeMutablePointer<IDataObject>?,
+                          _ grfKeyState: DWORD,
+                          _ pt: POINTL,
+                          _ pdwEffect: UnsafeMutablePointer<DWORD>?) -> HRESULT {
+            if self.dropAllowed {
+
+            }
+            self.files = [String]()
+            self.lastEffectMask = DWORD(DROPEFFECT_NONE)        
             return S_OK;
         }
-        static func makeMutablePointer() -> UnsafeMutablePointer<DropTarget> {
+        static func makeMutablePointer(target: Win32.Window) -> UnsafeMutablePointer<DropTarget> {
             let dt: UnsafeMutablePointer<DropTarget> = .allocate(capacity: 1)
-            dt.initialize(to: DropTarget())
-            // setup IDropTarget interface
+            dt.initialize(to: DropTarget(target: target))
+            
+            // *** IUnknown ***
             dt.pointee.vtbl.QueryInterface = { ptr, riid, ppv in
                 let dt = UnsafeMutableRawPointer(ptr!).bindMemory(to: DropTarget.self, capacity: 1)
                 return dt.pointee.queryInterface(riid, ppv)
@@ -76,6 +172,8 @@ extension Win32 {
                 let dt = UnsafeMutableRawPointer(ptr!).bindMemory(to: DropTarget.self, capacity: 1)
                 return dt.pointee.release()
             }
+
+            // *** IDropTarget ***
             dt.pointee.vtbl.DragEnter = { ptr, pDataObj, grfKeyState, pt, pdwEffect in 
                 let dt = UnsafeMutableRawPointer(ptr!).bindMemory(to: DropTarget.self, capacity: 1)
                 return dt.pointee.dragEnter(pDataObj, grfKeyState, pt, pdwEffect)
@@ -92,6 +190,8 @@ extension Win32 {
                 let dt = UnsafeMutableRawPointer(ptr!).bindMemory(to: DropTarget.self, capacity: 1)
                 return dt.pointee.drop(pDataObj, grfKeyState, pt, pdwEffect)
             }
+
+            // setup IDropTarget interface (lpVtbl)
             withUnsafeMutablePointer(to: &dt.pointee.vtbl) {
                 dt.pointee.dropTarget.lpVtbl = $0
             }
@@ -100,3 +200,4 @@ extension Win32 {
         }
     }
 }
+#endif //if os(Windows)

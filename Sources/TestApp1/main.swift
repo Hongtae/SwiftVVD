@@ -8,21 +8,22 @@ class MyWindowDelegate: WindowDelegate {
         print("window closed, request app exit!")
         return true
     }
-    func restrictedContentMininumSize(window: Window) -> CGSize? { CGSize(width: 200, height: 200) }
-    func restrictedContentMaxinumSize(window: Window) -> CGSize? { nil }
+    func minimumContentSize(window: Window) -> CGSize? { CGSize(width: 200, height: 200) }
+    func maximumContentSize(window: Window) -> CGSize? { nil }
 
 
-    func draggingEntered(files: [String], keyState: [Int], pt: CGPoint) -> DragOperation {
+    public func draggingEntered(target: Window, position: CGPoint, files: [String]) -> DragOperation {
+        print("draggingEntered: position:\(position), files:\(files)")
         return .copy
     }
-    func draggingUpdated(files: [String], keyState: [Int], pt: CGPoint) -> DragOperation {
+    public func draggingUpdated(target: Window, position: CGPoint, files: [String]) -> DragOperation {
         return .copy
     }
-    func draggingExited(files: [String], pt: CGPoint) -> DragOperation {
+    public func draggingDropped(target: Window, position: CGPoint, files: [String]) -> DragOperation {
         return .copy
     }
-    func draggingDropped(files: [String], pt: CGPoint) -> DragOperation {
-        return .copy
+    public func draggingExited(target: Window, files: [String]) {
+
     }
 }
 

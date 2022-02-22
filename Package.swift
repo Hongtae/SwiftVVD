@@ -46,6 +46,10 @@ let package = Package(
             cSettings: [
                 //.unsafeFlags(["-ISupportPackages/DKGame-ThirdParty/Sources/FreeType/include"]),
             ],
+            swiftSettings: [
+                .define("ENABLE_VULKAN", .when(platforms:[.windows, .linux, .android])),
+                .define("ENABLE_METAL", .when(platforms:[.iOS, .macOS, .tvOS])),
+            ],
             linkerSettings: [
                 .linkedLibrary("User32", .when(platforms: [.windows])),
                 .linkedLibrary("Ole32",  .when(platforms: [.windows])),

@@ -1,3 +1,4 @@
+#if os(Windows)
 import WinSDK
 import Foundation
 
@@ -142,3 +143,4 @@ extension Win32 {
         }
     }
 }
+#endif //if os(Windows)

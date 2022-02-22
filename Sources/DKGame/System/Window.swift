@@ -1,38 +1,33 @@
 import Foundation
 
 public enum DragOperation {
-    case none, copy, move, link
+    case reject
+    case none
+    case copy
+    case move
+    case link
 }
 
 public protocol DragTargetDelegate {
-    func draggingEntered(files: [String], keyState: [Int], pt: CGPoint) -> DragOperation
-    func draggingUpdated(files: [String], keyState: [Int], pt: CGPoint) -> DragOperation
-    func draggingExited(files: [String], pt: CGPoint) -> DragOperation
-    func draggingDropped(files: [String], pt: CGPoint) -> DragOperation
-}
-
-extension DragTargetDelegate {
-    public func draggingEntered(files: [String], keyState: [Int], pt: CGPoint) -> DragOperation {
-        return .none
-    }
-    public func draggingUpdated(files: [String], keyState: [Int], pt: CGPoint) -> DragOperation {
-        return .none
-    }
-    public func draggingExited(files: [String], pt: CGPoint) -> DragOperation {
-        return .none
-    }
-    public func draggingDropped(files: [String], pt: CGPoint) -> DragOperation {
-        return .none
-    }
+    func draggingEntered(target: Window, position: CGPoint, files: [String]) -> DragOperation
+    func draggingUpdated(target: Window, position: CGPoint, files: [String]) -> DragOperation
+    func draggingDropped(target: Window, position: CGPoint, files: [String]) -> DragOperation
+    func draggingExited(target: Window, files: [String])
 }
 
 public enum MouseEventType {
-    case buttonDown, buttonUp, move, wheel, pointing
+    case buttonDown
+    case buttonUp
+    case move
+    case wheel
+    case pointing
 }
 
 public enum MouseEventDevice {
     case unknown
-    case genericMouse, stylus, touch
+    case genericMouse
+    case stylus
+    case touch
 }
 
 public struct MouseEvent {
@@ -47,7 +42,10 @@ public struct MouseEvent {
 }
 
 public enum KeyboardEventType {
-    case keyDown, keyUp, textInput, textComposition
+    case keyDown
+    case keyUp
+    case textInput
+    case textComposition
 }
 
 public struct KeyboardEvent {
@@ -79,14 +77,26 @@ public struct WindowEvent {
 
 public protocol WindowDelegate: AnyObject, DragTargetDelegate {
     func shouldClose(window: Window) -> Bool
-    func restrictedContentMininumSize(window: Window) -> CGSize?
-    func restrictedContentMaxinumSize(window: Window) -> CGSize?
+    func minimumContentSize(window: Window) -> CGSize?
+    func maximumContentSize(window: Window) -> CGSize?
 }
 
 extension WindowDelegate {
     public func shouldClose(window: Window) -> Bool { true }
-    public func restrictedContentMininumSize(window: Window) -> CGSize? { nil }
-    public func restrictedContentMaxinumSize(window: Window) -> CGSize? { nil }
+    public func minimumContentSize(window: Window) -> CGSize? { nil }
+    public func maximumContentSize(window: Window) -> CGSize? { nil }
+
+    // DragTargetDelegate 
+    public func draggingEntered(target: Window, position: CGPoint, files: [String]) -> DragOperation {
+        return .none
+    }
+    public func draggingUpdated(target: Window, position: CGPoint, files: [String]) -> DragOperation {
+        return .none
+    }
+    public func draggingDropped(target: Window, position: CGPoint, files: [String]) -> DragOperation {
+        return .none
+    }
+    public func draggingExited(target: Window, files: [String]) {}
 }
 
 public struct WindowStyle: OptionSet {
