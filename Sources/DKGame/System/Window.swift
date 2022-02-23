@@ -87,15 +87,9 @@ extension WindowDelegate {
     public func maximumContentSize(window: Window) -> CGSize? { nil }
 
     // DragTargetDelegate 
-    public func draggingEntered(target: Window, position: CGPoint, files: [String]) -> DragOperation {
-        return .none
-    }
-    public func draggingUpdated(target: Window, position: CGPoint, files: [String]) -> DragOperation {
-        return .none
-    }
-    public func draggingDropped(target: Window, position: CGPoint, files: [String]) -> DragOperation {
-        return .none
-    }
+    public func draggingEntered(target: Window, position: CGPoint, files: [String]) -> DragOperation { .reject }
+    public func draggingUpdated(target: Window, position: CGPoint, files: [String]) -> DragOperation { .reject }
+    public func draggingDropped(target: Window, position: CGPoint, files: [String]) -> DragOperation { .reject }
     public func draggingExited(target: Window, files: [String]) {}
 }
 

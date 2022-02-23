@@ -17,13 +17,15 @@ class MyWindowDelegate: WindowDelegate {
         return .copy
     }
     public func draggingUpdated(target: Window, position: CGPoint, files: [String]) -> DragOperation {
+        print("draggingUpdated: position:\(position), files:\(files)")
         return .copy
     }
     public func draggingDropped(target: Window, position: CGPoint, files: [String]) -> DragOperation {
+        print("draggingDropped: position:\(position), files:\(files)")
         return .copy
     }
     public func draggingExited(target: Window, files: [String]) {
-
+        print("draggingExited: files:\(files)")
     }
 }
 

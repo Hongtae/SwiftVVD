@@ -87,29 +87,71 @@ extension Win32 {
             self.dropAllowed = false
             self.lastEffectMask = DWORD(DROPEFFECT_NONE)
 
-            var fmtetc: FORMATETC = FORMATETC(cfFormat: UInt16(CF_HDROP),
-                                                   ptd: nil,
-                                              dwAspect: DWORD(DVASPECT_CONTENT.rawValue),
-                                                lindex: -1,
-                                                 tymed: DWORD(TYMED_HGLOBAL.rawValue))
-            if pDataObj!.pointee.lpVtbl.pointee.QueryGetData(pDataObj, &fmtetc) == S_OK {
-                self.files = Self.filesFromDataObject(&pDataObj!.pointee)
-                if self.files.count > 0 {
-                    self.dropAllowed = true
+            let delegate = self.target?.delegate
+            if  delegate != nil {
+                var fmtetc: FORMATETC = FORMATETC(cfFormat: UInt16(CF_HDROP),
+                                                    ptd: nil,
+                                                dwAspect: DWORD(DVASPECT_CONTENT.rawValue),
+                                                    lindex: -1,
+                                                    tymed: DWORD(TYMED_HGLOBAL.rawValue))
+                if pDataObj!.pointee.lpVtbl.pointee.QueryGetData(pDataObj, &fmtetc) == S_OK {
+                    self.files = Self.filesFromDataObject(&pDataObj!.pointee)
+                    if self.files.count > 0 {
+                        self.dropAllowed = true
+                    }
                 }
             }
 
             if self.dropAllowed {
-                var point: POINT = POINT(x: pt.x, y: pt.y)
-                ScreenToClient(target!.hWnd, &point)
+                var pos: POINT = POINT(x: pt.x, y: pt.y)
+                ScreenToClient(target!.hWnd, &pos)
 
                 self.lastKeyState = grfKeyState
-                self.lastPosition = point
+                self.lastPosition = pos
 
-                if let op = self.target?.delegate?.draggingEntered(target: self.target!, 
-                                                                 position: CGPoint(x: Int(point.x),
-                                                                                   y: Int(point.y)),
-                                                                    files: self.files) {
+                let op = delegate!.draggingEntered(target: self.target!, 
+                                                 position: CGPoint(x: Int(pos.x),
+                                                                   y: Int(pos.y)),
+                                                    files: self.files)
+                switch op {
+                case .copy: self.lastEffectMask = DWORD(DROPEFFECT_COPY)
+                case .move: self.lastEffectMask = DWORD(DROPEFFECT_MOVE)
+                case .link: self.lastEffectMask = DWORD(DROPEFFECT_LINK)
+                case .none: self.lastEffectMask = DWORD(DROPEFFECT_NONE)  
+                default: // .reject
+                    self.lastEffectMask = DWORD(DROPEFFECT_NONE)
+                    self.dropAllowed = false
+                }
+                pdwEffect!.pointee &= self.lastEffectMask
+            } else {
+                pdwEffect!.pointee = DWORD(DROPEFFECT_NONE)
+            }
+            return S_OK;
+        }
+        private mutating func dragOver(_ grfKeyState: DWORD,
+                                       _ pt: POINTL,
+                                       _ pdwEffect: UnsafeMutablePointer<DWORD>?) -> HRESULT {
+
+            if let delegate = self.target?.delegate, self.dropAllowed {
+                var pos: POINT = POINT(x: pt.x, y: pt.y)
+                ScreenToClient(target!.hWnd, &pos)
+
+                var update = true
+                if periodicUpdate == false && 
+                    self.lastPosition.x == pos.x &&
+                    self.lastPosition.y == pos.y &&
+                    self.lastKeyState == grfKeyState {
+                       update = false
+                }
+
+                if update {
+                    self.lastKeyState = grfKeyState
+                    self.lastPosition = pos
+
+                    let op = delegate.draggingUpdated(target: self.target!, 
+                                                    position: CGPoint(x: Int(pos.x),
+                                                                      y: Int(pos.y)),
+                                                       files: self.files)
                     switch op {
                     case .copy: self.lastEffectMask = DWORD(DROPEFFECT_COPY)
                     case .move: self.lastEffectMask = DWORD(DROPEFFECT_MOVE)
@@ -120,25 +162,18 @@ extension Win32 {
                         self.dropAllowed = false
                     }
                 }
-                pdwEffect!.pointee = self.lastEffectMask
+                pdwEffect!.pointee &= self.lastEffectMask
             } else {
-                pdwEffect!.pointee = DWORD(DROPEFFECT_NONE)
-            }
-            return S_OK;
-        }
-        private mutating func dragOver(_ grfKeyState: DWORD,
-                                       _ pt: POINTL,
-                                       _ pdwEffect: UnsafeMutablePointer<DWORD>?) -> HRESULT {
-            if self.dropAllowed {
-
-            } else {
+                self.dropAllowed = false
                 pdwEffect!.pointee = DWORD(DROPEFFECT_NONE)
             }
             return S_OK;
         }
         private mutating func dragLeave() -> HRESULT {
-            if self.dropAllowed {
-
+            if let delegate = self.target?.delegate, self.dropAllowed {
+                delegate.draggingExited(target: self.target!, files: self.files)
+            } else {
+                self.dropAllowed = false
             }
             self.files = [String]()
             self.lastEffectMask = DWORD(DROPEFFECT_NONE)        
@@ -148,8 +183,31 @@ extension Win32 {
                           _ grfKeyState: DWORD,
                           _ pt: POINTL,
                           _ pdwEffect: UnsafeMutablePointer<DWORD>?) -> HRESULT {
-            if self.dropAllowed {
 
+            if let delegate = self.target?.delegate, self.dropAllowed {
+                var pos: POINT = POINT(x: pt.x, y: pt.y)
+                ScreenToClient(target!.hWnd, &pos)
+
+                self.lastKeyState = grfKeyState
+                self.lastPosition = pos
+
+                let op = delegate.draggingDropped(target: self.target!, 
+                                                position: CGPoint(x: Int(pos.x),
+                                                                  y: Int(pos.y)),
+                                                   files: self.files)
+                switch op {
+                case .copy: self.lastEffectMask = DWORD(DROPEFFECT_COPY)
+                case .move: self.lastEffectMask = DWORD(DROPEFFECT_MOVE)
+                case .link: self.lastEffectMask = DWORD(DROPEFFECT_LINK)
+                case .none: self.lastEffectMask = DWORD(DROPEFFECT_NONE)  
+                default: // .reject
+                    self.lastEffectMask = DWORD(DROPEFFECT_NONE)
+                    self.dropAllowed = false
+                }
+                pdwEffect!.pointee &= self.lastEffectMask
+            } else {
+                self.dropAllowed = false
+                pdwEffect!.pointee = DWORD(DROPEFFECT_NONE)
             }
             self.files = [String]()
             self.lastEffectMask = DWORD(DROPEFFECT_NONE)        
