@@ -2,6 +2,10 @@ module OpenAL_backend_windows {
     header "dummy.h"
 }
 
+module OpenAL_backend_coreaudio {
+    header "dummy.h"
+}
+
 module OpenAL_backend {
     header "dummy.h"
 }
@@ -13,4 +17,3 @@ module OpenAL_mixer_neon {
 module OpenAL_mixer_sse {
     header "dummy.h"
 }
-

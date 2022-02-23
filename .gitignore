@@ -1,11 +1,12 @@
 .DS_Store
-/.build
+#/.build
 /Packages
 /*.xcodeproj
 xcuserdata/
 DerivedData/
 .swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
-/_Users_*.lock
+**/_Users_*.lock
+**/.build/
 
 # vscode gitignore
 .vscode/*

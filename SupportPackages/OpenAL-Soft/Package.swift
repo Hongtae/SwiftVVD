@@ -3,6 +3,14 @@
 
 import PackageDescription
 
+let cxxSettings: [CXXSetting] = [
+    .headerSearchPath("openal-soft/alc"),
+    .headerSearchPath("openal-soft/build"),
+    .headerSearchPath("openal-soft/common"),
+    .headerSearchPath("openal-soft/include"),
+    .headerSearchPath("openal-soft"),
+]
+
 let package = Package(
     name: "OepnAL-Soft",
     products: [
@@ -18,8 +26,9 @@ let package = Package(
             dependencies: [
                 .target(name: "OpenAL_backend"),
                 .target(name: "OpenAL_backend_windows", condition:.when(platforms: [.windows])),
+                .target(name: "OpenAL_backend_coreaudio", condition:.when(platforms: [.macOS, .iOS, .tvOS])),
                 .target(name: "OpenAL_mixer_sse", condition:.when(platforms: [.windows])),
-                // .target(name: "OpenAL_mixer_neon", condition:.when(platforms: [.iOS])),
+                .target(name: "OpenAL_mixer_neon", condition:.when(platforms: [.iOS, .tvOS])),
                 ],
             path: "Sources",
             exclude: [
@@ -37,12 +46,7 @@ let package = Package(
                 "openal-soft/core",
             ],
             publicHeadersPath: "openal-soft/include",
-            cSettings: [],
-            cxxSettings: [
-                .headerSearchPath("openal-soft"),
-                .headerSearchPath("openal-soft/build"),
-                .headerSearchPath("openal-soft/common"),
-                .headerSearchPath("openal-soft/alc"),
+            cxxSettings: cxxSettings + [
                 //.define("AL_ALEXT_PROTOTYPES"),
                 //.unsafeFlags(["-fms-extensions"], .when(platforms: [.windows]))
                 .unsafeFlags(["-Wno-unused-value"])
@@ -64,11 +68,7 @@ let package = Package(
                 "openal-soft/core/mixer/mixer_sse41.cpp",
             ],
             publicHeadersPath: "swift_module",
-            cxxSettings: [
-                .headerSearchPath("openal-soft"),
-                .headerSearchPath("openal-soft/build"),
-                .headerSearchPath("openal-soft/common"),
-                ]),
+            cxxSettings: cxxSettings),
         .target(
             name: "OpenAL_mixer_neon",
             path: "Sources",
@@ -76,11 +76,7 @@ let package = Package(
                 "openal-soft/core/mixer/mixer_neon.cpp",
             ],
             publicHeadersPath: "swift_module",
-            cxxSettings: [
-                .headerSearchPath("openal-soft"),
-                .headerSearchPath("openal-soft/build"),
-                .headerSearchPath("openal-soft/common"),
-                ]),
+            cxxSettings: cxxSettings),
         .target(
             name: "OpenAL_backend",
             path: "Sources",
@@ -91,13 +87,7 @@ let package = Package(
                 "openal-soft/alc/backends/wave.cpp",
             ],
             publicHeadersPath: "swift_module",
-            cxxSettings: [
-                .headerSearchPath("openal-soft/alc"),
-                .headerSearchPath("openal-soft/build"),
-                .headerSearchPath("openal-soft/common"),
-                .headerSearchPath("openal-soft/include"),
-                .headerSearchPath("openal-soft"),
-                ]),
+            cxxSettings: cxxSettings),
         .target(
             name: "OpenAL_backend_windows",
             path: "Sources",
@@ -107,13 +97,16 @@ let package = Package(
                 "openal-soft/alc/backends/wasapi.cpp"
             ],
             publicHeadersPath: "swift_module",
-            cxxSettings: [
-                .headerSearchPath("openal-soft/alc"),
-                .headerSearchPath("openal-soft/build"),
-                .headerSearchPath("openal-soft/common"),
-                .headerSearchPath("openal-soft/include"),
-                .headerSearchPath("openal-soft"),
-                ])
+            cxxSettings: cxxSettings),
+        .target(
+            name: "OpenAL_backend_coreaudio",
+            path: "Sources",
+            sources: [
+                "openal-soft/alc/backends/coreaudio.cpp",
+            ],
+            publicHeadersPath: "swift_module",
+            cxxSettings: cxxSettings)
+
     ],
     cLanguageStandard: .c11,
     cxxLanguageStandard: .cxx20

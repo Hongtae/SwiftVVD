@@ -51,10 +51,6 @@
 #endif	/*fdef _WIN32*/
 
 #if defined(__APPLE__) && defined(__MACH__)
-// #include <TargetConditionals.h>
-// #if TARGET_OS_IPHONE		// iOS
-// #error OpenAL-soft not support iOS.
-// #endif
 
 #define AL_API  __attribute__((visibility("default")))
 #define ALC_API __attribute__((visibility("default")))
@@ -70,16 +66,16 @@
 #define SIZEOF_LONG_LONG	8
 #endif
 
-#define restrict __restrict
+#define RESTRICT __restrict
 #define HAVE_POSIX_MEMALIGN
-#define HAVE_SSE
+/* #define HAVE_SSE */
 #define HAVE_COREAUDIO
 #define HAVE_WAVE
 #define HAVE_STAT
 #define HAVE_LRINTF
 #define HAVE_STRTOF
-#define HAVE_GCC_DESTRUCTOR
-#define HAVE_GCC_FORMAT
+/* #define HAVE_GCC_DESTRUCTOR */
+/* #define HAVE_GCC_FORMAT */
 #define HAVE_STDINT_H
 #define HAVE_DLFCN_H
 #define HAVE_XMMINTRIN_H
@@ -104,7 +100,7 @@
 #define SIZEOF_LONG_LONG	8
 #endif
 
-#define restrict __restrict
+#define RESTRICT __restrict
 #define HAVE_ARM_NEON_H
 #define HAVE_OPENSL
 #define HAVE_WAVE

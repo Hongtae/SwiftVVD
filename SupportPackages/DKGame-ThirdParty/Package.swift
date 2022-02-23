@@ -14,15 +14,6 @@ let package = Package(
                 "DKGameUtils",
                 "SPIRV_Cross",
                 "FreeType",
-                "jpeg",
-                "libpng",
-                "libogg",
-                "libvorbis",
-                "libFLAC",
-                "lz4",
-                "lzma",
-                "zlib",
-                "zstd",
                 ]),
     ],
     dependencies: [],
@@ -209,6 +200,7 @@ let package = Package(
                 //.define("PNG_INTEL_SSE", .when(platforms: [.windows])),
                 .unsafeFlags([
                     "-Wno-tautological-constant-out-of-range-compare",
+                    "-Wno-incompatible-pointer-types-discards-qualifiers"
                 ])
             ]),
         .target(
