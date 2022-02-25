@@ -1,5 +1,7 @@
 public protocol Application {
     func terminate(exitCode : Int)
+    static func run(delegate: ApplicationDelegate?) -> Int
+    static var shared: Application? { get }
 }
 
 public protocol ApplicationDelegate {
@@ -7,10 +9,10 @@ public protocol ApplicationDelegate {
     func finalize(application: Application)
 }
 
-public func applicationInstance() -> Application? {
-    return Platform.applicationInstance()
+public func sharedApplication() -> Application? {
+    Platform.sharedApplication()
 }
 
 public func runApplication(delegate: ApplicationDelegate?) -> Int {
-    return Platform.runApplication(delegate: delegate)
+    Platform.runApplication(delegate: delegate)
 }

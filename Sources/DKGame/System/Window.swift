@@ -119,6 +119,8 @@ public protocol Window {
 
     var delegate: WindowDelegate? { get }
 
+    init(name: String, style: WindowStyle, delegate: WindowDelegate?)
+
     func show()
     func hide()
     func activate()
@@ -147,6 +149,7 @@ extension Window {
     public func isTextInputEnabled(forDeviceId: Int) -> Bool { return false }
 }
 
-public func makeWindow(name: String, style: WindowStyle = .genericWindow, delegate: WindowDelegate? = nil) -> Window { 
-    return Platform.makeWindow(name: name, style: style, delegate: delegate)
+
+public func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?) -> Window {
+    Platform.makeWindow(name: name, style: style, delegate: delegate)
 }

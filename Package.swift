@@ -47,8 +47,14 @@ let package = Package(
                 //.unsafeFlags(["-ISupportPackages/DKGame-ThirdParty/Sources/FreeType/include"]),
             ],
             swiftSettings: [
-                .define("ENABLE_VULKAN", .when(platforms:[.windows, .linux, .android])),
-                .define("ENABLE_METAL", .when(platforms:[.iOS, .macOS, .tvOS])),
+                // App & Window
+                .define("ENABLE_WIN32",     .when(platforms: [.windows])),
+                .define("ENABLE_UIKIT",     .when(platforms: [.iOS, .tvOS])),
+                .define("ENABLE_APPKIT",    .when(platforms: [.macOS])),
+                .define("ENABLE_WAYLAND",   .when(platforms: [.linux])),
+                // Graphics Device
+                .define("ENABLE_VULKAN",    .when(platforms: [.windows, .linux, .android])),
+                .define("ENABLE_METAL",     .when(platforms: [.iOS, .macOS, .tvOS])),
             ],
             linkerSettings: [
                 .linkedLibrary("User32", .when(platforms: [.windows])),

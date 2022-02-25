@@ -3,7 +3,7 @@ import DKGame
 
 class MyWindowDelegate: WindowDelegate {
     func shouldClose(window: Window) -> Bool { 
-        let app = applicationInstance()
+        let app = sharedApplication()
         app!.terminate(exitCode: 1234)
         print("window closed, request app exit!")
         return true

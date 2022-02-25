@@ -1,18 +1,18 @@
-#if ENABLE_WIN32
+#if ENABLE_UIKIT
 
-public struct DKGameWin32: PlatformFactory {
+public struct DKGameUIKit: PlatformFactory {
 
     public func sharedApplication() -> Application? {
-        return Win32Application.shared
+        return iOSApplication.shared
     }
 
     public func runApplication(delegate: ApplicationDelegate?) -> Int {
-        return Win32Application.run(delegate: delegate)
+        return iOSApplication.run(delegate: delegate)
     }
 
     public func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?) -> Window {
-        return Win32Window(name: name, style: style, delegate: delegate)
+        return iOSWindow(name: name, style: style, delegate: delegate)
     }
 }
 
-#endif //ENABLE_WIN32
+#endif //ENABLE_UIKIT

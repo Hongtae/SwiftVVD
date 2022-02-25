@@ -1,26 +1,28 @@
+public protocol PlatformFactory {
+     func sharedApplication() -> Application? 
+     func runApplication(delegate: ApplicationDelegate?) -> Int
+     func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?) -> Window 
+}
+
 public class Platform {
 
-#if os(macOS)
-    typealias Impl = macOS
-#elseif os(iOS)
-    typealias Impl = iOS
-#elseif os(Android)
-    typealias Impl = Android
-#elseif os(Windows)
-    typealias Impl = Win32
-#elseif os(Linux)
-    typealias Impl = Linux
+    public class var factory: PlatformFactory {
+#if ENABLE_APPKIT
+        DKGameAppKit()
+#elseif ENABLE_UIKIT
+        DKGameUIKit()
+#elseif ENABLE_WIN32
+        DKGameWin32()
 #endif
-
-    public class var name : String { Impl.name }
+    }
 
     public class func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?) -> Window {
-        return Impl.Window(name: name, style: style, delegate: delegate)
+        factory.makeWindow(name: name, style: style, delegate: delegate)
     }
     public class func runApplication(delegate: ApplicationDelegate?) -> Int {
-        return Impl.Application.run(delegate: delegate)
+        factory.runApplication(delegate: delegate)
     }
-    public class func applicationInstance() -> Application? {
-        return Impl.Application.sharedInstance
+    public class func sharedApplication() -> Application? {
+        factory.sharedApplication()
     }
 }

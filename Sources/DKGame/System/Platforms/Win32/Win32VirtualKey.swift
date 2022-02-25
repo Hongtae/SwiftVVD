@@ -1,4 +1,4 @@
-#if os(Windows)
+#if ENABLE_WIN32
 extension VirtualKey {
 
     static func fromWin32VK(_ key: Int) -> VirtualKey {
@@ -149,4 +149,4 @@ extension VirtualKey {
         return .none
     }
 }
-#endif //if os(Windows)
+#endif //if ENABLE_WIN32
