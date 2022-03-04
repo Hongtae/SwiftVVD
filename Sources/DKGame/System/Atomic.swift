@@ -1,4 +1,5 @@
 import DKGameUtils
+import Foundation
 
 public class AtomicNumber32 {
     private var atomic: DKAtomicNumber32 = DKAtomicNumber32()
@@ -60,16 +61,10 @@ public class AtomicNumber64 {
     public var value: Int64 { DKAtomicNumber64_Value(&atomic) }
 }
 
-public class SpinLock {
+public class SpinLock: NSLocking {
     private let free = Int32(0)
     private let locked = Int32(1)
     private var atomic = AtomicNumber32()
-
-    enum SpinLockError: Error {
-        case deadlockDetected
-        case objectWasNotLockedByCallingThread
-        case objectWasNotLocked
-    }
 
     public init() {
         atomic.store(free)
@@ -82,9 +77,51 @@ public class SpinLock {
             DKThreadYield()
         }
     }
-    public func unlock() throws {
+    public func unlock() {
         guard atomic.compareAndSet(comparand: locked, newValue: free) else {
-            throw SpinLockError.objectWasNotLocked
+            fatalError("Error! object was not locked.")
         }
     }
+}
+
+private var lockedContextTable: [ObjectIdentifier: (threadId: UInt, count: UInt64)] = .init()
+private let condition: NSCondition = NSCondition()
+
+public func synchronized<Result>(_ context: AnyObject, _ body: () throws -> Result) rethrows -> Result {
+    let threadId: UInt = DKThreadCurrentId()
+    let key = ObjectIdentifier(context)
+    condition.lock()
+    while true {
+        if var ctxt = lockedContextTable[key] {
+            if ctxt.threadId == threadId {
+                ctxt.count += 1
+                lockedContextTable.updateValue(ctxt, forKey: key)
+                break
+            }
+        } else {
+            lockedContextTable.updateValue((threadId: threadId, count: 1), forKey: key)
+            break
+        }
+        condition.wait()
+    }
+    condition.unlock()
+    defer {
+        condition.lock()
+        var ctxt = lockedContextTable[key]!
+        ctxt.count -= 1
+        if ctxt.count == 0 {
+            lockedContextTable.removeValue(forKey: key)
+            condition.broadcast()
+        } else {
+            lockedContextTable.updateValue(ctxt, forKey: key)
+        }
+        condition.unlock()
+    }
+    return try body()
+}
+
+public func synchronizedBy<Result>(locking lock: NSLocking, _ body: () throws -> Result) rethrows -> Result {
+    lock.lock()
+    defer { lock.unlock() }
+    return try body()
 }

@@ -68,3 +68,12 @@ extern "C" void DKThreadYield()
 		DKThreadSleep(0);
 #endif
 }
+
+extern "C" uintptr_t DKThreadCurrentId()
+{
+	#ifdef _WIN32
+	return (uintptr_t)::GetCurrentThreadId();
+#else
+	return (uintptr_t)pthread_self();	
+#endif
+}

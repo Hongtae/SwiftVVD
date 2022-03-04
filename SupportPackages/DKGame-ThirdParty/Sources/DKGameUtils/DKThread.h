@@ -13,6 +13,7 @@
 *******************************************************************************/
 
 #pragma once
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C"
@@ -21,6 +22,7 @@ extern "C"
 
 void DKThreadSleep(double d);
 void DKThreadYield();
+uintptr_t DKThreadCurrentId();
 
 #ifdef __cplusplus
 }
