@@ -18,9 +18,9 @@ public protocol RenderCommandEncoder: CommandEncoder {
     func setResource(set: UInt32, _: ShaderBindingSet)
     func setViewport(_: Viewport)
     func setRenderPipelineState(_: RenderPipelineState)
-    func setVertexBuffer(_: GpuBuffer, offset: UInt64, index: UInt32)
-    func setVertexBuffers(_: [GpuBuffer], offset: [UInt64], index: UInt32)
-    func setIndexBuffer(_: GpuBuffer, offset: UInt64, type: IndexType)
+    func setVertexBuffer(_: Buffer, offset: UInt64, index: UInt32)
+    func setVertexBuffers(_: [Buffer], offset: [UInt64], index: UInt32)
+    func setIndexBuffer(_: Buffer, offset: UInt64, type: IndexType)
     
     func pushConstant(stages: [ShaderStage], offset: UInt32, data: UnsafeRawPointer)
 

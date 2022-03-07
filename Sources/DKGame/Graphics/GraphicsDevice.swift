@@ -1,18 +1,32 @@
+public enum CPUCacheMode {
+    case readWrite
+    case writeOnly
+}
+
+public protocol Event {
+    func device() -> GraphicsDevice
+}
+
+public protocol Semaphore {
+    func device() -> GraphicsDevice
+}
+
 public protocol GraphicsDevice {
+    var name: String { get }
 
     func makeCommandQueue() -> CommandQueue?
-    // func makeShaderModule() -> ShaderModule?
-    // func makeBindingSet() -> ShaderBindingSet?
+    func makeShaderModule() -> ShaderModule?
+    func makeBindingSet() -> ShaderBindingSet?
 
-    // func makeRenderPipeline() -> RenderPipelineState?
-    // func makeComputePipeline() -> ComputePipelineState?
+    func makeRenderPipelineState() -> RenderPipelineState?
+    func makeComputePipelineState() -> ComputePipelineState?
 
-    // func makeBuffer() -> GpuBuffer?
-    // func makeTexture() -> Texture?
-    // func makeSamplerState() -> SamplerState?
+    func makeBuffer() -> Buffer?
+    func makeTexture() -> Texture?
+    func makeSamplerState() -> SamplerState?
 
-    // func makeEvent() -> GpuEvent?
-    // func makeSemaphore() -> GpuSemaphore?
+    func makeEvent() -> Event?
+    func makeSemaphore() -> Semaphore?
 }
 
 public enum GraphicsAPI {
@@ -20,5 +34,22 @@ public enum GraphicsAPI {
 }
 
 public func makeGraphicsDevice(api: GraphicsAPI = .auto) -> GraphicsDevice?  {
-    return VulkanGraphicsDevice()
+    var enableValidation = false
+#if DEBUG
+        enableValidation = true
+#endif
+
+    if api == .vulkan || api == .auto {
+#if ENABLE_VULKAN        
+        if let instance = VulkanInstance(enableValidation: enableValidation) {
+            return instance.makeDevice(identifier:"")
+        }
+#endif
+    }
+    if api == .metal || api == .auto {
+#if ENABLE_METAL
+
+#endif        
+    }
+    return nil
 }

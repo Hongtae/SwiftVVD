@@ -10,16 +10,16 @@ public struct ShaderBindingSetLayout {
     var bindings : [Binding]
 }
 
-public struct GpuBufferBindingInfo {
-    var buffer : GpuBuffer
+public struct GPUBufferBindingInfo {
+    var buffer : Buffer
     var offset : UInt64
     var length : UInt64
 }
 
 public protocol ShaderBindingSet {
     // bind buffers
-    func setBuffer(binding: UInt32, buffer: GpuBuffer, offset: UInt64, length: UInt64)
-    func setBufferArray(binding: UInt32, buffers: [GpuBufferBindingInfo])
+    func setBuffer(binding: UInt32, buffer: Buffer, offset: UInt64, length: UInt64)
+    func setBufferArray(binding: UInt32, buffers: [GPUBufferBindingInfo])
 
     // bind textures
     func setTexture(binding: UInt32, texture: Texture)

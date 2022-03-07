@@ -18,10 +18,10 @@ public struct BufferImageOrigin {
 }
 
 public protocol CopyCommandEncoder: CommandEncoder {
-    func copy(from: GpuBuffer, sourceOffset: UInt64, to: GpuBuffer, destinationOffset: UInt64, size: UInt64)
-    func copy(from: GpuBuffer, sourceOffset: BufferImageOrigin, to: Texture, destinationOffset: TextureOrigin, size: TextureSize)
-    func copy(from: Texture, sourceOffset: TextureOrigin, to: GpuBuffer, destinationOffset: BufferImageOrigin, size: TextureSize)
+    func copy(from: Buffer, sourceOffset: UInt64, to: Buffer, destinationOffset: UInt64, size: UInt64)
+    func copy(from: Buffer, sourceOffset: BufferImageOrigin, to: Texture, destinationOffset: TextureOrigin, size: TextureSize)
+    func copy(from: Texture, sourceOffset: TextureOrigin, to: Buffer, destinationOffset: BufferImageOrigin, size: TextureSize)
     func copy(from: Texture, sourceOffset: TextureOrigin, to: Texture, destinationOffset: TextureOrigin, size: TextureSize)
 
-    func fill(buffer: GpuBuffer, offset: UInt64, length: UInt64, value: UInt8)
+    func fill(buffer: Buffer, offset: UInt64, length: UInt64, value: UInt8)
 }

@@ -4,7 +4,7 @@ public protocol SwapChain {
     func currentRenderPassDescriptor() -> RenderPassDescriptor
     var maximumBufferCount: UInt64 { get }
 
-    func present(waitEvents: [GpuEvent]) -> Bool
+    func present(waitEvents: [Event]) -> Bool
 }
 
 extension SwapChain {

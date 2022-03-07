@@ -44,6 +44,9 @@ let package = Package(
                 ],
             exclude: [],
             cSettings: [
+                .define("VK_USE_PLATFORM_WIN32_KHR",   .when(platforms:[.windows])),
+                .define("VK_USE_PLATFORM_ANDROID_KHR", .when(platforms:[.android])),
+                .define("VK_USE_PLATFORM_WAYLAND_KHR", .when(platforms:[.linux])),
                 //.unsafeFlags(["-ISupportPackages/DKGame-ThirdParty/Sources/FreeType/include"]),
             ],
             swiftSettings: [
@@ -55,12 +58,17 @@ let package = Package(
                 // Graphics Device
                 .define("ENABLE_VULKAN",    .when(platforms: [.windows, .linux, .android])),
                 .define("ENABLE_METAL",     .when(platforms: [.iOS, .macOS, .tvOS])),
+
+                // Vulkan platforms
+                .define("VK_USE_PLATFORM_WIN32_KHR",   .when(platforms:[.windows])),
+                .define("VK_USE_PLATFORM_ANDROID_KHR", .when(platforms:[.android])),
+                .define("VK_USE_PLATFORM_WAYLAND_KHR", .when(platforms:[.linux])),
             ],
             linkerSettings: [
-                .linkedLibrary("User32", .when(platforms: [.windows])),
-                .linkedLibrary("Ole32",  .when(platforms: [.windows])),
-                .linkedLibrary("Imm32",  .when(platforms: [.windows])),
-                .linkedLibrary("Shcore", .when(platforms: [.windows])),
+                .linkedLibrary("User32",    .when(platforms: [.windows])),
+                .linkedLibrary("Ole32",     .when(platforms: [.windows])),
+                .linkedLibrary("Imm32",     .when(platforms: [.windows])),
+                .linkedLibrary("Shcore",    .when(platforms: [.windows])),
                 .linkedLibrary("SupportPackages/Vulkan/lib/Win32/vulkan-1", .when(platforms: [.windows])),
                 // .unsafeFlags([
                 //     "-LSupportPackages/Vulkan/lib/Win32"
