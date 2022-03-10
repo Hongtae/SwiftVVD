@@ -3,16 +3,28 @@ import Foundation
 
 class TemporaryBufferHolder {
     var buffers: [UnsafeRawPointer] = []
-    init () {}
+    let label: String
+    init (label: String) {
+        self.label = label
+    }
     deinit {
+        NSLog("<< TemporaryBufferHolder(label:\"\(self.label)\") deallocate \(buffers.count) buffers. >>")
         for ptr in buffers {
             ptr.deallocate()
         }
-        NSLog("<< TemporaryBufferHolder deallocate \(buffers.count) buffers. >>")
     }
 }
 
 func unsafePointerCopy<T>(_ object: inout T, holder: TemporaryBufferHolder) -> UnsafePointer<T> {
+    let buffer: UnsafeMutablePointer<T> = .allocate(capacity: 1)
+    withUnsafePointer(to: object) {
+        buffer.initialize(from: $0, count: 1)
+    }
+    holder.buffers.append(buffer)
+    return UnsafePointer<T>(buffer)
+}
+
+func unsafePointerCopy<T>(_ object: T, holder: TemporaryBufferHolder) -> UnsafePointer<T> {
     let buffer: UnsafeMutablePointer<T> = .allocate(capacity: 1)
     withUnsafePointer(to: object) {
         buffer.initialize(from: $0, count: 1)

@@ -33,11 +33,12 @@ class MyApplicationDelegate: ApplicationDelegate {
 
     var window: Window?
     var windowDelegate: WindowDelegate?
+    var graphicsDevice: GraphicsDevice?
 
     func initialize(application: Application) {
         print("app initialize")
 
-        _ = makeGraphicsDevice()
+        self.graphicsDevice = makeGraphicsDevice()
 
         self.windowDelegate = MyWindowDelegate()
         self.window = makeWindow(name: "TestApp1",
@@ -51,6 +52,7 @@ class MyApplicationDelegate: ApplicationDelegate {
         print("app finalize")
 
         self.window = nil
+        self.graphicsDevice = nil
     }
 }
 

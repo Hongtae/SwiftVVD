@@ -42,7 +42,7 @@ public func makeGraphicsDevice(api: GraphicsAPI = .auto) -> GraphicsDevice?  {
     if api == .vulkan || api == .auto {
 #if ENABLE_VULKAN        
         if let instance = VulkanInstance(enableValidation: enableValidation) {
-            return instance.makeDevice(identifier:"")
+            return instance.makeDevice()
         }
 #endif
     }

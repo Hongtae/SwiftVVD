@@ -14,17 +14,12 @@ let VK_VERSION_PATCH = { (version: UInt32) -> UInt32 in
     (version & 0xfff)
 }
 
-public struct VulkanExtensionProperties {
-    let name: String
-    let specVersion: UInt32
-}
-
 public struct VulkanLayerProperties {
     let name: String
     let specVersion: UInt32
     let implementationVersion: UInt32
     let description: String
-    let extensions: [VulkanExtensionProperties]
+    let extensions: [String: UInt32]
 }
 
 private func debugUtilsMessengerCallback(messageSeverity: VkDebugUtilsMessageSeverityFlagBitsEXT,
@@ -68,7 +63,7 @@ private func debugUtilsMessengerCallback(messageSeverity: VkDebugUtilsMessageSev
 public class VulkanInstance {
 
     public private(set) var layers: [String: VulkanLayerProperties]
-    public private(set) var extensions: [VulkanExtensionProperties]
+    public private(set) var extensions: [String: UInt32] // key: extension-name, value: spec-version
     public private(set) var extensionSupportLayers: [String: [String]] // key: extension-name, value: layer-names(array)
     public private(set) var physicalDevices: [VulkanPhysicalDeviceDescription]
 
@@ -79,7 +74,7 @@ public class VulkanInstance {
     
     public var extensionProc = VulkanInstanceExtensions()
 
-    private let tempBufferHolder = TemporaryBufferHolder() // for allocated unsafe buffers
+    private let tempBufferHolder = TemporaryBufferHolder(label: "VulkanInstance") // for allocated unsafe buffers
 
     public init?(requiredLayers: [String] = [],
                  optionalLayers: [String] = [],
@@ -99,7 +94,7 @@ public class VulkanInstance {
         appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO
         appInfo.pNext = nil
         
-        let tempHolder = TemporaryBufferHolder()
+        let tempHolder = TemporaryBufferHolder(label: "VulkanInstance.init")
 
         let applicationName = unsafePointerCopy("DKGame.Vulkan", holder: tempHolder)
         let engineName = unsafePointerCopy("DKGL", holder: tempHolder)
@@ -144,7 +139,7 @@ public class VulkanInstance {
                     description: withUnsafeBytes(of: layer.description) {
                         String(cString: $0.baseAddress!.assumingMemoryBound(to: CChar.self))
                     },
-                    extensions: [])
+                    extensions: [:])
                 layers.append(prop)                
             }
             return layers
@@ -154,8 +149,8 @@ public class VulkanInstance {
         self.extensionSupportLayers = [:]
 
         for layer in availableLayers {
-            let extensions = layer.name.withCString { cname -> [VulkanExtensionProperties] in
-                var extensions: [VulkanExtensionProperties] = []
+            let extensions = layer.name.withCString { cname -> [String: UInt32] in
+                var extensions: [String: UInt32] = [:]
                 var extCount: UInt32 = 0
                 let err = vkEnumerateInstanceExtensionProperties(cname, &extCount, nil)
                 if err == VK_SUCCESS {
@@ -169,7 +164,7 @@ public class VulkanInstance {
                             let extensionName = withUnsafeBytes(of: ext.extensionName) {
                                 String(cString: $0.baseAddress!.assumingMemoryBound(to: CChar.self))
                             }
-                            extensions.append(VulkanExtensionProperties(name: extensionName, specVersion: ext.specVersion))
+                            extensions[extensionName] = ext.specVersion
                         }
                     }
                 } else {
@@ -177,11 +172,11 @@ public class VulkanInstance {
                 }
                 return extensions
             }            
-            for ext in extensions {
-                if var extLayers = self.extensionSupportLayers[ext.name] {
+            for ext in extensions.keys {
+                if var extLayers = self.extensionSupportLayers[ext] {
                     extLayers.append(layer.name)
                 } else {
-                    self.extensionSupportLayers.updateValue([layer.name], forKey:ext.name)
+                    self.extensionSupportLayers[ext] = [layer.name]
                 }
             }
 
@@ -195,8 +190,8 @@ public class VulkanInstance {
             self.layers[prop.name] = prop
         }
         // default ext
-        self.extensions = { () -> [VulkanExtensionProperties] in
-            var extensions: [VulkanExtensionProperties] = []
+        self.extensions = { () -> [String: UInt32] in
+            var extensions: [String: UInt32] = [:]
             var extCount: UInt32 = 0
             let err = vkEnumerateInstanceExtensionProperties(nil, &extCount, nil)
             if err == VK_SUCCESS {
@@ -210,7 +205,7 @@ public class VulkanInstance {
                         let extensionName = withUnsafeBytes(of: ext.extensionName) {
                             String(cString: $0.baseAddress!.assumingMemoryBound(to: CChar.self))
                         }
-                        extensions.append(VulkanExtensionProperties(name: extensionName, specVersion: ext.specVersion))
+                        extensions[extensionName] = ext.specVersion
                     }
                 }
             } else {
@@ -218,9 +213,9 @@ public class VulkanInstance {
             }
             return extensions
         }()
-        for ext in self.extensions {
-            if self.extensionSupportLayers.index(forKey: ext.name) == nil {
-                self.extensionSupportLayers.updateValue([], forKey:ext.name)
+        for ext in self.extensions.keys {
+            if self.extensionSupportLayers[ext] == nil {
+                self.extensionSupportLayers[ext] = []
             }
         }
 
@@ -231,12 +226,14 @@ public class VulkanInstance {
                 let spec = "\(VK_VERSION_MAJOR(layer.specVersion)).\(VK_VERSION_MINOR(layer.specVersion)).\(VK_VERSION_PATCH(layer.specVersion))"
                 NSLog(" -- Layer: \(layer.name) (\"\(layer.description)\", spec:\(spec), implementation:\(layer.implementationVersion))")
 
-                for ext in layer.extensions {
-                    NSLog("  +-- Layer extension: \(ext.name) (Version: \(ext.specVersion))")
+                for ext in layer.extensions.keys.sorted() {
+                    let specVersion = layer.extensions[ext]!
+                    NSLog("  +-- Layer extension: \(ext) (Version: \(specVersion))")
                 }
             }
-            for ext in self.extensions {
-                NSLog(" -- Instance extension: \(ext.name) (Version: \(ext.specVersion))")
+            for ext in self.extensions.keys.sorted() {
+                let specVersion = self.extensions[ext]!
+                NSLog(" -- Instance extension: \(ext) (Version: \(specVersion))")
             }
         }
 
@@ -282,7 +279,7 @@ public class VulkanInstance {
         // setup layer, merge extension list
         var enabledLayers: [String] = []
         for layer in optionalLayers {
-            if self.layers.index(forKey: layer) != nil {
+            if self.layers[layer] != nil {
                 requiredLayers.append(layer)
             } else {
                 NSLog("Warning: Layer: \(layer) not supported.")
@@ -290,7 +287,7 @@ public class VulkanInstance {
         }
         for layer in requiredLayers {
             enabledLayers.append(layer)
-            if self.layers.index(forKey: layer) == nil {
+            if self.layers[layer] == nil {
                 NSLog("Warning: Layer: \(layer) not supported, but required.")
             }
         }
@@ -299,15 +296,13 @@ public class VulkanInstance {
         if enableExtensionsForEnabledLayers {
             for item in enabledLayers {
                 if let layer = self.layers[item] {
-                    for ext in layer.extensions {
-                        optionalExtensions.append(ext.name)
-                    }
+                    optionalExtensions.append(contentsOf: layer.extensions.keys)
                 }
             }
         }
         // merge two extensions
         for ext in optionalExtensions {
-            if self.extensionSupportLayers.index(forKey: ext) != nil {
+            if self.extensionSupportLayers[ext] != nil {
                 requiredExtensions.append(ext)
             }
         }
@@ -423,7 +418,7 @@ public class VulkanInstance {
                 self.physicalDevices.append(pd)
             }
         } else {
-            NSLog("ERROR: No vulkan gpu found")
+            NSLog("ERROR: No Vulkan GPU found")
         }
         // sort deviceList order by Type/NumQueues/Memory
         self.physicalDevices.sort {
@@ -452,11 +447,6 @@ public class VulkanInstance {
     public func makeDevice(identifier: String,
                            requiredExtensions: [String] = [],
                            optionalExtensions: [String] = []) -> VulkanGraphicsDevice? {
-        var identifier = identifier
-        if identifier == "", let first = self.physicalDevices.first {
-            identifier = first.registryID
-        }
-
         for device in self.physicalDevices {
             if device.registryID == identifier {
                 return VulkanGraphicsDevice(instance: self,
@@ -467,4 +457,17 @@ public class VulkanInstance {
         }
         return nil
     }
+
+    public func makeDevice(requiredExtensions: [String] = [],
+                           optionalExtensions: [String] = []) -> VulkanGraphicsDevice? {
+        for device in self.physicalDevices {
+            if let vgd = VulkanGraphicsDevice(instance: self,
+                                              physicalDevice: device,
+                                              requiredExtensions: requiredExtensions,
+                                              optionalExtensions: optionalExtensions) {
+                return vgd
+            }
+        }
+        return nil
+    }    
 }
