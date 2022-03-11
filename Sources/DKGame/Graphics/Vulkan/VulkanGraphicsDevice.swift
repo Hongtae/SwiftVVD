@@ -1,308 +1,15 @@
 import Vulkan
 import Foundation
 
-private protocol QueueCompletionHandler {
-    func destroy(device: VulkanGraphicsDevice)
-}
-
-private class QueueCompletionTimelineSemaphore: QueueCompletionHandler {
-
-    struct TimelineSemaphoreCounter {
-        let semaphore: VkSemaphore
-        var timeline: UInt64 = 0    // signal value from GPU
-    }
-    struct TimelineSemaphoreCompletionHandler {
-        let value: UInt64
-        let operation: () -> Void
-    }
-    struct QueueSubmissionSemaphore {
-        let queue: VkQueue
-        let semaphore: VkSemaphore
-        var timeline: UInt64 = 0
-        var waitValue: UInt64 = 0
-        var handlers: [TimelineSemaphoreCompletionHandler] = []
-    }
-    var dispatchQueue: DispatchQueue? = nil
-    var deviceEventSemaphore: TimelineSemaphoreCounter
-    var queueCompletionSemaphoreHandlers: [QueueSubmissionSemaphore] = []
-
-    var queueCompletionThreadRunning: Bool = false
-    var queueCompletionThreadRequestTerminate: Bool = false
-    var queueCompletionHandlerLock = NSCondition()
-
-    init(device: VulkanGraphicsDevice, dispatchQueue: DispatchQueue? = nil) {
-        let createTimelineSemaphore = { (initialValue: UInt64) -> VkSemaphore in
-            var semaphore: VkSemaphore? = nil
-            var createInfo = VkSemaphoreCreateInfo()
-            createInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO
-
-            var typeCreateInfo = VkSemaphoreTypeCreateInfoKHR()
-            typeCreateInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO_KHR
-            typeCreateInfo.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE_KHR
-            typeCreateInfo.initialValue = initialValue
-
-            let result = withUnsafePointer(to: typeCreateInfo) { pointer -> VkResult in
-                createInfo.pNext = UnsafeRawPointer(pointer)
-                return vkCreateSemaphore(device.device, &createInfo, device.allocationCallbacks, &semaphore)
-            }
-            if result != VK_SUCCESS {
-                fatalError("ERROR: vkCreateSemaphore failed: \(result.rawValue)")
-            }
-            return semaphore!
-        }
-
-        self.dispatchQueue = dispatchQueue
-        self.deviceEventSemaphore = TimelineSemaphoreCounter(semaphore: createTimelineSemaphore(0))
-
-        var numQueues = 0
-        for queueFamily in device.queueFamilies {
-            numQueues += queueFamily.freeQueues.count
-        }
-        self.queueCompletionSemaphoreHandlers.reserveCapacity(numQueues)
-
-        for queueFamily in device.queueFamilies {
-            for queue in queueFamily.freeQueues {
-                let s = QueueSubmissionSemaphore(queue: queue,
-                                                 semaphore: createTimelineSemaphore(0))
-                self.queueCompletionSemaphoreHandlers.append(s)
-            }
-        }
-        // create semaphore completion thread
-        self.queueCompletionThreadRequestTerminate = false
-        Thread.detachNewThread {
-            self.queueCompletionThreadProc(device: device.device)
-        }
-        synchronizedBy(locking: self.queueCompletionHandlerLock) {
-            while self.queueCompletionThreadRunning == false {
-                self.queueCompletionHandlerLock.wait()
-            }
-        }
-    }
-    private func queueCompletionThreadProc(device: VkDevice) {
-
-        var timelineSemaphores: [VkSemaphore?] = []
-        var timelineValues: [UInt64] = []
-        var completionHandlers: [()->Void] = []
-
-        for s in self.queueCompletionSemaphoreHandlers {
-            timelineSemaphores.append(s.semaphore)
-            timelineValues.append(s.timeline)
-        }
-        timelineSemaphores.append(self.deviceEventSemaphore.semaphore)
-        timelineValues.append(self.deviceEventSemaphore.timeline)
-
-        let numSemaphores = timelineSemaphores.count
-
-        synchronizedBy(locking: self.queueCompletionHandlerLock) {
-            self.queueCompletionThreadRunning = true
-            self.queueCompletionHandlerLock.broadcast()
-        }
-
-        NSLog("Vulkan Queue Completion Helper thread is started.");
-
-        var result: VkResult = VK_SUCCESS
-        var running = true
-        while running {
-            if result == VK_SUCCESS {
-                for i in 0 ..< numSemaphores {
-                    timelineValues[i] += 1
-                }
-            }
-            var waitInfo = VkSemaphoreWaitInfoKHR()
-            waitInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO
-            waitInfo.flags = UInt32(VK_SEMAPHORE_WAIT_ANY_BIT.rawValue)
-            waitInfo.semaphoreCount = UInt32(numSemaphores)
-            result = timelineSemaphores.withUnsafeBufferPointer {
-                semaphores -> VkResult in
-                waitInfo.pSemaphores = semaphores.baseAddress
-                return timelineValues.withUnsafeBufferPointer {
-                    values -> VkResult in
-                    waitInfo.pValues = values.baseAddress
-
-                    let sec2ns = { (s: Double) -> UInt64 in UInt64(s * 1000000.0) * 1000 }
-                    return vkWaitSemaphores(device, &waitInfo, sec2ns(0.1))
-                }
-            }
-            if result == VK_SUCCESS {
-                // update semaphore values.
-                for i in 0 ..< numSemaphores {
-                    let r = vkGetSemaphoreCounterValue(device, timelineSemaphores[i], &timelineValues[i])
-                    if r != VK_SUCCESS {
-                        NSLog("ERROR: vkGetSemaphoreCounterValue failed: \(r.rawValue)")
-                    }
-                }
-                // update queues and handlers.
-                synchronizedBy(locking: self.queueCompletionHandlerLock) {
-
-                    // queueCompletionSemaphoreHandlers must be immutable!
-                    if numSemaphores != self.queueCompletionSemaphoreHandlers.count + 1 {
-                        fatalError("ERROR! wrong semaphore count")
-                    }
-
-                    for index in 0 ..< self.queueCompletionSemaphoreHandlers.count {
-                        let s = self.queueCompletionSemaphoreHandlers[index]
-                        if s.semaphore != timelineSemaphores[index] {
-                            fatalError("Invalid semaphore!")
-                        }
-                        let timeline = timelineValues[index]
-                        var handlersToProcess = 0
-                        while handlersToProcess < s.handlers.count {
-                            let handler = s.handlers[handlersToProcess]
-                            if handler.value > timeline {
-                                break
-                            }
-                            completionHandlers.append(handler.operation)
-                            handlersToProcess += 1
-                        }
-
-                        self.queueCompletionSemaphoreHandlers[index].timeline = timeline
-                        self.queueCompletionSemaphoreHandlers[index].handlers.removeFirst(handlersToProcess)
-                    }
-
-                    if self.deviceEventSemaphore.semaphore != timelineSemaphores.last {
-                        fatalError("Invalid semaphore!")
-                    }
-                    self.deviceEventSemaphore.timeline = timelineValues.last!
-
-                    running = self.queueCompletionThreadRequestTerminate == false
-                }
-            } else if result == VK_TIMEOUT {
-                running = synchronizedBy(locking: self.queueCompletionHandlerLock) {
-                    self.queueCompletionThreadRequestTerminate == false
-                }
-            } else {
-                NSLog("ERROR: vkWaitSemaphores failed: \(result.rawValue)")
-            }
-
-            // execute handlers.
-            if completionHandlers.isEmpty == false {
-                if let dispatchQueue = self.dispatchQueue {
-                    for handler in completionHandlers {
-                        dispatchQueue.async { handler() }
-                    }
-                } else {
-                    for handler in completionHandlers {
-                        handler()
-                    }
-                }
-                completionHandlers.removeAll(keepingCapacity: true)
-
-                // update thread state again.
-                running = synchronizedBy(locking: self.queueCompletionHandlerLock) {
-                    self.queueCompletionThreadRequestTerminate == false
-                }
-            }
-        }
-
-        if completionHandlers.isEmpty == false {
-            fatalError("ERROR: completionHandlers must be empty!")
-        }
-
-        synchronizedBy(locking: self.queueCompletionHandlerLock) {
-            self.queueCompletionThreadRunning = false
-            self.queueCompletionHandlerLock.broadcast()
-        }
-        NSLog("Vulkan Queue Completion Helper thread is finished.");
-    }
-
-    func setQueueCompletionHandler(queue: VkQueue, op: @escaping ()->Void) -> TimelineSemaphoreCounter {
-        let lowerBound = {
-            (value: VkQueue, cmp: (_ lhs: VkQueue, _ rhs: VkQueue) -> Bool ) -> Int in
-
-            var begin = 0
-            var count = self.queueCompletionSemaphoreHandlers.count
-            var mid = begin
-            while count > 0 {
-                mid = count / 2
-                if cmp(self.queueCompletionSemaphoreHandlers[begin + mid].queue, value) {
-                    begin += mid + 1
-                    count -= mid + 1
-                } else {
-                    count = mid
-                }
-            }
-            return begin
-        }
-        let index = lowerBound(queue) { a, b in UInt(bitPattern: a) < UInt(bitPattern: b) }
-        if self.queueCompletionSemaphoreHandlers[index].queue != queue {
-            fatalError("Invalid queue!")
-        }
-
-        return synchronizedBy(locking: self.queueCompletionHandlerLock) {
-            if self.queueCompletionThreadRunning == false {
-                fatalError("Thread is not running!")
-            }
-            var s = self.queueCompletionSemaphoreHandlers[index]
-            s.waitValue += 1 
-
-            let semaphore = s.semaphore
-            let timeline = s.waitValue
-            let handler = TimelineSemaphoreCompletionHandler(value: timeline, operation: op)
-
-            // update next wait (timeline) value & handler.
-            self.queueCompletionSemaphoreHandlers[index].waitValue = s.waitValue
-            self.queueCompletionSemaphoreHandlers[index].handlers.append(handler)
-
-            return TimelineSemaphoreCounter(semaphore: semaphore, timeline: timeline)
-        }
-    }
-
-    func destroy(device: VulkanGraphicsDevice) {
-        synchronizedBy(locking: self.queueCompletionHandlerLock) {
-            if self.queueCompletionThreadRunning {
-                var signalInfo = VkSemaphoreSignalInfoKHR()
-                signalInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SIGNAL_INFO
-                signalInfo.semaphore = self.deviceEventSemaphore.semaphore
-                signalInfo.value = self.deviceEventSemaphore.timeline + 1
-                vkSignalSemaphore(device.device, &signalInfo)
-                
-                self.queueCompletionThreadRequestTerminate = true
-                self.queueCompletionHandlerLock.broadcast()
-                while self.queueCompletionThreadRunning {
-                    self.queueCompletionHandlerLock.wait()
-                }
-            }
-        }
-        vkDestroySemaphore(device.device, self.deviceEventSemaphore.semaphore, device.allocationCallbacks)
-        for handler in self.queueCompletionSemaphoreHandlers {
-            vkDestroySemaphore(device.device, handler.semaphore, device.allocationCallbacks)
-            if handler.handlers.isEmpty == false {
-                fatalError("Handler must be empty!")
-            }
-        }
-        self.queueCompletionSemaphoreHandlers = []
-    }
-}
-
-private class QueueCompletionFence: QueueCompletionHandler {
-
-    struct FenceCallback {
-        let fence: VkFence
-        let operation: () -> Void
-    }
-
-    var pendingFenceCallbacks: [FenceCallback] = []
-    var reusableFences: [VkFence] = []
-    var fenceCompletionCond: NSCondition = NSCondition()
-
-    var queueCompletionThreadRunning: Bool = false
-    var queueCompletionThread: Thread?
-
-    init(device: VulkanGraphicsDevice, dispatchQueue: DispatchQueue? = nil) {
-    }
-    func destroy(device: VulkanGraphicsDevice) {
-
-    }
-    deinit {
-
-    }
+public enum VulkanGraphicsDeviceQueueCompletionHandlerType {
+    case timelineSemaphore
+    case fence
+    case none
 }
 
 private let pipelineCacheDataKey = "_SavedSystemStates.Vulkan.PipelineCacheData"
 
 public class VulkanGraphicsDevice : GraphicsDevice {
-
-    public static var queueCompletionSyncTimelineSemaphore = true
 
     public var name: String
 
@@ -323,7 +30,9 @@ public class VulkanGraphicsDevice : GraphicsDevice {
 
     private var pipelineCache: VkPipelineCache?
 
-    private var queueCompletionHandler: QueueCompletionHandler?
+    static public var queueCompletionHandlerType: VulkanGraphicsDeviceQueueCompletionHandlerType = .fence
+    var queueCompletionHandlerSemaphore: VulkanQueueCompletionHandlerTimelineSemaphore?
+    var queueCompletionHandlerFence: VulkanQueueCompletionHandlerFence?
 
     public init?(instance: VulkanInstance,
                  physicalDevice: VulkanPhysicalDeviceDescription,
@@ -490,24 +199,38 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         }
 
         self.loadPipelineCache()
-        NSLog("Create Queue-Completion handler!")
-        if Self.queueCompletionSyncTimelineSemaphore {
-            self.queueCompletionHandler = QueueCompletionTimelineSemaphore(device: self, dispatchQueue: .main)
-        } else {
-            self.queueCompletionHandler = QueueCompletionFence(device: self, dispatchQueue: .main)
+
+        // create queue completion handlr
+        switch (Self.queueCompletionHandlerType) {
+            case .timelineSemaphore:
+                NSLog("VulkanGraphicsDevice: Create Queue-Completion handler! (TimelineSemaphore)")
+                self.queueCompletionHandlerSemaphore = VulkanQueueCompletionHandlerTimelineSemaphore(
+                    device: self,
+                    dispatchQueue: .main)
+            case .fence:
+                NSLog("VulkanGraphicsDevice: Create Queue-Completion handler! (Fence)")
+                self.queueCompletionHandlerFence = VulkanQueueCompletionHandlerFence(
+                    device: self,
+                    dispatchQueue: .main)
+            default:
+                NSLog("VulkanGraphicsDevice: No Queue-Completion handler!")
+                break
         }
     }
     
     deinit {
         vkDeviceWaitIdle(self.device)
-        self.queueCompletionHandler!.destroy(device: self)
-        self.queueCompletionHandler = nil
+        self.queueCompletionHandlerSemaphore?.destroy(device: self)
+        self.queueCompletionHandlerFence?.destroy(device: self)
+        self.queueCompletionHandlerSemaphore = nil
+        self.queueCompletionHandlerFence = nil
 
         if let pipelineCache = self.pipelineCache {
             vkDestroyPipelineCache(self.device, pipelineCache, self.allocationCallbacks)
             self.pipelineCache = nil
         }
         vkDestroyDevice(self.device, self.allocationCallbacks)
+        NSLog("VulkanGraphicsDevice destroyed.")
     }
 
     public func loadPipelineCache() {

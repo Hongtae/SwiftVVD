@@ -516,16 +516,16 @@ public class Win32Window : Window {
     }
 
     func postWindowEvent(_ event: WindowEvent) {
-        NSLog("Win32Window.postWindowEvent: \(event)")
+        //NSLog("Win32Window.postWindowEvent: \(event)")
     }
 
     func postKeyboardEvent(_ event: KeyboardEvent) {
-        NSLog("Win32Window.postKeyboardEvent: \(event)")
+        //NSLog("Win32Window.postKeyboardEvent: \(event)")
     }
 
     func postMouseEvent(_ event: MouseEvent) {
         if event.type != .move {
-            NSLog("Win32Window.postMouseEvent: \(event)")
+            //NSLog("Win32Window.postMouseEvent: \(event)")
         }
     }
 
