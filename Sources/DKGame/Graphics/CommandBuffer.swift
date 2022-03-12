@@ -10,12 +10,12 @@ public enum CommandBufferStatus {
 public typealias CommandBufferHandler = (CommandBuffer) -> Void
 
 public protocol CommandBuffer {
-    func makeRenderCommandEncoder(descriptor: RenderPassDescriptor) -> RenderCommandEncoder
-    func makeComputeCommandEncoder() -> ComputeCommandEncoder
-    func makeCopyCommandEncoder() -> CopyCommandEncoder
+    func makeRenderCommandEncoder(descriptor: RenderPassDescriptor) -> RenderCommandEncoder?
+    func makeComputeCommandEncoder() -> ComputeCommandEncoder?
+    func makeCopyCommandEncoder() -> CopyCommandEncoder?
 
     func addCompletedHandler(_ handler: CommandBufferHandler)
 
-    func queue() -> CommandQueue
-    func device() -> GraphicsDevice
+    var commandQueue: CommandQueue { get }
+    var device: GraphicsDevice { get }
 }

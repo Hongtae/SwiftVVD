@@ -183,7 +183,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             let queueCount = $0.queueCount
             let queueFamilyProperties = physicalDevice.queueFamilies[Int(queueFamilyIndex)]
             return VulkanQueueFamily(device: device!,
-                                     index: queueFamilyIndex,
+                                     familyIndex: queueFamilyIndex,
                                      count: queueCount,
                                      properties: queueFamilyProperties,
                                      presentationSupport: supportPresentation)
@@ -302,7 +302,34 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         }
     }
 
-    public func makeCommandQueue() -> CommandQueue? {
+    public func makeCommandQueue(typeMask: CommandQueueTypeMask) -> CommandQueue? {
+        var queueFlags: UInt32 = 0
+        if typeMask.contains(.graphics) {
+            queueFlags = queueFlags | UInt32(VK_QUEUE_GRAPHICS_BIT.rawValue)
+        }
+        if typeMask.contains(.compute) {
+            queueFlags = queueFlags | UInt32(VK_QUEUE_COMPUTE_BIT.rawValue)
+        }
+        var queueMask = UInt32(VK_QUEUE_GRAPHICS_BIT.rawValue | VK_QUEUE_COMPUTE_BIT.rawValue)
+        queueMask = queueMask ^ queueFlags
+
+        // find the exact matching queue
+        for family in self.queueFamilies {
+            if family.properties.queueFlags & queueMask == 0 &&
+               family.properties.queueFlags & queueFlags == queueFlags {
+                if let queue = family.makeCommandQueue(device: self) {
+                    return queue
+                }
+            }
+        }
+    	// find any queue that satisfies the condition.
+        for family in self.queueFamilies {
+            if family.properties.queueFlags & queueFlags == queueFlags {
+                if let queue = family.makeCommandQueue(device: self) {
+                    return queue
+                }
+            }
+        }
         return nil
     }
     public func makeShaderModule() -> ShaderModule? {

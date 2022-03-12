@@ -14,7 +14,7 @@ public protocol Semaphore {
 public protocol GraphicsDevice {
     var name: String { get }
 
-    func makeCommandQueue() -> CommandQueue?
+    func makeCommandQueue(typeMask: CommandQueueTypeMask) -> CommandQueue?
     func makeShaderModule() -> ShaderModule?
     func makeBindingSet() -> ShaderBindingSet?
 
