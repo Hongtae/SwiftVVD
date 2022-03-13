@@ -125,3 +125,11 @@ public func synchronizedBy<Result>(locking lock: NSLocking, _ body: () throws ->
     defer { lock.unlock() }
     return try body()
 }
+
+public func threadYield() {
+    DKThreadYield()
+}
+
+public func threadId() -> UInt {
+    return DKThreadCurrentId()
+}

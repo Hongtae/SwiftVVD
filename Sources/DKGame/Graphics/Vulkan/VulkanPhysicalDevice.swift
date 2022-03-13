@@ -1,3 +1,4 @@
+#if ENABLE_VULKAN
 import Vulkan
 import Foundation
 
@@ -173,3 +174,4 @@ public class VulkanPhysicalDeviceDescription: CustomStringConvertible {
         return desc
     }
 }
+#endif //if ENABLE_VULKAN

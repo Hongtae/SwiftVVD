@@ -11,7 +11,7 @@ public struct CommandQueueFlags: OptionSet {
 
 public protocol CommandQueue {
     func makeCommandBuffer() -> CommandBuffer?
-    func makeSwapChain() -> SwapChain?
+    func makeSwapChain(target: Window) -> SwapChain?
 
     var flags : CommandQueueFlags { get }
     var device: GraphicsDevice { get }

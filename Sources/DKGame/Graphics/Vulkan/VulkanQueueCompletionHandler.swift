@@ -1,6 +1,6 @@
+#if ENABLE_VULKAN
 import Vulkan
 import Foundation
-import DKGameUtils
 
 public class VulkanQueueCompletionHandlerTimelineSemaphore {
 
@@ -418,7 +418,7 @@ public class VulkanQueueCompletionHandlerFence {
                         if fenceWaitInterval > 0.0 {
                             _ = self.queueCompletionHandlerCond.wait(until: Date(timeIntervalSinceNow: fenceWaitInterval))
                         } else {
-                            DKThreadYield()
+                            threadYield()
                         }
                     }
                 } else {
@@ -447,7 +447,7 @@ public class VulkanQueueCompletionHandlerFence {
         }
     }
 
-    public func takeOutFence(device: VulkanGraphicsDevice) -> VkFence {
+    public func getFence(device: VulkanGraphicsDevice) -> VkFence {
         var fence: VkFence? = synchronizedBy(locking: self.queueCompletionHandlerCond) {
             if self.reusableFences.count > 0 {
                 return self.reusableFences.removeFirst()
@@ -468,3 +468,4 @@ public class VulkanQueueCompletionHandlerFence {
         return fence!
     }
 }
+#endif //if ENABLE_VULKAN

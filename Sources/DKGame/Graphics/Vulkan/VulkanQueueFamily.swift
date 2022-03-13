@@ -1,3 +1,4 @@
+#if ENABLE_VULKAN
 import Vulkan
 import Foundation
 
@@ -30,7 +31,7 @@ public class VulkanQueueFamily {
         synchronizedBy(locking: self.spinLock) {
             if self.freeQueues.count > 0 {
                 let queue = self.freeQueues.removeLast()
-                let commandQueue = VulkanCommandQueue(device: device, queueFamily: self, queue: queue)
+                let commandQueue = VulkanCommandQueue(device: device, family: self, queue: queue)
         		NSLog("Vulkan Command-Queue with family-index: \(self.familyIndex) has been created.")
                 return commandQueue as CommandQueue
             }
@@ -45,3 +46,4 @@ public class VulkanQueueFamily {
         }
     }
 }
+#endif //if ENABLE_VULKAN

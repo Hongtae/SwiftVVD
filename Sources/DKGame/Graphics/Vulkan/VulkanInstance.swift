@@ -1,3 +1,4 @@
+#if ENABLE_VULKAN
 import Vulkan
 import Foundation
 
@@ -67,7 +68,7 @@ public class VulkanInstance {
     public private(set) var extensionSupportLayers: [String: [String]] // key: extension-name, value: layer-names(array)
     public private(set) var physicalDevices: [VulkanPhysicalDeviceDescription]
 
-    public private(set) var instance: VkInstance?
+    public private(set) var instance: VkInstance
     public private(set) var allocationCallbacks: UnsafePointer<VkAllocationCallbacks>?
     
     private var debugMessenger: VkDebugUtilsMessengerEXT?
@@ -346,13 +347,14 @@ public class VulkanInstance {
             self.allocationCallbacks = unsafePointerCopy(&cb, holder: self.tempBufferHolder)
         }
 
-        var err: VkResult = vkCreateInstance(&instanceCreateInfo, self.allocationCallbacks, &self.instance)
+        var instance: VkInstance?
+        var err: VkResult = vkCreateInstance(&instanceCreateInfo, self.allocationCallbacks, &instance)
         if err != VK_SUCCESS {
             NSLog("ERROR: vkCreateInstance failed: \(err.rawValue)")
             return nil
         }
 
-        let instance = self.instance!
+        self.instance = instance!
 
         if enabledLayers.isEmpty {
             NSLog("VkInstance enabled layers: None")
@@ -370,7 +372,7 @@ public class VulkanInstance {
         }
 
         // load extensions
-        self.extensionProc.load(instance: instance)
+        self.extensionProc.load(instance: self.instance)
 
         if enabledExtensions.contains(VK_EXT_DEBUG_UTILS_EXTENSION_NAME) {
             var debugUtilsMessengerCreateInfo = VkDebugUtilsMessengerCreateInfoEXT()
@@ -446,28 +448,33 @@ public class VulkanInstance {
 
     public func makeDevice(identifier: String,
                            requiredExtensions: [String] = [],
-                           optionalExtensions: [String] = []) -> VulkanGraphicsDevice? {
+                           optionalExtensions: [String] = [],
+                           dispatchQueue: DispatchQueue? = .main) -> VulkanGraphicsDevice? {
         for device in self.physicalDevices {
             if device.registryID == identifier {
                 return VulkanGraphicsDevice(instance: self,
                                             physicalDevice: device,
                                             requiredExtensions: requiredExtensions,
-                                            optionalExtensions: optionalExtensions)
+                                            optionalExtensions: optionalExtensions,
+                                            dispatchQueue: dispatchQueue)
             }
         }
         return nil
     }
 
     public func makeDevice(requiredExtensions: [String] = [],
-                           optionalExtensions: [String] = []) -> VulkanGraphicsDevice? {
+                           optionalExtensions: [String] = [],
+                           dispatchQueue: DispatchQueue? = .main) -> VulkanGraphicsDevice? {
         for device in self.physicalDevices {
             if let vgd = VulkanGraphicsDevice(instance: self,
                                               physicalDevice: device,
                                               requiredExtensions: requiredExtensions,
-                                              optionalExtensions: optionalExtensions) {
+                                              optionalExtensions: optionalExtensions,
+                                              dispatchQueue: dispatchQueue) {
                 return vgd
             }
         }
         return nil
     }    
 }
+#endif //if ENABLE_VULKAN

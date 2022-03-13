@@ -516,17 +516,60 @@ public class Win32Window : Window {
     }
 
     func postWindowEvent(_ event: WindowEvent) {
-        //NSLog("Win32Window.postWindowEvent: \(event)")
+        self.eventObservers.forEach { _, handlers in
+            if let handler = handlers.windowEventHandler { handler(event) }
+        }
     }
 
     func postKeyboardEvent(_ event: KeyboardEvent) {
-        //NSLog("Win32Window.postKeyboardEvent: \(event)")
+        self.eventObservers.forEach { _, handlers in
+            if let handler = handlers.keyboardEventHandler { handler(event) }
+        }
     }
 
-    func postMouseEvent(_ event: MouseEvent) {
-        if event.type != .move {
-            //NSLog("Win32Window.postMouseEvent: \(event)")
+    func postMouseEvent(_ event: MouseEvent) {        
+        self.eventObservers.forEach { _, handlers in
+            if let handler = handlers.mouseEventHandler { handler(event) }
         }
+    }
+
+    private struct EventHandlers {
+        var windowEventHandler: ((_: WindowEvent)->Void)?
+        var mouseEventHandler: ((_: MouseEvent)->Void)?
+        var keyboardEventHandler: ((_: KeyboardEvent)->Void)?
+    }
+    private var eventObservers: [ObjectIdentifier: EventHandlers] = [:]
+
+    public func addEventObserver(_ key: AnyObject, handler: @escaping (_: WindowEvent)->Void) {
+        let key = ObjectIdentifier(key)
+        if var handlers = self.eventObservers[key] {
+            handlers.windowEventHandler = handler
+            self.eventObservers[key] = handlers
+        } else {
+            self.eventObservers[key] = EventHandlers(windowEventHandler: handler)
+        }
+    }
+    public func addEventObserver(_ key: AnyObject, handler: @escaping (_: MouseEvent)->Void) {
+        let key = ObjectIdentifier(key)
+        if var handlers = self.eventObservers[key] {
+            handlers.mouseEventHandler = handler
+            self.eventObservers[key] = handlers
+        } else {
+            self.eventObservers[key] = EventHandlers(mouseEventHandler: handler)
+        }
+    }
+    public func addEventObserver(_ key: AnyObject, handler: @escaping (_: KeyboardEvent)->Void) {
+        let key = ObjectIdentifier(key)
+        if var handlers = self.eventObservers[key] {
+            handlers.keyboardEventHandler = handler
+            self.eventObservers[key] = handlers
+        } else {
+            self.eventObservers[key] = EventHandlers(keyboardEventHandler: handler)
+        }
+    }
+    public func removeEventObserver(_ key: AnyObject) {
+        let key = ObjectIdentifier(key)
+        self.eventObservers[key] = nil
     }
 
     private static func windowProc(_ hWnd: HWND?, _ uMsg: UINT, _ wParam: WPARAM, _ lParam: LPARAM) -> LRESULT {

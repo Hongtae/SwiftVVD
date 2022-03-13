@@ -135,6 +135,11 @@ public protocol Window {
 
     func enableTextInput(_: Bool, forDeviceId: Int)
     func isTextInputEnabled(forDeviceId: Int) -> Bool
+
+    func addEventObserver(_: AnyObject, handler: @escaping (_: WindowEvent)->Void)
+    func addEventObserver(_: AnyObject, handler: @escaping (_: MouseEvent)->Void)
+    func addEventObserver(_: AnyObject, handler: @escaping (_: KeyboardEvent)->Void)
+    func removeEventObserver(_: AnyObject)
 }
 
 extension Window {

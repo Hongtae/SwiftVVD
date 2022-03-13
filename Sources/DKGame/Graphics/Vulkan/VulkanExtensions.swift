@@ -1,6 +1,6 @@
+#if ENABLE_VULKAN
 import Vulkan
 import Foundation
-
 
 public struct VulkanInstanceExtensions {
     // VK_EXT_debug_utils
@@ -94,3 +94,4 @@ public struct VulkanDeviceExtensions {
         return nil
     }
 }
+#endif //if ENABLE_VULKAN

@@ -1,3 +1,4 @@
+#if ENABLE_VULKAN
 import Vulkan
 import Foundation
 
@@ -37,7 +38,8 @@ public class VulkanGraphicsDevice : GraphicsDevice {
     public init?(instance: VulkanInstance,
                  physicalDevice: VulkanPhysicalDeviceDescription,
                  requiredExtensions: [String],
-                 optionalExtensions: [String]) {
+                 optionalExtensions: [String],
+                 dispatchQueue: DispatchQueue?) {
 
         self.instance = instance
         self.physicalDevice = physicalDevice
@@ -206,12 +208,12 @@ public class VulkanGraphicsDevice : GraphicsDevice {
                 NSLog("VulkanGraphicsDevice: Create Queue-Completion handler! (TimelineSemaphore)")
                 self.queueCompletionHandlerSemaphore = VulkanQueueCompletionHandlerTimelineSemaphore(
                     device: self,
-                    dispatchQueue: .main)
+                    dispatchQueue: dispatchQueue)
             case .fence:
                 NSLog("VulkanGraphicsDevice: Create Queue-Completion handler! (Fence)")
                 self.queueCompletionHandlerFence = VulkanQueueCompletionHandlerFence(
                     device: self,
-                    dispatchQueue: .main)
+                    dispatchQueue: dispatchQueue)
             default:
                 NSLog("VulkanGraphicsDevice: No Queue-Completion handler!")
                 break
@@ -360,3 +362,4 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         return nil
     }
 }
+#endif //if ENABLE_VULKAN

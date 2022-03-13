@@ -1,3 +1,4 @@
+#if ENABLE_VULKAN
 import Vulkan
 import Foundation
 
@@ -8,7 +9,7 @@ class TemporaryBufferHolder {
         self.label = label
     }
     deinit {
-        NSLog("<< TemporaryBufferHolder(label:\"\(self.label)\") deallocate \(buffers.count) buffers. >>")
+        //NSLog("<< TemporaryBufferHolder(label:\"\(self.label)\") deallocate \(buffers.count) buffers. >>")
         for ptr in buffers {
             ptr.deallocate()
         }
@@ -51,3 +52,4 @@ func unsafePointerCopy<T>(_ array: [T], holder: TemporaryBufferHolder) -> Unsafe
     holder.buffers.append(ptr)
     return ptr
 }
+#endif //if ENABLE_VULKAN
