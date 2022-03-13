@@ -4,7 +4,7 @@ import Foundation
 public class VulkanCommandQueue: CommandQueue {
 
     public let device: GraphicsDevice
-    public let queueTypeMask: CommandQueueTypeMask
+    public let flags: CommandQueueFlags
 
     public init(device: VulkanGraphicsDevice, queueFamily: VulkanQueueFamily, queue: VkQueue) {
 
@@ -14,17 +14,17 @@ public class VulkanCommandQueue: CommandQueue {
         let compute = (queueFlags & UInt32(VK_QUEUE_COMPUTE_BIT.rawValue)) != 0
         let graphics = (queueFlags & UInt32(VK_QUEUE_GRAPHICS_BIT.rawValue)) != 0
 
-        var typeMask: CommandQueueTypeMask = []
+        var flags: CommandQueueFlags = []
         if copy {
-            typeMask.insert(.copy)
+            flags.insert(.copy)
         }
         if graphics {
-            typeMask.insert(.graphics)
+            flags.insert(.graphics)
         }
         if compute {
-            typeMask.insert(.compute)
+            flags.insert(.compute)
         }
-        self.queueTypeMask = typeMask
+        self.flags = flags
         self.device = device
     }
 

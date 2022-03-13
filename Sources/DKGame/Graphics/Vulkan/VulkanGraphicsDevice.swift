@@ -302,12 +302,12 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         }
     }
 
-    public func makeCommandQueue(typeMask: CommandQueueTypeMask) -> CommandQueue? {
+    public func makeCommandQueue(flags: CommandQueueFlags) -> CommandQueue? {
         var queueFlags: UInt32 = 0
-        if typeMask.contains(.graphics) {
+        if flags.contains(.graphics) {
             queueFlags = queueFlags | UInt32(VK_QUEUE_GRAPHICS_BIT.rawValue)
         }
-        if typeMask.contains(.compute) {
+        if flags.contains(.compute) {
             queueFlags = queueFlags | UInt32(VK_QUEUE_COMPUTE_BIT.rawValue)
         }
         var queueMask = UInt32(VK_QUEUE_GRAPHICS_BIT.rawValue | VK_QUEUE_COMPUTE_BIT.rawValue)
