@@ -32,7 +32,7 @@ public class VulkanQueueFamily {
             if self.freeQueues.count > 0 {
                 let queue = self.freeQueues.removeLast()
                 let commandQueue = VulkanCommandQueue(device: device, family: self, queue: queue)
-        		NSLog("Vulkan Command-Queue with family-index: \(self.familyIndex) has been created.")
+        		Log.verbose("Vulkan Command-Queue with family-index: \(self.familyIndex) has been created.")
                 return commandQueue as CommandQueue
             }
             return nil
@@ -41,7 +41,7 @@ public class VulkanQueueFamily {
 
     public func recycle(queue: VkQueue) {
         synchronizedBy(locking: self.spinLock) {
-            NSLog("Vulakn Command-Queue with family-index: \(self.familyIndex) was reclaimed for recycling.")
+            Log.verbose("Vulakn Command-Queue with family-index: \(self.familyIndex) was reclaimed for recycling.")
             self.freeQueues.append(queue)
         }
     }

@@ -9,7 +9,7 @@ class TemporaryBufferHolder {
         self.label = label
     }
     deinit {
-        //NSLog("<< TemporaryBufferHolder(label:\"\(self.label)\") deallocate \(buffers.count) buffers. >>")
+        //Log.verbose("<< TemporaryBufferHolder(label:\"\(self.label)\") deallocate \(buffers.count) buffers. >>")
         for ptr in buffers {
             ptr.deallocate()
         }

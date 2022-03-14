@@ -30,7 +30,7 @@ public class VulkanSwapChain: SwapChain {
 #if DEBUG
             fatalError("vkCreateSemaphore failed: \(err.rawValue)")            
 #else
-            NSLog("vkCreateSemaphore failed: \(err.rawValue)")            
+            Log.err("vkCreateSemaphore failed: \(err.rawValue)")            
 #endif
             return nil
         }
@@ -80,7 +80,7 @@ public class VulkanSwapChain: SwapChain {
         err = instance.extensionProc.vkCreateWin32SurfaceKHR!(instance.instance, &surfaceCreateInfo, device.allocationCallbacks, &self.surface)
         if (err != VK_SUCCESS)
         {
-            NSLog("ERROR: vkCreateWin32SurfaceKHR failed: \(err.rawValue)")
+            Log.err("vkCreateWin32SurfaceKHR failed: \(err.rawValue)")
             return false
         }
 #endif
@@ -92,7 +92,7 @@ public class VulkanSwapChain: SwapChain {
         err = instance.extensionProc.vkCreateAndroidSurfaceKHR!(instance.instance, &surfaceCreateInfo, device.allocationCallbacks, &self.surface)
         if (err != VK_SUCCESS)
         {
-            NSLog("ERROR: vkCreateAndroidSurfaceKHR failed: \(err.rawValue)")
+            Log.err("vkCreateAndroidSurfaceKHR failed: \(err.rawValue)")
             return false
         }
 #endif
@@ -100,11 +100,11 @@ public class VulkanSwapChain: SwapChain {
         var surfaceSupported: VkBool32 = VkBool32(VK_FALSE)
         err = vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevice.device, queueFamilyIndex, surface, &surfaceSupported);
         if err != VK_SUCCESS {
-            NSLog("ERROR: vkGetPhysicalDeviceSurfaceSupportKHR failed: \(err.rawValue)")
+            Log.err("vkGetPhysicalDeviceSurfaceSupportKHR failed: \(err.rawValue)")
             return false
         }
         if surfaceSupported == VkBool32(VK_FALSE) {
-            NSLog("ERROR: VkSurfaceKHR not support with QueueFamily at index: \(queueFamilyIndex)")
+            Log.err("VkSurfaceKHR not support with QueueFamily at index: \(queueFamilyIndex)")
             return false
         }
 
@@ -113,19 +113,19 @@ public class VulkanSwapChain: SwapChain {
         var surfaceFormatCount: UInt32 = 0
         err = vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice.device, surface, &surfaceFormatCount, nil)
         if err != VK_SUCCESS {
-            NSLog("ERROR: vkGetPhysicalDeviceSurfaceFormatsKHR failed: \(err.rawValue)")
+            Log.err("vkGetPhysicalDeviceSurfaceFormatsKHR failed: \(err.rawValue)")
             return false
         }
         if (surfaceFormatCount == 0)
         {
-            NSLog("ERROR: vkGetPhysicalDeviceSurfaceFormatsKHR returns 0 surface format count")
+            Log.err("vkGetPhysicalDeviceSurfaceFormatsKHR returns 0 surface format count")
             return false
         }
 
         self.availableSurfaceFormats = .init(repeating: VkSurfaceFormatKHR(), count: Int(surfaceFormatCount))
     	err = vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice.device, surface, &surfaceFormatCount, &availableSurfaceFormats)
         if err != VK_SUCCESS {
-            NSLog("ERROR: vkGetPhysicalDeviceSurfaceFormatsKHR failed: \(err.rawValue)")
+            Log.err("vkGetPhysicalDeviceSurfaceFormatsKHR failed: \(err.rawValue)")
             return false;
         }
 

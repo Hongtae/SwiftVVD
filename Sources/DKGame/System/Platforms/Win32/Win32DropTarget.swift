@@ -10,7 +10,7 @@ struct Win32DropTarget {
 
     private mutating func queryInterface(_ riid: UnsafePointer<IID>?,
                                             _ ppv: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> HRESULT {
-        NSLog("queryInterface")
+        Log.debug("queryInterface")
         let isEqualIID = { (iid1: UnsafePointer<IID>, id2: IID)->Bool in
             withUnsafePointer(to: id2) { ptr2 in
                 memcmp(iid1, ptr2, MemoryLayout<IID>.size) == 0
@@ -28,14 +28,14 @@ struct Win32DropTarget {
     }
     private mutating func addRef() -> ULONG {
         self.refCount += 1
-        NSLog("DropTarget.addRef: \(self.refCount)")
+        Log.debug("DropTarget.addRef: \(self.refCount)")
         return ULONG(self.refCount)
     }
     private mutating func release() -> ULONG {
         self.refCount -= 1
-        NSLog("DropTarget.release: \(self.refCount)")
+        Log.debug("DropTarget.release: \(self.refCount)")
         if self.refCount == 0 {
-            NSLog("DropTarget deallocate!")
+            Log.debug("DropTarget deallocate!")
 
             let ptr: UnsafeMutablePointer<Win32DropTarget> = self.thisPointer!
             ptr.deinitialize(count: 1)

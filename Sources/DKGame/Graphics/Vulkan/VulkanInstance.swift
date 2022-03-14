@@ -23,22 +23,36 @@ public struct VulkanLayerProperties {
     let extensions: [String: UInt32]
 }
 
+private weak var vulkanDebugLogger: Logger? = nil
+
+public class VulkanLogger: Logger {
+    public init() {
+        super.init(category: "Vulkan", bind: false)
+    }
+}
+
 private func debugUtilsMessengerCallback(messageSeverity: VkDebugUtilsMessageSeverityFlagBitsEXT,
                                          messageTypes: VkDebugUtilsMessageTypeFlagsEXT,
                                          pCallbackData: UnsafePointer<VkDebugUtilsMessengerCallbackDataEXT>?,
                                          pUserData: UnsafeMutableRawPointer?) -> VkBool32 {
+
+    var logLevel: Log.Level = .info    
     var prefix = ""
     if (messageSeverity.rawValue & VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT.rawValue) != 0 {
         prefix += ""
+        logLevel = .verbose
     }
     if (messageSeverity.rawValue & VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT.rawValue) != 0 {
         prefix += "INFO: "
+        logLevel = .info
     }
     if (messageSeverity.rawValue & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT.rawValue) != 0 {
         prefix += "WARNING: "
+        logLevel = .warning
     }
     if (messageSeverity.rawValue & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT.rawValue) != 0 {
         prefix += "ERROR: "
+        logLevel = .error
     }
 
     var type = ""
@@ -56,7 +70,11 @@ private func debugUtilsMessengerCallback(messageSeverity: VkDebugUtilsMessageSev
     let mesgIdNum = String(format:"0x%02x", pCallbackData!.pointee.messageIdNumber)
     let mesg = String(cString: pCallbackData!.pointee.pMessage)
 
-    NSLog("[VULKAN \(type)\(prefix)] [\(mesgId)](\(mesgIdNum)) \(mesg)")
+    if let logger = vulkanDebugLogger {
+        logger.log(level: logLevel, "[\(mesgId)](\(mesgIdNum)) \(mesg)")
+    } else {
+        Log.log(level: logLevel, "[VULKAN \(type)\(prefix)] [\(mesgId)](\(mesgIdNum)) \(mesg)")
+    }
 
     return VkBool32(VK_FALSE)
 }
@@ -75,6 +93,8 @@ public class VulkanInstance {
     
     public var extensionProc = VulkanInstanceExtensions()
 
+    public let debugLogger = VulkanLogger()
+
     private let tempBufferHolder = TemporaryBufferHolder(label: "VulkanInstance") // for allocated unsafe buffers
 
     public init?(requiredLayers: [String] = [],
@@ -90,6 +110,8 @@ public class VulkanInstance {
         var optionalLayers = optionalLayers
         var requiredExtensions = requiredExtensions
         var optionalExtensions = optionalExtensions
+
+        vulkanDebugLogger = self.debugLogger
 
         var appInfo : VkApplicationInfo = VkApplicationInfo()
         appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO
@@ -169,7 +191,7 @@ public class VulkanInstance {
                         }
                     }
                 } else {
-                    NSLog("ERROR: vkEnumerateInstanceExtensionProperties failed:\(err.rawValue)")
+                    Log.err("vkEnumerateInstanceExtensionProperties failed:\(err.rawValue)")
                 }
                 return extensions
             }            
@@ -210,7 +232,7 @@ public class VulkanInstance {
                     }
                 }
             } else {
-                NSLog("ERROR: vkEnumerateInstanceExtensionProperties failed:\(err.rawValue)")
+                Log.err("vkEnumerateInstanceExtensionProperties failed:\(err.rawValue)")
             }
             return extensions
         }()
@@ -222,19 +244,19 @@ public class VulkanInstance {
 
         let printInfo = true
         if printInfo {
-            NSLog("Vulkan available layers: \(self.layers.count)")
+            Log.verbose("Vulkan available layers: \(self.layers.count)")
             for layer in self.layers.values {
                 let spec = "\(VK_VERSION_MAJOR(layer.specVersion)).\(VK_VERSION_MINOR(layer.specVersion)).\(VK_VERSION_PATCH(layer.specVersion))"
-                NSLog(" -- Layer: \(layer.name) (\"\(layer.description)\", spec:\(spec), implementation:\(layer.implementationVersion))")
+                Log.verbose(" -- Layer: \(layer.name) (\"\(layer.description)\", spec:\(spec), implementation:\(layer.implementationVersion))")
 
                 for ext in layer.extensions.keys.sorted() {
                     let specVersion = layer.extensions[ext]!
-                    NSLog("  +-- Layer extension: \(ext) (Version: \(specVersion))")
+                    Log.verbose("  +-- Layer extension: \(ext) (Version: \(specVersion))")
                 }
             }
             for ext in self.extensions.keys.sorted() {
                 let specVersion = self.extensions[ext]!
-                NSLog(" -- Instance extension: \(ext) (Version: \(specVersion))")
+                Log.verbose(" -- Instance extension: \(ext) (Version: \(specVersion))")
             }
         }
 
@@ -263,7 +285,7 @@ public class VulkanInstance {
                     requiredLayers.append(contentsOf: layers)
                 }
             } else {
-                NSLog("Warning: Instance extension: \(ext) not supported, but required.")
+                Log.warn("Instance extension: \(ext) not supported, but required.")
             }
         }
         // add layers for optional extensions,
@@ -273,7 +295,7 @@ public class VulkanInstance {
                     optionalLayers.append(contentsOf: layers)
                 }
             } else {
-                NSLog("Warning: Instance extension: \(ext) not supported.")
+                Log.warn("Instance extension: \(ext) not supported.")
             }
         }
         
@@ -283,13 +305,13 @@ public class VulkanInstance {
             if self.layers[layer] != nil {
                 requiredLayers.append(layer)
             } else {
-                NSLog("Warning: Layer: \(layer) not supported.")
+                Log.warn("Layer: \(layer) not supported.")
             }
         }
         for layer in requiredLayers {
             enabledLayers.append(layer)
             if self.layers[layer] == nil {
-                NSLog("Warning: Layer: \(layer) not supported, but required.")
+                Log.warn("Layer: \(layer) not supported, but required.")
             }
         }
         // setup instance extensions!
@@ -350,24 +372,24 @@ public class VulkanInstance {
         var instance: VkInstance?
         var err: VkResult = vkCreateInstance(&instanceCreateInfo, self.allocationCallbacks, &instance)
         if err != VK_SUCCESS {
-            NSLog("ERROR: vkCreateInstance failed: \(err.rawValue)")
+            Log.err("vkCreateInstance failed: \(err.rawValue)")
             return nil
         }
 
         self.instance = instance!
 
         if enabledLayers.isEmpty {
-            NSLog("VkInstance enabled layers: None")
+            Log.verbose("VkInstance enabled layers: None")
         } else {
             for (index, layer) in enabledLayers.enumerated() {
-                NSLog("VkInstance enabled layer[\(index)]: \(layer)")
+                Log.verbose("VkInstance enabled layer[\(index)]: \(layer)")
             }
         }
         if enabledExtensions.isEmpty {
-            NSLog("VkInstance enabled extensions: None")
+            Log.verbose("VkInstance enabled extensions: None")
         } else {
             for (index, ext) in enabledExtensions.enumerated() {
-                NSLog("VkInstance enabled extension[\(index)]: \(ext)")
+                Log.verbose("VkInstance enabled extension[\(index)]: \(ext)")
             }
         }
 
@@ -393,7 +415,7 @@ public class VulkanInstance {
 
             err = self.extensionProc.vkCreateDebugUtilsMessengerEXT!(instance, &debugUtilsMessengerCreateInfo, self.allocationCallbacks, &self.debugMessenger)
             if err != VK_SUCCESS {
-                NSLog("ERROR: vkCreateDebugUtilsMessengerEXT failed: \(err.rawValue)")
+                Log.err("vkCreateDebugUtilsMessengerEXT failed: \(err.rawValue)")
             }
         }
 
@@ -401,7 +423,7 @@ public class VulkanInstance {
         var gpuCount: UInt32 = 0
         err = vkEnumeratePhysicalDevices(instance, &gpuCount, nil)
         if err != VK_SUCCESS {
-            NSLog("ERROR: vkEnumeratePhysicalDevices failed: \(err.rawValue)")
+            Log.err("vkEnumeratePhysicalDevices failed: \(err.rawValue)")
         }
         if gpuCount > 0 {
             // enumerate devices
@@ -420,7 +442,7 @@ public class VulkanInstance {
                 self.physicalDevices.append(pd)
             }
         } else {
-            NSLog("ERROR: No Vulkan GPU found")
+            Log.err("No Vulkan GPU found")
         }
         // sort deviceList order by Type/NumQueues/Memory
         self.physicalDevices.sort {
@@ -435,7 +457,7 @@ public class VulkanInstance {
         }
 
         for (index, device) in self.physicalDevices.enumerated() {
-            NSLog("PhysicalDevice[\(index)]: \(device)")
+            Log.verbose("PhysicalDevice[\(index)]: \(device)")
         }
     }
 

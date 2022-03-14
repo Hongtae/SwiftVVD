@@ -91,14 +91,14 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         for ext in requiredExtensions {
             deviceExtensions.append(ext)
             if physicalDevice.hasExtension(ext) == false {
-                NSLog("Warning: Vulkan-Device-Extension:\"\(ext)\" not supported, but required.")
+                Log.warn("Vulkan-Device-Extension:\"\(ext)\" not supported, but required.")
             }
         }
         for ext in optionalExtensions {
             if physicalDevice.hasExtension(ext) {
                 deviceExtensions.append(ext)
             } else {
-                NSLog("Warning: Vulkan-Device-Extension:\"\(ext)\" not supported.")
+                Log.warn("Warning: Vulkan-Device-Extension:\"\(ext)\" not supported.")
             }
         }
 
@@ -135,7 +135,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
                 for index in 0 ..< count {
                     let ptr = pointerCopy.advanced(by: index)
                     let ss = String(format: "self:%p, pNext:%p", OpaquePointer(ptr), OpaquePointer(ptr.pointee.pNext) ?? 0)
-                    NSLog("VkPhysicalDeviceExtendedDynamicStateFeaturesEXT[\(index)] \(ss)")
+                    Log.debug("VkPhysicalDeviceExtendedDynamicStateFeaturesEXT[\(index)] \(ss)")
                 }
             }
 
@@ -145,7 +145,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         var device: VkDevice? = nil
         let err = vkCreateDevice(physicalDevice.device, &deviceCreateInfo, instance.allocationCallbacks, &device)
         if err != VK_SUCCESS {
-            NSLog("Error: vkCreateDevice Failed: \(err.rawValue)")
+            Log.err("vkCreateDevice Failed: \(err.rawValue)")
             return nil
         }
         self.device = device!
@@ -206,17 +206,17 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         // create queue completion handlr
         switch (Self.queueCompletionHandlerType) {
             case .timelineSemaphore:
-                NSLog("VulkanGraphicsDevice: Create Queue-Completion handler! (TimelineSemaphore)")
+                Log.info("VulkanGraphicsDevice: Create Queue-Completion handler! (TimelineSemaphore)")
                 self.queueCompletionHandlerSemaphore = VulkanQueueCompletionHandlerTimelineSemaphore(
                     device: self,
                     dispatchQueue: dispatchQueue)
             case .fence:
-                NSLog("VulkanGraphicsDevice: Create Queue-Completion handler! (Fence)")
+                Log.info("VulkanGraphicsDevice: Create Queue-Completion handler! (Fence)")
                 self.queueCompletionHandlerFence = VulkanQueueCompletionHandlerFence(
                     device: self,
                     dispatchQueue: dispatchQueue)
             default:
-                NSLog("VulkanGraphicsDevice: No Queue-Completion handler!")
+                Log.warn("VulkanGraphicsDevice: No Queue-Completion handler!")
                 break
         }
     }
@@ -233,7 +233,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             self.pipelineCache = nil
         }
         vkDestroyDevice(self.device, self.allocationCallbacks)
-        NSLog("VulkanGraphicsDevice destroyed.")
+        Log.debug("VulkanGraphicsDevice destroyed.")
     }
 
     public func loadPipelineCache() {
@@ -262,7 +262,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         if err == VK_SUCCESS {
             self.pipelineCache = pipelineCache
         } else {
-            NSLog("ERROR: vkCreatePipelineCache failed: \(err.rawValue)")
+            Log.err("vkCreatePipelineCache failed: \(err.rawValue)")
         }
     }
 
@@ -294,14 +294,14 @@ public class VulkanGraphicsDevice : GraphicsDevice {
                     UserDefaults.standard.set(data, forKey: pipelineCacheDataKey)
                     UserDefaults.standard.synchronize()
 
-                    NSLog("Vulkan PipelineCache saved \(dataLength) bytes.")
+                    Log.info("Vulkan PipelineCache saved \(dataLength) bytes.")
                 }
             } else {
-                NSLog("ERROR: vkGetPipelineCacheData failed: \(result.rawValue)")
+                Log.err("vkGetPipelineCacheData failed: \(result.rawValue)")
             }
 
         } else {
-            NSLog("ERROR: VkPipelineCache is nil")            
+            Log.err("VkPipelineCache is nil")            
         }
     }
 

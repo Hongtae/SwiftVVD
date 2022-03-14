@@ -130,7 +130,7 @@ public class VulkanPhysicalDeviceDescription: CustomStringConvertible {
                 }
             }
         } else {
-            NSLog("ERROR: vkEnumerateDeviceExtensionProperties failed:\(err.rawValue)")
+            Log.err("vkEnumerateDeviceExtensionProperties failed:\(err.rawValue)")
         }
         self.extensions = extensions
     }

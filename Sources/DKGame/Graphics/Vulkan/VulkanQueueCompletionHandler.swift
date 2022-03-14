@@ -125,7 +125,7 @@ public class VulkanQueueCompletionHandlerTimelineSemaphore {
         }
 
         let threadName = "VulkanQueueCompletionHandlerTimelineSemaphore"
-        NSLog("Helper thread: \"\(threadName)\" is started.");
+        Log.info("Helper thread: \"\(threadName)\" is started.");
 
         var result: VkResult = VK_SUCCESS
         var running = true
@@ -156,7 +156,7 @@ public class VulkanQueueCompletionHandlerTimelineSemaphore {
                 for i in 0 ..< numSemaphores {
                     let r = vkGetSemaphoreCounterValue(device, timelineSemaphores[i], &timelineValues[i])
                     if r != VK_SUCCESS {
-                        NSLog("ERROR: vkGetSemaphoreCounterValue failed: \(r.rawValue)")
+                        Log.err("vkGetSemaphoreCounterValue failed: \(r.rawValue)")
                     }
                 }
                 // update queues and handlers.
@@ -199,7 +199,7 @@ public class VulkanQueueCompletionHandlerTimelineSemaphore {
                     self.queueCompletionThreadRequestTerminate == false
                 }
             } else {
-                NSLog("ERROR: vkWaitSemaphores failed: \(result.rawValue)")
+                Log.err("vkWaitSemaphores failed: \(result.rawValue)")
             }
 
             // execute handlers.
@@ -226,7 +226,7 @@ public class VulkanQueueCompletionHandlerTimelineSemaphore {
             fatalError("ERROR: completionHandlers must be empty!")
         }
 
-        NSLog("Helper thread: \"\(threadName)\" is finished.");
+        Log.info("Helper thread: \"\(threadName)\" is finished.");
 
         synchronizedBy(locking: self.queueCompletionHandlerCond) {
             self.queueCompletionThreadRunning = false
@@ -327,7 +327,7 @@ public class VulkanQueueCompletionHandlerFence {
             fatalError("Handler must be empty!")
         }
         if self.reusableFences.count != self.numberOfFences {
-            NSLog("Warning: Some fences were not returned. \(self.reusableFences.count)/\(self.numberOfFences)")
+            Log.warn("Some fences were not returned. \(self.reusableFences.count)/\(self.numberOfFences)")
         }
         for fence in self.reusableFences {
             vkDestroyFence(device.device, fence, device.allocationCallbacks)
@@ -342,7 +342,7 @@ public class VulkanQueueCompletionHandlerFence {
         }
 
         let threadName = "VulkanQueueCompletionHandlerFence"
-        NSLog("Helper thread: \"\(threadName)\" is started.");
+        Log.info("Helper thread: \"\(threadName)\" is started.");
 
         let fenceWaitInterval = 0.002
 
@@ -431,7 +431,7 @@ public class VulkanQueueCompletionHandlerFence {
             fatalError("ERROR: completionHandlers must be empty!")
         }
 
-        NSLog("Helper thread: \"\(threadName)\" is finished.");
+        Log.info("Helper thread: \"\(threadName)\" is finished.");
 
         synchronizedBy(locking: self.queueCompletionHandlerCond) {
             self.queueCompletionThreadRunning = false
@@ -463,7 +463,7 @@ public class VulkanQueueCompletionHandlerFence {
                 fatalError("vkCreateFence failed: \(err.rawValue)")
             }
             self.numberOfFences += 1
-            NSLog("VulkanQueueCompletionHandlerFence: \(self.numberOfFences) fences created.")
+            Log.verbose("VulkanQueueCompletionHandlerFence: \(self.numberOfFences) fences created.")
         }
         return fence!
     }

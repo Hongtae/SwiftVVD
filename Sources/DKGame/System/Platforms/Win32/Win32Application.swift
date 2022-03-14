@@ -61,7 +61,7 @@ public class Win32Application : Application {
 
         if IsDebuggerPresent() == false {
             if keyboardHook != nil {
-                NSLog("Error: Keyboard hook state invalid. (already installed?)")
+                Log.err("Keyboard hook state invalid. (already installed?)")
                 UnhookWindowsHookEx(keyboardHook)
                 keyboardHook = nil;
             }
@@ -71,7 +71,7 @@ public class Win32Application : Application {
             if installHook {
                 keyboardHook = SetWindowsHookExW(WH_KEYBOARD_LL, keyboardHookProc, GetModuleHandleW(nil), 0)
                 if keyboardHook == nil {
-                    NSLog("ERROR: SetWindowsHookEx Failed.");
+                    Log.err("SetWindowsHookEx Failed.");
                 }
             }
         }

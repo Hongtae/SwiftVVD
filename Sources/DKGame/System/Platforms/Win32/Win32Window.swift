@@ -115,9 +115,9 @@ public class Win32Window : Window {
             return RegisterClassExW(&wc)
         }
         if atom == nil { 
-            print("RegisterClassExW failed.")
+            Log.err("RegisterClassExW failed.")
         } else {
-            print("WindowClass: \"\(windowClass)\" registered!")
+            Log.debug("WindowClass: \"\(windowClass)\" registered!")
         }
         return atom
     }()
@@ -132,7 +132,7 @@ public class Win32Window : Window {
         _ = self.registeredWindowClass
 
         if self.create() == nil {
-            NSLog("CreateWindow failed: \(win32ErrorString(GetLastError()))")
+            Log.err("CreateWindow failed: \(win32ErrorString(GetLastError()))")
         }
     }
     deinit {
@@ -235,7 +235,7 @@ public class Win32Window : Window {
         if SetWindowLongPtrW(hWnd, GWLP_USERDATA, unsafeBitCast(self as AnyObject, to: LONG_PTR.self)) == 0 {
             let err: DWORD = GetLastError()
             if err != 0 {
-                NSLog("SetWindowLongPtr failed with error: \(win32ErrorString(err))")
+                Log.err("SetWindowLongPtr failed with error: \(win32ErrorString(err))")
                 DestroyWindow(hWnd)
                 SetLastError(err)
                 return nil
@@ -252,7 +252,7 @@ public class Win32Window : Window {
             if result == S_OK {
                 self.dropTarget = dropTargetPtr
             } else {
-                NSLog("RegisterDragDrop failed: \(win32ErrorString(DWORD(result)))")
+                Log.err("RegisterDragDrop failed: \(win32ErrorString(DWORD(result)))")
             }
         }
         
@@ -287,7 +287,7 @@ public class Win32Window : Window {
                     dt.pointee.vtbl.Release($0)
                 }
                 if refCount > 0 {
-                    NSLog("Warning! DropTarget for Window:\(self.name) in use! refCount:\(refCount)")
+                    Log.warn("DropTarget for Window:\(self.name) in use! refCount:\(refCount)")
                 }
             }
             self.dropTarget = nil
@@ -301,7 +301,7 @@ public class Win32Window : Window {
             // Post WM_CLOSE to destroy window from DefWindowProc().
             PostMessageW(hWnd, UINT(WM_CLOSE), 0, 0);
 
-            NSLog("Window: \(self.name) destroyed")
+            Log.verbose("Window: \(self.name) destroyed")
 
             // post event!
 
@@ -595,7 +595,7 @@ public class Win32Window : Window {
                         window.postWindowEvent(type: .activated)
                         window.resetKeyStates()
                         window.resetMouse()
-                        NSLog("DKGame.numActiveWindows: \(numActiveWindows)")
+                        Log.debug("DKGame.numActiveWindows: \(numActiveWindows)")
                     }
                 } else {
                     if window.activated {
@@ -604,7 +604,7 @@ public class Win32Window : Window {
                         window.resetMouse()
                         window.activated = false
                         window.postWindowEvent(type: .inactivated)                            
-                        NSLog("DKGame.numActiveWindows: \(numActiveWindows)")
+                        Log.debug("DKGame.numActiveWindows: \(numActiveWindows)")
                     }
                 }
                 return 0

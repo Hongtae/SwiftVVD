@@ -51,13 +51,13 @@ public class VulkanCommandQueue: CommandQueue {
         if err == VK_SUCCESS {
             return VulkanCommandBuffer(pool: commandPool!, queue: self)
         }
-        NSLog("ERROR: vkCreateCommandPool failed: \(err.rawValue)")
+        Log.err("vkCreateCommandPool failed: \(err.rawValue)")
         return nil 
     }
 
     public func makeSwapChain(target: Window) -> SwapChain? {
         guard self.family.supportPresentation else {
-            NSLog("ERROR: Vulkan WSI not supported with this queue family. Try to use other queue family!")
+            Log.err("Vulkan WSI not supported with this queue family. Try to use other queue family!")
             return nil
         }
 
@@ -113,7 +113,7 @@ public class VulkanCommandQueue: CommandQueue {
             result = vkQueueSubmit(self.queue, UInt32(submits.count), submits, nil)
         }
         if result != VK_SUCCESS {
-            NSLog("ERROR: vkQueueSubmit failed: \(result.rawValue)")
+            Log.error("vkQueueSubmit failed: \(result.rawValue)")
         }        
         return result == VK_SUCCESS 
     }
