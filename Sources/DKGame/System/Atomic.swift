@@ -90,6 +90,7 @@ private let condition: NSCondition = NSCondition()
 public func synchronized<Result>(_ context: AnyObject, _ body: () throws -> Result) rethrows -> Result {
     let threadId: UInt = DKThreadCurrentId()
     let key = ObjectIdentifier(context)
+
     condition.lock()
     while true {
         if var ctxt = lockedContextTable[key] {
@@ -118,6 +119,162 @@ public func synchronized<Result>(_ context: AnyObject, _ body: () throws -> Resu
         condition.unlock()
     }
     return try body()
+}
+
+public func synchronized(_ context: AnyObject, timeout: Double, _ body: () throws -> Void) rethrows -> Bool {
+    let threadId: UInt = DKThreadCurrentId()
+    let timer: TickCounter = TickCounter.now
+    let key = ObjectIdentifier(context)
+    
+    var locked = false
+    condition.lock()
+    while true {
+        if var ctxt = lockedContextTable[key] {
+            if ctxt.threadId == threadId {
+                ctxt.count += 1
+                lockedContextTable.updateValue(ctxt, forKey: key)
+                locked = true
+                break
+            }
+        } else {
+            lockedContextTable.updateValue((threadId: threadId, count: 1), forKey: key)
+            locked = true
+            break
+        }
+
+        let remain = timeout - timer.elapsed
+        if remain > 0.0 && condition.wait(until: Date(timeIntervalSinceNow: remain)) {
+        } else { // time-out!
+            break
+        }
+    }
+    condition.unlock()
+
+    if locked {
+        defer {
+            condition.lock()
+            var ctxt = lockedContextTable[key]!
+            ctxt.count -= 1
+            if ctxt.count == 0 {
+                lockedContextTable.removeValue(forKey: key)
+                condition.broadcast()
+            } else {
+                lockedContextTable.updateValue(ctxt, forKey: key)
+            }
+            condition.unlock()
+        }
+        try body()
+    }
+    return locked
+}
+
+public func synchronized<Result>(_ objects: [AnyObject], _ body: () throws -> Result) rethrows -> Result {
+    let threadId: UInt = DKThreadCurrentId()
+
+    condition.lock()
+    while true {
+        if objects.allSatisfy({
+            let key = ObjectIdentifier($0)
+            if let ctxt = lockedContextTable[key] {
+                return ctxt.threadId == threadId
+            }
+            return true
+        }) {
+            objects.forEach { 
+                let key = ObjectIdentifier($0)
+                if var ctxt = lockedContextTable[key] {
+                    ctxt.count += 1
+                    lockedContextTable.updateValue(ctxt, forKey: key)
+                } else {
+                    lockedContextTable.updateValue((threadId: threadId, count: 1), forKey: key)
+                }
+            }
+            break
+        }
+        condition.wait()
+    }
+    condition.unlock()
+    defer {
+        condition.lock()
+        var broadcast = false
+        objects.forEach { 
+            let key = ObjectIdentifier($0)
+            var ctxt = lockedContextTable[key]!
+            ctxt.count -= 1
+            if ctxt.count == 0 {
+                lockedContextTable.removeValue(forKey: key)
+                broadcast = true
+            } else {
+                lockedContextTable.updateValue(ctxt, forKey: key)
+            }
+        }
+        if broadcast {
+            condition.broadcast()
+        }
+        condition.unlock()
+    }
+    return try body()
+}
+
+public func synchronized(_ objects: [AnyObject], timeout: Double, _ body: () throws -> Void) rethrows -> Bool {
+    let threadId: UInt = DKThreadCurrentId()
+    let timer: TickCounter = TickCounter.now
+
+    var locked = false
+    condition.lock()
+    while true {
+        if objects.allSatisfy({
+            let key = ObjectIdentifier($0)
+            if let ctxt = lockedContextTable[key] {
+                return ctxt.threadId == threadId
+            }
+            return true
+        }) {
+            objects.forEach { 
+                let key = ObjectIdentifier($0)
+                if var ctxt = lockedContextTable[key] {
+                    ctxt.count += 1
+                    lockedContextTable.updateValue(ctxt, forKey: key)
+                } else {
+                    lockedContextTable.updateValue((threadId: threadId, count: 1), forKey: key)
+                }
+            }
+            locked = true
+            break
+        } else {
+            let remain = timeout - timer.elapsed
+            if remain > 0.0 && condition.wait(until: Date(timeIntervalSinceNow: remain)) {
+            } else { // time-out!
+                break
+            }
+        }
+    }
+    condition.unlock()
+
+    if locked {
+        defer {
+            condition.lock()
+            var broadcast = false
+            objects.forEach { 
+                let key = ObjectIdentifier($0)
+
+                var ctxt = lockedContextTable[key]!
+                ctxt.count -= 1
+                if ctxt.count == 0 {
+                    lockedContextTable.removeValue(forKey: key)
+                    broadcast = true
+                } else {
+                    lockedContextTable.updateValue(ctxt, forKey: key)
+                }
+            }
+            if broadcast {
+                condition.broadcast()
+            }
+            condition.unlock()
+        }
+        try body()
+    }
+    return locked
 }
 
 public func synchronizedBy<Result>(locking lock: NSLocking, _ body: () throws -> Result) rethrows -> Result {
