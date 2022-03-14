@@ -130,7 +130,7 @@ public class VulkanPhysicalDeviceDescription: CustomStringConvertible {
                 }
             }
         } else {
-            Log.err("vkEnumerateDeviceExtensionProperties failed:\(err.rawValue)")
+            Log.err("vkEnumerateDeviceExtensionProperties failed:\(err)")
         }
         self.extensions = extensions
     }

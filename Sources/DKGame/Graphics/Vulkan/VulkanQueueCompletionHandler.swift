@@ -43,7 +43,7 @@ public class VulkanQueueCompletionHandlerTimelineSemaphore {
                 return vkCreateSemaphore(device.device, &createInfo, device.allocationCallbacks, &semaphore)
             }
             if result != VK_SUCCESS {
-                fatalError("ERROR: vkCreateSemaphore failed: \(result.rawValue)")
+                fatalError("ERROR: vkCreateSemaphore failed: \(result)")
             }
             return semaphore!
         }
@@ -199,7 +199,7 @@ public class VulkanQueueCompletionHandlerTimelineSemaphore {
                     self.queueCompletionThreadRequestTerminate == false
                 }
             } else {
-                Log.err("vkWaitSemaphores failed: \(result.rawValue)")
+                Log.err("vkWaitSemaphores failed: \(result)")
             }
 
             // execute handlers.
@@ -388,11 +388,11 @@ public class VulkanQueueCompletionHandlerFence {
                         if fences.count > 0 {
                             err = vkResetFences(device, UInt32(fences.count), fences)
                             if err != VK_SUCCESS {
-                                fatalError("vkResetFences failed: \(err.rawValue)")
+                                fatalError("vkResetFences failed: \(err)")
                             }
                         }
                     } else if err != VK_TIMEOUT {
-                        fatalError("vkWaitForFences failed: \(err.rawValue)")
+                        fatalError("vkWaitForFences failed: \(err)")
                     }
 
                     if completionHandlers.count > 0 {
@@ -460,7 +460,7 @@ public class VulkanQueueCompletionHandlerFence {
 
             let err = vkCreateFence(device.device, &fenceCreateInfo, device.allocationCallbacks, &fence)
             if err != VK_SUCCESS {
-                fatalError("vkCreateFence failed: \(err.rawValue)")
+                fatalError("vkCreateFence failed: \(err)")
             }
             self.numberOfFences += 1
             Log.verbose("VulkanQueueCompletionHandlerFence: \(self.numberOfFences) fences created.")

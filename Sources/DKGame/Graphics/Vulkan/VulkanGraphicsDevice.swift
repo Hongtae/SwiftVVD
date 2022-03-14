@@ -145,7 +145,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         var device: VkDevice? = nil
         let err = vkCreateDevice(physicalDevice.device, &deviceCreateInfo, instance.allocationCallbacks, &device)
         if err != VK_SUCCESS {
-            Log.err("vkCreateDevice Failed: \(err.rawValue)")
+            Log.err("vkCreateDevice Failed: \(err)")
             return nil
         }
         self.device = device!
@@ -262,7 +262,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         if err == VK_SUCCESS {
             self.pipelineCache = pipelineCache
         } else {
-            Log.err("vkCreatePipelineCache failed: \(err.rawValue)")
+            Log.err("vkCreatePipelineCache failed: \(err)")
         }
     }
 
@@ -297,7 +297,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
                     Log.info("Vulkan PipelineCache saved \(dataLength) bytes.")
                 }
             } else {
-                Log.err("vkGetPipelineCacheData failed: \(result.rawValue)")
+                Log.err("vkGetPipelineCacheData failed: \(result)")
             }
 
         } else {

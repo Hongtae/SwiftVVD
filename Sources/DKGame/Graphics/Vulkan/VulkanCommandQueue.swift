@@ -51,7 +51,7 @@ public class VulkanCommandQueue: CommandQueue {
         if err == VK_SUCCESS {
             return VulkanCommandBuffer(pool: commandPool!, queue: self)
         }
-        Log.err("vkCreateCommandPool failed: \(err.rawValue)")
+        Log.err("vkCreateCommandPool failed: \(err)")
         return nil 
     }
 
@@ -113,7 +113,7 @@ public class VulkanCommandQueue: CommandQueue {
             result = vkQueueSubmit(self.queue, UInt32(submits.count), submits, nil)
         }
         if result != VK_SUCCESS {
-            Log.error("vkQueueSubmit failed: \(result.rawValue)")
+            Log.error("vkQueueSubmit failed: \(result)")
         }        
         return result == VK_SUCCESS 
     }

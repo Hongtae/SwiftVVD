@@ -191,7 +191,7 @@ public class VulkanInstance {
                         }
                     }
                 } else {
-                    Log.err("vkEnumerateInstanceExtensionProperties failed:\(err.rawValue)")
+                    Log.err("vkEnumerateInstanceExtensionProperties failed:\(err)")
                 }
                 return extensions
             }            
@@ -232,7 +232,7 @@ public class VulkanInstance {
                     }
                 }
             } else {
-                Log.err("vkEnumerateInstanceExtensionProperties failed:\(err.rawValue)")
+                Log.err("vkEnumerateInstanceExtensionProperties failed:\(err)")
             }
             return extensions
         }()
@@ -372,7 +372,7 @@ public class VulkanInstance {
         var instance: VkInstance?
         var err: VkResult = vkCreateInstance(&instanceCreateInfo, self.allocationCallbacks, &instance)
         if err != VK_SUCCESS {
-            Log.err("vkCreateInstance failed: \(err.rawValue)")
+            Log.err("vkCreateInstance failed: \(err)")
             return nil
         }
 
@@ -415,7 +415,7 @@ public class VulkanInstance {
 
             err = self.extensionProc.vkCreateDebugUtilsMessengerEXT!(instance, &debugUtilsMessengerCreateInfo, self.allocationCallbacks, &self.debugMessenger)
             if err != VK_SUCCESS {
-                Log.err("vkCreateDebugUtilsMessengerEXT failed: \(err.rawValue)")
+                Log.err("vkCreateDebugUtilsMessengerEXT failed: \(err)")
             }
         }
 
@@ -423,7 +423,7 @@ public class VulkanInstance {
         var gpuCount: UInt32 = 0
         err = vkEnumeratePhysicalDevices(instance, &gpuCount, nil)
         if err != VK_SUCCESS {
-            Log.err("vkEnumeratePhysicalDevices failed: \(err.rawValue)")
+            Log.err("vkEnumeratePhysicalDevices failed: \(err)")
         }
         if gpuCount > 0 {
             // enumerate devices
@@ -432,7 +432,7 @@ public class VulkanInstance {
                 let err = vkEnumeratePhysicalDevices(instance, &gpuCount, buffer.baseAddress)
                 initializedCount = Int(gpuCount)
                 if err != VK_SUCCESS {
-                    fatalError("ERROR: vkEnumeratePhysicalDevices failed: \(err.rawValue)")
+                    fatalError("ERROR: vkEnumeratePhysicalDevices failed: \(err)")
                 }
             }
             var maxQueueSize: UInt = 0

@@ -28,9 +28,9 @@ public class VulkanSwapChain: SwapChain {
         let err = vkCreateSemaphore(device.device, &semaphoreCreateInfo, device.allocationCallbacks, &frameReadySemaphore)
         if err != VK_SUCCESS {
 #if DEBUG
-            fatalError("vkCreateSemaphore failed: \(err.rawValue)")            
+            fatalError("vkCreateSemaphore failed: \(err)")            
 #else
-            Log.err("vkCreateSemaphore failed: \(err.rawValue)")            
+            Log.err("vkCreateSemaphore failed: \(err)")            
 #endif
             return nil
         }
@@ -80,7 +80,7 @@ public class VulkanSwapChain: SwapChain {
         err = instance.extensionProc.vkCreateWin32SurfaceKHR!(instance.instance, &surfaceCreateInfo, device.allocationCallbacks, &self.surface)
         if (err != VK_SUCCESS)
         {
-            Log.err("vkCreateWin32SurfaceKHR failed: \(err.rawValue)")
+            Log.err("vkCreateWin32SurfaceKHR failed: \(err)")
             return false
         }
 #endif
@@ -92,7 +92,7 @@ public class VulkanSwapChain: SwapChain {
         err = instance.extensionProc.vkCreateAndroidSurfaceKHR!(instance.instance, &surfaceCreateInfo, device.allocationCallbacks, &self.surface)
         if (err != VK_SUCCESS)
         {
-            Log.err("vkCreateAndroidSurfaceKHR failed: \(err.rawValue)")
+            Log.err("vkCreateAndroidSurfaceKHR failed: \(err)")
             return false
         }
 #endif
@@ -100,7 +100,7 @@ public class VulkanSwapChain: SwapChain {
         var surfaceSupported: VkBool32 = VkBool32(VK_FALSE)
         err = vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevice.device, queueFamilyIndex, surface, &surfaceSupported);
         if err != VK_SUCCESS {
-            Log.err("vkGetPhysicalDeviceSurfaceSupportKHR failed: \(err.rawValue)")
+            Log.err("vkGetPhysicalDeviceSurfaceSupportKHR failed: \(err)")
             return false
         }
         if surfaceSupported == VkBool32(VK_FALSE) {
@@ -113,7 +113,7 @@ public class VulkanSwapChain: SwapChain {
         var surfaceFormatCount: UInt32 = 0
         err = vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice.device, surface, &surfaceFormatCount, nil)
         if err != VK_SUCCESS {
-            Log.err("vkGetPhysicalDeviceSurfaceFormatsKHR failed: \(err.rawValue)")
+            Log.err("vkGetPhysicalDeviceSurfaceFormatsKHR failed: \(err)")
             return false
         }
         if (surfaceFormatCount == 0)
@@ -125,7 +125,7 @@ public class VulkanSwapChain: SwapChain {
         self.availableSurfaceFormats = .init(repeating: VkSurfaceFormatKHR(), count: Int(surfaceFormatCount))
     	err = vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice.device, surface, &surfaceFormatCount, &availableSurfaceFormats)
         if err != VK_SUCCESS {
-            Log.err("vkGetPhysicalDeviceSurfaceFormatsKHR failed: \(err.rawValue)")
+            Log.err("vkGetPhysicalDeviceSurfaceFormatsKHR failed: \(err)")
             return false;
         }
 
