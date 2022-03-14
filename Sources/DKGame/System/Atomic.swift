@@ -87,17 +87,43 @@ public class SpinLock: NSLocking {
 private var lockedContextTable: [ObjectIdentifier: (threadId: UInt, count: UInt64)] = .init()
 private let condition: NSCondition = NSCondition()
 
+#if DEBUG
+private var threadWaitings: [UInt: Set<UInt>] = [:]
+private func setThreadWaiting(target: UInt) {
+    let threadId: UInt = DKThreadCurrentId()
+
+    if let waitings = threadWaitings[target], waitings.contains(threadId) {
+        // deadlock
+        fatalError("deadlock detected, threadId:\(threadId), \(target). Waiting for each other to finish.")
+    }
+    if threadWaitings[threadId] == nil {
+        threadWaitings[threadId] = []
+    }
+    threadWaitings[threadId]!.update(with: target)
+}
+private func clearThreadWaiting() {
+    let threadId: UInt = DKThreadCurrentId()
+    threadWaitings[threadId] = nil
+}
+#else
+private func setThreadWaiting(target: UInt) {}
+private func clearThreadWaiting() {}
+#endif
+
 public func synchronized<Result>(_ context: AnyObject, _ body: () throws -> Result) rethrows -> Result {
     let threadId: UInt = DKThreadCurrentId()
     let key = ObjectIdentifier(context)
 
     condition.lock()
     while true {
+        clearThreadWaiting()
         if var ctxt = lockedContextTable[key] {
             if ctxt.threadId == threadId {
                 ctxt.count += 1
                 lockedContextTable.updateValue(ctxt, forKey: key)
                 break
+            } else {
+                setThreadWaiting(target: ctxt.threadId)
             }
         } else {
             lockedContextTable.updateValue((threadId: threadId, count: 1), forKey: key)
@@ -105,6 +131,7 @@ public func synchronized<Result>(_ context: AnyObject, _ body: () throws -> Resu
         }
         condition.wait()
     }
+    clearThreadWaiting()
     condition.unlock()
     defer {
         condition.lock()
@@ -173,10 +200,15 @@ public func synchronized<Result>(_ objects: [AnyObject], _ body: () throws -> Re
 
     condition.lock()
     while true {
+        clearThreadWaiting()
         if objects.allSatisfy({
             let key = ObjectIdentifier($0)
             if let ctxt = lockedContextTable[key] {
-                return ctxt.threadId == threadId
+                if ctxt.threadId == threadId {
+                    return true
+                }
+                setThreadWaiting(target: ctxt.threadId)
+                return false
             }
             return true
         }) {
@@ -193,6 +225,7 @@ public func synchronized<Result>(_ objects: [AnyObject], _ body: () throws -> Re
         }
         condition.wait()
     }
+    clearThreadWaiting()
     condition.unlock()
     defer {
         condition.lock()
