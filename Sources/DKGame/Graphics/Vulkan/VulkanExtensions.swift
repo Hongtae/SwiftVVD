@@ -17,10 +17,10 @@ public struct VulkanInstanceExtensions {
     var vkSubmitDebugUtilsMessageEXT: PFN_vkSubmitDebugUtilsMessageEXT?
 
     // VK_KHR_surface
-    var vkGetPhysicalDeviceSurfaceSupportKHR: PFN_vkGetPhysicalDeviceSurfaceSupportKHR?
-    var vkGetPhysicalDeviceSurfaceCapabilitiesKHR: PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR?
-    var vkGetPhysicalDeviceSurfaceFormatsKHR: PFN_vkGetPhysicalDeviceSurfaceFormatsKHR?
-    var vkGetPhysicalDeviceSurfacePresentModesKHR: PFN_vkGetPhysicalDeviceSurfacePresentModesKHR?
+    // var vkGetPhysicalDeviceSurfaceSupportKHR: PFN_vkGetPhysicalDeviceSurfaceSupportKHR?
+    // var vkGetPhysicalDeviceSurfaceCapabilitiesKHR: PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR?
+    // var vkGetPhysicalDeviceSurfaceFormatsKHR: PFN_vkGetPhysicalDeviceSurfaceFormatsKHR?
+    // var vkGetPhysicalDeviceSurfacePresentModesKHR: PFN_vkGetPhysicalDeviceSurfacePresentModesKHR?
 
 
 #if VK_USE_PLATFORM_WAYLAND_KHR
@@ -53,10 +53,10 @@ public struct VulkanInstanceExtensions {
         self.vkSubmitDebugUtilsMessageEXT = loadInstanceProc(instance, "vkSubmitDebugUtilsMessageEXT", to: PFN_vkSubmitDebugUtilsMessageEXT.self)
 
         // VK_KHR_surface
-        self.vkGetPhysicalDeviceSurfaceSupportKHR = loadInstanceProc(instance, "vkGetPhysicalDeviceSurfaceSupportKHR", to: PFN_vkGetPhysicalDeviceSurfaceSupportKHR.self)
-        self.vkGetPhysicalDeviceSurfaceCapabilitiesKHR = loadInstanceProc(instance, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR", to: PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR.self)
-        self.vkGetPhysicalDeviceSurfaceFormatsKHR = loadInstanceProc(instance, "vkGetPhysicalDeviceSurfaceFormatsKHR", to: PFN_vkGetPhysicalDeviceSurfaceFormatsKHR.self)
-        self.vkGetPhysicalDeviceSurfacePresentModesKHR = loadInstanceProc(instance, "vkGetPhysicalDeviceSurfacePresentModesKHR", to: PFN_vkGetPhysicalDeviceSurfacePresentModesKHR.self)
+        // self.vkGetPhysicalDeviceSurfaceSupportKHR = loadInstanceProc(instance, "vkGetPhysicalDeviceSurfaceSupportKHR", to: PFN_vkGetPhysicalDeviceSurfaceSupportKHR.self)
+        // self.vkGetPhysicalDeviceSurfaceCapabilitiesKHR = loadInstanceProc(instance, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR", to: PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR.self)
+        // self.vkGetPhysicalDeviceSurfaceFormatsKHR = loadInstanceProc(instance, "vkGetPhysicalDeviceSurfaceFormatsKHR", to: PFN_vkGetPhysicalDeviceSurfaceFormatsKHR.self)
+        // self.vkGetPhysicalDeviceSurfacePresentModesKHR = loadInstanceProc(instance, "vkGetPhysicalDeviceSurfacePresentModesKHR", to: PFN_vkGetPhysicalDeviceSurfacePresentModesKHR.self)
 
 #if VK_USE_PLATFORM_WAYLAND_KHR
         // VK_KHR_wayland_surface

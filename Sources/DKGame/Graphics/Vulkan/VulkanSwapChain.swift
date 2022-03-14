@@ -111,7 +111,7 @@ public class VulkanSwapChain: SwapChain {
         // get color format, color space
         // Get list of supported surface formats
         var surfaceFormatCount: UInt32 = 0
-        err = instance.extensionProc.vkGetPhysicalDeviceSurfaceFormatsKHR!(physicalDevice.device, surface, &surfaceFormatCount, nil)
+        err = vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice.device, surface, &surfaceFormatCount, nil)
         if err != VK_SUCCESS {
             NSLog("ERROR: vkGetPhysicalDeviceSurfaceFormatsKHR failed: \(err.rawValue)")
             return false
@@ -123,7 +123,7 @@ public class VulkanSwapChain: SwapChain {
         }
 
         self.availableSurfaceFormats = .init(repeating: VkSurfaceFormatKHR(), count: Int(surfaceFormatCount))
-    	err = instance.extensionProc.vkGetPhysicalDeviceSurfaceFormatsKHR!(physicalDevice.device, surface, &surfaceFormatCount, &availableSurfaceFormats)
+    	err = vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice.device, surface, &surfaceFormatCount, &availableSurfaceFormats)
         if err != VK_SUCCESS {
             NSLog("ERROR: vkGetPhysicalDeviceSurfaceFormatsKHR failed: \(err.rawValue)")
             return false;

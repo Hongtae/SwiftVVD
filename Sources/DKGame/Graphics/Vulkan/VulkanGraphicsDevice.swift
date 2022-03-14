@@ -106,6 +106,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         let enabledFeatures = physicalDevice.features // enable all features supported by a device
         var deviceCreateInfo = VkDeviceCreateInfo()
         deviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO
+        deviceCreateInfo.queueCreateInfoCount = UInt32(queueCreateInfos.count)
         deviceCreateInfo.pQueueCreateInfos = unsafePointerCopy(queueCreateInfos, holder: tempHolder)
         deviceCreateInfo.pEnabledFeatures = unsafePointerCopy(enabledFeatures, holder: tempHolder)
 
