@@ -70,8 +70,8 @@ public enum WindowEventType {
 
 public struct WindowEvent {
     var type: WindowEventType
-    var windowRect: CGRect
-    var contentRect: CGRect
+    var windowFrame: CGRect
+    var contentBounds: CGRect
     var contentScaleFactor: Float
 }
 
@@ -110,8 +110,8 @@ public struct WindowStyle: OptionSet {
 
 public protocol Window {
 
-    var contentRect: CGRect { get }
-    var windowRect: CGRect { get }
+    var contentBounds: CGRect { get }
+    var windowFrame: CGRect { get }
     var contentScaleFactor: Float { get }
 
     var origin: CGPoint { get set }

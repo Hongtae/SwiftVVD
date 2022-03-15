@@ -2,8 +2,8 @@
 
 public class UIKitWindow: Window {
 
-    public private(set) var contentRect: CGRect = .null
-    public private(set) var windowRect: CGRect = .null
+    public private(set) var contentBounds: CGRect = .null
+    public private(set) var windowFrame: CGRect = .null
     public private(set) var contentScaleFactor: Float = 0.0
 
     public var origin: CGPoint {

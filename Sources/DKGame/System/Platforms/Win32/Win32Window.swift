@@ -69,8 +69,8 @@ public class Win32Window : Window {
 
     public private(set) var hWnd : HWND?
     public private(set) var style: WindowStyle
-    public private(set) var contentRect: CGRect = .null
-    public private(set) var windowRect: CGRect = .null
+    public private(set) var contentBounds: CGRect = .null
+    public private(set) var windowFrame: CGRect = .null
     public private(set) var contentScaleFactor: Float = 1.0
 
     public var name: String
@@ -167,7 +167,7 @@ public class Win32Window : Window {
     }
 
     public var origin: CGPoint {
-        get { self.windowRect.origin }
+        get { self.windowFrame.origin }
         set (value) {
             if let hWnd = self.hWnd {
                 let x = Int32(value.x)
@@ -178,7 +178,7 @@ public class Win32Window : Window {
     }
 
     public var contentSize: CGSize {
-        get { self.contentRect.size }
+        get { self.contentBounds.size }
         set (value) {
             if let hWnd = self.hWnd {
                 var w = Int32(value.width)
@@ -261,14 +261,14 @@ public class Win32Window : Window {
         GetClientRect(hWnd, &rc1)
         GetWindowRect(hWnd, &rc2)
 
-        self.contentRect = CGRect(x: Int(rc1.left),
+        self.contentBounds = CGRect(x: Int(rc1.left),
                                     y: Int(rc1.top),
                                     width: Int(rc1.right - rc1.left),
                                     height: Int(rc1.bottom - rc1.top))
-        self.windowRect = CGRect(x: Int(rc2.left),
-                                    y: Int(rc2.top),
-                                    width: Int(rc2.right - rc2.left),
-                                    height: Int(rc2.bottom - rc2.top))
+        self.windowFrame = CGRect(x: Int(rc2.left),
+                                  y: Int(rc2.top),
+                                  width: Int(rc2.right - rc2.left),
+                                  height: Int(rc2.bottom - rc2.top))
         self.contentScaleFactor = dpiScaleForWindow(hWnd!)
         
         SetWindowPos(hWnd, HWND_TOP, 0, 0, 0, 0, UINT(SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED))
@@ -510,9 +510,9 @@ public class Win32Window : Window {
 
     func postWindowEvent(type: WindowEventType) {
         self.postWindowEvent(WindowEvent(type: type,
-                                            windowRect: self.windowRect,
-                                            contentRect: self.contentRect,
-                                            contentScaleFactor: self.contentScaleFactor))
+                                         windowFrame: self.windowFrame,
+                                         contentBounds: self.contentBounds,
+                                         contentScaleFactor: self.contentScaleFactor))
     }
 
     func postWindowEvent(_ event: WindowEvent) {
@@ -632,22 +632,22 @@ public class Win32Window : Window {
                 GetWindowRect(hWnd, &rcWindow)
                 var resized = false
                 var moved = false
-                if (rcClient.right - rcClient.left) != LONG(window.contentRect.width) ||
-                    (rcClient.bottom - rcClient.top) != LONG(window.contentRect.height) {
+                if (rcClient.right - rcClient.left) != LONG(window.contentBounds.width) ||
+                    (rcClient.bottom - rcClient.top) != LONG(window.contentBounds.height) {
                     resized = true
                 }
-                if rcWindow.left != LONG(window.windowRect.origin.x) || rcWindow.top != LONG(window.windowRect.origin.y) {
+                if rcWindow.left != LONG(window.windowFrame.origin.x) || rcWindow.top != LONG(window.windowFrame.origin.y) {
                     moved = true
                 }
                 if resized || moved {
-                    window.windowRect = CGRect(x: Int(rcWindow.left),
+                    window.windowFrame = CGRect(x: Int(rcWindow.left),
                                                 y: Int(rcWindow.top),
                                                 width: Int(rcWindow.right - rcWindow.left),
                                                 height: Int(rcWindow.bottom - rcWindow.top))
-                    window.contentRect = CGRect(x: Int(rcClient.left),
-                                                y: Int(rcClient.top),
-                                                width: Int(rcClient.right - rcClient.left),
-                                                height: Int(rcClient.bottom - rcClient.top))
+                    window.contentBounds = CGRect(x: Int(rcClient.left),
+                                                  y: Int(rcClient.top),
+                                                  width: Int(rcClient.right - rcClient.left),
+                                                  height: Int(rcClient.bottom - rcClient.top))
 
                     if resized {
                         window.postWindowEvent(type: .resized)
@@ -677,11 +677,11 @@ public class Win32Window : Window {
                         let w: Int = Int(lParam & 0xffff)
                         let h: Int = Int((lParam >> 16) & 0xffff)
                         let size: CGSize = CGSize(width: w, height: h)
-                        window.contentRect.size = size
+                        window.contentBounds.size = size
 
                         var rc: RECT = RECT()
                         GetWindowRect(hWnd, &rc)
-                        window.windowRect = CGRect(x: Int(rc.left),
+                        window.windowFrame = CGRect(x: Int(rc.left),
                                                     y: Int(rc.top),
                                                     width: Int(rc.right - rc.left),
                                                     height: Int(rc.bottom - rc.top))
@@ -694,7 +694,7 @@ public class Win32Window : Window {
                     let x: Int = Int(lParam & 0xffff)         // horizontal position 
                     let y: Int = Int((lParam >> 16) & 0xffff) // vertical position 
 
-                    window.windowRect.origin = CGPoint(x: x, y: y);
+                    window.windowFrame.origin = CGPoint(x: x, y: y);
                     window.postWindowEvent(type: .moved)
                 }
                 return 0
@@ -704,17 +704,17 @@ public class Win32Window : Window {
                 let yDPI: Int = Int((wParam >> 16) & 0xffff)
 
                 let tmp: UnsafePointer<RECT>? = UnsafePointer<RECT>(bitPattern: UInt(lParam))
-                let suggestedWindowRect: RECT = tmp!.pointee
+                let suggestedWindowFrame: RECT = tmp!.pointee
 
                 let scaleFactor: Float = Float(max(xDPI, yDPI)) / 96.0
                 window.contentScaleFactor = scaleFactor
 
                 if window.style.contains(.autoResize) {
                     SetWindowPos(hWnd, nil,
-                        suggestedWindowRect.left,
-                        suggestedWindowRect.top,
-                        suggestedWindowRect.right - suggestedWindowRect.left,
-                        suggestedWindowRect.bottom - suggestedWindowRect.top,
+                        suggestedWindowFrame.left,
+                        suggestedWindowFrame.top,
+                        suggestedWindowFrame.right - suggestedWindowFrame.left,
+                        suggestedWindowFrame.bottom - suggestedWindowFrame.top,
                         UINT(SWP_NOZORDER | SWP_NOACTIVATE))
                 } else {
                     window.postWindowEvent(type: .resized)
