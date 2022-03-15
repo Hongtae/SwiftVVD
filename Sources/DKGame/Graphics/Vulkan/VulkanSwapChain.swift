@@ -10,10 +10,10 @@ public class VulkanSwapChain: SwapChain {
     let queue: VulkanCommandQueue
     let frameReadySemaphore: VkSemaphore
 
+    var enableVSync = false
     var swapchain: VkSwapchainKHR?
     var surface: VkSurfaceKHR?
-    var enableVSync = false
-
+    var surfaceFormat = VkSurfaceFormatKHR()
     var availableSurfaceFormats: [VkSurfaceFormatKHR] = []
 
     private let lock = SpinLock()
@@ -129,7 +129,30 @@ public class VulkanSwapChain: SwapChain {
             return false;
         }
 
-        return false
+        // If the surface format list only includes one entry with VK_FORMAT_UNDEFINED,
+        // there is no preferered format, so we assume VK_FORMAT_B8G8R8A8_UNORM
+        if (surfaceFormatCount == 1) && (availableSurfaceFormats[0].format == VK_FORMAT_UNDEFINED) {
+            self.surfaceFormat.format = VK_FORMAT_B8G8R8A8_UNORM;
+        } else {
+            // Always select the first available color format
+            // If you need a specific format (e.g. SRGB) you'd need to
+            // iterate over the list of available surface format and
+            // check for it's presence
+            self.surfaceFormat.format = availableSurfaceFormats[0].format;
+        }
+        self.surfaceFormat.colorSpace = availableSurfaceFormats[0].colorSpace;
+
+        // create swapchain
+        return self.update()
+    }
+
+    public func update() -> Bool {
+        let device = self.queue.device as! VulkanGraphicsDevice
+        let instance = device.instance
+        let physicalDevice = device.physicalDevice
+
+
+        return false 
     }
 
     public func currentRenderPassDescriptor() -> RenderPassDescriptor {
