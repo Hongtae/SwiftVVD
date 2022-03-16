@@ -3,7 +3,7 @@ import Vulkan
 import Foundation
 
 public class VulkanSwapChain: SwapChain {
-    public var pixelFormat: PixelFormat = .invalid
+
     public var maximumBufferCount: UInt64 = 0
 
     let window: Window
@@ -16,8 +16,13 @@ public class VulkanSwapChain: SwapChain {
     var surfaceFormat = VkSurfaceFormatKHR()
     var availableSurfaceFormats: [VkSurfaceFormatKHR] = []
 
+    var imageViews: [VulkanImageView] = []
+
     private let lock = SpinLock()
     private var deviceReset = false
+
+    private var frameIndex: UInt32 = 0
+    private var renderPassDescriptor: RenderPassDescriptor
 
     public init?(queue: VulkanCommandQueue, window: Window) {
 
@@ -38,6 +43,9 @@ public class VulkanSwapChain: SwapChain {
         self.frameReadySemaphore = frameReadySemaphore!
         self.queue = queue
         self.window = window
+        self.renderPassDescriptor = RenderPassDescriptor(
+            colorAttachments: [],
+            depthStencilAttachment: RenderPassDepthStencilAttachmentDescriptor())
 
         window.addEventObserver(self) { (event: WindowEvent) in
             if event.type == .resized {
@@ -53,6 +61,14 @@ public class VulkanSwapChain: SwapChain {
         let device = queue.device as! VulkanGraphicsDevice
         let instance = device.instance
 
+        for imageView in self.imageViews {
+            imageView.image!.image = nil
+            imageView.image = nil
+            imageView.waitSemaphore = nil
+            imageView.signalSemaphore = nil
+        }
+    	self.imageViews.removeAll()
+
         if let swapchain = self.swapchain {
     		vkDestroySwapchainKHR(device.device, swapchain, device.allocationCallbacks);
         }
@@ -63,7 +79,7 @@ public class VulkanSwapChain: SwapChain {
     }
 
     public func setup() -> Bool {
-        let device = self.queue.device as! VulkanGraphicsDevice
+        let device = queue.device as! VulkanGraphicsDevice
         let instance = device.instance
         let physicalDevice = device.physicalDevice
 
@@ -132,15 +148,15 @@ public class VulkanSwapChain: SwapChain {
         // If the surface format list only includes one entry with VK_FORMAT_UNDEFINED,
         // there is no preferered format, so we assume VK_FORMAT_B8G8R8A8_UNORM
         if (surfaceFormatCount == 1) && (availableSurfaceFormats[0].format == VK_FORMAT_UNDEFINED) {
-            self.surfaceFormat.format = VK_FORMAT_B8G8R8A8_UNORM;
+            self.surfaceFormat.format = VK_FORMAT_B8G8R8A8_UNORM
         } else {
             // Always select the first available color format
             // If you need a specific format (e.g. SRGB) you'd need to
             // iterate over the list of available surface format and
             // check for it's presence
-            self.surfaceFormat.format = availableSurfaceFormats[0].format;
+            self.surfaceFormat.format = availableSurfaceFormats[0].format
         }
-        self.surfaceFormat.colorSpace = availableSurfaceFormats[0].colorSpace;
+        self.surfaceFormat.colorSpace = availableSurfaceFormats[0].colorSpace
 
         // create swapchain
         return self.update()
@@ -148,16 +164,288 @@ public class VulkanSwapChain: SwapChain {
 
     public func update() -> Bool {
         let device = self.queue.device as! VulkanGraphicsDevice
-        let instance = device.instance
+        //let instance = device.instance
         let physicalDevice = device.physicalDevice
 
+        let contentBounds = self.window.contentBounds
+        var width = UInt32(contentBounds.width)
+        var height = UInt32(contentBounds.height)
 
-        return false 
+        var err: VkResult = VK_SUCCESS
+        let swapchainOld = self.swapchain
+
+        // Get physical device surface properties and formats
+        var surfaceCaps = VkSurfaceCapabilitiesKHR()
+        err = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice.device, self.surface, &surfaceCaps)
+        if err != VK_SUCCESS {
+            Log.err("vkGetPhysicalDeviceSurfaceCapabilitiesKHR failed: \(err)")
+            return false
+        }
+
+        // Get available present modes
+        var presentModeCount: UInt32 = 0
+        err = vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice.device, self.surface, &presentModeCount, nil)
+        if err != VK_SUCCESS {
+            Log.err("vkGetPhysicalDeviceSurfacePresentModesKHR failed: \(err)")
+            return false
+        }
+        if presentModeCount == 0 {
+            Log.err("vkGetPhysicalDeviceSurfacePresentModesKHR returns 0 present mode count")
+            return false
+        }
+
+        var presentModes: [VkPresentModeKHR] = .init(repeating: VkPresentModeKHR(rawValue: 0), count: Int(presentModeCount))
+        err = vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice.device, self.surface, &presentModeCount, &presentModes);
+        if err != VK_SUCCESS {
+            Log.err("vkGetPhysicalDeviceSurfacePresentModesKHR failed: \(err)")
+            return false
+        }
+
+        var swapchainExtent = VkExtent2D()
+        // If width (and height) equals the special value 0xFFFFFFFF, the size of the surface will be set by the swapchain
+        if surfaceCaps.currentExtent.width == UInt32.max {
+            // If the surface size is undefined, the size is set to
+            // the size of the images requested.
+            swapchainExtent.width = width
+            swapchainExtent.height = height
+        } else {
+            // If the surface size is defined, the swap chain size must match
+            swapchainExtent = surfaceCaps.currentExtent
+            width = surfaceCaps.currentExtent.width
+            height = surfaceCaps.currentExtent.height
+        }
+
+        // Select a present mode for the swapchain
+        // VK_PRESENT_MODE_IMMEDIATE_KHR
+        // VK_PRESENT_MODE_MAILBOX_KHR
+        // VK_PRESENT_MODE_FIFO_KHR
+        // VK_PRESENT_MODE_FIFO_RELAXED_KHR
+
+        // The VK_PRESENT_MODE_FIFO_KHR mode must always be present as per spec
+        // This mode waits for the vertical blank ("v-sync")
+        var swapchainPresentMode: VkPresentModeKHR = VK_PRESENT_MODE_FIFO_KHR
+
+        // If v-sync is not requested, try to find a mailbox mode
+        // It's the lowest latency non-tearing present mode available
+        if self.enableVSync == false {
+            for i in 0 ..< Int(presentModeCount) {
+                if presentModes[i] == VK_PRESENT_MODE_MAILBOX_KHR {
+                    swapchainPresentMode = VK_PRESENT_MODE_MAILBOX_KHR
+                    break
+                }
+                if swapchainPresentMode != VK_PRESENT_MODE_MAILBOX_KHR && presentModes[i] == VK_PRESENT_MODE_IMMEDIATE_KHR {
+                    swapchainPresentMode = VK_PRESENT_MODE_IMMEDIATE_KHR
+                }
+            }
+        }
+
+        // Determine the number of images
+        var desiredNumberOfSwapchainImages: UInt32 = surfaceCaps.minImageCount + 1
+        if (surfaceCaps.maxImageCount > 0) && (desiredNumberOfSwapchainImages > surfaceCaps.maxImageCount) {
+            desiredNumberOfSwapchainImages = surfaceCaps.maxImageCount
+        }
+
+        // Find the transformation of the surface
+        var preTransform = VkSurfaceTransformFlagsKHR(surfaceCaps.currentTransform.rawValue)
+        if surfaceCaps.supportedTransforms & UInt32(VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR.rawValue) != 0 {
+            // We prefer a non-rotated transform
+            preTransform = VkSurfaceTransformFlagsKHR(VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR.rawValue)
+        }
+
+        var swapchainCreateInfo = VkSwapchainCreateInfoKHR()
+        swapchainCreateInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR
+        swapchainCreateInfo.surface = self.surface
+        swapchainCreateInfo.minImageCount = desiredNumberOfSwapchainImages
+        swapchainCreateInfo.imageFormat = self.surfaceFormat.format
+        swapchainCreateInfo.imageColorSpace = self.surfaceFormat.colorSpace
+        swapchainCreateInfo.imageExtent = VkExtent2D(width: swapchainExtent.width, height: swapchainExtent.height)
+        swapchainCreateInfo.imageUsage = UInt32(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT.rawValue)
+        swapchainCreateInfo.preTransform = VkSurfaceTransformFlagBitsKHR(Int32(preTransform))
+        swapchainCreateInfo.imageArrayLayers = 1
+        swapchainCreateInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE
+        swapchainCreateInfo.queueFamilyIndexCount = 0
+        swapchainCreateInfo.pQueueFamilyIndices = nil
+        swapchainCreateInfo.presentMode = swapchainPresentMode
+        swapchainCreateInfo.oldSwapchain = swapchainOld
+        // Setting clipped to VK_TRUE allows the implementation to discard rendering outside of the surface area
+        swapchainCreateInfo.clipped = VkBool32(VK_TRUE)
+        swapchainCreateInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR
+
+        // Set additional usage flag for blitting from the swapchain images if supported
+        var formatProps = VkFormatProperties()
+        vkGetPhysicalDeviceFormatProperties(physicalDevice.device, self.surfaceFormat.format, &formatProps)
+        if formatProps.optimalTilingFeatures & UInt32(VK_FORMAT_FEATURE_BLIT_DST_BIT.rawValue) != 0 {
+            swapchainCreateInfo.imageUsage |= UInt32(VK_IMAGE_USAGE_TRANSFER_SRC_BIT.rawValue)
+        }
+
+        err = vkCreateSwapchainKHR(device.device, &swapchainCreateInfo, device.allocationCallbacks, &self.swapchain)
+        if err != VK_SUCCESS {
+            Log.err("vkCreateSwapchainKHR failed: \(err)")
+            return false
+        }
+
+        let presentModeString = { (mode: VkPresentModeKHR) -> String in
+            switch (mode)
+            {
+            case VK_PRESENT_MODE_IMMEDIATE_KHR: return "VK_PRESENT_MODE_IMMEDIATE_KHR"
+            case VK_PRESENT_MODE_MAILBOX_KHR:   return "VK_PRESENT_MODE_MAILBOX_KHR"
+            case VK_PRESENT_MODE_FIFO_KHR:      return "VK_PRESENT_MODE_FIFO_KHR"
+            case VK_PRESENT_MODE_FIFO_RELAXED_KHR:  return "VK_PRESENT_MODE_FIFO_RELAXED_KHR"
+            case VK_PRESENT_MODE_SHARED_DEMAND_REFRESH_KHR: return "VK_PRESENT_MODE_SHARED_DEMAND_REFRESH_KHR"
+            case VK_PRESENT_MODE_SHARED_CONTINUOUS_REFRESH_KHR: return "VK_PRESENT_MODE_SHARED_CONTINUOUS_REFRESH_KHR"
+            default: break
+            }
+            return "## UNKNOWN ##";
+        }
+        Log.info("VkSwapchainKHR created. (\(swapchainExtent.width) x \(swapchainExtent.height), V-sync:\(self.enableVSync), \(presentModeString(swapchainPresentMode)))")
+
+        // If an existing swap chain is re-created, destroy the old swap chain
+        // This also cleans up all the presentable images
+        if let swapchainOld = swapchainOld {
+            vkDestroySwapchainKHR(device.device, swapchainOld, device.allocationCallbacks)
+        }
+
+        for imageView in self.imageViews {
+            imageView.image!.image = nil
+            imageView.image = nil
+            imageView.waitSemaphore = nil
+            imageView.signalSemaphore = nil
+        }
+        self.imageViews.removeAll()
+
+        var swapchainImageCount: UInt32 = 0;
+        err = vkGetSwapchainImagesKHR(device.device, self.swapchain, &swapchainImageCount, nil)
+        if err != VK_SUCCESS {
+            Log.err("vkGetSwapchainImagesKHR failed: \(err)")
+            return false
+        }
+
+        // Get the swap chain images
+        var swapchainImages: [VkImage?] = .init(repeating: nil, count: Int(swapchainImageCount))
+        err = vkGetSwapchainImagesKHR(device.device, self.swapchain, &swapchainImageCount, &swapchainImages)
+        if err != VK_SUCCESS {
+            Log.err("vkGetSwapchainImagesKHR failed: \(err)")
+            return false
+        }
+
+        // Get the swap chain buffers containing the image and imageview
+        self.imageViews.reserveCapacity(swapchainImages.count)
+        for image in swapchainImages {
+            var imageViewCreateInfo = VkImageViewCreateInfo()
+            imageViewCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO
+            imageViewCreateInfo.format = self.surfaceFormat.format
+            imageViewCreateInfo.components = VkComponentMapping(
+                r: VK_COMPONENT_SWIZZLE_R,
+                g: VK_COMPONENT_SWIZZLE_G,
+                b: VK_COMPONENT_SWIZZLE_B,
+                a: VK_COMPONENT_SWIZZLE_A)
+
+            imageViewCreateInfo.subresourceRange.aspectMask = VkImageAspectFlags(VK_IMAGE_ASPECT_COLOR_BIT.rawValue)
+            imageViewCreateInfo.subresourceRange.baseMipLevel = 0
+            imageViewCreateInfo.subresourceRange.levelCount = 1
+            imageViewCreateInfo.subresourceRange.baseArrayLayer = 0
+            imageViewCreateInfo.subresourceRange.layerCount = 1
+            imageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D
+            imageViewCreateInfo.flags = 0
+            imageViewCreateInfo.image = image
+
+            var imageView: VkImageView? = nil
+            err = vkCreateImageView(device.device, &imageViewCreateInfo, device.allocationCallbacks, &imageView)
+            if err != VK_SUCCESS {
+                Log.err("vkCreateImageView failed: \(err)")
+                return false
+            }
+
+            let swapchainImage = VulkanImage(device: device, image: image!)
+            swapchainImage.imageType = VK_IMAGE_TYPE_2D
+            swapchainImage.format = swapchainCreateInfo.imageFormat
+            swapchainImage.extent = VkExtent3D(width: swapchainExtent.width, height: swapchainExtent.height, depth: 1 )
+            swapchainImage.mipLevels = 1
+            swapchainImage.arrayLayers = swapchainCreateInfo.imageArrayLayers
+            swapchainImage.usage = swapchainCreateInfo.imageUsage
+            swapchainImage.setLayout(
+                layout: VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                accessMask: 0,
+                stageBegin: UInt32(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT.rawValue),
+                stageEnd: UInt32(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT.rawValue))
+
+            let swapchainImageView = VulkanImageView(device: device, imageView: imageView!)
+            swapchainImageView.image = swapchainImage
+            swapchainImageView.waitSemaphore = frameReadySemaphore
+            swapchainImageView.signalSemaphore = frameReadySemaphore
+
+            self.imageViews.append(swapchainImageView)
+        }
+        return true 
+    }
+
+    public func setupFrame() {
+        let device = self.queue.device as! VulkanGraphicsDevice
+
+        let resetSwapchain = synchronizedBy(locking: self.lock) { self.deviceReset }
+        if resetSwapchain {
+            vkDeviceWaitIdle(device.device)
+            synchronizedBy(locking: self.lock) { self.deviceReset = false }
+            _ = self.update()
+        }
+
+        vkAcquireNextImageKHR(device.device, self.swapchain, UInt64.max, self.frameReadySemaphore, nil, &self.frameIndex)
+
+        let colorAttachment = RenderPassColorAttachmentDescriptor()
+        colorAttachment.renderTarget = self.imageViews[Int(self.frameIndex)]
+    	colorAttachment.clearColor = Color(r: 0, g: 0, b: 0, a:0)
+        colorAttachment.loadAction = .clear
+	    colorAttachment.storeAction = .store
+
+    	self.renderPassDescriptor.colorAttachments.removeAll()
+	    self.renderPassDescriptor.colorAttachments.append(colorAttachment)
+    }
+
+    public var pixelFormat: PixelFormat {
+        get {
+            synchronizedBy(locking: self.lock) {
+                PixelFormat.from(format: self.surfaceFormat.format)
+            }
+        }
+        set (value) {
+            synchronizedBy(locking: self.lock) {
+                let format = value.vkFormat()
+                if format != self.surfaceFormat.format {
+                    if value.isColorFormat() {
+                        var formatChanged = false
+                        if self.availableSurfaceFormats.count == 1 &&
+                           self.availableSurfaceFormats[0].format == VK_FORMAT_UNDEFINED {
+                            formatChanged = true
+                            self.surfaceFormat.format = format
+                            self.surfaceFormat.colorSpace = self.availableSurfaceFormats[0].colorSpace       
+                        } else {
+                            for fmt in self.availableSurfaceFormats {
+                                if fmt.format == format {
+                                    formatChanged = true
+                                    self.surfaceFormat = fmt
+                                    break
+                                }
+                            }
+                        }
+                        if formatChanged {
+                            self.deviceReset = true
+                            Log.info("SwapChain.pixelFormat value changed!")
+                        } else {
+                            Log.err("Failed to set SwapChain.pixelFormat property: not supported format")
+                        }
+                    } else {
+                        Log.err("Failed to set SwapChain.pixelFormat property: invalid format");
+                    }
+                }
+            }            
+        }
     }
 
     public func currentRenderPassDescriptor() -> RenderPassDescriptor {
-        let depthStencilAttachment = RenderPassDepthStencilAttachmentDescriptor()
-        return RenderPassDescriptor(colorAttachments:[], depthStencilAttachment: depthStencilAttachment)
+        if self.renderPassDescriptor.colorAttachments.count == 0 {
+            self.setupFrame()
+        }
+        return self.renderPassDescriptor
     }
 
     public func present(waitEvents: [Event]) -> Bool { false }

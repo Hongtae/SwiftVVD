@@ -1,26 +1,13 @@
-public class Color {
-    public var red : Float = 0.0
-    public var green : Float = 0.0
-    public var blue : Float = 0.0
-    public var alpha : Float = 1.0
+public struct Color {
+    public var r : Float = 0.0
+    public var g : Float = 0.0
+    public var b : Float = 0.0
+    public var a : Float = 1.0
 
-    public init() {
-        self.red = 0.0
-        self.green = 0.0
-        self.blue = 0.0
-        self.alpha = 1.0
+    public static func make(_ r: Float, _ g: Float, _ b: Float, _ a: Float) -> Color {
+        return Color(r: r, g: g, b: b, a: a)
     }
 
-    public init(red: Float, green: Float, blue: Float, alpha: Float) {
-        self.red = red
-        self.green = green
-        self.blue = blue
-        self.alpha = alpha
-    }
-
-    static func make(_ red: Float, _ green: Float, _ blue: Float, _ alpha: Float) -> Color {
-        return Color(red: red, green: green, blue: blue, alpha: alpha)
-    }
-    static var black: Color { return .make(0.0, 0.0, 0.0, 1.0) }
-    static var white: Color { return .make(1.0, 1.0, 1.0, 1.0) }
+    public static let black: Color = .make(0.0, 0.0, 0.0, 1.0)
+    public static let white: Color = .make(1.0, 1.0, 1.0, 1.0)
 }
