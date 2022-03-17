@@ -4,8 +4,6 @@ import Foundation
 
 public class VulkanSwapChain: SwapChain {
 
-    public var maximumBufferCount: UInt64 = 0
-
     let window: Window
     let queue: VulkanCommandQueue
     let frameReadySemaphore: VkSemaphore
@@ -441,6 +439,10 @@ public class VulkanSwapChain: SwapChain {
         }
     }
 
+    public var maximumBufferCount: UInt {
+        synchronizedBy(locking: self.lock) { UInt(self.imageViews.count) }
+    }
+
     public func currentRenderPassDescriptor() -> RenderPassDescriptor {
         if self.renderPassDescriptor.colorAttachments.count == 0 {
             self.setupFrame()
@@ -448,7 +450,48 @@ public class VulkanSwapChain: SwapChain {
         return self.renderPassDescriptor
     }
 
-    public func present(waitEvents: [Event]) -> Bool { false }
+    @discardableResult
+    public func present(waitEvents: [Event]) -> Bool {
+        var waitSemaphores: [VkSemaphore?] = []
+        waitSemaphores.reserveCapacity(waitEvents.count + 1)
+        for event in waitEvents {
+            let s = event as! VulkanSemaphore
+            waitSemaphores.append(s.semaphore)
+        }
+        waitSemaphores.append(self.frameReadySemaphore)
+
+        var presentInfo = VkPresentInfoKHR()
+        presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR
+        presentInfo.swapchainCount = 1
+
+        let err: VkResult = withUnsafePointer(to: self.swapchain) {
+            presentInfo.pSwapchains = $0
+            return withUnsafePointer(to: self.frameIndex) {
+                presentInfo.pImageIndices = $0
+
+            	// Check if a wait semaphore has been specified to wait for before presenting the image
+                if waitSemaphores.count > 0 {
+                    return waitSemaphores.withUnsafeBufferPointer {
+                        presentInfo.pWaitSemaphores = $0.baseAddress
+                        presentInfo.waitSemaphoreCount = UInt32($0.count)
+
+                        return vkQueuePresentKHR(self.queue.queue, &presentInfo)
+                    }
+                } else {
+                    presentInfo.pWaitSemaphores = nil
+                    presentInfo.waitSemaphoreCount = 0
+                    return vkQueuePresentKHR(self.queue.queue, &presentInfo)
+                }
+            }
+        }
+
+        if err != VK_SUCCESS {
+            Log.err("vkQueuePresentKHR failed: \(err)")
+        }
+
+    	renderPassDescriptor.colorAttachments.removeAll(keepingCapacity: true)
+	    return err == VK_SUCCESS
+    }
 }
 
 #endif //if ENABLE_VULKAN

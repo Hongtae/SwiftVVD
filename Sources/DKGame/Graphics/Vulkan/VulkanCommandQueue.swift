@@ -117,6 +117,7 @@ public class VulkanCommandQueue: CommandQueue {
         }        
         return result == VK_SUCCESS 
     }
+    
     func waitIdle() -> Bool { vkQueueWaitIdle(self.queue) == VK_SUCCESS }
 }
 #endif //if ENABLE_VULKAN

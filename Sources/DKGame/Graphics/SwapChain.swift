@@ -1,9 +1,8 @@
 public protocol SwapChain {
     var pixelFormat: PixelFormat { get set }
+    var maximumBufferCount: UInt { get }
 
     func currentRenderPassDescriptor() -> RenderPassDescriptor
-    var maximumBufferCount: UInt64 { get }
-
     func present(waitEvents: [Event]) -> Bool
 }
 

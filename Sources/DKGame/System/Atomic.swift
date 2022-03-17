@@ -3,8 +3,8 @@ import Foundation
 
 public class AtomicNumber32 {
     private var atomic: DKAtomicNumber32 = DKAtomicNumber32()
-    public init() {
-        atomic.value = 0
+    public init(_ value: Int32 = 0) {
+        atomic.value = value
     }
     public func increment() -> Int32 { DKAtomicNumber32_Increment(&atomic) }
     public func decrement() -> Int32 { DKAtomicNumber32_Decrement(&atomic) }
@@ -33,8 +33,8 @@ public class AtomicNumber32 {
 
 public class AtomicNumber64 {
     private var atomic: DKAtomicNumber64 = DKAtomicNumber64()
-    public init() {
-        atomic.value = 0
+    public init(_ value: Int64 = 0) {
+        atomic.value = value
     }
     public func increment() -> Int64 { DKAtomicNumber64_Increment(&atomic) }
     public func decrement() -> Int64 { DKAtomicNumber64_Decrement(&atomic) }

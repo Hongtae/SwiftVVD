@@ -35,6 +35,8 @@ public class VulkanGraphicsDevice : GraphicsDevice {
     var queueCompletionHandlerSemaphore: VulkanQueueCompletionHandlerTimelineSemaphore?
     var queueCompletionHandlerFence: VulkanQueueCompletionHandlerFence?
 
+    public var autoIncrementTimelineEvent = false
+
     public init?(instance: VulkanInstance,
                  physicalDevice: VulkanPhysicalDeviceDescription,
                  requiredExtensions: [String],
@@ -356,11 +358,55 @@ public class VulkanGraphicsDevice : GraphicsDevice {
     public func makeSamplerState() -> SamplerState? {
         return nil
     }
+
     public func makeEvent() -> Event? {
-        return nil
+        var createInfo = VkSemaphoreCreateInfo()
+        createInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO
+
+        var semaphore: VkSemaphore? = nil
+        var typeCreateInfo = VkSemaphoreTypeCreateInfo()
+        typeCreateInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO
+
+        if self.autoIncrementTimelineEvent {
+            typeCreateInfo.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE
+        } else {
+            typeCreateInfo.semaphoreType = VK_SEMAPHORE_TYPE_BINARY
+        }
+
+        typeCreateInfo.initialValue = 0
+        let result: VkResult = withUnsafePointer(to: typeCreateInfo) {
+            createInfo.pNext = UnsafeRawPointer($0)
+            return vkCreateSemaphore(self.device, &createInfo, self.allocationCallbacks, &semaphore)
+        }
+        if result != VK_SUCCESS {
+            Log.err("vkCreateSemaphore failed: \(result)")
+            return nil
+        }
+        if typeCreateInfo.semaphoreType == VK_SEMAPHORE_TYPE_TIMELINE {
+            return VulkanSemaphoreAutoIncrementalTimeline(device: self, semaphore: semaphore!)            
+        }
+        return VulkanSemaphore(device: self, semaphore: semaphore!)
     }
+
     public func makeSemaphore() -> Semaphore? {
-        return nil
+        var createInfo = VkSemaphoreCreateInfo()
+        createInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO
+
+        var semaphore: VkSemaphore? = nil
+        var typeCreateInfo = VkSemaphoreTypeCreateInfo()
+        typeCreateInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO
+        typeCreateInfo.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE
+        typeCreateInfo.initialValue = 0
+
+        let result: VkResult = withUnsafePointer(to: typeCreateInfo) {
+            createInfo.pNext = UnsafeRawPointer($0)
+            return vkCreateSemaphore(self.device, &createInfo, self.allocationCallbacks, &semaphore)
+        }
+        if result != VK_SUCCESS {
+            Log.err("vkCreateSemaphore failed: \(result)")
+            return nil
+        }
+        return VulkanTimelineSemaphore(device: self, semaphore: semaphore!)
     }
 }
 #endif //if ENABLE_VULKAN

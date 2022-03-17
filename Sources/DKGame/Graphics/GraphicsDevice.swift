@@ -4,11 +4,11 @@ public enum CPUCacheMode {
 }
 
 public protocol Event {
-    func device() -> GraphicsDevice
+    var device: GraphicsDevice { get }
 }
 
 public protocol Semaphore {
-    func device() -> GraphicsDevice
+    var device: GraphicsDevice { get }
 }
 
 public protocol GraphicsDevice {
