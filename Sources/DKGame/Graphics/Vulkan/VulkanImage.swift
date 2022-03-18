@@ -84,13 +84,76 @@ public class VulkanImage {
         }
     }
 
+    @discardableResult
     public func setLayout(layout: VkImageLayout,
                           accessMask: VkAccessFlags,
                           stageBegin: UInt32,
                           stageEnd: UInt32,
                           queueFamilyIndex: UInt32 = VK_QUEUE_FAMILY_IGNORED,
-                          commandBuffer: VkCommandBuffer? = nil) {
+                          commandBuffer: VkCommandBuffer? = nil) -> VkImageLayout {
+        assert(layout != VK_IMAGE_LAYOUT_UNDEFINED)
+        assert(layout != VK_IMAGE_LAYOUT_PREINITIALIZED)
 
+        self.layoutLock.lock()
+        defer { self.layoutLock.unlock() }
+
+        if let commandBuffer = commandBuffer {
+            var barrier = VkImageMemoryBarrier()
+            barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER
+            barrier.srcAccessMask = layoutInfo.accessMask
+            barrier.dstAccessMask = accessMask
+            barrier.oldLayout = layoutInfo.layout
+            barrier.newLayout = layout
+            barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED
+            barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED
+            barrier.image = image
+
+            let pixelFormat = self.pixelFormat
+            if pixelFormat.isColorFormat() {
+                barrier.subresourceRange.aspectMask = VkImageAspectFlags(VK_IMAGE_ASPECT_COLOR_BIT.rawValue)
+            } else {
+                if pixelFormat.isDepthFormat() {
+                    barrier.subresourceRange.aspectMask |= UInt32(VK_IMAGE_ASPECT_DEPTH_BIT.rawValue)
+                }
+                if pixelFormat.isStencilFormat() {
+                    barrier.subresourceRange.aspectMask |= UInt32(VK_IMAGE_ASPECT_STENCIL_BIT.rawValue)
+                }
+            }
+            barrier.subresourceRange.baseMipLevel = 0
+            barrier.subresourceRange.levelCount = VK_REMAINING_MIP_LEVELS
+            barrier.subresourceRange.baseArrayLayer = 0
+            barrier.subresourceRange.layerCount = VK_REMAINING_ARRAY_LAYERS
+
+            var srcStageMask:VkPipelineStageFlags = self.layoutInfo.stageMaskEnd
+
+            if self.layoutInfo.queueFamilyIndex != queueFamilyIndex {
+                srcStageMask = VkPipelineStageFlags(VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT.rawValue)
+                barrier.srcAccessMask = 0
+            }
+            if srcStageMask == VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT.rawValue {
+                srcStageMask = VkPipelineStageFlags(VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT.rawValue)
+                barrier.srcAccessMask = 0
+            }
+
+            vkCmdPipelineBarrier(commandBuffer,
+                                 srcStageMask,
+                                 stageBegin,
+                                 0,         //dependencyFlags
+                                 0,         //pMemoryBarriers
+                                 nil,       //pMemoryBarriers
+                                 0,         //bufferMemoryBarrierCount
+                                 nil,       //pBufferMemoryBarriers
+                                 1,         //imageMemoryBarrierCount
+                                 &barrier)  //pImageMemoryBarriers
+        }
+
+        let oldLayout = self.layoutInfo.layout
+        self.layoutInfo.layout = layout
+        self.layoutInfo.stageMaskBegin = stageBegin
+        self.layoutInfo.stageMaskEnd = stageEnd
+        self.layoutInfo.accessMask = accessMask
+        self.layoutInfo.queueFamilyIndex = queueFamilyIndex
+        return oldLayout
     }
 
     public func layout() -> VkImageLayout {
