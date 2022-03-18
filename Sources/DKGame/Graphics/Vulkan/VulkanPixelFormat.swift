@@ -69,7 +69,7 @@ extension PixelFormat {
         }
     }
     
-    func vkFormat() -> VkFormat {
+    public func vkFormat() -> VkFormat {
         switch (self)
         {
         case .r8Unorm:          return VK_FORMAT_R8_UNORM

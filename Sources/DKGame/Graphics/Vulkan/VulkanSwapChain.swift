@@ -30,11 +30,8 @@ public class VulkanSwapChain: SwapChain {
         var frameReadySemaphore: VkSemaphore?
         let err = vkCreateSemaphore(device.device, &semaphoreCreateInfo, device.allocationCallbacks, &frameReadySemaphore)
         if err != VK_SUCCESS {
-#if DEBUG
-            fatalError("vkCreateSemaphore failed: \(err)")            
-#else
             Log.err("vkCreateSemaphore failed: \(err)")            
-#endif
+            assertionFailure("vkCreateSemaphore failed: \(err)")            
             return nil
         }
 

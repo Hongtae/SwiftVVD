@@ -427,13 +427,11 @@ public class VulkanInstance {
         }
         if gpuCount > 0 {
             // enumerate devices
-            let physicalDevices: [VkPhysicalDevice?] = .init(unsafeUninitializedCapacity: Int(gpuCount)) {
-                buffer, initializedCount in
-                let err = vkEnumeratePhysicalDevices(instance, &gpuCount, buffer.baseAddress)
-                initializedCount = Int(gpuCount)
-                if err != VK_SUCCESS {
-                    fatalError("ERROR: vkEnumeratePhysicalDevices failed: \(err)")
-                }
+            var physicalDevices: [VkPhysicalDevice?] = .init(repeating: nil, count: Int(gpuCount))
+            err = vkEnumeratePhysicalDevices(instance, &gpuCount, &physicalDevices)
+            if err != VK_SUCCESS {
+                Log.err("ERROR: vkEnumeratePhysicalDevices failed: \(err)")
+                return nil
             }
             var maxQueueSize: UInt = 0
             for device in physicalDevices {
@@ -443,6 +441,7 @@ public class VulkanInstance {
             }
         } else {
             Log.err("No Vulkan GPU found")
+            return nil
         }
         // sort deviceList order by Type/NumQueues/Memory
         self.physicalDevices.sort {

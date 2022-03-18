@@ -27,8 +27,8 @@ public class VulkanQueueCompletionHandlerTimelineSemaphore {
     var queueCompletionThreadRequestTerminate: Bool = false
     var queueCompletionHandlerCond = NSCondition()
 
-    init(device: VulkanGraphicsDevice, dispatchQueue: DispatchQueue? = nil) {
-        let createTimelineSemaphore = { (initialValue: UInt64) -> VkSemaphore in
+    init?(device: VulkanGraphicsDevice, dispatchQueue: DispatchQueue? = nil) {
+        let createTimelineSemaphore = { (initialValue: UInt64) -> VkSemaphore? in
             var semaphore: VkSemaphore? = nil
             var createInfo = VkSemaphoreCreateInfo()
             createInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO
@@ -43,13 +43,23 @@ public class VulkanQueueCompletionHandlerTimelineSemaphore {
                 return vkCreateSemaphore(device.device, &createInfo, device.allocationCallbacks, &semaphore)
             }
             if result != VK_SUCCESS {
-                fatalError("ERROR: vkCreateSemaphore failed: \(result)")
+                Log.err("vkCreateSemaphore failed: \(result)")
+                return nil
             }
-            return semaphore!
+            return semaphore
         }
 
+        // temporary hold semaphores (to destroy all semaphores on init faiure)
+        var createdSemaphores: [VkSemaphore] = []
+
         self.dispatchQueue = dispatchQueue
-        self.deviceEventSemaphore = TimelineSemaphore(semaphore: createTimelineSemaphore(0))
+        if let semaphore = createTimelineSemaphore(0) {
+            self.deviceEventSemaphore = TimelineSemaphore(semaphore: semaphore)
+            createdSemaphores.append(semaphore)
+        } else {
+            createdSemaphores.forEach { vkDestroySemaphore(device.device, $0, device.allocationCallbacks) }
+            return nil
+        }
 
         var numQueues = 0
         for queueFamily in device.queueFamilies {
@@ -59,9 +69,15 @@ public class VulkanQueueCompletionHandlerTimelineSemaphore {
 
         for queueFamily in device.queueFamilies {
             for queue in queueFamily.freeQueues {
-                let s = QueueSubmissionSemaphore(queue: queue,
-                                                 semaphore: createTimelineSemaphore(0))
-                self.queueCompletionSemaphoreHandlers.append(s)
+                if let semaphore = createTimelineSemaphore(0) {
+                    let s = QueueSubmissionSemaphore(queue: queue,
+                                                    semaphore: semaphore)
+                    self.queueCompletionSemaphoreHandlers.append(s)
+                    createdSemaphores.append(semaphore)
+                } else {
+                    createdSemaphores.forEach { vkDestroySemaphore(device.device, $0, device.allocationCallbacks) }
+                    return nil
+                }
             }
         }
 
@@ -97,9 +113,7 @@ public class VulkanQueueCompletionHandlerTimelineSemaphore {
         vkDestroySemaphore(device.device, self.deviceEventSemaphore.semaphore, device.allocationCallbacks)
         for handler in self.queueCompletionSemaphoreHandlers {
             vkDestroySemaphore(device.device, handler.semaphore, device.allocationCallbacks)
-            if handler.handlers.isEmpty == false {
-                fatalError("Handler must be empty!")
-            }
+            assert(handler.handlers.isEmpty, "Handler must be empty!")
         }
         self.queueCompletionSemaphoreHandlers = []
     }
@@ -163,15 +177,12 @@ public class VulkanQueueCompletionHandlerTimelineSemaphore {
                 synchronizedBy(locking: self.queueCompletionHandlerCond) {
 
                     // queueCompletionSemaphoreHandlers must be immutable!
-                    if numSemaphores != self.queueCompletionSemaphoreHandlers.count + 1 {
-                        fatalError("ERROR! wrong semaphore count")
-                    }
+                    assert(numSemaphores == self.queueCompletionSemaphoreHandlers.count + 1, "Wrong semaphore count")
 
                     for index in 0 ..< self.queueCompletionSemaphoreHandlers.count {
                         let s = self.queueCompletionSemaphoreHandlers[index]
-                        if s.semaphore != timelineSemaphores[index] {
-                            fatalError("Invalid semaphore!")
-                        }
+                        assert(s.semaphore == timelineSemaphores[index], "Invalid semaphore!")
+
                         let timeline = timelineValues[index]
                         var handlersToProcess = 0
                         while handlersToProcess < s.handlers.count {
@@ -187,9 +198,8 @@ public class VulkanQueueCompletionHandlerTimelineSemaphore {
                         self.queueCompletionSemaphoreHandlers[index].handlers.removeFirst(handlersToProcess)
                     }
 
-                    if self.deviceEventSemaphore.semaphore != timelineSemaphores.last {
-                        fatalError("Invalid semaphore!")
-                    }
+                    assert(self.deviceEventSemaphore.semaphore == timelineSemaphores.last, "Invalid semaphore!")
+
                     self.deviceEventSemaphore.timeline = timelineValues.last!
 
                     running = self.queueCompletionThreadRequestTerminate == false
@@ -222,9 +232,7 @@ public class VulkanQueueCompletionHandlerTimelineSemaphore {
             }
         }
 
-        if completionHandlers.isEmpty == false {
-            fatalError("ERROR: completionHandlers must be empty!")
-        }
+        assert(completionHandlers.isEmpty, "completionHandlers must be empty!")
 
         Log.info("Helper thread: \"\(threadName)\" is finished.");
 
@@ -253,14 +261,11 @@ public class VulkanQueueCompletionHandlerTimelineSemaphore {
             return begin
         }
         let index = lowerBound(queue) { a, b in UInt(bitPattern: a) < UInt(bitPattern: b) }
-        if self.queueCompletionSemaphoreHandlers[index].queue != queue {
-            fatalError("Invalid queue!")
-        }
+        assert(self.queueCompletionSemaphoreHandlers[index].queue == queue, "Invalid queue!")
 
         return synchronizedBy(locking: self.queueCompletionHandlerCond) {
-            if self.queueCompletionThreadRunning == false {
-                fatalError("Thread is not running!")
-            }
+            assert(self.queueCompletionThreadRunning, "Thread is not running!")
+
             var s = self.queueCompletionSemaphoreHandlers[index]
             s.waitValue += 1 
 
@@ -323,9 +328,8 @@ public class VulkanQueueCompletionHandlerFence {
             }
         }
 
-        if self.pendingFenceCallbacks.isEmpty == false {
-            fatalError("Handler must be empty!")
-        }
+        assert(self.pendingFenceCallbacks.isEmpty, "Handler must be empty!")
+
         if self.reusableFences.count != self.numberOfFences {
             Log.warn("Some fences were not returned. \(self.reusableFences.count)/\(self.numberOfFences)")
         }
@@ -388,11 +392,13 @@ public class VulkanQueueCompletionHandlerFence {
                         if fences.count > 0 {
                             err = vkResetFences(device, UInt32(fences.count), fences)
                             if err != VK_SUCCESS {
-                                fatalError("vkResetFences failed: \(err)")
+                                Log.err("vkResetFences failed: \(err)")
+                                assertionFailure("vkResetFences failed: \(err)")
                             }
                         }
                     } else if err != VK_TIMEOUT {
-                        fatalError("vkWaitForFences failed: \(err)")
+                        Log.err("vkWaitForFences failed: \(err)")
+                        assertionFailure("vkWaitForFences failed: \(err)")
                     }
 
                     if completionHandlers.count > 0 {
@@ -427,9 +433,7 @@ public class VulkanQueueCompletionHandlerFence {
             }
         }
 
-        if completionHandlers.isEmpty == false {
-            fatalError("ERROR: completionHandlers must be empty!")
-        }
+        assert(completionHandlers.isEmpty, "completionHandlers must be empty!")
 
         Log.info("Helper thread: \"\(threadName)\" is finished.");
 
@@ -460,7 +464,8 @@ public class VulkanQueueCompletionHandlerFence {
 
             let err = vkCreateFence(device.device, &fenceCreateInfo, device.allocationCallbacks, &fence)
             if err != VK_SUCCESS {
-                fatalError("vkCreateFence failed: \(err)")
+                Log.err("vkCreateFence failed: \(err)")
+                assertionFailure("vkCreateFence failed: \(err)")
             }
             self.numberOfFences += 1
             Log.verbose("VulkanQueueCompletionHandlerFence: \(self.numberOfFences) fences created.")

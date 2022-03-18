@@ -48,16 +48,12 @@ public class VulkanImage {
             layoutInfo.stageMaskEnd = VkPipelineStageFlags(VK_PIPELINE_STAGE_HOST_BIT.rawValue)
         }
 
-        guard 
-            extent.width > 0 &&
-            extent.height > 0 &&
-            extent.depth > 0 &&
-            mipLevels > 0 &&
-            arrayLayers > 0 &&
-            format != VK_FORMAT_UNDEFINED
-        else {
-            fatalError("Invalid Image")
-        }
+        assert(extent.width > 0)
+        assert(extent.height > 0)
+        assert(extent.depth > 0)
+        assert(mipLevels > 0)
+        assert(arrayLayers > 0)
+        assert(format != VK_FORMAT_UNDEFINED)
     }
 
     public init(device: VulkanGraphicsDevice, image: VkImage) {
