@@ -4,9 +4,9 @@ import Foundation
 
 public class VulkanDeviceMemory {
 
-    let memory: VkDeviceMemory
-    let type: VkMemoryType
-    let length: UInt
+    public let memory: VkDeviceMemory
+    public let type: VkMemoryType
+    public let length: UInt
 
     var mapped: UnsafeMutableRawPointer?
 
@@ -39,12 +39,66 @@ public class VulkanDeviceMemory {
         vkFreeMemory(device.device, self.memory, device.allocationCallbacks)
     }
 
+    @discardableResult
     public func invalidate(offset: UInt, size: UInt) -> Bool {
-        false
+        if self.mapped != nil &&
+           (type.propertyFlags & UInt32(VK_MEMORY_PROPERTY_HOST_COHERENT_BIT.rawValue)) == 0 {
+
+            if offset < length {
+                let device = self.device as! VulkanGraphicsDevice
+
+                var range = VkMappedMemoryRange()
+                range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE
+                range.memory = memory
+                range.offset = VkDeviceSize(offset)
+
+                if size == VK_WHOLE_SIZE {
+                    range.size = VkDeviceSize(size)
+                } else {
+                    range.size = VkDeviceSize(min(size, length - offset))
+                }
+                let result = vkInvalidateMappedMemoryRanges(device.device, 1, &range)
+                if result == VK_SUCCESS {
+                    return true
+                } else {
+                    Log.err("vkInvalidateMappedMemoryRanges failed: \(result)")
+                }
+            } else {
+                Log.err("VulkanDeviceMemory::Invalidate() failed: Out of range")
+            }
+        }
+        return false
     }
 
+    @discardableResult
     public func flush(offset: UInt, size: UInt) -> Bool {
-        false
+        if self.mapped != nil &&
+           (type.propertyFlags & UInt32(VK_MEMORY_PROPERTY_HOST_COHERENT_BIT.rawValue)) == 0 {
+           
+            if offset < length {
+                let device = self.device as! VulkanGraphicsDevice
+
+                var range = VkMappedMemoryRange()
+                range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE
+                range.memory = memory
+                range.offset = VkDeviceSize(offset)
+
+                if size == VK_WHOLE_SIZE {
+                    range.size = VkDeviceSize(size)
+                } else {
+                    range.size = VkDeviceSize(min(size, length - offset))
+                }
+                let result = vkFlushMappedMemoryRanges(device.device, 1, &range)
+                if result == VK_SUCCESS {
+                    return true
+                } else {
+                    Log.err("vkFlushMappedMemoryRanges failed: \(result)")
+                }
+            } else {
+                Log.err("VulkanDeviceMemory::Flush() failed: Out of range")
+            }
+        }
+        return false
     }
 }
 

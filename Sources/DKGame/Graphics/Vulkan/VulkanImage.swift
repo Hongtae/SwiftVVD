@@ -78,8 +78,8 @@ public class VulkanImage {
     }
 
     deinit {
-        let device = self.device as! VulkanGraphicsDevice
         if let image = self.image {
+            let device = self.device as! VulkanGraphicsDevice
             vkDestroyImage(device.device, image, device.allocationCallbacks)
         }
     }
@@ -175,7 +175,38 @@ public class VulkanImage {
                 return .unknown
         }
     }
-    public var pixelFormat: PixelFormat { .from(format: self.format) }    
+    public var pixelFormat: PixelFormat { .from(format: self.format) }
+
+    public static func commonAccessMask(forLayout layout: VkImageLayout) -> VkAccessFlags {
+        var accessMask: VkAccessFlags = 0
+        switch (layout) {
+        case VK_IMAGE_LAYOUT_UNDEFINED:
+            accessMask = 0
+        case VK_IMAGE_LAYOUT_GENERAL:
+            accessMask = UInt32(VK_ACCESS_SHADER_READ_BIT.rawValue) | UInt32(VK_ACCESS_SHADER_WRITE_BIT.rawValue)
+        case VK_IMAGE_LAYOUT_PREINITIALIZED:
+            accessMask = UInt32(VK_ACCESS_HOST_WRITE_BIT.rawValue)
+        case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
+            accessMask = UInt32(VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT.rawValue)
+        case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
+            accessMask = UInt32(VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT.rawValue)
+        case VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+             VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_STENCIL_ATTACHMENT_OPTIMAL,
+             VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_STENCIL_READ_ONLY_OPTIMAL:
+            accessMask = UInt32(VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT.rawValue)
+        case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
+            accessMask = UInt32(VK_ACCESS_SHADER_READ_BIT.rawValue)
+        case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
+            accessMask = UInt32(VK_ACCESS_TRANSFER_READ_BIT.rawValue)
+        case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
+            accessMask = UInt32(VK_ACCESS_TRANSFER_WRITE_BIT.rawValue)
+        case VK_IMAGE_LAYOUT_PRESENT_SRC_KHR:
+            accessMask = 0
+        default:
+            accessMask = 0
+        }
+        return accessMask
+    }
 }
 
 #endif //if ENABLE_VULKAN

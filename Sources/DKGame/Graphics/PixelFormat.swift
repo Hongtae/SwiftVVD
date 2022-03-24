@@ -75,102 +75,74 @@ public enum PixelFormat {
 extension PixelFormat {
     public func isColorFormat() -> Bool {
         switch (self) {
-            case .invalid:      fallthrough
-            case .depth32Float: fallthrough
-            case .stencil8:     fallthrough
-            case .depth32Float_stencil8:    return false
+            case .invalid, .depth32Float, .stencil8, .depth32Float_stencil8:
+                return false
             default:
                 return true
         }
     }
     public func isDepthFormat() -> Bool {
         switch (self) {
-            case .depth32Float: fallthrough
-            case .depth32Float_stencil8:    return true
+            case .depth32Float, .depth32Float_stencil8:
+                return true
             default:
                 return false
         }
     }
     public func isStencilFormat() -> Bool {
-        if self == .stencil8 || self == .depth32Float_stencil8 {
-            return true
+        switch (self) {
+            case .stencil8, .depth32Float_stencil8:
+                return true
+            default:
+                return false
         }
-        return false
     }
     public func bytesPerPixel() -> Int {
         switch (self) {
             // 8 bit formats
-            case .r8Unorm:      fallthrough
-            case .r8Snorm:      fallthrough
-            case .r8Uint:       fallthrough
-            case .r8Sint:       return 1
+            case .r8Unorm, .r8Snorm, .r8Uint, .r8Sint:
+                return 1
 
             // 16 bit formats
-            case .r16Unorm:     fallthrough
-            case .r16Snorm:     fallthrough
-            case .r16Uint:      fallthrough
-            case .r16Sint:      fallthrough
-            case .r16Float:     fallthrough
-        
-            case .rg8Unorm:     fallthrough
-            case .rg8Snorm:     fallthrough
-            case .rg8Uint:      fallthrough
-            case .rg8Sint:      return 2
+            case .r16Unorm, .r16Snorm, .r16Uint, .r16Sint, .r16Float,
+                 .rg8Unorm, .rg8Snorm, .rg8Uint, .rg8Sint:
+                return 2
 
-                // 32 bit formats
-            case .r32Uint:          fallthrough
-            case .r32Sint:          fallthrough
-            case .r32Float:         fallthrough
+            // 32 bit formats
+            case .r32Uint, .r32Sint, .r32Float,
+                 .rg16Unorm, .rg16Snorm, .rg16Uint, .rg16Sint, .rg16Float,
+                 .rgba8Unorm, .rgba8Unorm_srgb, .rgba8Snorm, .rgba8Uint, .rgba8Sint,
+                 .bgra8Unorm, .bgra8Unorm_srgb:
+                return 4
 
-            case .rg16Unorm:        fallthrough
-            case .rg16Snorm:        fallthrough
-            case .rg16Uint:         fallthrough
-            case .rg16Sint:         fallthrough
-            case .rg16Float:        fallthrough
-
-            case .rgba8Unorm:       fallthrough
-            case .rgba8Unorm_srgb:  fallthrough
-            case .rgba8Snorm:       fallthrough
-            case .rgba8Uint:        fallthrough
-            case .rgba8Sint:        fallthrough
-
-            case .bgra8Unorm:       fallthrough
-            case .bgra8Unorm_srgb:  fallthrough  
-
-                // packed 32 bit formats
-            case .rgb10a2Unorm:     fallthrough
-            case .rgb10a2Uint:      fallthrough
-            
-            case .rg11b10Float:     fallthrough
-            case .rgb9e5Float:      return 4
+            // packed 32 bit formats
+            case .rgb10a2Unorm, .rgb10a2Uint,
+                 .rg11b10Float, .rgb9e5Float:
+                return 4
     
             // 64 bit formats
-            case .rg32Uint:         fallthrough
-            case .rg32Sint:         fallthrough
-            case .rg32Float:        fallthrough
-
-            case .rgba16Unorm:      fallthrough
-            case .rgba16Snorm:      fallthrough
-            case .rgba16Uint:       fallthrough
-            case .rgba16Sint:       fallthrough
-            case .rgba16Float:      return 8
+            case .rg32Uint, .rg32Sint, .rg32Float,
+                 .rgba16Unorm, .rgba16Snorm, .rgba16Uint, .rgba16Sint, .rgba16Float:
+                return 8
 
             // 128 bit formats
-            case .rgba32Uint:       fallthrough
-            case .rgba32Sint:       fallthrough
-            case .rgba32Float:      return 16
+            case .rgba32Uint, .rgba32Sint, .rgba32Float:
+                return 16
 
             // Depth
-            case .depth32Float:     return 4
+            case .depth32Float:
+                return 4
 
             // Stencil (Uint)
-            case .stencil8:         return 1
+            case .stencil8:
+                return 1
 
             // Depth Stencil
             case .depth32Float_stencil8: // 32-depth: 8-stencil: 24-unused.
                 return 8
 
-            case .invalid:          return 0
+            case .invalid:
+                return 0
         }
         // return 0 // unsupported pixel format!
     }

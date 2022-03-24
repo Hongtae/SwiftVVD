@@ -27,6 +27,8 @@ public protocol Texture {
 
     var type: TextureType { get }
     var pixelFormat: PixelFormat { get }
+
+    var device: GraphicsDevice { get }
 }
 
 public struct TextureDescriptor {

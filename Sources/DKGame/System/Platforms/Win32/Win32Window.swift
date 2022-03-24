@@ -1012,18 +1012,18 @@ public class Win32Window : Window {
             case UINT(WM_SYSCOMMAND):
                 switch (wParam)
                 {
-                case WPARAM(SC_CONTEXTHELP): fallthrough // help menu
-                case WPARAM(SC_KEYMENU): fallthrough     // alt-key
-                case WPARAM(SC_HOTKEY):                  // hotkey
+                case WPARAM(SC_CONTEXTHELP), // help menu
+                     WPARAM(SC_KEYMENU),     // alt-key
+                     WPARAM(SC_HOTKEY):                  // hotkey
                     return 0
                 default:
                     break
                 }
-            case UINT(WM_SYSKEYDOWN): fallthrough
-            case UINT(WM_SYSKEYUP):
+            case UINT(WM_SYSKEYDOWN),
+                 UINT(WM_SYSKEYUP):
                 return 0    // block ALT-key
-            case UINT(WM_KEYDOWN): fallthrough
-            case UINT(WM_KEYUP):
+            case UINT(WM_KEYDOWN),
+                 UINT(WM_KEYUP):
                 return 0
             case UINT(WM_DKWINDOW_SHOWCURSOR):
                 // If we need to control mouse position from other thread,

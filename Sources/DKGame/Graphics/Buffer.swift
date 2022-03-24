@@ -4,7 +4,8 @@ public enum GPUBufferStorageMode {
 }
 
 public protocol Buffer {
-    func contents() -> UnsafeMutableRawPointer
+    func contents() -> UnsafeMutableRawPointer?
     func flush()
-    var length: Int { get }
+    var length: UInt { get }
+    var device: GraphicsDevice { get }
 }
