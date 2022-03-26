@@ -56,5 +56,5 @@ public struct RenderPipelineDescriptor {
 }
 
 public protocol RenderPipelineState {
-    func device() -> GraphicsDevice 
+    var device: GraphicsDevice { get }
 }

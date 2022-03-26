@@ -37,5 +37,5 @@ public struct SamplerDescriptor {
 }
 
 public protocol SamplerState {
-    func device() -> GraphicsDevice
+    var device: GraphicsDevice { get }
 }

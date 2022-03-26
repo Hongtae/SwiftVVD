@@ -5,5 +5,5 @@ public struct ComputePipelineDescriptor {
 }
 
 public protocol ComputePipelineState {
-    func device() -> GraphicsDevice
+    var device: GraphicsDevice { get }
 }
