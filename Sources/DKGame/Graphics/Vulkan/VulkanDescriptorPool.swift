@@ -2,7 +2,7 @@
 import Vulkan
 import Foundation
 
-private let descriptorTypes: [VkDescriptorType] = [
+let descriptorTypes: [VkDescriptorType] = [
     VK_DESCRIPTOR_TYPE_SAMPLER,
     VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
     VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
@@ -34,13 +34,13 @@ private func index(of type: VkDescriptorType) -> Int {
     return begin
 }
 
-private func type(at index: Int) -> VkDescriptorType {
+func descriptorType(at index: Int) -> VkDescriptorType {
     return descriptorTypes[index]
 }
 
 public struct VulkanDescriptorPoolID: Hashable, Equatable {
-    let mask: UInt32
-    let typeSize: [UInt32]
+    public let mask: UInt32
+    public let typeSize: [UInt32]
 
     public init() {
         self.mask = 0
@@ -122,7 +122,7 @@ public class VulkanDescriptorPool {
         vkDestroyDescriptorPool(device.device, pool, device.allocationCallbacks)
     }
 
-    public func allocateDescriptorSet(layout: VkDescriptorSetLayout) -> VkDescriptorSet {
+    public func allocateDescriptorSet(layout: VkDescriptorSetLayout) -> VkDescriptorSet? {
         var allocateInfo = VkDescriptorSetAllocateInfo()
         allocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO
         allocateInfo.descriptorPool = self.pool
@@ -138,7 +138,7 @@ public class VulkanDescriptorPool {
         } else {
             Log.err("vkAllocateDescriptorSets failed: \(result)")
         }
-        return descriptorSet!
+        return descriptorSet
     }
 
     public func release(descriptorSets: [VkDescriptorSet]) {

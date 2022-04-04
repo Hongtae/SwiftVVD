@@ -37,6 +37,12 @@ public class VulkanGraphicsDevice : GraphicsDevice {
 
     public var autoIncrementTimelineEvent = false
 
+    private struct DescriptorPoolChainMap {
+        var poolChainMap: [VulkanDescriptorPoolID: VulkanDescriptorPoolChain] = [:]
+        let lock: SpinLock = SpinLock()
+    }
+    private var descriptorPoolChainMaps: [DescriptorPoolChainMap] = .init(repeating: DescriptorPoolChainMap(), count: 7)
+
     public init?(instance: VulkanInstance,
                  physicalDevice: VulkanPhysicalDeviceDescription,
                  requiredExtensions: [String],
@@ -224,6 +230,9 @@ public class VulkanGraphicsDevice : GraphicsDevice {
     }
     
     deinit {
+        for maps in self.descriptorPoolChainMaps {
+            assert(maps.poolChainMap.isEmpty)
+        }
         vkDeviceWaitIdle(self.device)
         self.queueCompletionHandlerSemaphore?.destroy(device: self)
         self.queueCompletionHandlerFence?.destroy(device: self)
@@ -407,6 +416,50 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             return nil
         }
         return VulkanTimelineSemaphore(device: self, semaphore: semaphore!)
+    }
+
+    public func makeDescriptorSet(layout: VkDescriptorSetLayout, poolID: VulkanDescriptorPoolID) -> VulkanDescriptorSet? {
+        if poolID.mask != 0 {
+            let hash = withUnsafeBytes(of: poolID) { CRC32.hash(data: $0).hash }
+            let index: Int = Int(hash % UInt32(descriptorPoolChainMaps.count))
+
+            self.descriptorPoolChainMaps[index].lock.lock()
+            defer {
+                self.descriptorPoolChainMaps[index].lock.unlock()
+            }
+
+            if self.descriptorPoolChainMaps[index].poolChainMap[poolID] == nil {
+                self.descriptorPoolChainMaps[index].poolChainMap[poolID] = VulkanDescriptorPoolChain(device: self, poolID: poolID)
+            }
+            
+            let chain = self.descriptorPoolChainMaps[index].poolChainMap[poolID]!
+            assert(chain.device! === self)
+            assert(chain.poolID == poolID)
+
+            if let allocationInfo = chain.allocateDescriptorSet(layout: layout) {
+                return VulkanDescriptorSet(device: self,
+                                           descriptorPool: allocationInfo.descriptorPool,
+                                           descriptorSet: allocationInfo.descriptorSet)
+            }
+        }
+        return nil
+    }
+
+    public func destroyDescriptorSet(_ set: VkDescriptorSet, pool: VulkanDescriptorPool) {
+        let poolID = pool.poolID
+        assert(poolID.mask != 0)
+
+        let hash = withUnsafeBytes(of: poolID) { CRC32.hash(data: $0).hash }
+        let index: Int = Int(hash % UInt32(descriptorPoolChainMaps.count))
+
+        synchronizedBy(locking: self.descriptorPoolChainMaps[index].lock) {
+            pool.release(descriptorSets: [set])
+            let chain = self.descriptorPoolChainMaps[index].poolChainMap[poolID]!
+            let numPools = chain.cleanup()
+            if numPools == 0 {
+                self.descriptorPoolChainMaps[index].poolChainMap[poolID] = nil
+            }
+        }
     }
 }
 #endif //if ENABLE_VULKAN

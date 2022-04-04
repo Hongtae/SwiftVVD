@@ -7,14 +7,22 @@ public class VulkanDescriptorSet {
     public let descriptorSet: VkDescriptorSet
     public let descriptorPool: VulkanDescriptorPool
 
+
+    public var bufferViews: [VulkanBufferView]
+    public var imageViews: [VulkanImageView]
+    public var samplers: [VulkanSampler]
+
     public init(device: VulkanGraphicsDevice, descriptorPool: VulkanDescriptorPool, descriptorSet: VkDescriptorSet) {
         self.device = device
         self.descriptorPool = descriptorPool
         self.descriptorSet = descriptorSet
+        self.bufferViews = []
+        self.imageViews = []
+        self.samplers = []
     }
 
     deinit {
-        // device.destroyDescriptorSet(self.descriptorPool, self.descriptorSet)
+        device.destroyDescriptorSet(self.descriptorSet, pool: self.descriptorPool)
     }
 }
 
