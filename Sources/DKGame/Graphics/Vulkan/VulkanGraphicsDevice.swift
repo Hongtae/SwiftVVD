@@ -445,15 +445,17 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         return nil
     }
 
-    public func destroyDescriptorSet(_ set: VkDescriptorSet, pool: VulkanDescriptorPool) {
+    public func releaseDescriptorSets(_ sets: [VkDescriptorSet], from pool: VulkanDescriptorPool) {
         let poolID = pool.poolID
         assert(poolID.mask != 0)
+
+        guard sets.isEmpty == false else { return }
 
         let hash = withUnsafeBytes(of: poolID) { CRC32.hash(data: $0).hash }
         let index: Int = Int(hash % UInt32(descriptorPoolChainMaps.count))
 
         synchronizedBy(locking: self.descriptorPoolChainMaps[index].lock) {
-            pool.release(descriptorSets: [set])
+            pool.release(descriptorSets: sets)
             let chain = self.descriptorPoolChainMaps[index].poolChainMap[poolID]!
             let numPools = chain.cleanup()
             if numPools == 0 {

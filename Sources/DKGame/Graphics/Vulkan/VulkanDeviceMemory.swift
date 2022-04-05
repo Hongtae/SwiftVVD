@@ -64,7 +64,7 @@ public class VulkanDeviceMemory {
                     Log.err("vkInvalidateMappedMemoryRanges failed: \(result)")
                 }
             } else {
-                Log.err("VulkanDeviceMemory::Invalidate() failed: Out of range")
+                Log.err("VulkanDeviceMemory.invalidate() failed: Out of range")
             }
         }
         return false
@@ -95,7 +95,7 @@ public class VulkanDeviceMemory {
                     Log.err("vkFlushMappedMemoryRanges failed: \(result)")
                 }
             } else {
-                Log.err("VulkanDeviceMemory::Flush() failed: Out of range")
+                Log.err("VulkanDeviceMemory.flush() failed: Out of range")
             }
         }
         return false

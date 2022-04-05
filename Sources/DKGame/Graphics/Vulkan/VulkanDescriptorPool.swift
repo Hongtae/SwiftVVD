@@ -34,10 +34,6 @@ private func index(of type: VkDescriptorType) -> Int {
     return begin
 }
 
-func descriptorType(at index: Int) -> VkDescriptorType {
-    return descriptorTypes[index]
-}
-
 public struct VulkanDescriptorPoolID: Hashable, Equatable {
     public let mask: UInt32
     public let typeSize: [UInt32]
@@ -87,6 +83,7 @@ public struct VulkanDescriptorPoolID: Hashable, Equatable {
             hasher.combine(type)
         }
     }
+    
     public static func == (lhs: Self, rhs: Self) -> Bool {
         if lhs.mask == rhs.mask {
             for i in 0..<descriptorTypes.count {
@@ -143,23 +140,22 @@ public class VulkanDescriptorPool {
 
     public func release(descriptorSets: [VkDescriptorSet]) {
         assert(numAllocatedSets > 0)
-        let count = UInt32(descriptorSets.count)
-        if count > 0 {
-            self.numAllocatedSets -= count
-            if self.numAllocatedSets == 0 {
-                let result = vkResetDescriptorPool(self.device.device, pool, 0);
-                if result != VK_SUCCESS {
-                    Log.err("vkResetDescriptorPool failed: \(result)")
-                }
-            } else if self.poolCreateFlags & UInt32(VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT.rawValue) != 0 {
-                let optionalSets = descriptorSets.map{ Optional($0) }
-                let result = optionalSets.withUnsafeBufferPointer {
-                    vkFreeDescriptorSets(self.device.device, self.pool, UInt32($0.count), $0.baseAddress);
-                }
-                assert(result == VK_SUCCESS)
-                if result != VK_SUCCESS {
-                    Log.err("vkFreeDescriptorSets failed: \(result)")
-                }
+        guard descriptorSets.isEmpty == false else { return }
+        
+        self.numAllocatedSets -= UInt32(descriptorSets.count)
+        if self.numAllocatedSets == 0 {
+            let result = vkResetDescriptorPool(self.device.device, pool, 0);
+            if result != VK_SUCCESS {
+                Log.err("vkResetDescriptorPool failed: \(result)")
+            }
+        } else if self.poolCreateFlags & UInt32(VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT.rawValue) != 0 {
+            let optionalSets = descriptorSets.map{ Optional($0) }
+            let result = optionalSets.withUnsafeBufferPointer {
+                vkFreeDescriptorSets(self.device.device, self.pool, UInt32($0.count), $0.baseAddress);
+            }
+            assert(result == VK_SUCCESS)
+            if result != VK_SUCCESS {
+                Log.err("vkFreeDescriptorSets failed: \(result)")
             }
         }
     }

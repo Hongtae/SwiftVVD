@@ -129,15 +129,17 @@ public class VulkanInstance {
         appInfo.apiVersion = VK_MAKE_VERSION(1, 2, 0) // Vulkan-1.2
 
         var instanceVersion : UInt32 = 0
+        var err: VkResult = VK_SUCCESS
 
-        if vkEnumerateInstanceVersion(&instanceVersion) == VK_SUCCESS {
+        err = vkEnumerateInstanceVersion(&instanceVersion)
+        if err == VK_SUCCESS {
             print(String(format: "Vulkan-Instance Version: %d.%d.%d (%d)",
                     VK_VERSION_MAJOR(instanceVersion),
                     VK_VERSION_MINOR(instanceVersion),
                     VK_VERSION_PATCH(instanceVersion),
                     instanceVersion))
         } else {
-            print("vkEnumerateInstanceVersion failed.")
+            print("vkEnumerateInstanceVersion failed: \(err)")
             return nil
         }
 
@@ -191,7 +193,7 @@ public class VulkanInstance {
                         }
                     }
                 } else {
-                    Log.err("vkEnumerateInstanceExtensionProperties failed:\(err)")
+                    Log.err("vkEnumerateInstanceExtensionProperties failed: \(err)")
                 }
                 return extensions
             }            
@@ -370,7 +372,7 @@ public class VulkanInstance {
         }
 
         var instance: VkInstance?
-        var err: VkResult = vkCreateInstance(&instanceCreateInfo, self.allocationCallbacks, &instance)
+        err = vkCreateInstance(&instanceCreateInfo, self.allocationCallbacks, &instance)
         if err != VK_SUCCESS {
             Log.err("vkCreateInstance failed: \(err)")
             return nil

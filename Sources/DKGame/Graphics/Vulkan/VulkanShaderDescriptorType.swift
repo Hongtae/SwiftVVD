@@ -21,12 +21,7 @@ extension Shader.DescriptorType {
             return VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER
         case .sampler:
             return VK_DESCRIPTOR_TYPE_SAMPLER
-        // default:
-        //     Log.err("Unknown DescriptorType!!")
-        //     assert(false, "Unknown descriptor type!")
         }
-        // assert(false)
-        // return unsafeBitCast(0, to: VkDescriptorType.self)
     }
 }
 

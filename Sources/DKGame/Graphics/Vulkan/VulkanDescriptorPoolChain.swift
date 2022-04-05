@@ -45,7 +45,7 @@ public class VulkanDescriptorPoolChain {
         poolSizes.reserveCapacity(descriptorTypes.count)
         for i in 0..<descriptorTypes.count {
             if self.poolID.typeSize[i] > 0 {
-                let type: VkDescriptorType = descriptorType(at: i)
+                let type: VkDescriptorType = descriptorTypes[i]
                 let poolSize = VkDescriptorPoolSize(type: type, descriptorCount: self.poolID.typeSize[i] * self.maxSets)
                 poolSizes.append(poolSize)
             }
