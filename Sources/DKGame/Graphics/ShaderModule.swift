@@ -6,9 +6,10 @@ public struct ShaderSpecialization {
 }
 
 public protocol ShaderModule {
-    func makeFunction(name: String)
-    func makeSpecializedFunction(name: String, specializedValues: [ShaderSpecialization])
+    func makeFunction(name: String) -> ShaderFunction?
+    func makeSpecializedFunction(name: String, specializedValues: [ShaderSpecialization]) -> ShaderFunction?
 
     var functionNames: [String] { get }
+    var device: GraphicsDevice { get }
 }
 

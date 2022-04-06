@@ -11,5 +11,5 @@ public protocol ShaderFunction {
     var functionName: String { get }
     var stage: ShaderStage { get }
 
-    func device() -> GraphicsDevice
+    var device: GraphicsDevice { get }
 }

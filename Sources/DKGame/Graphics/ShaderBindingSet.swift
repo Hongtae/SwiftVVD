@@ -1,6 +1,6 @@
 public struct ShaderBinding {
     var binding : UInt32
-    var type : Shader.DescriptorType
+    var type : ShaderDescriptorType
     var arrayLength : UInt32
     var immutableSamplers : SamplerState?
 }

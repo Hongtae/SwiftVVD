@@ -1,79 +1,106 @@
 public enum ShaderDataType {
     case unknown
     case none
-    
+
     case `struct`
     case texture
     case sampler
-    
-    case float
-    case float2
-    case float3
-    case float4
-    
-    case float2x2
-    case float2x3
-    case float2x4
-    
-    case float3x2
-    case float3x3
-    case float3x4
-    
-    case float4x2
-    case float4x3
-    case float4x4
-    
-    case half
-    case half2
-    case half3
-    case half4
-    
-    case half2x2
-    case half2x3
-    case half2x4
-    
-    case half3x2
-    case half3x3
-    case half3x4
-    
-    case half4x2
-    case half4x3
-    case half4x4
-    
+
+    case bool
+    case bool2
+    case bool3
+    case bool4
+
+    case char
+    case char2
+    case char3
+    case char4
+
+    case uchar
+    case uchar2
+    case uchar3
+    case uchar4
+
+    case short
+    case short2
+    case short3
+    case short4
+
+    case ushort
+    case ushort2
+    case ushort3
+    case ushort4
+
     case int
     case int2
     case int3
     case int4
     
-    case uInt
-    case uInt2
-    case uInt3
-    case uInt4
-    
-    case short
-    case short2
-    case short3
-    case short4
-    
-    case uShort
-    case uShort2
-    case uShort3
-    case uShort4
-    
-    case char
-    case char2
-    case char3
-    case char4
-    
-    case uChar
-    case uChar2
-    case uChar3
-    case uChar4
-    
-    case bool
-    case bool2
-    case bool3
-    case bool4
+    case uint
+    case uint2
+    case uint3
+    case uint4
+
+    case long
+    case long2
+    case long3
+    case long4
+
+    case ulong
+    case ulong2
+    case ulong3
+    case ulong4
+
+    case half
+    case half2
+    case half3
+    case half4
+
+    case half2x2
+    case half2x3
+    case half2x4
+
+    case half3x2
+    case half3x3
+    case half3x4
+
+    case half4x2
+    case half4x3
+    case half4x4
+
+    case float
+    case float2
+    case float3
+    case float4
+
+    case float2x2
+    case float2x3
+    case float2x4
+
+    case float3x2
+    case float3x3
+    case float3x4
+
+    case float4x2
+    case float4x3
+    case float4x4
+
+    case double
+    case double2
+    case double3
+    case double4
+
+    case double2x2
+    case double2x3
+    case double2x4
+
+    case double3x2
+    case double3x3
+    case double3x4
+
+    case double4x2
+    case double4x3
+    case double4x4
 }
 
 public enum ShaderStage {
@@ -113,7 +140,7 @@ public struct ShaderResourceStructMember {
     var members : [ShaderResourceStructMember]
 }
 
-public enum ShaderResourceType {
+public enum ShaderResourceType: Comparable {
     case buffer
     case texture
     case sampler
@@ -154,4 +181,45 @@ public struct ShaderPushConstantLayout {
     var size : UInt32
     var stages : [ShaderStage]
     var members : [ShaderResourceStructMember]
+}
+
+func describeShaderResourceStructMember(_ member: ShaderResourceStructMember, indent: Int = 0) -> String {
+    var indentStr = ""
+    for _ in 0..<indent {
+        indentStr += "    "
+    }
+    var str = ""
+    if member.count > 1 {
+        str = "\(indentStr)\"\(member.name)[\(member.count)]\" (type: \(member.dataType), offset: \(member.offset), size: \(member.size), stride: \(member.stride))"
+    } else {
+        str = "\(indentStr)\"\(member.name)\" (type: \(member.dataType), offset: \(member.offset), size: \(member.size))"
+    }
+    for mem in member.members {
+        str += "\n" + describeShaderResourceStructMember(mem, indent: indent+1)
+    }
+    return str    
+}
+
+extension ShaderResourceStructMember: CustomStringConvertible {
+    public var description: String { describeShaderResourceStructMember(self, indent: 0) }
+}
+
+extension ShaderResource: CustomStringConvertible {
+    public var description: String {
+        var str = "ShaderResource: \"\(self.name)\""
+        if self.count > 1 { str += "[\(self.count)]" }
+        str += " (set: \(self.set), binding: \(self.binding), stages: \(self.stages))\n"
+        if self.type == .buffer {
+            str += " type: \(self.type), access: \(self.access), enabled: \(self.enabled), size: \(self.bufferTypeInfo!.size)"
+
+            if self.bufferTypeInfo!.dataType == .struct {
+                for member in self.members {
+                    str += "\n" + describeShaderResourceStructMember(member, indent: 1)
+                }                
+            }
+        } else {
+            str += " type: \(self.type), access: \(self.access), enabled: \(self.enabled)"
+        }
+        return str
+    }
 }
