@@ -8,5 +8,5 @@ public protocol CommandEncoder {
     func waitSemaphoreValue(_ semaphore: Semaphore, value: UInt64)
     func signalSemaphoreValue(_ semaphore: Semaphore, value: UInt64)
 
-    func commandBuffer() -> CommandBuffer
+    var commandBuffer: CommandBuffer { get }
 }

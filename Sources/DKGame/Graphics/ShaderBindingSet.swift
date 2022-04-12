@@ -28,4 +28,6 @@ public protocol ShaderBindingSet {
     // bind samplers
     func setSamplerState(binding: UInt32, sampler: SamplerState)
     func setSamplerStateArray(binding: UInt32, samplers: [SamplerState])
+
+    var device: GraphicsDevice { get }
 }

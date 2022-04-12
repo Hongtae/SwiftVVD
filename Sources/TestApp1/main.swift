@@ -56,6 +56,26 @@ class MyApplicationDelegate: ApplicationDelegate {
     }
 }
 
+func loadResourceData(name: String) -> Data? {
+    let bundle = Bundle.main
+    if let url = bundle.url(forResource: name, withExtension: nil) {
+        do {
+            return try Data(contentsOf: url, options: [])
+        } catch {
+            print("Error on loading data: \(error)")
+        }
+    }
+    if let url = bundle.url(forResource: name, withExtension: nil, subdirectory: "DKGame_TestApp1.resources") {
+        do {
+            return try Data(contentsOf: url, options: [])
+        } catch {
+            print("Error on loading data: \(error)")
+        }
+    }
+    print("cannot load resource.")
+    return nil
+}
+
 let appDelegate = MyApplicationDelegate()
 let exitCode = runApplication(delegate: appDelegate)
 

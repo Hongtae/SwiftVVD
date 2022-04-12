@@ -9,7 +9,7 @@ struct Win32DropTarget {
     private var thisPointer: UnsafeMutablePointer<Win32DropTarget>?
 
     private mutating func queryInterface(_ riid: UnsafePointer<IID>?,
-                                            _ ppv: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> HRESULT {
+                                         _ ppv: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> HRESULT {
         Log.debug("queryInterface")
         let isEqualIID = { (iid1: UnsafePointer<IID>, id2: IID)->Bool in
             withUnsafePointer(to: id2) { ptr2 in
@@ -88,10 +88,10 @@ struct Win32DropTarget {
         let delegate = self.target?.delegate
         if  delegate != nil {
             var fmtetc: FORMATETC = FORMATETC(cfFormat: UInt16(CF_HDROP),
-                                                ptd: nil,
-                                            dwAspect: DWORD(DVASPECT_CONTENT.rawValue),
-                                                lindex: -1,
-                                                tymed: DWORD(TYMED_HGLOBAL.rawValue))
+                                              ptd: nil,
+                                              dwAspect: DWORD(DVASPECT_CONTENT.rawValue),
+                                              lindex: -1,
+                                              tymed: DWORD(TYMED_HGLOBAL.rawValue))
             if pDataObj!.pointee.lpVtbl.pointee.QueryGetData(pDataObj, &fmtetc) == S_OK {
                 self.files = Self.filesFromDataObject(&pDataObj!.pointee)
                 if self.files.count > 0 {
@@ -108,9 +108,9 @@ struct Win32DropTarget {
             self.lastPosition = pos
 
             let op = delegate!.draggingEntered(target: self.target!, 
-                                                position: CGPoint(x: Int(pos.x),
-                                                                y: Int(pos.y)),
-                                                files: self.files)
+                                               position: CGPoint(x: Int(pos.x),
+                                                                 y: Int(pos.y)),
+                                               files: self.files)
             switch op {
             case .copy: self.lastEffectMask = DWORD(DROPEFFECT_COPY)
             case .move: self.lastEffectMask = DWORD(DROPEFFECT_MOVE)
@@ -127,8 +127,8 @@ struct Win32DropTarget {
         return S_OK;
     }
     private mutating func dragOver(_ grfKeyState: DWORD,
-                                    _ pt: POINTL,
-                                    _ pdwEffect: UnsafeMutablePointer<DWORD>?) -> HRESULT {
+                                   _ pt: POINTL,
+                                   _ pdwEffect: UnsafeMutablePointer<DWORD>?) -> HRESULT {
 
         if let delegate = self.target?.delegate, self.dropAllowed {
             var pos: POINT = POINT(x: pt.x, y: pt.y)
@@ -147,9 +147,9 @@ struct Win32DropTarget {
                 self.lastPosition = pos
 
                 let op = delegate.draggingUpdated(target: self.target!, 
-                                                position: CGPoint(x: Int(pos.x),
+                                                  position: CGPoint(x: Int(pos.x),
                                                                     y: Int(pos.y)),
-                                                    files: self.files)
+                                                  files: self.files)
                 switch op {
                 case .copy: self.lastEffectMask = DWORD(DROPEFFECT_COPY)
                 case .move: self.lastEffectMask = DWORD(DROPEFFECT_MOVE)
@@ -178,9 +178,9 @@ struct Win32DropTarget {
         return S_OK;
     }
     private mutating func drop(_ pDataObj: UnsafeMutablePointer<IDataObject>?,
-                        _ grfKeyState: DWORD,
-                        _ pt: POINTL,
-                        _ pdwEffect: UnsafeMutablePointer<DWORD>?) -> HRESULT {
+                               _ grfKeyState: DWORD,
+                               _ pt: POINTL,
+                               _ pdwEffect: UnsafeMutablePointer<DWORD>?) -> HRESULT {
 
         if let delegate = self.target?.delegate, self.dropAllowed {
             var pos: POINT = POINT(x: pt.x, y: pt.y)
@@ -190,9 +190,9 @@ struct Win32DropTarget {
             self.lastPosition = pos
 
             let op = delegate.draggingDropped(target: self.target!, 
-                                            position: CGPoint(x: Int(pos.x),
+                                              position: CGPoint(x: Int(pos.x),
                                                                 y: Int(pos.y)),
-                                                files: self.files)
+                                              files: self.files)
             switch op {
             case .copy: self.lastEffectMask = DWORD(DROPEFFECT_COPY)
             case .move: self.lastEffectMask = DWORD(DROPEFFECT_MOVE)

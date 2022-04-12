@@ -14,7 +14,7 @@ public protocol CommandBuffer {
     func makeComputeCommandEncoder() -> ComputeCommandEncoder?
     func makeCopyCommandEncoder() -> CopyCommandEncoder?
 
-    func addCompletedHandler(_ handler: CommandBufferHandler)
+    func addCompletedHandler(_ handler: @escaping CommandBufferHandler)
 
     var commandQueue: CommandQueue { get }
     var device: GraphicsDevice { get }
