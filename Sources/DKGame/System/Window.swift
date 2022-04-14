@@ -32,6 +32,7 @@ public enum MouseEventDevice {
 
 public struct MouseEvent {
     var type: MouseEventType
+    weak var window: Window?
     var device: MouseEventDevice
     var deviceId: Int
     var buttonId: Int
@@ -50,6 +51,7 @@ public enum KeyboardEventType {
 
 public struct KeyboardEvent {
     var type: KeyboardEventType
+    weak var window: Window?
     var deviceId: Int
     var key: VirtualKey
     var text: String
@@ -70,6 +72,7 @@ public enum WindowEventType {
 
 public struct WindowEvent {
     var type: WindowEventType
+    weak var window: Window?
     var windowFrame: CGRect
     var contentBounds: CGRect
     var contentScaleFactor: Float
@@ -108,7 +111,7 @@ public struct WindowStyle: OptionSet {
     public static let acceptFileDrop    = WindowStyle(rawValue: 1 << 8) // enables file drag & drop
 }
 
-public protocol Window {
+public protocol Window: AnyObject {
 
     var contentBounds: CGRect { get }
     var windowFrame: CGRect { get }

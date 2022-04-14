@@ -449,12 +449,14 @@ public class Win32Window : Window {
                 if keyStates[key] & 0x80 != 0 {
                     // post keydown event
                     postKeyboardEvent(KeyboardEvent(type: .keyDown,
+                                                    window: self,
                                                     deviceId: 0,
                                                     key: virtualKey,
                                                     text: ""))
                 } else {
                     // post keyup event
                     postKeyboardEvent(KeyboardEvent(type: .keyUp,
+                                                    window: self,
                                                     deviceId: 0,
                                                     key: virtualKey,
                                                     text: ""))
@@ -801,10 +803,11 @@ public class Win32Window : Window {
                 let pos: CGPoint = CGPoint(x: Int(pts.x), y: Int(pts.y))
 
                 window.postMouseEvent(MouseEvent(type: .buttonDown,
-                                                    device: .genericMouse,
-                                                    deviceId: 0,
-                                                    buttonId: 0,
-                                                    location: pos))
+                                                 window: window,
+                                                 device: .genericMouse,
+                                                 deviceId: 0,
+                                                 buttonId: 0,
+                                                 location: pos))
                 PostMessageW(hWnd, UINT(WM_DKWINDOW_UPDATEMOUSECAPTURE), 0, 0);
                 return 0
             case UINT(WM_LBUTTONUP):
@@ -813,10 +816,11 @@ public class Win32Window : Window {
                 let pos: CGPoint = CGPoint(x: Int(pts.x), y: Int(pts.y))
 
                 window.postMouseEvent(MouseEvent(type: .buttonUp,
-                                                    device: .genericMouse,
-                                                    deviceId: 0,
-                                                    buttonId: 0,
-                                                    location: pos))
+                                                 window: window,
+                                                 device: .genericMouse,
+                                                 deviceId: 0,
+                                                 buttonId: 0,
+                                                 location: pos))
                 PostMessageW(hWnd, UINT(WM_DKWINDOW_UPDATEMOUSECAPTURE), 0, 0);
                 return 0
             case UINT(WM_RBUTTONDOWN):
@@ -825,10 +829,11 @@ public class Win32Window : Window {
                 let pos: CGPoint = CGPoint(x: Int(pts.x), y: Int(pts.y))
 
                 window.postMouseEvent(MouseEvent(type: .buttonDown,
-                                                    device: .genericMouse,
-                                                    deviceId: 0,
-                                                    buttonId: 1,
-                                                    location: pos))
+                                                 window: window,
+                                                 device: .genericMouse,
+                                                 deviceId: 0,
+                                                 buttonId: 1,
+                                                 location: pos))
                 PostMessageW(hWnd, UINT(WM_DKWINDOW_UPDATEMOUSECAPTURE), 0, 0);
                 return 0
             case UINT(WM_RBUTTONUP):
@@ -837,10 +842,11 @@ public class Win32Window : Window {
                 let pos: CGPoint = CGPoint(x: Int(pts.x), y: Int(pts.y))
 
                 window.postMouseEvent(MouseEvent(type: .buttonUp,
-                                                    device: .genericMouse,
-                                                    deviceId: 0,
-                                                    buttonId: 1,
-                                                    location: pos))
+                                                 window: window,
+                                                 device: .genericMouse,
+                                                 deviceId: 0,
+                                                 buttonId: 1,
+                                                 location: pos))
                 PostMessageW(hWnd, UINT(WM_DKWINDOW_UPDATEMOUSECAPTURE), 0, 0);
                 return 0
             case UINT(WM_MBUTTONDOWN):
@@ -849,10 +855,11 @@ public class Win32Window : Window {
                 let pos: CGPoint = CGPoint(x: Int(pts.x), y: Int(pts.y))
 
                 window.postMouseEvent(MouseEvent(type: .buttonDown,
-                                                    device: .genericMouse,
-                                                    deviceId: 0,
-                                                    buttonId: 2,
-                                                    location: pos))
+                                                 window: window,
+                                                 device: .genericMouse,
+                                                 deviceId: 0,
+                                                 buttonId: 2,
+                                                 location: pos))
                 PostMessageW(hWnd, UINT(WM_DKWINDOW_UPDATEMOUSECAPTURE), 0, 0);
                 return 0
             case UINT(WM_MBUTTONUP):
@@ -861,10 +868,11 @@ public class Win32Window : Window {
                 let pos: CGPoint = CGPoint(x: Int(pts.x), y: Int(pts.y))
 
                 window.postMouseEvent(MouseEvent(type: .buttonUp,
-                                                    device: .genericMouse,
-                                                    deviceId: 0,
-                                                    buttonId: 2,
-                                                    location: pos))
+                                                 window: window,
+                                                 device: .genericMouse,
+                                                 deviceId: 0,
+                                                 buttonId: 2,
+                                                 location: pos))
                 PostMessageW(hWnd, UINT(WM_DKWINDOW_UPDATEMOUSECAPTURE), 0, 0);
                 return 0
             case UINT(WM_XBUTTONDOWN):
@@ -876,18 +884,20 @@ public class Win32Window : Window {
                     window.mouseButtonDownMask.insert(.button4)
 
                     window.postMouseEvent(MouseEvent(type: .buttonDown,
-                                                        device: .genericMouse,
-                                                        deviceId: 0,
-                                                        buttonId: 3,
-                                                        location: pos))
+                                                     window: window,
+                                                     device: .genericMouse,
+                                                     deviceId: 0,
+                                                     buttonId: 3,
+                                                     location: pos))
                 } else if xButton == XBUTTON2 {
                     window.mouseButtonDownMask.insert(.button5)
 
                     window.postMouseEvent(MouseEvent(type: .buttonDown,
-                                                        device: .genericMouse,
-                                                        deviceId: 0,
-                                                        buttonId: 4,
-                                                        location: pos))
+                                                     window: window,
+                                                     device: .genericMouse,
+                                                     deviceId: 0,
+                                                     buttonId: 4,
+                                                     location: pos))
                 }
                 PostMessageW(hWnd, UINT(WM_DKWINDOW_UPDATEMOUSECAPTURE), 0, 0);                    
                 return 1 // should return TRUE
@@ -900,18 +910,20 @@ public class Win32Window : Window {
                     window.mouseButtonDownMask.remove(.button4)
 
                     window.postMouseEvent(MouseEvent(type: .buttonUp,
-                                                        device: .genericMouse,
-                                                        deviceId: 0,
-                                                        buttonId: 3,
-                                                        location: pos))
+                                                     window: window,
+                                                     device: .genericMouse,
+                                                     deviceId: 0,
+                                                     buttonId: 3,
+                                                     location: pos))
                 } else if xButton == XBUTTON2 {
                     window.mouseButtonDownMask.remove(.button5)
 
                     window.postMouseEvent(MouseEvent(type: .buttonUp,
-                                                        device: .genericMouse,
-                                                        deviceId: 0,
-                                                        buttonId: 4,
-                                                        location: pos))
+                                                     window: window,
+                                                     device: .genericMouse,
+                                                     deviceId: 0,
+                                                     buttonId: 4,
+                                                     location: pos))
                 }
                 PostMessageW(hWnd, UINT(WM_DKWINDOW_UPDATEMOUSECAPTURE), 0, 0);                    
                 return 1 // should return TRUE
@@ -925,11 +937,12 @@ public class Win32Window : Window {
                 let deltaY: Int16 = Int16(bitPattern: UInt16(DWORD_PTR(wParam) >> 16 & 0xffff))
 
                 window.postMouseEvent(MouseEvent(type: .wheel,
-                                                    device: .genericMouse,
-                                                    deviceId: 0,
-                                                    buttonId: 2,
-                                                    location: pos,
-                                                    delta: CGPoint(x: 0, y: Int(deltaY))))
+                                                 window: window,
+                                                 device: .genericMouse,
+                                                 deviceId: 0,
+                                                 buttonId: 2,
+                                                 location: pos,
+                                                 delta: CGPoint(x: 0, y: Int(deltaY))))
                 return 0
             case UINT(WM_CHAR):
                 window.synchronizeKeyStates()
@@ -941,9 +954,10 @@ public class Win32Window : Window {
                     let inputText = String(decodingCString: str, as: UTF16.self)
 
                     window.postKeyboardEvent(KeyboardEvent(type: .textInput,
-                                                            deviceId: 0,
-                                                            key: .none,
-                                                            text: inputText))
+                                                           window: window,
+                                                           deviceId: 0,
+                                                           key: .none,
+                                                           text: inputText))
                 }
                 return 0
             case UINT(WM_IME_STARTCOMPOSITION):
@@ -957,9 +971,10 @@ public class Win32Window : Window {
                     // Result characters will be received via WM_CHAR,
                     // reset input-candidate characters here.
                     window.postKeyboardEvent(KeyboardEvent(type: .textComposition,
-                                                            deviceId: 0,
-                                                            key: .none,
-                                                            text: ""))  
+                                                           window: window,
+                                                           deviceId: 0,
+                                                           key: .none,
+                                                           text: ""))  
                 }
                 if lParam & LPARAM(GCS_COMPSTR) != 0 {
                     // composition in progress.
@@ -976,15 +991,17 @@ public class Win32Window : Window {
                                 }
 
                                 window.postKeyboardEvent(KeyboardEvent(type: .textComposition,
-                                                                        deviceId: 0,
-                                                                        key: .none,
-                                                                        text: compositionText))  
+                                                                       window: window,
+                                                                       deviceId: 0,
+                                                                       key: .none,
+                                                                       text: compositionText))  
 
                             } else {    // composition character's length become 0. (erased)
                                 window.postKeyboardEvent(KeyboardEvent(type: .textComposition,
-                                                                        deviceId: 0,
-                                                                        key: .none,
-                                                                        text: ""))  
+                                                                       window: window,
+                                                                       deviceId: 0,
+                                                                       key: .none,
+                                                                       text: ""))  
                             }
                         } else {        // not text-input mode.
                             ImmNotifyIME(hIMC, DWORD(NI_COMPOSITIONSTR), DWORD(CPS_CANCEL), 0)
