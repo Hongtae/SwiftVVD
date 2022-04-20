@@ -7,8 +7,8 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
     struct EncodingState {
         var encoder: VulkanRenderCommandEncoder
         var pipelineState: VulkanRenderPipelineState? = nil
-        var imageLayouts: VulkanShaderBindingSet.ImageLayoutMap = [:]
-        var imageViewLayouts: VulkanShaderBindingSet.ImageViewLayoutMap = [:]
+        var imageLayouts: VulkanDescriptorSet.ImageLayoutMap = [:]
+        var imageViewLayouts: VulkanDescriptorSet.ImageViewLayoutMap = [:]
         var bindingSets: [ObjectIdentifier: VulkanDescriptorSet] = [:]
     }
     
@@ -17,7 +17,6 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
         unowned let commandBuffer: VulkanCommandBuffer
 
         var pipelineStateObjects: [VulkanRenderPipelineState] = []
-        var shaderBindingSets: [VulkanShaderBindingSet] = []
         var descriptorSets: [VulkanDescriptorSet] = []
         var buffers: [Buffer] = []
         var events: [Event] = []

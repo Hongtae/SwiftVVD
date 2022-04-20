@@ -18,16 +18,16 @@ public struct GPUBufferBindingInfo {
 
 public protocol ShaderBindingSet {
     // bind buffers
-    func setBuffer(binding: UInt32, buffer: Buffer, offset: UInt64, length: UInt64)
-    func setBufferArray(binding: UInt32, buffers: [GPUBufferBindingInfo])
+    func setBuffer(_: Buffer, offset: UInt64, length: UInt64, binding: UInt32)
+    func setBufferArray(_ : [GPUBufferBindingInfo], binding: UInt32)
 
     // bind textures
-    func setTexture(binding: UInt32, texture: Texture)
-    func setTextureArray(binding: UInt32, textures: [Texture])
+    func setTexture(_: Texture, binding: UInt32)
+    func setTextureArray(_: [Texture], binding: UInt32)
 
     // bind samplers
-    func setSamplerState(binding: UInt32, sampler: SamplerState)
-    func setSamplerStateArray(binding: UInt32, samplers: [SamplerState])
+    func setSamplerState(_: SamplerState, binding: UInt32)
+    func setSamplerStateArray(_: [SamplerState], binding: UInt32)
 
     var device: GraphicsDevice { get }
 }

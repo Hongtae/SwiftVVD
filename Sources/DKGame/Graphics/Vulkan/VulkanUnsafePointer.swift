@@ -52,4 +52,5 @@ func unsafePointerCopy<T>(_ array: [T], holder: TemporaryBufferHolder) -> Unsafe
     holder.buffers.append(ptr)
     return ptr
 }
+
 #endif //if ENABLE_VULKAN
