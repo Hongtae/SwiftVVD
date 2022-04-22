@@ -309,7 +309,7 @@ DKAudioStream* DKAudioStreamWaveCreate(DKStream* stream)
                 audioStream->decoder = reinterpret_cast<void*>(context);
                 audioStream->mediaType = DKAudioStreamEncodingFormat_Wave;
                 audioStream->channels = context->formatExt.format.channels;
-                audioStream->frequency = context->formatExt.format.samplesPerSec;
+                audioStream->sampleRate = context->formatExt.format.samplesPerSec;
                 audioStream->bits = context->formatExt.format.bitsPerSample;
                 audioStream->seekable = true;
 

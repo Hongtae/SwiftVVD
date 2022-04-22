@@ -213,7 +213,7 @@ DKAudioStream* DKAudioStreamVorbisCreate(const char* file)
 
             audioStream->mediaType = DKAudioStreamEncodingFormat_OggVorbis;
             audioStream->channels = info->channels;
-            audioStream->frequency = info->rate;
+            audioStream->sampleRate = info->rate;
             audioStream->bits = 16;
             audioStream->seekable = (bool)ov_seekable(&context->vorbis);
 
@@ -269,7 +269,7 @@ DKAudioStream* DKAudioStreamVorbisCreate(DKStream* stream)
 
             audioStream->mediaType = DKAudioStreamEncodingFormat_OggVorbis;
             audioStream->channels = info->channels;
-            audioStream->frequency = info->rate;
+            audioStream->sampleRate = info->rate;
             audioStream->bits = 16;
             audioStream->seekable = (bool)ov_seekable(&context->vorbis);
 

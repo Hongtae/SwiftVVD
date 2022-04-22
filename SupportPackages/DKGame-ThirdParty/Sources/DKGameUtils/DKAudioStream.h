@@ -57,7 +57,7 @@ typedef struct _DKAudioStream
     void* userContext;
     
     bool seekable;
-    uint32_t frequency;
+    uint32_t sampleRate;
     uint32_t channels;
     uint32_t bits;
     DKAudioStreamEncodingFormat mediaType;

@@ -173,7 +173,7 @@ namespace {
                 (context->totalSamples > 0 && context->sampleRate > 0 && context->channels > 0))
             {
                 stream->channels = context->channels;
-                stream->frequency = context->sampleRate;
+                stream->sampleRate = context->sampleRate;
                 stream->seekable = DKSTREAM_IS_SEEKABLE(context->stream);
 
                 switch (context->bps)
