@@ -451,6 +451,7 @@ public class VulkanSwapChain: SwapChain {
     public func present(waitEvents: [Event]) -> Bool {
         var waitSemaphores: [VkSemaphore?] = []
         waitSemaphores.reserveCapacity(waitEvents.count + 1)
+        
         for event in waitEvents {
             let s = event as! VulkanSemaphore
             waitSemaphores.append(s.semaphore)

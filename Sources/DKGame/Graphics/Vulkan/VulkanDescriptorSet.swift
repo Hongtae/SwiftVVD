@@ -91,6 +91,7 @@ public class VulkanDescriptorSet {
 
     public func updateImageViewLayouts(_ imageLayouts: ImageViewLayoutMap) {
         var descriptorWrites: [VkWriteDescriptorSet] = []
+        descriptorWrites.reserveCapacity(self.bindings.count)
 
         let tempHolder = TemporaryBufferHolder(label: "VulkanDescriptorSet.updateImageViewLayouts")
 

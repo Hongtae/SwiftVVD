@@ -78,6 +78,9 @@ public class VulkanDescriptorPoolChain {
         var activePools: [VulkanDescriptorPool] = []
         var inactivePools: [VulkanDescriptorPool] = []
 
+        activePools.reserveCapacity(self.descriptorPools.count)
+        inactivePools.reserveCapacity(self.descriptorPools.count)
+
         for pool in self.descriptorPools {
             if pool.numAllocatedSets > 0 {
                 activePools.append(pool)
