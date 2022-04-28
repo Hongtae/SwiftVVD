@@ -124,7 +124,7 @@ public class VulkanDescriptorSet {
                 }
                 if update {
                     self.bindings[i].imageInfos = binding.imageInfos
-                    write.pImageInfo = unsafePointerCopy(binding.imageInfos, holder: tempHolder)
+                    write.pImageInfo = unsafePointerCopy(collection: binding.imageInfos, holder: tempHolder)
                     descriptorWrites.append(write)
                 }
             }

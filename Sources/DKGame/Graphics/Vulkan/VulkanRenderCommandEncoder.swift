@@ -35,7 +35,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
             self.renderPassDescriptor = descriptor
         }
 
-        override func encode(buffer: VkCommandBuffer) -> Bool {
+        override func encode(commandBuffer: VkCommandBuffer) -> Bool {
             false
         }
     }

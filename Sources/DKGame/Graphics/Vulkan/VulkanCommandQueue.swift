@@ -69,7 +69,7 @@ public class VulkanCommandQueue: CommandQueue {
         return nil 
     }
 
-    func submit(submits: [VkSubmitInfo], callback: (()->Void)?) -> Bool {
+    func submit(_ submits: [VkSubmitInfo], callback: (()->Void)?) -> Bool {
         let device = self.device as! VulkanGraphicsDevice
         var result: VkResult = VK_SUCCESS
 

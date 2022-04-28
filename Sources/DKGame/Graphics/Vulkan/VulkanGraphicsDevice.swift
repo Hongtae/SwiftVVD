@@ -56,7 +56,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         let tempHolder = TemporaryBufferHolder(label: "VulkanGraphicsDevice.init")
 
         let queuePriority = [Float](repeating: 0.0, count: Int(physicalDevice.maxQueues))
-        let queuePriorityPointer = unsafePointerCopy(queuePriority, holder: tempHolder)
+        let queuePriorityPointer = unsafePointerCopy(collection: queuePriority, holder: tempHolder)
 
         // setup queue
         let queueCreateInfos: [VkDeviceQueueCreateInfo] = .init(unsafeUninitializedCapacity: physicalDevice.queueFamilies.count) {
@@ -115,13 +115,13 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         var deviceCreateInfo = VkDeviceCreateInfo()
         deviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO
         deviceCreateInfo.queueCreateInfoCount = UInt32(queueCreateInfos.count)
-        deviceCreateInfo.pQueueCreateInfos = unsafePointerCopy(queueCreateInfos, holder: tempHolder)
-        deviceCreateInfo.pEnabledFeatures = unsafePointerCopy(enabledFeatures, holder: tempHolder)
+        deviceCreateInfo.pQueueCreateInfos = unsafePointerCopy(collection: queueCreateInfos, holder: tempHolder)
+        deviceCreateInfo.pEnabledFeatures = unsafePointerCopy(from: enabledFeatures, holder: tempHolder)
 
         if deviceExtensions.count > 0 {
             deviceCreateInfo.enabledExtensionCount = UInt32(deviceExtensions.count)
-            deviceCreateInfo.ppEnabledExtensionNames = unsafePointerCopy(deviceExtensions.map {
-                unsafePointerCopy($0, holder: tempHolder)
+            deviceCreateInfo.ppEnabledExtensionNames = unsafePointerCopy(collection: deviceExtensions.map {
+                unsafePointerCopy(string: $0, holder: tempHolder)
             }, holder: tempHolder)
         }
 
@@ -349,7 +349,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
     public func makeShaderModule() -> ShaderModule? {
         return nil
     }
-    public func makeBindingSet() -> ShaderBindingSet? {
+    public func makeShaderBindingSet() -> ShaderBindingSet? {
         return nil
     }
     public func makeRenderPipelineState() -> RenderPipelineState? {

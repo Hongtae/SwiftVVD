@@ -302,19 +302,19 @@ public class VulkanShaderBindingSet: ShaderBindingSet {
                 assert(binding.bufferInfos.isEmpty)
                 assert(binding.texelBufferViews.isEmpty)
 
-                write.pImageInfo = unsafePointerCopy(binding.imageInfos, holder: tempHolder)
+                write.pImageInfo = unsafePointerCopy(collection: binding.imageInfos, holder: tempHolder)
             }
             if binding.bufferInfos.count > 0 {
                 assert(binding.imageInfos.isEmpty)
                 assert(binding.texelBufferViews.isEmpty)
 
-                write.pBufferInfo = unsafePointerCopy(binding.bufferInfos, holder: tempHolder)
+                write.pBufferInfo = unsafePointerCopy(collection: binding.bufferInfos, holder: tempHolder)
             }
             if binding.texelBufferViews.count > 0 {
                 assert(binding.imageInfos.isEmpty)
                 assert(binding.bufferInfos.isEmpty)
 
-                write.pTexelBufferView = unsafePointerCopy(binding.texelBufferViews, holder: tempHolder)
+                write.pTexelBufferView = unsafePointerCopy(collection: binding.texelBufferViews, holder: tempHolder)
             }
             descriptorWrites.append(write)
         }

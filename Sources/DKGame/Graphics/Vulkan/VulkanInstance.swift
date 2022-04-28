@@ -119,8 +119,8 @@ public class VulkanInstance {
         
         let tempHolder = TemporaryBufferHolder(label: "VulkanInstance.init")
 
-        let applicationName = unsafePointerCopy("DKGame.Vulkan", holder: tempHolder)
-        let engineName = unsafePointerCopy("DKGL", holder: tempHolder)
+        let applicationName = unsafePointerCopy(string: "DKGame.Vulkan", holder: tempHolder)
+        let engineName = unsafePointerCopy(string: "DKGL", holder: tempHolder)
 
         appInfo.pApplicationName = applicationName
         appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0)
@@ -335,7 +335,7 @@ public class VulkanInstance {
 
         var instanceCreateInfo: VkInstanceCreateInfo = VkInstanceCreateInfo()
         instanceCreateInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO
-        instanceCreateInfo.pApplicationInfo = unsafePointerCopy(&appInfo, holder: tempHolder)
+        instanceCreateInfo.pApplicationInfo = unsafePointerCopy(from: appInfo, holder: tempHolder)
 
         if enableValidation {
             let enabledFeatures: [VkValidationFeatureEnableEXT] = [
@@ -346,29 +346,29 @@ public class VulkanInstance {
             validationFeatures.sType = VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT
 
             validationFeatures.enabledValidationFeatureCount = UInt32(enabledFeatures.count)
-            validationFeatures.pEnabledValidationFeatures = unsafePointerCopy(enabledFeatures, holder: tempHolder)
+            validationFeatures.pEnabledValidationFeatures = unsafePointerCopy(collection: enabledFeatures, holder: tempHolder)
 
-            instanceCreateInfo.pNext = UnsafeRawPointer(unsafePointerCopy(&validationFeatures, holder: tempHolder))
+            instanceCreateInfo.pNext = UnsafeRawPointer(unsafePointerCopy(from: validationFeatures, holder: tempHolder))
         }
 
         if enabledLayers.count > 0 {
             instanceCreateInfo.enabledLayerCount = UInt32(enabledLayers.count)
-            instanceCreateInfo.ppEnabledLayerNames = unsafePointerCopy(enabledLayers.map {
-                unsafePointerCopy($0, holder: tempHolder)
+            instanceCreateInfo.ppEnabledLayerNames = unsafePointerCopy(collection: enabledLayers.map {
+                unsafePointerCopy(string: $0, holder: tempHolder)
             }, holder: tempHolder)
         }
         if enabledExtensions.count > 0 {
             instanceCreateInfo.enabledExtensionCount = UInt32(enabledExtensions.count)
-            instanceCreateInfo.ppEnabledExtensionNames = unsafePointerCopy(enabledExtensions.map {
-                unsafePointerCopy($0, holder: tempHolder)
+            instanceCreateInfo.ppEnabledExtensionNames = unsafePointerCopy(collection: enabledExtensions.map {
+                unsafePointerCopy(string: $0, holder: tempHolder)
             }, holder: tempHolder)
         }
 
         // create instance!
         self.physicalDevices = []
 
-        if var cb = allocationCallbacks {
-            self.allocationCallbacks = unsafePointerCopy(&cb, holder: self.tempBufferHolder)
+        if let cb = allocationCallbacks {
+            self.allocationCallbacks = unsafePointerCopy(from: cb, holder: self.tempBufferHolder)
         }
 
         var instance: VkInstance?

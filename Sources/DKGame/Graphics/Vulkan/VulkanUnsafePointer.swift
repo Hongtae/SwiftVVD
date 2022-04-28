@@ -16,7 +16,7 @@ class TemporaryBufferHolder {
     }
 }
 
-func unsafePointerCopy<T>(_ object: inout T, holder: TemporaryBufferHolder) -> UnsafePointer<T> {
+func unsafePointerCopy<T>(from object: T, holder: TemporaryBufferHolder) -> UnsafePointer<T> {
     let buffer: UnsafeMutablePointer<T> = .allocate(capacity: 1)
     withUnsafePointer(to: object) {
         buffer.initialize(from: $0, count: 1)
@@ -25,16 +25,7 @@ func unsafePointerCopy<T>(_ object: inout T, holder: TemporaryBufferHolder) -> U
     return UnsafePointer<T>(buffer)
 }
 
-func unsafePointerCopy<T>(_ object: T, holder: TemporaryBufferHolder) -> UnsafePointer<T> {
-    let buffer: UnsafeMutablePointer<T> = .allocate(capacity: 1)
-    withUnsafePointer(to: object) {
-        buffer.initialize(from: $0, count: 1)
-    }
-    holder.buffers.append(buffer)
-    return UnsafePointer<T>(buffer)
-}
-
-func unsafePointerCopy(_ str: String, holder: TemporaryBufferHolder) -> UnsafePointer<CChar> {
+func unsafePointerCopy(string str: String, holder: TemporaryBufferHolder) -> UnsafePointer<CChar> {
     let buffer = str.withCString { ptr -> UnsafePointer<CChar> in
         let length = str.utf8.count + 1
         let buffer: UnsafeMutablePointer<CChar> = .allocate(capacity: length)
@@ -45,10 +36,10 @@ func unsafePointerCopy(_ str: String, holder: TemporaryBufferHolder) -> UnsafePo
     return buffer
 }
 
-func unsafePointerCopy<T>(_ array: [T], holder: TemporaryBufferHolder) -> UnsafePointer<T> {
-    let buffer: UnsafeMutableBufferPointer<T> = .allocate(capacity: array.count)
-    _ = buffer.initialize(from: array)
-    let ptr = UnsafePointer<T>(buffer.baseAddress!)
+func unsafePointerCopy<C>(collection source: C, holder: TemporaryBufferHolder) -> UnsafePointer<C.Element> where C: Collection {
+    let buffer: UnsafeMutableBufferPointer<C.Element> = .allocate(capacity: source.count)
+    _ = buffer.initialize(from: source)
+    let ptr = UnsafePointer<C.Element>(buffer.baseAddress!)
     holder.buffers.append(ptr)
     return ptr
 }
