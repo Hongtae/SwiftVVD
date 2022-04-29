@@ -115,9 +115,9 @@ public class VulkanComputeCommandEncoder: VulkanCommandEncoder, ComputeCommandEn
         }
     }
 
-    public func setComputePipelineState(_ ps: ComputePipelineState) {
-        assert(ps as? VulkanComputePipelineState != nil)
-        if let pipeline = ps as? VulkanComputePipelineState {
+    public func setComputePipelineState(_ pso: ComputePipelineState) {
+        assert(pso as? VulkanComputePipelineState != nil)
+        if let pipeline = pso as? VulkanComputePipelineState {
             let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
                 vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.pipeline)
                 state.pipelineState = pipeline
@@ -129,13 +129,8 @@ public class VulkanComputeCommandEncoder: VulkanCommandEncoder, ComputeCommandEn
 
     public func pushConstant<D: DataProtocol>(stages: [ShaderStage], offset: UInt32, data: D) {
         var stageFlags: UInt32 = 0
-        let stageTuples: [(ShaderStage, Int32)] = [
-            (.compute, VK_SHADER_STAGE_COMPUTE_BIT.rawValue)
-        ]
-        for (s, v) in stageTuples {
-            if stages.contains(s) {
-                stageFlags = stageFlags | UInt32(v)
-            }
+        for stage in stages {
+            stageFlags |= stage.vkFlags()
         }
 
         if stageFlags != 0 && data.count > 0 {
