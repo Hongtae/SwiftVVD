@@ -9,7 +9,6 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
         var pipelineState: VulkanRenderPipelineState? = nil
         var imageLayouts: VulkanDescriptorSet.ImageLayoutMap = [:]
         var imageViewLayouts: VulkanDescriptorSet.ImageViewLayoutMap = [:]
-        var bindingSets: [ObjectIdentifier: VulkanDescriptorSet] = [:]
     }
     
     class Encoder: VulkanCommandEncoder {
@@ -30,8 +29,8 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
         var setupCommands: [Command] = []
         var cleanupCommands: [Command] = []
 
-        init(buffer: VulkanCommandBuffer, descriptor: RenderPassDescriptor) {   
-            self.commandBuffer = buffer
+        init(commandBuffer: VulkanCommandBuffer, descriptor: RenderPassDescriptor) {   
+            self.commandBuffer = commandBuffer
             self.renderPassDescriptor = descriptor
         }
 
@@ -44,11 +43,11 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
 
     public init(buffer: VulkanCommandBuffer, descriptor: RenderPassDescriptor) {   
         self.commandBuffer = buffer
-        self.encoder = Encoder(buffer: buffer, descriptor: descriptor)
+        self.encoder = Encoder(commandBuffer: buffer, descriptor: descriptor)
     }
 
     public func reset(descriptor: RenderPassDescriptor) {   
-        self.encoder = Encoder(buffer: self.commandBuffer as! VulkanCommandBuffer, descriptor: descriptor)
+        self.encoder = Encoder(commandBuffer: self.commandBuffer as! VulkanCommandBuffer, descriptor: descriptor)
     }
 
     public func endEncoding() {
@@ -71,7 +70,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
     public func signalSemaphoreValue(_ semaphore: Semaphore, value: UInt64) {
     }
 
-    public func setResource(set: UInt32, _: ShaderBindingSet) {
+    public func setResource(_ set: ShaderBindingSet, atIndex index: UInt32) {
     }
 
     public func setViewport(_: Viewport) {

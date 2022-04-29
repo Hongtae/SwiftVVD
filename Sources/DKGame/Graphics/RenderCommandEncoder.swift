@@ -15,7 +15,7 @@ public struct Viewport {
 }
 
 public protocol RenderCommandEncoder: CommandEncoder {
-    func setResource(set: UInt32, _: ShaderBindingSet)
+    func setResource(_: ShaderBindingSet, atIndex: UInt32)
     func setViewport(_: Viewport)
     func setRenderPipelineState(_: RenderPipelineState)
     func setVertexBuffer(_: Buffer, offset: UInt64, index: UInt32)

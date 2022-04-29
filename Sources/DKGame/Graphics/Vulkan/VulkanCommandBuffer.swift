@@ -15,7 +15,7 @@ public class VulkanCommandEncoder {
 
     public func encode(commandBuffer: VkCommandBuffer) -> Bool { false }
 
-    public func addWaitSemaphore(semaphore: VkSemaphore, value: UInt64, flags: VkPipelineStageFlags) {
+    public func addWaitSemaphore(_ semaphore: VkSemaphore, value: UInt64, flags: VkPipelineStageFlags) {
         if var p = self.waitSemaphores[semaphore] {
             if value > p.value {
                 p.value = value
@@ -27,7 +27,7 @@ public class VulkanCommandEncoder {
         }
     }
 
-    public func addSignalSemaphore(semaphore: VkSemaphore, value: UInt64) {
+    public func addSignalSemaphore(_ semaphore: VkSemaphore, value: UInt64) {
         if let p = self.signalSemaphores[semaphore] {
             if value > p {
                 self.signalSemaphores[semaphore] = value
