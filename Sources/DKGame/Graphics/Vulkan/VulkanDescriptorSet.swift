@@ -44,7 +44,8 @@ public class VulkanDescriptorSet {
     public typealias ImageLayoutMap = [VkImage: ImageLayoutInfo]
     public typealias ImageViewLayoutMap = [VkImageView: ImageViewLayoutInfo]
 
-    public func collectImageViewLayouts(imageLayouts: inout ImageLayoutMap, imageViewLayouts: inout ImageViewLayoutMap) {
+    public func collectImageViewLayouts(_ imageLayouts: inout ImageLayoutMap,
+                                        _ imageViewLayouts: inout ImageViewLayoutMap) {
         var imageViewMap: [VkImageView: VulkanImageView] = [:]
         for binding in self.bindings {
             if binding.valueSet == false {

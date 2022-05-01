@@ -2,10 +2,11 @@
 import Vulkan
 import Foundation
 
+fileprivate let flipViewportY = true
+
 public class VulkanRenderCommandEncoder: RenderCommandEncoder {
 
     struct EncodingState {
-        var encoder: VulkanRenderCommandEncoder
         var pipelineState: VulkanRenderPipelineState? = nil
         var imageLayouts: VulkanDescriptorSet.ImageLayoutMap = [:]
         var imageViewLayouts: VulkanDescriptorSet.ImageViewLayoutMap = [:]
@@ -32,16 +33,271 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
         init(commandBuffer: VulkanCommandBuffer, descriptor: RenderPassDescriptor) {   
             self.commandBuffer = commandBuffer
             self.renderPassDescriptor = descriptor
+            super.init()
+
+            self.commands.reserveCapacity(self.initialNumberOfCommands)
+            self.setupCommands.reserveCapacity(self.initialNumberOfCommands)
+            self.cleanupCommands.reserveCapacity(self.initialNumberOfCommands)
+
+            for colorAttachment in renderPassDescriptor.colorAttachments {
+                if let rt = colorAttachment.renderTarget as? VulkanImageView, rt.image != nil {
+                    if let semaphore = rt.waitSemaphore {
+                        self.addWaitSemaphore(semaphore, value: 0, flags: UInt32(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT.rawValue))
+                    }
+                    if let semaphore = rt.signalSemaphore {
+                        self.addSignalSemaphore(semaphore, value: 0)
+                    }
+                }
+            }
+            if let rt = renderPassDescriptor.depthStencilAttachment.renderTarget as? VulkanImageView, rt.image != nil {
+                if let semaphore = rt.waitSemaphore {
+                    self.addWaitSemaphore(semaphore, value: 0, flags: UInt32(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT.rawValue))
+                }
+                if let semaphore = rt.signalSemaphore {
+                    self.addSignalSemaphore(semaphore, value: 0)
+                }
+            }
+        }
+
+        deinit {
+            let device = self.commandBuffer.device as! VulkanGraphicsDevice
+
+            if let renderPass = self.renderPass {
+                vkDestroyRenderPass(device.device, renderPass, device.allocationCallbacks)
+            }
+            if let framebuffer = self.framebuffer {
+                vkDestroyFramebuffer(device.device, framebuffer, device.allocationCallbacks)
+            }
         }
 
         override func encode(commandBuffer: VkCommandBuffer) -> Bool {
-            false
+            var state = EncodingState()
+
+            // initialize render pass
+            var frameWidth: UInt32 = 0
+            var frameHeight: UInt32 = 0
+
+            var attachments: [VkAttachmentDescription] = []
+            attachments.reserveCapacity(self.renderPassDescriptor.colorAttachments.count + 1)
+            var colorReferences: [VkAttachmentReference] = []
+            colorReferences.reserveCapacity(self.renderPassDescriptor.colorAttachments.count)
+            var framebufferImageViews: [VkImageView] = []
+            framebufferImageViews.reserveCapacity(self.renderPassDescriptor.colorAttachments.count + 1)
+            var attachmentClearValues: [VkClearValue] = []
+            attachmentClearValues.reserveCapacity(self.renderPassDescriptor.colorAttachments.count + 1)
+
+            for colorAttachment in self.renderPassDescriptor.colorAttachments {
+                if let rt = colorAttachment.renderTarget as? VulkanImageView,
+                   let image = rt.image {
+                    var attachment = VkAttachmentDescription()
+                    attachment.format = image.format
+                    attachment.samples = VK_SAMPLE_COUNT_1_BIT // 1 sample per pixel
+                    switch colorAttachment.loadAction {
+                    case .load:
+                        attachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD
+                    case .clear:
+                        attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR
+                    default:
+                        attachment.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE
+                    }
+                    switch colorAttachment.storeAction {
+                    case .dontCare:
+                        attachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE
+                    case .store:
+                        attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE
+                    }
+                    attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE
+                    attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE
+                    attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
+                    attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
+                    let currentLayout = image.setLayout(attachment.finalLayout,
+                        accessMask: VkAccessFlags(VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT.rawValue),
+                        stageBegin: UInt32(VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT.rawValue),
+                        stageEnd: UInt32(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT.rawValue))
+                    if attachment.loadOp == VK_ATTACHMENT_LOAD_OP_LOAD {
+                        attachment.initialLayout = currentLayout
+                    }
+
+                    var attachmentReference = VkAttachmentReference()
+                    attachmentReference.attachment = UInt32(attachments.count)
+                    attachmentReference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+
+                    attachments.append(attachment)
+                    colorReferences.append(attachmentReference)
+
+                    framebufferImageViews.append(rt.imageView)
+
+                    var clearValue = VkClearValue()
+                    clearValue.color.float32 = (colorAttachment.clearColor.r,
+                                                colorAttachment.clearColor.g,
+                                                colorAttachment.clearColor.b,
+                                                colorAttachment.clearColor.a)
+                    attachmentClearValues.append(clearValue)
+
+                    frameWidth = (frameWidth > 0) ? min(frameWidth, rt.width) : rt.width
+                    frameHeight = (frameHeight > 0) ? min(frameHeight, rt.height) : rt.height
+                }
+            }
+
+            var depthStencilReference = VkAttachmentReference()
+            depthStencilReference.attachment = VK_ATTACHMENT_UNUSED
+            depthStencilReference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+
+            if let rt = self.renderPassDescriptor.depthStencilAttachment.renderTarget as? VulkanImageView,
+               let image = rt.image {
+                var attachment = VkAttachmentDescription()
+                attachment.format = image.format
+                attachment.samples = VK_SAMPLE_COUNT_1_BIT
+                switch self.renderPassDescriptor.depthStencilAttachment.loadAction {
+                case .load:
+                    attachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD
+                case .clear:
+                    attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR
+                default:
+                    attachment.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE
+                }
+                switch self.renderPassDescriptor.depthStencilAttachment.storeAction {
+                case .store:
+                    attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE
+                default:
+                    attachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE
+                }
+                attachment.stencilLoadOp = attachment.loadOp
+                attachment.stencilStoreOp = attachment.storeOp
+                attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
+                attachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+                let currentLayout = image.setLayout(attachment.finalLayout,
+                    accessMask: VkAccessFlags(VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT.rawValue),
+                    stageBegin: UInt32(VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT.rawValue),
+                    stageEnd: UInt32(VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT.rawValue))
+
+                if attachment.loadOp == VK_ATTACHMENT_LOAD_OP_LOAD {
+                    attachment.initialLayout = currentLayout
+                }
+
+                depthStencilReference.attachment = UInt32(attachments.count)
+                attachments.append(attachment)
+
+                framebufferImageViews.append(rt.imageView)
+
+                var clearValue = VkClearValue()
+                clearValue.depthStencil.depth = self.renderPassDescriptor.depthStencilAttachment.clearDepth
+                clearValue.depthStencil.stencil = self.renderPassDescriptor.depthStencilAttachment.clearStencil
+                attachmentClearValues.append(clearValue)
+
+                frameWidth = (frameWidth > 0) ? min(frameWidth, rt.width) : rt.width
+                frameHeight = (frameHeight > 0) ? min(frameHeight, rt.height) : rt.height
+            }
+
+            let tempHolder = TemporaryBufferHolder(label: "VulkanRenderCommandEncoder.Encoder.encode")
+
+            var subpassDescription = VkSubpassDescription()
+            subpassDescription.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS
+            subpassDescription.colorAttachmentCount = UInt32(colorReferences.count)
+            subpassDescription.pColorAttachments = unsafePointerCopy(collection: colorReferences, holder: tempHolder)
+            subpassDescription.pDepthStencilAttachment = unsafePointerCopy(from: depthStencilReference, holder: tempHolder)
+            subpassDescription.inputAttachmentCount = 0
+            subpassDescription.pInputAttachments = nil
+            subpassDescription.preserveAttachmentCount = 0
+            subpassDescription.pPreserveAttachments = nil
+            subpassDescription.pResolveAttachments = nil
+
+            var renderPassCreateInfo = VkRenderPassCreateInfo()
+            renderPassCreateInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO
+            renderPassCreateInfo.attachmentCount = UInt32(attachments.count)
+            renderPassCreateInfo.pAttachments = unsafePointerCopy(collection: attachments, holder: tempHolder)
+            renderPassCreateInfo.subpassCount = 1
+            renderPassCreateInfo.pSubpasses = unsafePointerCopy(from: subpassDescription, holder: tempHolder)
+
+            let device = self.commandBuffer.device as! VulkanGraphicsDevice
+            var err = vkCreateRenderPass(device.device, &renderPassCreateInfo, device.allocationCallbacks, &self.renderPass)
+            if err != VK_SUCCESS {
+                Log.err("vkCreateRenderPass failed: \(err)")
+                return false
+            }
+
+            var framebufferCreateInfo = VkFramebufferCreateInfo()
+            framebufferCreateInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO
+            framebufferCreateInfo.renderPass = self.renderPass;
+            framebufferCreateInfo.attachmentCount = UInt32(framebufferImageViews.count)
+            framebufferCreateInfo.pAttachments = unsafePointerCopy(collection: framebufferImageViews, holder: tempHolder)
+            framebufferCreateInfo.width = frameWidth
+            framebufferCreateInfo.height = frameHeight
+            framebufferCreateInfo.layers = 1
+            err = vkCreateFramebuffer(device.device, &framebufferCreateInfo, device.allocationCallbacks, &self.framebuffer)
+            if err != VK_SUCCESS {
+                Log.err("vkCreateFramebuffer failed: \(err)")
+                return false
+            }
+
+            // collect image layout transition
+            for ds in self.descriptorSets {
+                ds.collectImageViewLayouts(&state.imageLayouts, &state.imageViewLayouts)
+            }
+            for cmd in self.setupCommands {
+                cmd(commandBuffer, &state)
+            }
+            // Set image layout transition
+            state.imageLayouts.forEach { (key, value) in
+                let image: VulkanImage = value.image
+                let layout: VkImageLayout = value.layout
+                let accessMask: VkAccessFlags = VulkanImage.commonAccessMask(forLayout: layout)
+
+                image.setLayout(layout,
+                                accessMask: accessMask,
+                                stageBegin: UInt32(VK_PIPELINE_STAGE_VERTEX_SHADER_BIT.rawValue),
+                                stageEnd: UInt32(VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT.rawValue),
+                                queueFamilyIndex: self.commandBuffer.queueFamily.familyIndex,
+                                commandBuffer: commandBuffer)
+            }
+
+            // begin render pass
+            var renderPassBeginInfo = VkRenderPassBeginInfo()
+            renderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO
+            renderPassBeginInfo.renderPass = self.renderPass
+            renderPassBeginInfo.clearValueCount = UInt32(attachmentClearValues.count)
+            renderPassBeginInfo.pClearValues = unsafePointerCopy(collection: attachmentClearValues, holder: tempHolder)
+            renderPassBeginInfo.renderArea.offset.x = 0
+            renderPassBeginInfo.renderArea.offset.y = 0
+            renderPassBeginInfo.renderArea.extent.width = frameWidth
+            renderPassBeginInfo.renderArea.extent.height = frameHeight
+            renderPassBeginInfo.framebuffer = self.framebuffer
+            vkCmdBeginRenderPass(commandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE)
+
+            // setup viewport
+            var viewport = VkViewport(x: 0.0,
+                                      y: 0.0,
+                                      width: Float(frameWidth),
+                                      height: Float(frameHeight),
+                                      minDepth: 0.0,
+                                      maxDepth: 1.0)
+            if flipViewportY {
+                viewport.y = viewport.y + viewport.height  // set origin to lower-left.
+                viewport.height = -(viewport.height) // negative height.
+            }
+            vkCmdSetViewport(commandBuffer, 0, 1, &viewport)
+
+            // setup scissor
+            var scissorRect = VkRect2D(offset: VkOffset2D(x: 0, y: 0),
+                                       extent: VkExtent2D(width: frameWidth, height: frameHeight))
+            vkCmdSetScissor(commandBuffer, 0, 1, &scissorRect)
+
+            // recording commands
+            for cmd in self.commands {
+                cmd(commandBuffer, &state)
+            }
+            // end render pass
+            vkCmdEndRenderPass(commandBuffer)
+
+            // process post-renderpass commands
+            for cmd in self.cleanupCommands {
+                cmd(commandBuffer, &state)
+            }
+            return true
         }
     }
     private var encoder: Encoder?
     public let commandBuffer: CommandBuffer
-
-    let flipViewportY = true
 
     public init(buffer: VulkanCommandBuffer, descriptor: RenderPassDescriptor) {   
         self.commandBuffer = buffer
@@ -141,7 +397,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
                                   height: v.height,
                                   minDepth: v.nearZ,
                                   maxDepth: v.farZ)
-        if self.flipViewportY {
+        if flipViewportY {
             viewport.y = viewport.y + viewport.height // set origin to lower-left.
             viewport.height = -(viewport.height) // negative height.
         }

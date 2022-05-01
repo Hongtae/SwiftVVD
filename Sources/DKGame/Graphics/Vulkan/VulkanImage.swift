@@ -85,7 +85,7 @@ public class VulkanImage {
     }
 
     @discardableResult
-    public func setLayout(layout: VkImageLayout,
+    public func setLayout(_ layout: VkImageLayout,
                           accessMask: VkAccessFlags,
                           stageBegin: UInt32,
                           stageEnd: UInt32,

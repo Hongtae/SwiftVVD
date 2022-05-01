@@ -358,11 +358,10 @@ public class VulkanSwapChain: SwapChain {
             swapchainImage.mipLevels = 1
             swapchainImage.arrayLayers = swapchainCreateInfo.imageArrayLayers
             swapchainImage.usage = swapchainCreateInfo.imageUsage
-            swapchainImage.setLayout(
-                layout: VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-                accessMask: 0,
-                stageBegin: UInt32(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT.rawValue),
-                stageEnd: UInt32(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT.rawValue))
+            swapchainImage.setLayout(VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                                     accessMask: 0,
+                                     stageBegin: UInt32(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT.rawValue),
+                                     stageEnd: UInt32(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT.rawValue))
 
             let swapchainImageView = VulkanImageView(device: device, imageView: imageView!)
             swapchainImageView.image = swapchainImage
@@ -451,7 +450,7 @@ public class VulkanSwapChain: SwapChain {
     public func present(waitEvents: [Event]) -> Bool {
         var waitSemaphores: [VkSemaphore?] = []
         waitSemaphores.reserveCapacity(waitEvents.count + 1)
-        
+
         for event in waitEvents {
             let s = event as! VulkanSemaphore
             waitSemaphores.append(s.semaphore)

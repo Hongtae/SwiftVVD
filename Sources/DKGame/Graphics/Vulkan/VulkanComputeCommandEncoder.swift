@@ -5,7 +5,6 @@ import Foundation
 public class VulkanComputeCommandEncoder: VulkanCommandEncoder, ComputeCommandEncoder {
 
     struct EncodingState {
-        var encoder: VulkanComputeCommandEncoder
         var pipelineState: VulkanComputePipelineState?
         var imageLayouts: VulkanDescriptorSet.ImageLayoutMap = [:]
         var imageViewLayouts: VulkanDescriptorSet.ImageViewLayoutMap = [:]
@@ -27,10 +26,41 @@ public class VulkanComputeCommandEncoder: VulkanCommandEncoder, ComputeCommandEn
 
         init(commandBuffer: VulkanCommandBuffer) {
             self.commandBuffer = commandBuffer
+            super.init()
+
+            self.commands.reserveCapacity(self.initialNumberOfCommands)
+            self.setupCommands.reserveCapacity(self.initialNumberOfCommands)
+            self.cleanupCommands.reserveCapacity(self.initialNumberOfCommands)
         }
 
         override func encode(commandBuffer: VkCommandBuffer) -> Bool {
-            false
+            var state = EncodingState()
+            for ds in self.descriptorSets {
+                ds.collectImageViewLayouts(&state.imageLayouts, &state.imageViewLayouts)
+            }
+            for cmd in self.setupCommands {
+                cmd(commandBuffer, &state)
+            }
+            // Set image layout transition
+            state.imageLayouts.forEach { (key, value) in
+                let image: VulkanImage = value.image
+                let layout: VkImageLayout = value.layout
+                let accessMask: VkAccessFlags = VulkanImage.commonAccessMask(forLayout: layout)
+
+                image.setLayout(layout,
+                                accessMask: accessMask,
+                                stageBegin: UInt32(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT.rawValue),
+                                stageEnd: UInt32(VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT.rawValue),
+                                queueFamilyIndex: self.commandBuffer.queueFamily.familyIndex,
+                                commandBuffer: commandBuffer)
+            }
+            for cmd in self.commands {
+                cmd(commandBuffer, &state)
+            }
+            for cmd in self.cleanupCommands {
+                cmd(commandBuffer, &state)
+            }
+            return true
         }        
     }
     private var encoder: Encoder?
