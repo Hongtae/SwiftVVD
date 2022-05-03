@@ -84,7 +84,7 @@ public class VulkanComputeCommandEncoder: VulkanCommandEncoder, ComputeCommandEn
     public var isCompleted: Bool { self.encoder == nil }
 
     public func waitEvent(_ event: Event) {
-        assert(event as? VulkanSemaphore != nil)
+        assert(event is VulkanSemaphore)
         if let semaphore = event as? VulkanSemaphore {
             let pipelineStages: VkPipelineStageFlags = VkPipelineStageFlags(VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT.rawValue)
             self.encoder!.addWaitSemaphore(semaphore.semaphore, value: semaphore.nextWaitValue, flags: pipelineStages)
@@ -92,7 +92,7 @@ public class VulkanComputeCommandEncoder: VulkanCommandEncoder, ComputeCommandEn
         }
     }
     public func signalEvent(_ event: Event) {
-        assert(event as? VulkanSemaphore != nil)
+        assert(event is VulkanSemaphore)
         if let semaphore = event as? VulkanSemaphore {
             self.encoder!.addSignalSemaphore(semaphore.semaphore, value: semaphore.nextWaitValue)
             self.encoder!.events.append(event)
@@ -100,7 +100,7 @@ public class VulkanComputeCommandEncoder: VulkanCommandEncoder, ComputeCommandEn
     }
 
     public func waitSemaphoreValue(_ sema: Semaphore, value: UInt64) {
-        assert(sema as? VulkanTimelineSemaphore != nil)
+        assert(sema is VulkanTimelineSemaphore)
         if let semaphore = sema as? VulkanTimelineSemaphore {
             let pipelineStages: VkPipelineStageFlags = VkPipelineStageFlags(VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT.rawValue)
             self.encoder!.addWaitSemaphore(semaphore.semaphore, value: value, flags: pipelineStages)
@@ -108,7 +108,7 @@ public class VulkanComputeCommandEncoder: VulkanCommandEncoder, ComputeCommandEn
         }
     }
     public func signalSemaphoreValue(_ sema: Semaphore, value: UInt64) {
-        assert(sema as? VulkanTimelineSemaphore != nil)
+        assert(sema is VulkanTimelineSemaphore)
         if let semaphore = sema as? VulkanTimelineSemaphore {
             self.encoder!.addSignalSemaphore(semaphore.semaphore, value: value)
             self.encoder!.semaphores.append(sema)
@@ -116,8 +116,8 @@ public class VulkanComputeCommandEncoder: VulkanCommandEncoder, ComputeCommandEn
     }
     
     public func setResource(_ set: ShaderBindingSet, atIndex index: UInt32) {
+        assert(set is VulkanShaderBindingSet)
         var descriptorSet: VulkanDescriptorSet? = nil
-        assert(set as? VulkanShaderBindingSet != nil)
         if let bindingSet = set as? VulkanShaderBindingSet {
             descriptorSet = bindingSet.makeDescriptorSet()
             self.encoder!.descriptorSets.append(descriptorSet!)
@@ -146,7 +146,7 @@ public class VulkanComputeCommandEncoder: VulkanCommandEncoder, ComputeCommandEn
     }
 
     public func setComputePipelineState(_ pso: ComputePipelineState) {
-        assert(pso as? VulkanComputePipelineState != nil)
+        assert(pso is VulkanComputePipelineState)
         if let pipeline = pso as? VulkanComputePipelineState {
             let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
                 vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.pipeline)

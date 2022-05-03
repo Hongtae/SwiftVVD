@@ -12,7 +12,7 @@ public struct TextureOrigin {
 }
 
 public struct BufferImageOrigin {
-    var offset: UInt64      // buffer offset (bytes)
+    var offset: UInt        // buffer offset (bytes)
     var imageWidth: UInt32  // buffer image's width (pixels)
     var imageHeight: UInt32 // buffer image's height (pixels)
 }
