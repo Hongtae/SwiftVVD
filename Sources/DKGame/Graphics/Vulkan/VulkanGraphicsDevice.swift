@@ -346,9 +346,54 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         }
         return nil
     }
-    public func makeShaderModule() -> ShaderModule? {
-        return nil
+    public func makeShaderModule(from shader: Shader) -> ShaderModule? {
+        if shader.spirvData.isEmpty { return nil }
+
+        let maxPushConstantsSize = self.properties.limits.maxPushConstantsSize
+
+        for layout in shader.pushConstantLayouts {
+            if layout.offset >= maxPushConstantsSize {
+                Log.err("PushConstant offset is out of range. (offset: \(layout.offset), limit: \(maxPushConstantsSize))")
+                return nil
+            }
+            if (layout.offset + layout.size > maxPushConstantsSize) {
+                Log.err("PushConstant range exceeded limit. (offset: \(layout.offset), size: \(layout.size), limit: \(maxPushConstantsSize))")
+                return nil
+            }            
+        }
+
+        let threadWorkgroupSize = shader.threadgroupSize
+        let maxComputeWorkGroupSize = self.properties.limits.maxComputeWorkGroupSize
+        if threadWorkgroupSize.x > maxComputeWorkGroupSize.0 ||
+           threadWorkgroupSize.y > maxComputeWorkGroupSize.1 ||
+           threadWorkgroupSize.z > maxComputeWorkGroupSize.2 {
+            Log.err("Thread-WorkGroup size exceeded limit. Size:(\(threadWorkgroupSize.x), \(threadWorkgroupSize.y), \(threadWorkgroupSize.z)), Limit:(\(maxComputeWorkGroupSize.0), \(maxComputeWorkGroupSize.1), \(maxComputeWorkGroupSize.2))")
+            return nil
+            }
+
+        var shaderModule: VkShaderModule? = nil
+        let stride = MemoryLayout.stride(ofValue: shader.spirvData[0])
+        let err: VkResult = shader.spirvData.withUnsafeBufferPointer {
+            var shaderModuleCreateInfo = VkShaderModuleCreateInfo()
+            shaderModuleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO
+            shaderModuleCreateInfo.codeSize = $0.count * stride
+            shaderModuleCreateInfo.pCode = $0.baseAddress
+            return vkCreateShaderModule(self.device, &shaderModuleCreateInfo, self.allocationCallbacks, &shaderModule)
+        }
+        if err != VK_SUCCESS {
+            Log.err("vkCreateShaderModule failed: \(err)")
+            return nil
+        }
+
+        switch (shader.stage) {
+        case .vertex, .fragment, .compute:  break
+        default:
+            Log.warn("Unsupported shader type!")
+            break
+        }
+        return VulkanShaderModule(device: self, module: shaderModule!, shader: shader)
     }
+    
     public func makeShaderBindingSet() -> ShaderBindingSet? {
         return nil
     }

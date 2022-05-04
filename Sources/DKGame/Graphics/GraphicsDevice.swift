@@ -15,7 +15,7 @@ public protocol GraphicsDevice {
     var name: String { get }
 
     func makeCommandQueue(flags: CommandQueueFlags) -> CommandQueue?
-    func makeShaderModule() -> ShaderModule?
+    func makeShaderModule(from: Shader) -> ShaderModule?
     func makeShaderBindingSet() -> ShaderBindingSet?
 
     func makeRenderPipelineState() -> RenderPipelineState?

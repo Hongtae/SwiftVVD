@@ -1,13 +1,15 @@
+import Foundation
+
 public struct ShaderSpecialization {
     var type : ShaderDataType
-    var data : Any?
+    var data : ContiguousBytes
     var index : UInt32
-    var size : UInt
+    var size : Int
 }
 
 public protocol ShaderModule {
     func makeFunction(name: String) -> ShaderFunction?
-    func makeSpecializedFunction(name: String, specializedValues: [ShaderSpecialization]) -> ShaderFunction?
+    func makeFunction(name: String, specializedValues: [ShaderSpecialization]) -> ShaderFunction?
 
     var functionNames: [String] { get }
     var device: GraphicsDevice { get }
