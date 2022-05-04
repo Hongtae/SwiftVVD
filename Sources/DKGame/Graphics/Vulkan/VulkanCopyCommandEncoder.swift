@@ -112,7 +112,7 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
         assert(dstBuffer.buffer != nil)
 
         if srcOffset + size > srcBuffer.length || dstOffset + size > dstBuffer.length {
-            Log.err("VulkanCopyCommandEncoder.copy failed: Invalid buffer region");
+            Log.err("VulkanCopyCommandEncoder.\(#function) failed: Invalid buffer region");
             return
         }
 
@@ -146,12 +146,12 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
         if dstOffset.x + size.width > mipDimensions.width ||
            dstOffset.y + size.height > mipDimensions.height ||
            dstOffset.z + size.depth > mipDimensions.depth {
-            Log.err("VulkanCopyCommandEncoder.copy failed: Invalid texture region")
+            Log.err("VulkanCopyCommandEncoder.\(#function) failed: Invalid texture region")
             return
         }
         if size.width > srcOffset.imageWidth ||
            size.height > srcOffset.imageHeight {
-            Log.err("VulkanCopyCommandEncoder.copy failed: Invalid buffer region")
+            Log.err("VulkanCopyCommandEncoder.\(#function) failed: Invalid buffer region")
             return
         }
 
@@ -162,7 +162,7 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
 
         let requiredBufferLengthForCopy = UInt(srcOffset.imageWidth) * UInt(srcOffset.imageHeight) * UInt(size.depth) * UInt(bytesPerPixel) + srcOffset.offset
         if requiredBufferLengthForCopy > bufferLength {
-            Log.err("VulkanCopyCommandEncoder.copy failed: buffer is too small!")
+            Log.err("VulkanCopyCommandEncoder.\(#function) failed: buffer is too small!")
             return
         }
 
@@ -216,12 +216,12 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
         if srcOffset.x + size.width > mipDimensions.width ||
            srcOffset.y + size.height > mipDimensions.height ||
            srcOffset.z + size.depth > mipDimensions.depth {
-            Log.err("VulkanCopyCommandEncoder.copy failed: Invalid texture region")
+            Log.err("VulkanCopyCommandEncoder.\(#function) failed: Invalid texture region")
             return
         }
         if size.width > dstOffset.imageWidth ||
            size.height > dstOffset.imageHeight {
-            Log.err("VulkanCopyCommandEncoder.copy failed: Invalid buffer region")
+            Log.err("VulkanCopyCommandEncoder.\(#function) failed: Invalid buffer region")
             return
         }
 
@@ -232,7 +232,7 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
 
         let requiredBufferLengthForCopy = UInt(dstOffset.imageWidth) * UInt(dstOffset.imageHeight) * UInt(size.depth) * UInt(bytesPerPixel) + dstOffset.offset
         if requiredBufferLengthForCopy > bufferLength {
-            Log.err("VulkanCopyCommandEncoder.copy failed: buffer is too small!")
+            Log.err("VulkanCopyCommandEncoder.\(#function) failed: buffer is too small!")
             return
         }
 
@@ -291,13 +291,13 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
         if srcOffset.x + size.width > srcMipDimensions.width ||
            srcOffset.y + size.height > srcMipDimensions.height ||
            srcOffset.z + size.depth > srcMipDimensions.depth {
-            Log.err("VulkanCopyCommandEncoder.copy failed: Invalid source texture region")
+            Log.err("VulkanCopyCommandEncoder.\(#function) failed: Invalid source texture region")
             return
         }
         if dstOffset.x + size.width > dstMipDimensions.width ||
            dstOffset.y + size.height > dstMipDimensions.height ||
            dstOffset.z + size.depth > dstMipDimensions.depth {
-            Log.err("VulkanCopyCommandEncoder.copy failed: Invalid destination texture region")
+            Log.err("VulkanCopyCommandEncoder.\(#function) failed: Invalid destination texture region")
             return
         }
 
@@ -309,7 +309,7 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
         assert(dstBytesPerPixel > 0)    // Unsupported texture format!
 
         if srcBytesPerPixel != dstBytesPerPixel {
-            Log.err("VulkanCopyCommandEncoder.copy failed: Incompatible pixel formats")
+            Log.err("VulkanCopyCommandEncoder.\(#function) failed: Incompatible pixel formats")
             return
         }
 
@@ -322,20 +322,6 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
         region.srcOffset = VkOffset3D(x: Int32(srcOffset.x), y: Int32(srcOffset.y), z: Int32(srcOffset.z))
         region.dstOffset = VkOffset3D(x: Int32(dstOffset.x), y: Int32(dstOffset.y), z: Int32(dstOffset.z))
         region.extent = VkExtent3D(width: size.width, height: size.height, depth: size.depth)
-
-        var imageMemoryBarrier0 = VkImageMemoryBarrier()
-        imageMemoryBarrier0.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER
-        imageMemoryBarrier0.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED
-        imageMemoryBarrier0.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED
-        imageMemoryBarrier0.image = srcImage.image
-        self.setupSubresource(&imageMemoryBarrier0.subresourceRange, origin: srcOffset, layerCount: 1, levelCount: 1, pixelFormat: srcPixelFormat)
-
-        var imageMemoryBarrier1 = VkImageMemoryBarrier()
-        imageMemoryBarrier1.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER
-        imageMemoryBarrier1.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED
-        imageMemoryBarrier1.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED
-        imageMemoryBarrier1.image = dstImage.image
-        self.setupSubresource(&imageMemoryBarrier1.subresourceRange, origin: dstOffset, layerCount: 1, levelCount: 1, pixelFormat: dstPixelFormat)
 
         let queueFamilyIndex = self.encoder!.commandBuffer.queueFamily.familyIndex
 
@@ -373,7 +359,7 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
 
         let bufferLength = buf.length
         if offset + length > bufferLength {
-            Log.err("VulkanCopyCommandEncoder.fill failed: Invalid buffer region")
+            Log.err("VulkanCopyCommandEncoder.\(#function) failed: Invalid buffer region")
             return       
         }
 
