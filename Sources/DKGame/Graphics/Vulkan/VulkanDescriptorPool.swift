@@ -38,6 +38,15 @@ public struct VulkanDescriptorPoolID: Hashable, Equatable {
     public let mask: UInt32
     public let typeSize: [UInt32]
 
+    public var hash: UInt32 {
+        assert(self.typeSize.count == descriptorTypes.count)
+        var data: [UInt32] = []
+        data.reserveCapacity(self.typeSize.count + 1)
+        data.append(self.mask)
+        data.append(contentsOf: self.typeSize)
+        return data.withUnsafeBytes { CRC32.hash(data: $0).hash }
+    }
+
     public init() {
         self.mask = 0
         self.typeSize = .init(repeating: 0, count: descriptorTypes.count)

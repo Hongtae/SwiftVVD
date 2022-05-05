@@ -16,10 +16,13 @@ public protocol GraphicsDevice {
 
     func makeCommandQueue(flags: CommandQueueFlags) -> CommandQueue?
     func makeShaderModule(from: Shader) -> ShaderModule?
-    func makeShaderBindingSet() -> ShaderBindingSet?
+    func makeShaderBindingSet(layout: ShaderBindingSetLayout) -> ShaderBindingSet?
 
-    func makeRenderPipelineState() -> RenderPipelineState?
-    func makeComputePipelineState() -> ComputePipelineState?
+    func makeRenderPipelineState(descriptor: RenderPipelineDescriptor, reflection: UnsafeMutablePointer<PipelineReflection>?) -> RenderPipelineState?
+    func makeRenderPipelineState(descriptor: RenderPipelineDescriptor) -> RenderPipelineState?
+
+    func makeComputePipelineState(descriptor: ComputePipelineDescriptor, reflection: UnsafeMutablePointer<PipelineReflection>?) -> ComputePipelineState?
+    func makeComputePipelineState(descriptor: ComputePipelineDescriptor) -> ComputePipelineState?
 
     func makeBuffer() -> Buffer?
     func makeTexture() -> Texture?
@@ -27,6 +30,16 @@ public protocol GraphicsDevice {
 
     func makeEvent() -> Event?
     func makeSemaphore() -> Semaphore?
+}
+
+public extension GraphicsDevice {
+    func makeRenderPipelineState(descriptor: RenderPipelineDescriptor) -> RenderPipelineState? {
+        return self.makeRenderPipelineState(descriptor: descriptor, reflection: nil)
+    }
+
+    func makeComputePipelineState(descriptor: ComputePipelineDescriptor) -> ComputePipelineState? {
+        return self.makeComputePipelineState(descriptor: descriptor, reflection: nil)
+    }
 }
 
 public enum GraphicsAPI {

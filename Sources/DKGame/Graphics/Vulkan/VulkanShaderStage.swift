@@ -3,23 +3,29 @@ import Vulkan
 import Foundation
 
 extension ShaderStage {
-    public func vkFlags() -> VkShaderStageFlags {
+    public func vkFlagBits() -> VkShaderStageFlagBits
+    {
         switch (self) {
         case .vertex:
-            return VkShaderStageFlags(VK_SHADER_STAGE_VERTEX_BIT.rawValue)
+            return VK_SHADER_STAGE_VERTEX_BIT
         case .tessellationControl:
-            return VkShaderStageFlags(VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT.rawValue)
+            return VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT
         case .tessellationEvaluation:
-            return VkShaderStageFlags(VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT.rawValue)
+            return VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT
         case .geometry:
-            return VkShaderStageFlags(VK_SHADER_STAGE_GEOMETRY_BIT.rawValue)
+            return VK_SHADER_STAGE_GEOMETRY_BIT
         case .fragment:
-            return VkShaderStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT.rawValue)
+            return VK_SHADER_STAGE_FRAGMENT_BIT
         case .compute:
-            return VkShaderStageFlags(VK_SHADER_STAGE_COMPUTE_BIT.rawValue)
+            return VK_SHADER_STAGE_COMPUTE_BIT
         default:
-            return VkShaderStageFlags(0)
-        }
+            assertionFailure("Unknown shader stage!")
+            return VkShaderStageFlagBits(0)
+        }        
+    }
+
+    public func vkFlags() -> VkShaderStageFlags {
+        return VkShaderStageFlags(self.vkFlagBits().rawValue)
     }
 }
 

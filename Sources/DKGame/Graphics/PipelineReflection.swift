@@ -1,7 +1,7 @@
 public struct PipelineReflection: CustomStringConvertible {
-    public var inputAttributes: [ShaderAttribute]
-    public var pushConstantLayouts: [ShaderPushConstantLayout]
-    public var resources: [ShaderResource]
+    public var inputAttributes: [ShaderAttribute] = []
+    public var pushConstantLayouts: [ShaderPushConstantLayout] = []
+    public var resources: [ShaderResource] = []
 
     public var description: String {
         var str = ""

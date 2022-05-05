@@ -393,16 +393,163 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         }
         return VulkanShaderModule(device: self, module: shaderModule!, shader: shader)
     }
-    
-    public func makeShaderBindingSet() -> ShaderBindingSet? {
+
+    public func makeShaderBindingSet(layout: ShaderBindingSetLayout) -> ShaderBindingSet? {
+        let poolID = VulkanDescriptorPoolID(layout: layout)
+        if poolID.mask != 0 {
+#if DEBUG
+            let index: Int = Int(poolID.hash % UInt32(descriptorPoolChainMaps.count))
+
+            synchronizedBy(locking: self.descriptorPoolChainMaps[index].lock) {
+                // find matching pool.
+                if let chain = self.descriptorPoolChainMaps[index].poolChainMap[poolID] {
+                    assert(chain.device! === self)
+                    assert(chain.poolID == poolID)
+                }
+            }
+#endif
+            // create layout!
+            var layoutBindings: [VkDescriptorSetLayoutBinding] = []
+            layoutBindings.reserveCapacity(layout.bindings.count)
+            for binding in layout.bindings {
+                var layoutBinding = VkDescriptorSetLayoutBinding()
+                layoutBinding.binding = binding.binding
+                layoutBinding.descriptorType = binding.type.vkType()
+                layoutBinding.descriptorCount = binding.arrayLength
+
+                // input-attachment is for the fragment shader only! (framebuffer load operation)
+                if layoutBinding.descriptorType == VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT &&
+                layoutBinding.descriptorCount > 0 {
+                    layoutBinding.stageFlags = VkShaderStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT.rawValue)
+                } else {
+                    layoutBinding.stageFlags = VkShaderStageFlags(VK_SHADER_STAGE_ALL.rawValue)
+                }
+
+                //TODO: setup immutable sampler!
+
+                layoutBindings.append(layoutBinding)
+            }
+
+            let tempHolder = TemporaryBufferHolder(label: "VulkanGraphicsDevice.makeShaderBindingSet")
+            var descriptorSetLayout: VkDescriptorSetLayout? = nil
+
+            var layoutCreateInfo = VkDescriptorSetLayoutCreateInfo()
+            layoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
+            layoutCreateInfo.bindingCount = UInt32(layoutBindings.count)
+            layoutCreateInfo.pBindings = unsafePointerCopy(collection: layoutBindings, holder: tempHolder)
+
+            var layoutSupport = VkDescriptorSetLayoutSupport()
+            layoutSupport.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_SUPPORT
+            vkGetDescriptorSetLayoutSupport(device, &layoutCreateInfo, &layoutSupport)
+            assert(layoutSupport.supported != 0)
+
+            let err = vkCreateDescriptorSetLayout(self.device, &layoutCreateInfo, self.allocationCallbacks, &descriptorSetLayout)
+            if err != VK_SUCCESS {
+                Log.err("vkCreateDescriptorSetLayout failed: \(err)")
+                return nil
+            }
+            return VulkanShaderBindingSet(device: self, layout: descriptorSetLayout!, poolID: poolID, layoutCreateInfo: layoutCreateInfo)
+        }
         return nil
     }
-    public func makeRenderPipelineState() -> RenderPipelineState? {
+
+    public func makeRenderPipelineState(descriptor desc: RenderPipelineDescriptor,
+        reflection: UnsafeMutablePointer<PipelineReflection>?) -> RenderPipelineState? {
+
+        var result: VkResult = VK_SUCCESS;
+
+        var pipelineLayout: VkPipelineLayout? = nil
+        var renderPass: VkRenderPass? = nil
+        var pipeline: VkPipeline? = nil
+        var pipelineState: RenderPipelineState? = nil
+
+        defer {
+            if pipelineState == nil {
+                if let pipelineLayout = pipelineLayout {
+                    vkDestroyPipelineLayout(self.device, pipelineLayout, self.allocationCallbacks)
+                }
+                if let renderPass = renderPass {
+                    vkDestroyRenderPass(self.device, renderPass, self.allocationCallbacks)
+                }
+                if let pipeline = pipeline {
+                    vkDestroyPipeline(self.device, pipeline, self.allocationCallbacks)
+                }
+            }
+        }
+
         return nil
     }
-    public func makeComputePipelineState() -> ComputePipelineState? {
-        return nil
+    public func makeComputePipelineState(descriptor desc: ComputePipelineDescriptor,
+        reflection: UnsafeMutablePointer<PipelineReflection>?) -> ComputePipelineState? {
+
+        var result: VkResult = VK_SUCCESS
+        var pipelineLayout: VkPipelineLayout? = nil
+        var pipeline: VkPipeline? = nil
+        var pipelineState: ComputePipelineState? = nil
+
+        let tempHolder = TemporaryBufferHolder(label: "VulkanGraphicsDevice.makeComputePipelineState")
+
+        defer {
+            // cleanup resources if function failure.
+            if pipelineState == nil {
+                if let pipelineLayout = pipelineLayout {
+                    vkDestroyPipelineLayout(self.device, pipelineLayout, self.allocationCallbacks)
+                }
+                if let pipeline = pipeline {
+                    vkDestroyPipeline(self.device, pipeline, self.allocationCallbacks)
+                }
+            }
+        }
+
+        var pipelineCreateInfo = VkComputePipelineCreateInfo()
+        pipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO
+
+        if desc.disableOptimization {
+            pipelineCreateInfo.flags |= VkPipelineCreateFlags(VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT.rawValue)
+        }
+        if desc.deferCompile {
+            // pipelineCreateInfo.flags |= VkPipelineCreateFlags(VK_PIPELINE_CREATE_DEFER_COMPILE_BIT_NV.rawValue)
+        }
+
+        assert(desc.computeFunction is VulkanShaderFunction)
+        let shader = desc.computeFunction as! VulkanShaderFunction
+        let module = shader.module as! VulkanShaderModule
+        assert(module.stage == .compute)
+
+        var shaderStageCreateInfo = VkPipelineShaderStageCreateInfo()
+        shaderStageCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO
+        shaderStageCreateInfo.stage = module.stage.vkFlagBits()
+        shaderStageCreateInfo.module = module.module
+        shaderStageCreateInfo.pName = unsafePointerCopy(string: shader.functionName, holder: tempHolder)
+        if shader.specializationInfo.mapEntryCount > 0 {
+           shaderStageCreateInfo.pSpecializationInfo = unsafePointerCopy(from: shader.specializationInfo, holder: tempHolder)
+        }
+
+        pipelineCreateInfo.stage = shaderStageCreateInfo
+
+        pipelineLayout = makePipelineLayout(
+            functions: [shader],
+            layoutDefaultStageFlags: VkShaderStageFlags(VK_SHADER_STAGE_ALL.rawValue))
+        if pipelineLayout == nil { return nil }
+
+        pipelineCreateInfo.layout = pipelineLayout;
+        assert(pipelineCreateInfo.stage.stage == VK_SHADER_STAGE_COMPUTE_BIT)
+
+        result = vkCreateComputePipelines(self.device, pipelineCache, 1, &pipelineCreateInfo, self.allocationCallbacks, &pipeline)
+        if result != VK_SUCCESS {
+            Log.err("vkCreateComputePipelines failed: \(result)")
+            return nil
+        }
+
+        self.savePipelineCache()
+
+        if let reflection = reflection {
+            reflection.pointee.resources = module.resources
+        }
+
+        return VulkanComputePipelineState(device: self, pipeline: pipeline!, layout: pipelineLayout!)
     }
+
     public func makeBuffer() -> Buffer? {
         return nil
     }
@@ -463,10 +610,9 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         return VulkanTimelineSemaphore(device: self, semaphore: semaphore!)
     }
 
-    public func makeDescriptorSet(layout: VkDescriptorSetLayout, poolID: VulkanDescriptorPoolID) -> VulkanDescriptorSet? {
+    func makeDescriptorSet(layout: VkDescriptorSetLayout, poolID: VulkanDescriptorPoolID) -> VulkanDescriptorSet? {
         if poolID.mask != 0 {
-            let hash = withUnsafeBytes(of: poolID) { CRC32.hash(data: $0).hash }
-            let index: Int = Int(hash % UInt32(descriptorPoolChainMaps.count))
+            let index: Int = Int(poolID.hash % UInt32(descriptorPoolChainMaps.count))
 
             self.descriptorPoolChainMaps[index].lock.lock()
             defer {
@@ -490,14 +636,13 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         return nil
     }
 
-    public func releaseDescriptorSets(_ sets: [VkDescriptorSet], from pool: VulkanDescriptorPool) {
+    func releaseDescriptorSets(_ sets: [VkDescriptorSet], from pool: VulkanDescriptorPool) {
         let poolID = pool.poolID
         assert(poolID.mask != 0)
 
         guard sets.isEmpty == false else { return }
 
-        let hash = withUnsafeBytes(of: poolID) { CRC32.hash(data: $0).hash }
-        let index: Int = Int(hash % UInt32(descriptorPoolChainMaps.count))
+        let index: Int = Int(poolID.hash % UInt32(descriptorPoolChainMaps.count))
 
         synchronizedBy(locking: self.descriptorPoolChainMaps[index].lock) {
             pool.release(descriptorSets: sets)
@@ -507,6 +652,147 @@ public class VulkanGraphicsDevice : GraphicsDevice {
                 self.descriptorPoolChainMaps[index].poolChainMap[poolID] = nil
             }
         }
+    }
+
+    private func makePipelineLayout(functions: [ShaderFunction],
+                                    layoutDefaultStageFlags: VkShaderStageFlags) -> VkPipelineLayout? {
+        var descriptorSetLayouts: [VkDescriptorSetLayout?] = []
+        let result = makePipelineLayout(functions: functions,
+            descriptorSetLayouts: &descriptorSetLayouts,
+            layoutDefaultStageFlags: layoutDefaultStageFlags)
+
+        for setLayout in descriptorSetLayouts {
+            assert(setLayout != nil)
+            vkDestroyDescriptorSetLayout(self.device, setLayout, self.allocationCallbacks)
+        }
+        return result
+    }
+
+    private func makePipelineLayout(functions: [ShaderFunction],
+                                    descriptorSetLayouts: inout [VkDescriptorSetLayout?],
+                                    layoutDefaultStageFlags: VkShaderStageFlags) -> VkPipelineLayout? {
+        var result: VkResult = VK_SUCCESS
+        var numPushConstantRanges = 0
+
+        for fn in functions {
+            assert(fn is VulkanShaderFunction)
+            let f = fn as! VulkanShaderFunction
+            let module = f.module as! VulkanShaderModule
+
+            numPushConstantRanges += module.pushConstantLayouts.count
+        }
+
+        var pushConstantRanges: [VkPushConstantRange] = []
+        pushConstantRanges.reserveCapacity(numPushConstantRanges)
+
+        var maxDescriptorBindings = 0   // maximum number of descriptor
+        var maxDescriptorSets: UInt32 = 0       // maximum number of sets
+
+        for fn in functions {
+            let f = fn as! VulkanShaderFunction
+            let module = f.module as! VulkanShaderModule
+
+            for layout in module.pushConstantLayouts {
+                if layout.size > 0 {
+                    var range = VkPushConstantRange()
+                    range.stageFlags = module.stage.vkFlags()
+                    range.offset = layout.offset
+                    range.size = layout.size
+                    pushConstantRanges.append(range)
+                }
+            }
+
+            // calculate max descriptor bindings a set
+            if module.descriptors.isEmpty == false {
+                maxDescriptorSets = max(maxDescriptorSets, module.descriptors.last!.set + 1)
+                maxDescriptorBindings = max(maxDescriptorBindings, module.descriptors.count)
+            }
+        }
+
+        // setup descriptor layout
+        var descriptorBindings: [VkDescriptorSetLayoutBinding] = []
+        descriptorBindings.reserveCapacity(maxDescriptorBindings)
+
+        for setIndex in 0..<maxDescriptorSets {
+            descriptorBindings.removeAll(keepingCapacity: true)
+            for fn in functions {
+                let f = fn as! VulkanShaderFunction
+                let module = f.module as! VulkanShaderModule
+
+                for desc in module.descriptors {
+                    if desc.set > setIndex { break }
+
+                    if desc.set == setIndex {
+                        var newBinding = true
+
+                        for i in 0..<descriptorBindings.count {
+                            var b = descriptorBindings[i]
+                            if b.binding == desc.binding {  // exist binding!! (conflict)
+                                newBinding = false
+                                if b.descriptorType == desc.type.vkType() {
+                                    b.descriptorCount = max(b.descriptorCount, desc.count)
+                                    b.stageFlags |= module.stage.vkFlags()
+                                    descriptorBindings[i] = b // udpate.
+                                } else {
+                                    Log.err("descriptor binding conflict! (set=\(setIndex), binding=\(desc.binding))")
+                                    return nil
+                                }
+                            }
+                        }
+                        if newBinding {
+                            let binding = VkDescriptorSetLayoutBinding(
+                                binding: desc.binding,
+                                descriptorType: desc.type.vkType(),
+                                descriptorCount: desc.count,
+                                stageFlags: layoutDefaultStageFlags | module.stage.vkFlags(), 
+                                pImmutableSamplers: nil  /* VkSampler* pImmutableSamplers */
+                            )
+                            descriptorBindings.append(binding)
+                        }
+                    }
+                }
+            }
+            // create descriptor set (setIndex) layout
+            var setLayout: VkDescriptorSetLayout? = nil
+            result = descriptorBindings.withUnsafeBufferPointer {
+                var setLayoutCreateInfo = VkDescriptorSetLayoutCreateInfo()
+                setLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
+                setLayoutCreateInfo.bindingCount = UInt32($0.count)
+                setLayoutCreateInfo.pBindings = $0.baseAddress
+
+                var layoutSupport = VkDescriptorSetLayoutSupport()
+                layoutSupport.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_SUPPORT
+                vkGetDescriptorSetLayoutSupport(device, &setLayoutCreateInfo, &layoutSupport);
+                assert(layoutSupport.supported != 0)
+
+                return vkCreateDescriptorSetLayout(self.device, &setLayoutCreateInfo, self.allocationCallbacks, &setLayout)
+            }
+            if result != VK_SUCCESS {
+                Log.err("vkCreateDescriptorSetLayout failed: \(result)")
+                return nil
+            }
+            descriptorSetLayouts.append(setLayout!)
+            descriptorBindings.removeAll(keepingCapacity: true)
+        }
+
+        var pipelineLayout: VkPipelineLayout? = nil
+        result = descriptorSetLayouts.withUnsafeBufferPointer {
+            var pipelineLayoutCreateInfo = VkPipelineLayoutCreateInfo()
+            pipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO
+            pipelineLayoutCreateInfo.setLayoutCount = UInt32($0.count)
+            pipelineLayoutCreateInfo.pSetLayouts = $0.baseAddress
+            return pushConstantRanges.withUnsafeBufferPointer {
+                pipelineLayoutCreateInfo.pushConstantRangeCount = UInt32($0.count)
+                pipelineLayoutCreateInfo.pPushConstantRanges = $0.baseAddress
+
+                return vkCreatePipelineLayout(self.device, &pipelineLayoutCreateInfo, self.allocationCallbacks, &pipelineLayout)
+            }
+        }
+        if result != VK_SUCCESS {
+            Log.err("ERROR: vkCreatePipelineLayout failed: \(result)")
+            return nil
+        }
+        return pipelineLayout
     }
 }
 #endif //if ENABLE_VULKAN
