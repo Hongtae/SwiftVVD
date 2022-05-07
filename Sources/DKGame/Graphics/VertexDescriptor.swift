@@ -47,10 +47,10 @@ public enum VertexFormat {
     case int3
     case int4
     
-    case uInt
-    case uInt2
-    case uInt3
-    case uInt4
+    case uint
+    case uint2
+    case uint3
+    case uint4
     
     case int1010102Normalized
     case uint1010102Normalized

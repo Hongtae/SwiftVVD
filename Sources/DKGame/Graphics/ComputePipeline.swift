@@ -1,5 +1,5 @@
 public struct ComputePipelineDescriptor {
-    var computeFunction: ShaderFunction
+    var computeFunction: ShaderFunction?
     var deferCompile: Bool = false
     var disableOptimization: Bool = false
 }

@@ -477,8 +477,454 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             }
         }
 
-        return nil
+        if let vs = desc.vertexFunction {
+            assert(vs.stage == .vertex)
+        }
+        if let fs = desc.fragmentFunction {
+            assert(fs.stage == .fragment)
+        }
+
+        let tempHolder = TemporaryBufferHolder(label: "VulkanGraphicsDevice.makeRenderPipelineState")
+
+        var pipelineCreateInfo = VkGraphicsPipelineCreateInfo()
+        pipelineCreateInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO
+
+        // shader stages
+        let shaderFunctions = [desc.vertexFunction, desc.fragmentFunction].compactMap { $0 }
+        var shaderStageCreateInfos: [VkPipelineShaderStageCreateInfo] = []
+        shaderStageCreateInfos.reserveCapacity(shaderFunctions.count)
+
+        for fn in shaderFunctions {
+            assert(fn is VulkanShaderFunction)
+            let fn = fn as! VulkanShaderFunction
+            let module = fn.module
+
+            var shaderStageCreateInfo = VkPipelineShaderStageCreateInfo()
+            shaderStageCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO
+            shaderStageCreateInfo.stage = module.stage.vkFlagBits()
+            shaderStageCreateInfo.module = module.module
+            shaderStageCreateInfo.pName = unsafePointerCopy(string: fn.functionName, holder: tempHolder)
+            if fn.specializationInfo.mapEntryCount > 0 {
+                shaderStageCreateInfo.pSpecializationInfo = unsafePointerCopy(from: fn.specializationInfo, holder: tempHolder)
+            }
+            shaderStageCreateInfos.append(shaderStageCreateInfo)
+        }
+        pipelineCreateInfo.stageCount = UInt32(shaderStageCreateInfos.count)
+        pipelineCreateInfo.pStages = unsafePointerCopy(collection: shaderStageCreateInfos, holder: tempHolder)
+
+        pipelineLayout = makePipelineLayout(
+            functions: shaderFunctions,
+            layoutDefaultStageFlags: VkShaderStageFlags(VK_SHADER_STAGE_ALL.rawValue))
+        if pipelineLayout == nil { return nil }
+        pipelineCreateInfo.layout = pipelineLayout
+
+        // vertex input state
+    	var vertexBindingDescriptions: [VkVertexInputBindingDescription] = []
+	    vertexBindingDescriptions.reserveCapacity(desc.vertexDescriptor.layouts.count)
+        for layout in desc.vertexDescriptor.layouts {   // buffer layout
+            var binding = VkVertexInputBindingDescription()
+            binding.binding = layout.bufferIndex
+            binding.stride = layout.stride
+            switch layout.step {
+            case .vertex:
+                binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX
+            case .instance:
+                binding.inputRate = VK_VERTEX_INPUT_RATE_INSTANCE
+            }
+            vertexBindingDescriptions.append(binding)
+        }
+
+        var vertexAttributeDescriptions: [VkVertexInputAttributeDescription] = []
+        vertexAttributeDescriptions.reserveCapacity(desc.vertexDescriptor.attributes.count)
+    	for attrDesc in desc.vertexDescriptor.attributes {
+            var attr = VkVertexInputAttributeDescription()
+            attr.location = attrDesc.location
+            attr.binding = attrDesc.bufferIndex
+            attr.format = attrDesc.format.vkFormat()
+            attr.offset = attrDesc.offset
+            vertexAttributeDescriptions.append(attr)
+        }
+
+        var vertexInputState = VkPipelineVertexInputStateCreateInfo()
+        vertexInputState.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO
+        vertexInputState.vertexBindingDescriptionCount = UInt32(vertexBindingDescriptions.count)
+        vertexInputState.pVertexBindingDescriptions = unsafePointerCopy(collection: vertexBindingDescriptions, holder: tempHolder)
+        vertexInputState.vertexAttributeDescriptionCount = UInt32(vertexAttributeDescriptions.count)
+        vertexInputState.pVertexAttributeDescriptions = unsafePointerCopy(collection: vertexAttributeDescriptions, holder: tempHolder)
+        pipelineCreateInfo.pVertexInputState = unsafePointerCopy(from: vertexInputState, holder: tempHolder)
+
+        // input assembly
+        var inputAssemblyState = VkPipelineInputAssemblyStateCreateInfo()
+        inputAssemblyState.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO
+        switch desc.primitiveTopology {
+        case .point:            inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST
+        case .line:             inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST
+        case .lineStrip:        inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_LINE_STRIP
+        case .triangle:         inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
+        case .triangleStrip:    inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP
+        }
+    	pipelineCreateInfo.pInputAssemblyState = unsafePointerCopy(from: inputAssemblyState, holder: tempHolder)
+
+        // setup viewport
+        var viewportState = VkPipelineViewportStateCreateInfo()
+        viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO
+        viewportState.viewportCount = 1
+        viewportState.scissorCount = 1
+        pipelineCreateInfo.pViewportState = unsafePointerCopy(from: viewportState, holder: tempHolder)
+
+        // rasterization state
+        var rasterizationState = VkPipelineRasterizationStateCreateInfo()
+        rasterizationState.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO
+        rasterizationState.polygonMode = VK_POLYGON_MODE_FILL
+        if desc.triangleFillMode == .lines {
+            if self.features.fillModeNonSolid != 0 {
+                rasterizationState.polygonMode = VK_POLYGON_MODE_LINE
+            } else {
+                Log.warn("VulkanGraphicsDevice.\(#function): PolygonFillMode not supported for this hardware.")
+            }
+        }
+
+        switch desc.cullMode {
+        case .none:  rasterizationState.cullMode = VkCullModeFlags(VK_CULL_MODE_NONE.rawValue)
+        case .front: rasterizationState.cullMode = VkCullModeFlags(VK_CULL_MODE_FRONT_BIT.rawValue)
+        case .back:  rasterizationState.cullMode = VkCullModeFlags(VK_CULL_MODE_BACK_BIT.rawValue)
+        }
+
+        switch desc.frontFace {
+        case .cw:   rasterizationState.frontFace = VK_FRONT_FACE_CLOCKWISE
+        case .ccw:  rasterizationState.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE
+        }
+
+    	rasterizationState.depthClampEnable = VkBool32(VK_FALSE)
+        if desc.depthClipMode == .clamp {
+            if self.features.depthClamp != 0 {
+                rasterizationState.depthClampEnable = VkBool32(VK_TRUE)
+            } else {
+                Log.warn("VulkanGraphicsDevice.\(#function): DepthClamp not supported for this hardware.")
+            }
+        }
+        rasterizationState.rasterizerDiscardEnable = VkBool32(desc.rasterizationEnabled ? VK_FALSE : VK_TRUE)
+        rasterizationState.depthBiasEnable = VkBool32(VK_FALSE)
+        rasterizationState.lineWidth = 1.0
+        pipelineCreateInfo.pRasterizationState = unsafePointerCopy(from: rasterizationState, holder: tempHolder)
+
+        // setup multisampling
+        var multisampleState = VkPipelineMultisampleStateCreateInfo()
+        multisampleState.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO
+        multisampleState.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT
+        multisampleState.pSampleMask = nil
+        pipelineCreateInfo.pMultisampleState = unsafePointerCopy(from: multisampleState, holder: tempHolder)
+
+        // setup depth-stencil
+        var depthStencilState = VkPipelineDepthStencilStateCreateInfo()
+        depthStencilState.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO
+        let compareOp = { (fn: CompareFunction) -> VkCompareOp in
+            switch fn {
+            case .never:            return VK_COMPARE_OP_NEVER
+            case .less:             return VK_COMPARE_OP_LESS
+            case .equal:            return VK_COMPARE_OP_EQUAL
+            case .lessEqual:        return VK_COMPARE_OP_LESS_OR_EQUAL
+            case .greater:          return VK_COMPARE_OP_GREATER
+            case .notEqual:         return VK_COMPARE_OP_NOT_EQUAL
+            case .greaterEqual:     return VK_COMPARE_OP_GREATER_OR_EQUAL
+            case .always:           return VK_COMPARE_OP_ALWAYS
+            }
+        }
+        let stencilOp = { (op: StencilOperation) -> VkStencilOp in
+            switch op {
+            case .keep:             return VK_STENCIL_OP_KEEP
+            case .zero:             return VK_STENCIL_OP_ZERO
+            case .replace:          return VK_STENCIL_OP_REPLACE
+            case .incrementClamp:   return VK_STENCIL_OP_INCREMENT_AND_CLAMP
+            case .decrementClamp:   return VK_STENCIL_OP_DECREMENT_AND_CLAMP
+            case .invert:           return VK_STENCIL_OP_INVERT
+            case .incrementWrap:    return VK_STENCIL_OP_INCREMENT_AND_WRAP
+            case .decrementWrap:    return VK_STENCIL_OP_DECREMENT_AND_WRAP
+            }
+        }
+        let setStencilOpState = { (state: inout VkStencilOpState, stencil: StencilDescriptor) in
+            state.failOp = stencilOp(stencil.stencilFailureOperation)
+            state.passOp = stencilOp(stencil.depthStencilPassOperation)
+            state.depthFailOp = stencilOp(stencil.depthFailOperation)
+            state.compareOp = compareOp(stencil.stencilCompareFunction)
+            state.compareMask = stencil.readMask
+            state.writeMask = stencil.writeMask
+            state.reference = 0 // use dynamic state (VK_DYNAMIC_STATE_STENCIL_REFERENCE)
+        }
+        depthStencilState.depthTestEnable = VkBool32(VK_TRUE)
+        depthStencilState.depthWriteEnable = VkBool32(desc.depthStencilDescriptor.depthWriteEnabled ? VK_TRUE:VK_FALSE)
+        depthStencilState.depthCompareOp = compareOp(desc.depthStencilDescriptor.depthCompareFunction)
+        depthStencilState.depthBoundsTestEnable = VkBool32(VK_FALSE)
+        setStencilOpState(&depthStencilState.front, desc.depthStencilDescriptor.frontFaceStencil)
+        setStencilOpState(&depthStencilState.back, desc.depthStencilDescriptor.backFaceStencil)
+        depthStencilState.stencilTestEnable = VkBool32(VK_TRUE)
+
+        if depthStencilState.front.failOp == VK_STENCIL_OP_KEEP &&
+           depthStencilState.front.passOp == VK_STENCIL_OP_KEEP &&
+           depthStencilState.front.depthFailOp == VK_STENCIL_OP_KEEP &&
+           depthStencilState.back.failOp == VK_STENCIL_OP_KEEP &&
+           depthStencilState.back.passOp == VK_STENCIL_OP_KEEP &&
+           depthStencilState.back.depthFailOp == VK_STENCIL_OP_KEEP {
+            depthStencilState.stencilTestEnable = VkBool32(VK_FALSE)
+        }
+        if depthStencilState.depthWriteEnable == VK_FALSE &&
+           depthStencilState.depthCompareOp == VK_COMPARE_OP_ALWAYS {
+            depthStencilState.depthTestEnable = VkBool32(VK_FALSE)
+        }
+
+    	pipelineCreateInfo.pDepthStencilState = unsafePointerCopy(from: depthStencilState, holder: tempHolder)
+
+	    // dynamic states
+        let dynamicStateEnables: [VkDynamicState] = [
+            VK_DYNAMIC_STATE_VIEWPORT,
+            VK_DYNAMIC_STATE_SCISSOR,
+            VK_DYNAMIC_STATE_LINE_WIDTH,
+            VK_DYNAMIC_STATE_DEPTH_BIAS,
+            VK_DYNAMIC_STATE_BLEND_CONSTANTS,
+            VK_DYNAMIC_STATE_DEPTH_BOUNDS,
+            VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK,
+            VK_DYNAMIC_STATE_STENCIL_WRITE_MASK,
+            VK_DYNAMIC_STATE_STENCIL_REFERENCE,
+        ]
+        var dynamicState = VkPipelineDynamicStateCreateInfo()
+        dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO
+        dynamicState.pDynamicStates = unsafePointerCopy(collection: dynamicStateEnables, holder: tempHolder)
+        dynamicState.dynamicStateCount = UInt32(dynamicStateEnables.count)
+        pipelineCreateInfo.pDynamicState = unsafePointerCopy(from: dynamicState, holder: tempHolder)
+
+        // render pass
+        var renderPassCreateInfo = VkRenderPassCreateInfo()
+        renderPassCreateInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO
+        var subpassDesc = VkSubpassDescription()
+        subpassDesc.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS
+        var attachmentDescriptions: [VkAttachmentDescription] = []
+        let subpassInputAttachmentRefs: [VkAttachmentReference] = []
+        var subpassColorAttachmentRefs: [VkAttachmentReference] = []
+        let subpassResolveAttachmentRefs: [VkAttachmentReference] = []
+        var colorBlendAttachmentStates: [VkPipelineColorBlendAttachmentState] = []
+
+        attachmentDescriptions.reserveCapacity(desc.colorAttachments.count + 1)
+        subpassColorAttachmentRefs.reserveCapacity(desc.colorAttachments.count)
+        colorBlendAttachmentStates.reserveCapacity(desc.colorAttachments.count)
+
+        let blendOperation = { (op: BlendOperation) -> VkBlendOp in
+            switch op {
+            case .add:              return VK_BLEND_OP_ADD
+            case .subtract:         return VK_BLEND_OP_SUBTRACT
+            case .reverseSubtract:  return VK_BLEND_OP_REVERSE_SUBTRACT
+            case .min:              return VK_BLEND_OP_MIN
+            case .max:              return VK_BLEND_OP_MAX
+            }
+        }
+        let blendFactor = { (factor: BlendFactor) -> VkBlendFactor in
+            switch factor {
+            case .zero:                     return VK_BLEND_FACTOR_ZERO
+            case .one:                      return VK_BLEND_FACTOR_ONE
+            case .sourceColor:              return VK_BLEND_FACTOR_SRC_COLOR
+            case .oneMinusSourceColor:      return VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR
+            case .sourceAlpha:              return VK_BLEND_FACTOR_SRC_ALPHA
+            case .oneMinusSourceAlpha:		return VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA
+            case .destinationColor:			return VK_BLEND_FACTOR_DST_COLOR
+            case .oneMinusDestinationColor: return VK_BLEND_FACTOR_ONE_MINUS_DST_COLOR
+            case .destinationAlpha:			return VK_BLEND_FACTOR_DST_ALPHA
+            case .oneMinusDestinationAlpha: return VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA
+            case .sourceAlphaSaturated:		return VK_BLEND_FACTOR_SRC_ALPHA_SATURATE
+            case .blendColor:               return VK_BLEND_FACTOR_CONSTANT_COLOR
+            case .oneMinusBlendColor:       return VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_COLOR
+            case .blendAlpha:               return VK_BLEND_FACTOR_CONSTANT_ALPHA
+            case .oneMinusBlendAlpha:       return VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_ALPHA
+            }
+        }
+
+        var colorAttachmentRefCount: UInt32 = 0
+        for attachment in desc.colorAttachments {
+            assert(attachment.pixelFormat.isColorFormat())
+            colorAttachmentRefCount = max(colorAttachmentRefCount, attachment.index + 1)
+        }
+    	if colorAttachmentRefCount > self.properties.limits.maxColorAttachments {
+    		Log.err("The number of colors attached exceeds the device limit. (\(colorAttachmentRefCount) > \(self.properties.limits.maxColorAttachments))")
+    		return nil
+	    }
+        subpassColorAttachmentRefs.append(contentsOf: 
+            [VkAttachmentReference](repeating: VkAttachmentReference(attachment: VK_ATTACHMENT_UNUSED, layout: VK_IMAGE_LAYOUT_UNDEFINED),
+                                    count: Int(colorAttachmentRefCount)))
+        for index in 0..<desc.colorAttachments.count {
+            let attachment = desc.colorAttachments[index]
+
+            var attachmentDesc = VkAttachmentDescription()
+            attachmentDesc.format = attachment.pixelFormat.vkFormat()
+            attachmentDesc.samples = VK_SAMPLE_COUNT_1_BIT
+            attachmentDesc.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE
+            attachmentDesc.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE
+            attachmentDesc.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE
+            attachmentDesc.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE
+            attachmentDesc.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
+            attachmentDesc.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
+            attachmentDescriptions.append(attachmentDesc)
+
+            var blendState = VkPipelineColorBlendAttachmentState()
+            blendState.blendEnable = VkBool32(attachment.blendState.enabled ? VK_TRUE:VK_FALSE)
+            blendState.srcColorBlendFactor = blendFactor(attachment.blendState.sourceRGBBlendFactor)
+            blendState.dstColorBlendFactor = blendFactor(attachment.blendState.destinationRGBBlendFactor)
+            blendState.colorBlendOp = blendOperation(attachment.blendState.rgbBlendOperation)
+            blendState.srcAlphaBlendFactor = blendFactor(attachment.blendState.sourceAlphaBlendFactor)
+            blendState.dstAlphaBlendFactor = blendFactor(attachment.blendState.destinationAlphaBlendFactor)
+            blendState.alphaBlendOp = blendOperation(attachment.blendState.alphaBlendOperation)
+
+		    blendState.colorWriteMask = 0
+            if attachment.blendState.writeMask.contains(.red) {
+                blendState.colorWriteMask |= VkColorComponentFlags(VK_COLOR_COMPONENT_R_BIT.rawValue)
+            }
+            if attachment.blendState.writeMask.contains(.green) {
+                blendState.colorWriteMask |= VkColorComponentFlags(VK_COLOR_COMPONENT_G_BIT.rawValue)
+            }
+            if attachment.blendState.writeMask.contains(.blue) {
+                blendState.colorWriteMask |= VkColorComponentFlags(VK_COLOR_COMPONENT_B_BIT.rawValue)
+            }
+            if attachment.blendState.writeMask.contains(.alpha) {
+                blendState.colorWriteMask |= VkColorComponentFlags(VK_COLOR_COMPONENT_A_BIT.rawValue)
+            }
+            colorBlendAttachmentStates.append(blendState)
+
+    		assert(subpassColorAttachmentRefs.count > attachment.index)
+            subpassColorAttachmentRefs[Int(attachment.index)].attachment = UInt32(index) // index of render-pass-attachment 
+            subpassColorAttachmentRefs[Int(attachment.index)].layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+        }
+        subpassDesc.colorAttachmentCount = UInt32(subpassColorAttachmentRefs.count)
+        subpassDesc.pColorAttachments = unsafePointerCopy(collection: subpassColorAttachmentRefs, holder: tempHolder)
+        subpassDesc.pResolveAttachments = unsafePointerCopy(collection: subpassResolveAttachmentRefs, holder: tempHolder)
+        subpassDesc.inputAttachmentCount = UInt32(subpassInputAttachmentRefs.count)
+        subpassDesc.pInputAttachments = unsafePointerCopy(collection: subpassInputAttachmentRefs, holder: tempHolder)
+
+	    if desc.depthStencilAttachmentPixelFormat.isDepthFormat() ||
+           desc.depthStencilAttachmentPixelFormat.isStencilFormat() {
+
+            var subpassDepthStencilAttachment = VkAttachmentReference()
+            subpassDepthStencilAttachment.attachment = UInt32(attachmentDescriptions.count) // attachment index
+            subpassDepthStencilAttachment.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+            // add depth-stencil attachment description
+            var attachmentDesc = VkAttachmentDescription()
+            attachmentDesc.format = desc.depthStencilAttachmentPixelFormat.vkFormat()
+            attachmentDesc.samples = VK_SAMPLE_COUNT_1_BIT
+            attachmentDesc.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE
+            attachmentDesc.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE
+            attachmentDesc.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE
+            attachmentDesc.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE
+            attachmentDesc.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
+            attachmentDesc.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+            attachmentDescriptions.append(attachmentDesc)
+            subpassDesc.pDepthStencilAttachment = unsafePointerCopy(from: subpassDepthStencilAttachment, holder: tempHolder)
+        }
+
+        renderPassCreateInfo.attachmentCount = UInt32(attachmentDescriptions.count)
+        renderPassCreateInfo.pAttachments = unsafePointerCopy(collection: attachmentDescriptions, holder: tempHolder)
+        renderPassCreateInfo.subpassCount = 1
+        renderPassCreateInfo.pSubpasses = unsafePointerCopy(from: subpassDesc, holder: tempHolder)
+
+	    result = vkCreateRenderPass(self.device, &renderPassCreateInfo, self.allocationCallbacks, &renderPass)
+    	if result != VK_SUCCESS {
+		    Log.err("vkCreateRenderPass failed: \(result)")
+    		return nil
+	    }
+        pipelineCreateInfo.renderPass = renderPass
+
+        // color blending
+        var colorBlendState = VkPipelineColorBlendStateCreateInfo()
+        colorBlendState.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO
+        colorBlendState.attachmentCount = UInt32(colorBlendAttachmentStates.count)
+        colorBlendState.pAttachments = unsafePointerCopy(collection: colorBlendAttachmentStates, holder: tempHolder)
+        pipelineCreateInfo.pColorBlendState = unsafePointerCopy(from: colorBlendState, holder: tempHolder)
+
+    	result = vkCreateGraphicsPipelines(self.device, pipelineCache, 1, &pipelineCreateInfo, self.allocationCallbacks, &pipeline)
+	    if result != VK_SUCCESS {
+		    Log.err("vkCreateGraphicsPipelines failed: \(result)")
+    		return nil
+        }
+		
+        self.savePipelineCache()
+
+        if let reflection = reflection {
+
+            var inputAttributes: [ShaderAttribute] = []
+            var pushConstantLayouts: [ShaderPushConstantLayout] = []
+            var resources: [ShaderResource] = []
+
+            var maxResourceCount = 0
+            var maxPushConstantLayoutCount = 0
+
+            for fn in shaderFunctions {
+                let fn = fn as! VulkanShaderFunction
+                let module = fn.module
+				maxResourceCount += module.resources.count
+				maxPushConstantLayoutCount += module.pushConstantLayouts.count
+
+                if module.stage == .vertex {
+                    inputAttributes.reserveCapacity(module.inputAttributes.count)
+                    for attr in module.inputAttributes {
+                        if attr.enabled {
+                            inputAttributes.append(attr)
+                        }
+                    }
+				}
+            }
+            resources.reserveCapacity(maxResourceCount)
+    		pushConstantLayouts.reserveCapacity(maxPushConstantLayoutCount)
+
+            for fn in shaderFunctions {
+                let fn = fn as! VulkanShaderFunction
+                let module = fn.module
+
+                for res in module.resources {
+                    if res.enabled == false { continue }
+
+                    var exist = false
+                    for i in 0..<resources.count {
+                        var res2 = resources[i]
+                        if res.set == res2.set && res.binding == res2.binding {
+                            assert(res.type == res2.type)
+                            res2.stages.insert(fn.stage)
+                            resources[i] = res2
+                            exist = true
+                            break
+                        }
+                    }
+                    if exist == false {
+                        var res = res
+                        res.stages = fn.stage
+                        resources.append(res)
+                    }
+                }
+                for layout in module.pushConstantLayouts {
+                    var exist = false
+                    for i in 0..<pushConstantLayouts.count {
+                        var layout2 = pushConstantLayouts[i]
+                        if layout.offset == layout2.offset && layout.size == layout2.size {
+                            layout2.stages.insert(fn.stage)
+                            pushConstantLayouts[i] = layout2
+                            exist = true
+                            break
+                        }
+                    }
+                    if exist == false {
+                        var layout = layout
+                        layout.stages = fn.stage
+                        pushConstantLayouts.append(layout)
+                    }
+                }
+            }
+
+            reflection.pointee.inputAttributes = inputAttributes
+            reflection.pointee.resources = resources
+            reflection.pointee.pushConstantLayouts = pushConstantLayouts
+        }
+
+        pipelineState = VulkanRenderPipelineState(device: self,
+                                                  pipeline: pipeline!,
+                                                  layout: pipelineLayout!,
+                                                  renderPass: renderPass!)
+        return pipelineState
     }
+
     public func makeComputePipelineState(descriptor desc: ComputePipelineDescriptor,
         reflection: UnsafeMutablePointer<PipelineReflection>?) -> ComputePipelineState? {
 
@@ -511,9 +957,13 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             // pipelineCreateInfo.flags |= VkPipelineCreateFlags(VK_PIPELINE_CREATE_DEFER_COMPILE_BIT_NV.rawValue)
         }
 
+        if desc.computeFunction == nil {
+            return nil      // compute function must be provided.
+        }
+
         assert(desc.computeFunction is VulkanShaderFunction)
         let shader = desc.computeFunction as! VulkanShaderFunction
-        let module = shader.module as! VulkanShaderModule
+        let module = shader.module //as! VulkanShaderModule
         assert(module.stage == .compute)
 
         var shaderStageCreateInfo = VkPipelineShaderStageCreateInfo()
@@ -547,7 +997,8 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             reflection.pointee.resources = module.resources
         }
 
-        return VulkanComputePipelineState(device: self, pipeline: pipeline!, layout: pipelineLayout!)
+        pipelineState = VulkanComputePipelineState(device: self, pipeline: pipeline!, layout: pipelineLayout!)
+        return pipelineState
     }
 
     public func makeBuffer() -> Buffer? {
@@ -677,7 +1128,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         for fn in functions {
             assert(fn is VulkanShaderFunction)
             let f = fn as! VulkanShaderFunction
-            let module = f.module as! VulkanShaderModule
+            let module = f.module //as! VulkanShaderModule
 
             numPushConstantRanges += module.pushConstantLayouts.count
         }
@@ -690,7 +1141,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
 
         for fn in functions {
             let f = fn as! VulkanShaderFunction
-            let module = f.module as! VulkanShaderModule
+            let module = f.module //as! VulkanShaderModule
 
             for layout in module.pushConstantLayouts {
                 if layout.size > 0 {
@@ -717,7 +1168,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             descriptorBindings.removeAll(keepingCapacity: true)
             for fn in functions {
                 let f = fn as! VulkanShaderFunction
-                let module = f.module as! VulkanShaderModule
+                let module = f.module //as! VulkanShaderModule
 
                 for desc in module.descriptors {
                     if desc.set > setIndex { break }

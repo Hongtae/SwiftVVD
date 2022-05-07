@@ -36,7 +36,9 @@ func unsafePointerCopy(string str: String, holder: TemporaryBufferHolder) -> Uns
     return buffer
 }
 
-func unsafePointerCopy<C>(collection source: C, holder: TemporaryBufferHolder) -> UnsafePointer<C.Element> where C: Collection {
+func unsafePointerCopy<C>(collection source: C, holder: TemporaryBufferHolder) -> UnsafePointer<C.Element>? where C: Collection {
+    if source.isEmpty { return nil }
+
     let buffer: UnsafeMutableBufferPointer<C.Element> = .allocate(capacity: source.count)
     _ = buffer.initialize(from: source)
     let ptr = UnsafePointer<C.Element>(buffer.baseAddress!)

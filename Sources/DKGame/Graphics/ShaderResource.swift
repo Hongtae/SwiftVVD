@@ -94,14 +94,25 @@ public enum ShaderDataType {
     case float64M4x4
 }
 
-public enum ShaderStage {
-    case unknown
-    case vertex
-    case tessellationControl
-    case tessellationEvaluation
-    case geometry
-    case fragment
-    case compute
+public struct ShaderStage: OptionSet {
+    public let rawValue: UInt32
+    public init(rawValue: UInt32) { self.rawValue = rawValue }
+
+    public static let vertex                    = ShaderStage(rawValue: 1)
+    public static let tessellationControl       = ShaderStage(rawValue: 1 << 1)
+    public static let tessellationEvaluation    = ShaderStage(rawValue: 1 << 2)
+    public static let geometry                  = ShaderStage(rawValue: 1 << 3)
+    public static let fragment                  = ShaderStage(rawValue: 1 << 4)
+    public static let compute                   = ShaderStage(rawValue: 1 << 5)
+
+    public static let unknown                   = ShaderStage(rawValue: UInt32.max)
+
+    public var isSingleOption: Bool {
+        if self.rawValue > 0 {
+            return self.rawValue & (self.rawValue - 1) == 0
+        }
+        return false
+    }
 }
 
 public struct ShaderResourceBuffer {
@@ -149,7 +160,7 @@ public struct ShaderResource {
     var binding : UInt32
     var name : String
     var type: ShaderResourceType
-    var stages : [ShaderStage]
+    var stages : ShaderStage
 
     var count : UInt32  // array length
     var stride : UInt32 // stride between array elements
@@ -170,7 +181,7 @@ public struct ShaderPushConstantLayout {
     var name : String
     var offset : UInt32
     var size : UInt32
-    var stages : [ShaderStage]
+    var stages : ShaderStage
     var members : [ShaderResourceStructMember]
 }
 
