@@ -1,8 +1,8 @@
 import Foundation
 
-public struct Vector2: Vector {
-
-    public typealias TransformMatrix = Matrix2
+public struct Vector2: Vector, LinearTransformable, HomogeneousTransformable {
+    public typealias LinearTransformMatrix = Matrix2
+    public typealias HomogeneousTransformMatrix = Matrix3
 
     public var x : Scalar
     public var y : Scalar
@@ -48,30 +48,10 @@ public struct Vector2: Vector {
         return v1.x * v2.x + v1.y * v2.y
     }
 
-    public func normalized() -> Vector2 {
-        var x = self.x
-        var y = self.y
-        let lengthSq = x * x + y * y
-        if lengthSq > 0.0 {
-            let inv = 1.0 / sqrt(lengthSq)
-            x *= inv
-            y *= inv
-        }
-        return Vector2(x, y)
-    }
-
-    public mutating func normalize() {
-        self = self.normalized()
-    }
-
     public func transforming(_ mat: Matrix2) -> Vector2 {
         let x = self.x * mat.m11 + self.y * mat.m21
         let y = self.x * mat.m12 + self.y * mat.m22
         return Vector2(x, y)
-    }
-
-    public mutating func transform(_ mat: Matrix2) {
-        self = self.transforming(mat)
     }
 
     public func transforming(_ mat: Matrix3) -> Vector2 {
@@ -81,11 +61,7 @@ public struct Vector2: Vector {
         return Vector2(x * w, y * w)
     }
 
-    public mutating func transform(_ mat: Matrix3) {
-        self = self.transforming(mat)
-    }
-
-    public static func == (lhs: Vector2, rhs: Vector2) -> Bool {
+    public static func == (lhs: Self, rhs: Self) -> Bool {
         return lhs.x == rhs.x && lhs.y == rhs.y
     }
 
@@ -107,13 +83,5 @@ public struct Vector2: Vector {
 
     public static func * (lhs: Self, rhs: Self) -> Self {
         return Self(lhs.x * rhs.x, lhs.y * rhs.y)
-    }
-
-    public static func * (lhs: Self, rhs: Matrix2) -> Self {
-        return lhs.transforming(rhs)
-    }
-
-    public static func * (lhs: Self, rhs: Matrix3) -> Self {
-        return lhs.transforming(rhs)
     }
 }

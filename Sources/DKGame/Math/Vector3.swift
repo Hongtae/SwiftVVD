@@ -1,9 +1,14 @@
 import Foundation
 
-public struct Vector3 {
+public struct Vector3: Vector, LinearTransformable, HomogeneousTransformable {
+    public typealias LinearTransformMatrix = Matrix3
+    public typealias HomogeneousTransformMatrix = Matrix4
+
     public var x : Scalar
     public var y : Scalar
     public var z : Scalar
+
+    public static let zero = Vector3(0.0, 0.0, 0.0)
 
     subscript(index: Int) -> Scalar {
         get {
@@ -29,8 +34,6 @@ public struct Vector3 {
         }
     }
 
-    public static let zero = Vector3(0.0, 0.0, 0.0)
-
     public init() {
         self = .zero
     }
@@ -45,10 +48,6 @@ public struct Vector3 {
         self.init(x, y, z)
     }
 
-    public var length: Scalar { sqrt(self.lengthSquared) }
-
-    public var lengthSquared: Scalar { Self.dot(self, self) }
-
     public static func dot(_ v1: Vector3, _ v2: Vector3) -> Scalar {
         return v1.x * v2.x + v1.y * v2.y + v1.z * v2.z
     }
@@ -59,19 +58,42 @@ public struct Vector3 {
                        z: v1.x * v2.y - v1.y * v2.x)
     }
 
-    public mutating func normalize() {
-        let lengthSq = x * x + y * y + z * z
-        if lengthSq > 0.0 {
-            let inv = 1.0 / sqrt(lengthSq)
-            self.x *= inv
-            self.y *= inv
-            self.z *= inv
-        }
+    public func transforming(_ m: Matrix3) -> Self {
+        let x = (self.x * m.m11) + (self.y * m.m21) + (self.z * m.m31)
+        let y = (self.x * m.m12) + (self.y * m.m22) + (self.z * m.m32)
+        let z = (self.x * m.m13) + (self.y * m.m23) + (self.z * m.m33)   
+        return Self(x, y, z) 
     }
 
-    public func normalized() -> Vector3 {
-        var v: Vector3 = self
-        v.normalize()
-        return v
+    public func transforming(_ m: Matrix4) -> Self {
+        let x = (self.x * m.m11) + (self.y * m.m21) + (self.z * m.m31) + m.m41
+        let y = (self.x * m.m12) + (self.y * m.m22) + (self.z * m.m32) + m.m42
+        let z = (self.x * m.m13) + (self.y * m.m23) + (self.z * m.m33) + m.m43
+        let w = 1.0 / ((self.x * m.m14) + (self.y * m.m24) + (self.z * m.m34) + m.m44)
+        return Self(x * w, y * w, z * w)
+    }
+
+    public static func == (lhs: Self, rhs: Self) -> Bool {
+        return lhs.x == rhs.x && lhs.y == rhs.y && lhs.z == rhs.z
+    }
+
+    public static func + (lhs: Self, rhs: Self) -> Self {
+        return Self(lhs.x + rhs.x, lhs.y + rhs.y, lhs.z + rhs.z)
+    }
+
+    public static prefix func - (lhs: Self) -> Self {
+        return Self(-lhs.x, -lhs.y, -lhs.z)
+    }
+
+    public static func - (lhs: Self, rhs: Self) -> Self {
+        return Self(rhs.x - rhs.x, lhs.y - rhs.y, lhs.z - rhs.z)
+    }
+
+    public static func * (lhs: Self, rhs: Scalar) -> Self {
+        return Self(lhs.x * rhs, lhs.y * rhs, lhs.z * rhs)
+    }
+
+    public static func * (lhs: Self, rhs: Self) -> Self {
+        return Self(lhs.x * rhs.x, lhs.y * rhs.y, lhs.z * rhs.z)
     }
 }

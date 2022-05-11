@@ -1,10 +1,14 @@
 import Foundation
 
-public struct Vector4 {
+public struct Vector4: Vector {
+    public typealias LinearTransformMatrix = Matrix4
+
     public var x : Scalar
     public var y : Scalar
     public var z : Scalar
     public var w : Scalar
+
+    public static let zero = Vector4(0.0, 0.0, 0.0, 0.0)
 
     subscript(index: Int) -> Scalar {
         get {
@@ -32,8 +36,6 @@ public struct Vector4 {
         }
     }
 
-    public static let zero = Vector4(0.0, 0.0, 0.0, 0.0)
-
     public init() {
         self = .zero
     }
@@ -47,5 +49,49 @@ public struct Vector4 {
 
     public init(x: Scalar, y: Scalar, z: Scalar, w: Scalar) {
         self.init(x, y, z, w)
+    }
+
+    public static func dot(_ lhs: Vector4, _ rhs: Vector4) -> Scalar {
+    	return (lhs.x * rhs.x) + (lhs.y * rhs.y) + (lhs.z * rhs.z) + (lhs.w * rhs.w)
+    }
+
+    public static func cross(_ v1: Vector4, _ v2: Vector4, _ v3: Vector4) -> Vector4 {
+        let x =   v1.y * (v2.z * v3.w - v3.z * v2.w) - v1.z * (v2.y * v3.w - v3.y * v2.w) + v1.w * (v2.y * v3.z - v2.z * v3.y)
+        let y = -(v1.x * (v2.z * v3.w - v3.z * v2.w) - v1.z * (v2.x * v3.w - v3.x * v2.w) + v1.w * (v2.x * v3.z - v3.x * v2.z))
+        let z =   v1.x * (v2.y * v3.w - v3.y * v2.w) - v1.y * (v2.x * v3.w - v3.x * v2.w) + v1.w * (v2.x * v3.y - v3.x * v2.y)
+        let w = -(v1.x * (v2.y * v3.z - v3.y * v2.z) - v1.y * (v2.x * v3.z - v3.x * v2.z) + v1.z * (v2.x * v3.y - v3.x * v2.y))  
+        return Vector4(x, y, z, w)
+    }
+
+    public func transforming(_ m: Matrix4) -> Self {
+        let x = (self.x * m.m11) + (self.y * m.m21) + (self.z * m.m31) + (self.w * m.m41)
+        let y = (self.x * m.m12) + (self.y * m.m22) + (self.z * m.m32) + (self.w * m.m42)
+        let z = (self.x * m.m13) + (self.y * m.m23) + (self.z * m.m33) + (self.w * m.m43)
+        let w = (self.x * m.m14) + (self.y * m.m24) + (self.z * m.m34) + (self.w * m.m44)
+        return Self(x, y, z, w)
+    }
+
+    public static func == (lhs: Self, rhs: Self) -> Bool {
+        return lhs.x == rhs.x && lhs.y == rhs.y && lhs.z == rhs.z && lhs.w == rhs.w
+    }
+
+    public static func + (lhs: Self, rhs: Self) -> Self {
+        return Self(lhs.x + rhs.x, lhs.y + rhs.y, lhs.z + rhs.z, lhs.w + rhs.w)
+    }
+
+    public static prefix func - (lhs: Self) -> Self {
+        return Self(-lhs.x, -lhs.y, -lhs.z, -lhs.w)
+    }
+
+    public static func - (lhs: Self, rhs: Self) -> Self {
+        return Self(rhs.x - rhs.x, lhs.y - rhs.y, lhs.z - rhs.z, lhs.w - rhs.w)
+    }
+
+    public static func * (lhs: Self, rhs: Scalar) -> Self {
+        return Self(lhs.x * rhs, lhs.y * rhs, lhs.z * rhs, lhs.w * rhs)
+    }
+
+    public static func * (lhs: Self, rhs: Self) -> Self {
+        return Self(lhs.x * rhs.x, lhs.y * rhs.y, lhs.z * rhs.z, lhs.w * rhs.w)
     }
 }

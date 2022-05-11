@@ -29,10 +29,10 @@ public protocol Matrix {
     static func *= (_:inout Self, _:Self.Scalar)
 }
 
-extension Matrix {
-    public static func != (_ lhs:inout Self, _ rhs:Self) -> Bool { return !(lhs == rhs) }
-    public static func += (_ lhs:inout Self, _ rhs:Self)         { lhs = lhs + rhs }
-    public static func -= (_ lhs:inout Self, _ rhs:Self)         { lhs = lhs - rhs }
-    public static func *= (_ lhs:inout Self, _ rhs:Self)         { lhs = lhs * rhs }
-    public static func *= (_ lhs:inout Self, _ rhs:Self.Scalar)  { lhs = lhs * rhs }
+public extension Matrix {
+    static func != (_ lhs:inout Self, _ rhs:Self) -> Bool { return !(lhs == rhs) }
+    static func += (_ lhs:inout Self, _ rhs:Self)         { lhs = lhs + rhs }
+    static func -= (_ lhs:inout Self, _ rhs:Self)         { lhs = lhs - rhs }
+    static func *= (_ lhs:inout Self, _ rhs:Self)         { lhs = lhs * rhs }
+    static func *= (_ lhs:inout Self, _ rhs:Self.Scalar)  { lhs = lhs * rhs }
 }
