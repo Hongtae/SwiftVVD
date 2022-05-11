@@ -1,8 +1,13 @@
 import Foundation
 
-public struct Vector2 {
+public struct Vector2: Vector {
+
+    public typealias TransformMatrix = Matrix2
+
     public var x : Scalar
     public var y : Scalar
+
+    public static let zero = Vector2(0.0, 0.0)
 
     subscript(index: Int) -> Scalar {
         get {
@@ -26,8 +31,6 @@ public struct Vector2 {
         }
     }
 
-    public static let zero = Vector2(0.0, 0.0)
-
     public init() {
         self = .zero
     }
@@ -40,10 +43,6 @@ public struct Vector2 {
     public init(x: Scalar, y: Scalar) {
         self.init(x, y)
     }
-
-    public var length: Scalar { sqrt(self.lengthSquared) }
-
-    public var lengthSquared: Scalar { Self.dot(self, self) }
 
     public static func dot(_ v1: Vector2, _ v2: Vector2) -> Scalar {
         return v1.x * v2.x + v1.y * v2.y
@@ -85,67 +84,13 @@ public struct Vector2 {
     public mutating func transform(_ mat: Matrix3) {
         self = self.transforming(mat)
     }
-}
 
-extension Vector2: Equatable {
     public static func == (lhs: Vector2, rhs: Vector2) -> Bool {
         return lhs.x == rhs.x && lhs.y == rhs.y
     }
-}
 
-extension Vector2 {
-    public var magnitudeSquared: Scalar {
-        return Self.dot(self, self)
-    }
-
-    public mutating func scale(by rhs: Scalar) {
-        self.x *= rhs
-        self.y *= rhs
-    }
-
-    public static func * (lhs: Self, rhs: Scalar) -> Self {
-        return Self(lhs.x * rhs, lhs.y * rhs)
-    }
-
-    public static func *= (lhs: inout Self, rhs: Scalar) {
-        lhs.x *= rhs
-        lhs.y *= rhs
-    }
-
-    public static func * (lhs: Self, rhs: Self) -> Self {
-        return Self(lhs.x * rhs.x, lhs.y * rhs.y)
-    }
-
-    public static func *= (lhs: inout Self, rhs: Self) {
-        lhs.x *= rhs.x
-        lhs.y *= rhs.y
-    }
-
-    public static func * (lhs: Self, rhs: Matrix2) -> Self {
-        return lhs.transforming(rhs)
-    }
-
-    public static func *= (lhs: inout Self, rhs: Matrix2) {
-        lhs.transform(rhs)
-    }
-
-    public static func * (lhs: Self, rhs: Matrix3) -> Self {
-        return lhs.transforming(rhs)
-    }
-
-    public static func *= (lhs: inout Self, rhs: Matrix3) {
-        lhs.transform(rhs)
-    }
-}
-
-extension Vector2: AdditiveArithmetic {
     public static func + (lhs: Self, rhs: Self) -> Self {
         return Self(lhs.x + rhs.x, lhs.y + rhs.y)
-    }
-
-    public static func += (lhs: inout Self, rhs: Self) {
-        lhs.x += rhs.x
-        lhs.y += rhs.y
     }
 
     public static prefix func - (lhs: Self) -> Self {
@@ -156,8 +101,19 @@ extension Vector2: AdditiveArithmetic {
         return Self(rhs.x - rhs.x, lhs.y - rhs.y)
     }
 
-    public static func -= (lhs: inout Self, rhs: Self) {
-        lhs.x -= rhs.x
-        lhs.y -= rhs.y
+    public static func * (lhs: Self, rhs: Scalar) -> Self {
+        return Self(lhs.x * rhs, lhs.y * rhs)
+    }
+
+    public static func * (lhs: Self, rhs: Self) -> Self {
+        return Self(lhs.x * rhs.x, lhs.y * rhs.y)
+    }
+
+    public static func * (lhs: Self, rhs: Matrix2) -> Self {
+        return lhs.transforming(rhs)
+    }
+
+    public static func * (lhs: Self, rhs: Matrix3) -> Self {
+        return lhs.transforming(rhs)
     }
 }
