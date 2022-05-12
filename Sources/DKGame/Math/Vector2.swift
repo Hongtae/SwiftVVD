@@ -48,17 +48,16 @@ public struct Vector2: Vector, LinearTransformable, HomogeneousTransformable {
         return v1.x * v2.x + v1.y * v2.y
     }
 
-    public func transforming(_ mat: Matrix2) -> Vector2 {
-        let x = self.x * mat.m11 + self.y * mat.m21
-        let y = self.x * mat.m12 + self.y * mat.m22
+    public func transforming(_ m: Matrix2) -> Vector2 {
+        let x = Self.dot(self, m.column1)
+        let y = Self.dot(self, m.column2)
         return Vector2(x, y)
     }
 
-    public func transforming(_ mat: Matrix3) -> Vector2 {
-        let x = self.x * mat.m11 + self.y * mat.m21 + mat.m31
-        let y = self.x * mat.m12 + self.y * mat.m22 + mat.m32
-        let w = 1.0 / (self.x * mat.m13 + self.y * mat.m23 + mat.m33)
-        return Vector2(x * w, y * w)
+    public func transforming(_ m: Matrix3) -> Vector2 {
+        let v = Vector3(self.x, self.y, 1.0).transforming(m)
+        let w = 1.0 / v.z
+        return Vector2(v.x * w, v.y * w)
     }
 
     public static func == (lhs: Self, rhs: Self) -> Bool {
@@ -83,5 +82,13 @@ public struct Vector2: Vector, LinearTransformable, HomogeneousTransformable {
 
     public static func * (lhs: Self, rhs: Self) -> Self {
         return Self(lhs.x * rhs.x, lhs.y * rhs.y)
+    }
+
+    public static func minimum(_ lhs: Self, _ rhs: Self) -> Self {
+        return Self(min(lhs.x, rhs.x), min(lhs.y, rhs.y))
+    }
+
+    public static func maximum(_ lhs: Self, _ rhs: Self) -> Self {
+        return Self(max(lhs.x, rhs.x), max(lhs.y, rhs.y))
     }
 }

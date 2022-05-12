@@ -1,6 +1,6 @@
 import Foundation
 
-public struct Matrix2 {
+public struct Matrix2: Matrix {
     public var m11, m12: Scalar
     public var m21, m22: Scalar
 
@@ -36,7 +36,7 @@ public struct Matrix2 {
         }
     }
 
-    subscript(row: Int) -> Vector2 {
+    public subscript(row: Int) -> Vector2 {
         get {
             switch row {
             case 0: return self.row1
@@ -58,7 +58,7 @@ public struct Matrix2 {
         }
     }
 
-    subscript(row: Int, column: Int) -> Scalar {
+    public subscript(row: Int, column: Int) -> Scalar {
         get {
             switch (row, column) {
             case (0, 0): return m11
@@ -101,5 +101,50 @@ public struct Matrix2 {
         self.init(m11, m12, m21, m22)
     }
 
+    public init(row1: Vector2, row2: Vector2) {
+        self.init(row1.x, row1.y, row2.x, row2.y)
+    }
+
     public var determinant: Scalar { return m11 * m22 - m12 * m21 }
+
+    public func inversed() -> Self {
+        let d = self.determinant
+        if d.isZero {
+            return .identity
+        }
+        let inv = 1.0 / d
+        let m11 =  self.m22 * inv
+        let m12 = -self.m12 * inv
+        let m21 = -self.m21 * inv
+        let m22 =  self.m11 * inv
+        return Matrix2(m11, m12, m21, m22)
+    }
+
+    public func transposed() -> Self {
+        return Matrix2(row1: self.column1, row2: self.column2)
+    }
+
+    public static func == (_ lhs:Self, _ rhs:Self) -> Bool {
+        return lhs.row1 == rhs.row1 && lhs.row2 == rhs.row2
+    }
+
+    public static func + (_ lhs:Self, _ rhs:Self) -> Self {
+        return Matrix2(row1: lhs.row1 + rhs.row1, row2: lhs.row2 + rhs.row2)
+    }
+
+    public static func - (_ lhs:Self, _ rhs:Self) -> Self {
+        return Matrix2(row1: lhs.row1 - rhs.row1, row2: lhs.row2 - rhs.row2)
+    }
+
+    public static func * (_ lhs:Self, _ rhs:Self) -> Self {
+        let row1 = lhs.row1,    row2 = lhs.row2
+        let col1 = rhs.column1, col2 = rhs.column2
+
+        return Matrix2(Vector2.dot(row1, col1), Vector2.dot(row1, col2),
+                       Vector2.dot(row2, col1), Vector2.dot(row2, col2))
+    }
+
+    public static func * (_ lhs:Self, _ rhs:Self.Scalar) -> Self {
+        return Matrix2(row1: lhs.row1 * rhs, row2: lhs.row2 * rhs)
+    }
 }

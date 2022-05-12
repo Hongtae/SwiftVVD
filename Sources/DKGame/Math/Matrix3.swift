@@ -1,6 +1,6 @@
 import Foundation
 
-public struct Matrix3 {
+public struct Matrix3: Matrix {
     public var m11, m12, m13: Scalar
     public var m21, m22, m23: Scalar
     public var m31, m32, m33: Scalar
@@ -59,7 +59,7 @@ public struct Matrix3 {
         }
     }
 
-    subscript(row: Int) -> Vector3 {
+    public subscript(row: Int) -> Vector3 {
         get {
             switch row {
             case 0: return self.row1
@@ -83,7 +83,7 @@ public struct Matrix3 {
         }
     }
 
-    subscript(row: Int, column: Int) -> Scalar {
+    public subscript(row: Int, column: Int) -> Scalar {
         get {
             switch (row, column) {
             case (0, 0): return m11
@@ -147,9 +147,74 @@ public struct Matrix3 {
         self.init(m11, m12, m13, m21, m22, m23, m31, m32, m33)
     }
 
+    public init(row1: Vector3, row2: Vector3, row3: Vector3) {
+        self.init(row1.x, row1.y, row1.z,
+                  row2.x, row2.y, row2.z,
+                  row3.x, row3.y, row3.z)
+    }
+
     public var determinant: Scalar {
        	return m11 * m22 * m33 + m12 * m23 * m31 +
                m13 * m21 * m32 - m11 * m23 * m32 -
                m12 * m21 * m33 - m13 * m22 * m31
+    }
+
+    public func inversed() -> Self {
+        let d = self.determinant
+        if d.isZero {
+            return .identity
+        }
+        let inv = 1.0 / d
+
+        let m11 = (self.m22 * self.m33 - self.m23 * self.m32) * inv
+        let m12 = (self.m13 * self.m32 - self.m12 * self.m33) * inv
+        let m13 = (self.m12 * self.m23 - self.m13 * self.m22) * inv
+        let m21 = (self.m23 * self.m31 - self.m21 * self.m33) * inv
+        let m22 = (self.m11 * self.m33 - self.m13 * self.m31) * inv
+        let m23 = (self.m13 * self.m21 - self.m11 * self.m23) * inv
+        let m31 = (self.m21 * self.m32 - self.m22 * self.m31) * inv
+        let m32 = (self.m12 * self.m31 - self.m11 * self.m32) * inv
+        let m33 = (self.m11 * self.m22 - self.m12 * self.m21) * inv
+
+        return Matrix3(m11, m12, m13, 
+                       m21, m22, m23,
+                       m31, m32, m33)
+    }
+
+    public func transposed() -> Self {
+        return Matrix3(row1: self.column1,
+                       row2: self.column2,
+                       row3: self.column3)
+    }
+
+    public static func == (_ lhs:Self, _ rhs:Self) -> Bool {
+        return lhs.row1 == rhs.row1 &&
+               lhs.row2 == rhs.row2 &&
+               lhs.row3 == rhs.row3
+    } 
+
+    public static func + (_ lhs:Self, _ rhs:Self) -> Self {
+        return Matrix3(row1: lhs.row1 + rhs.row1,
+                       row2: lhs.row2 + rhs.row2,
+                       row3: lhs.row3 + rhs.row3)
+    }
+
+    public static func - (_ lhs:Self, _ rhs:Self) -> Self {
+        return Matrix3(row1: lhs.row1 - rhs.row1,
+                       row2: lhs.row2 - rhs.row2,
+                       row3: lhs.row3 - rhs.row3)
+    }
+
+    public static func * (_ lhs:Self, _ rhs:Self) -> Self {
+        let row1 = lhs.row1, row2 = lhs.row2, row3 = lhs.row3
+        let col1 = rhs.column1, col2 = rhs.column2, col3 = rhs.column3
+        let dot = Vector3.dot
+        return Matrix3(dot(row1, col1), dot(row1, col2), dot(row1, col3),
+                       dot(row2, col1), dot(row2, col2), dot(row2, col3),
+                       dot(row3, col1), dot(row3, col2), dot(row3, col3))
+    }
+
+    public static func * (_ lhs:Self, _ rhs:Self.Scalar) -> Self {
+        return Matrix3(row1: lhs.row1 * rhs, row2: lhs.row2 * rhs, row3: lhs.row3 * rhs)
     }
 }

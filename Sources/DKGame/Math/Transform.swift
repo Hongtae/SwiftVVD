@@ -1,6 +1,29 @@
 import Foundation
 
-public struct TransformUnit {
+public protocol Transform {
+    associatedtype Vector
+
+    static var identity: Self { get }
+
+    static func * (_:Self.Vector, _:Self) -> Self.Vector
+    static func *= (_:inout Self.Vector, _:Self)
+    static func == (_:Self, _:Self) -> Bool
+    static func != (_:Self, _:Self) -> Bool
+}
+
+public extension Transform {
+    static func *= (lhs:inout Self.Vector, rhs:Self)    { lhs = lhs * rhs }
+    static func != (lhs:Self, rhs: Self) -> Bool        { !(lhs == rhs) }
+}
+
+public protocol Interpolatable {
+    associatedtype Scalar
+    static func interpolate(_:Self, _:Self, t: Self.Scalar) -> Self
+}
+
+public struct TransformUnit: Transform, Interpolatable {
+    public typealias Vector = Vector3
+
     public var scale: Vector3
     public var rotation: Quaternion
     public var translation: Vector3
@@ -19,7 +42,7 @@ public struct TransformUnit {
 	    mat3.m31 *= scale.z
 	    mat3.m32 *= scale.z
 	    mat3.m33 *= scale.z
-        
+
         return mat3
     }
 
@@ -30,5 +53,34 @@ public struct TransformUnit {
             mat3.m21, mat3.m22, mat3.m23, 0.0,
             mat3.m31, mat3.m32, mat3.m33, 0.0,
             translation.x, translation.y, translation.z, 1.0)
+    }
+
+    public static let identity: Self = .init(scale: Vector3(1, 1, 1), rotation: .identity, translation: .zero)
+
+    public init(scale: Vector3, rotation: Quaternion, translation: Vector3) {
+        self.scale = scale
+        self.rotation = rotation
+        self.translation = translation
+    }
+
+    public init() {
+        self.init(scale: Vector3(1, 1, 1), rotation: .identity, translation: .zero)
+    }
+
+    public static func interpolate(_ t1: Self, _ t2: Self, t: Scalar) -> Self {
+        let s = t1.scale + ((t2.scale - t1.scale) * t)
+        let r = Quaternion.slerp(t1.rotation, t2.rotation, t: t)
+        let t = t1.translation + ((t2.translation - t1.translation) * t)
+        return Self(scale: s, rotation: r, translation: t)
+    }
+
+    public static func * (v: Vector3, t: Self) -> Vector3 {
+        return (v * t.scale) * t.rotation + t.translation
+    }
+
+    public static func == (lhs:Self, rhs:Self) -> Bool {
+        return lhs.scale == rhs.scale &&
+               lhs.rotation == rhs.rotation &&
+               lhs.translation == rhs.translation
     }
 }

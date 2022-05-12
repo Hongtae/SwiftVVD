@@ -64,10 +64,10 @@ public struct Vector4: Vector {
     }
 
     public func transforming(_ m: Matrix4) -> Self {
-        let x = (self.x * m.m11) + (self.y * m.m21) + (self.z * m.m31) + (self.w * m.m41)
-        let y = (self.x * m.m12) + (self.y * m.m22) + (self.z * m.m32) + (self.w * m.m42)
-        let z = (self.x * m.m13) + (self.y * m.m23) + (self.z * m.m33) + (self.w * m.m43)
-        let w = (self.x * m.m14) + (self.y * m.m24) + (self.z * m.m34) + (self.w * m.m44)
+        let x = Self.dot(self, m.column1)
+        let y = Self.dot(self, m.column2)
+        let z = Self.dot(self, m.column3)
+        let w = Self.dot(self, m.column4)
         return Self(x, y, z, w)
     }
 
@@ -93,5 +93,13 @@ public struct Vector4: Vector {
 
     public static func * (lhs: Self, rhs: Self) -> Self {
         return Self(lhs.x * rhs.x, lhs.y * rhs.y, lhs.z * rhs.z, lhs.w * rhs.w)
+    }
+
+    public static func minimum(_ lhs: Self, _ rhs: Self) -> Self {
+        return Self(min(lhs.x, rhs.x), min(lhs.y, rhs.y), min(lhs.z, rhs.z), min(lhs.w, rhs.w))
+    }
+
+    public static func maximum(_ lhs: Self, _ rhs: Self) -> Self {
+        return Self(max(lhs.x, rhs.x), max(lhs.y, rhs.y), max(lhs.z, rhs.z), max(lhs.w, rhs.w))
     }
 }

@@ -1,6 +1,6 @@
 import Foundation
 
-public struct Matrix4 {
+public struct Matrix4: Matrix {
     public var m11, m12, m13, m14: Scalar
     public var m21, m22, m23, m24: Scalar
     public var m31, m32, m33, m34: Scalar
@@ -86,7 +86,7 @@ public struct Matrix4 {
         }
     }
 
-    subscript(row: Int) -> Vector4 {
+    public subscript(row: Int) -> Vector4 {
         get {
             switch row {
             case 0: return self.row1
@@ -112,7 +112,7 @@ public struct Matrix4 {
         }
     }
 
-    subscript(row: Int, column: Int) -> Scalar {
+    public subscript(row: Int, column: Int) -> Scalar {
         get {
             switch (row, column) {
             case (0, 0): return m11
@@ -203,6 +203,13 @@ public struct Matrix4 {
                   m41, m42, m43, m44)
     }
 
+    public init(row1: Vector4, row2: Vector4, row3: Vector4, row4: Vector4) {
+        self.init(row1.x, row1.y, row1.z, row1.w,
+                  row2.x, row2.y, row2.z, row2.w,
+                  row3.x, row3.y, row3.z, row3.w,
+                  row4.x, row4.y, row4.z, row4.w)
+    }
+
     public var determinant: Scalar {
     	return m14 * m23 * m32 * m41 - m13 * m24 * m32 * m41 -
                m14 * m22 * m33 * m41 + m12 * m24 * m33 * m41 +
@@ -216,5 +223,81 @@ public struct Matrix4 {
                m13 * m22 * m31 * m44 + m12 * m23 * m31 * m44 +
                m13 * m21 * m32 * m44 - m11 * m23 * m32 * m44 -
                m12 * m21 * m33 * m44 + m11 * m22 * m33 * m44
+    }
+
+
+    public func inversed() -> Self {
+        let d = self.determinant
+        if d.isZero {
+            return .identity
+        }
+        let inv = 1.0 / d
+
+        let m11 = (self.m23 * self.m34 * self.m42 - self.m24 * self.m33 * self.m42 + self.m24 * self.m32 * self.m43 - self.m22 * self.m34 * self.m43 - self.m23 * self.m32 * self.m44 + self.m22 * self.m33 * self.m44) * inv
+        let m12 = (self.m14 * self.m33 * self.m42 - self.m13 * self.m34 * self.m42 - self.m14 * self.m32 * self.m43 + self.m12 * self.m34 * self.m43 + self.m13 * self.m32 * self.m44 - self.m12 * self.m33 * self.m44) * inv
+        let m13 = (self.m13 * self.m24 * self.m42 - self.m14 * self.m23 * self.m42 + self.m14 * self.m22 * self.m43 - self.m12 * self.m24 * self.m43 - self.m13 * self.m22 * self.m44 + self.m12 * self.m23 * self.m44) * inv
+        let m14 = (self.m14 * self.m23 * self.m32 - self.m13 * self.m24 * self.m32 - self.m14 * self.m22 * self.m33 + self.m12 * self.m24 * self.m33 + self.m13 * self.m22 * self.m34 - self.m12 * self.m23 * self.m34) * inv
+        let m21 = (self.m24 * self.m33 * self.m41 - self.m23 * self.m34 * self.m41 - self.m24 * self.m31 * self.m43 + self.m21 * self.m34 * self.m43 + self.m23 * self.m31 * self.m44 - self.m21 * self.m33 * self.m44) * inv
+        let m22 = (self.m13 * self.m34 * self.m41 - self.m14 * self.m33 * self.m41 + self.m14 * self.m31 * self.m43 - self.m11 * self.m34 * self.m43 - self.m13 * self.m31 * self.m44 + self.m11 * self.m33 * self.m44) * inv
+        let m23 = (self.m14 * self.m23 * self.m41 - self.m13 * self.m24 * self.m41 - self.m14 * self.m21 * self.m43 + self.m11 * self.m24 * self.m43 + self.m13 * self.m21 * self.m44 - self.m11 * self.m23 * self.m44) * inv
+        let m24 = (self.m13 * self.m24 * self.m31 - self.m14 * self.m23 * self.m31 + self.m14 * self.m21 * self.m33 - self.m11 * self.m24 * self.m33 - self.m13 * self.m21 * self.m34 + self.m11 * self.m23 * self.m34) * inv
+        let m31 = (self.m22 * self.m34 * self.m41 - self.m24 * self.m32 * self.m41 + self.m24 * self.m31 * self.m42 - self.m21 * self.m34 * self.m42 - self.m22 * self.m31 * self.m44 + self.m21 * self.m32 * self.m44) * inv
+        let m32 = (self.m14 * self.m32 * self.m41 - self.m12 * self.m34 * self.m41 - self.m14 * self.m31 * self.m42 + self.m11 * self.m34 * self.m42 + self.m12 * self.m31 * self.m44 - self.m11 * self.m32 * self.m44) * inv
+        let m33 = (self.m12 * self.m24 * self.m41 - self.m14 * self.m22 * self.m41 + self.m14 * self.m21 * self.m42 - self.m11 * self.m24 * self.m42 - self.m12 * self.m21 * self.m44 + self.m11 * self.m22 * self.m44) * inv
+        let m34 = (self.m14 * self.m22 * self.m31 - self.m12 * self.m24 * self.m31 - self.m14 * self.m21 * self.m32 + self.m11 * self.m24 * self.m32 + self.m12 * self.m21 * self.m34 - self.m11 * self.m22 * self.m34) * inv
+        let m41 = (self.m23 * self.m32 * self.m41 - self.m22 * self.m33 * self.m41 - self.m23 * self.m31 * self.m42 + self.m21 * self.m33 * self.m42 + self.m22 * self.m31 * self.m43 - self.m21 * self.m32 * self.m43) * inv
+        let m42 = (self.m12 * self.m33 * self.m41 - self.m13 * self.m32 * self.m41 + self.m13 * self.m31 * self.m42 - self.m11 * self.m33 * self.m42 - self.m12 * self.m31 * self.m43 + self.m11 * self.m32 * self.m43) * inv
+        let m43 = (self.m13 * self.m22 * self.m41 - self.m12 * self.m23 * self.m41 - self.m13 * self.m21 * self.m42 + self.m11 * self.m23 * self.m42 + self.m12 * self.m21 * self.m43 - self.m11 * self.m22 * self.m43) * inv
+        let m44 = (self.m12 * self.m23 * self.m31 - self.m13 * self.m22 * self.m31 + self.m13 * self.m21 * self.m32 - self.m11 * self.m23 * self.m32 - self.m12 * self.m21 * self.m33 + self.m11 * self.m22 * self.m33) * inv
+
+        return Matrix4(m11, m12, m13, m14,
+                       m21, m22, m23, m24,
+                       m31, m32, m33, m34,
+                       m41, m42, m43, m44)
+    }
+
+    public func transposed() -> Self {
+        return Matrix4(row1: self.column1,
+                       row2: self.column2,
+                       row3: self.column3,
+                       row4: self.column4)
+    }
+
+    public static func == (_ lhs:Self, _ rhs:Self) -> Bool {
+        return lhs.row1 == rhs.row1 &&
+               lhs.row2 == rhs.row2 &&
+               lhs.row3 == rhs.row3 &&
+               lhs.row4 == rhs.row4
+    } 
+
+    public static func + (_ lhs:Self, _ rhs:Self) -> Self {
+        return Matrix4(row1: lhs.row1 + rhs.row1,
+                       row2: lhs.row2 + rhs.row2,
+                       row3: lhs.row3 + rhs.row3,
+                       row4: lhs.row4 + rhs.row4)
+    }
+
+    public static func - (_ lhs:Self, _ rhs:Self) -> Self {
+        return Matrix4(row1: lhs.row1 - rhs.row1,
+                       row2: lhs.row2 - rhs.row2,
+                       row3: lhs.row3 - rhs.row3,
+                       row4: lhs.row4 - rhs.row4)
+    }
+
+    public static func * (_ lhs:Self, _ rhs:Self) -> Self {
+        let row1 = lhs.row1, row2 = lhs.row2, row3 = lhs.row3, row4 = lhs.row4
+        let col1 = rhs.column1, col2 = rhs.column2, col3 = rhs.column3, col4 = rhs.column4
+        let dot = Vector4.dot
+        return Matrix4(dot(row1, col1), dot(row1, col2), dot(row1, col3), dot(row1, col4),
+                       dot(row2, col1), dot(row2, col2), dot(row2, col3), dot(row2, col4),
+                       dot(row3, col1), dot(row3, col2), dot(row3, col3), dot(row3, col4),
+                       dot(row4, col1), dot(row4, col2), dot(row4, col3), dot(row4, col4))
+    }
+
+    public static func * (_ lhs:Self, _ rhs:Self.Scalar) -> Self {
+        return Matrix4(row1: lhs.row1 * rhs,
+                       row2: lhs.row2 * rhs,
+                       row3: lhs.row3 * rhs,
+                       row4: lhs.row4 * rhs)
     }
 }

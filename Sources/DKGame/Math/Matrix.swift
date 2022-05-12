@@ -30,7 +30,11 @@ public protocol Matrix {
 }
 
 public extension Matrix {
-    static func != (_ lhs:inout Self, _ rhs:Self) -> Bool { return !(lhs == rhs) }
+    mutating func inverse()     { self = self.inversed() }
+    mutating func transpose()   { self = self.transposed() }
+
+    static func != (_ lhs:Self, _ rhs:Self) -> Bool { return !(lhs == rhs) }
+    
     static func += (_ lhs:inout Self, _ rhs:Self)         { lhs = lhs + rhs }
     static func -= (_ lhs:inout Self, _ rhs:Self)         { lhs = lhs - rhs }
     static func *= (_ lhs:inout Self, _ rhs:Self)         { lhs = lhs * rhs }

@@ -27,6 +27,9 @@ public protocol Vector {
 
     static func == (_:Self, _:Self) -> Bool
     static func != (_:Self, _:Self) -> Bool
+
+    static func minimum(_:Self, _:Self) -> Self
+    static func maximum(_:Self, _:Self) -> Self
 }
 
 public extension Vector where Scalar: FloatingPoint {
@@ -43,7 +46,7 @@ public extension Vector where Scalar: FloatingPoint {
 }
 
 public extension Vector {
-    var lengthSquared: Self.Scalar   { Self.dot(self, self) }
+    var lengthSquared: Self.Scalar    { Self.dot(self, self) }
 
     var magnitude: Self.Scalar        { self.length }
     var magnitudeSquared: Self.Scalar { self.lengthSquared }
