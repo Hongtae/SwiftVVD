@@ -215,7 +215,7 @@ public struct Quaternion: Vector {
         return slerp(q1, q2, t: t)
     }
 
-    public func inversed() -> Quaternion {
+    public func inverted() -> Quaternion? {
         let n = self.lengthSquared
         if n > 0.0 {
             let inv = 1.0 / n
@@ -225,11 +225,11 @@ public struct Quaternion: Vector {
             let w = self.w * inv
             return Quaternion(x, y, z, w)
         }
-        return self
+        return nil
     }
 
-    public mutating func inverse() {
-        self = self.inversed()
+    public mutating func invert() {
+        self = self.inverted() ?? self
     }
 
     public static func minimum(_ lhs: Self, _ rhs: Self) -> Self {

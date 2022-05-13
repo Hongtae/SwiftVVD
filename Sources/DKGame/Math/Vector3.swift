@@ -58,28 +58,27 @@ public struct Vector3: Vector, LinearTransformable, HomogeneousTransformable {
                        z: v1.x * v2.y - v1.y * v2.x)
     }
 
-    public func transforming(_ m: Matrix3) -> Self {
+    public func transformed(by m: Matrix3) -> Self {
         let x = Self.dot(self, m.column1)
         let y = Self.dot(self, m.column2)
         let z = Self.dot(self, m.column3)
         return Self(x, y, z) 
     }
 
-    public func transforming(_ m: Matrix4) -> Self {
-        let v = Vector4(self.x, self.y, self.z, 1.0).transforming(m)
-        let w = 1.0 / v.w
-        return Vector3(v.x * w, v.y * w, v.z * w)
+    public func transformed(by m: Matrix4) -> Self {
+        let v = Vector4(self.x, self.y, self.z, 1.0).transformed(by: m)
+        return Vector3(v.x, v.y, v.z) * (1.0 / v.w)
     }
 
-    public func transforming(_ q: Quaternion) -> Self {
+    public func transformed(by q: Quaternion) -> Self {
         return self.rotated(by: q)
     }
 
-    public mutating func transform(_ q: Quaternion) {
+    public mutating func transform(by q: Quaternion) {
         self.rotate(by: q)
     }
 
-    public func rotatedBy(x radian: Scalar) -> Vector3 {
+    public func rotatedX(_ radian: Scalar) -> Vector3 {
         if radian.isZero  { return self }
         let c = cos(radian)
         let s = sin(radian)
@@ -89,7 +88,7 @@ public struct Vector3: Vector, LinearTransformable, HomogeneousTransformable {
         return Vector3(self.x, y, z)
     }
 
-    public func rotatedBy(y radian: Scalar) -> Vector3 {
+    public func rotatedY(_ radian: Scalar) -> Vector3 {
         if radian.isZero { return self }
         let c = cos(radian)
         let s = sin(-radian)
@@ -99,7 +98,7 @@ public struct Vector3: Vector, LinearTransformable, HomogeneousTransformable {
         return Vector3(x, self.y, z)
     }
 
-    public func rotatedBy(z radian: Scalar) -> Vector3 {
+    public func rotatedZ(_ radian: Scalar) -> Vector3 {
         if radian.isZero { return self }
         let c = cos(radian)
         let s = sin(radian)
@@ -123,16 +122,16 @@ public struct Vector3: Vector, LinearTransformable, HomogeneousTransformable {
         return self + uv + uuv
     }
 
-    public mutating func rotateBy(x radian: Scalar) {
-        self = self.rotatedBy(x: radian)
+    public mutating func rotateX(_ radian: Scalar) {
+        self = self.rotatedX(radian)
     }
 
-    public mutating func rotateBy(y radian: Scalar) {
-        self = self.rotatedBy(y: radian)
+    public mutating func rotateY(_ radian: Scalar) {
+        self = self.rotatedY(radian)
     }
 
-    public mutating func rotateBy(z radian: Scalar) {
-        self = self.rotatedBy(z: radian)
+    public mutating func rotateZ(_ radian: Scalar) {
+        self = self.rotatedZ(radian)
     }
 
     public mutating func rotateBy(angle: Scalar, axis: Vector3) {
@@ -168,11 +167,11 @@ public struct Vector3: Vector, LinearTransformable, HomogeneousTransformable {
     }
 
     public static func * (lhs: Self, rhs: Quaternion) -> Vector3 {
-        return lhs.transforming(rhs)
+        return lhs.transformed(by: rhs)
     }
 
     public static func *= (lhs: inout Self, rhs: Quaternion) {
-        lhs.transform(rhs)
+        lhs.transform(by: rhs)
     }
 
     public static func minimum(_ lhs: Self, _ rhs: Self) -> Self {

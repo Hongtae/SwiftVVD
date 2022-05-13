@@ -2,8 +2,8 @@ public protocol Matrix {
     associatedtype Scalar
     associatedtype Vector
 
-    mutating func inverse()
-    func inversed() -> Self
+    mutating func invert()
+    func inverted() -> Self?
 
     mutating func transpose()
     func transposed() -> Self
@@ -30,7 +30,7 @@ public protocol Matrix {
 }
 
 public extension Matrix {
-    mutating func inverse()     { self = self.inversed() }
+    mutating func invert()      { self = self.inverted() ?? self }
     mutating func transpose()   { self = self.transposed() }
 
     static func != (_ lhs:Self, _ rhs:Self) -> Bool { return !(lhs == rhs) }

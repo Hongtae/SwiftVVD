@@ -5,6 +5,8 @@ public struct UniformScaleTransform {
     public var orientation: Quaternion
     public var position: Vector3
 
+    public static let identity: Self = .init(scale: 1.0, orientation: .identity, position: .zero)
+
     public var matrix3: Matrix3 { orientation.matrix3 * scale }
     public var matrix4: Matrix4 {
         let m = self.matrix3
@@ -20,15 +22,15 @@ public struct UniformScaleTransform {
         self.position = position
     }
 
-    public func inversed() -> Self {
+    public func inverted() -> Self {
         let s = 1.0 / self.scale
         let r = orientation.conjugate
         let p = (-position * scale) * r
         return Self(scale: s, orientation: r, position: p)
     }
 
-    public mutating func inverse() {
-        self = self.inversed()
+    public mutating func invert() {
+        self = self.inverted()
     }
 
     public static func * (lhs: Vector3, rhs: Self) -> Vector3 {

@@ -159,11 +159,15 @@ public struct Matrix3: Matrix {
                m12 * m21 * m33 - m13 * m22 * m31
     }
 
-    public func inversed() -> Self {
+    public var isDiagonal: Bool {
+        m12 == 0.0 && m13 == 0.0 &&
+        m21 == 0.0 && m23 == 0.0 &&
+        m31 == 0.0 && m32 == 0.0
+    }
+
+    public func inverted() -> Self? {
         let d = self.determinant
-        if d.isZero {
-            return .identity
-        }
+        if d.isZero { return nil }
         let inv = 1.0 / d
 
         let m11 = (self.m22 * self.m33 - self.m23 * self.m32) * inv

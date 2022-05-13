@@ -55,51 +55,51 @@ public extension Vector {
         self = self.normalized()
     }
 
-    static func += (_ lhs:inout Self, _ rhs:Self) { lhs = lhs + rhs }
-    static func -= (_ lhs:inout Self, _ rhs:Self) { lhs = lhs - rhs }
-    static func *= (_ lhs:inout Self, _ rhs:Self) { lhs = lhs * rhs }
-    static func *= (_ lhs:inout Self, _ rhs:Self.Scalar) { lhs = lhs * rhs }
-    static func != (_ lhs:Self, _ rhs:Self) -> Bool { return !(lhs == rhs) }
+    static func += (lhs: inout Self, rhs: Self) { lhs = lhs + rhs }
+    static func -= (lhs: inout Self, rhs: Self) { lhs = lhs - rhs }
+    static func *= (lhs: inout Self, rhs: Self) { lhs = lhs * rhs }
+    static func *= (lhs: inout Self, rhs: Self.Scalar) { lhs = lhs * rhs }
+    static func != (lhs: Self, rhs: Self) -> Bool { return !(lhs == rhs) }
 }
 
 public protocol LinearTransformable {
     associatedtype LinearTransformMatrix
-    mutating func transform(_:LinearTransformMatrix)
-    func transforming(_:LinearTransformMatrix) -> Self
+    mutating func transform(by:LinearTransformMatrix)
+    func transformed(by:LinearTransformMatrix) -> Self
 
-    static func * (_:Self, _:Self.LinearTransformMatrix) -> Self
-    static func *= (_:inout Self, _:Self.LinearTransformMatrix)
+    static func * (_: Self, _: Self.LinearTransformMatrix) -> Self
+    static func *= (_: inout Self, _: Self.LinearTransformMatrix)
 }
 
 public extension LinearTransformable {
-    mutating func transform(_ t: Self.LinearTransformMatrix) {
-        self = self.transforming(t)
+    mutating func transform(by t: Self.LinearTransformMatrix) {
+        self = self.transformed(by:t)
     }
-    static func * (_ lhs:Self, _ rhs:Self.LinearTransformMatrix) -> Self {
-        return lhs.transforming(rhs)
+    static func * (lhs: Self, rhs: Self.LinearTransformMatrix) -> Self {
+        return lhs.transformed(by: rhs)
     }
-    static func *= (_ lhs:inout Self, _ rhs:Self.LinearTransformMatrix) {
-        lhs.transform(rhs)
+    static func *= (lhs: inout Self, rhs: Self.LinearTransformMatrix) {
+        lhs.transform(by: rhs)
     }
 }
 
 public protocol HomogeneousTransformable {
     associatedtype HomogeneousTransformMatrix
-    mutating func transform(_:HomogeneousTransformMatrix)
-    func transforming(_:HomogeneousTransformMatrix) -> Self
+    mutating func transform(by:HomogeneousTransformMatrix)
+    func transformed(by:HomogeneousTransformMatrix) -> Self
 
-    static func * (_:Self, _:Self.HomogeneousTransformMatrix) -> Self
-    static func *= (_:inout Self, _:Self.HomogeneousTransformMatrix)
+    // static func * (_:Self, _:Self.HomogeneousTransformMatrix) -> Self
+    // static func *= (_:inout Self, _:Self.HomogeneousTransformMatrix)
 }
 
 public extension HomogeneousTransformable {
-    mutating func transform(_ t: Self.HomogeneousTransformMatrix) {
-        self = self.transforming(t)
+    mutating func transform(by t: Self.HomogeneousTransformMatrix) {
+        self = self.transformed(by: t)
     }
-    static func * (_ lhs:Self, _ rhs:Self.HomogeneousTransformMatrix) -> Self {
-        return lhs.transforming(rhs)
-    }
-    static func *= (_ lhs:inout Self, _ rhs:Self.HomogeneousTransformMatrix) {
-        lhs.transform(rhs)
-    }
+    // static func * (lhs: Self, rhs: Self.HomogeneousTransformMatrix) -> Self {
+    //     return lhs.transformed(by: rhs)
+    // }
+    // static func *= (lhs: inout Self, rhs: Self.HomogeneousTransformMatrix) {
+    //     lhs = lhs.transformed(by: rhs)
+    // }
 }

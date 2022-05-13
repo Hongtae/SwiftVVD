@@ -225,12 +225,16 @@ public struct Matrix4: Matrix {
                m12 * m21 * m33 * m44 + m11 * m22 * m33 * m44
     }
 
+    public var isDiagonal: Bool {
+        m12 == 0.0 && m13 == 0.0 && m14 == 0.0 &&
+        m21 == 0.0 && m23 == 0.0 && m24 == 0.0 &&
+        m31 == 0.0 && m32 == 0.0 && m34 == 0.0 &&
+        m41 == 0.0 && m42 == 0.0 && m43 == 0.0
+    }
 
-    public func inversed() -> Self {
+    public func inverted() -> Self? {
         let d = self.determinant
-        if d.isZero {
-            return .identity
-        }
+        if d.isZero { return nil }
         let inv = 1.0 / d
 
         let m11 = (self.m23 * self.m34 * self.m42 - self.m24 * self.m33 * self.m42 + self.m24 * self.m32 * self.m43 - self.m22 * self.m34 * self.m43 - self.m23 * self.m32 * self.m44 + self.m22 * self.m33 * self.m44) * inv

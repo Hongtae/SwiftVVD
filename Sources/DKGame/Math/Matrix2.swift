@@ -106,12 +106,12 @@ public struct Matrix2: Matrix {
     }
 
     public var determinant: Scalar { return m11 * m22 - m12 * m21 }
+    
+    public var isDiagonal: Bool { m12 == 0.0 && m21 == 0.0 }
 
-    public func inversed() -> Self {
+    public func inverted() -> Self? {
         let d = self.determinant
-        if d.isZero {
-            return .identity
-        }
+        if d.isZero { return nil }
         let inv = 1.0 / d
         let m11 =  self.m22 * inv
         let m12 = -self.m12 * inv

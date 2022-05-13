@@ -1,6 +1,6 @@
 import Foundation
 
-public struct Vector4: Vector {
+public struct Vector4: Vector, LinearTransformable {
     public typealias LinearTransformMatrix = Matrix4
 
     public var x : Scalar
@@ -63,7 +63,7 @@ public struct Vector4: Vector {
         return Vector4(x, y, z, w)
     }
 
-    public func transforming(_ m: Matrix4) -> Self {
+    public func transformed(by m: Matrix4) -> Self {
         let x = Self.dot(self, m.column1)
         let y = Self.dot(self, m.column2)
         let z = Self.dot(self, m.column3)

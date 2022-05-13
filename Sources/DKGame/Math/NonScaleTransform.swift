@@ -6,7 +6,7 @@ public struct NonScaleTransform: Transform, Interpolatable {
     public var orientation: Quaternion
     public var position: Vector3
 
-    public static let identity: Self = .init(matrix: .identity)
+    public static let identity: Self = .init(orientation: .identity, position: .zero)
 
     public var matrix3: Matrix3 { self.orientation.matrix3 }
     public var matrix4: Matrix4 {

@@ -48,16 +48,15 @@ public struct Vector2: Vector, LinearTransformable, HomogeneousTransformable {
         return v1.x * v2.x + v1.y * v2.y
     }
 
-    public func transforming(_ m: Matrix2) -> Vector2 {
+    public func transformed(by m: Matrix2) -> Vector2 {
         let x = Self.dot(self, m.column1)
         let y = Self.dot(self, m.column2)
         return Vector2(x, y)
     }
 
-    public func transforming(_ m: Matrix3) -> Vector2 {
-        let v = Vector3(self.x, self.y, 1.0).transforming(m)
-        let w = 1.0 / v.z
-        return Vector2(v.x * w, v.y * w)
+    public func transformed(by m: Matrix3) -> Vector2 {
+        let v = Vector3(self.x, self.y, 1.0).transformed(by: m)
+        return Vector2(v.x, v.y) * (1.0 / v.z)
     }
 
     public static func == (lhs: Self, rhs: Self) -> Bool {

@@ -19,6 +19,12 @@ public struct LinearTransform3: Transform {
 	    return Quaternion(x, y, z, w)
     }
 
+    public var scale: Vector3 {
+        Vector3(Vector3(matrix3.m11, matrix3.m12, matrix3.m13).length,
+                Vector3(matrix3.m21, matrix3.m22, matrix3.m23).length,
+                Vector3(matrix3.m31, matrix3.m32, matrix3.m33).length)
+    }
+
     public init() {
         self.matrix3 = .identity
     }
@@ -41,42 +47,129 @@ public struct LinearTransform3: Transform {
         self.matrix3 = .init(row1: left, row2: up, row3: forward)
     }
 
+    // Decompose by scale, rotate order.
     public func decompose(scale: inout Vector3, rotation: inout Quaternion) -> Bool {
-        let s = Vector3(
-            Vector3(matrix3.m11, matrix3.m12, matrix3.m13).length,
-            Vector3(matrix3.m21, matrix3.m22, matrix3.m23).length,
-            Vector3(matrix3.m31, matrix3.m32, matrix3.m33).length)
+        let s = self.scale
+        if s.x * s.y * s.z == 0.0 { return false }
 
-        if s.x.isZero || s.y.isZero || s.z.isZero { return false }
-
-        var normalized = Matrix3()
-        normalized.m11 = matrix3.m11 / scale.x
-        normalized.m12 = matrix3.m12 / scale.x
-        normalized.m13 = matrix3.m13 / scale.x
-        normalized.m21 = matrix3.m21 / scale.y
-        normalized.m22 = matrix3.m22 / scale.y
-        normalized.m23 = matrix3.m23 / scale.y
-        normalized.m31 = matrix3.m31 / scale.z
-        normalized.m32 = matrix3.m32 / scale.z
-        normalized.m33 = matrix3.m33 / scale.z
+        let x = 1.0 / s.x
+        let y = 1.0 / s.y
+        let z = 1.0 / s.z
+        let normalized = Matrix3(row1: self.matrix3.row1 * x,
+                                 row2: self.matrix3.row2 * y,
+                                 row3: self.matrix3.row3 * z)
         
-        scale = s
         rotation = LinearTransform3(normalized).rotation
+        scale = s
         return true
     }
 
-    public func inversed() -> Self {
-        return Self(self.matrix3.inversed())
+    public func inverted() -> Self {
+        let matrix = self.matrix3.inverted() ?? .identity
+        return Self(matrix)
     }
 
-    public mutating func inverse() { self = self.inversed() }
+    public mutating func invert() {
+        self = self.inverted()
+    }
 
-    public func multiplied(by t: Self) -> Self {
+    public func transformed(by t: LinearTransform3) -> Self {
         return Self(self.matrix3 * t.matrix3)
     }
 
-    public mutating func multiply(by t: Self) {
-        self = self.multiplied(by: t)
+    public func transformed(by m: Matrix3) -> Self {
+        return Self(self.matrix3 * m)
+    }
+
+    public func transformed(by q: Quaternion) -> Self {
+        return Self(self.matrix3 * q.matrix3)
+    }
+
+    public mutating func transform(by t: LinearTransform3) {
+        self = self.transformed(by: t)
+    }
+
+    public mutating func transform(by m: Matrix3) {
+        self = self.transformed(by: m)
+    }
+
+    public mutating func transform(by q: Quaternion) {
+        self = self.transformed(by: q)
+    }
+
+    public func rotated(by q: Quaternion) -> Self {
+        self.transformed(by: q)
+    }
+
+    public mutating func rotate(by q: Quaternion) {
+        self.transform(by: q)
+    }
+
+    public func rotated(angle: Scalar, axis: Vector3) -> Self {
+        if angle != 0 {
+            return self.rotated(by: Quaternion(angle: angle, axis: axis)) 
+        }
+        return self
+    }
+
+    public mutating func rotate(angle: Scalar, axis: Vector3) {
+        if angle != 0 { self.rotate(by: Quaternion(angle: angle, axis: axis)) }
+    }
+
+    public mutating func rotateX(_ r: Scalar) {
+        // X - Axis:
+        // |1  0    0   |
+        // |0  cos  sin |
+        // |0 -sin  cos |
+        let cosR = cos(r)
+        let sinR = sin(r)
+        let m = Matrix3(1.0, 0.0, 0.0,
+                        0.0, cosR, sinR,
+                        0.0, -sinR, cosR)
+        self.matrix3 *= m
+    }
+
+    public mutating func rotateY(_ r: Scalar) {
+        // Y - Axis:
+        // |cos  0 -sin |
+        // |0    1  0   |
+        // |sin  0  cos |
+        let cosR = cos(r)
+        let sinR = sin(r)
+        let m = Matrix3(cosR, 0.0, -sinR,
+                        0.0, 1.0, 0.0,
+                        sinR, 0.0, cosR)
+        self.matrix3 *= m
+    }
+
+    public mutating func rotateZ(_ r: Scalar) {
+        // Z - Axis:
+        // |cos  sin 0  |
+        // |-sin cos 0  |
+        // |0    0   1  |
+        let cosR = cos(r)
+        let sinR = sin(r)
+        let m = Matrix3(cosR, sinR, 0.0,
+                        -sinR, cosR, 0.0,
+                        0.0, 0.0, 1.0)
+        self.matrix3 *= m
+    }
+
+    public mutating func scale(byVector v: Vector3) {
+        self.scale(x: v.x, y: v.y, z: v.z)
+    }
+
+    public mutating func scale(uniform s: Scalar) {
+        self.scale(x: s, y: s, z: s)
+    }
+
+    public mutating func scale(x: Scalar, y: Scalar, z: Scalar) {
+        // | X 0 0 |
+        // | 0 Y 0 |
+        // | 0 0 Z |
+        self.matrix3.column1 *= x
+        self.matrix3.column2 *= y
+        self.matrix3.column3 *= z
     }
 
     public static func == (lhs: Self, rhs: Self) -> Bool {
@@ -84,10 +177,26 @@ public struct LinearTransform3: Transform {
     }
 
     public static func * (lhs: Self, rhs: Self) -> Self {
-        return lhs.multiplied(by: rhs)
+        return lhs.transformed(by: rhs)
+    }
+
+    public static func * (lhs: Self, rhs: Matrix3) -> Self {
+        return lhs.transformed(by: rhs)
+    }
+
+    public static func * (lhs: Self, rhs: Quaternion) -> Self {
+        return lhs.transformed(by: rhs)
     }
 
     public static func *= (lhs: inout Self, rhs: Self) {
+        lhs = lhs * rhs
+    }
+
+    public static func *= (lhs: inout Self, rhs: Matrix3) {
+        lhs = lhs * rhs
+    }
+
+    public static func *= (lhs: inout Self, rhs: Quaternion) {
         lhs = lhs * rhs
     }
 
