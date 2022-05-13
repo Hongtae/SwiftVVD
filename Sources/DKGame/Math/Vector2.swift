@@ -1,8 +1,6 @@
 import Foundation
 
-public struct Vector2: Vector, LinearTransformable, HomogeneousTransformable {
-    public typealias LinearTransformMatrix = Matrix2
-    public typealias HomogeneousTransformMatrix = Matrix3
+public struct Vector2: Vector {
 
     public var x : Scalar
     public var y : Scalar
@@ -48,15 +46,17 @@ public struct Vector2: Vector, LinearTransformable, HomogeneousTransformable {
         return v1.x * v2.x + v1.y * v2.y
     }
 
-    public func transformed(by m: Matrix2) -> Vector2 {
-        let x = Self.dot(self, m.column1)
-        let y = Self.dot(self, m.column2)
-        return Vector2(x, y)
+    public func rotated(by angle: Scalar) -> Self {
+        // Rotate
+        // | cos  sin|
+        // |-sin  cos|
+    	let cosR = cos(angle)
+    	let sinR = sin(angle)
+        return Self(x * cosR - y * sinR, x * sinR + y * cosR)
     }
 
-    public func transformed(by m: Matrix3) -> Vector2 {
-        let v = Vector3(self.x, self.y, 1.0).transformed(by: m)
-        return Vector2(v.x, v.y) * (1.0 / v.z)
+    public mutating func rotate(by angle: Scalar) {
+        self = self.rotated(by: angle)
     }
 
     public static func == (lhs: Self, rhs: Self) -> Bool {

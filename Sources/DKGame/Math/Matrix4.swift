@@ -267,28 +267,28 @@ public struct Matrix4: Matrix {
                        row4: self.column4)
     }
 
-    public static func == (_ lhs:Self, _ rhs:Self) -> Bool {
+    public static func == (lhs: Self, rhs: Self) -> Bool {
         return lhs.row1 == rhs.row1 &&
                lhs.row2 == rhs.row2 &&
                lhs.row3 == rhs.row3 &&
                lhs.row4 == rhs.row4
     } 
 
-    public static func + (_ lhs:Self, _ rhs:Self) -> Self {
+    public static func + (lhs: Self, rhs: Self) -> Self {
         return Matrix4(row1: lhs.row1 + rhs.row1,
                        row2: lhs.row2 + rhs.row2,
                        row3: lhs.row3 + rhs.row3,
                        row4: lhs.row4 + rhs.row4)
     }
 
-    public static func - (_ lhs:Self, _ rhs:Self) -> Self {
+    public static func - (lhs: Self, rhs: Self) -> Self {
         return Matrix4(row1: lhs.row1 - rhs.row1,
                        row2: lhs.row2 - rhs.row2,
                        row3: lhs.row3 - rhs.row3,
                        row4: lhs.row4 - rhs.row4)
     }
 
-    public static func * (_ lhs:Self, _ rhs:Self) -> Self {
+    public static func * (lhs: Self, rhs: Self) -> Self {
         let row1 = lhs.row1, row2 = lhs.row2, row3 = lhs.row3, row4 = lhs.row4
         let col1 = rhs.column1, col2 = rhs.column2, col3 = rhs.column3, col4 = rhs.column4
         let dot = Vector4.dot
@@ -298,10 +298,39 @@ public struct Matrix4: Matrix {
                        dot(row4, col1), dot(row4, col2), dot(row4, col3), dot(row4, col4))
     }
 
-    public static func * (_ lhs:Self, _ rhs:Self.Scalar) -> Self {
+    public static func * (lhs: Self, rhs: Scalar) -> Self {
         return Matrix4(row1: lhs.row1 * rhs,
                        row2: lhs.row2 * rhs,
                        row3: lhs.row3 * rhs,
                        row4: lhs.row4 * rhs)
     }
+}
+
+public extension Vector3 {    
+    func transformed(by m: Matrix4) -> Self {
+        let v = Vector4(self.x, self.y, self.z, 1.0).transformed(by: m)
+        return Vector3(v.x, v.y, v.z) * (1.0 / v.w)
+    }
+    mutating func transform(by: Matrix4) {
+        self = self.transformed(by: by)
+    }
+}
+
+public extension Vector4 {
+    func transformed(by m: Matrix4) -> Self {
+        let x = Self.dot(self, m.column1)
+        let y = Self.dot(self, m.column2)
+        let z = Self.dot(self, m.column3)
+        let w = Self.dot(self, m.column4)
+        return Self(x, y, z, w)
+    }
+    mutating func transform(by: Matrix4) {
+        self = self.transformed(by: by)
+    }
+
+    static func * (lhs: Vector4, rhs: Matrix4) -> Vector4 {
+        return lhs.transformed(by: rhs)
+    }
+
+    static func *= (lhs: inout Vector4, rhs: Matrix4) { lhs = lhs * rhs }
 }

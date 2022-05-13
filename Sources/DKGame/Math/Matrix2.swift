@@ -144,7 +144,25 @@ public struct Matrix2: Matrix {
                        Vector2.dot(row2, col1), Vector2.dot(row2, col2))
     }
 
-    public static func * (_ lhs:Self, _ rhs:Self.Scalar) -> Self {
+    public static func * (_ lhs:Self, _ rhs:Scalar) -> Self {
         return Matrix2(row1: lhs.row1 * rhs, row2: lhs.row2 * rhs)
     }
+}
+
+public extension Vector2 {
+    func transformed(by m: Matrix2) -> Vector2 {
+        let x = Self.dot(self, m.column1)
+        let y = Self.dot(self, m.column2)
+        return Vector2(x, y)
+    }
+
+    mutating func transform(by: Matrix2) {
+        self = self.transformed(by: by)
+    }
+
+    static func * (lhs: Vector2, rhs: Matrix2) -> Vector2 {
+        return lhs.transformed(by: rhs)
+    }
+
+    static func *= (lhs: inout Vector2, rhs: Matrix2) { lhs = lhs * rhs }
 }

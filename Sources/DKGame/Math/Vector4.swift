@@ -1,7 +1,6 @@
 import Foundation
 
-public struct Vector4: Vector, LinearTransformable {
-    public typealias LinearTransformMatrix = Matrix4
+public struct Vector4: Vector {
 
     public var x : Scalar
     public var y : Scalar
@@ -61,14 +60,6 @@ public struct Vector4: Vector, LinearTransformable {
         let z =   v1.x * (v2.y * v3.w - v3.y * v2.w) - v1.y * (v2.x * v3.w - v3.x * v2.w) + v1.w * (v2.x * v3.y - v3.x * v2.y)
         let w = -(v1.x * (v2.y * v3.z - v3.y * v2.z) - v1.y * (v2.x * v3.z - v3.x * v2.z) + v1.z * (v2.x * v3.y - v3.x * v2.y))  
         return Vector4(x, y, z, w)
-    }
-
-    public func transformed(by m: Matrix4) -> Self {
-        let x = Self.dot(self, m.column1)
-        let y = Self.dot(self, m.column2)
-        let z = Self.dot(self, m.column3)
-        let w = Self.dot(self, m.column4)
-        return Self(x, y, z, w)
     }
 
     public static func == (lhs: Self, rhs: Self) -> Bool {

@@ -17,8 +17,7 @@ public extension Transform {
 }
 
 public protocol Interpolatable {
-    associatedtype Scalar
-    static func interpolate(_:Self, _:Self, t: Self.Scalar) -> Self
+    static func interpolate(_:Self, _:Self, t: Scalar) -> Self
 }
 
 public struct TransformUnit: Transform, Interpolatable {

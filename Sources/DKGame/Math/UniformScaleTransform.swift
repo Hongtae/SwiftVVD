@@ -1,6 +1,8 @@
 import Foundation
 
-public struct UniformScaleTransform {
+public struct UniformScaleTransform: Transform, Interpolatable {
+    public typealias Vector = Vector3
+
     public var scale: Scalar
     public var orientation: Quaternion
     public var position: Vector3
@@ -31,6 +33,18 @@ public struct UniformScaleTransform {
 
     public mutating func invert() {
         self = self.inverted()
+    }
+
+    public static func interpolate(_ t1: Self, _ t2: Self, t: Scalar) -> Self {
+        return Self(scale: t1.scale + ((t2.scale - t1.scale) * t),
+                    orientation: Quaternion.slerp(t1.orientation, t2.orientation, t:t),
+                    position: t1.position + ((t2.position - t1.position) * t))
+    }   
+
+    public static func == (lhs:Self, rhs:Self) -> Bool {
+        return lhs.scale == rhs.scale &&
+               lhs.orientation == rhs.orientation &&
+               lhs.position == rhs.position
     }
 
     public static func * (lhs: Vector3, rhs: Self) -> Vector3 {

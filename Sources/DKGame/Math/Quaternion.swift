@@ -240,3 +240,41 @@ public struct Quaternion: Vector {
         return Self(max(lhs.x, rhs.x), max(lhs.y, rhs.y), max(lhs.z, rhs.z), max(lhs.w, rhs.w))
     }
 }
+
+public extension Vector3 {
+    func rotated(angle: Scalar, axis: Vector3) -> Vector3 {
+        if angle.isZero { return self }
+        return self.rotated(by: Quaternion(angle: angle, axis: axis))
+    }
+
+    mutating func rotate(angle: Scalar, axis: Vector3) {
+        self = self.rotated(angle: angle, axis: axis)
+    }
+
+    func rotated(by q: Quaternion) -> Vector3 {
+        let vec = Vector3(q.x, q.y, q.z)
+        var uv = Self.cross(vec, self)
+        var uuv = Self.cross(vec, uv)
+        uv *= (2.0 * q.w)
+        uuv *= 2.0
+        return self + uv + uuv
+    }
+
+    mutating func rotate(by q: Quaternion) {
+        self = self.rotated(by: q)
+    }
+
+    func transformed(by q: Quaternion) -> Vector3 {
+        return self.rotated(by: q)
+    }
+
+    mutating func transform(by q: Quaternion) {
+        self.rotate(by: q)
+    }
+
+    static func * (lhs: Vector3, rhs: Quaternion) -> Vector3 {
+        return lhs.transformed(by: rhs)
+    }
+
+    static func *= (lhs: inout Vector3, rhs: Quaternion) { lhs = lhs * rhs }
+}

@@ -27,18 +27,28 @@ public struct NonScaleTransform: Transform, Interpolatable {
         self.position = position
     }
 
+    public func inverted() -> Self {
+        let r = orientation.conjugate
+        let p = -position * r
+        return Self(orientation: r, position: p)
+    }
+
+    public mutating func invert() {
+        self = self.inverted()
+    }
+
     public static func interpolate(_ t1: Self, _ t2: Self, t: Scalar) -> Self {
         return Self(orientation: Quaternion.slerp(t1.orientation, t2.orientation, t:t),
                     position: t1.position + ((t2.position - t1.position) * t))
     }
 
-    public static func * (v: Vector3, t: Self) -> Vector3 {
-        return v * t.orientation + t.position
-    }
-
     public static func == (lhs:Self, rhs:Self) -> Bool {
         return lhs.orientation == rhs.orientation &&
                lhs.position == rhs.position
+    }
+
+    public static func * (v: Vector3, t: Self) -> Vector3 {
+        return v * t.orientation + t.position
     }
 
     public static func * (lhs: Self, rhs: Self) -> Self {
