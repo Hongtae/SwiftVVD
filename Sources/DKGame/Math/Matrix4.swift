@@ -306,7 +306,40 @@ public struct Matrix4: Matrix {
     }
 }
 
-public extension Vector3 {    
+public extension Matrix4 {
+    var half: Half4x4 {
+        get { (self.row1.half4, self.row2.half4, self.row3.half4, self.row4.half4) }
+        set(v) {
+            self.row1.half4 = v.0
+            self.row2.half4 = v.1
+            self.row3.half4 = v.2
+            self.row4.half4 = v.3
+        }
+    }
+
+    var float: Float4x4 {
+        get { (self.row1.float4, self.row2.float4, self.row3.float4, self.row4.float4) }
+        set(v) {
+            self.row1.float4 = v.0
+            self.row2.float4 = v.1
+            self.row3.float4 = v.2
+            self.row4.float4 = v.3
+        }
+    }
+
+    var double: Double4x4 {
+        get { (self.row1.double4, self.row2.double4, self.row3.double4, self.row4.double4) }
+        set(v) {
+            self.row1.double4 = v.0
+            self.row2.double4 = v.1
+            self.row3.double4 = v.2
+            self.row4.double4 = v.3
+        }
+    }
+}
+
+public extension Vector3 {
+    // homogeneous transform
     func transformed(by m: Matrix4) -> Self {
         let v = Vector4(self.x, self.y, self.z, 1.0).transformed(by: m)
         return Vector3(v.x, v.y, v.z) * (1.0 / v.w)

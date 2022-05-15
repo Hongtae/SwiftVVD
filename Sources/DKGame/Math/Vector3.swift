@@ -130,3 +130,38 @@ public struct Vector3: Vector {
         return Self(max(lhs.x, rhs.x), max(lhs.y, rhs.y), max(lhs.z, rhs.z))
     }
 }
+
+public extension Vector3 {
+    var half3: Half3 {
+        get {
+            (Float16(self.x), Float16(self.y), Float16(self.z))
+        }
+        set(v) {
+            self.x = Scalar(v.0)
+            self.y = Scalar(v.1)
+            self.z = Scalar(v.2)
+        }
+    }
+
+    var float3: Float3 {
+        get {
+            (Float32(self.x), Float32(self.y), Float32(self.z))
+        }
+        set(v) {
+            self.x = Scalar(v.0)
+            self.y = Scalar(v.1)
+            self.z = Scalar(v.2)
+        }
+    }
+
+    var double3: Double3 {
+        get {
+            (Float64(self.x), Float64(self.y), Float64(self.z))
+        }
+        set(v) {
+            self.x = Scalar(v.0)
+            self.y = Scalar(v.1)
+            self.z = Scalar(v.2)
+        }
+    }
+}

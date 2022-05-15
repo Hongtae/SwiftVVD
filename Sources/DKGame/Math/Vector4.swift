@@ -94,3 +94,41 @@ public struct Vector4: Vector {
         return Self(max(lhs.x, rhs.x), max(lhs.y, rhs.y), max(lhs.z, rhs.z), max(lhs.w, rhs.w))
     }
 }
+
+public extension Vector4 {
+    var half4: Half4 {
+        get {
+            (Float16(self.x), Float16(self.y), Float16(self.z), Float16(self.w))
+        }
+        set(v) {
+            self.x = Scalar(v.0)
+            self.y = Scalar(v.1)
+            self.z = Scalar(v.2)
+            self.w = Scalar(v.3)
+        }
+    }
+
+    var float4: Float4 {
+        get {
+            (Float32(self.x), Float32(self.y), Float32(self.z), Float32(self.w))
+        }
+        set(v) {
+            self.x = Scalar(v.0)
+            self.y = Scalar(v.1)
+            self.z = Scalar(v.2)
+            self.w = Scalar(v.3)
+        }
+    }
+
+    var double4: Double4 {
+        get {
+            (Float64(self.x), Float64(self.y), Float64(self.z), Float64(self.w))
+        }
+        set(v) {
+            self.x = Scalar(v.0)
+            self.y = Scalar(v.1)
+            self.z = Scalar(v.2)
+            self.w = Scalar(v.3)
+        }
+    }
+}

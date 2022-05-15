@@ -128,10 +128,10 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
                     framebufferImageViews.append(rt.imageView)
 
                     var clearValue = VkClearValue()
-                    clearValue.color.float32 = (colorAttachment.clearColor.r,
-                                                colorAttachment.clearColor.g,
-                                                colorAttachment.clearColor.b,
-                                                colorAttachment.clearColor.a)
+                    clearValue.color.float32 = (Float32(colorAttachment.clearColor.r),
+                                                Float32(colorAttachment.clearColor.g),
+                                                Float32(colorAttachment.clearColor.b),
+                                                Float32(colorAttachment.clearColor.a))
                     attachmentClearValues.append(clearValue)
 
                     frameWidth = (frameWidth > 0) ? min(frameWidth, rt.width) : rt.width

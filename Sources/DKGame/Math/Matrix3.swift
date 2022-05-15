@@ -223,7 +223,37 @@ public struct Matrix3: Matrix {
     }
 }
 
+public extension Matrix3 {
+    var half: Half3x3 {
+        get { (self.row1.half3, self.row2.half3, self.row3.half3) }
+        set(v) {
+            self.row1.half3 = v.0
+            self.row2.half3 = v.1
+            self.row3.half3 = v.2
+        }
+    }
+
+    var float: Float3x3 {
+        get { (self.row1.float3, self.row2.float3, self.row3.float3) }
+        set(v) {
+            self.row1.float3 = v.0
+            self.row2.float3 = v.1
+            self.row3.float3 = v.2
+        }
+    }
+
+    var double: Double3x3 {
+        get { (self.row1.double3, self.row2.double3, self.row3.double3) }
+        set(v) {
+            self.row1.double3 = v.0
+            self.row2.double3 = v.1
+            self.row3.double3 = v.2
+        }
+    }
+}
+
 public extension Vector2 {
+    // homogeneous transform
     func transformed(by m: Matrix3) -> Vector2 {
         let v = Vector3(self.x, self.y, 1.0).transformed(by: m)
         return Vector2(v.x, v.y) * (1.0 / v.z)

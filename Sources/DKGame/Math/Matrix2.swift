@@ -149,6 +149,32 @@ public struct Matrix2: Matrix {
     }
 }
 
+public extension Matrix2 {
+    var half2x2: Half2x2 {
+        get { (self.row1.half2, self.row2.half2) }
+        set(v) {
+            self.row1.half2 = v.0
+            self.row2.half2 = v.1
+        }
+    }
+
+    var float2x2: Float2x2 {
+        get { (self.row1.float2, self.row1.float2) }
+        set(v) {
+            self.row1.float2 = v.0
+            self.row2.float2 = v.1
+        }
+    }
+
+    var double2x2: Double2x2 {
+        get { (self.row1.double2, self.row1.double2) }
+        set(v) {
+            self.row1.double2 = v.0
+            self.row2.double2 = v.1
+        }
+    }
+}
+
 public extension Vector2 {
     func transformed(by m: Matrix2) -> Vector2 {
         let x = Self.dot(self, m.column1)
