@@ -3,9 +3,15 @@ import Vulkan
 import Foundation
 
 public class VulkanBufferView: Buffer {
-    public let bufferView: VkBufferView
     public let device: GraphicsDevice
+    public let bufferView: VkBufferView?
     public let buffer: VulkanBuffer?
+
+    public init(buffer: VulkanBuffer) {
+        self.device = buffer.device
+        self.buffer = buffer
+        self.bufferView = nil
+    }
 
     public init(buffer: VulkanBuffer, bufferView: VkBufferView) {
         self.device = buffer.device
@@ -20,8 +26,10 @@ public class VulkanBufferView: Buffer {
     }
 
     deinit {
-        let device = self.device as! VulkanGraphicsDevice
-        vkDestroyBufferView(device.device, bufferView, device.allocationCallbacks)
+        if let bufferView = bufferView {
+            let device = self.device as! VulkanGraphicsDevice
+            vkDestroyBufferView(device.device, bufferView, device.allocationCallbacks)
+        }
     }
 
     public func contents() -> UnsafeMutableRawPointer? {

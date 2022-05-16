@@ -175,7 +175,7 @@ public class VulkanImage {
                 return .unknown
         }
     }
-    public var pixelFormat: PixelFormat { .from(format: self.format) }
+    public var pixelFormat: PixelFormat { .from(vkFormat: self.format) }
 
     public static func commonAccessMask(forLayout layout: VkImageLayout) -> VkAccessFlags {
         var accessMask: VkAccessFlags = 0

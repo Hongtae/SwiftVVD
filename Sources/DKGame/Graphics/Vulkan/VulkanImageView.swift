@@ -12,7 +12,7 @@ public class VulkanImageView: Texture {
     public var image: VulkanImage?
     public let device: GraphicsDevice
 
-    public init(image: VulkanImage, imageView: VkImageView, createInfo: VkImageViewCreateInfo) {
+    public init(image: VulkanImage, imageView: VkImageView, imageViewCreateInfo: VkImageViewCreateInfo) {
         self.image = image
         self.imageView = imageView
         self.device = image.device

@@ -105,7 +105,7 @@ public struct ShaderStage: OptionSet {
     public static let fragment                  = ShaderStage(rawValue: 1 << 4)
     public static let compute                   = ShaderStage(rawValue: 1 << 5)
 
-    public static let unknown                   = ShaderStage(rawValue: UInt32.max)
+    public static let unknown: ShaderStage = []
 
     public var isSingleOption: Bool {
         if self.rawValue > 0 {

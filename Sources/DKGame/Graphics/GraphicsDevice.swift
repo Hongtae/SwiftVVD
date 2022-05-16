@@ -24,9 +24,9 @@ public protocol GraphicsDevice {
     func makeComputePipelineState(descriptor: ComputePipelineDescriptor, reflection: UnsafeMutablePointer<PipelineReflection>?) -> ComputePipelineState?
     func makeComputePipelineState(descriptor: ComputePipelineDescriptor) -> ComputePipelineState?
 
-    func makeBuffer() -> Buffer?
-    func makeTexture() -> Texture?
-    func makeSamplerState() -> SamplerState?
+    func makeBuffer(length: Int, storageMode: GPUBufferStorageMode, cacheMode: CPUCacheMode) -> Buffer?
+    func makeTexture(descriptor: TextureDescriptor) -> Texture?
+    func makeSamplerState(descriptor: SamplerDescriptor) -> SamplerState?
 
     func makeEvent() -> Event?
     func makeSemaphore() -> Semaphore?

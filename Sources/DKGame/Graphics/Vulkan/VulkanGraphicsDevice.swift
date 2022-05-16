@@ -316,6 +316,16 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         }
     }
 
+    private func indexOfMemoryType(typeBits: UInt32, properties: VkMemoryPropertyFlags) -> UInt32 {
+        for i in 0..<self.deviceMemoryTypes.count {
+            if (typeBits & (1 << i)) != 0 && (self.deviceMemoryTypes[i].propertyFlags & properties) == properties {
+                    return UInt32(i)
+                }
+        }
+        assertionFailure("VulkanGraphicsDevice error: Unknown memory type!")
+        return UInt32.max
+    }
+
     public func makeCommandQueue(flags: CommandQueueFlags) -> CommandQueue? {
         var queueFlags: UInt32 = 0
         if flags.contains(.graphics) {
@@ -1001,14 +1011,316 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         return pipelineState
     }
 
-    public func makeBuffer() -> Buffer? {
+    public func makeBuffer(length: Int, storageMode: GPUBufferStorageMode, cacheMode: CPUCacheMode) -> Buffer? {
+        guard length > 0 else { return nil }
+
+        var buffer: VkBuffer? = nil
+        var memory: VkDeviceMemory? = nil
+
+        defer {
+            if buffer != nil {
+                vkDestroyBuffer(self.device, buffer, self.allocationCallbacks)
+            }
+            if memory != nil {
+                vkFreeMemory(self.device, memory, self.allocationCallbacks)
+            }
+        }
+
+        var bufferCreateInfo = VkBufferCreateInfo()
+        bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO
+        bufferCreateInfo.size = VkDeviceSize(length)
+        bufferCreateInfo.usage = 0x1ff
+        bufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE
+
+        var result: VkResult = vkCreateBuffer(self.device, &bufferCreateInfo, self.allocationCallbacks, &buffer)
+        if result != VK_SUCCESS {
+            Log.err("vkCreateBuffer failed: \(result)")
+            return nil
+        }
+
+        var memReqs = VkMemoryRequirements()
+        var memProperties: VkMemoryPropertyFlags
+        switch storageMode {
+        case .shared:
+            memProperties = VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT.rawValue | VK_MEMORY_PROPERTY_HOST_CACHED_BIT.rawValue)
+        default:
+            memProperties = VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT.rawValue)
+        }
+
+        var memAllocInfo = VkMemoryAllocateInfo()
+        memAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO
+        vkGetBufferMemoryRequirements(device, buffer, &memReqs)
+        memAllocInfo.allocationSize = memReqs.size
+        memAllocInfo.memoryTypeIndex = self.indexOfMemoryType(typeBits: memReqs.memoryTypeBits, properties: memProperties)
+        assert(memAllocInfo.allocationSize >= bufferCreateInfo.size)
+
+        result = vkAllocateMemory(self.device, &memAllocInfo, self.allocationCallbacks, &memory)
+        if result != VK_SUCCESS {
+            Log.err("vkAllocateMemory failed: \(result)")
+            return nil
+        }
+        result = vkBindBufferMemory(self.device, buffer, memory, 0)
+        if result != VK_SUCCESS {
+            Log.err("vkBindBufferMemory failed: \(result)")
+            return nil
+        }
+
+        let memoryType: VkMemoryType = self.deviceMemoryTypes[Int(memAllocInfo.memoryTypeIndex)]
+        let deviceMemory = VulkanDeviceMemory(device: self, memory: memory!, type: memoryType, size: UInt(memAllocInfo.allocationSize))
+        memory = nil
+
+        let bufferObject = VulkanBuffer(memory: deviceMemory, buffer: buffer!, bufferCreateInfo: bufferCreateInfo)
+        buffer = nil
+
+        return VulkanBufferView(buffer: bufferObject)
+    }
+
+    public func makeTexture(descriptor desc: TextureDescriptor) -> Texture? {
+        var image: VkImage? = nil
+        var memory: VkDeviceMemory? = nil
+
+        defer {
+            if image != nil {
+                vkDestroyImage(self.device, image, self.allocationCallbacks)
+            }
+            if memory != nil {
+                vkFreeMemory(self.device, memory, self.allocationCallbacks)
+            }
+        }
+
+        var imageCreateInfo = VkImageCreateInfo()
+        imageCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO
+        switch desc.textureType {
+        case .type1D:
+            imageCreateInfo.imageType = VK_IMAGE_TYPE_1D
+        case .type2D:
+            imageCreateInfo.imageType = VK_IMAGE_TYPE_2D
+        case .type3D:
+            imageCreateInfo.imageType = VK_IMAGE_TYPE_3D
+        case .typeCube:
+            imageCreateInfo.imageType = VK_IMAGE_TYPE_2D
+            imageCreateInfo.flags |= UInt32(VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT.rawValue)
+        default:
+            assertionFailure("Invalid texture type!")
+            Log.err("VulkanGraphicsDevice.makeTexture(): Invalid texture type!")
+            return nil
+        }
+        imageCreateInfo.arrayLayers = max(desc.arrayLength, 1)
+        if imageCreateInfo.arrayLayers > 1 && imageCreateInfo.imageType == VK_IMAGE_TYPE_2D {
+            imageCreateInfo.flags |= UInt32(VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT.rawValue)
+        }
+        imageCreateInfo.format = desc.pixelFormat.vkFormat()
+        assert(imageCreateInfo.format != VK_FORMAT_UNDEFINED, "Unsupported format!")
+
+        imageCreateInfo.extent.width = desc.width
+        imageCreateInfo.extent.height = desc.height
+        imageCreateInfo.extent.depth = desc.depth
+        imageCreateInfo.mipLevels = desc.mipmapLevels
+
+        assert(desc.sampleCount == 1, "Multisample is not implemented.")
+        imageCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT
+
+        imageCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL
+
+        if desc.usage.contains(.copySource){
+            imageCreateInfo.usage |= UInt32(VK_IMAGE_USAGE_TRANSFER_SRC_BIT.rawValue)
+        }
+        if desc.usage.contains(.copyDestination) {
+            imageCreateInfo.usage |= UInt32(VK_IMAGE_USAGE_TRANSFER_DST_BIT.rawValue)
+        }
+        if desc.usage.contains(.shaderRead) || desc.usage.contains(.sampled) {
+            imageCreateInfo.usage |= UInt32(VK_IMAGE_USAGE_SAMPLED_BIT.rawValue)
+        }
+        if desc.usage.contains(.shaderWrite) || desc.usage.contains(.storage) {
+            imageCreateInfo.usage |= UInt32(VK_IMAGE_USAGE_STORAGE_BIT.rawValue)
+        }
+        if desc.usage.contains(.renderTarget) {
+            imageCreateInfo.usage |= UInt32(VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT.rawValue)
+            if desc.pixelFormat.isDepthFormat() || desc.pixelFormat.isStencilFormat() {
+                imageCreateInfo.usage |= UInt32(VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT.rawValue)
+            } else {
+                imageCreateInfo.usage |= UInt32(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT.rawValue)
+            }
+        }
+
+        imageCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE
+        // Set initial layout of the image to undefined
+        imageCreateInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
+
+        var result: VkResult = vkCreateImage(self.device, &imageCreateInfo, self.allocationCallbacks, &image)
+        if result != VK_SUCCESS {
+            Log.err("vkCreateImage failed: \(result)")
+            return nil
+        }
+
+        // Allocate device memory
+        var memReqs = VkMemoryRequirements()
+        vkGetImageMemoryRequirements(self.device, image, &memReqs)
+        var memAllocInfo = VkMemoryAllocateInfo()
+        memAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO
+        let memProperties = VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT.rawValue)
+        memAllocInfo.allocationSize = memReqs.size
+        memAllocInfo.memoryTypeIndex = self.indexOfMemoryType(typeBits: memReqs.memoryTypeBits, properties: memProperties)
+        result = vkAllocateMemory(self.device, &memAllocInfo, self.allocationCallbacks, &memory)
+        if result != VK_SUCCESS {
+            Log.err("vkAllocateMemory failed: \(result)")
+            return nil
+        }
+        result = vkBindImageMemory(self.device, image, memory, 0)
+        if result != VK_SUCCESS {
+            Log.err("vkBindBufferMemory failed: \(result)")
+            return nil
+        }
+
+        let memoryType = self.deviceMemoryTypes[Int(memAllocInfo.memoryTypeIndex)]
+        let deviceMemory = VulkanDeviceMemory(device: self, memory: memory!, type: memoryType, size: UInt(memAllocInfo.allocationSize))
+        memory = nil
+
+        let imageObject = VulkanImage(memory: deviceMemory, image: image!, imageCreateInfo: imageCreateInfo)
+        image = nil
+
+        if imageCreateInfo.usage & (UInt32(VK_IMAGE_USAGE_SAMPLED_BIT.rawValue) |
+                                    UInt32(VK_IMAGE_USAGE_STORAGE_BIT.rawValue) |
+                                    UInt32(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT.rawValue) |
+                                    UInt32(VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT.rawValue)) != 0 {
+
+            var imageViewCreateInfo = VkImageViewCreateInfo()
+            imageViewCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO
+            imageViewCreateInfo.image = imageObject.image
+
+            switch desc.textureType {
+            case .type1D:
+                if desc.arrayLength > 1 {
+                    imageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_1D_ARRAY
+                } else {
+                    imageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_1D
+                }
+            case .type2D:
+                if desc.arrayLength > 1 {
+                    imageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY
+                } else {
+                    imageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D
+                }
+            case .type3D:
+                imageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_3D
+            case .typeCube:
+                if desc.arrayLength > 1 {
+                    imageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_CUBE_ARRAY
+                } else {
+                    imageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_CUBE
+                }
+            default:
+                assertionFailure("Unknown texture type!")
+                return nil
+            }
+
+            imageViewCreateInfo.format = imageCreateInfo.format
+            imageViewCreateInfo.components = VkComponentMapping(
+                r: VK_COMPONENT_SWIZZLE_R,
+                g: VK_COMPONENT_SWIZZLE_G,
+                b: VK_COMPONENT_SWIZZLE_B,
+                a: VK_COMPONENT_SWIZZLE_A)
+            
+            if desc.pixelFormat.isColorFormat() {
+                imageViewCreateInfo.subresourceRange.aspectMask |= UInt32(VK_IMAGE_ASPECT_COLOR_BIT.rawValue)
+            }
+            if desc.pixelFormat.isDepthFormat() {
+                imageViewCreateInfo.subresourceRange.aspectMask |= UInt32(VK_IMAGE_ASPECT_DEPTH_BIT.rawValue)
+            }
+            if desc.pixelFormat.isStencilFormat() {
+                imageViewCreateInfo.subresourceRange.aspectMask |= UInt32(VK_IMAGE_ASPECT_STENCIL_BIT.rawValue)
+            }
+
+            imageViewCreateInfo.subresourceRange.baseMipLevel = 0
+            imageViewCreateInfo.subresourceRange.baseArrayLayer = 0
+            imageViewCreateInfo.subresourceRange.layerCount = imageCreateInfo.arrayLayers
+            imageViewCreateInfo.subresourceRange.levelCount = imageCreateInfo.mipLevels
+
+            var imageView: VkImageView? = nil
+            result = vkCreateImageView(self.device, &imageViewCreateInfo, self.allocationCallbacks, &imageView)
+            if result != VK_SUCCESS {
+               Log.err("vkCreateImageView failed: \(result)")
+               return nil
+            }
+
+            return VulkanImageView(image: imageObject, imageView: imageView!, imageViewCreateInfo: imageViewCreateInfo)
+        }
         return nil
     }
-    public func makeTexture() -> Texture? {
-        return nil
-    }
-    public func makeSamplerState() -> SamplerState? {
-        return nil
+    public func makeSamplerState(descriptor desc: SamplerDescriptor) -> SamplerState? {
+        let filter = { (f: SamplerMinMagFilter) -> VkFilter in
+            switch f {
+            case .nearest:      return VK_FILTER_NEAREST
+            case .linear:       return VK_FILTER_LINEAR
+                }
+        }
+        let mipmapMode = { (f: SamplerMipFilter) -> VkSamplerMipmapMode in
+            switch f {
+            case .notMipmapped,
+                 .nearest:      return VK_SAMPLER_MIPMAP_MODE_NEAREST
+            case .linear:       return VK_SAMPLER_MIPMAP_MODE_LINEAR
+            }
+        }
+        let addressMode = { (m: SamplerAddressMode) -> VkSamplerAddressMode in
+            switch m {
+            case .clampToEdge:  return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE
+            case .repeat:       return VK_SAMPLER_ADDRESS_MODE_REPEAT
+            case .mirrorRepeat: return VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT
+            case .clampToZero:  return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER
+            }
+        }
+        let compareOp = { (f: CompareFunction) -> VkCompareOp in
+            switch f {
+            case .never:        return VK_COMPARE_OP_NEVER
+            case .less:         return VK_COMPARE_OP_LESS
+            case .equal:        return VK_COMPARE_OP_EQUAL
+            case .lessEqual:    return VK_COMPARE_OP_LESS_OR_EQUAL
+            case .greater:      return VK_COMPARE_OP_GREATER
+            case .notEqual:     return VK_COMPARE_OP_NOT_EQUAL
+            case .greaterEqual: return VK_COMPARE_OP_GREATER_OR_EQUAL
+            case .always:       return VK_COMPARE_OP_ALWAYS
+            }
+        }
+
+        var createInfo = VkSamplerCreateInfo()
+        createInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO
+        createInfo.minFilter = filter(desc.minFilter)
+        createInfo.magFilter = filter(desc.magFilter)
+        createInfo.mipmapMode = mipmapMode(desc.mipFilter)
+        createInfo.addressModeU = addressMode(desc.addressModeU)
+        createInfo.addressModeV = addressMode(desc.addressModeV)
+        createInfo.addressModeW = addressMode(desc.addressModeW)
+        createInfo.mipLodBias = 0.0
+        // createInfo.anisotropyEnable = desc.maxAnisotropy > 1 ? VK_TRUE : VK_FALSE
+        createInfo.anisotropyEnable = VK_TRUE
+        createInfo.maxAnisotropy = Float(desc.maxAnisotropy)
+        createInfo.compareOp = compareOp(desc.compareFunction)
+        createInfo.compareEnable = createInfo.compareOp != VK_COMPARE_OP_NEVER ? VK_TRUE : VK_FALSE
+        createInfo.minLod = desc.minLod
+        createInfo.maxLod = desc.maxLod
+
+        createInfo.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK
+
+        createInfo.unnormalizedCoordinates = desc.normalizedCoordinates ? VK_FALSE : VK_TRUE
+        if createInfo.unnormalizedCoordinates != 0 {
+            createInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST
+            createInfo.magFilter = createInfo.minFilter
+            createInfo.minLod = 0
+            createInfo.maxLod = 0
+            createInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE
+            createInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE
+            createInfo.anisotropyEnable = VK_FALSE
+            createInfo.compareEnable = VK_FALSE
+        }
+
+        var sampler: VkSampler? = nil
+        let result = vkCreateSampler(self.device, &createInfo, self.allocationCallbacks, &sampler)
+        if result != VK_SUCCESS {
+            Log.err("vkCreateSampler failed: \(result)")
+            return nil
+        }
+
+        return VulkanSampler(device: self, sampler: sampler!)
     }
 
     public func makeEvent() -> Event? {

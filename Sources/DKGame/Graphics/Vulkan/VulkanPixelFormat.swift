@@ -2,7 +2,7 @@
 import Vulkan
 
 extension PixelFormat {
-    public static func from(format: VkFormat) -> PixelFormat {
+    public static func from(vkFormat format: VkFormat) -> PixelFormat {
         switch (format)
         {
         case VK_FORMAT_R8_UNORM:                    return .r8Unorm

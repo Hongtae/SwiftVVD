@@ -398,7 +398,7 @@ public class VulkanSwapChain: SwapChain {
     public var pixelFormat: PixelFormat {
         get {
             synchronizedBy(locking: self.lock) {
-                PixelFormat.from(format: self.surfaceFormat.format)
+                PixelFormat.from(vkFormat: self.surfaceFormat.format)
             }
         }
         set (value) {

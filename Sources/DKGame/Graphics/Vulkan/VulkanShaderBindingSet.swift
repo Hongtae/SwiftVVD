@@ -78,7 +78,7 @@ public class VulkanShaderBindingSet: ShaderBindingSet {
                     let bufferView = buffers[i].buffer as? VulkanBufferView
                     assert(bufferView != nil) 
                     if let bufferView = bufferView {
-                        descriptorBinding.texelBufferViews.append(bufferView.bufferView)
+                        descriptorBinding.texelBufferViews.append(bufferView.bufferView!)
                     }
                 }
             case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,

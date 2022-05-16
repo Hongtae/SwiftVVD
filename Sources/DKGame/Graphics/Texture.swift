@@ -6,16 +6,19 @@ public enum TextureType {
     case typeCube
 }
 
-public enum TextureUsage {
-    case unknown           
-    case copySource        
-    case copyDestination   
-    case sampled           
-    case storage           
-    case shaderRead        
-    case shaderWrite       
-    case renderTarget      
-    case pixelFormatView   
+public struct TextureUsage: OptionSet {
+    public let rawValue: UInt32
+    public init(rawValue: UInt32) { self.rawValue = rawValue }
+
+    public static let unknown: TextureUsage = []
+    public static let copySource        = TextureUsage(rawValue: 1)
+    public static let copyDestination   = TextureUsage(rawValue: 1<<1)
+    public static let sampled           = TextureUsage(rawValue: 1<<2)
+    public static let storage           = TextureUsage(rawValue: 1<<3)
+    public static let shaderRead        = TextureUsage(rawValue: 1<<4)
+    public static let shaderWrite       = TextureUsage(rawValue: 1<<5)
+    public static let renderTarget      = TextureUsage(rawValue: 1<<6)
+    public static let pixelFormatView   = TextureUsage(rawValue: 1<<7)
 }
 
 public protocol Texture {
@@ -41,5 +44,5 @@ public struct TextureDescriptor {
     var mipmapLevels: UInt32
     var sampleCount: UInt32
     var arrayLength: UInt32
-    var usage: [TextureUsage]
+    var usage: TextureUsage
 }

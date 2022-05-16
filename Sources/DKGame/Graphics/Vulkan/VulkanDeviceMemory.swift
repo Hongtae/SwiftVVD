@@ -12,9 +12,9 @@ public class VulkanDeviceMemory {
 
     let device: GraphicsDevice
 
-    public init(device: VulkanGraphicsDevice, mem: VkDeviceMemory, type: VkMemoryType, size: UInt) {
+    public init(device: VulkanGraphicsDevice, memory: VkDeviceMemory, type: VkMemoryType, size: UInt) {
         self.device = device
-        self.memory = mem
+        self.memory = memory
         self.type = type
         self.length = size
 
