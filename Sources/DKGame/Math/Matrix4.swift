@@ -210,6 +210,13 @@ public struct Matrix4: Matrix {
                   row4.x, row4.y, row4.z, row4.w)
     }
 
+    public init(column1: Vector4, column2: Vector4, column3: Vector4, column4: Vector4) {
+        self.init(column1.x, column2.x, column3.x, column4.x,
+                  column1.y, column2.y, column3.y, column4.y,
+                  column1.z, column2.z, column3.z, column4.z,
+                  column1.w, column2.w, column3.w, column4.w)
+    }
+
     public var determinant: Scalar {
     	return m14 * m23 * m32 * m41 - m13 * m24 * m32 * m41 -
                m14 * m22 * m33 * m41 + m12 * m24 * m33 * m41 +

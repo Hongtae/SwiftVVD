@@ -105,6 +105,10 @@ public struct Matrix2: Matrix {
         self.init(row1.x, row1.y, row2.x, row2.y)
     }
 
+    public init(column1: Vector2, column2: Vector2) {
+        self.init(column1.x, column2.x, column1.y, column2.y)
+    }
+
     public var determinant: Scalar { return m11 * m22 - m12 * m21 }
     
     public var isDiagonal: Bool { m12 == 0.0 && m21 == 0.0 }

@@ -153,6 +153,12 @@ public struct Matrix3: Matrix {
                   row3.x, row3.y, row3.z)
     }
 
+    public init(column1: Vector3, column2: Vector3, column3: Vector3) {
+        self.init(column1.x, column2.x, column3.x,
+                  column1.y, column2.y, column3.y,
+                  column1.z, column2.z, column3.z)
+    }
+
     public var determinant: Scalar {
        	return m11 * m22 * m33 + m12 * m23 * m31 +
                m13 * m21 * m32 - m11 * m23 * m32 -
