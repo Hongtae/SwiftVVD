@@ -461,12 +461,8 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
         self.encoder!.commands.append(command)
     }
  
-    public func pushConstant<D: DataProtocol>(stages: [ShaderStage], offset: UInt32, data: D) {
-         var stageFlags: UInt32 = 0
-        for stage in stages {
-            stageFlags |= stage.vkFlags()
-        }
-
+    public func pushConstant<D: DataProtocol>(stages: ShaderStageFlags, offset: UInt32, data: D) {
+        let stageFlags = stages.vkFlags()
         if stageFlags != 0 && data.count > 0 {
             var buffer: [UInt8] = .init(data)
             assert(buffer.count == data.count)

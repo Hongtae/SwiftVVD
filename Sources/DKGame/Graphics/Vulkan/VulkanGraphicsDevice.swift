@@ -892,7 +892,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
                         var res2 = resources[i]
                         if res.set == res2.set && res.binding == res2.binding {
                             assert(res.type == res2.type)
-                            res2.stages.insert(fn.stage)
+                            res2.stages.insert(ShaderStageFlags(stage:fn.stage))
                             resources[i] = res2
                             exist = true
                             break
@@ -900,7 +900,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
                     }
                     if exist == false {
                         var res = res
-                        res.stages = fn.stage
+                        res.stages = ShaderStageFlags(stage: fn.stage)
                         resources.append(res)
                     }
                 }
@@ -909,7 +909,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
                     for i in 0..<pushConstantLayouts.count {
                         var layout2 = pushConstantLayouts[i]
                         if layout.offset == layout2.offset && layout.size == layout2.size {
-                            layout2.stages.insert(fn.stage)
+                            layout2.stages.insert(ShaderStageFlags(stage: fn.stage))
                             pushConstantLayouts[i] = layout2
                             exist = true
                             break
@@ -917,7 +917,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
                     }
                     if exist == false {
                         var layout = layout
-                        layout.stages = fn.stage
+                        layout.stages = ShaderStageFlags(stage: fn.stage)
                         pushConstantLayouts.append(layout)
                     }
                 }

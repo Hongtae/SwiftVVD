@@ -157,13 +157,9 @@ public class VulkanComputeCommandEncoder: VulkanCommandEncoder, ComputeCommandEn
         }
     }
 
-    public func pushConstant<D: DataProtocol>(stages: [ShaderStage], offset: UInt32, data: D) {
-        var stageFlags: UInt32 = 0
-        for stage in stages {
-            stageFlags |= stage.vkFlags()
-        }
-
-        if stageFlags != 0 && data.count > 0 {
+    public func pushConstant<D: DataProtocol>(stages: ShaderStageFlags, offset: UInt32, data: D) {
+        if stages.contains(.compute) && data.count > 0 {
+            let stageFlags = stages.vkFlags()
             var buffer: [UInt8] = .init(data)
             assert(buffer.count == data.count)
 

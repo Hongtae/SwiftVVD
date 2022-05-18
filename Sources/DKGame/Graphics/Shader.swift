@@ -322,7 +322,7 @@ private func resourceFromSPVC(compiler: spvc_compiler,
         binding: binding,
         name: name,
         type: type,
-        stages: [stage],
+        stages: ShaderStageFlags(stage: stage),
         count: count,
         stride: stride,
         enabled: enabled,
@@ -663,7 +663,7 @@ public class Shader: CustomStringConvertible {
                         let layout = ShaderPushConstantLayout(name: name,
                                                             offset: UInt32(rangeBegin),
                                                             size: UInt32(rangeEnd - rangeBegin),
-                                                            stages: [self.stage],
+                                                            stages: ShaderStageFlags(stage: self.stage),
                                                             members: members)
 
                         self.pushConstantLayouts.append(layout)

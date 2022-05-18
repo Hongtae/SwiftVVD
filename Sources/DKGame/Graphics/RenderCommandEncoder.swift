@@ -23,7 +23,7 @@ public protocol RenderCommandEncoder: CommandEncoder {
     func setVertexBuffers(_: [Buffer], offsets: [UInt64], index: UInt32)
     func setIndexBuffer(_: Buffer, offset: UInt64, type: IndexType)
     
-    func pushConstant<D: DataProtocol>(stages: [ShaderStage], offset: UInt32, data: D)
+    func pushConstant<D: DataProtocol>(stages: ShaderStageFlags, offset: UInt32, data: D)
 
     func draw(numVertices: UInt32, numInstances: UInt32, baseVertex: UInt32, baseInstance: UInt32)
     func drawIndexed(numIndices: UInt32, numInstances: UInt32, indexOffset: UInt32, vertexOffset: Int32, baseInstance: UInt32)

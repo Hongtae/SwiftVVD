@@ -94,18 +94,39 @@ public enum ShaderDataType {
     case float64M4x4
 }
 
-public struct ShaderStage: OptionSet {
+public enum ShaderStage {
+    case unknown
+    case vertex
+    case tessellationControl
+    case tessellationEvaluation
+    case geometry
+    case fragment
+    case compute
+}
+
+public struct ShaderStageFlags: OptionSet {
     public let rawValue: UInt32
     public init(rawValue: UInt32) { self.rawValue = rawValue }
+    public init(stage: ShaderStage) {
+        switch stage {
+        case .unknown:                  self.rawValue = 0
+        case .vertex:                   self.rawValue = 1
+        case .tessellationControl:      self.rawValue = 1 << 1
+        case .tessellationEvaluation:   self.rawValue = 1 << 2
+        case .geometry:                 self.rawValue = 1 << 3
+        case .fragment:                 self.rawValue = 1 << 4
+        case .compute:                  self.rawValue = 1 << 5
+        }
+    }
 
-    public static let vertex                    = ShaderStage(rawValue: 1)
-    public static let tessellationControl       = ShaderStage(rawValue: 1 << 1)
-    public static let tessellationEvaluation    = ShaderStage(rawValue: 1 << 2)
-    public static let geometry                  = ShaderStage(rawValue: 1 << 3)
-    public static let fragment                  = ShaderStage(rawValue: 1 << 4)
-    public static let compute                   = ShaderStage(rawValue: 1 << 5)
+    public static let vertex                    = ShaderStageFlags(stage: .vertex)
+    public static let tessellationControl       = ShaderStageFlags(stage: .tessellationControl)
+    public static let tessellationEvaluation    = ShaderStageFlags(stage: .tessellationEvaluation)
+    public static let geometry                  = ShaderStageFlags(stage: .geometry)
+    public static let fragment                  = ShaderStageFlags(stage: .fragment)
+    public static let compute                   = ShaderStageFlags(stage: .compute)
 
-    public static let unknown: ShaderStage = []
+    public static let unknown: ShaderStageFlags = []
 
     public var isSingleOption: Bool {
         if self.rawValue > 0 {
@@ -160,7 +181,7 @@ public struct ShaderResource {
     var binding : UInt32
     var name : String
     var type: ShaderResourceType
-    var stages : ShaderStage
+    var stages : ShaderStageFlags
 
     var count : UInt32  // array length
     var stride : UInt32 // stride between array elements
@@ -181,7 +202,7 @@ public struct ShaderPushConstantLayout {
     var name : String
     var offset : UInt32
     var size : UInt32
-    var stages : ShaderStage
+    var stages : ShaderStageFlags
     var members : [ShaderResourceStructMember]
 }
 
