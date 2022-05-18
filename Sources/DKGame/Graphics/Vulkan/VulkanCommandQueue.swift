@@ -16,14 +16,14 @@ public class VulkanCommandQueue: CommandQueue {
 
         let copy = (queueFlags & UInt32(VK_QUEUE_TRANSFER_BIT.rawValue)) != 0
         let compute = (queueFlags & UInt32(VK_QUEUE_COMPUTE_BIT.rawValue)) != 0
-        let graphics = (queueFlags & UInt32(VK_QUEUE_GRAPHICS_BIT.rawValue)) != 0
+        let render = (queueFlags & UInt32(VK_QUEUE_GRAPHICS_BIT.rawValue)) != 0
 
         var flags: CommandQueueFlags = []
         if copy {
             flags.insert(.copy)
         }
-        if graphics {
-            flags.insert(.graphics)
+        if render {
+            flags.insert(.render)
         }
         if compute {
             flags.insert(.compute)

@@ -328,7 +328,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
 
     public func makeCommandQueue(flags: CommandQueueFlags) -> CommandQueue? {
         var queueFlags: UInt32 = 0
-        if flags.contains(.graphics) {
+        if flags.contains(.render) {
             queueFlags = queueFlags | UInt32(VK_QUEUE_GRAPHICS_BIT.rawValue)
         }
         if flags.contains(.compute) {

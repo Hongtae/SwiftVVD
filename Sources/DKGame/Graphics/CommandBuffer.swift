@@ -15,7 +15,7 @@ public protocol CommandBuffer {
     func makeCopyCommandEncoder() -> CopyCommandEncoder?
 
     func addCompletedHandler(_ handler: @escaping CommandBufferHandler)
-    func commit() -> Bool
+    @discardableResult func commit() -> Bool
 
     var commandQueue: CommandQueue { get }
     var device: GraphicsDevice { get }
