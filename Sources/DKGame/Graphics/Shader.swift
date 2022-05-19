@@ -39,124 +39,124 @@ private func dataTypeFromSPVC(type: spvc_type) -> ShaderDataType {
 	case SPVC_BASETYPE_BOOLEAN:
         switch vecsize {
         case 1:     return .bool
-        case 2:     return .boolV2
-        case 3:     return .boolV3
-        case 4:     return .boolV4
+        case 2:     return .bool2
+        case 3:     return .bool3
+        case 4:     return .bool4
         default:    break
         }
 	case SPVC_BASETYPE_INT8:
         switch vecsize {
-        case 1:     return .int8
-        case 2:     return .int8V2
-        case 3:     return .int8V3
-        case 4:     return .int8V4
+        case 1:     return .char
+        case 2:     return .char2
+        case 3:     return .char3
+        case 4:     return .char4
         default:    break
         }
 	case SPVC_BASETYPE_UINT8:
         switch vecsize {
-        case 1:     return .uint8
-        case 2:     return .uint8V2
-        case 3:     return .uint8V3
-        case 4:     return .uint8V4
+        case 1:     return .uchar
+        case 2:     return .uchar2
+        case 3:     return .uchar3
+        case 4:     return .uchar4
         default:    break
         }
 	case SPVC_BASETYPE_INT16:
         switch vecsize {
-        case 1:     return .int16
-        case 2:     return .int16V2
-        case 3:     return .int16V3
-        case 4:     return .int16V4
+        case 1:     return .short
+        case 2:     return .short2
+        case 3:     return .short3
+        case 4:     return .short4
         default:    break
         }
 	case SPVC_BASETYPE_UINT16:
         switch vecsize {
-        case 1:     return .uint16
-        case 2:     return .uint16V2
-        case 3:     return .uint16V3
-        case 4:     return .uint16V4
+        case 1:     return .ushort
+        case 2:     return .ushort2
+        case 3:     return .ushort3
+        case 4:     return .ushort4
         default:    break
         }
 	case SPVC_BASETYPE_INT32:
         switch vecsize {
-        case 1:     return .int32
-        case 2:     return .int32V2
-        case 3:     return .int32V3
-        case 4:     return .int32V4
+        case 1:     return .int
+        case 2:     return .int2
+        case 3:     return .int3
+        case 4:     return .int4
         default:    break
         }
 	case SPVC_BASETYPE_UINT32:
         switch vecsize {
-        case 1:     return .uint32
-        case 2:     return .uint32V2
-        case 3:     return .uint32V3
-        case 4:     return .uint32V4
+        case 1:     return .uint
+        case 2:     return .uint2
+        case 3:     return .uint3
+        case 4:     return .uint4
         default:    break
         }
 	case SPVC_BASETYPE_INT64:
         switch vecsize {
-        case 1:     return .int64
-        case 2:     return .int64V2
-        case 3:     return .int64V3
-        case 4:     return .int64V4
+        case 1:     return .long
+        case 2:     return .long2
+        case 3:     return .long3
+        case 4:     return .long4
         default:    break
         }
 	case SPVC_BASETYPE_UINT64:
         switch vecsize {
-        case 1:     return .uint16
-        case 2:     return .uint16V2
-        case 3:     return .uint16V3
-        case 4:     return .uint16V4
+        case 1:     return .ulong
+        case 2:     return .ulong2
+        case 3:     return .ulong3
+        case 4:     return .ulong4
         default:    break
         }
 	case SPVC_BASETYPE_FP16:
         switch (vecsize, columns) {
-        case (1, _):    return .float16
-        case (2, 1):    return .float16V2
-        case (3, 1):    return .float16V3
-        case (4, 1):    return .float16V4
-        case (2, 2):    return .float16M2x2
-        case (3, 2):    return .float16M3x2
-        case (4, 2):    return .float16M4x2
-        case (2, 3):    return .float16M2x3
-        case (3, 3):    return .float16M3x3
-        case (4, 3):    return .float16M4x3
-        case (2, 4):    return .float16M2x4
-        case (3, 4):    return .float16M3x4
-        case (4, 4):    return .float16M4x4
+        case (1, _):    return .half
+        case (2, 1):    return .half2
+        case (3, 1):    return .half3
+        case (4, 1):    return .half4
+        case (2, 2):    return .half2x2
+        case (3, 2):    return .half3x2
+        case (4, 2):    return .half4x2
+        case (2, 3):    return .half2x3
+        case (3, 3):    return .half3x3
+        case (4, 3):    return .half4x3
+        case (2, 4):    return .half2x4
+        case (3, 4):    return .half3x4
+        case (4, 4):    return .half4x4
         default:        break
         }
 	case SPVC_BASETYPE_FP32:
         switch (vecsize, columns) {
-        case (1, _):    return .float32
-        case (2, 1):    return .float32V2
-        case (3, 1):    return .float32V3
-        case (4, 1):    return .float32V4
-        case (2, 2):    return .float32M2x2
-        case (3, 2):    return .float32M3x2
-        case (4, 2):    return .float32M4x2
-        case (2, 3):    return .float32M2x3
-        case (3, 3):    return .float32M3x3
-        case (4, 3):    return .float32M4x3
-        case (2, 4):    return .float32M2x4
-        case (3, 4):    return .float32M3x4
-        case (4, 4):    return .float32M4x4
+        case (1, _):    return .float
+        case (2, 1):    return .float2
+        case (3, 1):    return .float3
+        case (4, 1):    return .float4
+        case (2, 2):    return .float2x2
+        case (3, 2):    return .float3x2
+        case (4, 2):    return .float4x2
+        case (2, 3):    return .float2x3
+        case (3, 3):    return .float3x3
+        case (4, 3):    return .float4x3
+        case (2, 4):    return .float2x4
+        case (3, 4):    return .float3x4
+        case (4, 4):    return .float4x4
         default:        break
         }
 	case SPVC_BASETYPE_FP64:
         switch (vecsize, columns) {
-        case (1, _):    return .float64
-        case (2, 1):    return .float64V2
-        case (3, 1):    return .float64V3
-        case (4, 1):    return .float64V4
-        case (2, 2):    return .float64M2x2
-        case (3, 2):    return .float64M3x2
-        case (4, 2):    return .float64M4x2
-        case (2, 3):    return .float64M2x3
-        case (3, 3):    return .float64M3x3
-        case (4, 3):    return .float64M4x3
-        case (2, 4):    return .float64M2x4
-        case (3, 4):    return .float64M3x4
-        case (4, 4):    return .float64M4x4
+        case (1, _):    return .double
+        case (2, 1):    return .double2
+        case (3, 1):    return .double3
+        case (4, 1):    return .double4
+        case (2, 2):    return .double2x2
+        case (3, 2):    return .double3x2
+        case (4, 2):    return .double4x2
+        case (2, 3):    return .double2x3
+        case (3, 3):    return .double3x3
+        case (4, 3):    return .double4x3
+        case (2, 4):    return .double2x4
+        case (3, 4):    return .double3x4
+        case (4, 4):    return .double4x4
         default:        break
         }
 	case SPVC_BASETYPE_STRUCT:          return .struct

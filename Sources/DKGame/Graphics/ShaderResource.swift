@@ -7,91 +7,91 @@ public enum ShaderDataType {
     case sampler
 
     case bool
-    case boolV2
-    case boolV3
-    case boolV4
+    case bool2
+    case bool3
+    case bool4
 
-    case int8
-    case int8V2
-    case int8V3
-    case int8V4
+    case char
+    case char2
+    case char3
+    case char4
 
-    case uint8
-    case uint8V2
-    case uint8V3
-    case uint8V4
+    case uchar
+    case uchar2
+    case uchar3
+    case uchar4
 
-    case int16
-    case int16V2
-    case int16V3
-    case int16V4
+    case short
+    case short2
+    case short3
+    case short4
 
-    case uint16
-    case uint16V2
-    case uint16V3
-    case uint16V4
+    case ushort
+    case ushort2
+    case ushort3
+    case ushort4
 
-    case int32
-    case int32V2
-    case int32V3
-    case int32V4
+    case int
+    case int2
+    case int3
+    case int4
 
-    case uint32
-    case uint32V2
-    case uint32V3
-    case uint32V4
+    case uint
+    case uint2
+    case uint3
+    case uint4
     
-    case int64
-    case int64V2
-    case int64V3
-    case int64V4
+    case long
+    case long2
+    case long3
+    case long4
 
-    case uint64
-    case uint64V2
-    case uint64V3
-    case uint64V4
+    case ulong
+    case ulong2
+    case ulong3
+    case ulong4
 
-    case float16
-    case float16V2
-    case float16V3
-    case float16V4
-    case float16M2x2
-    case float16M2x3
-    case float16M2x4
-    case float16M3x2
-    case float16M3x3
-    case float16M3x4
-    case float16M4x2
-    case float16M4x3
-    case float16M4x4
+    case half
+    case half2
+    case half3
+    case half4
+    case half2x2
+    case half2x3
+    case half2x4
+    case half3x2
+    case half3x3
+    case half3x4
+    case half4x2
+    case half4x3
+    case half4x4
 
-    case float32
-    case float32V2
-    case float32V3
-    case float32V4
-    case float32M2x2
-    case float32M2x3
-    case float32M2x4
-    case float32M3x2
-    case float32M3x3
-    case float32M3x4
-    case float32M4x2
-    case float32M4x3
-    case float32M4x4
+    case float
+    case float2
+    case float3
+    case float4
+    case float2x2
+    case float2x3
+    case float2x4
+    case float3x2
+    case float3x3
+    case float3x4
+    case float4x2
+    case float4x3
+    case float4x4
 
-    case float64
-    case float64V2
-    case float64V3
-    case float64V4
-    case float64M2x2
-    case float64M2x3
-    case float64M2x4
-    case float64M3x2
-    case float64M3x3
-    case float64M3x4
-    case float64M4x2
-    case float64M4x3
-    case float64M4x4
+    case double
+    case double2
+    case double3
+    case double4
+    case double2x2
+    case double2x3
+    case double2x4
+    case double3x2
+    case double3x3
+    case double3x4
+    case double4x2
+    case double4x3
+    case double4x4
 }
 
 public enum ShaderStage {
