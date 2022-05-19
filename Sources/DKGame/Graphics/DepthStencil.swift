@@ -32,7 +32,7 @@ public struct StencilDescriptor {
 
 public struct DepthStencilDescriptor {
     var depthCompareFunction: CompareFunction = .always
-    var frontFaceStencil: StencilDescriptor
-    var backFaceStencil: StencilDescriptor
+    var frontFaceStencil: StencilDescriptor = .init()
+    var backFaceStencil: StencilDescriptor = .init()
     var depthWriteEnabled: Bool = false
 }

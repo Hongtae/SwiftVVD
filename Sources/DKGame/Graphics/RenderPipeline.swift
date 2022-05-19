@@ -41,12 +41,12 @@ public enum DepthClipMode {
 public struct RenderPipelineDescriptor {
     var vertexFunction : ShaderFunction?
     var fragmentFunction : ShaderFunction?
-    var vertexDescriptor : VertexDescriptor
-    var colorAttachments : [RenderPipelineColorAttachmentDescriptor]
-    var depthStencilAttachmentPixelFormat : PixelFormat
-    var depthStencilDescriptor : DepthStencilDescriptor
+    var vertexDescriptor : VertexDescriptor = .init()
+    var colorAttachments : [RenderPipelineColorAttachmentDescriptor] = []
+    var depthStencilAttachmentPixelFormat : PixelFormat = .invalid
+    var depthStencilDescriptor : DepthStencilDescriptor = .init()
 
-    var primitiveTopology : PrimitiveType
+    var primitiveTopology : PrimitiveType = .point
 
     var triangleFillMode : TriangleFillMode = .fill
     var depthClipMode : DepthClipMode = .clip

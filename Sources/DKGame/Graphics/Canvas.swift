@@ -1,3 +1,4 @@
+import Foundation
 
 private let vsGLSL = """
     /* vertex shader */
@@ -89,9 +90,9 @@ private let fsEllipseGLSL = """
 
     layout (push_constant) uniform Ellipse
     {
-        vec2 outerRadiusSqInv; // vec2(1/A^2, 1/B^2) where X^2 / A^2 + Y^2 / B^2 = 1
+        vec2 outerRadiusSqInv; /* vec2(1/A^2, 1/B^2) where X^2 / A^2 + Y^2 / B^2 = 1 */
         vec2 innerRadiusSqInv;
-        vec2 center;	// center of ellipse
+        vec2 center;	/* center of ellipse */
     } ellipse;
 
     layout (location=0) in vec2 position;
@@ -128,9 +129,9 @@ private let fsEllipseHoleGLSL = """
 
     layout (push_constant) uniform Ellipse
     {
-        vec2 outerRadiusSqInv; // vec2(1/A^2, 1/B^2) where X^2 / A^2 + Y^2 / B^2 = 1
+        vec2 outerRadiusSqInv; /* vec2(1/A^2, 1/B^2) where X^2 / A^2 + Y^2 / B^2 = 1 */
         vec2 innerRadiusSqInv;
-        vec2 center;	// center of ellipse
+        vec2 center;	/* center of ellipse */
     } ellipse;
 
     layout (location=0) in vec2 position;
@@ -176,9 +177,9 @@ private let fsTextureEllipseGLSL = """
 
     layout (push_constant) uniform Ellipse
     {
-        vec2 outerRadiusSqInv; // vec2(1/A^2, 1/B^2) where X^2 / A^2 + Y^2 / B^2 = 1
+        vec2 outerRadiusSqInv; /* vec2(1/A^2, 1/B^2) where X^2 / A^2 + Y^2 / B^2 = 1 */
         vec2 innerRadiusSqInv;
-        vec2 center;	// center of ellipse
+        vec2 center;	/* center of ellipse */
     } ellipse;
 
     layout (location=0) in vec2 position;
@@ -238,8 +239,8 @@ private let fsAlphaTextureSpvCB64 = """
     TWYNZckWtKxwY0icr0gZ5LKhJsWwNspes4qNS9cXn/IMfuvMZO4A
     """
 
-private enum CanvasShader {
-    case vertexColor
+private enum CanvasShaderIndex: Int {
+    case vertexColor = 0
     case vertexColorTexture
     case vertexColorEllipse
     case vertexColorEllipseHole
@@ -247,7 +248,179 @@ private enum CanvasShader {
     case vertexColorAlphaTexture
 }
 
+private struct CanvasPipelineDescriptor: Hashable {
+    var shader: CanvasShaderIndex
+
+    // render target format
+    var colorFormat: PixelFormat = .invalid
+    var depthFormat: PixelFormat = .invalid
+
+    // render target blend factor
+    var sourceRGBBlendFactor: BlendFactor = .one
+    var sourceAlphaBlendFactor: BlendFactor = .one
+    var destinationRGBBlendFactor: BlendFactor = .zero
+    var destinationAlphaBlendFactor: BlendFactor = .zero
+    var rgbBlendOperation: BlendOperation = .add
+    var alphaBlendOperation: BlendOperation = .add
+    var writeMask: ColorWriteMask = .all
+
+    func blendState() -> BlendState {
+        var state = BlendState()
+        state.sourceRGBBlendFactor = sourceRGBBlendFactor
+        state.sourceAlphaBlendFactor = sourceAlphaBlendFactor
+        state.destinationRGBBlendFactor = destinationRGBBlendFactor
+        state.destinationAlphaBlendFactor = destinationAlphaBlendFactor
+        state.rgbBlendOperation = rgbBlendOperation
+        state.alphaBlendOperation = alphaBlendOperation
+        state.writeMask = writeMask
+        if sourceRGBBlendFactor == .one &&
+           sourceAlphaBlendFactor == .one &&
+           destinationRGBBlendFactor == .zero &&
+           destinationAlphaBlendFactor == .zero &&
+           rgbBlendOperation == .add &&
+           alphaBlendOperation == .add &&
+           writeMask == .all {
+            state.enabled = false
+        } else {
+            state.enabled = true
+        }
+        return state
+    }
+
+    mutating func setBlendState(_ state: BlendState) {
+        if state.enabled {
+            sourceRGBBlendFactor = state.sourceRGBBlendFactor
+            sourceAlphaBlendFactor = state.sourceAlphaBlendFactor
+            destinationRGBBlendFactor = state.destinationRGBBlendFactor
+            destinationAlphaBlendFactor = state.destinationAlphaBlendFactor
+            rgbBlendOperation = state.rgbBlendOperation
+            alphaBlendOperation = state.alphaBlendOperation
+            writeMask = state.writeMask
+        } else {
+            sourceRGBBlendFactor = .one
+            sourceAlphaBlendFactor = .one
+            destinationRGBBlendFactor = .zero
+            destinationAlphaBlendFactor = .zero
+            rgbBlendOperation = .add
+            alphaBlendOperation = .add
+            writeMask = .all
+        } 
+    }
+}
+
+private struct EllipseUniformPushConstant {
+    // vec2(1/A^2,1/B^2) value from formula X^2 / A^2 + Y^2 / B^2 = 1
+    var outerRadiusSqInv: Float2 // outer inversed squared radius
+    var innerRadiusSqInv: Float2 // inner inversed squared radius
+    var center: Float2           // center of ellipse
+}
+
+private struct CanvasColoredVertexData {
+    var position: Float2
+    var color: Float4
+}
+
+private struct CanvasTexturedVertexData {
+    var position: Float2
+    var texcoord: Float2
+    var color: Float4
+}
+
+private class CanvasPipelineStates {
+    var vertexFunction: ShaderFunction?
+    var fragmentFunctions: [ShaderFunction] = []
+
+    var pipelineStates: [CanvasPipelineDescriptor: RenderPipelineState] = [:]
+    let device: GraphicsDevice
+
+    var defaultBindingSet: ShaderBindingSet?
+    var defaultSampler: SamplerState?
+
+    static let lock = NSLock()
+    static weak var sharedInstance: CanvasPipelineStates? = nil
+
+    init(device: GraphicsDevice) {
+        self.device = device
+    }
+
+    func state(for desc: CanvasPipelineDescriptor) -> RenderPipelineState? {
+        Self.lock.lock()
+        defer { Self.lock.unlock() }
+
+        if let state = pipelineStates[desc] { return state }
+
+        var pipelineDescriptor = RenderPipelineDescriptor()
+        pipelineDescriptor.vertexFunction = vertexFunction
+        pipelineDescriptor.fragmentFunction = fragmentFunctions[desc.shader.rawValue]
+        pipelineDescriptor.colorAttachments = [
+            .init(index: 0, pixelFormat: desc.colorFormat, blendState: desc.blendState())
+        ]
+        pipelineDescriptor.depthStencilAttachmentPixelFormat = desc.depthFormat
+        pipelineDescriptor.depthStencilDescriptor.depthCompareFunction = .always
+        pipelineDescriptor.depthStencilDescriptor.depthWriteEnabled = false
+        pipelineDescriptor.vertexDescriptor.attributes = [
+            .init(format: .float2, offset: 0, bufferIndex: 0, location: 0 ),
+            .init(format: .float2, offset: MemoryLayout<CanvasTexturedVertexData>.offset(of: \.texcoord)!, bufferIndex: 0, location: 1 ),
+            .init(format: .float4, offset: MemoryLayout<CanvasTexturedVertexData>.offset(of: \.color)!, bufferIndex: 0, location: 2 ),
+        ]
+        pipelineDescriptor.vertexDescriptor.layouts = [
+            .init(step: .vertex, stride: MemoryLayout<CanvasTexturedVertexData>.stride, bufferIndex: 0)
+        ]
+        pipelineDescriptor.primitiveTopology = .triangle
+        pipelineDescriptor.frontFace = .ccw
+        pipelineDescriptor.triangleFillMode = .fill
+        pipelineDescriptor.depthClipMode = .clip
+        pipelineDescriptor.cullMode = .none
+        pipelineDescriptor.rasterizationEnabled = true
+
+        if let state = device.makeRenderPipelineState(descriptor: pipelineDescriptor) {
+            pipelineStates[desc] = state
+            return state
+        }
+        return nil
+    }
+
+    static func sharedInstance(device: GraphicsDevice) -> CanvasPipelineStates? {
+        if let instance = Self.sharedInstance {
+            return instance
+        }
+        var instance: CanvasPipelineStates? = nil
+        Self.lock.lock()
+        defer { Self.lock.unlock() }
+
+        instance = Self.sharedInstance
+        if instance == nil {
+            let decodeShader = { (encodedText: String) -> ShaderFunction? in
+                if let data = Data.init(base64Encoded: encodedText, options: .ignoreUnknownCharacters) {
+                    var inputStream = InputStream(data: data)
+                    var outputStream = OutputStream.toMemory()
+                    // Decompress!
+                    if Compressor.decompress(in: inputStream, out: outputStream) {
+                        let decodedData = outputStream.property(forKey: .dataWrittenToMemoryStreamKey) as! Data
+                        if let shader = Shader(data: decodedData), shader.validate() {
+
+                        }
+                    }
+                }
+                return nil
+            }
+        }
+        return instance
+    }
+}
+
 public class Canvas {
+    public struct ColoredVertex {
+        var position: CGPoint
+        var color: Color
+    }
+
+    public struct TexturedVertex {
+        var position: CGPoint
+        var texcoord: CGPoint
+        var color: Color
+    }
+
     public init() {
     }
 }

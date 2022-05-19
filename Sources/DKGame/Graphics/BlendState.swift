@@ -24,7 +24,7 @@ public enum BlendOperation {
     case max
 }
 
-public struct ColorWriteMask: OptionSet {
+public struct ColorWriteMask: OptionSet, Hashable {
     public let rawValue: UInt
     public init(rawValue: UInt) { self.rawValue = rawValue }
 

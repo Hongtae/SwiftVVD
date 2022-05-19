@@ -357,7 +357,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         return nil
     }
     public func makeShaderModule(from shader: Shader) -> ShaderModule? {
-        if shader.spirvData.isEmpty { return nil }
+        if shader.validate() == false { return nil }
 
         let maxPushConstantsSize = self.properties.limits.maxPushConstantsSize
 
@@ -382,12 +382,11 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             }
 
         var shaderModule: VkShaderModule? = nil
-        let stride = MemoryLayout.stride(ofValue: shader.spirvData[0])
-        let err: VkResult = shader.spirvData.withUnsafeBufferPointer {
+        let err: VkResult = shader.spirvData!.withUnsafeBytes {
             var shaderModuleCreateInfo = VkShaderModuleCreateInfo()
             shaderModuleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO
-            shaderModuleCreateInfo.codeSize = $0.count * stride
-            shaderModuleCreateInfo.pCode = $0.baseAddress
+            shaderModuleCreateInfo.codeSize = $0.count
+            shaderModuleCreateInfo.pCode = $0.baseAddress?.assumingMemoryBound(to: UInt32.self)
             return vkCreateShaderModule(self.device, &shaderModuleCreateInfo, self.allocationCallbacks, &shaderModule)
         }
         if err != VK_SUCCESS {
@@ -534,7 +533,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         for layout in desc.vertexDescriptor.layouts {   // buffer layout
             var binding = VkVertexInputBindingDescription()
             binding.binding = layout.bufferIndex
-            binding.stride = layout.stride
+            binding.stride = UInt32(layout.stride)
             switch layout.step {
             case .vertex:
                 binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX
@@ -551,7 +550,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             attr.location = attrDesc.location
             attr.binding = attrDesc.bufferIndex
             attr.format = attrDesc.format.vkFormat()
-            attr.offset = attrDesc.offset
+            attr.offset = UInt32(attrDesc.offset)
             vertexAttributeDescriptions.append(attr)
         }
 

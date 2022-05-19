@@ -356,7 +356,7 @@ private func attributeFromSPVC(compiler: spvc_compiler,
 
 public class Shader: CustomStringConvertible {
     public private(set) var stage: ShaderStage
-    public private(set) var spirvData: [UInt32]
+    public private(set) var spirvData: Data?
 
     public private(set) var functionNames: [String]
     public private(set) var inputAttributes: [ShaderAttribute]
@@ -371,7 +371,6 @@ public class Shader: CustomStringConvertible {
 
     public init(name: String? = nil) {
         self.stage = .unknown
-        self.spirvData = []
 
         self.functionNames = []
         self.inputAttributes = []
@@ -385,33 +384,14 @@ public class Shader: CustomStringConvertible {
         self.name = name ?? ""
     }
 
-    public convenience init?(data: UnsafeBufferPointer<UInt32>, name: String? = nil) {
+    public convenience init?(data: Data, name: String? = nil) {
         self.init(name: name)
         if self.compile(data: data) == false {
             return nil
         }
     }
 
-    public convenience init?<D>(data: D, name: String? = nil) where D: DataProtocol {
-        self.init(name: name)
-        if self.compile(data: data) == false {
-            return nil
-        }
-    }
-
-    public func compile<D>(data: D) -> Bool where D: DataProtocol {
-        if data.count > 4 {
-            let numWords = data.count / 4
-            let array: [UInt32] = .init(unsafeUninitializedCapacity: numWords) {
-                data.copyBytes(to: $0, count: data.count)
-                $1 = numWords
-            }
-            return array.withUnsafeBufferPointer { compile(data: $0) }
-        }
-        return false
-    }
-
-    public func compile(data: UnsafeBufferPointer<UInt32>) -> Bool {
+    public func compile(data: Data) -> Bool {
         guard data.count > 0 else { return false }
 
         class SPVCErrorCallback {
@@ -444,7 +424,11 @@ public class Shader: CustomStringConvertible {
 
         do {
             var ir: spvc_parsed_ir? = nil
-            result = spvc_context_parse_spirv(context, data.baseAddress, data.count, &ir)
+            result = data.withUnsafeBytes {
+                // result = spvc_context_parse_spirv(context, data.baseAddress, data.count, &ir)
+                let spvData = $0.bindMemory(to: UInt32.self)
+                return spvc_context_parse_spirv(context, spvData.baseAddress, spvData.count, &ir)
+            }
             if result != SPVC_SUCCESS { return false }
 
             var compilerPtr: spvc_compiler? = nil
@@ -719,18 +703,18 @@ public class Shader: CustomStringConvertible {
         self.outputAttributes.sort { $0.location < $1.location }
 
         // copy spir-v data
-        self.spirvData = Array(data)
+        self.spirvData = data
 
         assert(result == SPVC_SUCCESS)
         return result == SPVC_SUCCESS
     }
 
     public func validate() -> Bool {
-        return false
+        return stage != .unknown && spirvData != nil
     }
 
     public var description: String {
-        var str = "Shader(name: \"\(self.name)\"), stage: \(self.stage), \(self.spirvData.count * 4) bytes."
+        var str = "Shader(name: \"\(self.name)\"), stage: \(self.stage), \(self.spirvData?.count ?? 0) bytes."
         str += "\nShader<\(self.stage).SPIR-V>.inputAttributes: \(self.inputAttributes.count)"
         for i in 0..<self.inputAttributes.count {
             let attr = self.inputAttributes[i]
