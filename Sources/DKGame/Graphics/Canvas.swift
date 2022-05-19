@@ -22,7 +22,7 @@ private let vsGLSL = """
     }
     """
 
-private let vsSpvCB64 = """
+private let vsSpvCEB64 = """
     XQAAAASwBAAAAAAAAAABgJdesntsONM6MGcxLKsQZjMqZyK9s+I5F9rVJqCzj9BrRuMFcP\
     pPjJTufO2GnekV4S/IzcItw0iVP+X5oQW6csvuo5GS2Ihrgt9U/0k7XYsDg2hWLwWyNRd2\
     i5M7LA80mBfTGUL9qSH5IFJp2HmzlKr7mK0KjEZMHymQ2d17sbqWysevCH7QwIrKiTJ6X6\
@@ -49,7 +49,7 @@ private let fsGLSL = """
     }
     """
 
-private let fsSPVCB64 = """
+private let fsSpvCEB64 = """
     XQAAAAQMAgAAAAAAAAABgJdesntsONM6MGcrJRJFH8eaWFhPhF/JgkVaMKDLBIehEkszc0\
     5hwuLCi2c2uZq7XW/7AY0KbL2Rwo/dGk5XbL0h8jqJ+yz0XcClGDo6FfdY3mTBUeJufqjr\
     3Lkng6/V1JJBTLD+nnardxsTuWH+d3kqBsEOvJvHvaVvd+3ubsYeulURrEldB0aem8ZuH4\
@@ -75,7 +75,7 @@ private let fsTextureGLSL = """
     }
     """
 
-private let fsTextureSpvCB64 = """
+private let fsTextureSpvCEB64 = """
     XQAAAATUAgAAAAAAAAABgJdesntsONM6MGctmKIB2HaeuzmgkxfX256KE1HOZIhrusCJ00\
     Nn8k7Pi3d42hliNd0QudCMu4Bu1dAmK7j4zRV2qYZl5l8PfDaM/mz2/HgrqvHwcD7o5Eli\
     3bGZ9xrelsWEyh6qGbUpnDohd44jZu9o/zr5ARxpz2vf4dN7QWpcWAq55iqfP/J8AlWOfV\
@@ -111,7 +111,7 @@ private let fsEllipseGLSL = """
     }
     """
 
-private let fsEllipseSpvCB64 = """
+private let fsEllipseSpvCEB64 = """
     XQAAAAT8BAAAAAAAAAABgJdesntsONM6MGc3MEApKl6gOKaOiphx2TUpKi7V15R/VQuLn+\
     KjvLo9ofgVgb40F/wOpzAAj5D4LefT647kouue3zFWqIW7pUYAIv+ki1qJ39xQTnZoUFBo\
     Ki8dyDOHF9/BQJD/8T4+qaLtGBo3q058zqkfOg1rWcMASaIzlPUtv384TEmI3x+sh2rvq8\
@@ -157,7 +157,7 @@ private let fsEllipseHoleGLSL = """
     }
     """
 
-private let fsEllipseHoleSpvCB64 = """
+private let fsEllipseHoleSpvCEB64 = """
     XQAAAAQwBQAAAAAAAAABgJdesntsONM6MGc5Nh9bzUJKYSZtr/HmTOO3q0we73pfWtE2WY\
     tgJOm/qvdgX3ek2zUGzNqWjozNjWHktaqHPDu6k96ZB/XsYBiGM+lW/BlRFL+BxFhu9G0i\
     lggok3ioK53HbVFOjbADtg/s4cHxMheKPcm8fsQPO+niU1q8wMO7xazU0dM5CPDE6qZ+1f\
@@ -198,7 +198,7 @@ private let fsTextureEllipseGLSL = """
     }
     """
 
-private let fsTextureEllipseSpvCB64 = """
+private let fsTextureEllipseSpvCEB64 = """
     XQAAAATEBQAAAAAAAAABgJdesntsONM6MGc5AxVbzUJKYSZtr/HmTOO3q0we73pfWtE2WY\
     tgJOm/qvdgX3ek2zUGzNqWjozNjWHktMZeH4El3hNjzurD8LARAo6TjbRD5m2dcF4abd7U\
     F1Axz9RmJNpZ2uVwtLoOtdWJlTc3P/+HTq/ySsXSCLGpFxWJ26clENesBi05UxNoVgcWJZ\
@@ -229,7 +229,7 @@ private let fsAlphaTextureGLSL = """
     }
     """
 
-private let fsAlphaTextureSpvCB64 = """
+private let fsAlphaTextureSpvCEB64 = """
     XQAAAASUAwAAAAAAAAABgJdesntsONM6MGcxcoMSBeaqbZCSM/1LXfg6AGNgofxumxOEb8\
     b615/PtnqMfm/XWlm6+YN+BmCRldMPqKzeHyGTCvtXjSGTE/R59f4ITWJxQxQ2jpntrZGM\
     +h2a2cA1ClEKyd6JekmlZv1J2/H56RGAYWG91/hL5cHNzd1V85upoxe2/2bUWjbCtzvULQ\
@@ -239,8 +239,8 @@ private let fsAlphaTextureSpvCB64 = """
     TWYNZckWtKxwY0icr0gZ5LKhJsWwNspes4qNS9cXn/IMfuvMZO4A
     """
 
-private enum CanvasShaderIndex: Int {
-    case vertexColor = 0
+private enum CanvasShaderIndex: Int, CaseIterable {
+    case vertexColor
     case vertexColorTexture
     case vertexColorEllipse
     case vertexColorEllipseHole
@@ -308,6 +308,23 @@ private struct CanvasPipelineDescriptor: Hashable {
     }
 }
 
+private func decodeShader(device: GraphicsDevice, encodedText: String) -> ShaderFunction? {
+    if let data = Data(base64Encoded: encodedText, options: .ignoreUnknownCharacters) {
+        let inputStream = InputStream(data: data)
+        let outputStream = OutputStream.toMemory()
+
+        if decompress(input: inputStream, output: outputStream) == .success {
+            let decodedData = outputStream.property(forKey: .dataWrittenToMemoryStreamKey) as! Data
+            if let shader = Shader(data: decodedData), shader.validate() {
+                if let module = device.makeShaderModule(from: shader) {
+                    return module.makeFunction(name: module.functionNames.first ?? "")
+                }
+            }
+        }
+    }
+    return nil
+}
+
 private struct EllipseUniformPushConstant {
     // vec2(1/A^2,1/B^2) value from formula X^2 / A^2 + Y^2 / B^2 = 1
     var outerRadiusSqInv: Float2 // outer inversed squared radius
@@ -327,21 +344,14 @@ private struct CanvasTexturedVertexData {
 }
 
 private class CanvasPipelineStates {
-    var vertexFunction: ShaderFunction?
-    var fragmentFunctions: [ShaderFunction] = []
+    let vertexFunction: ShaderFunction
+    let fragmentFunctions: [ShaderFunction]
 
     var pipelineStates: [CanvasPipelineDescriptor: RenderPipelineState] = [:]
     let device: GraphicsDevice
 
-    var defaultBindingSet: ShaderBindingSet?
-    var defaultSampler: SamplerState?
-
-    static let lock = NSLock()
-    static weak var sharedInstance: CanvasPipelineStates? = nil
-
-    init(device: GraphicsDevice) {
-        self.device = device
-    }
+    let defaultBindingSet: ShaderBindingSet
+    let defaultSampler: SamplerState
 
     func state(for desc: CanvasPipelineDescriptor) -> RenderPipelineState? {
         Self.lock.lock()
@@ -380,6 +390,21 @@ private class CanvasPipelineStates {
         return nil
     }
 
+    private init(device: GraphicsDevice,
+                 vertexFunction: ShaderFunction,
+                 fragmentFunctions: [ShaderFunction],
+                 defaultBindingSet: ShaderBindingSet,
+                 defaultSampler: SamplerState) {
+        self.device = device
+        self.vertexFunction = vertexFunction
+        self.fragmentFunctions = fragmentFunctions
+        self.defaultBindingSet = defaultBindingSet
+        self.defaultSampler = defaultSampler
+    }
+
+    private static let lock = NSLock()
+    private static weak var sharedInstance: CanvasPipelineStates? = nil
+
     static func sharedInstance(device: GraphicsDevice) -> CanvasPipelineStates? {
         if let instance = Self.sharedInstance {
             return instance
@@ -390,20 +415,61 @@ private class CanvasPipelineStates {
 
         instance = Self.sharedInstance
         if instance == nil {
-            let decodeShader = { (encodedText: String) -> ShaderFunction? in
-                if let data = Data.init(base64Encoded: encodedText, options: .ignoreUnknownCharacters) {
-                    var inputStream = InputStream(data: data)
-                    var outputStream = OutputStream.toMemory()
-                    // Decompress!
-                    if Compressor.decompress(in: inputStream, out: outputStream) {
-                        let decodedData = outputStream.property(forKey: .dataWrittenToMemoryStreamKey) as! Data
-                        if let shader = Shader(data: decodedData), shader.validate() {
+            initPipeline: repeat {
+                let vertexFunction = decodeShader(device: device, encodedText: vsSpvCEB64)
+                if vertexFunction == nil { break }
 
-                        }
+                let allShaders = CanvasShaderIndex.allCases
+                var fsFunctions: [ShaderFunction?] = .init(repeating: nil, count: allShaders.count)
+                for s in allShaders {
+                    var function: ShaderFunction? = nil
+                    switch s {
+                    case .vertexColor:
+                        function = decodeShader(device: device, encodedText: fsSpvCEB64)
+                    case .vertexColorTexture:
+                        function = decodeShader(device: device, encodedText: fsTextureSpvCEB64)
+                    case .vertexColorEllipse:
+                        function = decodeShader(device: device, encodedText: fsEllipseSpvCEB64)
+                    case .vertexColorEllipseHole:
+                        function = decodeShader(device: device, encodedText: fsEllipseHoleSpvCEB64)
+                    case .vertexColorTexturedEllipse:
+                        function = decodeShader(device: device, encodedText: fsTextureEllipseSpvCEB64)
+                    case .vertexColorAlphaTexture:  
+                        function = decodeShader(device: device, encodedText: fsAlphaTextureSpvCEB64)
+                    }
+                    if let function = function {
+                        fsFunctions[s.rawValue] = function
+                    } else {
+                        break initPipeline
                     }
                 }
-                return nil
-            }
+
+                let fragmentFunctions = fsFunctions.compactMap { $0 }
+                if fragmentFunctions.count != allShaders.count { break }
+
+                let bindingLayout = ShaderBindingSetLayout(
+                    bindings: [
+                        .init(binding: 0, type: .textureSampler, arrayLength: 1)
+                    ])
+            
+                let defaultBindingSet = device.makeShaderBindingSet(layout: bindingLayout)
+                if defaultBindingSet == nil { break }
+
+                let samplerDesc = SamplerDescriptor()
+                let defaultSampler = device.makeSamplerState(descriptor: samplerDesc)
+                if defaultSampler == nil { break }
+
+                instance = CanvasPipelineStates(
+                    device: device,
+                    vertexFunction: vertexFunction!,
+                    fragmentFunctions: fragmentFunctions,
+                    defaultBindingSet: defaultBindingSet!,
+                    defaultSampler: defaultSampler!)
+
+                // make weak-ref
+                Self.sharedInstance = instance
+
+            } while false
         }
         return instance
     }
@@ -421,6 +487,148 @@ public class Canvas {
         var color: Color
     }
 
-    public init() {
+    private var commandBuffer: CommandBuffer?
+    private var renderTarget: Texture?
+
+    private var _viewport: CGRect	  
+    private var _contentBounds: CGRect	  
+    private var _contentTransform: Matrix3 
+    private var _screenTransform: Matrix3 // for 2d scene
+    private var _deviceOrientation: Matrix3 
+
+    private var pipelineStates: CanvasPipelineStates?
+
+    public init(commandBuffer: CommandBuffer, renderTarget: Texture) {
+        self.commandBuffer = commandBuffer
+        self.renderTarget = renderTarget
+        self._viewport = CGRect(x: 0, y: 0, width: 1, height: 1)
+        self._contentBounds = CGRect(x: 0, y: 0, width: 1, height: 1)
+        self._contentTransform = .identity
+        self._screenTransform = .identity
+        self._deviceOrientation = .identity
+        self.pipelineStates = .sharedInstance(device: commandBuffer.device)
+    }
+
+    @discardableResult
+    public func commit() -> Bool {
+        let result = commandBuffer?.commit()
+        commandBuffer = nil
+        return result ?? false
+    }
+
+    @discardableResult
+    public static func cachePipelineContext(_ deviceContext: GraphicsDeviceContext) -> Bool {
+        if let state = CanvasPipelineStates.sharedInstance(device: deviceContext.device) {
+            deviceContext.cachedDeviceResources["Canvas.CanvasPipelineStates"] = state
+            return true
+        }
+        return false
+    }
+
+    private func encodeDrawCommand(shaderIndex: CanvasShaderIndex,
+                                   vertices: [CanvasTexturedVertexData],
+                                   texture: Texture?,
+                                   blendState: BlendState,
+                                   pushConstantData: UnsafeRawBufferPointer?) {
+
+        guard let commandBuffer = commandBuffer else { return }
+        guard let pipelineStates = pipelineStates else { return }
+        guard let renderTarget = renderTarget else { return }
+
+        if vertices.isEmpty { return }
+
+        var textureRequired = false;
+        var pushConstantDataRequired = false;
+
+        switch shaderIndex {
+        case .vertexColor:
+            textureRequired = false
+            pushConstantDataRequired = false
+        case .vertexColorTexture:
+            textureRequired = true
+            pushConstantDataRequired = false
+        case .vertexColorEllipse:
+            textureRequired = false
+            pushConstantDataRequired = true
+        case .vertexColorEllipseHole:
+            textureRequired = false
+            pushConstantDataRequired = true
+        case .vertexColorTexturedEllipse:
+            textureRequired = true
+            pushConstantDataRequired = true
+        case .vertexColorAlphaTexture:
+            textureRequired = true
+            pushConstantDataRequired = false
+        }
+
+        if textureRequired && texture == nil {
+            Log.err("Canvas.encodeDrawCommand: Invalid Texture Object (Texture cannot be nil)")
+            return
+        }
+        if pushConstantDataRequired {
+            if pushConstantData == nil ||
+               pushConstantData!.count != MemoryLayout<EllipseUniformPushConstant>.size {
+                Log.err("Canvas.encodeDrawCommand: Invalid Ellipse (Push-Constant) Data")
+                return
+            }
+        }
+
+        var desc = CanvasPipelineDescriptor(shader: shaderIndex)
+        desc.colorFormat = renderTarget.pixelFormat
+        desc.depthFormat = .invalid
+        desc.setBlendState(blendState)
+
+        guard let pso = pipelineStates.state(for: desc) else {
+            Log.err("Canvas.encodeDrawCommand: failed to create pipeline state object.")
+            return        
+        }
+        
+        let device = commandBuffer.device
+
+        let bufferLength = MemoryLayout<CanvasTexturedVertexData>.stride * vertices.count
+        guard let vertexBuffer = device.makeBuffer(length: bufferLength,
+                                                storageMode: .shared,
+                                                cacheMode: .writeOnly) else {
+            Log.err("Canvas.encodeDrawCommand: Cannot create GPU-Buffer object with length:\(bufferLength)")
+            return
+        }
+        let numVertices = vertices.count
+        if let buffer = vertexBuffer.contents() {
+            vertices.withUnsafeBytes {
+                buffer.copyMemory(from: $0.baseAddress!, byteCount: MemoryLayout<CanvasTexturedVertexData>.stride * numVertices)
+            }
+        } else {
+            Log.err("Canvas.encodeDrawCommand: Vertex-Buffer is not writable.(Invalid-mapping)")
+            return
+        }
+
+        let colorAttachmentDesc = RenderPassColorAttachmentDescriptor()
+        colorAttachmentDesc.renderTarget = renderTarget
+        colorAttachmentDesc.loadAction = .load
+        colorAttachmentDesc.storeAction = .store
+        colorAttachmentDesc.clearColor = Color(0, 0, 0, 0)
+        let depthAttachmentDesc = RenderPassDepthStencilAttachmentDescriptor()
+        let renderPassDesc = RenderPassDescriptor(colorAttachments: [colorAttachmentDesc],
+                                                  depthStencilAttachment: depthAttachmentDesc)
+
+        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDesc) else {
+            Log.err("Canvas.encodeDrawCommand: Failed to create rencoder command encoder.")
+            return
+        }
+
+        encoder.setRenderPipelineState(pso)
+        if textureRequired {
+            pipelineStates.defaultBindingSet.setTexture(texture!, binding: 0)
+            pipelineStates.defaultBindingSet.setSamplerState(pipelineStates.defaultSampler, binding: 0)
+            encoder.setResource(pipelineStates.defaultBindingSet, atIndex: 0)
+        }
+        if pushConstantDataRequired {
+            encoder.pushConstant(stages: .fragment,
+                                 offset: 0,
+                                 data: pushConstantData!)
+        }
+        encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
+        encoder.draw(numVertices: numVertices, numInstances: 1, baseVertex: 0, baseInstance: 0)
+        encoder.endEncoding()
     }
 }

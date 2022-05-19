@@ -6,6 +6,13 @@ public class GraphicsDeviceContext {
         self.device = device
     }
 
+    deinit {
+        self.cachedDeviceResources.removeAll()        
+        self.renderQueues.removeAll()
+        self.computeQueues.removeAll()
+        self.copyQueues.removeAll()
+    }
+
     // cached command queue.
     public func renderQueue() -> CommandQueue? {
         if renderQueues.isEmpty {

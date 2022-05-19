@@ -481,19 +481,33 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
         }       
     }
  
-    public func draw(numVertices: UInt32, numInstances: UInt32, baseVertex: UInt32, baseInstance: UInt32) {
-        if numInstances > 0 {
+    public func draw(numVertices: Int, numInstances: Int, baseVertex: Int, baseInstance: Int) {
+        if numVertices > 0 && numInstances > 0 {
+            assert(baseVertex >= 0)
+            assert(baseInstance >= 0)
             let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
-                vkCmdDraw(commandBuffer, numVertices, numInstances, baseVertex, baseInstance)
+                vkCmdDraw(commandBuffer,
+                          UInt32(numVertices),
+                          UInt32(numInstances),
+                          UInt32(baseVertex),
+                          UInt32(baseInstance))
             }
             self.encoder!.commands.append(command)
         }
     }
 
-    public func drawIndexed(numIndices: UInt32, numInstances: UInt32, indexOffset: UInt32, vertexOffset: Int32, baseInstance: UInt32) {
-        if numInstances > 0 {
+    public func drawIndexed(numIndices: Int, numInstances: Int, indexOffset: Int, vertexOffset: Int, baseInstance: Int) {
+        if numIndices > 0 && numInstances > 0 {
+            assert(indexOffset >= 0)
+            assert(vertexOffset >= 0)
+            assert(baseInstance >= 0)
             let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
-                vkCmdDrawIndexed(commandBuffer, numIndices, numInstances, indexOffset, vertexOffset, baseInstance)
+                vkCmdDrawIndexed(commandBuffer,
+                                 UInt32(numIndices),
+                                 UInt32(numInstances),
+                                 UInt32(indexOffset),
+                                 Int32(vertexOffset),
+                                 UInt32(baseInstance))
             }
             self.encoder!.commands.append(command)            
         }

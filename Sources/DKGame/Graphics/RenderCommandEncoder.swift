@@ -25,6 +25,6 @@ public protocol RenderCommandEncoder: CommandEncoder {
     
     func pushConstant<D: DataProtocol>(stages: ShaderStageFlags, offset: UInt32, data: D)
 
-    func draw(numVertices: UInt32, numInstances: UInt32, baseVertex: UInt32, baseInstance: UInt32)
-    func drawIndexed(numIndices: UInt32, numInstances: UInt32, indexOffset: UInt32, vertexOffset: Int32, baseInstance: UInt32)
+    func draw(numVertices: Int, numInstances: Int, baseVertex: Int, baseInstance: Int)
+    func drawIndexed(numIndices: Int, numInstances: Int, indexOffset: Int, vertexOffset: Int, baseInstance: Int)
 }
