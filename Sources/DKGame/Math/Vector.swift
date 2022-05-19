@@ -37,6 +37,8 @@ public extension Vector {
     var magnitude: Scalar           { self.length }
     var magnitudeSquared: Scalar    { self.lengthSquared }
 
+    func dot(_ v: Self) -> Scalar   { Self.dot(self, v) }
+
     func normalized()->Self {
         let lengthSq = self.lengthSquared
         if lengthSq.isZero == false {
