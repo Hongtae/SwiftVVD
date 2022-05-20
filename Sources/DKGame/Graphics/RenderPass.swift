@@ -1,26 +1,35 @@
-public class RenderPassAttachmentDescriptor {
-    public enum LoadAction {
-        case dontCare
-        case load
-        case clear
-    }
-    public enum StoreAction {
-        case dontCare
-        case store
-    }
-
-    var renderTarget: Texture?
-    var loadAction: LoadAction = .dontCare
-    var storeAction: StoreAction = .dontCare
+public enum RenderPassAttachmentLoadAction {
+    case dontCare
+    case load
+    case clear
 }
 
-public class RenderPassColorAttachmentDescriptor : RenderPassAttachmentDescriptor {
-    var clearColor: Color = .black
+public enum RenderPassAttachmentStoreAction {
+    case dontCare
+    case store
 }
 
-public class RenderPassDepthStencilAttachmentDescriptor : RenderPassAttachmentDescriptor {
-    var clearDepth: Float = 1.0
-    var clearStencil: UInt32 = 0
+protocol RenderPassAttachmentDescriptor {
+    var renderTarget: Texture? { get }
+    var loadAction: RenderPassAttachmentLoadAction { get }
+    var storeAction: RenderPassAttachmentStoreAction { get }
+}
+
+public struct RenderPassColorAttachmentDescriptor: RenderPassAttachmentDescriptor {
+    public var renderTarget: Texture?
+    public var loadAction: RenderPassAttachmentLoadAction = .dontCare
+    public var storeAction: RenderPassAttachmentStoreAction = .dontCare
+
+    public var clearColor: Color = .black
+}
+
+public struct RenderPassDepthStencilAttachmentDescriptor: RenderPassAttachmentDescriptor {
+    public var renderTarget: Texture?
+    public var loadAction: RenderPassAttachmentLoadAction = .dontCare
+    public var storeAction: RenderPassAttachmentStoreAction = .dontCare
+
+    public var clearDepth: Float = 1.0
+    public var clearStencil: UInt32 = 0
 }
 
 public struct RenderPassDescriptor {

@@ -385,11 +385,11 @@ public class VulkanSwapChain: SwapChain {
 
         vkAcquireNextImageKHR(device.device, self.swapchain, UInt64.max, self.frameReadySemaphore, nil, &self.frameIndex)
 
-        let colorAttachment = RenderPassColorAttachmentDescriptor()
-        colorAttachment.renderTarget = self.imageViews[Int(self.frameIndex)]
-    	colorAttachment.clearColor = Color(r: 0, g: 0, b: 0, a:0)
-        colorAttachment.loadAction = .clear
-	    colorAttachment.storeAction = .store
+        let colorAttachment = RenderPassColorAttachmentDescriptor(
+            renderTarget: self.imageViews[Int(self.frameIndex)],
+            loadAction: .clear,
+	        storeAction: .store,
+    	    clearColor: Color(r: 0, g: 0, b: 0, a:0))
 
     	self.renderPassDescriptor.colorAttachments.removeAll()
 	    self.renderPassDescriptor.colorAttachments.append(colorAttachment)
