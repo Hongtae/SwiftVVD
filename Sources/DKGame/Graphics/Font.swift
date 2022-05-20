@@ -310,7 +310,7 @@ public class Font {
     }
 
     /// text pixel-width from baseline. not includes outline.
-    public func lineWidth(text: String) -> CGFloat {
+    public func lineWidth(of text: String) -> CGFloat {
         var length: CGFloat = 0.0
         var c1 = UnicodeScalar(UInt8(0))
         for c2 in text.unicodeScalars {
@@ -330,7 +330,7 @@ public class Font {
     }
 
     /// text bounding box.
-    public func bounds(text: String) -> CGRect {
+    public func bounds(of text: String) -> CGRect {
         var bboxMin: CGPoint = .zero
         var bboxMax: CGPoint = .zero
         var offset: CGFloat = 0.0

@@ -260,10 +260,12 @@ public extension Matrix3 {
 
 public extension Vector2 {
     // homogeneous transform
-    func transformed(by m: Matrix3) -> Vector2 {
+    func transformed(by m: Matrix3) -> Self {
         let v = Vector3(self.x, self.y, 1.0).transformed(by: m)
-        return Vector2(v.x, v.y) * (1.0 / v.z)
+        assert(abs(v.z) > .leastNonzeroMagnitude)
+        return Self(v.x, v.y) * (1.0 / v.z)
     }
+
     mutating func transform(by: Matrix3) {
         self = self.transformed(by: by)
     }
@@ -276,13 +278,14 @@ public extension Vector3 {
         let z = Self.dot(self, m.column3)
         return Self(x, y, z) 
     }
+
     mutating func transform(by: Matrix3) {
         self = self.transformed(by: by)
     }
 
-    static func * (lhs: Vector3, rhs: Matrix3) -> Vector3 {
+    static func * (lhs: Self, rhs: Matrix3) -> Self {
         return lhs.transformed(by: rhs)
     }
 
-    static func *= (lhs: inout Vector3, rhs: Matrix3) { lhs = lhs * rhs }
+    static func *= (lhs: inout Self, rhs: Matrix3) { lhs = lhs * rhs }
 }

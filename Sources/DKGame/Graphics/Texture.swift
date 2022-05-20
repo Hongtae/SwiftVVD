@@ -21,7 +21,7 @@ public struct TextureUsage: OptionSet {
     public static let pixelFormatView   = TextureUsage(rawValue: 1<<7)
 }
 
-public protocol Texture {
+public protocol Texture: AnyObject {
     var width: UInt32 { get }
     var height: UInt32 { get }
     var depth: UInt32 { get }

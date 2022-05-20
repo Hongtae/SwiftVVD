@@ -332,12 +332,7 @@ private struct EllipseUniformPushConstant {
     var center: Float2           // center of ellipse
 }
 
-private struct CanvasColoredVertexData {
-    var position: Float2
-    var color: Float4
-}
-
-private struct CanvasTexturedVertexData {
+private struct VertexData {
     var position: Float2
     var texcoord: Float2
     var color: Float4
@@ -370,11 +365,11 @@ private class CanvasPipelineStates {
         pipelineDescriptor.depthStencilDescriptor.depthWriteEnabled = false
         pipelineDescriptor.vertexDescriptor.attributes = [
             .init(format: .float2, offset: 0, bufferIndex: 0, location: 0 ),
-            .init(format: .float2, offset: MemoryLayout<CanvasTexturedVertexData>.offset(of: \.texcoord)!, bufferIndex: 0, location: 1 ),
-            .init(format: .float4, offset: MemoryLayout<CanvasTexturedVertexData>.offset(of: \.color)!, bufferIndex: 0, location: 2 ),
+            .init(format: .float2, offset: MemoryLayout<VertexData>.offset(of: \.texcoord)!, bufferIndex: 0, location: 1 ),
+            .init(format: .float4, offset: MemoryLayout<VertexData>.offset(of: \.color)!, bufferIndex: 0, location: 2 ),
         ]
         pipelineDescriptor.vertexDescriptor.layouts = [
-            .init(step: .vertex, stride: MemoryLayout<CanvasTexturedVertexData>.stride, bufferIndex: 0)
+            .init(step: .vertex, stride: MemoryLayout<VertexData>.stride, bufferIndex: 0)
         ]
         pipelineDescriptor.primitiveTopology = .triangle
         pipelineDescriptor.frontFace = .ccw
@@ -487,16 +482,51 @@ public class Canvas {
         var color: Color
     }
 
+    public let minimumScaleFactor: CGFloat = 0.000001
+
     private var commandBuffer: CommandBuffer?
     private var renderTarget: Texture?
 
     private var _viewport: CGRect	  
     private var _contentBounds: CGRect	  
     private var _contentTransform: Matrix3 
-    private var _screenTransform: Matrix3 // for 2d scene
     private var _deviceOrientation: Matrix3 
 
+    private var screenTransform: Matrix3 // for 2d scene
+
     private var pipelineStates: CanvasPipelineStates?
+
+    public var viewport: CGRect {
+        get { _viewport }
+        set(rect) {
+            _viewport = rect
+            self.updateTransform()
+        }
+    }
+
+    public var contentBounds: CGRect {
+        get { _contentBounds }
+        set(rect) {
+            _contentBounds = rect
+            self.updateTransform()
+        }
+    }
+
+    public var contentTransform: Matrix3 {
+        get { _contentTransform }
+        set(mat) {
+            _contentTransform = mat
+            self.updateTransform()
+        }
+    }
+
+    public var deviceOrientation: Matrix3 {
+        get { _deviceOrientation }
+        set(mat) {
+            _deviceOrientation = mat
+            self.updateTransform()
+        }
+    }
 
     public init(commandBuffer: CommandBuffer, renderTarget: Texture) {
         self.commandBuffer = commandBuffer
@@ -504,9 +534,710 @@ public class Canvas {
         self._viewport = CGRect(x: 0, y: 0, width: 1, height: 1)
         self._contentBounds = CGRect(x: 0, y: 0, width: 1, height: 1)
         self._contentTransform = .identity
-        self._screenTransform = .identity
         self._deviceOrientation = .identity
+        self.screenTransform = .identity
         self.pipelineStates = .sharedInstance(device: commandBuffer.device)
+    }
+
+    public func clear(color: Color) {            
+        let colorAttachmentDesc = RenderPassColorAttachmentDescriptor(
+            renderTarget: renderTarget,
+            loadAction: .clear,
+            storeAction: .store,
+            clearColor: color)
+
+        let depthAttachmentDesc = RenderPassDepthStencilAttachmentDescriptor()
+
+        let desc = RenderPassDescriptor(
+            colorAttachments: [colorAttachmentDesc],
+            depthStencilAttachment: depthAttachmentDesc)
+
+        if let encoder = commandBuffer?.makeRenderCommandEncoder(descriptor: desc) {
+            encoder.endEncoding()
+        }
+    }
+
+    public func drawLines(_ points: [CGPoint],
+                          lineWidth: CGFloat = 1.0,
+                          color: Color,
+                          blendState: BlendState) {
+        if points.isEmpty || lineWidth < minimumScaleFactor { return }
+
+        let numPoints = points.count
+        let halfWidth = Scalar(lineWidth * 0.5)
+        var vertices: [Vector2] = []
+        vertices.reserveCapacity(numPoints * 3)
+
+        var index = 0
+        while index + 1 < numPoints {
+            let v0 = Vector2(points[index])
+            let v1 = Vector2(points[index+1])
+            var line = v1 - v0
+            let length = line.length
+            if length > Scalar(minimumScaleFactor) {
+                line.normalize()
+                let cosR = line.x
+                let sinR = line.y
+                let rotate = Matrix2(cosR, sinR, -sinR, cosR)
+
+                let box0 = Vector2(0.0, halfWidth).transformed(by: rotate) + v0
+                let box1 = Vector2(0.0, -halfWidth).transformed(by: rotate) + v0
+                let box2 = Vector2(length, halfWidth).transformed(by: rotate) + v0
+                let box3 = Vector2(length, -halfWidth).transformed(by: rotate) + v0
+                
+                vertices.append(box0)
+                vertices.append(box1)
+                vertices.append(box2)
+                vertices.append(box2)
+                vertices.append(box1)
+                vertices.append(box3)
+            }
+            index += 2
+        }
+        self.drawTriangles(vertices.map{ CGPoint($0) }, color: color, blendState: blendState)
+    }
+
+    public func drawLineStrip(_ points: [CGPoint],
+                              lineWidth: CGFloat = 1.0,
+                              color: Color,
+                              blendState: BlendState) {
+
+        if points.isEmpty || lineWidth < minimumScaleFactor { return }
+
+        let numPoints = points.count
+        let halfWidth = Scalar(lineWidth * 0.5)
+        var vertices: [Vector2] = []
+        vertices.reserveCapacity(numPoints * 4)
+
+        for index in 0..<(numPoints - 1) {
+            let v0 = Vector2(points[index])
+            let v1 = Vector2(points[index+1])
+            var line = v1 - v0
+            let length = line.length
+            if length > Scalar(minimumScaleFactor) {
+                line.normalize()
+                let cosR = line.x
+                let sinR = line.y
+                let rotate = Matrix2(cosR, sinR, -sinR, cosR)
+
+                let box0 = Vector2(0.0, halfWidth).transformed(by: rotate) + v0
+                let box1 = Vector2(0.0, -halfWidth).transformed(by: rotate) + v0
+                let box2 = Vector2(length, halfWidth).transformed(by: rotate) + v0
+                let box3 = Vector2(length, -halfWidth).transformed(by: rotate) + v0
+                
+                vertices.append(box0)
+                vertices.append(box1)
+                vertices.append(box2)
+                vertices.append(box3)
+            }
+        }
+        self.drawTriangleStrip(vertices.map{ CGPoint($0) }, color: color, blendState: blendState)
+    }
+
+    public func drawTriangles(_ vertices: [CGPoint],
+                              color: Color,
+                              blendState: BlendState) {
+        let numVerts = vertices.count
+        if numVerts > 2 {
+            var vertexData: [VertexData] = []
+            vertexData.reserveCapacity(numVerts)
+
+            for pt in vertices {
+                let pos = Vector2(pt).transformed(by: screenTransform).float2
+                vertexData.append(VertexData(position: pos,
+                                             texcoord: Float2(0, 0),
+                                             color: color.float4))
+            }
+
+            self.encodeDrawCommand(shaderIndex: .vertexColor,
+                                   vertices: vertexData,
+                                   texture: nil,
+                                   blendState: blendState,
+                                   pushConstantData: nil)
+        }
+    }
+
+    public func drawTriangles(_ vertices: [ColoredVertex],
+                              blendState: BlendState) {
+        let numVerts = vertices.count
+        if numVerts > 2 {
+            var vertexData: [VertexData] = []
+            vertexData.reserveCapacity(numVerts)
+
+            for v in vertices {
+                let pos = Vector2(v.position).transformed(by: screenTransform).float2
+                vertexData.append(VertexData(position: pos,
+                                             texcoord: Float2(0, 0),
+                                             color: v.color.float4))
+            }
+
+            self.encodeDrawCommand(shaderIndex: .vertexColor,
+                                   vertices: vertexData,
+                                   texture: nil,
+                                   blendState: blendState,
+                                   pushConstantData: nil)
+        }
+    }
+
+    public func drawTriangles(_ vertices: [TexturedVertex],
+                              texture: Texture,
+                              blendState: BlendState) {
+        let numVerts = vertices.count
+        if numVerts > 2 {
+            var vertexData: [VertexData] = []
+            vertexData.reserveCapacity(numVerts)
+
+            for v in vertices {
+                let pos = Vector2(v.position).transformed(by: screenTransform).float2
+                vertexData.append(VertexData(position: pos,
+                                             texcoord: Vector2(v.texcoord).float2,
+                                             color: v.color.float4))
+            }
+
+            self.encodeDrawCommand(shaderIndex: .vertexColor,
+                                   vertices: vertexData,
+                                   texture: nil,
+                                   blendState: blendState,
+                                   pushConstantData: nil)
+        }
+    }
+
+    public func  drawTriangleStrip(_ vertices: [CGPoint],
+                                   color: Color,
+                                   blendState: BlendState) {
+        let numVerts = vertices.count
+        if numVerts > 2 {
+            var verts: [CGPoint] = []
+            verts.reserveCapacity(numVerts * 3)
+
+            for i in 0..<(numVerts - 2) {
+                if i & 1 == 0 {
+                    verts.append(vertices[i])
+                    verts.append(vertices[i+1])
+                } else {
+                    verts.append(vertices[i+1])
+                    verts.append(vertices[i])
+                }
+                verts.append(vertices[i+2])
+            }
+            self.drawTriangles(verts, color: color, blendState: blendState)
+        }
+    }
+
+    public func  drawTriangleStrip(_ vertices: [ColoredVertex],
+                                   blendState: BlendState) {
+        let numVerts = vertices.count
+        if numVerts > 2 {
+            var verts: [ColoredVertex] = []
+            verts.reserveCapacity(numVerts * 3)
+
+            for i in 0..<(numVerts - 2) {
+                if i & 1 == 0 {
+                    verts.append(vertices[i])
+                    verts.append(vertices[i+1])
+                } else {
+                    verts.append(vertices[i+1])
+                    verts.append(vertices[i])
+                }
+                verts.append(vertices[i+2])
+            }
+            self.drawTriangles(verts, blendState: blendState)
+        }
+    }
+
+    public func  drawTriangleStrip(_ vertices: [TexturedVertex],
+                                   texture: Texture,
+                                   blendState: BlendState) {
+        let numVerts = vertices.count
+        if numVerts > 2 {
+            var verts: [TexturedVertex] = []
+            verts.reserveCapacity(numVerts * 3)
+
+            for i in 0..<(numVerts - 2) {
+                if i & 1 == 0 {
+                    verts.append(vertices[i])
+                    verts.append(vertices[i+1])
+                } else {
+                    verts.append(vertices[i+1])
+                    verts.append(vertices[i])
+                }
+                verts.append(vertices[i+2])
+            }
+            self.drawTriangles(verts, texture: texture, blendState: blendState)
+        }
+    }
+
+    public func drawQuad(leftTop lt: CGPoint,
+                         rightTop rt: CGPoint,
+                         leftBottom lb: CGPoint,
+                         rightBottom rb: CGPoint,
+                         color: Color,
+                         blendState: BlendState) {
+        let tpos0 = lt.transformed(by: self._contentTransform)
+        let tpos1 = rt.transformed(by: self._contentTransform)
+        let tpos2 = lb.transformed(by: self._contentTransform)
+        let tpos3 = rb.transformed(by: self._contentTransform)
+
+        let t1 = self._contentBounds.intersectsTriangle(tpos0, tpos2, tpos1)
+        let t2 = self._contentBounds.intersectsTriangle(tpos1, tpos2, tpos3)
+        if t1 && t2 {
+            let vertices = [lt, lb, rt, rb, lb, rb]
+            self.drawTriangles(vertices, color: color, blendState: blendState)
+        } else if t1 {
+            let vertices = [lt, lb, rt]
+            self.drawTriangles(vertices, color: color, blendState: blendState)
+        } else if t2 {
+            let vertices = [rt, lb, rb]
+            self.drawTriangles(vertices, color: color, blendState: blendState)
+        }
+    }
+
+    public func drawQuad(leftTop lt: TexturedVertex,
+                         rightTop rt: TexturedVertex,
+                         leftBottom lb: TexturedVertex,
+                         rightBottom rb: TexturedVertex,
+                         texture: Texture,
+                         blendState: BlendState) {
+        let tpos0 = lt.position.transformed(by: self._contentTransform)
+        let tpos1 = rt.position.transformed(by: self._contentTransform)
+        let tpos2 = lb.position.transformed(by: self._contentTransform)
+        let tpos3 = rb.position.transformed(by: self._contentTransform)
+
+        let t1 = self._contentBounds.intersectsTriangle(tpos0, tpos2, tpos1)
+        let t2 = self._contentBounds.intersectsTriangle(tpos1, tpos2, tpos3)
+        if t1 && t2 {
+            let vertices = [lt, lb, rt, rb, lb, rb]
+            self.drawTriangles(vertices, texture: texture, blendState: blendState)
+        } else if t1 {
+            let vertices = [lt, lb, rt]
+            self.drawTriangles(vertices, texture: texture, blendState: blendState)
+        } else if t2 {
+            let vertices = [rt, lb, rb]
+            self.drawTriangles(vertices, texture: texture, blendState: blendState)
+        }
+    }
+
+    public func drawRect(_ rect: CGRect,
+                         transform tm: Matrix3,
+                         color: Color,
+                         blendState: BlendState) {        
+        if rect.isEmpty || rect.isInfinite { return }
+
+        let pos0 = CGPoint(x: rect.minX, y: rect.minY).transformed(by: tm) // left-top
+        let pos1 = CGPoint(x: rect.maxX, y: rect.minY).transformed(by: tm) // right-top
+        let pos2 = CGPoint(x: rect.minX, y: rect.maxY).transformed(by: tm) // left-bottom
+        let pos3 = CGPoint(x: rect.maxX, y: rect.maxY).transformed(by: tm) // right-bottom
+
+        let tpos0 = pos0.transformed(by: _contentTransform)
+        let tpos1 = pos1.transformed(by: _contentTransform)
+        let tpos2 = pos2.transformed(by: _contentTransform)
+        let tpos3 = pos3.transformed(by: _contentTransform)
+        
+        let t1 = _contentBounds.intersectsTriangle(tpos0, tpos2, tpos1)
+        let t2 = _contentBounds.intersectsTriangle(tpos1, tpos2, tpos3)
+        if t1 && t2 {
+            let vertices = [ pos0, pos2, pos1, pos1, pos2, pos3 ]
+            self.drawTriangles(vertices, color: color, blendState: blendState)
+        } else if t1 {
+            let vertices = [ pos0, pos2, pos1 ]
+            self.drawTriangles(vertices, color: color, blendState: blendState)
+        } else if t2 {
+            let vertices = [ pos1, pos2, pos3 ]
+            self.drawTriangles(vertices, color: color, blendState: blendState)
+        }
+    }
+
+    public func drawRect(_ rect: CGRect,
+                         transform tm: Matrix3,
+                         textureRect texRect: CGRect,
+                         textureTransform texTM: Matrix3,
+                         texture: Texture,
+                         color: Color,
+                         blendState: BlendState) {
+        if rect.isEmpty || rect.isInfinite { return }
+
+        let pos0 = CGPoint(x: rect.minX, y: rect.minY).transformed(by: tm) // left-top
+        let pos1 = CGPoint(x: rect.maxX, y: rect.minY).transformed(by: tm) // right-top
+        let pos2 = CGPoint(x: rect.minX, y: rect.maxY).transformed(by: tm) // left-bottom
+        let pos3 = CGPoint(x: rect.maxX, y: rect.maxY).transformed(by: tm) // right-bottom
+
+        let tex0 = CGPoint(x: texRect.minX, y: texRect.minY).transformed(by: texTM) // left-top
+        let tex1 = CGPoint(x: texRect.maxX, y: texRect.minY).transformed(by: texTM) // right-top
+        let tex2 = CGPoint(x: texRect.minX, y: texRect.maxY).transformed(by: texTM) // left-bottom
+        let tex3 = CGPoint(x: texRect.maxX, y: texRect.maxY).transformed(by: texTM) // right-bottom
+
+        let tpos0 = pos0.transformed(by: _contentTransform)
+        let tpos1 = pos1.transformed(by: _contentTransform)
+        let tpos2 = pos2.transformed(by: _contentTransform)
+        let tpos3 = pos3.transformed(by: _contentTransform)
+        
+        let t1 = _contentBounds.intersectsTriangle(tpos0, tpos2, tpos1)
+        let t2 = _contentBounds.intersectsTriangle(tpos1, tpos2, tpos3)
+        if t1 && t2 {
+            let vertices: [TexturedVertex] = [
+                TexturedVertex(position: pos0, texcoord: tex0, color: color),
+                TexturedVertex(position: pos2, texcoord: tex2, color: color),
+                TexturedVertex(position: pos1, texcoord: tex1, color: color),
+                TexturedVertex(position: pos1, texcoord: tex1, color: color),
+                TexturedVertex(position: pos2, texcoord: tex2, color: color),
+                TexturedVertex(position: pos3, texcoord: tex3, color: color),
+            ]
+            self.drawTriangles(vertices, texture: texture, blendState: blendState)
+        } else if t1 {
+            let vertices: [TexturedVertex] = [
+                TexturedVertex(position: pos0, texcoord: tex0, color: color),
+                TexturedVertex(position: pos2, texcoord: tex2, color: color),
+                TexturedVertex(position: pos1, texcoord: tex1, color: color),
+            ]
+            self.drawTriangles(vertices, texture: texture, blendState: blendState)
+        } else if t2 {
+            let vertices: [TexturedVertex] = [
+                TexturedVertex(position: pos1, texcoord: tex1, color: color),
+                TexturedVertex(position: pos2, texcoord: tex2, color: color),
+                TexturedVertex(position: pos3, texcoord: tex3, color: color),
+            ]
+            self.drawTriangles(vertices, texture: texture, blendState: blendState)
+        }
+    }
+
+    public func drawEllipse(bounds: CGRect,
+                            inset: CGSize,
+                            transform: Matrix3,
+                            color: Color,
+                            blendState: BlendState) {
+        if bounds.isEmpty || bounds.isInfinite { return }
+        if inset.width < minimumScaleFactor || inset.height < minimumScaleFactor { return }
+
+        let innerBounds = bounds.insetBy(dx: inset.width, dy: inset.height)
+
+        if innerBounds.width < minimumScaleFactor || innerBounds.height < minimumScaleFactor {
+            return self.drawEllipse(bounds: bounds,
+                                    transform: transform,
+                                    color: color,
+                                    blendState: blendState)
+        }
+
+        let tm = transform * screenTransform    // user transform * screen space
+        let pos0 = Vector2(Scalar(bounds.minX), Scalar(bounds.minY)).transformed(by: tm)  // left-top
+        let pos1 = Vector2(Scalar(bounds.maxX), Scalar(bounds.minY)).transformed(by: tm)  // right-top
+        let pos2 = Vector2(Scalar(bounds.minX), Scalar(bounds.maxY)).transformed(by: tm)  // left-bottom
+        let pos3 = Vector2(Scalar(bounds.maxX), Scalar(bounds.maxY)).transformed(by: tm)  // right-bottom
+
+        let local = CGRect(x: -1.0, y: -1.0, width: 2.0, height: 2.0)   // 3d frustum space of screen.
+        if local.intersectsTriangle(CGPoint(pos0), CGPoint(pos2), CGPoint(pos1)) ||
+           local.intersectsTriangle(CGPoint(pos1), CGPoint(pos2), CGPoint(pos3)) {
+
+            let radiusSq = Vector2((pos1 - pos0).lengthSquared * 0.25,
+                                   (pos0 - pos2).lengthSquared * 0.25)
+            if CGFloat(radiusSq.x * radiusSq.y) > minimumScaleFactor {
+                let ibpos0 = Vector2(Scalar(innerBounds.minX), Scalar(innerBounds.minY)).transformed(by: tm)  // left-top
+                let ibpos1 = Vector2(Scalar(innerBounds.maxX), Scalar(innerBounds.minY)).transformed(by: tm)  // right-top
+                let ibpos2 = Vector2(Scalar(innerBounds.minX), Scalar(innerBounds.maxY)).transformed(by: tm)  // left-bottom
+
+                let ibRadiusSq = Vector2(x: (ibpos1 - ibpos0).lengthSquared * 0.25,
+                                         y: (ibpos0 - ibpos2).lengthSquared * 0.25)
+
+                // formula: X^2 / A^2 + Y^2 / B^2 = 1
+                // A^2 = bounds.width/2, B^2 = bounds.height/2
+                var ellipseData = EllipseUniformPushConstant(
+                    outerRadiusSqInv: Vector2(1.0 / radiusSq.x, 1.0 / radiusSq.y).float2,
+                    innerRadiusSqInv: Vector2(1.0 / ibRadiusSq.x, 1.0 / ibRadiusSq.y).float2,
+                    center: Vector2(Scalar(bounds.midX), Scalar(bounds.midY)).transformed(by: screenTransform).float2)
+
+                let texcoord = Vector2.zero.float2
+                let vertexcolor = color.float4
+                let vf: [VertexData] = [
+                    VertexData(position: pos0.float2, texcoord: texcoord, color: vertexcolor),
+                    VertexData(position: pos2.float2, texcoord: texcoord, color: vertexcolor),
+                    VertexData(position: pos1.float2, texcoord: texcoord, color: vertexcolor),
+                    VertexData(position: pos1.float2, texcoord: texcoord, color: vertexcolor),
+                    VertexData(position: pos2.float2, texcoord: texcoord, color: vertexcolor),
+                    VertexData(position: pos3.float2, texcoord: texcoord, color: vertexcolor),
+                ]
+
+                withUnsafeBytes(of: &ellipseData) {
+                    self.encodeDrawCommand(shaderIndex: .vertexColorEllipseHole,
+                                           vertices: vf,
+                                           texture: nil,
+                                           blendState: blendState,
+                                           pushConstantData: $0)
+                }
+            }
+        }
+    }
+
+    public func drawEllipse(bounds: CGRect,
+                            transform: Matrix3,
+                            color: Color,
+                            blendState: BlendState) {
+        if bounds.isEmpty || bounds.isInfinite { return }
+
+        let tm = transform * screenTransform    // user transform * screen space
+        let pos0 = Vector2(Scalar(bounds.minX), Scalar(bounds.minY)).transformed(by: tm)  // left-top
+        let pos1 = Vector2(Scalar(bounds.maxX), Scalar(bounds.minY)).transformed(by: tm)  // right-top
+        let pos2 = Vector2(Scalar(bounds.minX), Scalar(bounds.maxY)).transformed(by: tm)  // left-bottom
+        let pos3 = Vector2(Scalar(bounds.maxX), Scalar(bounds.maxY)).transformed(by: tm)  // right-bottom
+
+        let local = CGRect(x: -1.0, y: -1.0, width: 2.0, height: 2.0)   // 3d frustum space of screen.
+        if local.intersectsTriangle(CGPoint(pos0), CGPoint(pos2), CGPoint(pos1)) ||
+           local.intersectsTriangle(CGPoint(pos1), CGPoint(pos2), CGPoint(pos3)) {
+
+            let radiusSq = Vector2((pos1 - pos0).lengthSquared * 0.25,
+                                   (pos0 - pos2).lengthSquared * 0.25)
+            if CGFloat(radiusSq.x * radiusSq.y) > minimumScaleFactor {
+                // formula: X^2 / A^2 + Y^2 / B^2 = 1
+                // A^2 = bounds.width/2, B^2 = bounds.height/2
+                var ellipseData = EllipseUniformPushConstant(
+                    outerRadiusSqInv: Vector2(1.0 / radiusSq.x, 1.0 / radiusSq.y).float2,
+                    innerRadiusSqInv: (0.0, 0.0),
+                    center: Vector2(Scalar(bounds.midX), Scalar(bounds.midY)).transformed(by: screenTransform).float2)
+
+                let texcoord = Vector2.zero.float2
+                let vertexcolor = color.float4
+                let vf: [VertexData] = [
+                    VertexData(position: pos0.float2, texcoord: texcoord, color: vertexcolor),
+                    VertexData(position: pos2.float2, texcoord: texcoord, color: vertexcolor),
+                    VertexData(position: pos1.float2, texcoord: texcoord, color: vertexcolor),
+                    VertexData(position: pos1.float2, texcoord: texcoord, color: vertexcolor),
+                    VertexData(position: pos2.float2, texcoord: texcoord, color: vertexcolor),
+                    VertexData(position: pos3.float2, texcoord: texcoord, color: vertexcolor),
+                ]
+
+                withUnsafeBytes(of: &ellipseData) {
+                    self.encodeDrawCommand(shaderIndex: .vertexColorEllipse,
+                                           vertices: vf,
+                                           texture: nil,
+                                           blendState: blendState,
+                                           pushConstantData: $0)
+                }
+            }
+        }
+    }
+
+    public func drawEllipse(bounds: CGRect,
+                            transform: Matrix3,
+                            textureBounds uvBounds: CGRect,
+                            textureTransform uvTransform: Matrix3,
+                            texture: Texture,
+                            color: Color,
+                            blendState: BlendState) {
+        if bounds.isEmpty || bounds.isInfinite { return }
+
+        let tm = transform * screenTransform    // user transform * screen space
+        let pos0 = Vector2(Scalar(bounds.minX), Scalar(bounds.minY)).transformed(by: tm)  // left-top
+        let pos1 = Vector2(Scalar(bounds.maxX), Scalar(bounds.minY)).transformed(by: tm)  // right-top
+        let pos2 = Vector2(Scalar(bounds.minX), Scalar(bounds.maxY)).transformed(by: tm)  // left-bottom
+        let pos3 = Vector2(Scalar(bounds.maxX), Scalar(bounds.maxY)).transformed(by: tm)  // right-bottom
+
+        let local = CGRect(x: -1.0, y: -1.0, width: 2.0, height: 2.0)   // 3d frustum space of screen.
+        if local.intersectsTriangle(CGPoint(pos0), CGPoint(pos2), CGPoint(pos1)) ||
+           local.intersectsTriangle(CGPoint(pos1), CGPoint(pos2), CGPoint(pos3)) {
+
+            let radiusSq = Vector2((pos1 - pos0).lengthSquared * 0.25,
+                                   (pos0 - pos2).lengthSquared * 0.25)
+            if CGFloat(radiusSq.x * radiusSq.y) > minimumScaleFactor {
+                // formula: X^2 / A^2 + Y^2 / B^2 = 1
+                // A^2 = bounds.width/2, B^2 = bounds.height/2
+                var ellipseData = EllipseUniformPushConstant(
+                    outerRadiusSqInv: Vector2(1.0 / radiusSq.x, 1.0 / radiusSq.y).float2,
+                    innerRadiusSqInv: (0.0, 0.0),
+                    center: Vector2(Scalar(bounds.midX), Scalar(bounds.midY)).transformed(by: screenTransform).float2)
+
+                let uv0 = Vector2(Scalar(uvBounds.minX), Scalar(uvBounds.minY)).transformed(by: uvTransform) // left-top
+                let uv1 = Vector2(Scalar(uvBounds.maxX), Scalar(uvBounds.minY)).transformed(by: uvTransform) // right-top
+                let uv2 = Vector2(Scalar(uvBounds.minX), Scalar(uvBounds.maxY)).transformed(by: uvTransform) // left-bottom
+                let uv3 = Vector2(Scalar(uvBounds.maxX), Scalar(uvBounds.maxY)).transformed(by: uvTransform) // right-bottom
+
+                let vertexcolor = color.float4
+                let vf: [VertexData] = [
+                    VertexData(position: pos0.float2, texcoord: uv0.float2, color: vertexcolor),
+                    VertexData(position: pos2.float2, texcoord: uv2.float2, color: vertexcolor),
+                    VertexData(position: pos1.float2, texcoord: uv1.float2, color: vertexcolor),
+                    VertexData(position: pos1.float2, texcoord: uv1.float2, color: vertexcolor),
+                    VertexData(position: pos2.float2, texcoord: uv2.float2, color: vertexcolor),
+                    VertexData(position: pos3.float2, texcoord: uv3.float2, color: vertexcolor),
+                ]
+
+                withUnsafeBytes(of: &ellipseData) {
+                    self.encodeDrawCommand(shaderIndex: .vertexColorTexturedEllipse,
+                                           vertices: vf,
+                                           texture: texture,
+                                           blendState: blendState,
+                                           pushConstantData: $0)
+                }
+            }
+        }
+    }
+
+    public func drawText(_ text: String,
+                         withFont font: Font,
+                         bounds: CGRect,
+                         transform: Matrix3,
+                         color: Color) {
+        if bounds.isEmpty || bounds.isInfinite { return }
+        if text.isEmpty { return }
+
+        struct GlyphVertex {
+            let pos: Vector2
+            let tex: Float2
+        }
+        struct Quad {
+            let lt: GlyphVertex 
+            let rt: GlyphVertex
+            let lb: GlyphVertex
+            let rb: GlyphVertex
+            let texture: Texture
+        }
+
+        var quads: [Quad] = []
+        let str = text.unicodeScalars
+        quads.reserveCapacity(str.count)
+
+        var bboxMin = Vector2(0, 0)
+        var bboxMax = Vector2(0, 0)
+        var offset: Scalar = 0.0        // accumulated text width (pixel)
+
+        let colorF4 = color.float4
+
+        var c1 = UnicodeScalar(UInt8(0)) 
+        for c2 in str {
+            // get glyph info from font object
+            if let glyph = font.glyphData(forChar: c2) {
+                offset += Scalar(font.kernAdvance(left: c1, right: c2).x)
+
+                let posMin = Vector2(offset + Scalar(glyph.position.x), Scalar(glyph.position.y))
+                let posMax = Vector2(Scalar(glyph.frame.maxX), Scalar(glyph.frame.maxY)) + posMin
+
+                if offset > 0.0 {
+                    if (bboxMin.x > posMin.x) { bboxMin.x = posMin.x }
+                    if (bboxMin.y > posMin.y) { bboxMin.y = posMin.y }
+                    if (bboxMax.x < posMax.x) { bboxMax.x = posMax.x }
+                    if (bboxMax.y < posMax.y) { bboxMax.y = posMax.y }
+                } else {
+                    bboxMin = posMin
+                    bboxMax = posMax
+                }
+
+                if let texture = glyph.texture {
+                    let textureWidth = texture.width
+                    let textureHeight = texture.height
+                    if textureWidth > 0 && textureHeight > 0 {
+                        let invW = 1.0 / Float(textureWidth)
+                        let invH = 1.0 / Float(textureHeight)
+
+                        let uvMinX = Float(glyph.frame.minX) * invW
+                        let uvMinY = Float(glyph.frame.minY) * invH
+                        let uvMaxX = Float(glyph.frame.maxX) * invW
+                        let uvMaxY = Float(glyph.frame.maxY) * invH
+
+                        let q = Quad(lt: GlyphVertex(pos: Vector2(posMin.x, posMin.y),
+                                                     tex: (uvMinX, uvMinY)),
+                                     rt: GlyphVertex(pos: Vector2(posMax.x, posMin.y),
+                                                     tex: (uvMaxX, uvMinY)),
+                                     lb: GlyphVertex(pos: Vector2(posMin.x, posMax.y),
+                                                     tex: (uvMinX, uvMaxY)),
+                                     rb: GlyphVertex(pos: Vector2(posMax.x, posMax.y),
+                                                     tex: (uvMaxX, uvMaxY)),
+                                     texture: texture)
+                        quads.append(q)
+                    }
+                }
+                offset += Scalar(glyph.advance.width)
+            }
+            c1 = c2
+        }
+        if quads.isEmpty { return }
+
+        let width = bboxMax.x - bboxMin.x
+        let height = bboxMax.y - bboxMin.y
+        if width <= .ulpOfOne || height <= .ulpOfOne { return }
+
+        // sort by texture order
+        quads.sort {
+            // unsafeBitCast($0.texture, to: UInt.self) > unsafeBitCast($1.texture, to: UInt.self)
+            ObjectIdentifier($0.texture) > ObjectIdentifier($1.texture)
+        }
+
+        // calculate transform matrix
+        var trans = AffineTransform2(x: -bboxMin.x, y: -bboxMin.y)    // move origin
+        trans *= LinearTransform2(scaleX: 1.0 / width, scaleY: 1.0 / height) // normalize size
+        trans *= LinearTransform2(scaleX: Scalar(bounds.maxX), scaleY: Scalar(bounds.maxY)) // scale to bounds
+        trans.translate(x: Scalar(bounds.minX), y: Scalar(bounds.minY)) // move to bounds origin
+
+        var matrix = trans.matrix3
+        matrix *= transform         // user transform
+        matrix *= screenTransform   // transform to screen-space
+
+        var lastTexture: Texture? = nil
+        var triangles: [VertexData] = []
+        triangles.reserveCapacity(quads.count * 6)
+        for q in quads {
+            if q.texture === lastTexture {
+                if triangles.count > 0 {
+                    self.encodeDrawCommand(shaderIndex: .vertexColorAlphaTexture,
+                        vertices: triangles, texture: lastTexture!,
+                        blendState: .defaultAlpha, pushConstantData: nil)
+                }
+                triangles.removeAll(keepingCapacity: true)
+                lastTexture = q.texture
+            }
+
+            let vf: [VertexData] = [
+                VertexData(position: q.lt.pos.transformed(by: matrix).float2, texcoord: q.lt.tex, color: colorF4),
+                VertexData(position: q.lb.pos.transformed(by: matrix).float2, texcoord: q.lb.tex, color: colorF4),
+                VertexData(position: q.rt.pos.transformed(by: matrix).float2, texcoord: q.rt.tex, color: colorF4),
+                VertexData(position: q.rt.pos.transformed(by: matrix).float2, texcoord: q.rt.tex, color: colorF4),
+                VertexData(position: q.lb.pos.transformed(by: matrix).float2, texcoord: q.lb.tex, color: colorF4),
+                VertexData(position: q.rb.pos.transformed(by: matrix).float2, texcoord: q.rb.tex, color: colorF4),
+            ]
+            triangles.append(contentsOf: vf)
+        }
+        if triangles.count > 0 {
+            self.encodeDrawCommand(shaderIndex: .vertexColorAlphaTexture,
+                vertices: triangles, texture: lastTexture!,
+                blendState: .defaultAlpha, pushConstantData: nil)
+        }
+    }
+
+    public func drawText(_ text: String,
+                         withFont font: Font,
+                         baselineBegin: CGPoint,
+                         baselineEnd: CGPoint,
+                         color: Color) {
+        if text.isEmpty { return }
+        if (baselineEnd - baselineBegin).magnitude < .ulpOfOne { return }
+
+        // font size, screen size in pixel units
+        let ascender = font.ascender
+        // let lineHeight = font.lineHeight()
+        let lineWidth = font.lineWidth(of: text)
+        let textBounds = font.bounds(of: text)
+
+        let viewportSize = CGSize(width: _viewport.width, height: _viewport.height)
+        let contentScale = CGSize(width: _contentBounds.width, height: _contentBounds.height)
+
+        // change local-coords to pixel-coords
+        let scaleToScreen = CGSize(width: viewportSize.width / contentScale.width,
+                                   height: viewportSize.height / contentScale.height)
+        let baselinePixelBegin = CGPoint(x: baselineBegin.x * scaleToScreen.width,
+                                         y: baselineBegin.y * scaleToScreen.height)
+        let baselinePixelEnd = CGPoint(x: baselineEnd.x * scaleToScreen.width,
+                                       y: baselineEnd.y * scaleToScreen.height)
+        let scale = (baselinePixelEnd - baselinePixelBegin).magnitude
+        let baselinePixelDir = Vector2(baselinePixelEnd - baselinePixelBegin).normalized()
+        let angle = acosf(baselinePixelDir.x) * ((baselinePixelDir.y < 0) ? -1.0 : 1.0)
+
+        // calculate transform (matrix)
+        var transform = AffineTransform2(x: 0, y: Scalar(-ascender))    // move pivot to baseline
+        transform *= LinearTransform2()
+            .scaled(by: Scalar(scale / lineWidth))                  // scale
+            .rotated(by: angle)                             // rotate
+            .scaled(x: Scalar(1.0 / viewportSize.width),
+                    y: Scalar(1.0 / viewportSize.height))   // normalize (0~1)
+            .scaled(by: Vector2(contentScale))              // apply contentScale
+        transform.translate(by: Vector2(baselineBegin))
+
+        self.drawText(text, withFont: font, bounds: textBounds, transform: transform.matrix3, color: color)
     }
 
     @discardableResult
@@ -525,8 +1256,28 @@ public class Canvas {
         return false
     }
 
+    private func updateTransform() {
+        // let viewportOffset = _viewport.origin
+        let contentOffset = _contentBounds.origin
+        let contentScale = _contentBounds.size
+
+        assert(contentScale.width > 0.0 && contentScale.height > 0.0)
+
+        let targetOrient = AffineTransform2(_deviceOrientation)
+        let offset = AffineTransform2(origin: -Vector2(contentOffset)).matrix3
+        let s = LinearTransform2(scaleX: 1.0 / Scalar(contentScale.width), scaleY: 1.0 / Scalar(contentScale.height))
+
+        // transform to screen viewport space.
+        let normalize = Matrix3(row1: Vector3(2.0, 0.0, 0.0),
+                                row2: Vector3(0.0, -2.0, 0.0),
+                                row3: Vector3(-1.0, 1.0, 1.0))
+
+        self.screenTransform = _contentTransform * offset * 
+            AffineTransform2(linear: s).transformed(by: targetOrient).matrix3 * normalize
+    }
+
     private func encodeDrawCommand(shaderIndex: CanvasShaderIndex,
-                                   vertices: [CanvasTexturedVertexData],
+                                   vertices: [VertexData],
                                    texture: Texture?,
                                    blendState: BlendState,
                                    pushConstantData: UnsafeRawBufferPointer?) {
@@ -585,7 +1336,7 @@ public class Canvas {
         
         let device = commandBuffer.device
 
-        let bufferLength = MemoryLayout<CanvasTexturedVertexData>.stride * vertices.count
+        let bufferLength = MemoryLayout<VertexData>.stride * vertices.count
         guard let vertexBuffer = device.makeBuffer(length: bufferLength,
                                                 storageMode: .shared,
                                                 cacheMode: .writeOnly) else {
@@ -595,18 +1346,18 @@ public class Canvas {
         let numVertices = vertices.count
         if let buffer = vertexBuffer.contents() {
             vertices.withUnsafeBytes {
-                buffer.copyMemory(from: $0.baseAddress!, byteCount: MemoryLayout<CanvasTexturedVertexData>.stride * numVertices)
+                buffer.copyMemory(from: $0.baseAddress!, byteCount: MemoryLayout<VertexData>.stride * numVertices)
             }
         } else {
             Log.err("Canvas.encodeDrawCommand: Vertex-Buffer is not writable.(Invalid-mapping)")
             return
         }
 
-        let colorAttachmentDesc = RenderPassColorAttachmentDescriptor()
-        colorAttachmentDesc.renderTarget = renderTarget
-        colorAttachmentDesc.loadAction = .load
-        colorAttachmentDesc.storeAction = .store
-        colorAttachmentDesc.clearColor = Color(0, 0, 0, 0)
+        let colorAttachmentDesc = RenderPassColorAttachmentDescriptor(
+            renderTarget: renderTarget,
+            loadAction: .load,
+            storeAction: .store,
+            clearColor: Color(0, 0, 0, 0))
         let depthAttachmentDesc = RenderPassDepthStencilAttachmentDescriptor()
         let renderPassDesc = RenderPassDescriptor(colorAttachments: [colorAttachmentDesc],
                                                   depthStencilAttachment: depthAttachmentDesc)

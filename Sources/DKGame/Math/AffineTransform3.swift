@@ -110,8 +110,16 @@ public struct AffineTransform3: Transform {
         return lhs.transformed(by: rhs)
     }
 
+    public static func *= (lhs: inout Self, rhs: Self) {
+        lhs = lhs * rhs
+    }
+
     public static func * (lhs: Self, rhs: LinearTransform3) -> Self {
         return lhs.transformed(by: rhs)
+    }
+
+    public static func *= (lhs: inout Self, rhs: LinearTransform3) {
+        lhs = lhs * rhs
     }
 
     public static func * (lhs: Vector3, rhs: Self) -> Vector3 {

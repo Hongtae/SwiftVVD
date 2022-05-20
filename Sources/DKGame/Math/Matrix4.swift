@@ -349,8 +349,10 @@ public extension Vector3 {
     // homogeneous transform
     func transformed(by m: Matrix4) -> Self {
         let v = Vector4(self.x, self.y, self.z, 1.0).transformed(by: m)
-        return Vector3(v.x, v.y, v.z) * (1.0 / v.w)
+        assert(abs(v.w) > .leastNonzeroMagnitude)
+        return Self(v.x, v.y, v.z) * (1.0 / v.w)
     }
+
     mutating func transform(by: Matrix4) {
         self = self.transformed(by: by)
     }
@@ -364,13 +366,14 @@ public extension Vector4 {
         let w = Self.dot(self, m.column4)
         return Self(x, y, z, w)
     }
+
     mutating func transform(by: Matrix4) {
         self = self.transformed(by: by)
     }
 
-    static func * (lhs: Vector4, rhs: Matrix4) -> Vector4 {
+    static func * (lhs: Self, rhs: Matrix4) -> Self {
         return lhs.transformed(by: rhs)
     }
 
-    static func *= (lhs: inout Vector4, rhs: Matrix4) { lhs = lhs * rhs }
+    static func *= (lhs: inout Self, rhs: Matrix4) { lhs = lhs * rhs }
 }

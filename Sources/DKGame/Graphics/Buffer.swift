@@ -3,7 +3,7 @@ public enum GPUBufferStorageMode {
     case `private`  // only accessible to the GPU
 }
 
-public protocol Buffer {
+public protocol Buffer: AnyObject {
     func contents() -> UnsafeMutableRawPointer?
     func flush()
     var length: UInt { get }

@@ -36,6 +36,6 @@ public struct SamplerDescriptor {
     var compareFunction: CompareFunction = .never
 }
 
-public protocol SamplerState {
+public protocol SamplerState: AnyObject {
     var device: GraphicsDevice { get }
 }

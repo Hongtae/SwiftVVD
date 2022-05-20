@@ -180,19 +180,19 @@ public extension Matrix2 {
 }
 
 public extension Vector2 {
-    func transformed(by m: Matrix2) -> Vector2 {
+    func transformed(by m: Matrix2) -> Self {
         let x = Self.dot(self, m.column1)
         let y = Self.dot(self, m.column2)
-        return Vector2(x, y)
+        return Self(x, y)
     }
 
     mutating func transform(by: Matrix2) {
         self = self.transformed(by: by)
     }
 
-    static func * (lhs: Vector2, rhs: Matrix2) -> Vector2 {
+    static func * (lhs: Self, rhs: Matrix2) -> Self {
         return lhs.transformed(by: rhs)
     }
 
-    static func *= (lhs: inout Vector2, rhs: Matrix2) { lhs = lhs * rhs }
+    static func *= (lhs: inout Self, rhs: Matrix2) { lhs = lhs * rhs }
 }

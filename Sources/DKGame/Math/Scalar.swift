@@ -1,6 +1,7 @@
 import Foundation
 
 public typealias Scalar = Float32
+//public typealias Scalar = CGFloat
 
 public func clamp<T>(_ value: T, min: T, max: T) -> T where T: Comparable {
     if value < min { return min }
