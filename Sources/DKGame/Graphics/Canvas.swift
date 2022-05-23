@@ -1172,7 +1172,7 @@ public class Canvas {
         var triangles: [VertexData] = []
         triangles.reserveCapacity(quads.count * 6)
         for q in quads {
-            if q.texture === lastTexture {
+            if q.texture !== lastTexture {
                 if triangles.count > 0 {
                     self.encodeDrawCommand(shaderIndex: .vertexColorAlphaTexture,
                         vertices: triangles, texture: lastTexture!,
