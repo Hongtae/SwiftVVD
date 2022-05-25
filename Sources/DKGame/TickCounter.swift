@@ -9,6 +9,14 @@ public struct TickCounter: Equatable, Comparable {
 
     public static var now: TickCounter { TickCounter(timestamp: DKTimerSystemTick()) }
 
+    public init() {
+        self.timestamp = DKTimerSystemTick()
+    }
+
+    public init(timestamp: UInt64) {
+        self.timestamp = timestamp
+    }
+
     @discardableResult
     public mutating func reset() -> Double {
         let t: Double = Double(self.timestamp)

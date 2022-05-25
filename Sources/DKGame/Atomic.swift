@@ -6,7 +6,9 @@ public class AtomicNumber32 {
     public init(_ value: Int32 = 0) {
         atomic.value = value
     }
+    @discardableResult
     public func increment() -> Int32 { DKAtomicNumber32_Increment(&atomic) }
+    @discardableResult
     public func decrement() -> Int32 { DKAtomicNumber32_Decrement(&atomic) }
 
     public func add(_ addend: Int32) -> Int32 {
@@ -36,7 +38,9 @@ public class AtomicNumber64 {
     public init(_ value: Int64 = 0) {
         atomic.value = value
     }
+    @discardableResult
     public func increment() -> Int64 { DKAtomicNumber64_Increment(&atomic) }
+    @discardableResult
     public func decrement() -> Int64 { DKAtomicNumber64_Decrement(&atomic) }
 
     public func add(_ addend: Int64) -> Int64 {

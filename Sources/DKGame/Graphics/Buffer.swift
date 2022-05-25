@@ -1,4 +1,4 @@
-public enum GPUBufferStorageMode {
+public enum StorageMode: UInt {
     case shared     // accessible to both the CPU and the GPU
     case `private`  // only accessible to the GPU
 }

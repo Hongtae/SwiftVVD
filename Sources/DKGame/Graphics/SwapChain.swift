@@ -7,6 +7,7 @@ public protocol SwapChain {
 }
 
 extension SwapChain {
+    @discardableResult
     public func present() -> Bool {
         return present(waitEvents:[])
     }

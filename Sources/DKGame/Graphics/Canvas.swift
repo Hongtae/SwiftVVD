@@ -482,7 +482,7 @@ public class Canvas {
         var color: Color
     }
 
-    public let minimumScaleFactor: CGFloat = 0.000001
+    public static let minimumScaleFactor: CGFloat = 0.000001
 
     private var commandBuffer: CommandBuffer?
     private var renderTarget: Texture?
@@ -561,7 +561,7 @@ public class Canvas {
                           lineWidth: CGFloat = 1.0,
                           color: Color,
                           blendState: BlendState) {
-        if points.isEmpty || lineWidth < minimumScaleFactor { return }
+        if points.isEmpty || lineWidth < Self.minimumScaleFactor { return }
 
         let numPoints = points.count
         let halfWidth = Scalar(lineWidth * 0.5)
@@ -574,7 +574,7 @@ public class Canvas {
             let v1 = Vector2(points[index+1])
             var line = v1 - v0
             let length = line.length
-            if length > Scalar(minimumScaleFactor) {
+            if length > Scalar(Self.minimumScaleFactor) {
                 line.normalize()
                 let cosR = line.x
                 let sinR = line.y
@@ -602,7 +602,7 @@ public class Canvas {
                               color: Color,
                               blendState: BlendState) {
 
-        if points.isEmpty || lineWidth < minimumScaleFactor { return }
+        if points.isEmpty || lineWidth < Self.minimumScaleFactor { return }
 
         let numPoints = points.count
         let halfWidth = Scalar(lineWidth * 0.5)
@@ -614,7 +614,7 @@ public class Canvas {
             let v1 = Vector2(points[index+1])
             var line = v1 - v0
             let length = line.length
-            if length > Scalar(minimumScaleFactor) {
+            if length > Scalar(Self.minimumScaleFactor) {
                 line.normalize()
                 let cosR = line.x
                 let sinR = line.y
@@ -906,11 +906,11 @@ public class Canvas {
                             color: Color,
                             blendState: BlendState) {
         if bounds.isEmpty || bounds.isInfinite { return }
-        if inset.width < minimumScaleFactor || inset.height < minimumScaleFactor { return }
+        if inset.width < Self.minimumScaleFactor || inset.height < Self.minimumScaleFactor { return }
 
         let innerBounds = bounds.insetBy(dx: inset.width, dy: inset.height)
 
-        if innerBounds.width < minimumScaleFactor || innerBounds.height < minimumScaleFactor {
+        if innerBounds.width < Self.minimumScaleFactor || innerBounds.height < Self.minimumScaleFactor {
             return self.drawEllipse(bounds: bounds,
                                     transform: transform,
                                     color: color,
@@ -929,7 +929,7 @@ public class Canvas {
 
             let radiusSq = Vector2((pos1 - pos0).lengthSquared * 0.25,
                                    (pos0 - pos2).lengthSquared * 0.25)
-            if CGFloat(radiusSq.x * radiusSq.y) > minimumScaleFactor {
+            if CGFloat(radiusSq.x * radiusSq.y) > Self.minimumScaleFactor {
                 let ibpos0 = Vector2(Scalar(innerBounds.minX), Scalar(innerBounds.minY)).transformed(by: tm)  // left-top
                 let ibpos1 = Vector2(Scalar(innerBounds.maxX), Scalar(innerBounds.minY)).transformed(by: tm)  // right-top
                 let ibpos2 = Vector2(Scalar(innerBounds.minX), Scalar(innerBounds.maxY)).transformed(by: tm)  // left-bottom
@@ -984,7 +984,7 @@ public class Canvas {
 
             let radiusSq = Vector2((pos1 - pos0).lengthSquared * 0.25,
                                    (pos0 - pos2).lengthSquared * 0.25)
-            if CGFloat(radiusSq.x * radiusSq.y) > minimumScaleFactor {
+            if CGFloat(radiusSq.x * radiusSq.y) > Self.minimumScaleFactor {
                 // formula: X^2 / A^2 + Y^2 / B^2 = 1
                 // A^2 = bounds.width/2, B^2 = bounds.height/2
                 var ellipseData = EllipseUniformPushConstant(
@@ -1035,7 +1035,7 @@ public class Canvas {
 
             let radiusSq = Vector2((pos1 - pos0).lengthSquared * 0.25,
                                    (pos0 - pos2).lengthSquared * 0.25)
-            if CGFloat(radiusSq.x * radiusSq.y) > minimumScaleFactor {
+            if CGFloat(radiusSq.x * radiusSq.y) > Self.minimumScaleFactor {
                 // formula: X^2 / A^2 + Y^2 / B^2 = 1
                 // A^2 = bounds.width/2, B^2 = bounds.height/2
                 var ellipseData = EllipseUniformPushConstant(
@@ -1338,8 +1338,8 @@ public class Canvas {
 
         let bufferLength = MemoryLayout<VertexData>.stride * vertices.count
         guard let vertexBuffer = device.makeBuffer(length: bufferLength,
-                                                storageMode: .shared,
-                                                cacheMode: .writeOnly) else {
+                                                   storageMode: .shared,
+                                                   cpuCacheMode: .writeCombined) else {
             Log.err("Canvas.encodeDrawCommand: Cannot create GPU-Buffer object with length:\(bufferLength)")
             return
         }

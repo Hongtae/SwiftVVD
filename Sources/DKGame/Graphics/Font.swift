@@ -600,7 +600,7 @@ public class Font {
             let bufferLength = Int(width * height)
 
             let device = queue.device
-            if let stagingBuffer = device.makeBuffer(length: bufferLength, storageMode: .shared, cacheMode: .readWrite) {
+            if let stagingBuffer = device.makeBuffer(length: bufferLength, storageMode: .shared, cpuCacheMode: .writeCombined) {
                 let buff = stagingBuffer.contents()!
 
                 for i in 0..<height {

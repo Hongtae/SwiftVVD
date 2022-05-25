@@ -1010,7 +1010,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         return pipelineState
     }
 
-    public func makeBuffer(length: Int, storageMode: GPUBufferStorageMode, cacheMode: CPUCacheMode) -> Buffer? {
+    public func makeBuffer(length: Int, storageMode: StorageMode, cpuCacheMode: CPUCacheMode) -> Buffer? {
         guard length > 0 else { return nil }
 
         var buffer: VkBuffer? = nil

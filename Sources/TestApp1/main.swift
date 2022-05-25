@@ -29,30 +29,38 @@ class MyWindowDelegate: WindowDelegate {
     }
 }
 
+class MyFrame: Frame {
+    override func draw(canvas: Canvas) {
+        canvas.clear(color: Color(0, 0, 1))
+    }
+}
+
 class MyApplicationDelegate: ApplicationDelegate {
 
     var window: Window?
     var windowDelegate: WindowDelegate?
-    var graphicsDevice: GraphicsDevice?
+    var screen: Screen?
+    var frame: Frame?
 
     func initialize(application: Application) {
         print("app initialize")
 
-        self.graphicsDevice = makeGraphicsDevice()
-
         self.windowDelegate = MyWindowDelegate()
+        self.screen = Screen()
         self.window = makeWindow(name: "TestApp1",
                                  style: [.genericWindow, .acceptFileDrop],
                                  delegate: self.windowDelegate)
         self.window?.contentSize = CGSize(width: 800, height: 600)
+        self.screen?.window = self.window
         self.window?.activate()
     }
 
     func finalize(application: Application) {
         print("app finalize")
 
+        self.screen = nil
         self.window = nil
-        self.graphicsDevice = nil
+        self.frame = nil
     }
 }
 

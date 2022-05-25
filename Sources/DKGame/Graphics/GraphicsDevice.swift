@@ -1,6 +1,6 @@
-public enum CPUCacheMode {
-    case readWrite
-    case writeOnly
+public enum CPUCacheMode: UInt {
+    case defaultCache   // read write
+    case writeCombined  // write only
 }
 
 public protocol Event {
@@ -24,7 +24,7 @@ public protocol GraphicsDevice {
     func makeComputePipelineState(descriptor: ComputePipelineDescriptor, reflection: UnsafeMutablePointer<PipelineReflection>?) -> ComputePipelineState?
     func makeComputePipelineState(descriptor: ComputePipelineDescriptor) -> ComputePipelineState?
 
-    func makeBuffer(length: Int, storageMode: GPUBufferStorageMode, cacheMode: CPUCacheMode) -> Buffer?
+    func makeBuffer(length: Int, storageMode: StorageMode, cpuCacheMode: CPUCacheMode) -> Buffer?
     func makeTexture(descriptor: TextureDescriptor) -> Texture?
     func makeSamplerState(descriptor: SamplerDescriptor) -> SamplerState?
 
@@ -40,29 +40,4 @@ public extension GraphicsDevice {
     func makeComputePipelineState(descriptor: ComputePipelineDescriptor) -> ComputePipelineState? {
         return self.makeComputePipelineState(descriptor: descriptor, reflection: nil)
     }
-}
-
-public enum GraphicsAPI {
-    case auto, vulkan, metal, d3d12
-}
-
-public func makeGraphicsDevice(api: GraphicsAPI = .auto) -> GraphicsDevice?  {
-    var enableValidation = false
-#if DEBUG
-        enableValidation = true
-#endif
-
-    if api == .vulkan || api == .auto {
-#if ENABLE_VULKAN        
-        if let instance = VulkanInstance(enableValidation: enableValidation) {
-            return instance.makeDevice()
-        }
-#endif
-    }
-    if api == .metal || api == .auto {
-#if ENABLE_METAL
-
-#endif        
-    }
-    return nil
 }

@@ -74,9 +74,29 @@ public class GraphicsDeviceContext {
     private var copyQueues: [CommandQueue] = []
 }
 
+public enum GraphicsAPI {
+    case auto, vulkan, metal, d3d12
+}
+
 public func makeGraphicsDeviceContext(api: GraphicsAPI = .auto) -> GraphicsDeviceContext?  {
-    if let device = makeGraphicsDevice(api: api) {
-        return GraphicsDeviceContext(device: device)
+    var enableValidation = false
+#if DEBUG
+        enableValidation = true
+#endif
+
+    if api == .vulkan || api == .auto {
+#if ENABLE_VULKAN        
+        if let instance = VulkanInstance(enableValidation: enableValidation) {
+            if let device = instance.makeDevice() {
+                return GraphicsDeviceContext(device: device)
+            }
+        }
+#endif
+    }
+    if api == .metal || api == .auto {
+#if ENABLE_METAL
+
+#endif        
     }
     return nil
 }
