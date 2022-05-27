@@ -472,14 +472,25 @@ private class CanvasPipelineStates {
 
 public class Canvas {
     public struct ColoredVertex {
-        var position: CGPoint
-        var color: Color
+        public var position: CGPoint
+        public var color: Color
+
+        public init(position: CGPoint, color: Color) {
+            self.position = position
+            self.color = color
+        }
     }
 
     public struct TexturedVertex {
-        var position: CGPoint
-        var texcoord: CGPoint
-        var color: Color
+        public var position: CGPoint
+        public var texcoord: CGPoint
+        public var color: Color
+
+        public init(position: CGPoint, texcoord: CGPoint, color: Color) {
+            self.position = position
+            self.texcoord = texcoord
+            self.color = color
+        }
     }
 
     public static let minimumScaleFactor: CGFloat = 0.000001

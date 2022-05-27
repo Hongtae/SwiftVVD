@@ -36,18 +36,36 @@ public struct ColorWriteMask: OptionSet, Hashable {
 }
 
 public struct BlendState {
-    public var enabled : Bool = false 
+    public var enabled : Bool
 
-    public var sourceRGBBlendFactor : BlendFactor = .one
-    public var sourceAlphaBlendFactor : BlendFactor = .one
+    public var sourceRGBBlendFactor : BlendFactor
+    public var sourceAlphaBlendFactor : BlendFactor
 
-    public var destinationRGBBlendFactor : BlendFactor = .zero
-    public var destinationAlphaBlendFactor : BlendFactor = .zero
+    public var destinationRGBBlendFactor : BlendFactor
+    public var destinationAlphaBlendFactor : BlendFactor
 
-    public var rgbBlendOperation : BlendOperation = .add
-    public var alphaBlendOperation : BlendOperation = .add
+    public var rgbBlendOperation : BlendOperation
+    public var alphaBlendOperation : BlendOperation
 
-    public var writeMask : ColorWriteMask = .all
+    public var writeMask : ColorWriteMask
+
+    public init(enabled : Bool = false,
+                sourceRGBBlendFactor : BlendFactor = .one,
+                sourceAlphaBlendFactor : BlendFactor = .one,
+                destinationRGBBlendFactor : BlendFactor = .zero,
+                destinationAlphaBlendFactor : BlendFactor = .zero,
+                rgbBlendOperation : BlendOperation = .add,
+                alphaBlendOperation : BlendOperation = .add,
+                writeMask : ColorWriteMask = .all) {
+        self.enabled = enabled
+        self.sourceRGBBlendFactor = sourceRGBBlendFactor
+        self.sourceAlphaBlendFactor = sourceAlphaBlendFactor
+        self.destinationRGBBlendFactor = destinationRGBBlendFactor
+        self.destinationAlphaBlendFactor = destinationAlphaBlendFactor
+        self.rgbBlendOperation = rgbBlendOperation
+        self.alphaBlendOperation = alphaBlendOperation
+        self.writeMask = writeMask
+    }
 
     // preset
     public static let defaultOpaque = BlendState(enabled: false)

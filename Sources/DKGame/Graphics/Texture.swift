@@ -35,14 +35,34 @@ public protocol Texture: AnyObject {
 }
 
 public struct TextureDescriptor {
-    var textureType: TextureType
-    var pixelFormat: PixelFormat
-    
-    var width: UInt32
-    var height: UInt32
-    var depth: UInt32
-    var mipmapLevels: UInt32
-    var sampleCount: UInt32
-    var arrayLength: UInt32
-    var usage: TextureUsage
+    public var textureType: TextureType
+    public var pixelFormat: PixelFormat
+
+    public var width: UInt32
+    public var height: UInt32
+    public var depth: UInt32
+    public var mipmapLevels: UInt32
+    public var sampleCount: UInt32
+    public var arrayLength: UInt32
+    public var usage: TextureUsage
+
+    public init(textureType: TextureType,
+                pixelFormat: PixelFormat,
+                width: UInt32,
+                height: UInt32,
+                depth: UInt32,
+                mipmapLevels: UInt32,
+                sampleCount: UInt32,
+                arrayLength: UInt32,
+                usage: TextureUsage) {
+        self.textureType = textureType
+        self.pixelFormat = pixelFormat
+        self.width = width
+        self.height = height
+        self.depth = depth
+        self.mipmapLevels = mipmapLevels
+        self.sampleCount = sampleCount
+        self.arrayLength = arrayLength
+        self.usage = usage
+    }
 }

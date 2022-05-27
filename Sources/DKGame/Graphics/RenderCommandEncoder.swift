@@ -7,12 +7,26 @@ public enum VisibilityResultMode {
 }
 
 public struct Viewport {
-    var x: Float
-    var y: Float
-    var width: Float
-    var height: Float
-    var nearZ: Float
-    var farZ: Float
+    public var x: Float
+    public var y: Float
+    public var width: Float
+    public var height: Float
+    public var nearZ: Float
+    public var farZ: Float
+
+    public init(x: Float,
+                y: Float,
+                width: Float,
+                height: Float,
+                nearZ: Float,
+                farZ: Float) {
+        self.x = x
+        self.y = y
+        self.width = width
+        self.height = height
+        self.nearZ = nearZ
+        self.farZ = farZ
+    }
 }
 
 public protocol RenderCommandEncoder: CommandEncoder {

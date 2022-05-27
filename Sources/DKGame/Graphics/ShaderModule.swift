@@ -1,10 +1,20 @@
 import Foundation
 
 public struct ShaderSpecialization {
-    var type : ShaderDataType
-    var data : ContiguousBytes
-    var index : UInt32
-    var size : Int
+    public var type: ShaderDataType
+    public var data: ContiguousBytes
+    public var index: UInt32
+    public var size: Int
+
+    public init(type: ShaderDataType,
+                data: ContiguousBytes,
+                index: UInt32,
+                size: Int) {
+        self.type = type
+        self.data = data
+        self.index = index
+        self.size = size
+    }
 }
 
 public protocol ShaderModule {

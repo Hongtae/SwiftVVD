@@ -1,19 +1,41 @@
 public struct ShaderBinding {
-    var binding : UInt32
-    var type : ShaderDescriptorType
-    var arrayLength : UInt32
-    var immutableSamplers : SamplerState?
+    public var binding: UInt32
+    public var type: ShaderDescriptorType
+    public var arrayLength: UInt32
+    public var immutableSamplers: SamplerState?
+
+    public init(binding: UInt32,
+                type: ShaderDescriptorType,
+                arrayLength: UInt32,
+                immutableSamplers: SamplerState? = nil) {
+        self.binding = binding
+        self.type = type
+        self.arrayLength = arrayLength
+        self.immutableSamplers = immutableSamplers
+    }
 }
 
 public struct ShaderBindingSetLayout {
     public typealias Binding = ShaderBinding
-    var bindings : [Binding]
+    public var bindings: [Binding]
+
+    public init(bindings: [Binding]) {
+        self.bindings = bindings
+    }
 }
 
 public struct GPUBufferBindingInfo {
-    var buffer : Buffer
-    var offset : UInt64
-    var length : UInt64
+    public var buffer: Buffer
+    public var offset: UInt64
+    public var length: UInt64
+
+    public init(buffer: Buffer,
+                offset: UInt64,
+                length: UInt64) {
+        self.buffer = buffer
+        self.offset = offset
+        self.length = length
+    }
 }
 
 public protocol ShaderBindingSet {

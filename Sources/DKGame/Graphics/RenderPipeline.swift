@@ -1,7 +1,15 @@
 public struct RenderPipelineColorAttachmentDescriptor {
-    var index : UInt32
-    var pixelFormat : PixelFormat
-    var blendState : BlendState
+    public var index: UInt32
+    public var pixelFormat: PixelFormat
+    public var blendState: BlendState
+
+    public init(index: UInt32,
+                pixelFormat: PixelFormat,
+                blendState: BlendState) {
+        self.index = index
+        self.pixelFormat = pixelFormat
+        self.blendState = blendState
+    }
 }
 
 public enum PrimitiveType {
@@ -39,20 +47,46 @@ public enum DepthClipMode {
 }
 
 public struct RenderPipelineDescriptor {
-    var vertexFunction : ShaderFunction?
-    var fragmentFunction : ShaderFunction?
-    var vertexDescriptor : VertexDescriptor = .init()
-    var colorAttachments : [RenderPipelineColorAttachmentDescriptor] = []
-    var depthStencilAttachmentPixelFormat : PixelFormat = .invalid
-    var depthStencilDescriptor : DepthStencilDescriptor = .init()
+    public var vertexFunction: ShaderFunction?
+    public var fragmentFunction: ShaderFunction?
+    public var vertexDescriptor: VertexDescriptor
+    public var colorAttachments: [RenderPipelineColorAttachmentDescriptor]
+    public var depthStencilAttachmentPixelFormat: PixelFormat
+    public var depthStencilDescriptor: DepthStencilDescriptor
 
-    var primitiveTopology : PrimitiveType = .point
+    public var primitiveTopology: PrimitiveType
 
-    var triangleFillMode : TriangleFillMode = .fill
-    var depthClipMode : DepthClipMode = .clip
-    var cullMode : CullMode = .back
-    var frontFace : FrontFace = .ccw
-    var rasterizationEnabled : Bool = true
+    public var triangleFillMode: TriangleFillMode
+    public var depthClipMode: DepthClipMode
+    public var cullMode: CullMode
+    public var frontFace: FrontFace
+    public var rasterizationEnabled: Bool
+
+    public init(vertexFunction: ShaderFunction? = nil,
+                fragmentFunction: ShaderFunction? = nil,
+                vertexDescriptor: VertexDescriptor = .init(),
+                colorAttachments: [RenderPipelineColorAttachmentDescriptor] = [],
+                depthStencilAttachmentPixelFormat: PixelFormat = .invalid,
+                depthStencilDescriptor: DepthStencilDescriptor = .init(),
+                primitiveTopology: PrimitiveType = .point,
+                triangleFillMode: TriangleFillMode = .fill,
+                depthClipMode: DepthClipMode = .clip,
+                cullMode: CullMode = .back,
+                frontFace: FrontFace = .ccw,
+                rasterizationEnabled: Bool = true) {
+        self.vertexFunction = vertexFunction
+        self.fragmentFunction = fragmentFunction
+        self.vertexDescriptor = vertexDescriptor
+        self.colorAttachments = colorAttachments
+        self.depthStencilAttachmentPixelFormat = depthStencilAttachmentPixelFormat
+        self.depthStencilDescriptor = depthStencilDescriptor
+        self.primitiveTopology = primitiveTopology
+        self.triangleFillMode = triangleFillMode
+        self.depthClipMode = depthClipMode
+        self.cullMode = cullMode
+        self.frontFace = frontFace
+        self.rasterizationEnabled = rasterizationEnabled
+    }
 }
 
 public protocol RenderPipelineState {

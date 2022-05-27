@@ -137,30 +137,30 @@ public struct ShaderStageFlags: OptionSet {
 }
 
 public struct ShaderResourceBuffer {
-    var dataType : ShaderDataType
-    var alignment : UInt32
-    var size : UInt32
+    public var dataType: ShaderDataType
+    public var alignment: UInt32
+    public var size: UInt32
 }
 
 public struct ShaderResourceTexture {
-    var dataType : ShaderDataType
-    var textureType : TextureType
+    public var dataType: ShaderDataType
+    public var textureType: TextureType
 }
 
 public struct ShaderResourceThreadgroup {
-    var alignment : UInt32
-    var size : UInt32
+    public var alignment: UInt32
+    public var size: UInt32
 }
 
 public struct ShaderResourceStructMember {
-    var dataType : ShaderDataType
-    var name : String
-    var offset : UInt32
-    var size : UInt32   // declared size
-    var count : UInt32  // array length
-    var stride : UInt32 // stride between array elements
+    public var dataType: ShaderDataType
+    public var name: String
+    public var offset: UInt32
+    public var size: UInt32   // declared size
+    public var count: UInt32  // array length
+    public var stride: UInt32 // stride between array elements
 
-    var members : [ShaderResourceStructMember]
+    public var members: [ShaderResourceStructMember]
 }
 
 public enum ShaderResourceType: Comparable {
@@ -177,33 +177,33 @@ public enum ShaderResourceAccess {
 }
 
 public struct ShaderResource {
-    var set : UInt32
-    var binding : UInt32
-    var name : String
-    var type: ShaderResourceType
-    var stages : ShaderStageFlags
+    public var set: UInt32
+    public var binding: UInt32
+    public var name: String
+    public var type: ShaderResourceType
+    public var stages: ShaderStageFlags
 
-    var count : UInt32  // array length
-    var stride : UInt32 // stride between array elements
+    public var count: UInt32  // array length
+    public var stride: UInt32 // stride between array elements
 
-    var enabled : Bool
-    var access : ShaderResourceAccess
+    public var enabled: Bool
+    public var access: ShaderResourceAccess
 
     // typeinfo
-    var bufferTypeInfo : ShaderResourceBuffer?
-    var textureTypeInfo : ShaderResourceTexture?
-    var threadgroupTypeInfo : ShaderResourceThreadgroup?
+    public var bufferTypeInfo: ShaderResourceBuffer?
+    public var textureTypeInfo: ShaderResourceTexture?
+    public var threadgroupTypeInfo: ShaderResourceThreadgroup?
 
     // struct members (struct only)
-    var members : [ShaderResourceStructMember]
+    public var members: [ShaderResourceStructMember]
 }
 
 public struct ShaderPushConstantLayout {
-    var name : String
-    var offset : UInt32
-    var size : UInt32
-    var stages : ShaderStageFlags
-    var members : [ShaderResourceStructMember]
+    public var name: String
+    public var offset: UInt32
+    public var size: UInt32
+    public var stages: ShaderStageFlags
+    public var members: [ShaderResourceStructMember]
 }
 
 func describeShaderResourceStructMember(_ member: ShaderResourceStructMember, indent: Int = 0) -> String {

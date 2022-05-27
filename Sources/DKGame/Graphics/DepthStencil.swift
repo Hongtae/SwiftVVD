@@ -21,18 +21,42 @@ public enum StencilOperation {
 }
 
 public struct StencilDescriptor {
-    var stencilCompareFunction: CompareFunction = .always
-    var stencilFailureOperation: StencilOperation = .keep
-    var depthFailOperation: StencilOperation = .keep
-    var depthStencilPassOperation: StencilOperation = .keep
+    public var stencilCompareFunction: CompareFunction = .always
+    public var stencilFailureOperation: StencilOperation = .keep
+    public var depthFailOperation: StencilOperation = .keep
+    public var depthStencilPassOperation: StencilOperation = .keep
 
-    var readMask: UInt32 = 0xffffffff
-    var writeMask: UInt32 = 0xffffffff
+    public var readMask: UInt32 = 0xffffffff
+    public var writeMask: UInt32 = 0xffffffff
+
+    public init(stencilCompareFunction: CompareFunction = .always,
+                stencilFailureOperation: StencilOperation = .keep,
+                depthFailOperation: StencilOperation = .keep,
+                depthStencilPassOperation: StencilOperation = .keep,
+                readMask: UInt32 = 0xffffffff,
+                writeMask: UInt32 = 0xffffffff) {
+        self.stencilCompareFunction = stencilCompareFunction
+        self.stencilFailureOperation = stencilFailureOperation
+        self.depthFailOperation = depthFailOperation
+        self.depthStencilPassOperation = depthStencilPassOperation
+        self.readMask = readMask
+        self.writeMask = writeMask
+    }
 }
 
 public struct DepthStencilDescriptor {
-    var depthCompareFunction: CompareFunction = .always
-    var frontFaceStencil: StencilDescriptor = .init()
-    var backFaceStencil: StencilDescriptor = .init()
-    var depthWriteEnabled: Bool = false
+    public var depthCompareFunction: CompareFunction
+    public var frontFaceStencil: StencilDescriptor
+    public var backFaceStencil: StencilDescriptor
+    public var depthWriteEnabled: Bool
+
+    public init(depthCompareFunction: CompareFunction = .always,
+                frontFaceStencil: StencilDescriptor = .init(),
+                backFaceStencil: StencilDescriptor = .init(),
+                depthWriteEnabled: Bool = false) {
+        self.depthCompareFunction = depthCompareFunction
+        self.frontFaceStencil = frontFaceStencil
+        self.backFaceStencil = backFaceStencil
+        self.depthWriteEnabled = depthWriteEnabled
+    }
 }

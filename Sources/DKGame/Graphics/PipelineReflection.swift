@@ -23,4 +23,12 @@ public struct PipelineReflection: CustomStringConvertible {
         }
         return str
     }
+
+    public init(inputAttributes: [ShaderAttribute] = [],
+                pushConstantLayouts: [ShaderPushConstantLayout] = [],
+                resources: [ShaderResource] = []) {
+        self.inputAttributes = inputAttributes
+        self.pushConstantLayouts = pushConstantLayouts
+        self.resources = resources
+    }
 }
