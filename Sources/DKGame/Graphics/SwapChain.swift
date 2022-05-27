@@ -4,6 +4,8 @@ public protocol SwapChain {
 
     func currentRenderPassDescriptor() -> RenderPassDescriptor
     func present(waitEvents: [Event]) -> Bool
+
+    var commandQueue: CommandQueue { get }
 }
 
 extension SwapChain {

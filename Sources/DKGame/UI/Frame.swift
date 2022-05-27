@@ -41,7 +41,7 @@ open class Frame {
     public private(set) unowned var screen: Screen? = nil
     public private(set) unowned var superframe: Frame? = nil
     public private(set) var subframes: [Frame] = []
-    private var loaded = false
+    public private(set) var loaded = false
     private var drawSurface = true
 
     public var numberOfDescendants: Int {
@@ -197,8 +197,9 @@ open class Frame {
     public init() {
     }
 
-    public func draw(commandQueue: CommandQueue) {
-        _ = self.drawHierarchy(commandQueue: commandQueue)
+    @discardableResult
+    public func draw() -> Bool {
+        return self.drawHierarchy()
     }
 
     public func redraw() {
@@ -340,16 +341,17 @@ open class Frame {
         counter.decrement()
     }
 
-    func drawHierarchy(commandQueue: CommandQueue) -> Bool {
+    func drawHierarchy() -> Bool {
         if self.loaded {
             assert(self.screen != nil)
+            let screen = self.screen!
 
             var drawSelf = false
             for frame in subframes {
                 if frame.hidden {
                     continue
                 }
-                if frame.drawHierarchy(commandQueue: commandQueue) {
+                if frame.drawHierarchy() {
                     drawSelf = true
                 }
             }
@@ -357,38 +359,38 @@ open class Frame {
             if drawSelf || self.drawSurface {
                 // create canvas.
                 var canvas: Canvas? = nil
-                if self.screen!.frame === self {
-                    canvas = self.screen!.makeCanvas()
+                if screen.frame === self {
+                    canvas = screen.makeCanvas()
                     self.renderTarget = nil
                 } else {
                     if self.renderTarget == nil {
                         // use screen's device (not from commandQueue.device)
-                        let device = self.screen!.graphicsDeviceContext!.device
+                        if let device = screen.graphicsDeviceContext?.device {
+                            let width = UInt32(self.resolution.width.rounded())
+                            let height = UInt32(self.resolution.height.rounded())
 
-                        let width = UInt32(self.resolution.width.rounded())
-                        let height = UInt32(self.resolution.height.rounded())
+                            assert(self.pixelFormat.isColorFormat())
 
-                        assert(self.pixelFormat.isColorFormat())
-
-                        let desc = TextureDescriptor(
-                            textureType: .type2D,
-                            pixelFormat: self.pixelFormat,
-                            width: width,
-                            height: height,
-                            depth: 1,
-                            mipmapLevels: 1,
-                            sampleCount: 1,
-                            arrayLength: 1,
-                            usage: [.sampled, .renderTarget]
-                        )
-                        self.renderTarget = device.makeTexture(descriptor: desc)
+                            let desc = TextureDescriptor(
+                                textureType: .type2D,
+                                pixelFormat: self.pixelFormat,
+                                width: width,
+                                height: height,
+                                depth: 1,
+                                mipmapLevels: 1,
+                                sampleCount: 1,
+                                arrayLength: 1,
+                                usage: [.sampled, .renderTarget]
+                            )
+                            self.renderTarget = device.makeTexture(descriptor: desc)
+                        }
                     }
                     if renderTarget == nil {
                         Log.err("Frame.draw() failed, cannot create render target texture")
                         return false
                     }
 
-                    if let commandBuffer = commandQueue.makeCommandBuffer() {
+                    if let commandBuffer = screen.swapChain?.commandQueue.makeCommandBuffer() {
                         canvas = Canvas(commandBuffer: commandBuffer,
                                         renderTarget: self.renderTarget!)
                     } else {
@@ -434,21 +436,36 @@ open class Frame {
     }
 
     func loadHierarchy(screen: Screen, resolution: CGSize) {
-        if self.loaded == false {
+        if self.screen !== screen {
+            self.unloadHierarchy()
+            assert(self.loaded == false)
+
             self.screen = screen
             // update resolution
-
+            self.resolution = CGSize(width: resolution.width.rounded(),
+                                     height: resolution.height.rounded())
             self.loaded = true
             self.loaded(withScreen: screen)
+            self.resolutionChanged(self.resolution)
+            self.updateResolution()
+
             subframes.forEach { $0.loadHierarchy(screen: screen, resolution: resolution)}
         }
     }
 
     func unloadHierarchy() {
+        subframes.forEach { $0.unloadHierarchy() }
+
         if self.loaded {
-            self.loaded = false
+            assert(self.screen != nil)
+            self.screen!.leaveHoverFrame(self)
+            self.screen!.removeFocusFrameForAnyDevices(frame: self)
+            self.screen!.removeKeyFrameForAnyDevices(frame: self)
+
             self.unload()
-            subframes.forEach { $0.unloadHierarchy() }
         }
+
+        self.loaded = false
+        self.screen = nil
     }
 }

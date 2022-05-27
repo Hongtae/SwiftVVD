@@ -498,54 +498,33 @@ public class Canvas {
     private var commandBuffer: CommandBuffer?
     private var renderTarget: Texture?
 
-    private var _viewport: CGRect	  
-    private var _contentBounds: CGRect	  
-    private var _contentTransform: Matrix3 
-    private var _deviceOrientation: Matrix3 
-
     private var screenTransform: Matrix3 // for 2d scene
 
     private var pipelineStates: CanvasPipelineStates?
 
     public var viewport: CGRect {
-        get { _viewport }
-        set(rect) {
-            _viewport = rect
-            self.updateTransform()
-        }
+        didSet { if viewport != oldValue { self.updateTransform() }}
     }
 
     public var contentBounds: CGRect {
-        get { _contentBounds }
-        set(rect) {
-            _contentBounds = rect
-            self.updateTransform()
-        }
+        didSet { if contentBounds != oldValue { self.updateTransform() }}
     }
 
     public var contentTransform: Matrix3 {
-        get { _contentTransform }
-        set(mat) {
-            _contentTransform = mat
-            self.updateTransform()
-        }
+        didSet { if contentTransform != oldValue { self.updateTransform() }}
     }
 
     public var deviceOrientation: Matrix3 {
-        get { _deviceOrientation }
-        set(mat) {
-            _deviceOrientation = mat
-            self.updateTransform()
-        }
+        didSet { if deviceOrientation != oldValue { self.updateTransform() }}
     }
 
     public init(commandBuffer: CommandBuffer, renderTarget: Texture) {
         self.commandBuffer = commandBuffer
         self.renderTarget = renderTarget
-        self._viewport = CGRect(x: 0, y: 0, width: 1, height: 1)
-        self._contentBounds = CGRect(x: 0, y: 0, width: 1, height: 1)
-        self._contentTransform = .identity
-        self._deviceOrientation = .identity
+        self.viewport = CGRect(x: 0, y: 0, width: 1, height: 1)
+        self.contentBounds = CGRect(x: 0, y: 0, width: 1, height: 1)
+        self.contentTransform = .identity
+        self.deviceOrientation = .identity
         self.screenTransform = .identity
         self.pipelineStates = .sharedInstance(device: commandBuffer.device)
     }
@@ -784,13 +763,13 @@ public class Canvas {
                          rightBottom rb: CGPoint,
                          color: Color,
                          blendState: BlendState) {
-        let tpos0 = lt.transformed(by: self._contentTransform)
-        let tpos1 = rt.transformed(by: self._contentTransform)
-        let tpos2 = lb.transformed(by: self._contentTransform)
-        let tpos3 = rb.transformed(by: self._contentTransform)
+        let tpos0 = lt.transformed(by: self.contentTransform)
+        let tpos1 = rt.transformed(by: self.contentTransform)
+        let tpos2 = lb.transformed(by: self.contentTransform)
+        let tpos3 = rb.transformed(by: self.contentTransform)
 
-        let t1 = self._contentBounds.intersectsTriangle(tpos0, tpos2, tpos1)
-        let t2 = self._contentBounds.intersectsTriangle(tpos1, tpos2, tpos3)
+        let t1 = self.contentBounds.intersectsTriangle(tpos0, tpos2, tpos1)
+        let t2 = self.contentBounds.intersectsTriangle(tpos1, tpos2, tpos3)
         if t1 && t2 {
             let vertices = [lt, lb, rt, rb, lb, rb]
             self.drawTriangles(vertices, color: color, blendState: blendState)
@@ -809,13 +788,13 @@ public class Canvas {
                          rightBottom rb: TexturedVertex,
                          texture: Texture,
                          blendState: BlendState) {
-        let tpos0 = lt.position.transformed(by: self._contentTransform)
-        let tpos1 = rt.position.transformed(by: self._contentTransform)
-        let tpos2 = lb.position.transformed(by: self._contentTransform)
-        let tpos3 = rb.position.transformed(by: self._contentTransform)
+        let tpos0 = lt.position.transformed(by: self.contentTransform)
+        let tpos1 = rt.position.transformed(by: self.contentTransform)
+        let tpos2 = lb.position.transformed(by: self.contentTransform)
+        let tpos3 = rb.position.transformed(by: self.contentTransform)
 
-        let t1 = self._contentBounds.intersectsTriangle(tpos0, tpos2, tpos1)
-        let t2 = self._contentBounds.intersectsTriangle(tpos1, tpos2, tpos3)
+        let t1 = self.contentBounds.intersectsTriangle(tpos0, tpos2, tpos1)
+        let t2 = self.contentBounds.intersectsTriangle(tpos1, tpos2, tpos3)
         if t1 && t2 {
             let vertices = [lt, lb, rt, rb, lb, rb]
             self.drawTriangles(vertices, texture: texture, blendState: blendState)
@@ -839,13 +818,13 @@ public class Canvas {
         let pos2 = CGPoint(x: rect.minX, y: rect.maxY).transformed(by: tm) // left-bottom
         let pos3 = CGPoint(x: rect.maxX, y: rect.maxY).transformed(by: tm) // right-bottom
 
-        let tpos0 = pos0.transformed(by: _contentTransform)
-        let tpos1 = pos1.transformed(by: _contentTransform)
-        let tpos2 = pos2.transformed(by: _contentTransform)
-        let tpos3 = pos3.transformed(by: _contentTransform)
+        let tpos0 = pos0.transformed(by: contentTransform)
+        let tpos1 = pos1.transformed(by: contentTransform)
+        let tpos2 = pos2.transformed(by: contentTransform)
+        let tpos3 = pos3.transformed(by: contentTransform)
         
-        let t1 = _contentBounds.intersectsTriangle(tpos0, tpos2, tpos1)
-        let t2 = _contentBounds.intersectsTriangle(tpos1, tpos2, tpos3)
+        let t1 = contentBounds.intersectsTriangle(tpos0, tpos2, tpos1)
+        let t2 = contentBounds.intersectsTriangle(tpos1, tpos2, tpos3)
         if t1 && t2 {
             let vertices = [ pos0, pos2, pos1, pos1, pos2, pos3 ]
             self.drawTriangles(vertices, color: color, blendState: blendState)
@@ -877,13 +856,13 @@ public class Canvas {
         let tex2 = CGPoint(x: texRect.minX, y: texRect.maxY).transformed(by: texTM) // left-bottom
         let tex3 = CGPoint(x: texRect.maxX, y: texRect.maxY).transformed(by: texTM) // right-bottom
 
-        let tpos0 = pos0.transformed(by: _contentTransform)
-        let tpos1 = pos1.transformed(by: _contentTransform)
-        let tpos2 = pos2.transformed(by: _contentTransform)
-        let tpos3 = pos3.transformed(by: _contentTransform)
+        let tpos0 = pos0.transformed(by: contentTransform)
+        let tpos1 = pos1.transformed(by: contentTransform)
+        let tpos2 = pos2.transformed(by: contentTransform)
+        let tpos3 = pos3.transformed(by: contentTransform)
         
-        let t1 = _contentBounds.intersectsTriangle(tpos0, tpos2, tpos1)
-        let t2 = _contentBounds.intersectsTriangle(tpos1, tpos2, tpos3)
+        let t1 = contentBounds.intersectsTriangle(tpos0, tpos2, tpos1)
+        let t2 = contentBounds.intersectsTriangle(tpos1, tpos2, tpos3)
         if t1 && t2 {
             let vertices: [TexturedVertex] = [
                 TexturedVertex(position: pos0, texcoord: tex0, color: color),
@@ -1224,8 +1203,8 @@ public class Canvas {
         let lineWidth = font.lineWidth(of: text)
         let textBounds = font.bounds(of: text)
 
-        let viewportSize = CGSize(width: _viewport.width, height: _viewport.height)
-        let contentScale = CGSize(width: _contentBounds.width, height: _contentBounds.height)
+        let viewportSize = CGSize(width: viewport.width, height: viewport.height)
+        let contentScale = CGSize(width: contentBounds.width, height: contentBounds.height)
 
         // change local-coords to pixel-coords
         let scaleToScreen = CGSize(width: viewportSize.width / contentScale.width,
@@ -1269,12 +1248,12 @@ public class Canvas {
 
     private func updateTransform() {
         // let viewportOffset = _viewport.origin
-        let contentOffset = _contentBounds.origin
-        let contentScale = _contentBounds.size
+        let contentOffset = contentBounds.origin
+        let contentScale = contentBounds.size
 
         assert(contentScale.width > 0.0 && contentScale.height > 0.0)
 
-        let targetOrient = AffineTransform2(_deviceOrientation)
+        let targetOrient = AffineTransform2(deviceOrientation)
         let offset = AffineTransform2(origin: -Vector2(contentOffset)).matrix3
         let s = LinearTransform2(scaleX: 1.0 / Scalar(contentScale.width), scaleY: 1.0 / Scalar(contentScale.height))
 
@@ -1283,7 +1262,7 @@ public class Canvas {
                                 row2: Vector3(0.0, -2.0, 0.0),
                                 row3: Vector3(-1.0, 1.0, 1.0))
 
-        self.screenTransform = _contentTransform * offset * 
+        self.screenTransform = contentTransform * offset * 
             AffineTransform2(linear: s).transformed(by: targetOrient).matrix3 * normalize
     }
 

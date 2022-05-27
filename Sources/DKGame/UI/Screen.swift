@@ -80,6 +80,10 @@ public class Screen {
 
                 if state() == .running {
                     if let frame = fs.0, fs.1 != nil {
+                        if frame.loaded == false {
+                            let res = synchronizedBy(locking: self.propertyLock) { self.resolution }
+                            frame.loadHierarchy(screen: self, resolution: res)
+                        }
                         if let dispatchQueue = self.dispatchQueue {
                             assert(frameUpdateCounter.load() == 0)
                             frameUpdateCounter.increment()
@@ -119,6 +123,10 @@ public class Screen {
                 if frameDrawn && state() == .running {
                     fs.1?.present()
                 }
+            }
+
+            if let frame = synchronizedBy(locking: self.propertyLock, { self.frame }) {
+                frame.unloadHierarchy()
             }
 
             synchronizedBy(locking: threadCond) {

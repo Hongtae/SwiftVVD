@@ -22,6 +22,8 @@ public class VulkanSwapChain: SwapChain {
     private var frameIndex: UInt32 = 0
     private var renderPassDescriptor: RenderPassDescriptor
 
+    public var commandQueue: CommandQueue { queue }
+
     public init?(queue: VulkanCommandQueue, window: Window) {
 
         let device = queue.device as! VulkanGraphicsDevice
