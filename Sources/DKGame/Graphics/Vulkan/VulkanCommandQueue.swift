@@ -108,6 +108,8 @@ public class VulkanCommandQueue: CommandQueue {
                 if result == VK_SUCCESS {
                     completionHandler.addCompletionHandler(fence: fence, op: callback)
                 }
+            } else {
+                fatalError("CommandQueue.submit: completion handler not available.")
             }
         } else {
             result = vkQueueSubmit(self.queue, UInt32(submits.count), submits, nil)

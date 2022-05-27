@@ -98,13 +98,17 @@ public func decompress(input: InputStream,
     inStream.userContext = unsafeBitCast(input as AnyObject, to: DKStreamContext.self)
     inStream.read = { ctxt, data, size in
         let input = unsafeBitCast(ctxt, to: AnyObject.self) as! InputStream
-        return UInt64(input.read(data!.assumingMemoryBound(to: UInt8.self), maxLength: size))
+        let read = input.read(data!.assumingMemoryBound(to: UInt8.self), maxLength: size)
+        if read < 0 { return ~UInt64(0) }
+        return UInt64(read)
     }
     var outStream = DKStream()
     outStream.userContext = unsafeBitCast(output as AnyObject, to: DKStreamContext.self)
-    inStream.write = { ctxt, data, size in
+    outStream.write = { ctxt, data, size in
         let output = unsafeBitCast(ctxt, to: AnyObject.self) as! OutputStream
-        return UInt64(output.write(data!.assumingMemoryBound(to: UInt8.self), maxLength: size))
+        let written = output.write(data!.assumingMemoryBound(to: UInt8.self), maxLength: size)
+        if written < 0 { return ~UInt64(0) }
+        return UInt64(written)
     }
 
     let inputStreamOpen = input.streamStatus == .notOpen

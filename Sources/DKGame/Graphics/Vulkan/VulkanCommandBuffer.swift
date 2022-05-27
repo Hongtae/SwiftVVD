@@ -116,38 +116,39 @@ public class VulkanCommandBuffer: CommandBuffer {
             self.bufferHolder = TemporaryBufferHolder(label: "VulkanCommandBuffer")
             let bufferHolder = self.bufferHolder!
 
-            var submitWaitSemaphores: [VkSemaphore] = []
+            var submitWaitSemaphores: [VkSemaphore?] = []
             var submitWaitStageMasks: [VkPipelineStageFlags] = []
-            var submitSignalSemaphores: [VkSemaphore] = []
-
             var submitWaitTimelineSemaphoreValues: [UInt64] = []
+
+            var submitSignalSemaphores: [VkSemaphore?] = []
             var submitSignalTimelineSemaphoreValues: [UInt64] = []
 
             // reserve storage for semaphores.
             var numWaitSemaphores = 0
             var numSignalSemaphores = 0
             for encoder in self.encoders {
-                numWaitSemaphores += encoder.waitSemaphores.count
-                numSignalSemaphores += encoder.signalSemaphores.count
+                numWaitSemaphores = max(encoder.waitSemaphores.count, numWaitSemaphores)
+                numSignalSemaphores = max(encoder.signalSemaphores.count, numSignalSemaphores)
             }
             submitWaitSemaphores.reserveCapacity(numWaitSemaphores)
             submitWaitStageMasks.reserveCapacity(numWaitSemaphores)
-            submitSignalSemaphores.reserveCapacity(numSignalSemaphores)
-
             submitWaitTimelineSemaphoreValues.reserveCapacity(numWaitSemaphores)
+
+            submitSignalSemaphores.reserveCapacity(numSignalSemaphores)
             submitSignalTimelineSemaphoreValues.reserveCapacity(numSignalSemaphores)
 
             self.submitCommandBuffers.reserveCapacity(self.encoders.count)
             self.submitInfos.reserveCapacity(self.encoders.count)
 
             for encoder in self.encoders {
-                let commandBuffersOffset = submitCommandBuffers.count
-                let waitSemaphoresOffset = submitWaitSemaphores.count
-                let signalSemaphoresOffset = submitSignalSemaphores.count
 
-                assert(submitWaitStageMasks.count == waitSemaphoresOffset)
-                assert(submitWaitTimelineSemaphoreValues.count == waitSemaphoresOffset)
-                assert(submitSignalTimelineSemaphoreValues.count == signalSemaphoresOffset)
+                submitWaitSemaphores.removeAll(keepingCapacity: true)
+                submitWaitStageMasks.removeAll(keepingCapacity: true)
+                submitSignalSemaphores.removeAll(keepingCapacity: true)
+                submitWaitTimelineSemaphoreValues.removeAll(keepingCapacity: true)
+                submitSignalTimelineSemaphoreValues.removeAll(keepingCapacity: true)
+
+                let commandBuffersOffset = self.submitCommandBuffers.count
 
                 var bufferInfo = VkCommandBufferAllocateInfo()
                 bufferInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO
@@ -211,31 +212,30 @@ public class VulkanCommandBuffer: CommandBuffer {
                     submitInfo.commandBufferCount = UInt32(count)
                     submitInfo.pCommandBuffers = unsafePointerCopy(collection: commandBuffers, holder: bufferHolder)                  
                 }
-                if submitWaitSemaphores.count > waitSemaphoresOffset {
-                    let count = submitWaitSemaphores.count - waitSemaphoresOffset
-                    let range = waitSemaphoresOffset ..< (waitSemaphoresOffset + count)
-                    let semaphores = submitWaitSemaphores[range].map { Optional($0) }
-                    let stages = submitWaitStageMasks[range]
-                    let timelineValues = submitWaitTimelineSemaphoreValues[range]
+                if submitWaitSemaphores.isEmpty == false {
+
+                    let count = submitWaitSemaphores.count
+
+                    assert(submitWaitStageMasks.count == count)
+                    assert(submitWaitTimelineSemaphoreValues.count == count)
 
                     submitInfo.waitSemaphoreCount = UInt32(count)
-                    submitInfo.pWaitSemaphores = unsafePointerCopy(collection: semaphores, holder: bufferHolder)
-                    submitInfo.pWaitDstStageMask = unsafePointerCopy(collection: stages, holder: bufferHolder)
+                    submitInfo.pWaitSemaphores = unsafePointerCopy(collection: submitWaitSemaphores, holder: bufferHolder)
+                    submitInfo.pWaitDstStageMask = unsafePointerCopy(collection: submitWaitStageMasks, holder: bufferHolder)
 
-                    timelineSemaphoreSubmitInfo.pWaitSemaphoreValues = unsafePointerCopy(collection: timelineValues, holder: bufferHolder)
                     timelineSemaphoreSubmitInfo.waitSemaphoreValueCount = UInt32(count)
+                    timelineSemaphoreSubmitInfo.pWaitSemaphoreValues = unsafePointerCopy(collection: submitWaitTimelineSemaphoreValues, holder: bufferHolder)
                 }
-                if submitSignalSemaphores.count > signalSemaphoresOffset {
-                    let count = submitSignalSemaphores.count - signalSemaphoresOffset
-                    let range = signalSemaphoresOffset ..< (signalSemaphoresOffset + count)
-                    let semaphores = submitSignalSemaphores[range].map { Optional($0) }
-                    let timelineValues = submitSignalTimelineSemaphoreValues[range]
+                if submitSignalSemaphores.isEmpty == false {
+                    let count = submitSignalSemaphores.count
+
+                    assert(submitSignalTimelineSemaphoreValues.count == count)
 
                     submitInfo.signalSemaphoreCount = UInt32(count)
-                    submitInfo.pSignalSemaphores = unsafePointerCopy(collection: semaphores, holder: bufferHolder)
+                    submitInfo.pSignalSemaphores = unsafePointerCopy(collection: submitSignalSemaphores, holder: bufferHolder)
 
-                    timelineSemaphoreSubmitInfo.pSignalSemaphoreValues = unsafePointerCopy(collection: timelineValues, holder: bufferHolder)
                     timelineSemaphoreSubmitInfo.signalSemaphoreValueCount = UInt32(count)
+                    timelineSemaphoreSubmitInfo.pSignalSemaphoreValues = unsafePointerCopy(collection: submitSignalTimelineSemaphoreValues, holder: bufferHolder)
                 }
                 submitInfo.pNext = UnsafeRawPointer(unsafePointerCopy(from: timelineSemaphoreSubmitInfo, holder: bufferHolder))
                 self.submitInfos.append(submitInfo)

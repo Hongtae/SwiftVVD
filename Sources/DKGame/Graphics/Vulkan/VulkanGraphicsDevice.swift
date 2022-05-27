@@ -1065,7 +1065,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         }
 
         let memoryType: VkMemoryType = self.deviceMemoryTypes[Int(memAllocInfo.memoryTypeIndex)]
-        let deviceMemory = VulkanDeviceMemory(device: self, memory: memory!, type: memoryType, size: UInt(memAllocInfo.allocationSize))
+        let deviceMemory = VulkanDeviceMemory(device: self, memory: memory!, type: memoryType, size: memAllocInfo.allocationSize)
         memory = nil
 
         let bufferObject = VulkanBuffer(memory: deviceMemory, buffer: buffer!, bufferCreateInfo: bufferCreateInfo)
@@ -1172,7 +1172,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         }
 
         let memoryType = self.deviceMemoryTypes[Int(memAllocInfo.memoryTypeIndex)]
-        let deviceMemory = VulkanDeviceMemory(device: self, memory: memory!, type: memoryType, size: UInt(memAllocInfo.allocationSize))
+        let deviceMemory = VulkanDeviceMemory(device: self, memory: memory!, type: memoryType, size: memAllocInfo.allocationSize)
         memory = nil
 
         let imageObject = VulkanImage(memory: deviceMemory, image: image!, imageCreateInfo: imageCreateInfo)

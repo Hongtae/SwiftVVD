@@ -35,7 +35,7 @@ public class VulkanBuffer {
         }
     }
 
-    public var length: UInt { self.deviceMemory!.length }
+    public var length: UInt { UInt(self.deviceMemory!.length) }
 
     public func contents() -> UnsafeMutableRawPointer? {
         return self.deviceMemory!.mapped
@@ -45,10 +45,10 @@ public class VulkanBuffer {
         let length = self.deviceMemory!.length
         if offset < length {
             if size > 0 {
-                self.deviceMemory!.flush(offset: offset, size: size)
+                self.deviceMemory!.flush(offset: UInt64(offset), size: UInt64(size))
             }
         }
-        self.deviceMemory!.invalidate(offset: 0, size: UInt(VK_WHOLE_SIZE))
+        self.deviceMemory!.invalidate(offset: 0, size: VK_WHOLE_SIZE)
     }
 
     public func makeBufferView(pixelFormat: PixelFormat, offset: UInt, range: UInt) -> VulkanBufferView? {

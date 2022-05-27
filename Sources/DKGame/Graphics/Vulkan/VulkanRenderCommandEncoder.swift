@@ -15,6 +15,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
     class Encoder: VulkanCommandEncoder {
         let renderPassDescriptor: RenderPassDescriptor
         unowned let commandBuffer: VulkanCommandBuffer
+        let device: VulkanGraphicsDevice
 
         var pipelineStateObjects: [VulkanRenderPipelineState] = []
         var descriptorSets: [VulkanDescriptorSet] = []
@@ -32,6 +33,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
 
         init(commandBuffer: VulkanCommandBuffer, descriptor: RenderPassDescriptor) {   
             self.commandBuffer = commandBuffer
+            self.device = commandBuffer.device as! VulkanGraphicsDevice
             self.renderPassDescriptor = descriptor
             super.init()
 
@@ -60,8 +62,6 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
         }
 
         deinit {
-            let device = self.commandBuffer.device as! VulkanGraphicsDevice
-
             if let renderPass = self.renderPass {
                 vkDestroyRenderPass(device.device, renderPass, device.allocationCallbacks)
             }

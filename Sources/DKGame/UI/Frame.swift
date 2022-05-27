@@ -309,7 +309,10 @@ open class Frame {
     open func draw(canvas: Canvas) { canvas.clear(color: .white) }
     open func drawOverlay(canvas: Canvas) {}
 
-    open func resolutionChanged(_ size: CGSize) {}
+    open func resolutionChanged(_ size: CGSize) {
+        let scaleFactor = self.screen?.contentScaleFactor ?? 1.0
+        self.contentScale = CGSize(width: size.width / scaleFactor, height: size.height / scaleFactor)
+    }
 
     open func hitTest(position pt: CGPoint) -> Bool { true }
     open func contentHitTest(position pt: CGPoint) -> Bool { true }
@@ -323,11 +326,13 @@ open class Frame {
 
     func updateHierarchy(tick: UInt64, delta: Double, date: Date) {
         assert(self.loaded)
+        self.update(tick: tick, delta: delta, date: date)
         subframes.forEach { $0.updateHierarchy(tick: tick, delta: delta, date: date) }
     }
 
     func updateHierarchyAsync(queue: DispatchQueue, counter: AtomicNumber64, tick: UInt64, delta: Double, date: Date) {
         assert(self.loaded)
+        self.update(tick: tick, delta: delta, date: date)
         for frame in subframes {
             counter.increment()
             queue.async {
@@ -390,7 +395,7 @@ open class Frame {
                         return false
                     }
 
-                    if let commandBuffer = screen.swapChain?.commandQueue.makeCommandBuffer() {
+                    if let commandBuffer = screen.commandQueue?.makeCommandBuffer() {
                         canvas = Canvas(commandBuffer: commandBuffer,
                                         renderTarget: self.renderTarget!)
                     } else {

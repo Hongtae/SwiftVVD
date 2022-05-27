@@ -165,8 +165,8 @@ public class VulkanSwapChain: SwapChain {
         let physicalDevice = device.physicalDevice
 
         let contentBounds = self.window.contentBounds
-        var width = UInt32(contentBounds.width)
-        var height = UInt32(contentBounds.height)
+        var width = UInt32(contentBounds.width.rounded())
+        var height = UInt32(contentBounds.height.rounded())
 
         var err: VkResult = VK_SUCCESS
         let swapchainOld = self.swapchain
@@ -200,7 +200,7 @@ public class VulkanSwapChain: SwapChain {
 
         var swapchainExtent = VkExtent2D()
         // If width (and height) equals the special value 0xFFFFFFFF, the size of the surface will be set by the swapchain
-        if surfaceCaps.currentExtent.width == UInt32.max {
+        if surfaceCaps.currentExtent.width == 0xFFFFFFFF {
             // If the surface size is undefined, the size is set to
             // the size of the images requested.
             swapchainExtent.width = width
@@ -238,7 +238,7 @@ public class VulkanSwapChain: SwapChain {
 
         // Determine the number of images
         var desiredNumberOfSwapchainImages: UInt32 = surfaceCaps.minImageCount + 1
-        if (surfaceCaps.maxImageCount > 0) && (desiredNumberOfSwapchainImages > surfaceCaps.maxImageCount) {
+        if surfaceCaps.maxImageCount > 0 && desiredNumberOfSwapchainImages > surfaceCaps.maxImageCount {
             desiredNumberOfSwapchainImages = surfaceCaps.maxImageCount
         }
 

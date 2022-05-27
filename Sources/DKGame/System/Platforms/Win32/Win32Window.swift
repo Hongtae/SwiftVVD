@@ -29,10 +29,10 @@ private func win32ErrorString(_ code: DWORD) -> String {
     return "Unknown error: \(code)"
 }
 
-private func dpiScaleForWindow(_ hWnd: HWND) -> Float {
+private func dpiScaleForWindow(_ hWnd: HWND) -> CGFloat {
     let dpi = GetDpiForWindow(hWnd)
     if dpi != 0 {
-        return Float(dpi) / 96.0
+        return CGFloat(dpi) / 96.0
     }
     return 1.0
 }
@@ -71,7 +71,7 @@ public class Win32Window : Window {
     public private(set) var style: WindowStyle
     public private(set) var contentBounds: CGRect = .null
     public private(set) var windowFrame: CGRect = .null
-    public private(set) var contentScaleFactor: Float = 1.0
+    public private(set) var contentScaleFactor: CGFloat = 1.0
 
     public var name: String
 
@@ -469,12 +469,14 @@ public class Win32Window : Window {
             if keyStates[capslock] & 0x01 != 0 {
                 // capslock on
                 postKeyboardEvent(KeyboardEvent(type: .keyDown,
+                                                window: self,
                                                 deviceId: 0,
                                                 key: .capslock,
                                                 text: ""))
             } else {
                 // capslock off
                 postKeyboardEvent(KeyboardEvent(type: .keyUp,
+                                                window: self,
                                                 deviceId: 0,
                                                 key: .capslock,
                                                 text: ""))
@@ -492,6 +494,7 @@ public class Win32Window : Window {
 
             if keyboardStates[key] & 0x80 != 0 {
                 postKeyboardEvent(KeyboardEvent(type: .keyUp,
+                                                window: self,
                                                 deviceId: 0,
                                                 key: virtualKey,
                                                 text: ""))
@@ -501,6 +504,7 @@ public class Win32Window : Window {
         let capslock = Int(VK_CAPITAL)
         if keyboardStates[capslock] & 0x01 != 0 {
             postKeyboardEvent(KeyboardEvent(type: .keyUp,
+                                            window: self,
                                             deviceId: 0,
                                             key: .capslock,
                                             text: ""))
@@ -512,24 +516,28 @@ public class Win32Window : Window {
 
     func postWindowEvent(type: WindowEventType) {
         self.postWindowEvent(WindowEvent(type: type,
+                                         window: self,
                                          windowFrame: self.windowFrame,
                                          contentBounds: self.contentBounds,
                                          contentScaleFactor: self.contentScaleFactor))
     }
 
     func postWindowEvent(_ event: WindowEvent) {
+        assert(event.window === self)
         self.eventObservers.forEach { _, handlers in
             if let handler = handlers.windowEventHandler { handler(event) }
         }
     }
 
     func postKeyboardEvent(_ event: KeyboardEvent) {
+        assert(event.window === self)
         self.eventObservers.forEach { _, handlers in
             if let handler = handlers.keyboardEventHandler { handler(event) }
         }
     }
 
     func postMouseEvent(_ event: MouseEvent) {        
+        assert(event.window === self)
         self.eventObservers.forEach { _, handlers in
             if let handler = handlers.mouseEventHandler { handler(event) }
         }
@@ -708,7 +716,7 @@ public class Win32Window : Window {
                 let tmp: UnsafePointer<RECT>? = UnsafePointer<RECT>(bitPattern: UInt(lParam))
                 let suggestedWindowFrame: RECT = tmp!.pointee
 
-                let scaleFactor: Float = Float(max(xDPI, yDPI)) / 96.0
+                let scaleFactor: CGFloat = CGFloat(max(xDPI, yDPI)) / 96.0
                 window.contentScaleFactor = scaleFactor
 
                 if window.style.contains(.autoResize) {
@@ -788,11 +796,12 @@ public class Win32Window : Window {
 
                         if postEvent {
                             window.postMouseEvent(MouseEvent(type: .move,
-                                                            device: .genericMouse,
-                                                            deviceId: 0,
-                                                            buttonId: 0,
-                                                            location: window.mousePosition,
-                                                            delta: delta))
+                                                             window: window,
+                                                             device: .genericMouse,
+                                                             deviceId: 0,
+                                                             buttonId: 0,
+                                                             location: window.mousePosition,
+                                                             delta: delta))
                         }
                     }
                 }

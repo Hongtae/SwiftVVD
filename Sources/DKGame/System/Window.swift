@@ -31,15 +31,15 @@ public enum MouseEventDevice {
 }
 
 public struct MouseEvent {
-    var type: MouseEventType
-    weak var window: Window?
-    var device: MouseEventDevice
-    var deviceId: Int
-    var buttonId: Int
-    var location: CGPoint
-    var delta: CGPoint = .zero
-    var pressure: Float = 0.0
-    var tilt: Float = 0.0
+    public var type: MouseEventType
+    public weak var window: Window?
+    public var device: MouseEventDevice
+    public var deviceId: Int
+    public var buttonId: Int
+    public var location: CGPoint
+    public var delta: CGPoint = .zero
+    public var pressure: Float = 0.0
+    public var tilt: Float = 0.0
 }
 
 public enum KeyboardEventType {
@@ -50,11 +50,11 @@ public enum KeyboardEventType {
 }
 
 public struct KeyboardEvent {
-    var type: KeyboardEventType
-    weak var window: Window?
-    var deviceId: Int
-    var key: VirtualKey
-    var text: String
+    public var type: KeyboardEventType
+    public weak var window: Window?
+    public var deviceId: Int
+    public var key: VirtualKey
+    public var text: String
 }
 
 public enum WindowEventType {
@@ -71,11 +71,11 @@ public enum WindowEventType {
 }
 
 public struct WindowEvent {
-    var type: WindowEventType
-    weak var window: Window?
-    var windowFrame: CGRect
-    var contentBounds: CGRect
-    var contentScaleFactor: Float
+    public var type: WindowEventType
+    public weak var window: Window?
+    public var windowFrame: CGRect
+    public var contentBounds: CGRect
+    public var contentScaleFactor: CGFloat
 }
 
 public protocol WindowDelegate: AnyObject, DragTargetDelegate {
@@ -113,9 +113,12 @@ public struct WindowStyle: OptionSet {
 
 public protocol Window: AnyObject {
 
+    var activated: Bool { get }
+    var visible: Bool { get }
+
     var contentBounds: CGRect { get }
     var windowFrame: CGRect { get }
-    var contentScaleFactor: Float { get }
+    var contentScaleFactor: CGFloat { get }
 
     var origin: CGPoint { get set }
     var contentSize: CGSize { get set }

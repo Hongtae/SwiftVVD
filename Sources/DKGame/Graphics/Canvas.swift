@@ -412,7 +412,10 @@ private class CanvasPipelineStates {
         if instance == nil {
             initPipeline: repeat {
                 let vertexFunction = decodeShader(device: device, encodedText: vsSpvCEB64)
-                if vertexFunction == nil { break }
+                if vertexFunction == nil {
+                    Log.err("CanvasPipelineStates: unable to decode shader (vertex-function)")
+                    break
+                }
 
                 let allShaders = CanvasShaderIndex.allCases
                 var fsFunctions: [ShaderFunction?] = .init(repeating: nil, count: allShaders.count)
@@ -435,6 +438,7 @@ private class CanvasPipelineStates {
                     if let function = function {
                         fsFunctions[s.rawValue] = function
                     } else {
+                        Log.err("CanvasPipelineStates: unable to decode shader (\(s))")
                         break initPipeline
                     }
                 }
@@ -448,11 +452,17 @@ private class CanvasPipelineStates {
                     ])
             
                 let defaultBindingSet = device.makeShaderBindingSet(layout: bindingLayout)
-                if defaultBindingSet == nil { break }
+                if defaultBindingSet == nil {
+                    Log.err("CanvasPipelineStates: makeShaderBindingSet failed.")
+                    break
+                }
 
                 let samplerDesc = SamplerDescriptor()
                 let defaultSampler = device.makeSamplerState(descriptor: samplerDesc)
-                if defaultSampler == nil { break }
+                if defaultSampler == nil {
+                    Log.err("CanvasPipelineStates: makeSampler failed.")
+                    break
+                }
 
                 instance = CanvasPipelineStates(
                     device: device,
@@ -463,6 +473,8 @@ private class CanvasPipelineStates {
 
                 // make weak-ref
                 Self.sharedInstance = instance
+
+                Log.info("CanvasPipelineStates instance created.")
 
             } while false
         }
@@ -550,7 +562,7 @@ public class Canvas {
     public func drawLines(_ points: [CGPoint],
                           lineWidth: CGFloat = 1.0,
                           color: Color,
-                          blendState: BlendState) {
+                          blendState: BlendState = .defaultAlpha) {
         if points.isEmpty || lineWidth < Self.minimumScaleFactor { return }
 
         let numPoints = points.count
@@ -590,7 +602,7 @@ public class Canvas {
     public func drawLineStrip(_ points: [CGPoint],
                               lineWidth: CGFloat = 1.0,
                               color: Color,
-                              blendState: BlendState) {
+                              blendState: BlendState = .defaultAlpha) {
 
         if points.isEmpty || lineWidth < Self.minimumScaleFactor { return }
 
@@ -626,7 +638,7 @@ public class Canvas {
 
     public func drawTriangles(_ vertices: [CGPoint],
                               color: Color,
-                              blendState: BlendState) {
+                              blendState: BlendState = .defaultAlpha) {
         let numVerts = vertices.count
         if numVerts > 2 {
             var vertexData: [VertexData] = []
@@ -648,7 +660,7 @@ public class Canvas {
     }
 
     public func drawTriangles(_ vertices: [ColoredVertex],
-                              blendState: BlendState) {
+                              blendState: BlendState = .defaultAlpha) {
         let numVerts = vertices.count
         if numVerts > 2 {
             var vertexData: [VertexData] = []
@@ -671,7 +683,7 @@ public class Canvas {
 
     public func drawTriangles(_ vertices: [TexturedVertex],
                               texture: Texture,
-                              blendState: BlendState) {
+                              blendState: BlendState = .defaultAlpha) {
         let numVerts = vertices.count
         if numVerts > 2 {
             var vertexData: [VertexData] = []
@@ -694,7 +706,7 @@ public class Canvas {
 
     public func  drawTriangleStrip(_ vertices: [CGPoint],
                                    color: Color,
-                                   blendState: BlendState) {
+                                   blendState: BlendState = .defaultAlpha) {
         let numVerts = vertices.count
         if numVerts > 2 {
             var verts: [CGPoint] = []
@@ -715,7 +727,7 @@ public class Canvas {
     }
 
     public func  drawTriangleStrip(_ vertices: [ColoredVertex],
-                                   blendState: BlendState) {
+                                   blendState: BlendState = .defaultAlpha) {
         let numVerts = vertices.count
         if numVerts > 2 {
             var verts: [ColoredVertex] = []
@@ -737,7 +749,7 @@ public class Canvas {
 
     public func  drawTriangleStrip(_ vertices: [TexturedVertex],
                                    texture: Texture,
-                                   blendState: BlendState) {
+                                   blendState: BlendState = .defaultAlpha) {
         let numVerts = vertices.count
         if numVerts > 2 {
             var verts: [TexturedVertex] = []
@@ -762,7 +774,7 @@ public class Canvas {
                          leftBottom lb: CGPoint,
                          rightBottom rb: CGPoint,
                          color: Color,
-                         blendState: BlendState) {
+                         blendState: BlendState = .defaultAlpha) {
         let tpos0 = lt.transformed(by: self.contentTransform)
         let tpos1 = rt.transformed(by: self.contentTransform)
         let tpos2 = lb.transformed(by: self.contentTransform)
@@ -787,7 +799,7 @@ public class Canvas {
                          leftBottom lb: TexturedVertex,
                          rightBottom rb: TexturedVertex,
                          texture: Texture,
-                         blendState: BlendState) {
+                         blendState: BlendState = .defaultAlpha) {
         let tpos0 = lt.position.transformed(by: self.contentTransform)
         let tpos1 = rt.position.transformed(by: self.contentTransform)
         let tpos2 = lb.position.transformed(by: self.contentTransform)
@@ -808,9 +820,9 @@ public class Canvas {
     }
 
     public func drawRect(_ rect: CGRect,
-                         transform tm: Matrix3,
+                         transform tm: Matrix3 = .identity,
                          color: Color,
-                         blendState: BlendState) {        
+                         blendState: BlendState = .defaultAlpha) {        
         if rect.isEmpty || rect.isInfinite { return }
 
         let pos0 = CGPoint(x: rect.minX, y: rect.minY).transformed(by: tm) // left-top
@@ -838,12 +850,12 @@ public class Canvas {
     }
 
     public func drawRect(_ rect: CGRect,
-                         transform tm: Matrix3,
+                         transform tm: Matrix3 = .identity,
                          textureRect texRect: CGRect,
-                         textureTransform texTM: Matrix3,
+                         textureTransform texTM: Matrix3 = .identity,
                          texture: Texture,
                          color: Color,
-                         blendState: BlendState) {
+                         blendState: BlendState = .defaultAlpha) {
         if rect.isEmpty || rect.isInfinite { return }
 
         let pos0 = CGPoint(x: rect.minX, y: rect.minY).transformed(by: tm) // left-top
@@ -892,9 +904,9 @@ public class Canvas {
 
     public func drawEllipse(bounds: CGRect,
                             inset: CGSize,
-                            transform: Matrix3,
+                            transform: Matrix3 = .identity,
                             color: Color,
-                            blendState: BlendState) {
+                            blendState: BlendState = .defaultAlpha) {
         if bounds.isEmpty || bounds.isInfinite { return }
         if inset.width < Self.minimumScaleFactor || inset.height < Self.minimumScaleFactor { return }
 
@@ -957,9 +969,9 @@ public class Canvas {
     }
 
     public func drawEllipse(bounds: CGRect,
-                            transform: Matrix3,
+                            transform: Matrix3 = .identity,
                             color: Color,
-                            blendState: BlendState) {
+                            blendState: BlendState = .defaultAlpha) {
         if bounds.isEmpty || bounds.isInfinite { return }
 
         let tm = transform * screenTransform    // user transform * screen space
@@ -1005,12 +1017,12 @@ public class Canvas {
     }
 
     public func drawEllipse(bounds: CGRect,
-                            transform: Matrix3,
+                            transform: Matrix3 = .identity,
                             textureBounds uvBounds: CGRect,
-                            textureTransform uvTransform: Matrix3,
+                            textureTransform uvTransform: Matrix3 = .identity,
                             texture: Texture,
                             color: Color,
-                            blendState: BlendState) {
+                            blendState: BlendState = .defaultAlpha) {
         if bounds.isEmpty || bounds.isInfinite { return }
 
         let tm = transform * screenTransform    // user transform * screen space
@@ -1062,7 +1074,7 @@ public class Canvas {
     public func drawText(_ text: String,
                          withFont font: Font,
                          bounds: CGRect,
-                         transform: Matrix3,
+                         transform: Matrix3 = .identity,
                          color: Color) {
         if bounds.isEmpty || bounds.isInfinite { return }
         if text.isEmpty { return }
@@ -1278,8 +1290,8 @@ public class Canvas {
 
         if vertices.isEmpty { return }
 
-        var textureRequired = false;
-        var pushConstantDataRequired = false;
+        var textureRequired = false
+        var pushConstantDataRequired = false
 
         switch shaderIndex {
         case .vertexColor:
@@ -1326,18 +1338,20 @@ public class Canvas {
         
         let device = commandBuffer.device
 
-        let bufferLength = MemoryLayout<VertexData>.stride * vertices.count
+        let numVertices = vertices.count
+        let bufferLength = MemoryLayout<VertexData>.stride * numVertices
         guard let vertexBuffer = device.makeBuffer(length: bufferLength,
                                                    storageMode: .shared,
                                                    cpuCacheMode: .writeCombined) else {
             Log.err("Canvas.encodeDrawCommand: Cannot create GPU-Buffer object with length:\(bufferLength)")
             return
         }
-        let numVertices = vertices.count
         if let buffer = vertexBuffer.contents() {
             vertices.withUnsafeBytes {
-                buffer.copyMemory(from: $0.baseAddress!, byteCount: MemoryLayout<VertexData>.stride * numVertices)
+                assert($0.count == bufferLength)
+                buffer.copyMemory(from: $0.baseAddress!, byteCount: $0.count)
             }
+            vertexBuffer.flush()
         } else {
             Log.err("Canvas.encodeDrawCommand: Vertex-Buffer is not writable.(Invalid-mapping)")
             return

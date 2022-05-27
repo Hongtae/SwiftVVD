@@ -628,7 +628,7 @@ public class Shader: CustomStringConvertible {
                     var ranges: UnsafePointer<spvc_buffer_range>? = nil
                     var numRanges: Int = 0
                     let result = spvc_compiler_get_active_buffer_ranges(compiler, ptr[i].id, &ranges, &numRanges)
-                    if result == SPVC_SUCCESS { throw SPVCError.spvcResult(result) }
+                    if result != SPVC_SUCCESS { throw SPVCError.spvcResult(result) }
                     assert(numRanges > 0)
                     if let ranges = ranges, numRanges > 0 {
                         var rangeBegin = ranges[0].offset

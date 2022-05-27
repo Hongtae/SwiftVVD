@@ -1,140 +1,216 @@
 import Foundation
 
+
 public class Screen {
+    private var _frame: Frame? = nil
+    public var frame: Frame? {
+        get { synchronizedBy(locking: self.propertyLock) { _frame } }
+        set { synchronizedBy(locking: self.propertyLock) { _frame = newValue } }
+    }
 
-    public var frame: Frame? = nil
-    public var window: Window? = nil
-    public var resolution: CGSize           { .zero }
-    public var contentScaleFactor: CGFloat  { 1.0 }
+    public var window: Window? {
+        didSet {
+            if window !== oldValue {
+                oldValue?.removeEventObserver(self)
 
-    public private(set) var swapChain: SwapChain?
+                if let window = window {
+                    let swapChain = commandQueue?.makeSwapChain(target: window)
+                    let scaleFactor = window.contentScaleFactor
+                    let contentBounds = window.contentBounds
+                    let activated = window.activated
+                    let visible = window.visible
+
+                    window.addEventObserver(self) {
+                        [weak self](event: WindowEvent) in
+                        if let self = self, self.window === event.window {
+                            self.processWindowEvent(event)
+                        }
+                    }
+                    window.addEventObserver(self) {
+                        [weak self](event: KeyboardEvent) in
+                        if let self = self, self.window === event.window {
+                            self.processKeyboardEvent(event)
+                        }
+                    }
+                    window.addEventObserver(self) {
+                        [weak self](event: MouseEvent) in
+                        if let self = self, self.window === event.window {
+                            self.processMouseEvent(event)
+                        }
+                    }
+
+                    synchronizedBy(locking: self.propertyLock) {
+                        self.swapChain = swapChain
+                        self._resolution = CGSize(width: contentBounds.width * scaleFactor,
+                                                  height: contentBounds.height * scaleFactor)
+                        self._contentScaleFactor = scaleFactor
+                        self.activated = activated
+                        self.visible = visible
+                    }
+                } else {
+                    synchronizedBy(locking: self.propertyLock) {
+                        self.swapChain = nil
+                        self.activated = false
+                        self.visible = false
+                    }
+                }
+            }
+        }
+    }
+
+    private var _resolution: CGSize = .zero
+    public var resolution: CGSize {
+        get { synchronizedBy(locking: self.propertyLock) { _resolution } }
+    }
+
+    private var _contentScaleFactor: CGFloat = 1.0
+    public var contentScaleFactor: CGFloat {
+        get { synchronizedBy(locking: self.propertyLock) { _contentScaleFactor } }
+    }
+
+    private var swapChain: SwapChain?
+
     public private(set) var dispatchQueue: DispatchQueue?
     public private(set) var graphicsDeviceContext: GraphicsDeviceContext?
     public private(set) var audioDeviceContext: AudioDeviceContext?
+    public private(set) var commandQueue: CommandQueue?
 
     private let activeFrameInterval = 1.0 / 60.0
     private let inactiveFrameInterval = 1.0 / 30.0
 
     private var activated = false
     private var visible = false
+    private var suspended = false
 
     private typealias ThreadTask = ()->Void
     private var threadTasks: [ThreadTask] = []
 
-    private enum State: Int32 {
-        case stopped = 0
-        case suspended
-        case running
-    }
-    private var runningState = AtomicNumber32(State.stopped.rawValue)
     private var threadCond = NSCondition()
-    private var threadRunning = false
+    private var threadAlive = AtomicNumber32(0)
     private var propertyLock = SpinLock()
-    private var tickCounter = TickCounter()
-    public init(graphicsDeviceContext: GraphicsDeviceContext?, audioDeviceContext: AudioDeviceContext?, dispatchQueue: DispatchQueue?) {
+
+    public init(graphicsDeviceContext: GraphicsDeviceContext?,
+                audioDeviceContext: AudioDeviceContext?,
+                dispatchQueue: DispatchQueue?) {
+
         var graphicsDeviceContext = graphicsDeviceContext
         if graphicsDeviceContext == nil {
             graphicsDeviceContext = makeGraphicsDeviceContext()
         }
         self.graphicsDeviceContext = graphicsDeviceContext
+        self.commandQueue = self.graphicsDeviceContext?.renderQueue()
 
-        let threadProc = { [unowned self]() in
+        Canvas.cachePipelineContext(graphicsDeviceContext!)
+
+        let threadProc = { [weak self]() in
+
+            let threadCond = self!.threadCond       // copy reference
+            let threadAlive = self!.threadAlive     // copy reference
+
+            Log.info("Screen render thread start.")
+
+            var tickCounter = TickCounter()
+
             synchronizedBy(locking: threadCond) {
-                self.threadRunning = true
+                threadAlive.store(1)
                 threadCond.broadcast()
             }
 
-            let state: () -> State = {
-                switch self.runningState.load() {
-                case State.stopped.rawValue:    return State.stopped
-                case State.suspended.rawValue:  return State.suspended
-                default:                        return State.running
-                }
-            }
-
-            let executeTask: () -> Bool = {
-                let task: ThreadTask? = synchronizedBy(locking: self.propertyLock) {
-                    if let t = self.threadTasks.first {
-                        self.threadTasks.remove(at: 0)
-                        return Optional(t)
-                    }
-                    return nil
-                }
-                if let task = task {
-                    task()
-                    return true
-                }
-                return false
-            }
-
             let frameUpdateCounter = AtomicNumber64(0)
+            
+            mainLoop: while true {
+                guard let self = self else { break }
+                
+                let executeTask: () -> Bool = {
+                    let task: ThreadTask? = synchronizedBy(locking: self.propertyLock) {
+                        if let t = self.threadTasks.first {
+                            self.threadTasks.remove(at: 0)
+                            return Optional(t)
+                        }
+                        return nil
+                    }
+                    if let task = task {
+                        task()
+                        return true
+                    }
+                    return false
+                }
 
-            mainLoop: while state() != .stopped {
+                var frame: Frame? = nil
+                var swapChain: SwapChain? = nil
+                var visible = false
+                var suspended = false
+                var frameInterval: Double = 1.0 / 60.0
+                
+                synchronizedBy(locking: self.propertyLock) {
+                    frame = self._frame
+                    swapChain = self.swapChain
 
-                let fs: (Frame?, SwapChain?) = synchronizedBy(locking: propertyLock) { (self.frame, self.swapChain) }
+                    visible = self.visible
+                    suspended = self.suspended
 
-                let delta = self.tickCounter.reset()
-                let tick = self.tickCounter.timestamp
+                    frameInterval = self.activated ? self.activeFrameInterval : self.inactiveFrameInterval
+                }
+
+                let delta = tickCounter.reset()
+                let tick = tickCounter.timestamp
                 let date = Date(timeIntervalSinceNow: 0)
                 var frameDrawn  = false
 
-                if state() == .running {
-                    if let frame = fs.0, fs.1 != nil {
-                        if frame.loaded == false {
-                            let res = synchronizedBy(locking: self.propertyLock) { self.resolution }
-                            frame.loadHierarchy(screen: self, resolution: res)
-                        }
-                        if let dispatchQueue = self.dispatchQueue {
-                            assert(frameUpdateCounter.load() == 0)
-                            frameUpdateCounter.increment()
-                            frame.updateHierarchyAsync(queue: dispatchQueue,
-                                                       counter: frameUpdateCounter,
-                                                       tick: tick,
-                                                       delta: delta,
-                                                       date: date)
-                            while frameUpdateCounter.load() != 0 {
-                                if executeTask() == false {
-                                    threadYield()
-                                }
+                if let frame = frame, swapChain != nil {
+                    if frame.loaded == false {
+                        frame.loadHierarchy(screen: self, resolution: self.resolution)
+                    }
+                    if let dispatchQueue = self.dispatchQueue {
+                        assert(frameUpdateCounter.load() == 0)
+                        frameUpdateCounter.increment()
+                        frame.updateHierarchyAsync(queue: dispatchQueue,
+                                                   counter: frameUpdateCounter,
+                                                   tick: tick,
+                                                   delta: delta,
+                                                   date: date)
+                        while frameUpdateCounter.load() != 0 {
+                            if executeTask() == false {
+                                threadYield()
                             }
-                        } else {
-                            frame.updateHierarchy(tick: tick, delta: delta, date: date)
                         }
-                        // draw!
-                        if activated || visible {
-                            // frame.draw()
-                            frameDrawn = true
-                        }
+                    } else {
+                        frame.updateHierarchy(tick: tick, delta: delta, date: date)
+                    }
+                    // draw!
+                    if visible {
+                        frame.redraw()
+                        frameDrawn = frame.draw()
                     }
                 }
-
-                let interval = activated ? activeFrameInterval : inactiveFrameInterval
-                while tickCounter.elapsed < interval {
+                
+                while tickCounter.elapsed < frameInterval {
                     if executeTask() == false {
-                        switch state() {
-                        case .running:      threadYield()
-                        case .suspended:    Thread.sleep(forTimeInterval: 0.01)
-                        case .stopped:
-                            break mainLoop
+                        if suspended {
+                            Thread.sleep(forTimeInterval: 0.01)
+                        } else {
+                            threadYield()
                         }
                     }
                 }
                 
-                if frameDrawn && state() == .running {
-                    fs.1?.present()
+                if frameDrawn {
+                    swapChain?.present()
                 }
             }
 
-            if let frame = synchronizedBy(locking: self.propertyLock, { self.frame }) {
-                frame.unloadHierarchy()
-            }
-
             synchronizedBy(locking: threadCond) {
-                self.threadRunning = false
+                threadAlive.store(0)
                 threadCond.broadcast()
             }
         }
+
         Thread.detachNewThread(threadProc)
+        synchronizedBy(locking: threadCond) {
+            while self.threadAlive.load() == 0 {
+                self.threadCond.wait()
+            }
+        }
     }
 
     public convenience init(dispatchQueue: DispatchQueue? = nil) {
@@ -142,16 +218,34 @@ public class Screen {
     }
 
     deinit {
-        self.runningState.store(State.stopped.rawValue)
-        synchronizedBy(locking: threadCond) {
-            while self.threadRunning {
-                threadCond.wait()
+        if let window = self.window {
+            window.removeEventObserver(self)
+        }
+        // Wait for the render thread to be terminated.
+        synchronizedBy(locking: self.threadCond) {
+            while self.threadAlive.load() != 0 {
+                self.threadCond.wait()
             }
         }
     }
 
     public func makeCanvas() -> Canvas? {
-        return nil
+        var canvas: Canvas? = nil
+        if let swapChain = swapChain {
+            let rpd = swapChain.currentRenderPassDescriptor()
+            if let renderTarget = rpd.colorAttachments.first?.renderTarget {
+                let width = Int(renderTarget.width)
+                let height = Int(renderTarget.height)
+                let viewport = CGRect(x: 0, y: 0, width: width, height: height)
+
+                if let commandBuffer = commandQueue?.makeCommandBuffer() {
+                    canvas = Canvas(commandBuffer: commandBuffer, renderTarget: renderTarget)
+                    canvas!.viewport = viewport
+                    canvas!.contentBounds = viewport
+                }
+            }
+        }
+        return canvas
     }
 
     private func postCommand(_ task: @escaping ThreadTask) {
@@ -184,7 +278,36 @@ public class Screen {
     public func windowToScreen(rect: CGRect) -> CGRect { rect }
     public func screenToWindow(rect: CGRect) -> CGRect { rect }
 
-    public func processKeyboardEvent() {}
-    public func processMouseEvent() {}
-    public func processWindowEvent() {}
+    public func processKeyboardEvent(_: KeyboardEvent) {}
+    public func processMouseEvent(_: MouseEvent) {}
+    public func processWindowEvent(_ event: WindowEvent) {
+
+        Log.debug("Screen.\(#function) event:\(event)")
+
+        switch event.type {
+        case .resized:
+            let scaleFactor = event.contentScaleFactor
+            let resolution = CGSize(width: event.contentBounds.width * scaleFactor,
+                                    height: event.contentBounds.height * scaleFactor)
+            synchronizedBy(locking: self.propertyLock) {
+                self._contentScaleFactor = scaleFactor
+                self._resolution = resolution
+            }
+            self.postCommand { self.frame?.updateResolution() }
+
+        case .hidden, .minimized:
+            synchronizedBy(locking: self.propertyLock) { visible = false }
+        case .shown:
+            synchronizedBy(locking: self.propertyLock) { visible = true }
+            self.postCommand { self.frame?.redraw() }
+        case .activated:
+            synchronizedBy(locking: self.propertyLock) { activated = true }
+        case .inactivated:
+            synchronizedBy(locking: self.propertyLock) { activated = false }
+        case .update:
+            self.postCommand { self.frame?.redraw() }
+        default:
+            break
+        }
+    }
 }

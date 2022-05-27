@@ -70,18 +70,42 @@ public class SpinLock: NSLocking {
     private let locked = Int32(1)
     private var atomic = AtomicNumber32()
 
+#if DEBUG
+    private var ownerThread: UInt = 0
+#endif
+
     public init() {
         atomic.store(free)
     }
+    deinit {
+#if DEBUG
+        assert(self.ownerThread == 0, "The lock is still owned by the thread.")
+#endif
+        assert(self.atomic.load() == free, "The lock is still locked.")
+    }
+
     public func tryLock() -> Bool {
-        atomic.compareAndSet(comparand: free, newValue: locked)
+        if atomic.compareAndSet(comparand: free, newValue: locked) {
+#if DEBUG
+            self.ownerThread = threadId()
+#endif
+            return true
+        }
+        return false
     }
     public func lock() {
+#if DEBUG
+        assert(self.ownerThread != threadId(), "Deadlock detected!")
+#endif
         while tryLock() == false {
             DKThreadYield()
         }
     }
     public func unlock() {
+#if DEBUG
+        assert(self.ownerThread == threadId(), "Thread does not own lock!")
+        self.ownerThread = 0
+#endif
         guard atomic.compareAndSet(comparand: locked, newValue: free) else {
             fatalError("Error! object was not locked.")
         }

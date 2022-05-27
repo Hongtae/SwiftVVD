@@ -30,8 +30,16 @@ class MyWindowDelegate: WindowDelegate {
 }
 
 class MyFrame: Frame {
+    var t = 0.0
+    override func update(tick: UInt64, delta: Double, date: Date) {
+        t += delta
+    }
+
     override func draw(canvas: Canvas) {
-        canvas.clear(color: Color(0, 0, 1))
+        let v = Scalar(sin(t) + 1.0) * 0.5
+        canvas.clear(color: Color(0, 0, v))
+        canvas.drawRect(CGRect(x: 15, y: 15, width: 100, height: 100), color: Color(1, 1, 1), blendState: .defaultOpaque)
+        canvas.drawEllipse(bounds: CGRect(x: 50, y: 50, width: 100, height: 100), color: Color(1, 1, 0), blendState: .defaultOpaque)
     }
 }
 
@@ -47,11 +55,13 @@ class MyApplicationDelegate: ApplicationDelegate {
 
         self.windowDelegate = MyWindowDelegate()
         self.screen = Screen()
+        self.frame = MyFrame()
         self.window = makeWindow(name: "TestApp1",
                                  style: [.genericWindow, .acceptFileDrop],
                                  delegate: self.windowDelegate)
         self.window?.contentSize = CGSize(width: 800, height: 600)
         self.screen?.window = self.window
+        self.screen?.frame = self.frame
         self.window?.activate()
     }
 
