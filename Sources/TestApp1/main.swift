@@ -37,9 +37,11 @@ class MyFrame: Frame {
 
     override func draw(canvas: Canvas) {
         let v = Scalar(sin(t) + 1.0) * 0.5
-        canvas.clear(color: Color(0, 0, v))
-        canvas.drawRect(CGRect(x: 15, y: 15, width: 100, height: 100), color: Color(1, 1, 1), blendState: .defaultOpaque)
-        canvas.drawEllipse(bounds: CGRect(x: 50, y: 50, width: 100, height: 100), color: Color(1, 1, 0), blendState: .defaultOpaque)
+        canvas.clear(color: Color(0, 0, 0.6))
+        canvas.drawRect(CGRect(x: 50, y: 15, width: 200, height: 200), color: Color(1, 1, 1), blendState: .defaultOpaque)
+        canvas.drawEllipse(bounds: CGRect(x: 150, y: 50, width: 200, height: 200),
+            inset: CGSize(width: 20, height: 20),
+            color: Color(v, 1, 0), blendState: .defaultOpaque)
     }
 }
 

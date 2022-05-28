@@ -111,7 +111,7 @@ public struct Vector3: Vector {
     }
 
     public static func - (lhs: Self, rhs: Self) -> Self {
-        return Self(rhs.x - rhs.x, lhs.y - rhs.y, lhs.z - rhs.z)
+        return Self(lhs.x - rhs.x, lhs.y - rhs.y, lhs.z - rhs.z)
     }
 
     public static func * (lhs: Self, rhs: Scalar) -> Self {

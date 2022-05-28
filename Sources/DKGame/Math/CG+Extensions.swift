@@ -17,7 +17,7 @@ public extension CGPoint {
 
     func transformed(by m: Matrix2) -> Self {
         let x = self.x * CGFloat(m.m11) + self.y * CGFloat(m.m21)
-        let y = self.x * CGFloat(m.m12) + self.y * CGFloat(m.m21)
+        let y = self.x * CGFloat(m.m12) + self.y * CGFloat(m.m22)
         return Self(x: x, y: y)
     }
 
@@ -27,7 +27,7 @@ public extension CGPoint {
 
     func transformed(by m: Matrix3) -> Self {
         let x = self.x * CGFloat(m.m11) + self.y * CGFloat(m.m21)
-        let y = self.x * CGFloat(m.m12) + self.y * CGFloat(m.m21)
+        let y = self.x * CGFloat(m.m12) + self.y * CGFloat(m.m22)
 	    var w = self.x * CGFloat(m.m13) + self.y * CGFloat(m.m23) + CGFloat(m.m33)
         assert(abs(w) != 0.0)
         w = 1.0 / w
