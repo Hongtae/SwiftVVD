@@ -31,6 +31,22 @@ class MyWindowDelegate: WindowDelegate {
 
 class MyFrame: Frame {
     var t = 0.0
+    var textFont: Font?
+    var outlineFont: Font?
+
+    override func loaded(screen: Screen) {
+        if let fontData = loadResourceData(name: "Resources/Roboto-Regular.ttf") {
+            self.textFont = Font(deviceContext: screen.graphicsDeviceContext!, data: fontData)
+            self.outlineFont = Font(deviceContext: screen.graphicsDeviceContext!, data: fontData)
+            if let font = self.textFont {
+                font.setStyle(pointSize: 12.0, dpi: (72, 72))
+            }
+            if let font = self.outlineFont {
+                font.setStyle(pointSize: 12.0, dpi: (72, 72), outline: 2.0)
+            }
+        }
+    }
+
     override func update(tick: UInt64, delta: Double, date: Date) {
         t += delta
     }
@@ -38,10 +54,16 @@ class MyFrame: Frame {
     override func draw(canvas: Canvas) {
         let v = Scalar(sin(t) + 1.0) * 0.5
         canvas.clear(color: Color(0, 0, 0.6))
-        canvas.drawRect(CGRect(x: 50, y: 15, width: 200, height: 200), color: Color(1, 1, 1), blendState: .defaultOpaque)
         canvas.drawEllipse(bounds: CGRect(x: 150, y: 50, width: 200, height: 200),
             inset: CGSize(width: 20, height: 20),
-            color: Color(v, 1, 0), blendState: .defaultOpaque)
+            color: Color(v, 0, 0), blendState: .defaultOpaque)
+        canvas.drawRect(CGRect(x: 50, y: 15, width: 200, height: 200), color: Color(1, 1, 1, 0.5), blendState: .defaultAlpha)
+        if let textFont = self.textFont {
+            // canvas.drawText("ABCDEFG", withFont: textFont,
+            //     baselineBegin: CGPoint(x: 50, y: 50),
+            //     baselineEnd: CGPoint(x: 200, y: 100),
+            //     color: Color(1,0,1))
+        }
     }
 }
 

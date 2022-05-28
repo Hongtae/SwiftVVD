@@ -516,7 +516,10 @@ public class Font {
                 var glyph: FT_Glyph? = nil
                 FT_Get_Glyph(face.pointee.glyph, &glyph)
                 if FT_Glyph_To_Bitmap(&glyph, FT_RENDER_MODE_NORMAL, nil, 1) == 0 {
-                    let glyphBitmap = UnsafeMutableRawPointer(glyph!).load(as: FT_BitmapGlyph.self)
+
+                    let glyphBitmap: FT_BitmapGlyph = withUnsafeBytes(of: glyph!) {
+                        $0.baseAddress!.assumingMemoryBound(to: FT_BitmapGlyph.self).pointee
+                    }
                     // bitmap.left: bitmap offset from origin
                     // bitmap.top: height from origin
                     position.x = CGFloat(glyphBitmap.pointee.left)
@@ -722,9 +725,9 @@ public class Font {
 
             if let texture = texture {
                 frame = CGRect(x: CGFloat(leftMargin),
-                            y: CGFloat(topMargin),
-                            width: CGFloat(width),
-                            height: CGFloat(height))
+                               y: CGFloat(topMargin),
+                               width: CGFloat(width),
+                               height: CGFloat(height))
                 updateTexture(queue, texture, frame, data)
 
                 let gta = GlyphTextureAtlas(

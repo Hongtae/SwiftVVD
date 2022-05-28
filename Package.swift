@@ -84,6 +84,9 @@ let package = Package(
             dependencies: [
                 .target(name: "DKGame"),
                 ],
+            resources: [
+                .copy("Resources")
+            ],
             linkerSettings: []),
     ]
 )

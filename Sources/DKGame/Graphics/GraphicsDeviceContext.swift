@@ -1,3 +1,5 @@
+import Foundation
+
 public class GraphicsDeviceContext {
     public let device: GraphicsDevice
     public var cachedDeviceResources: [String: AnyObject] = [:]
@@ -78,7 +80,7 @@ public enum GraphicsAPI {
     case auto, vulkan, metal, d3d12
 }
 
-public func makeGraphicsDeviceContext(api: GraphicsAPI = .auto) -> GraphicsDeviceContext?  {
+public func makeGraphicsDeviceContext(api: GraphicsAPI = .auto, dispatchQueue: DispatchQueue? = nil) -> GraphicsDeviceContext? {
     var enableValidation = false
 #if DEBUG
         enableValidation = true
@@ -87,7 +89,7 @@ public func makeGraphicsDeviceContext(api: GraphicsAPI = .auto) -> GraphicsDevic
     if api == .vulkan || api == .auto {
 #if ENABLE_VULKAN        
         if let instance = VulkanInstance(enableValidation: enableValidation) {
-            if let device = instance.makeDevice() {
+            if let device = instance.makeDevice(dispatchQueue: dispatchQueue) {
                 return GraphicsDeviceContext(device: device)
             }
         }

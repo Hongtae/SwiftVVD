@@ -30,7 +30,7 @@ public class VulkanDescriptorSet {
     }
 
     deinit {
-        device.releaseDescriptorSets([self.descriptorSet], from: self.descriptorPool)
+        device.releaseDescriptorSets([self.descriptorSet], pool: self.descriptorPool)
     }
 
     public struct ImageLayoutInfo {
@@ -55,14 +55,14 @@ public class VulkanDescriptorSet {
                 imageViewMap[view.imageView] = view
             }
         }
+
         for binding in self.bindings {
             if binding.valueSet == false {
                 continue
             }
 
-            let write = binding.write
-            let imageInfo = write.pImageInfo
-            if let imageInfo = imageInfo?.pointee, imageInfo.imageView != nil {
+            for imageInfo in binding.imageInfos {
+                if imageInfo.imageView == nil { continue }
 
                 assert(imageViewMap[imageInfo.imageView] != nil)
 
@@ -108,7 +108,8 @@ public class VulkanDescriptorSet {
 
             if binding.imageInfos.isEmpty == false {
                 var update = false
-                for j in 0..<Int(write.descriptorCount) {
+                assert(write.descriptorCount == binding.imageInfos.count)
+                for j in 0..<Int(binding.imageInfos.count) {
                     let imageInfo = binding.imageInfos[j]
                     if let imageView = imageInfo.imageView {
                         if let layoutInfo = imageLayouts[imageView] {

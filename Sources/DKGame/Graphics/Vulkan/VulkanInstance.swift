@@ -472,7 +472,7 @@ public class VulkanInstance {
     public func makeDevice(identifier: String,
                            requiredExtensions: [String] = [],
                            optionalExtensions: [String] = [],
-                           dispatchQueue: DispatchQueue? = .main) -> VulkanGraphicsDevice? {
+                           dispatchQueue: DispatchQueue? = nil) -> VulkanGraphicsDevice? {
         for device in self.physicalDevices {
             if device.registryID == identifier {
                 return VulkanGraphicsDevice(instance: self,
@@ -487,7 +487,7 @@ public class VulkanInstance {
 
     public func makeDevice(requiredExtensions: [String] = [],
                            optionalExtensions: [String] = [],
-                           dispatchQueue: DispatchQueue? = .main) -> VulkanGraphicsDevice? {
+                           dispatchQueue: DispatchQueue? = nil) -> VulkanGraphicsDevice? {
         for device in self.physicalDevices {
             if let vgd = VulkanGraphicsDevice(instance: self,
                                               physicalDevice: device,

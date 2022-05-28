@@ -1398,7 +1398,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         return nil
     }
 
-    func releaseDescriptorSets(_ sets: [VkDescriptorSet], from pool: VulkanDescriptorPool) {
+    func releaseDescriptorSets(_ sets: [VkDescriptorSet], pool: VulkanDescriptorPool) {
         let poolID = pool.poolID
         assert(poolID.mask != 0)
 

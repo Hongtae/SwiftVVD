@@ -85,12 +85,14 @@ public class Win32Application : Application {
         var msg: MSG = MSG()
 
         PostMessageW(nil, UINT(WM_NULL), 0, 0); // To process first enqueued events.
-        while true {
-            let ret = GetMessageW(&msg, nil, 0, 0)
-            if ret == false { break }
-
-            TranslateMessage(&msg);
-            DispatchMessageW(&msg);
+        mainLoop: while true {
+            while PeekMessageW(&msg, nil, 0, 0, UINT(PM_REMOVE)) {
+                if msg.message == UINT(WM_QUIT) {
+                    break mainLoop
+                }
+                TranslateMessage(&msg)
+                DispatchMessageW(&msg)
+            }
 
             if app.running {
                 var next: Date? = nil
@@ -116,8 +118,9 @@ public class Win32Application : Application {
                         timerId = 0
                     }
                 }
+                WaitMessage()
             } else {
-                PostQuitMessage(0);
+                PostQuitMessage(0)
             }
         }
 

@@ -303,7 +303,7 @@ open class Frame {
     public func isKeyboardCatpuredBySelf(deviceId: Int) -> Bool { false }
     public func isMouseCapturedBySelf(deviceId: Int) -> Bool { false }
 
-    open func loaded(withScreen: Screen) {}
+    open func loaded(screen: Screen) {}
     open func unload() {}
     open func update(tick: UInt64, delta: Double, date: Date) {}
     open func draw(canvas: Canvas) { canvas.clear(color: .white) }
@@ -450,7 +450,7 @@ open class Frame {
             self.resolution = CGSize(width: resolution.width.rounded(),
                                      height: resolution.height.rounded())
             self.loaded = true
-            self.loaded(withScreen: screen)
+            self.loaded(screen: screen)
             self.resolutionChanged(self.resolution)
             self.updateResolution()
 

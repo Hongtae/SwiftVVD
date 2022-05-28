@@ -95,7 +95,7 @@ public class Screen {
 
         var graphicsDeviceContext = graphicsDeviceContext
         if graphicsDeviceContext == nil {
-            graphicsDeviceContext = makeGraphicsDeviceContext()
+            graphicsDeviceContext = makeGraphicsDeviceContext(dispatchQueue: nil)
         }
         self.graphicsDeviceContext = graphicsDeviceContext
         self.commandQueue = self.graphicsDeviceContext?.renderQueue()
@@ -141,6 +141,7 @@ public class Screen {
                 var visible = false
                 var suspended = false
                 var frameInterval: Double = 1.0 / 60.0
+                var numTasksExecuted = 0
                 
                 synchronizedBy(locking: self.propertyLock) {
                     frame = self._frame
@@ -155,7 +156,6 @@ public class Screen {
                 let delta = tickCounter.reset()
                 let tick = tickCounter.timestamp
                 let date = Date(timeIntervalSinceNow: 0)
-                var frameDrawn  = false
 
                 if let frame = frame, swapChain != nil {
                     if frame.loaded == false {
@@ -170,7 +170,9 @@ public class Screen {
                                                    delta: delta,
                                                    date: date)
                         while frameUpdateCounter.load() != 0 {
-                            if executeTask() == false {
+                            if executeTask() {
+                                numTasksExecuted += 1
+                            } else {
                                 threadYield()
                             }
                         }
@@ -180,22 +182,26 @@ public class Screen {
                     // draw!
                     if visible {
                         frame.redraw()
-                        frameDrawn = frame.draw()
+                        if frame.draw() {
+                            swapChain?.present()
+                        }
                     }
+                }
+
+                if numTasksExecuted == 0 && executeTask() {
+                    numTasksExecuted += 1
                 }
                 
                 while tickCounter.elapsed < frameInterval {
-                    if executeTask() == false {
+                    if executeTask() {
+                        numTasksExecuted += 1
+                    } else {
                         if suspended {
                             Thread.sleep(forTimeInterval: 0.01)
                         } else {
                             threadYield()
                         }
                     }
-                }
-                
-                if frameDrawn {
-                    swapChain?.present()
                 }
             }
 
@@ -211,6 +217,7 @@ public class Screen {
                 self.threadCond.wait()
             }
         }
+        Log.debug("Screen created.")
     }
 
     public convenience init(dispatchQueue: DispatchQueue? = nil) {
@@ -227,6 +234,7 @@ public class Screen {
                 self.threadCond.wait()
             }
         }
+        Log.debug("Screen destoryed.")
     }
 
     public func makeCanvas() -> Canvas? {
