@@ -74,42 +74,10 @@ public class VulkanCommandQueue: CommandQueue {
         var result: VkResult = VK_SUCCESS
 
         if let callback = callback {
-            if let completionHandler = device.queueCompletionHandlerSemaphore {
-                let timelineSemaphore = completionHandler.setQueueCompletionHandler(queue: self.queue, op: callback)
-                let semaphore: VkSemaphore? = timelineSemaphore.semaphore
-                let timeline: UInt64 = timelineSemaphore.timeline
-
-                var semaphoreSubmitInfo = VkTimelineSemaphoreSubmitInfo()
-                semaphoreSubmitInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO
-                semaphoreSubmitInfo.signalSemaphoreValueCount = 1;
-
-                result = withUnsafePointer(to: timeline) {
-                    semaphoreSubmitInfo.pSignalSemaphoreValues = $0
-
-                    return withUnsafePointer(to: semaphoreSubmitInfo) {
-                        var submitInfo = VkSubmitInfo()
-                        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO
-                        submitInfo.pNext = UnsafeRawPointer($0)
-
-                        return withUnsafePointer(to: semaphore) {
-                            submitInfo.pSignalSemaphores = $0
-
-                            var submits = submits
-                            submits.append(submitInfo)
-
-                            return vkQueueSubmit(self.queue, UInt32(submits.count), submits, nil)
-                        }
-                    }
-                }
-            }
-            else if let completionHandler = device.queueCompletionHandlerFence {
-                let fence: VkFence = completionHandler.getFence(device: device)
-                result = vkQueueSubmit(self.queue, UInt32(submits.count), submits, fence)
-                if result == VK_SUCCESS {
-                    completionHandler.addCompletionHandler(fence: fence, op: callback)
-                }
-            } else {
-                fatalError("CommandQueue.submit: completion handler not available.")
+            let fence: VkFence = device.fence(device: device)
+            result = vkQueueSubmit(self.queue, UInt32(submits.count), submits, fence)
+            if result == VK_SUCCESS {
+                device.addCompletionHandler(fence: fence, op: callback)
             }
         } else {
             result = vkQueueSubmit(self.queue, UInt32(submits.count), submits, nil)

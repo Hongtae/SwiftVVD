@@ -44,9 +44,11 @@ public class VulkanSwapChain: SwapChain {
             colorAttachments: [],
             depthStencilAttachment: RenderPassDepthStencilAttachmentDescriptor())
 
-        window.addEventObserver(self) { (event: WindowEvent) in
+        window.addEventObserver(self) { [weak self](event: WindowEvent) in
             if event.type == .resized {
-                synchronizedBy(locking: self.lock) { self.deviceReset = true }
+                if let self = self {
+                    synchronizedBy(locking: self.lock) { self.deviceReset = true }
+                }
             }
         }
     }

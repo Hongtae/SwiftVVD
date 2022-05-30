@@ -85,9 +85,6 @@ public class Screen {
     private typealias ThreadTask = ()->Void
     private var threadTasks: [ThreadTask] = []
 
-    private var threadCond = NSCondition()
-    private var threadAlive = AtomicNumber32(0)
-    private var threadId: UInt = 0
     private var propertyLock = SpinLock()
 
     public init(graphicsDeviceContext: GraphicsDeviceContext?,
@@ -105,18 +102,9 @@ public class Screen {
 
         let threadProc = { [weak self]() in
 
-            let threadCond = self!.threadCond       // copy reference
-            let threadAlive = self!.threadAlive     // copy reference
-
             Log.info("Screen render thread start.")
 
             var tickCounter = TickCounter()
-
-            synchronizedBy(locking: threadCond) {
-                self!.threadId = currentThreadId()
-                threadAlive.store(1)
-                threadCond.broadcast()
-            }
 
             let frameUpdateCounter = AtomicNumber64(0)
             
@@ -206,21 +194,10 @@ public class Screen {
                     }
                 }
             }
-
-            synchronizedBy(locking: threadCond) {
-                threadAlive.store(0)
-                threadCond.broadcast()
-            }
-
             Log.info("Screen render thread has been terminated.")
         }
 
         Thread.detachNewThread(threadProc)
-        synchronizedBy(locking: threadCond) {
-            while self.threadAlive.load() == 0 {
-                self.threadCond.wait()
-            }
-        }
         Log.debug("Screen created.")
     }
 
@@ -229,13 +206,6 @@ public class Screen {
     }
 
     deinit {
-        if self.threadId != currentThreadId() {
-            // Wait for the render thread to be terminated.
-            synchronizedBy(locking: self.threadCond) {
-                while self.threadAlive.load() != 0 { self.threadCond.wait() }
-            }
-        }
-
         self.window = nil
         self.frame = nil
         self.swapChain = nil
