@@ -3,7 +3,7 @@ import Vulkan
 import Foundation
 
 public class VulkanDescriptorPoolChain {
-    public weak var device: VulkanGraphicsDevice?
+    public unowned var device: VulkanGraphicsDevice
     public let poolID: VulkanDescriptorPoolID
     
     public var maxSets: UInt32
@@ -58,7 +58,6 @@ public class VulkanDescriptorPoolChain {
         // Log.debug("VulkanDescriptorPoolChain: \(ObjectIdentifier(self)) \(poolID), maxSets: \(maxSets)")
 
         var pool: VkDescriptorPool?
-        let device = self.device!
         let result: VkResult = poolSizes.withUnsafeBufferPointer {
             poolCreateInfo.pPoolSizes = $0.baseAddress
             return vkCreateDescriptorPool(device.device, &poolCreateInfo, device.allocationCallbacks, &pool)

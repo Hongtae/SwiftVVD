@@ -1,7 +1,39 @@
+import Foundation
+
 public protocol PlatformFactory {
      func sharedApplication() -> Application? 
      func runApplication(delegate: ApplicationDelegate?) -> Int
      func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?) -> Window 
+}
+
+private var numberOfThreadsToWaitBeforeExiting = AtomicNumber64(0)
+
+func runServiceThread(_ block: @escaping () -> Void) {
+    Thread.detachNewThread {
+        numberOfThreadsToWaitBeforeExiting.increment()
+        block()
+        numberOfThreadsToWaitBeforeExiting.decrement()
+    }
+}
+
+func appFinalize() {
+    var timer = TickCounter()
+    while true {
+        let next = RunLoop.main.limitDate(forMode: .default)
+        if let next = next, next.timeIntervalSinceNow <= 0.0 {
+            continue
+        }
+        let numThreads = numberOfThreadsToWaitBeforeExiting.load()
+        if numThreads > 0 {
+            if timer.elapsed > 1.5 {
+                Log.info("Waiting for system service threads to finish. (\(numThreads))")
+                timer.reset()
+            }
+            threadYield()
+            continue
+        }
+        break
+    }
 }
 
 public class Platform {

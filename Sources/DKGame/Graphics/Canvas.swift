@@ -1105,8 +1105,6 @@ public class Canvas {
         for c2 in str {
             // get glyph info from font object
             if let glyph = font.glyphData(forChar: c2) {
-                offset += font.kernAdvance(left: c1, right: c2).x
-
                 let posMin = Vector2(Scalar(glyph.position.x + offset), Scalar(glyph.position.y))
                 let posMax = Vector2(Scalar(glyph.frame.width), Scalar(glyph.frame.height)) + posMin
 
@@ -1144,7 +1142,7 @@ public class Canvas {
                         quads.append(q)
                     }
                 }
-                offset += glyph.advance.width
+                offset += glyph.advance.width + font.kernAdvance(left: c1, right: c2).x
             }
             c1 = c2
         }

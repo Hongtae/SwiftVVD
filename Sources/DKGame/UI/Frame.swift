@@ -15,6 +15,7 @@ open class Frame {
     }}
     private var inverseContentTransform: Matrix3 = .identity
 
+    private var _contentScaleFactor: CGFloat = 1.0
     public private(set) var resolution: CGSize = CGSize(width: 1, height: 1)
     public var contentScale: CGSize { 
         get { _contentScale }
@@ -216,13 +217,17 @@ open class Frame {
 
         var resized = false
         if let screen = self.screen, screen.frame === self {
+            let scaleFactor = screen.contentScaleFactor
             let size = screen.resolution
             let w = max(size.width.rounded(), 1.0)
             let h = max(size.height.rounded(), 1.0)
 
-            if self.resolution.width.rounded() != w || self.resolution.height.rounded() != h {
+            if self.resolution.width.rounded() != w ||
+               self.resolution.height.rounded() != h ||
+               self._contentScaleFactor != scaleFactor {
                 resized = true
                 self.resolution = CGSize(width: w, height: h)
+                self._contentScaleFactor = scaleFactor
             }
         } else {
             let size = self.calculateResolution()
@@ -233,6 +238,7 @@ open class Frame {
             if self.resolution.width.rounded() != w || self.resolution.height.rounded() != h {
                 resized = true
                 self.resolution = CGSize(width: w, height: h)
+                self._contentScaleFactor = self.screen?.contentScaleFactor ?? 1.0
                 self.discardSurface()
             }
         }
@@ -240,7 +246,7 @@ open class Frame {
         assert(resolution.height > .leastNormalMagnitude)
 
         if resized {
-            self.resolutionChanged(resolution)
+            self.resolutionChanged(resolution, scaleFactor: self._contentScaleFactor)
             self.redraw()
         }
         subframes.forEach { $0.updateResolution() }
@@ -279,7 +285,9 @@ open class Frame {
             frame.superframe = self
             if self.loaded {
                 assert(self.screen != nil)
-                frame.loadHierarchy(screen: self.screen!, resolution: self.resolution)
+                frame.loadHierarchy(screen: self.screen!,
+                                    resolution: self.resolution,
+                                    scaleFactor: self._contentScaleFactor)
                 frame.updateResolution()
                 redraw()
             }
@@ -309,8 +317,7 @@ open class Frame {
     open func draw(canvas: Canvas) { canvas.clear(color: .white) }
     open func drawOverlay(canvas: Canvas) {}
 
-    open func resolutionChanged(_ size: CGSize) {
-        let scaleFactor = self.screen?.contentScaleFactor ?? 1.0
+    open func resolutionChanged(_ size: CGSize, scaleFactor: CGFloat) {
         self.contentScale = CGSize(width: size.width / scaleFactor, height: size.height / scaleFactor)
     }
 
@@ -440,7 +447,7 @@ open class Frame {
         return false 
     }
 
-    func loadHierarchy(screen: Screen, resolution: CGSize) {
+    func loadHierarchy(screen: Screen, resolution: CGSize, scaleFactor: CGFloat) {
         if self.screen !== screen {
             self.unloadHierarchy()
             assert(self.loaded == false)
@@ -449,12 +456,13 @@ open class Frame {
             // update resolution
             self.resolution = CGSize(width: resolution.width.rounded(),
                                      height: resolution.height.rounded())
+            self._contentScaleFactor = scaleFactor
             self.loaded = true
             self.loaded(screen: screen)
-            self.resolutionChanged(self.resolution)
+            self.resolutionChanged(self.resolution, scaleFactor: scaleFactor)
             self.updateResolution()
 
-            subframes.forEach { $0.loadHierarchy(screen: screen, resolution: resolution)}
+            subframes.forEach { $0.loadHierarchy(screen: screen, resolution: resolution, scaleFactor: scaleFactor)}
         }
     }
 

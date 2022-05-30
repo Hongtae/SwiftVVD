@@ -31,24 +31,48 @@ class MyWindowDelegate: WindowDelegate {
 
 class MyFrame: Frame {
     var t = 0.0
+    var tickDelta = 0.0
     var textFont: Font?
     var outlineFont: Font?
+    var fpsFont: Font?
+
+    let dpi: Font.DPI = (72, 72)
 
     override func loaded(screen: Screen) {
         if let fontData = loadResourceData(name: "Resources/Roboto-Regular.ttf") {
             self.textFont = Font(deviceContext: screen.graphicsDeviceContext!, data: fontData)
             self.outlineFont = Font(deviceContext: screen.graphicsDeviceContext!, data: fontData)
+            let pointSize = 32.0
             if let font = self.textFont {
-                font.setStyle(pointSize: 32.0, dpi: (72, 72))
+                font.setStyle(pointSize: pointSize, dpi: dpi)
             }
             if let font = self.outlineFont {
-                font.setStyle(pointSize: 32.0, dpi: (72, 72), outline: 1.0)
+                font.setStyle(pointSize: pointSize, dpi: dpi, outline: 1.0, forceBitmap: true)
+            }
+        }
+        if let fontData = loadResourceData(name: "Resources/BitstreamVeraSansMono.ttf") {
+            self.fpsFont = Font(deviceContext: screen.graphicsDeviceContext!, data: fontData)
+            if let font = self.fpsFont {
+                font.setStyle(pointSize: 24, dpi: dpi)
             }
         }
     }
 
     override func update(tick: UInt64, delta: Double, date: Date) {
         t += delta
+        tickDelta = delta
+    }
+
+    override func resolutionChanged(_ size: CGSize, scaleFactor: CGFloat) {
+        super.resolutionChanged(size, scaleFactor: scaleFactor)
+
+        var dpi = self.dpi
+        dpi.x = UInt32(CGFloat(dpi.x) * scaleFactor)
+        dpi.y = UInt32(CGFloat(dpi.y) * scaleFactor)
+
+        self.textFont?.dpi = dpi
+        self.outlineFont?.dpi = dpi
+        self.fpsFont?.dpi = dpi
     }
 
     override func draw(canvas: Canvas) {
@@ -59,8 +83,8 @@ class MyFrame: Frame {
             color: Color(v, 0, 0), blendState: .defaultOpaque)
         canvas.drawRect(CGRect(x: 50, y: 15, width: 200, height: 200), color: Color(1, 1, 1, 0.5), blendState: .defaultAlpha)
         if let textFont = self.textFont, let outlineFont = self.outlineFont {
-            let text = "ABCDEFG"
-            let baseline = [CGPoint(x: 150, y: 200), CGPoint(x: 340, y: 80)]
+            let text = "Swift DKGL"
+            let baseline = [CGPoint(x: 80, y: 500), CGPoint(x: 700, y: 200)]
             canvas.drawText(text, font: outlineFont,
                 baselineBegin: baseline[0],
                 baselineEnd: baseline[1],
@@ -69,6 +93,14 @@ class MyFrame: Frame {
                 baselineBegin: baseline[0],
                 baselineEnd: baseline[1],
                 color: Color(1,1,0))
+        }
+        if let font = self.fpsFont {
+            let text = String(format:"%.1f FPS (%.4f)", 1.0 / self.tickDelta, self.tickDelta)
+            var bounds = self.pixelToLocal(rect: font.bounds(of: text))
+            let contentBounds = self.bounds
+            bounds.origin = CGPoint(x: contentBounds.width - bounds.width - 10, y: 10)
+
+            canvas.drawText(text, font: font, bounds: bounds, color: Color(1, 1, 1))
         }
     }
 }

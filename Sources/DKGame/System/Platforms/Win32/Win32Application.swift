@@ -83,7 +83,6 @@ public class Win32Application : Application {
 
         var timerId: UINT_PTR = 0
         var msg: MSG = MSG()
-        var next: Date? = nil
 
         PostMessageW(nil, UINT(WM_NULL), 0, 0); // To process first enqueued events.
         mainLoop: while true {
@@ -96,6 +95,7 @@ public class Win32Application : Application {
             }
 
             if app.running {
+                var next: Date? = nil
                 repeat {
                     next = RunLoop.main.limitDate(forMode: .default)
                 } while (next?.timeIntervalSinceNow ?? 1.0) <= 0.0
@@ -130,9 +130,7 @@ public class Win32Application : Application {
 
         delegate?.finalize(application: app)
 
-        repeat {
-            next = RunLoop.main.limitDate(forMode: .default)
-        } while (next?.timeIntervalSinceNow ?? 1.0) <= 0.0
+        appFinalize()
 
         if keyboardHook != nil {
             UnhookWindowsHookEx(keyboardHook)

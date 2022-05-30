@@ -216,7 +216,8 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         self.loadPipelineCache()
 
         // create queue completion handlr
-        let queueCompletionHandlerProc = {
+        fenceCompletionThreadRunning.store(1)
+        runServiceThread {
             [weak self,
              fenceCompletionCond = self.fenceCompletionCond,
              fenceCompletionThreadRunning = self.fenceCompletionThreadRunning] in
@@ -327,8 +328,6 @@ public class VulkanGraphicsDevice : GraphicsDevice {
 
             Log.info("VulkanGraphicsDevice Helper thread is finished.")
         }
-        fenceCompletionThreadRunning.store(1)
-        Thread.detachNewThread(queueCompletionHandlerProc)
     }
     
     deinit {
@@ -532,7 +531,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             synchronizedBy(locking: self.descriptorPoolChainMaps[index].lock) {
                 // find matching pool.
                 if let chain = self.descriptorPoolChainMaps[index].poolChainMap[poolID] {
-                    assert(chain.device! === self)
+                    assert(chain.device === self)
                     assert(chain.poolID == poolID)
                 }
             }
@@ -1506,7 +1505,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             }
             
             let chain = self.descriptorPoolChainMaps[index].poolChainMap[poolID]!
-            assert(chain.device! === self)
+            assert(chain.device === self)
             assert(chain.poolID == poolID)
 
             if let allocationInfo = chain.allocateDescriptorSet(layout: layout) {

@@ -47,6 +47,8 @@ public class Screen {
                         self.activated = activated
                         self.visible = visible
                     }
+                    self.postCommand { self.frame?.updateResolution() }
+
                 } else {
                     synchronizedBy(locking: self.propertyLock) {
                         self.swapChain = nil
@@ -100,7 +102,7 @@ public class Screen {
 
         Canvas.cachePipelineContext(graphicsDeviceContext!)
 
-        let threadProc = { [weak self]() in
+        runServiceThread { [weak self]() in
 
             Log.info("Screen render thread start.")
 
@@ -149,7 +151,9 @@ public class Screen {
 
                 if let frame = frame, swapChain != nil {
                     if frame.loaded == false {
-                        frame.loadHierarchy(screen: self, resolution: self.resolution)
+                        frame.loadHierarchy(screen: self,
+                                            resolution: self.resolution,
+                                            scaleFactor: self.contentScaleFactor)
                     }
                     if let dispatchQueue = self.dispatchQueue {
                         assert(frameUpdateCounter.load() == 0)
@@ -196,8 +200,6 @@ public class Screen {
             }
             Log.info("Screen render thread has been terminated.")
         }
-
-        Thread.detachNewThread(threadProc)
         Log.debug("Screen created.")
     }
 

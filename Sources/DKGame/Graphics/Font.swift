@@ -339,7 +339,7 @@ public class Font {
             if let glyph = self.glyphData(forChar: c2) {
                 if offset > 0.0 {
                     let posMin = CGPoint(x: offset + glyph.position.x, y: glyph.position.y)
-                    let posMax = CGPoint(x: posMin.x + glyph.frame.size.width, y: posMin.y + glyph.frame.size.height)
+                    let posMax = CGPoint(x: posMin.x + glyph.frame.width, y: posMin.y + glyph.frame.height)
 
                     if bboxMin.x > posMin.x { bboxMin.x = posMin.x }
                     if bboxMin.y > posMin.y { bboxMin.y = posMin.y }
@@ -347,8 +347,8 @@ public class Font {
                     if bboxMax.y < posMax.y { bboxMax.y = posMax.y }
                 } else {
                     bboxMin = glyph.position
-                    bboxMax.x = bboxMin.x + glyph.frame.size.width
-                    bboxMax.y = bboxMin.y + glyph.frame.size.height
+                    bboxMax.x = bboxMin.x + glyph.frame.width
+                    bboxMax.y = bboxMin.y + glyph.frame.height
                 }
 
                 offset += glyph.advance.width + self.kernAdvance(left: c1, right: c2).x
@@ -362,35 +362,35 @@ public class Font {
     /// The distance from the baseline to the highest or upper grid coordinate used to place an outline point.
     public var ascender: CGFloat {
         let metrics = self.face.pointee.size.pointee.metrics
-        return ft26d6ToFloat(metrics.ascender)
+        return ft26d6ToFloat(metrics.ascender) + _embolden
     }
 
     /// The distance from the baseline to the lowest grid coordinate used to place an outline point.
     public var descender: CGFloat {
         let metrics = self.face.pointee.size.pointee.metrics
-        return ft26d6ToFloat(metrics.descender)
+        return ft26d6ToFloat(metrics.descender) + _embolden
     }
 
     public var maxAdvance: CGFloat  {
         let metrics = self.face.pointee.size.pointee.metrics
-        return ft26d6ToFloat(metrics.max_advance)
+        return ft26d6ToFloat(metrics.max_advance) + ceil(_embolden * 2.0)
     }
 
     public var height: CGFloat  {
         let metrics = self.face.pointee.size.pointee.metrics
-        return ft26d6ToFloat(metrics.height) + ceil(_embolden) * 2.0
+        return ft26d6ToFloat(metrics.height) + ceil(_embolden * 2.0) + ceil(_outline) * 2.0
     }
 
     /// font pixel-width (includes outline)
     public var glyphMaxWidth: CGFloat {
         let metrics = self.face.pointee.size.pointee.metrics
-        return ft26d6ToFloat(metrics.max_advance) + (ceil(_embolden) + ceil(_outline)) * 2.0
+        return ft26d6ToFloat(metrics.max_advance) + ceil(_embolden * 2.0) + ceil(_outline) * 2.0
     }
 
     /// font pixel-height (includes outline)
     public var glyphMaxHeight: CGFloat  {
         let metrics = self.face.pointee.size.pointee.metrics
-        return ft26d6ToFloat(metrics.height) + (ceil(_embolden) + ceil(_outline)) * 2.0
+        return ft26d6ToFloat(metrics.height) + ceil(_embolden * 2.0) + ceil(_outline) * 2.0
     }
 
     public var xScale: CGFloat {
@@ -563,7 +563,7 @@ public class Font {
                         }
                     }
                     position.x = CGFloat(face.pointee.glyph.pointee.bitmap_left) - _outline
-                    position.y = ascender - CGFloat(face.pointee.glyph.pointee.bitmap_top) + _outline
+                    position.y = ascender - (CGFloat(face.pointee.glyph.pointee.bitmap_top) + _outline)
                     texture = self.cacheGlyphTexture(width: outer.width,
                                                      height: outer.rows,
                                                      data: outer.buffer,
@@ -587,12 +587,13 @@ public class Font {
         return self.glyphMap[c]
     }
 
-    private func cacheGlyphTexture(width: UInt32, height: UInt32, data: UnsafePointer<UInt8>, frame: inout CGRect) -> Texture? {
+    private func cacheGlyphTexture(width: UInt32, height: UInt32, data: UnsafePointer<UInt8>?, frame: inout CGRect) -> Texture? {
         // keep padding between each glyphs.
         if width == 0 || height == 0 {
             frame = .zero
             return nil
         }
+        let data = data!
 
         let device = deviceContext.device
         let queue = deviceContext.copyQueue()!
