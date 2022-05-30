@@ -595,10 +595,10 @@ public class Font {
         var texture: Texture? = nil
 
         let updateTexture = { (queue: CommandQueue, texture: Texture, rect: CGRect, data: UnsafePointer<UInt8>) in
-            let x = UInt32(rect.origin.x.rounded())
-            let y = UInt32(rect.origin.y.rounded())
-            let width = UInt32(rect.size.width.rounded())
-            let height = UInt32(rect.size.height.rounded())
+            let x = UInt32(rect.minX.rounded())
+            let y = UInt32(rect.minY.rounded())
+            let width = UInt32(rect.width.rounded())
+            let height = UInt32(rect.height.rounded())
 
             let bufferLength = Int(width * height)
 

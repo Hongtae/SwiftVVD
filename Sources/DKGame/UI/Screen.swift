@@ -87,6 +87,7 @@ public class Screen {
 
     private var threadCond = NSCondition()
     private var threadAlive = AtomicNumber32(0)
+    private var threadId: UInt = 0
     private var propertyLock = SpinLock()
 
     public init(graphicsDeviceContext: GraphicsDeviceContext?,
@@ -112,6 +113,7 @@ public class Screen {
             var tickCounter = TickCounter()
 
             synchronizedBy(locking: threadCond) {
+                self!.threadId = currentThreadId()
                 threadAlive.store(1)
                 threadCond.broadcast()
             }
@@ -209,6 +211,8 @@ public class Screen {
                 threadAlive.store(0)
                 threadCond.broadcast()
             }
+
+            Log.info("Screen render thread has been terminated.")
         }
 
         Thread.detachNewThread(threadProc)
@@ -225,15 +229,20 @@ public class Screen {
     }
 
     deinit {
-        if let window = self.window {
-            window.removeEventObserver(self)
-        }
-        // Wait for the render thread to be terminated.
-        synchronizedBy(locking: self.threadCond) {
-            while self.threadAlive.load() != 0 {
-                self.threadCond.wait()
+        if self.threadId != currentThreadId() {
+            // Wait for the render thread to be terminated.
+            synchronizedBy(locking: self.threadCond) {
+                while self.threadAlive.load() != 0 { self.threadCond.wait() }
             }
         }
+
+        self.window = nil
+        self.frame = nil
+        self.swapChain = nil
+        self.commandQueue = nil
+        self.graphicsDeviceContext = nil
+        self.audioDeviceContext = nil
+
         Log.debug("Screen destoryed.")
     }
 
