@@ -427,6 +427,10 @@ public class Font {
         self.faceLock.lock()
         defer { self.faceLock.unlock() }
 
+        if let data = self.glyphMap[c] {
+            return data
+        }
+
         let index = FT_Get_Char_Index(face, c.value)
         // loading font.
         let loadFlags: FT_Int32 = _forceBitmap ? FT_LOAD_RENDER : FT_LOAD_DEFAULT

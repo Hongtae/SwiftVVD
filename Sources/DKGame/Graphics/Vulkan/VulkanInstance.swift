@@ -66,7 +66,10 @@ private func debugUtilsMessengerCallback(messageSeverity: VkDebugUtilsMessageSev
         type += "PERFORMANCE-"
     }
 
-    let mesgId = String(cString: pCallbackData!.pointee.pMessageIdName)
+    var mesgId: String = ""
+    if let name = pCallbackData!.pointee.pMessageIdName {
+        mesgId = String(cString: name)
+    }
     let mesgIdNum = String(format:"0x%02x", pCallbackData!.pointee.messageIdNumber)
     let mesg = String(cString: pCallbackData!.pointee.pMessage)
 

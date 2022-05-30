@@ -39,10 +39,10 @@ class MyFrame: Frame {
             self.textFont = Font(deviceContext: screen.graphicsDeviceContext!, data: fontData)
             self.outlineFont = Font(deviceContext: screen.graphicsDeviceContext!, data: fontData)
             if let font = self.textFont {
-                font.setStyle(pointSize: 12.0, dpi: (72, 72))
+                font.setStyle(pointSize: 32.0, dpi: (72, 72))
             }
             if let font = self.outlineFont {
-                font.setStyle(pointSize: 12.0, dpi: (72, 72), outline: 2.0)
+                font.setStyle(pointSize: 32.0, dpi: (72, 72), outline: 1.0)
             }
         }
     }
@@ -58,11 +58,17 @@ class MyFrame: Frame {
             inset: CGSize(width: 20, height: 20),
             color: Color(v, 0, 0), blendState: .defaultOpaque)
         canvas.drawRect(CGRect(x: 50, y: 15, width: 200, height: 200), color: Color(1, 1, 1, 0.5), blendState: .defaultAlpha)
-        if let textFont = self.textFont {
-            // canvas.drawText("ABCDEFG", withFont: textFont,
-            //     baselineBegin: CGPoint(x: 50, y: 50),
-            //     baselineEnd: CGPoint(x: 200, y: 100),
-            //     color: Color(1,0,1))
+        if let textFont = self.textFont, let outlineFont = self.outlineFont {
+            let text = "ABCDEFG"
+            let baseline = [CGPoint(x: 150, y: 200), CGPoint(x: 340, y: 80)]
+            canvas.drawText(text, font: outlineFont,
+                baselineBegin: baseline[0],
+                baselineEnd: baseline[1],
+                color: Color(0,0,0))
+            canvas.drawText(text, font: textFont,
+                baselineBegin: baseline[0],
+                baselineEnd: baseline[1],
+                color: Color(1,1,0))
         }
     }
 }

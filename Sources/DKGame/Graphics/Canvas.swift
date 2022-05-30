@@ -1072,7 +1072,7 @@ public class Canvas {
     }
 
     public func drawText(_ text: String,
-                         withFont font: Font,
+                         font: Font,
                          bounds: CGRect,
                          transform: Matrix3 = .identity,
                          color: Color) {
@@ -1097,7 +1097,7 @@ public class Canvas {
 
         var bboxMin = Vector2(0, 0)
         var bboxMax = Vector2(0, 0)
-        var offset: Scalar = 0.0        // accumulated text width (pixel)
+        var offset: CGFloat = 0.0        // accumulated text width (pixel)
 
         let colorF4 = color.float4
 
@@ -1105,10 +1105,10 @@ public class Canvas {
         for c2 in str {
             // get glyph info from font object
             if let glyph = font.glyphData(forChar: c2) {
-                offset += Scalar(font.kernAdvance(left: c1, right: c2).x)
+                offset += font.kernAdvance(left: c1, right: c2).x
 
-                let posMin = Vector2(offset + Scalar(glyph.position.x), Scalar(glyph.position.y))
-                let posMax = Vector2(Scalar(glyph.frame.maxX), Scalar(glyph.frame.maxY)) + posMin
+                let posMin = Vector2(Scalar(glyph.position.x + offset), Scalar(glyph.position.y))
+                let posMax = Vector2(Scalar(glyph.frame.width), Scalar(glyph.frame.height)) + posMin
 
                 if offset > 0.0 {
                     if (bboxMin.x > posMin.x) { bboxMin.x = posMin.x }
@@ -1144,7 +1144,7 @@ public class Canvas {
                         quads.append(q)
                     }
                 }
-                offset += Scalar(glyph.advance.width)
+                offset += glyph.advance.width
             }
             c1 = c2
         }
@@ -1163,7 +1163,7 @@ public class Canvas {
         // calculate transform matrix
         var trans = AffineTransform2(x: -bboxMin.x, y: -bboxMin.y)    // move origin
         trans *= LinearTransform2(scaleX: 1.0 / width, scaleY: 1.0 / height) // normalize size
-        trans *= LinearTransform2(scaleX: Scalar(bounds.maxX), scaleY: Scalar(bounds.maxY)) // scale to bounds
+        trans *= LinearTransform2(scaleX: Scalar(bounds.width), scaleY: Scalar(bounds.height)) // scale to bounds
         trans.translate(x: Scalar(bounds.minX), y: Scalar(bounds.minY)) // move to bounds origin
 
         var matrix = trans.matrix3
@@ -1202,7 +1202,7 @@ public class Canvas {
     }
 
     public func drawText(_ text: String,
-                         withFont font: Font,
+                         font: Font,
                          baselineBegin: CGPoint,
                          baselineEnd: CGPoint,
                          color: Color) {
@@ -1239,7 +1239,7 @@ public class Canvas {
             .scaled(by: Vector2(contentScale))              // apply contentScale
         transform.translate(by: Vector2(baselineBegin))
 
-        self.drawText(text, withFont: font, bounds: textBounds, transform: transform.matrix3, color: color)
+        self.drawText(text, font: font, bounds: textBounds, transform: transform.matrix3, color: color)
     }
 
     @discardableResult

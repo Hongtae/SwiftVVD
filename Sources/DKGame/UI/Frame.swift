@@ -38,7 +38,7 @@ open class Frame {
         if let s = self.superframe { s.redraw() }
     } }
 
-    public private(set) unowned var screen: Screen? = nil
+    public private(set) weak var screen: Screen? = nil
     public private(set) unowned var superframe: Frame? = nil
     public private(set) var subframes: [Frame] = []
     public private(set) var loaded = false

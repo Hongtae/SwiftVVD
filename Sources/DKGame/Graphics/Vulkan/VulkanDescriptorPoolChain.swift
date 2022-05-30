@@ -6,8 +6,8 @@ public class VulkanDescriptorPoolChain {
     public weak var device: VulkanGraphicsDevice?
     public let poolID: VulkanDescriptorPoolID
     
-    private var maxSets: UInt32
-    private var descriptorPools: [VulkanDescriptorPool]
+    public var maxSets: UInt32
+    public var descriptorPools: [VulkanDescriptorPool]
     
     public struct AllocationInfo {
         public let descriptorSet: VkDescriptorSet
@@ -17,7 +17,7 @@ public class VulkanDescriptorPoolChain {
     public init(device: VulkanGraphicsDevice, poolID: VulkanDescriptorPoolID) {
         self.device = device
         self.poolID = poolID
-        self.maxSets = 0
+        self.maxSets = 2
         self.descriptorPools = []
     }
 
@@ -40,7 +40,7 @@ public class VulkanDescriptorPoolChain {
     }
 
     public func addNewPool(flags: VkDescriptorPoolCreateFlags) -> VulkanDescriptorPool? {
-        self.maxSets = self.maxSets * 2 + 1
+        self.maxSets = max(self.maxSets, 1) * 2
         var poolSizes: [VkDescriptorPoolSize] = []
         poolSizes.reserveCapacity(descriptorTypes.count)
         for i in 0..<descriptorTypes.count {
@@ -55,6 +55,7 @@ public class VulkanDescriptorPoolChain {
         poolCreateInfo.flags = flags
         poolCreateInfo.poolSizeCount = UInt32(poolSizes.count)
         poolCreateInfo.maxSets = self.maxSets
+        // Log.debug("VulkanDescriptorPoolChain: \(ObjectIdentifier(self)) \(poolID), maxSets: \(maxSets)")
 
         var pool: VkDescriptorPool?
         let device = self.device!
@@ -67,6 +68,7 @@ public class VulkanDescriptorPoolChain {
 
             let dp = VulkanDescriptorPool(device: device, pool: pool!, poolCreateInfo: poolCreateInfo, poolID: poolID)
             self.descriptorPools.insert(dp, at: 0)
+            // Log.debug("VulkanDescriptorPoolChain.\(#function): \(ObjectIdentifier(self)) \(poolID), pools: \(self.descriptorPools.count) maxSets: \(maxSets)")
             return dp
         }
         Log.err("vkCreateDescriptorPool failed: \(result)")
@@ -94,6 +96,7 @@ public class VulkanDescriptorPoolChain {
             activePools.append(inactivePools[0])
         }
         self.descriptorPools = activePools
+        // Log.debug("VulkanDescriptorPoolChain.\(#function): \(ObjectIdentifier(self)) \(poolID), pools: \(self.descriptorPools.count) maxSets: \(maxSets)")
         return self.descriptorPools.count
     }
 }

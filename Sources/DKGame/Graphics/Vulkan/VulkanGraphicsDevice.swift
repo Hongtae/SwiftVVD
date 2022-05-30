@@ -340,7 +340,13 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         fenceCompletionCond.unlock()
 
         for maps in self.descriptorPoolChainMaps {
-            assert(maps.poolChainMap.isEmpty)
+            maps.poolChainMap.forEach{
+                $0.value.descriptorPools.forEach { (pool) in
+                    assert(pool.numAllocatedSets == 0)
+                    vkDestroyDescriptorPool(self.device, pool.pool, self.allocationCallbacks)
+                }
+            }
+            // assert(maps.poolChainMap.isEmpty)
         }
         vkDeviceWaitIdle(self.device)
 
@@ -1520,12 +1526,35 @@ public class VulkanGraphicsDevice : GraphicsDevice {
 
         let index: Int = Int(poolID.hash % UInt32(descriptorPoolChainMaps.count))
 
+        let cleanupThresholdAllChains = 2000
+        let cleanupThreshold = 100
+
         synchronizedBy(locking: self.descriptorPoolChainMaps[index].lock) {
             pool.release(descriptorSets: sets)
-            let chain = self.descriptorPoolChainMaps[index].poolChainMap[poolID]!
-            let numPools = chain.cleanup()
-            if numPools == 0 {
-                self.descriptorPoolChainMaps[index].poolChainMap[poolID] = nil
+            
+            var numChainPools = 0
+            if cleanupThresholdAllChains > 0 {
+                self.descriptorPoolChainMaps[index].poolChainMap.forEach {
+                    numChainPools += $0.value.descriptorPools.count
+                }
+            }
+
+            if numChainPools > cleanupThresholdAllChains {
+                var emptyChainIDs: [VulkanDescriptorPoolID] = []
+                emptyChainIDs.reserveCapacity(self.descriptorPoolChainMaps[index].poolChainMap.count)
+                self.descriptorPoolChainMaps[index].poolChainMap.forEach {
+                    if $0.value.cleanup() == 0 {
+                        emptyChainIDs.append($0.key)
+                    }                    
+                }
+                for poolID in emptyChainIDs {
+                     self.descriptorPoolChainMaps[index].poolChainMap[poolID] = nil
+                }
+            } else {
+                let chain = self.descriptorPoolChainMaps[index].poolChainMap[poolID]!
+                if chain.descriptorPools.count > cleanupThreshold && chain.cleanup() == 0 {
+                    self.descriptorPoolChainMaps[index].poolChainMap[poolID] = nil
+                }
             }
         }
     }
