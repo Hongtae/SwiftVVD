@@ -7,13 +7,13 @@ open class Frame {
         inverseTransform = transform.inverted() ?? .identity
         self.redraw()
     } }
-    private var inverseTransform: Matrix3 = .identity
+    public private(set) var inverseTransform: Matrix3 = .identity
 
     public var contentTransform: Matrix3 = .identity { didSet {
         inverseContentTransform = contentTransform.inverted() ?? .identity
         self.redraw()
     }}
-    private var inverseContentTransform: Matrix3 = .identity
+    public private(set) var inverseContentTransform: Matrix3 = .identity
 
     private var _contentScaleFactor: CGFloat = 1.0
     public private(set) var resolution: CGSize = CGSize(width: 1, height: 1)
@@ -296,10 +296,109 @@ open class Frame {
         return false
     }
 
-    public func removeFromSuperframe() {}
+    public func removeFromSuperframe() {
+        if let parent = self.superframe {
+            if let screen = self.screen {
+                screen.leaveHoverFrame(self)
+                screen.releaseAllKeyboardsCapturedBy(frame: self)
+                screen.releaseAllMiceCapturedBy(frame: self)
+            }
+            
+            for i in 0..<parent.subframes.count {
+                if parent.subframes[i] === self {
+                    parent.subframes.remove(at: i)
+                    break
+                }
+            }
+            parent.redraw()
+            self.superframe = nil
+        }
+    }
 
     public func bringSubframeToFront(_ frame: Frame) {}
     public func sendSubframeToBack(_ frame: Frame) {}
+
+    open var canHandleMouse: Bool { true }
+    open var canHandleKeyboard: Bool { true }
+
+    public func processMouseEvent(_ event: MouseEvent, position: CGPoint, delta: CGPoint, exclusive: Bool) -> Bool {
+
+        // convert frame local-space to content-space
+        let localPos = position.transformed(by: self.inverseContentTransform)
+        let localPosOld = (position - delta).transformed(by: self.inverseContentTransform)
+        let localDelta = localPos - localPosOld
+
+        if event.type != .move {
+            Log.debug("Frame.\(#function). position: \(position), localPos:\(localPos)")
+        }
+
+
+        if exclusive == false {
+            if self.hitTest(position: position) == false { return false }
+
+            if self.contentHitTest(position: localPos) {
+                for frame in self.subframes {
+                    if frame.hidden { continue }
+
+                    // apply inversed frame transform (convert to normalized frame coordinates)
+                    let scale = Vector2(frame.contentScale)
+                    assert(scale.x > 0.0 && scale.y > 0.0)
+                    let tm = frame.inverseTransform * AffineTransform2(linear: .init(scaleX: scale.x, scaleY: scale.y)).matrix3
+                    let posInFrame = localPos.transformed(by: tm)
+
+                    if frame.bounds.contains(posInFrame) {
+                        let posInFrameOld = localPosOld.transformed(by: tm)
+                        let deltaInFrame = posInFrame - posInFrameOld
+                        
+                        // send event to frame whether it is able to process or not. (frame is visible-destionation)
+                        if frame.processMouseEvent(event, position: posInFrame, delta: deltaInFrame, exclusive: false) {
+                            return true
+                        }
+                    }
+                }
+            }
+        }
+        
+        if self.canHandleMouse {
+            return self.handleMouseEvent(event, position: localPos, delta: localDelta)
+        }
+        return false
+    }
+
+    public func processKeyboardEvent(_ event: KeyboardEvent) -> Bool {
+        if self.canHandleKeyboard {
+            return handleKeyboardEvent(event)
+        }
+        return false
+    }
+
+    public func findHoverFrame(at position: CGPoint) -> Frame? {
+        if self.hidden == false {
+            if self.bounds.contains(position) {
+                if self.hitTest(position: position) {
+                    let localPos = position.transformed(by: self.inverseContentTransform)
+
+                    if self.contentHitTest(position: localPos) {
+                        for frame in subframes {
+                            let scale = Vector2(frame.contentScale)
+                            assert(scale.x > 0.0 && scale.y > 0.0)
+                            let tm = frame.inverseTransform * AffineTransform2(linear: .init(scaleX: scale.x, scaleY: scale.y)).matrix3
+                            let posInFrame = localPos.transformed(by: tm)
+
+                            if let hover = frame.findHoverFrame(at: posInFrame) {
+                                return hover
+                            }
+                        }
+                    }
+
+                    if self.canHandleMouse {
+                        return self
+                    }
+                }
+            }
+        }
+        return nil
+    }
 
     public func captureKeyboard(deviceId: Int) -> Bool { false }
     public func captureMouse(deviceId: Int) -> Bool { false }
@@ -324,10 +423,10 @@ open class Frame {
     open func hitTest(position pt: CGPoint) -> Bool { true }
     open func contentHitTest(position pt: CGPoint) -> Bool { true }
 
-    open func handleMouseEvent() -> Bool { false }
-    open func handleKeyboardEvent() -> Bool { false }
-    open func handleMouseEnter(deviceId: Int) {}
-    open func handleMouseLeave(deviceId: Int) {}
+    open func handleMouseEvent(_: MouseEvent, position: CGPoint, delta: CGPoint) -> Bool { false }
+    open func handleKeyboardEvent(_: KeyboardEvent) -> Bool { false }
+    open func handleMouseEnter(deviceId: Int, device: MouseEventDevice) {}
+    open func handleMouseLeave(deviceId: Int, device: MouseEventDevice) {}
     open func handleMouseLost(deviceId: Int) {}
     open func handleKeyboardLost(deviceId: Int) {}
 
@@ -470,11 +569,11 @@ open class Frame {
         subframes.forEach { $0.unloadHierarchy() }
 
         if self.loaded {
-            assert(self.screen != nil)
-            self.screen!.leaveHoverFrame(self)
-            self.screen!.removeFocusFrameForAnyDevices(frame: self)
-            self.screen!.removeKeyFrameForAnyDevices(frame: self)
-
+            if let screen = self.screen {
+                screen.leaveHoverFrame(self)
+                screen.releaseAllKeyboardsCapturedBy(frame: self)
+                screen.releaseAllMiceCapturedBy(frame: self)
+            }
             self.unload()
         }
 

@@ -434,7 +434,7 @@ public class Win32Window : Window {
     }
 
     private func synchronizeKeyStates() {
-        guard !self.activated else { return }
+        if self.activated == false { return }
 
         var keyStates: [UInt8] = [UInt8](repeating: 0, count: 256)
         GetKeyboardState(&keyStates)

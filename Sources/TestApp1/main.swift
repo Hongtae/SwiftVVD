@@ -38,6 +38,8 @@ class MyFrame: Frame {
 
     let dpi: Font.DPI = (72, 72)
 
+    var baseline = [CGPoint(x: 80, y: 450), CGPoint(x: 620, y: 180)]
+
     override func loaded(screen: Screen) {
         if let fontData = loadResourceData(name: "Resources/Roboto-Regular.ttf") {
             self.textFont = Font(deviceContext: screen.graphicsDeviceContext!, data: fontData)
@@ -83,8 +85,11 @@ class MyFrame: Frame {
             color: Color(v, 0, 0), blendState: .defaultOpaque)
         canvas.drawRect(CGRect(x: 50, y: 15, width: 200, height: 200), color: Color(1, 1, 1, 0.5), blendState: .defaultAlpha)
         if let textFont = self.textFont, let outlineFont = self.outlineFont {
+
+            canvas.drawLines(baseline, lineWidth: 2, color: Color(1, 1, 1))
+
             let text = "Swift DKGL"
-            let baseline = [CGPoint(x: 80, y: 500), CGPoint(x: 700, y: 200)]
+            
             canvas.drawText(text, font: outlineFont,
                 baselineBegin: baseline[0],
                 baselineEnd: baseline[1],
@@ -103,6 +108,47 @@ class MyFrame: Frame {
             canvas.drawText(text, font: font, bounds: bounds, color: Color(1, 1, 1))
         }
     }
+
+    override func handleMouseEvent(_ event: MouseEvent, position: CGPoint, delta: CGPoint) -> Bool {
+        if event.type != .move {
+            // Log.debug("\(#function): event: \(event), position: \(position), delta: \(delta)")
+        }
+
+        if event.type == .buttonDown {
+            switch event.buttonId {
+            case 0:
+                self.baseline[0] = position
+            case 1:
+                self.baseline[1] = position
+            default:
+                break
+            }
+            self.redraw()
+        }
+        return true 
+    }
+
+    override func handleKeyboardEvent(_ event: KeyboardEvent) -> Bool {
+        Log.debug("\(#function): event: \(event)")
+        return true
+    }
+    
+    override func handleMouseEnter(deviceId: Int, device: MouseEventDevice) {
+        Log.debug("\(#function): deviceId: \(deviceId), device: \(device)")
+    }
+
+    override func handleMouseLeave(deviceId: Int, device: MouseEventDevice) {
+        Log.debug("\(#function): deviceId: \(deviceId), device: \(device)")
+    }
+
+    override func handleMouseLost(deviceId: Int) {
+        Log.debug("\(#function): deviceId: \(deviceId)")
+    }
+
+    override func handleKeyboardLost(deviceId: Int) {
+        Log.debug("\(#function): deviceId: \(deviceId)")
+    }
+
 }
 
 class MyApplicationDelegate: ApplicationDelegate {

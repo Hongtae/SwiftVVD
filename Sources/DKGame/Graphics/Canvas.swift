@@ -514,9 +514,7 @@ public class Canvas {
 
     private var pipelineStates: CanvasPipelineStates?
 
-    public var viewport: CGRect {
-        didSet { if viewport != oldValue { self.updateTransform() }}
-    }
+    public var viewport: CGRect
 
     public var contentBounds: CGRect {
         didSet { if contentBounds != oldValue { self.updateTransform() }}
@@ -1258,22 +1256,20 @@ public class Canvas {
 
     private func updateTransform() {
         // let viewportOffset = _viewport.origin
-        let contentOffset = contentBounds.origin
-        let contentScale = contentBounds.size
+        let contentOffset = Vector2(contentBounds.origin)
+        let contentScale = Vector2(contentBounds.size)
 
-        assert(contentScale.width > 0.0 && contentScale.height > 0.0)
+        assert(contentScale.x > 0.0 && contentScale.y > 0.0)
 
-        let targetOrient = AffineTransform2(deviceOrientation)
-        let offset = AffineTransform2(origin: -Vector2(contentOffset)).matrix3
-        let s = LinearTransform2(scaleX: 1.0 / Scalar(contentScale.width), scaleY: 1.0 / Scalar(contentScale.height))
+        let offset = AffineTransform2(origin: -contentOffset).matrix3
+        let normalize = AffineTransform2(linear: .init(scaleX: 1.0 / contentScale.x, scaleY: 1.0 / contentScale.y)).matrix3
 
         // transform to screen viewport space.
-        let normalize = Matrix3(row1: Vector3(2.0, 0.0, 0.0),
+        let clipSpace = Matrix3(row1: Vector3(2.0, 0.0, 0.0),
                                 row2: Vector3(0.0, -2.0, 0.0),
                                 row3: Vector3(-1.0, 1.0, 1.0))
 
-        self.screenTransform = contentTransform * offset * 
-            AffineTransform2(linear: s).transformed(by: targetOrient).matrix3 * normalize
+        self.screenTransform = contentTransform * offset * normalize * deviceOrientation * clipSpace
     }
 
     private func encodeDrawCommand(shaderIndex: CanvasShaderIndex,
