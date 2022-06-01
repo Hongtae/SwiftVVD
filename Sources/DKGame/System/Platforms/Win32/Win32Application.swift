@@ -76,8 +76,14 @@ public class Win32Application : Application {
             }
         }
 
-        // Setup thread DPI
-        SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE)   
+        // Setup process DPI
+        if SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) {
+            Log.info("Windows DPI-Awareness: DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2")
+        } else if SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE) {
+            Log.info("Windows DPI-Awareness: DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE")
+        } else {
+            Log.warn("Windows DPI-Awareness not set, please check application manifest.")
+        }
 
         delegate?.initialize(application: app)
 

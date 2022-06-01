@@ -376,7 +376,7 @@ public class Screen {
     }
 
     public func processWindowEvent(_ event: WindowEvent) {
-        // Log.debug("Screen.\(#function) event:\(event)")
+        Log.debug("Screen.\(#function) event:\(event)")
 
         switch event.type {
         case .resized:
