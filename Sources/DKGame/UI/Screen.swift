@@ -1,18 +1,19 @@
 import Foundation
 
+@globalActor public actor ScreenActor: GlobalActor {
+    public static let shared = ScreenActor()
+}
 
+@ScreenActor
 public class Screen {
-    private var _frame: Frame? = nil
     public var frame: Frame? {
-        get { synchronizedBy(locking: self.propertyLock) { _frame } }
-        set { synchronizedBy(locking: self.propertyLock) {
-            if newValue !== _frame {
-                 _frame = newValue 
+        didSet {
+            if frame !== oldValue {
                 self.keyboardCaptors.removeAll()
                 self.mouseCaptors.removeAll()
                 self.hoverFrames.removeAll()
             }
-        }}
+        }
     }
 
     public var window: Window? {
@@ -46,36 +47,25 @@ public class Screen {
                         }
                     }
 
-                    synchronizedBy(locking: self.propertyLock) {
-                        self.swapChain = swapChain
-                        self._resolution = CGSize(width: contentBounds.width,
-                                                  height: contentBounds.height)
-                        self._contentScaleFactor = scaleFactor
-                        self.activated = activated
-                        self.visible = visible
-                    }
-                    self.postCommand { self.frame?.updateResolution() }
+                    self.swapChain = swapChain
+                    self.resolution = CGSize(width: contentBounds.width, height: contentBounds.height)
+                    self.contentScaleFactor = scaleFactor
+                    self.activated = activated
+                    self.visible = visible
+
+                    self.frame?.updateResolution()
 
                 } else {
-                    synchronizedBy(locking: self.propertyLock) {
-                        self.swapChain = nil
-                        self.activated = false
-                        self.visible = false
-                    }
+                    self.swapChain = nil
+                    self.activated = false
+                    self.visible = false
                 }
             }
         }
     }
 
-    private var _resolution: CGSize = .zero
-    public var resolution: CGSize {
-        get { synchronizedBy(locking: self.propertyLock) { _resolution } }
-    }
-
-    private var _contentScaleFactor: CGFloat = 1.0
-    public var contentScaleFactor: CGFloat {
-        get { synchronizedBy(locking: self.propertyLock) { _contentScaleFactor } }
-    }
+    public var resolution: CGSize = .zero
+    public var contentScaleFactor: CGFloat = 1.0
 
     private var swapChain: SwapChain?
 
@@ -97,8 +87,6 @@ public class Screen {
 
     private typealias ThreadTask = ()->Void
     private var threadTasks: [ThreadTask] = []
-
-    private var propertyLock = SpinLock()
 
     public init(graphicsDeviceContext: GraphicsDeviceContext?,
                 audioDeviceContext: AudioDeviceContext?,
@@ -127,14 +115,8 @@ public class Screen {
                 guard let self = self else { break }
                 
                 let executeTask: () -> Bool = {
-                    let task: ThreadTask? = synchronizedBy(locking: self.propertyLock) {
-                        if let t = self.threadTasks.first {
-                            self.threadTasks.remove(at: 0)
-                            return Optional(t)
-                        }
-                        return nil
-                    }
-                    if let task = task {
+                    if let task = self.threadTasks.first {
+                        self.threadTasks.remove(at: 0)
                         task()
                         return true
                     }
@@ -147,15 +129,13 @@ public class Screen {
                 var frameInterval: Double = 1.0 / 60.0
                 var numTasksExecuted = 0
                 
-                synchronizedBy(locking: self.propertyLock) {
-                    frame = self._frame
-                    swapChain = self.swapChain
+                frame = self.frame
+                swapChain = self.swapChain
 
-                    visible = self.visible
-                    suspended = self.suspended
+                visible = self.visible
+                suspended = self.suspended
 
-                    frameInterval = self.activated ? self.activeFrameInterval : self.inactiveFrameInterval
-                }
+                frameInterval = self.activated ? self.activeFrameInterval : self.inactiveFrameInterval
 
                 let delta = tickCounter.reset()
                 let tick = tickCounter.timestamp
@@ -167,24 +147,9 @@ public class Screen {
                                             resolution: self.resolution,
                                             scaleFactor: self.contentScaleFactor)
                     }
-                    if let dispatchQueue = self.dispatchQueue {
-                        assert(frameUpdateCounter.load() == 0)
-                        frameUpdateCounter.increment()
-                        frame.updateHierarchyAsync(queue: dispatchQueue,
-                                                   counter: frameUpdateCounter,
-                                                   tick: tick,
-                                                   delta: delta,
-                                                   date: date)
-                        while frameUpdateCounter.load() != 0 {
-                            if executeTask() {
-                                numTasksExecuted += 1
-                            } else {
-                                threadYield()
-                            }
-                        }
-                    } else {
-                        frame.updateHierarchy(tick: tick, delta: delta, date: date)
-                    }
+
+                    frame.updateHierarchy(tick: tick, delta: delta, date: date)
+                    
                     // draw!
                     if visible {
                         frame.redraw()
@@ -254,9 +219,7 @@ public class Screen {
     }
 
     private func postCommand(_ task: @escaping ThreadTask) {
-        synchronizedBy(locking: self.propertyLock) {
-            self.threadTasks.append(task)
-        }
+        self.threadTasks.append(task)
     }
 
     public func captureKeyboard(frame: Frame?, forDeviceId: Int) -> Bool { false }
@@ -383,23 +346,21 @@ public class Screen {
             let scaleFactor = event.contentScaleFactor
             let resolution = CGSize(width: event.contentBounds.width,
                                     height: event.contentBounds.height)
-            synchronizedBy(locking: self.propertyLock) {
-                self._contentScaleFactor = scaleFactor
-                self._resolution = resolution
-            }
-            self.postCommand { self.frame?.updateResolution() }
 
+            self.contentScaleFactor = scaleFactor
+            self.resolution = resolution
+            self.frame?.updateResolution()
         case .hidden, .minimized:
-            synchronizedBy(locking: self.propertyLock) { visible = false }
+            self.visible = false
         case .shown:
-            synchronizedBy(locking: self.propertyLock) { visible = true }
-            self.postCommand { self.frame?.redraw() }
+            self.visible = true
+            self.frame?.redraw()
         case .activated:
-            synchronizedBy(locking: self.propertyLock) { activated = true }
+            self.activated = true
         case .inactivated:
-            synchronizedBy(locking: self.propertyLock) { activated = false }
+            self.activated = false
         case .update:
-            self.postCommand { self.frame?.redraw() }
+            self.frame?.redraw()
         default:
             break
         }

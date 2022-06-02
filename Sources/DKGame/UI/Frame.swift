@@ -1,5 +1,6 @@
 import Foundation
 
+@ScreenActor
 open class Frame {
 
     public var bounds: CGRect   { CGRect(origin: .zero, size: contentScale) }
@@ -434,22 +435,6 @@ open class Frame {
         assert(self.loaded)
         self.update(tick: tick, delta: delta, date: date)
         subframes.forEach { $0.updateHierarchy(tick: tick, delta: delta, date: date) }
-    }
-
-    func updateHierarchyAsync(queue: DispatchQueue, counter: AtomicNumber64, tick: UInt64, delta: Double, date: Date) {
-        assert(self.loaded)
-        self.update(tick: tick, delta: delta, date: date)
-        for frame in subframes {
-            counter.increment()
-            queue.async {
-                frame.updateHierarchyAsync(queue: queue,
-                                           counter: counter,
-                                           tick: tick,
-                                           delta: delta,
-                                           date: date)
-            }
-        }
-        counter.decrement()
     }
 
     func drawHierarchy() -> Bool {
