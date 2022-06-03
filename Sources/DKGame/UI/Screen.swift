@@ -107,8 +107,6 @@ public class Screen {
 
             var tickCounter = TickCounter()
 
-            let frameUpdateCounter = AtomicNumber64(0)
-
             var frame: Frame? = nil
 
             mainLoop: while true {
@@ -184,8 +182,8 @@ public class Screen {
         Log.debug("Screen created.")
     }
 
-    public convenience init(dispatchQueue: DispatchQueue? = nil) {
-        self.init(graphicsDeviceContext: nil, audioDeviceContext: nil, dispatchQueue: dispatchQueue)
+    public convenience init() {
+        self.init(graphicsDeviceContext: nil, audioDeviceContext: nil, dispatchQueue: nil)
     }
 
     deinit {

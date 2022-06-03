@@ -1,6 +1,6 @@
 #if ENABLE_WIN32
 
-public struct DKGameWin32: PlatformFactory {
+public struct PlatformFactoryWin32: PlatformFactory {
 
     public func sharedApplication() -> Application? {
         return Win32Application.shared
@@ -10,7 +10,7 @@ public struct DKGameWin32: PlatformFactory {
         return Win32Application.run(delegate: delegate)
     }
 
-    public func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?) -> Window {
+    @MainActor public func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?) -> Window {
         return Win32Window(name: name, style: style, delegate: delegate)
     }
 }

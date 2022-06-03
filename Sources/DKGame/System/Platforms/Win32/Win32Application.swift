@@ -32,7 +32,7 @@ private func keyboardHookProc(_ nCode: Int32, _ wParam: WPARAM, _ lParam: LPARAM
 
 public class Win32Application : Application {
 
-    let eventLoopMaximumInterval: Double = 0.0
+    let eventLoopMaximumInterval: Double = 0.1
 
     var running: Bool = false
     var threadId: DWORD = 0
@@ -85,7 +85,7 @@ public class Win32Application : Application {
             Log.warn("Windows DPI-Awareness not set, please check application manifest.")
         }
 
-        delegate?.initialize(application: app)
+        Task { await delegate?.initialize(application: app) }
 
         var timerId: UINT_PTR = 0
         var msg: MSG = MSG()
@@ -113,6 +113,9 @@ public class Win32Application : Application {
                     } else {
                         elapse = UINT(max(nextInterval, 0.0) * 1000)
                     }
+                    if app.eventLoopMaximumInterval > 0.0 {
+                        elapse = min(UINT(app.eventLoopMaximumInterval * 1000), elapse)
+                    }
                     timerId = SetTimer(nil, timerId, elapse, nil)
                 } else {
                     if app.eventLoopMaximumInterval > 0.0 {
@@ -134,7 +137,7 @@ public class Win32Application : Application {
             KillTimer(nil, timerId);
         }
 
-        delegate?.finalize(application: app)
+        Task { await delegate?.finalize(application: app) }
 
         appFinalize()
 

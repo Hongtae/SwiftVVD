@@ -40,15 +40,15 @@ public class Platform {
 
     public class var factory: PlatformFactory {
 #if ENABLE_APPKIT
-        DKGameAppKit()
+        PlatformFactoryAppKit()
 #elseif ENABLE_UIKIT
-        DKGameUIKit()
+        PlatformFactoryUIKit()
 #elseif ENABLE_WIN32
-        DKGameWin32()
+        PlatformFactoryWin32()
 #endif
     }
 
-    public class func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?) -> Window {
+    @MainActor public class func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?) -> Window {
         factory.makeWindow(name: name, style: style, delegate: delegate)
     }
     public class func runApplication(delegate: ApplicationDelegate?) -> Int {

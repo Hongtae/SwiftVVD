@@ -1,6 +1,6 @@
 #if ENABLE_APPKIT
 
-public struct DKGameAppKit: PlatformFactory {
+public struct PlatformFactoryAppKit: PlatformFactory {
 
     public func sharedApplication() -> Application? {
         return AppKitApplication.shared
