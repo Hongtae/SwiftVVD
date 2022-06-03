@@ -48,7 +48,7 @@ public class Platform {
 #endif
     }
 
-    @MainActor public class func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?) -> Window {
+    public class func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?) -> Window {
         factory.makeWindow(name: name, style: style, delegate: delegate)
     }
     public class func runApplication(delegate: ApplicationDelegate?) -> Int {

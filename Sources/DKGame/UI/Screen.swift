@@ -109,6 +109,8 @@ public class Screen {
 
             var frame: Frame? = nil
 
+            let group = DispatchGroup()
+
             mainLoop: while true {
                 guard let self = self else { break }
                 
@@ -146,9 +148,12 @@ public class Screen {
                                             scaleFactor: self.contentScaleFactor)
                     }
 
+                    group.enter()
                     Task {
                         await frame.updateHierarchyAsync(tick: tick, delta: delta, date: date)
+                        group.leave()
                     }
+                    group.wait()
 
                     // draw!
                     if visible {

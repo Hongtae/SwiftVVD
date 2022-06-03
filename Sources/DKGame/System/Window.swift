@@ -160,6 +160,6 @@ extension Window {
     public func isTextInputEnabled(forDeviceId: Int) -> Bool { return false }
 }
 
-@MainActor public func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?) -> Window {
+public func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?) -> Window {
     Platform.makeWindow(name: name, style: style, delegate: delegate)
 }
