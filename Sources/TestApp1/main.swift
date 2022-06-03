@@ -158,7 +158,7 @@ class MyApplicationDelegate: ApplicationDelegate {
     var screen: Screen?
     var frame: Frame?
 
-    func initialize(application: Application) async {
+    func initialize(application: Application) {
         print("app initialize")
 
         self.windowDelegate = MyWindowDelegate()
@@ -167,16 +167,18 @@ class MyApplicationDelegate: ApplicationDelegate {
                                  delegate: self.windowDelegate)
         self.window?.contentSize = CGSize(width: 800, height: 600)
 
-        self.screen = await Screen()
-        self.frame = await MyFrame()
-        Task { @ScreenActor in
-            self.screen?.window = self.window
-            self.screen?.frame = self.frame
+        Task {
+            self.screen = await Screen()
+            self.frame = await MyFrame()
+            Task { @ScreenActor in
+                self.screen?.window = self.window
+                self.screen?.frame = self.frame
+            }
         }
         self.window?.activate()
     }
 
-    func finalize(application: Application) async {
+    func finalize(application: Application) {
         print("app finalize")
 
         self.screen = nil

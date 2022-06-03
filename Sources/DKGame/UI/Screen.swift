@@ -146,8 +146,10 @@ public class Screen {
                                             scaleFactor: self.contentScaleFactor)
                     }
 
-                    frame.updateHierarchy(tick: tick, delta: delta, date: date)
-                    
+                    Task {
+                        await frame.updateHierarchyAsync(tick: tick, delta: delta, date: date)
+                    }
+
                     // draw!
                     if visible {
                         frame.redraw()

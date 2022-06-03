@@ -431,10 +431,17 @@ open class Frame {
     open func handleMouseLost(deviceId: Int) {}
     open func handleKeyboardLost(deviceId: Int) {}
 
-    func updateHierarchy(tick: UInt64, delta: Double, date: Date) {
+    func updateHierarchyAsync(tick: UInt64, delta: Double, date: Date) async {
         assert(self.loaded)
         self.update(tick: tick, delta: delta, date: date)
-        subframes.forEach { $0.updateHierarchy(tick: tick, delta: delta, date: date) }
+        await withTaskGroup(of: Void.self) {
+            taskGroup in
+            for frame in subframes {
+                taskGroup.addTask {
+                    await frame.updateHierarchyAsync(tick: tick, delta: delta, date: date)
+                }
+            }
+        }
     }
 
     func drawHierarchy() -> Bool {

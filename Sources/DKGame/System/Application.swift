@@ -5,8 +5,8 @@ public protocol Application {
 }
 
 public protocol ApplicationDelegate {
-    @MainActor func initialize(application: Application) async
-    @MainActor func finalize(application: Application) async
+    @MainActor func initialize(application: Application)
+    @MainActor func finalize(application: Application)
 }
 
 public func sharedApplication() -> Application? {
