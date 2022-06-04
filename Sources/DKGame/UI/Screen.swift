@@ -108,14 +108,17 @@ public class Screen {
 
         var graphicsDeviceContext = graphicsDeviceContext
         if graphicsDeviceContext == nil {
-            graphicsDeviceContext = makeGraphicsDeviceContext(dispatchQueue: nil)
+            graphicsDeviceContext = makeGraphicsDeviceContext()
         }
         self.graphicsDeviceContext = graphicsDeviceContext
         self.commandQueue = self.graphicsDeviceContext?.renderQueue()
 
         Canvas.cachePipelineContext(graphicsDeviceContext!)
 
-        Task.detached { @ScreenActor [weak self] in
+        Task.detached(priority: .userInitiated) { @ScreenActor [weak self] in
+
+            numberOfThreadsToWaitBeforeExiting.increment()
+            defer { numberOfThreadsToWaitBeforeExiting.decrement() }
 
             Log.info("Screen render task start.")
 

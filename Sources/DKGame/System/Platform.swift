@@ -6,7 +6,7 @@ public protocol PlatformFactory {
      func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?) -> Window 
 }
 
-private var numberOfThreadsToWaitBeforeExiting = AtomicNumber64(0)
+var numberOfThreadsToWaitBeforeExiting = AtomicNumber64(0)
 
 func runServiceThread(_ block: @escaping () -> Void) {
     Thread.detachNewThread {
