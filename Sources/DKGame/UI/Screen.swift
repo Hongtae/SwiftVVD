@@ -88,7 +88,6 @@ public class Screen {
 
     private var swapChain: SwapChain?
 
-    public private(set) var dispatchQueue: DispatchQueue?
     public private(set) var graphicsDeviceContext: GraphicsDeviceContext?
     public private(set) var audioDeviceContext: AudioDeviceContext?
     public private(set) var commandQueue: CommandQueue?
@@ -105,8 +104,7 @@ public class Screen {
     private var hoverFrames: [Int: (frame: Frame, device: MouseEventDevice)] = [:]  // mouse hover frames
 
     public init(graphicsDeviceContext: GraphicsDeviceContext?,
-                audioDeviceContext: AudioDeviceContext?,
-                dispatchQueue: DispatchQueue?) {
+                audioDeviceContext: AudioDeviceContext?) {
 
         var graphicsDeviceContext = graphicsDeviceContext
         if graphicsDeviceContext == nil {
@@ -124,13 +122,7 @@ public class Screen {
             var tickCounter = TickCounter()
             var frame: Frame? = nil
 
-            var frameCount: UInt64 = 0
-
             mainLoop: while true {
-                frameCount += 1
-
-                // Log.info("RenderLoop: \(frameCount)")
-
                 guard let self = self else { break }
 
                 var swapChain: SwapChain? = nil
@@ -168,8 +160,6 @@ public class Screen {
                             swapChain?.present()
                         }
                     }
-                } else {
-                    // Log.info("Render Loop frame: \(frame), swapChain: \(swapChain)")
                 }
                 
                 while tickCounter.elapsed < frameInterval {
@@ -185,7 +175,7 @@ public class Screen {
     }
 
     public convenience init() {
-        self.init(graphicsDeviceContext: nil, audioDeviceContext: nil, dispatchQueue: nil)
+        self.init(graphicsDeviceContext: nil, audioDeviceContext: nil)
     }
 
     deinit {
@@ -243,9 +233,10 @@ public class Screen {
     public func screenToWindow(rect: CGRect) -> CGRect { rect }
 
     public func processKeyboardEvent(_ event: KeyboardEvent) {
-        // Log.debug("Screen.\(#function) event:\(event)")
-
         Task { @ScreenActor in
+
+            Log.debug("Screen.\(#function) event:\(event)")
+
             if let captor = self.keyboardCaptor(forDeviceId: event.deviceId) {
                 assert(captor.screen === self)
                 _ = captor.processKeyboardEvent(event)
@@ -254,11 +245,12 @@ public class Screen {
     }
 
     public func processMouseEvent(_ event: MouseEvent) {
-        if event.type != .move {
-            Log.debug("Screen.\(#function) event:\(event)")
-        }
-
         Task { @ScreenActor in
+
+            if event.type != .move {
+                Log.debug("Screen.\(#function) event:\(event)")
+            }
+
             if let frame = self.frame {
                 let res = Vector2(self.resolution)
                 assert(res.x > 0.0 && res.y > 0.0)
@@ -335,30 +327,32 @@ public class Screen {
     }
 
     public func processWindowEvent(_ event: WindowEvent) {
-        Log.debug("Screen.\(#function) event:\(event)")
+        Task { @ScreenActor in
 
-        switch event.type {
-        case .resized:
-            let scaleFactor = event.contentScaleFactor
-            let resolution = CGSize(width: event.contentBounds.width,
-                                    height: event.contentBounds.height)
+            Log.debug("Screen.\(#function) event:\(event)")
 
-            self.contentScaleFactor = scaleFactor
-            self.resolution = resolution
-            self.frame?.updateResolution()
-        case .hidden, .minimized:
-            self.visible = false
-        case .shown:
-            self.visible = true
-            self.frame?.redraw()
-        case .activated:
-            self.activated = true
-        case .inactivated:
-            self.activated = false
-        case .update:
-            self.frame?.redraw()
-        default:
-            break
+            switch event.type {
+            case .resized:
+                let scaleFactor = event.contentScaleFactor
+                let resolution = CGSize(width: event.contentBounds.width,
+                                        height: event.contentBounds.height)
+                self.contentScaleFactor = scaleFactor
+                self.resolution = resolution
+                self.frame?.updateResolution()
+            case .hidden, .minimized:
+                self.visible = false
+            case .shown:
+                self.visible = true
+                self.frame?.redraw()
+            case .activated:
+                self.activated = true
+            case .inactivated:
+                self.activated = false
+            case .update:
+                self.frame?.redraw()
+            default:
+                break
+            }
         }
     }
 }

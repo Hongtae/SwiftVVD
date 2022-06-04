@@ -30,9 +30,30 @@ private func keyboardHookProc(_ nCode: Int32, _ wParam: WPARAM, _ lParam: LPARAM
     return CallNextHookEx(keyboardHook, nCode, wParam, lParam);
 }
 
+private var mainLoopMaxInterval: UINT = 10
+private var mainLoopTimerId: UINT_PTR = 0
+
+private func processMainRunLoop(_ maxInterval: UINT = UINT(USER_TIMER_MAXIMUM)) -> UINT {
+    while true {
+        let next = RunLoop.main.limitDate(forMode: .default)
+        let s = next?.timeIntervalSinceNow ?? 1.0
+        if s > 0.0 {
+            if s * 1000 > Double(USER_TIMER_MAXIMUM) {
+                return min(UINT(USER_TIMER_MAXIMUM), maxInterval)
+            }
+            return min(UINT(s * 1000), maxInterval)
+        }
+    }
+}
+
+private let mainLoopTimerProc: TIMERPROC = { (_: HWND?, elapse: UINT, timerId: UINT_PTR, _: DWORD) in
+    let next = processMainRunLoop(mainLoopMaxInterval)
+    mainLoopTimerId = SetTimer(nil, timerId, next, mainLoopTimerProc)
+}
+
 public class Win32Application : Application {
 
-    let eventLoopMaximumInterval: Double = 0.1
+    let mainLoopMaximumInterval: Double = 0.01
 
     var running: Bool = false
     var threadId: DWORD = 0
@@ -41,7 +62,6 @@ public class Win32Application : Application {
     public static var shared: Application? = nil
 
     private init() {
-
     }
 
     public func terminate(exitCode: Int) {
@@ -87,9 +107,10 @@ public class Win32Application : Application {
 
         Task { await delegate?.initialize(application: app) }
 
-        var timerId: UINT_PTR = 0
-        var msg: MSG = MSG()
+        mainLoopMaxInterval = UINT(app.mainLoopMaximumInterval * 1000)
+        mainLoopTimerId = SetTimer(nil, 0, mainLoopMaxInterval, mainLoopTimerProc)
 
+        var msg = MSG()
         PostMessageW(nil, UINT(WM_NULL), 0, 0); // To process first enqueued events.
         mainLoop: while true {
             while PeekMessageW(&msg, nil, 0, 0, UINT(PM_REMOVE)) {
@@ -101,40 +122,20 @@ public class Win32Application : Application {
             }
 
             if app.running {
-                var next: Date? = nil
-                repeat {
-                    next = RunLoop.main.limitDate(forMode: .default)
-                } while (next?.timeIntervalSinceNow ?? 1.0) <= 0.0
-                
-                if let nextInterval = next?.timeIntervalSinceNow {
-                    var elapse: UINT = 0
-                    if nextInterval * 1000 > Double(USER_TIMER_MAXIMUM) {
-                        elapse = UINT(USER_TIMER_MAXIMUM)
-                    } else {
-                        elapse = UINT(max(nextInterval, 0.0) * 1000)
-                    }
-                    if app.eventLoopMaximumInterval > 0.0 {
-                        elapse = min(UINT(app.eventLoopMaximumInterval * 1000), elapse)
-                    }
-                    timerId = SetTimer(nil, timerId, elapse, nil)
-                } else {
-                    if app.eventLoopMaximumInterval > 0.0 {
-                        let elapse: UINT = UINT(app.eventLoopMaximumInterval * 1000)
-                        timerId = SetTimer(nil, timerId, elapse, nil)
-                    } else if timerId != 0 {
-                        // kill timer and wait for next event.
-                        KillTimer(nil, timerId)
-                        timerId = 0
-                    }
-                }
+                mainLoopMaxInterval = UINT(app.mainLoopMaximumInterval * 1000)
+
+                let next = processMainRunLoop(mainLoopMaxInterval)
+                mainLoopTimerId = SetTimer(nil, mainLoopTimerId, next, mainLoopTimerProc)
+
                 WaitMessage()
             } else {
                 PostQuitMessage(0)
             }
         }
 
-        if timerId != 0 {
-            KillTimer(nil, timerId);
+        if mainLoopTimerId != 0 {
+            KillTimer(nil, mainLoopTimerId)
+            mainLoopTimerId = 0
         }
 
         Task { await delegate?.finalize(application: app) }

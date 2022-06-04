@@ -23,6 +23,7 @@ func appFinalize() {
         if let next = next, next.timeIntervalSinceNow <= 0.0 {
             continue
         }
+
         let numThreads = numberOfThreadsToWaitBeforeExiting.load()
         if numThreads > 0 {
             if timer.elapsed > 1.5 {
