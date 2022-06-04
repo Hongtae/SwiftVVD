@@ -391,6 +391,14 @@ public class VulkanSwapChain: SwapChain {
             await self.update()
         }
 
+#if DEBUG   // BUG? crash without below
+        do {
+            try await Task.sleep(nanoseconds:100000)
+        } catch {
+            await Task.yield()
+        }
+#endif
+
         vkAcquireNextImageKHR(device.device, self.swapchain, UInt64.max, self.frameReadySemaphore, nil, &self.frameIndex)
 
         let colorAttachment = RenderPassColorAttachmentDescriptor(
