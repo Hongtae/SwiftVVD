@@ -8,57 +8,76 @@ import Foundation
 public class Screen {
     public var frame: Frame? {
         didSet {
-            if frame !== oldValue {
-                self.keyboardCaptors.removeAll()
-                self.mouseCaptors.removeAll()
-                self.hoverFrames.removeAll()
+            Task {
+                if frame !== oldValue {
+                    self.keyboardCaptors.removeAll()
+                    self.mouseCaptors.removeAll()
+                    self.hoverFrames.removeAll()
+                }
             }
         }
     }
 
     public var window: Window? {
         didSet {
-            if window !== oldValue {
-                oldValue?.removeEventObserver(self)
+            Task { @MainActor in
+                if await window !== oldValue {
+                    oldValue?.removeEventObserver(self)
 
-                if let window = window {
-                    let swapChain = commandQueue?.makeSwapChain(target: window)
-                    let scaleFactor = window.contentScaleFactor
-                    let contentBounds = window.contentBounds
-                    let activated = window.activated
-                    let visible = window.visible
+                    if let window = await window {
 
-                    window.addEventObserver(self) {
-                        [weak self](event: WindowEvent) in
-                        if let self = self, self.window === event.window {
-                            self.processWindowEvent(event)
+                        let swapChain = await commandQueue?.makeSwapChain(target: window)
+                        if swapChain == nil {
+                            Log.err("Failed to create swapChain!")
+                        }
+                        let scaleFactor = window.contentScaleFactor
+                        let contentBounds = window.contentBounds
+                        let activated = window.activated
+                        let visible = window.visible
+
+                        window.addEventObserver(self) { [weak self](event: WindowEvent) in
+                            if let self = self {
+                                Task { @ScreenActor in
+                                    if self.window === event.window {
+                                        self.processWindowEvent(event)
+                                    }
+                                }
+                            }
+                        }
+                        window.addEventObserver(self) { [weak self](event: KeyboardEvent) in
+                            if let self = self {
+                                Task { @ScreenActor in                      
+                                    if self.window === event.window {
+                                        self.processKeyboardEvent(event)
+                                    }
+                                }
+                            }
+                        }
+                        window.addEventObserver(self) { [weak self](event: MouseEvent) in
+                            if let self = self {
+                                Task { @ScreenActor in
+                                    if self.window === event.window {
+                                        self.processMouseEvent(event)
+                                    }
+                                }
+                            }
+                        }
+
+                        Task { @ScreenActor in
+                            self.swapChain = swapChain
+                            self.resolution = CGSize(width: contentBounds.width, height: contentBounds.height)
+                            self.contentScaleFactor = scaleFactor
+                            self.activated = activated
+                            self.visible = visible
+                            self.frame?.updateResolution()
+                        }
+                    } else {
+                        Task { @ScreenActor in
+                            self.swapChain = nil
+                            self.activated = false
+                            self.visible = false
                         }
                     }
-                    window.addEventObserver(self) {
-                        [weak self](event: KeyboardEvent) in
-                        if let self = self, self.window === event.window {
-                            self.processKeyboardEvent(event)
-                        }
-                    }
-                    window.addEventObserver(self) {
-                        [weak self](event: MouseEvent) in
-                        if let self = self, self.window === event.window {
-                            self.processMouseEvent(event)
-                        }
-                    }
-
-                    self.swapChain = swapChain
-                    self.resolution = CGSize(width: contentBounds.width, height: contentBounds.height)
-                    self.contentScaleFactor = scaleFactor
-                    self.activated = activated
-                    self.visible = visible
-
-                    self.frame?.updateResolution()
-
-                } else {
-                    self.swapChain = nil
-                    self.activated = false
-                    self.visible = false
                 }
             }
         }
@@ -85,9 +104,6 @@ public class Screen {
     private var mouseCaptors: [Int: Frame] = [:]    // mouse captors
     private var hoverFrames: [Int: (frame: Frame, device: MouseEventDevice)] = [:]  // mouse hover frames
 
-    private typealias ThreadTask = ()->Void
-    private var threadTasks: [ThreadTask] = []
-
     public init(graphicsDeviceContext: GraphicsDeviceContext?,
                 audioDeviceContext: AudioDeviceContext?,
                 dispatchQueue: DispatchQueue?) {
@@ -101,33 +117,26 @@ public class Screen {
 
         Canvas.cachePipelineContext(graphicsDeviceContext!)
 
-        runServiceThread { [weak self]() in
+        Task.detached { @ScreenActor [weak self] in
 
-            Log.info("Screen render thread start.")
+            Log.info("Screen render task start.")
 
             var tickCounter = TickCounter()
-
             var frame: Frame? = nil
 
-            let group = DispatchGroup()
+            var frameCount: UInt64 = 0
 
             mainLoop: while true {
+                frameCount += 1
+
+                // Log.info("RenderLoop: \(frameCount)")
+
                 guard let self = self else { break }
-                
-                let executeTask: () -> Bool = {
-                    if let task = self.threadTasks.first {
-                        self.threadTasks.remove(at: 0)
-                        task()
-                        return true
-                    }
-                    return false
-                }
 
                 var swapChain: SwapChain? = nil
                 var visible = false
                 var suspended = false
                 var frameInterval: Double = 1.0 / 60.0
-                var numTasksExecuted = 0
                 
                 frame = self.frame
                 swapChain = self.swapChain
@@ -148,43 +157,29 @@ public class Screen {
                                             scaleFactor: self.contentScaleFactor)
                     }
 
-                    group.enter()
-                    Task {
-                        await frame.updateHierarchyAsync(tick: tick, delta: delta, date: date)
-                        group.leave()
+                    if suspended == false {
+                        await frame.updateHierarchy(tick: tick, delta: delta, date: date)
                     }
-                    group.wait()
 
                     // draw!
                     if visible {
                         frame.redraw()
-                        if frame.draw() {
+                        if await frame.draw() {
                             swapChain?.present()
                         }
                     }
-                }
-
-                if numTasksExecuted == 0 && executeTask() {
-                    numTasksExecuted += 1
+                } else {
+                    // Log.info("Render Loop frame: \(frame), swapChain: \(swapChain)")
                 }
                 
                 while tickCounter.elapsed < frameInterval {
-                    if executeTask() {
-                        numTasksExecuted += 1
-                    } else {
-                        if suspended {
-                            Thread.sleep(forTimeInterval: 0.01)
-                        } else {
-                            threadYield()
-                        }
-                    }
+                    await Task.yield()
                 }
             }
             if let frame = frame {
                 frame.unloadHierarchy()
             }
-
-            Log.info("Screen render thread has been terminated.")
+            Log.info("Screen render task has been terminated.")
         }
         Log.debug("Screen created.")
     }
@@ -204,9 +199,9 @@ public class Screen {
         Log.debug("Screen destoryed.")
     }
 
-    public func makeCanvas() -> Canvas? {
+    public func makeCanvas() async -> Canvas? {
         if let swapChain = swapChain {
-            let rpd = swapChain.currentRenderPassDescriptor()
+            let rpd = await swapChain.currentRenderPassDescriptor()
             if let renderTarget = rpd.colorAttachments.first?.renderTarget {
                 let width = Int(renderTarget.width)
                 let height = Int(renderTarget.height)
@@ -221,10 +216,6 @@ public class Screen {
             }
         }
         return nil
-    }
-
-    private func postCommand(_ task: @escaping ThreadTask) {
-        self.threadTasks.append(task)
     }
 
     public func captureKeyboard(frame: Frame?, forDeviceId: Int) -> Bool { false }
@@ -254,7 +245,7 @@ public class Screen {
     public func processKeyboardEvent(_ event: KeyboardEvent) {
         // Log.debug("Screen.\(#function) event:\(event)")
 
-        self.postCommand {
+        Task { @ScreenActor in
             if let captor = self.keyboardCaptor(forDeviceId: event.deviceId) {
                 assert(captor.screen === self)
                 _ = captor.processKeyboardEvent(event)
@@ -267,7 +258,7 @@ public class Screen {
             Log.debug("Screen.\(#function) event:\(event)")
         }
 
-        self.postCommand {
+        Task { @ScreenActor in
             if let frame = self.frame {
                 let res = Vector2(self.resolution)
                 assert(res.x > 0.0 && res.y > 0.0)

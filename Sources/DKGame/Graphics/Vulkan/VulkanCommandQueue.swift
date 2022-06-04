@@ -55,15 +55,18 @@ public class VulkanCommandQueue: CommandQueue {
         return nil 
     }
 
-    public func makeSwapChain(target: Window) -> SwapChain? {
+    public func makeSwapChain(target: Window) async -> SwapChain? {
         guard self.family.supportPresentation else {
             Log.err("Vulkan WSI not supported with this queue family. Try to use other queue family!")
             return nil
         }
-
         if let swapchain = VulkanSwapChain(queue: self, window: target) {
-            if swapchain.setup() {
+            //if await swapchain.setup() {  // <__ BUG???
+            let r = await swapchain.setup()
+            if r {
                 return swapchain
+            } else {
+                Log.err("VulkanSwapChain.setup() failed.")
             }
         }
         return nil 
@@ -88,6 +91,7 @@ public class VulkanCommandQueue: CommandQueue {
         return result == VK_SUCCESS 
     }
     
+    @discardableResult
     func waitIdle() -> Bool { vkQueueWaitIdle(self.queue) == VK_SUCCESS }
 }
 #endif //if ENABLE_VULKAN

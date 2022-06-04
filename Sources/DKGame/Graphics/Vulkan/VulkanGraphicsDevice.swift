@@ -283,14 +283,9 @@ public class VulkanGraphicsDevice : GraphicsDevice {
                         }
 
                         if completionHandlers.count > 0 {
-                            if let dispatchQueue = self.dispatchQueue {
-                                for handler in completionHandlers {
-                                    dispatchQueue.async { handler() }
-                                }
-                            } else {
-                                for handler in completionHandlers {
-                                    handler()
-                                }
+                            let dispatchQueue = self.dispatchQueue ?? DispatchQueue.global()
+                            for handler in completionHandlers {
+                                dispatchQueue.async { handler() }
                             }
                             completionHandlers.removeAll(keepingCapacity: true)
                         }

@@ -44,19 +44,20 @@ public class VulkanSwapChain: SwapChain {
             colorAttachments: [],
             depthStencilAttachment: RenderPassDepthStencilAttachmentDescriptor())
 
-        window.addEventObserver(self) { [weak self](event: WindowEvent) in
-            if event.type == .resized {
-                if let self = self {
-                    synchronizedBy(locking: self.lock) { self.deviceReset = true }
+        Task {
+            await window.addEventObserver(self) { [weak self](event: WindowEvent) in
+                if event.type == .resized {
+                    if let self = self {
+                        synchronizedBy(locking: self.lock) { self.deviceReset = true }
+                    }
                 }
             }
         }
     }
 
     deinit {
-        self.window.removeEventObserver(self)
+        self.queue.waitIdle()
 
-        _ = self.queue.waitIdle()
         let device = queue.device as! VulkanGraphicsDevice
         let instance = device.instance
 
@@ -69,15 +70,15 @@ public class VulkanSwapChain: SwapChain {
     	self.imageViews.removeAll()
 
         if let swapchain = self.swapchain {
-    		vkDestroySwapchainKHR(device.device, swapchain, device.allocationCallbacks);
+    		vkDestroySwapchainKHR(device.device, swapchain, device.allocationCallbacks)
         }
         if let surface = self.surface {
-    		vkDestroySurfaceKHR(instance.instance, surface, device.allocationCallbacks);            
+    		vkDestroySurfaceKHR(instance.instance, surface, device.allocationCallbacks)          
         }
-    	vkDestroySemaphore(device.device, self.frameReadySemaphore, device.allocationCallbacks);
+    	vkDestroySemaphore(device.device, self.frameReadySemaphore, device.allocationCallbacks)
     }
 
-    public func setup() -> Bool {
+    public func setup() async -> Bool {
         let device = queue.device as! VulkanGraphicsDevice
         let instance = device.instance
         let physicalDevice = device.physicalDevice
@@ -90,7 +91,7 @@ public class VulkanSwapChain: SwapChain {
         var surfaceCreateInfo = VkWin32SurfaceCreateInfoKHR()
         surfaceCreateInfo.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR
         surfaceCreateInfo.hinstance = GetModuleHandleW(nil)
-        surfaceCreateInfo.hwnd = (self.window as! Win32Window).hWnd
+        surfaceCreateInfo.hwnd = await (self.window as! Win32Window).hWnd
 
         err = instance.extensionProc.vkCreateWin32SurfaceKHR!(instance.instance, &surfaceCreateInfo, device.allocationCallbacks, &self.surface)
         if (err != VK_SUCCESS)
@@ -113,7 +114,7 @@ public class VulkanSwapChain: SwapChain {
 #endif
 
         var surfaceSupported: VkBool32 = VkBool32(VK_FALSE)
-        err = vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevice.device, queueFamilyIndex, surface, &surfaceSupported);
+        err = vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevice.device, queueFamilyIndex, surface, &surfaceSupported)
         if err != VK_SUCCESS {
             Log.err("vkGetPhysicalDeviceSurfaceSupportKHR failed: \(err)")
             return false
@@ -141,7 +142,7 @@ public class VulkanSwapChain: SwapChain {
     	err = vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice.device, surface, &surfaceFormatCount, &availableSurfaceFormats)
         if err != VK_SUCCESS {
             Log.err("vkGetPhysicalDeviceSurfaceFormatsKHR failed: \(err)")
-            return false;
+            return false
         }
 
         // If the surface format list only includes one entry with VK_FORMAT_UNDEFINED,
@@ -158,15 +159,18 @@ public class VulkanSwapChain: SwapChain {
         self.surfaceFormat.colorSpace = availableSurfaceFormats[0].colorSpace
 
         // create swapchain
-        return self.update()
+        // return await self.update() // BUG?? It returns false even if self.update() returns true.
+        let r = await self.update()
+        return r
     }
 
-    public func update() -> Bool {
+    @discardableResult
+    public func update() async -> Bool {
         let device = self.queue.device as! VulkanGraphicsDevice
         //let instance = device.instance
         let physicalDevice = device.physicalDevice
 
-        let contentBounds = self.window.contentBounds
+        let contentBounds = await self.window.contentBounds
         var width = UInt32(contentBounds.width.rounded())
         var height = UInt32(contentBounds.height.rounded())
 
@@ -194,7 +198,7 @@ public class VulkanSwapChain: SwapChain {
         }
 
         var presentModes: [VkPresentModeKHR] = .init(repeating: VkPresentModeKHR(rawValue: 0), count: Int(presentModeCount))
-        err = vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice.device, self.surface, &presentModeCount, &presentModes);
+        err = vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice.device, self.surface, &presentModeCount, &presentModes)
         if err != VK_SUCCESS {
             Log.err("vkGetPhysicalDeviceSurfacePresentModesKHR failed: \(err)")
             return false
@@ -294,7 +298,7 @@ public class VulkanSwapChain: SwapChain {
             case VK_PRESENT_MODE_SHARED_CONTINUOUS_REFRESH_KHR: return "VK_PRESENT_MODE_SHARED_CONTINUOUS_REFRESH_KHR"
             default: break
             }
-            return "## UNKNOWN ##";
+            return "## UNKNOWN ##"
         }
         Log.info("VkSwapchainKHR created. (\(swapchainExtent.width) x \(swapchainExtent.height), V-sync:\(self.enableVSync), \(presentModeString(swapchainPresentMode)))")
 
@@ -312,7 +316,7 @@ public class VulkanSwapChain: SwapChain {
         }
         self.imageViews.removeAll()
 
-        var swapchainImageCount: UInt32 = 0;
+        var swapchainImageCount: UInt32 = 0
         err = vkGetSwapchainImagesKHR(device.device, self.swapchain, &swapchainImageCount, nil)
         if err != VK_SUCCESS {
             Log.err("vkGetSwapchainImagesKHR failed: \(err)")
@@ -377,14 +381,14 @@ public class VulkanSwapChain: SwapChain {
         return true 
     }
 
-    public func setupFrame() {
+    public func setupFrame() async {
         let device = self.queue.device as! VulkanGraphicsDevice
 
         let resetSwapchain = synchronizedBy(locking: self.lock) { self.deviceReset }
         if resetSwapchain {
             vkDeviceWaitIdle(device.device)
             synchronizedBy(locking: self.lock) { self.deviceReset = false }
-            _ = self.update()
+            await self.update()
         }
 
         vkAcquireNextImageKHR(device.device, self.swapchain, UInt64.max, self.frameReadySemaphore, nil, &self.frameIndex)
@@ -432,7 +436,7 @@ public class VulkanSwapChain: SwapChain {
                             Log.err("Failed to set SwapChain.pixelFormat property: not supported format")
                         }
                     } else {
-                        Log.err("Failed to set SwapChain.pixelFormat property: invalid format");
+                        Log.err("Failed to set SwapChain.pixelFormat property: invalid format")
                     }
                 }
             }            
@@ -443,9 +447,9 @@ public class VulkanSwapChain: SwapChain {
         synchronizedBy(locking: self.lock) { UInt(self.imageViews.count) }
     }
 
-    public func currentRenderPassDescriptor() -> RenderPassDescriptor {
+    public func currentRenderPassDescriptor() async -> RenderPassDescriptor {
         if self.renderPassDescriptor.colorAttachments.count == 0 {
-            self.setupFrame()
+            await self.setupFrame()
         }
         return self.renderPassDescriptor
     }

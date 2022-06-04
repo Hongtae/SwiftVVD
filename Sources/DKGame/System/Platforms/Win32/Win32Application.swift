@@ -85,7 +85,7 @@ public class Win32Application : Application {
             Log.warn("Windows DPI-Awareness not set, please check application manifest.")
         }
 
-        delegate?.initialize(application: app)
+        Task { await delegate?.initialize(application: app) }
 
         var timerId: UINT_PTR = 0
         var msg: MSG = MSG()
@@ -137,7 +137,7 @@ public class Win32Application : Application {
             KillTimer(nil, timerId);
         }
 
-        delegate?.finalize(application: app)
+        Task { await delegate?.finalize(application: app) }
 
         appFinalize()
 
