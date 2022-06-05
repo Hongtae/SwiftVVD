@@ -147,9 +147,9 @@ public class Screen {
 
                 if let frame = frame, swapChain != nil {
                     if frame.loaded == false {
-                        frame.loadHierarchy(screen: self,
-                                            resolution: self.resolution,
-                                            scaleFactor: self.contentScaleFactor)
+                        await frame.loadHierarchy(screen: self,
+                            resolution: self.resolution,
+                            scaleFactor: self.contentScaleFactor)
                     }
 
                     if suspended == false {
@@ -170,7 +170,7 @@ public class Screen {
                 }
             }
             if let frame = frame {
-                frame.unloadHierarchy()
+                await frame.unloadHierarchy()
             }
             Log.info("Screen render task has been terminated.")
         }
@@ -242,7 +242,7 @@ public class Screen {
 
             if let captor = self.keyboardCaptor(forDeviceId: event.deviceId) {
                 assert(captor.screen === self)
-                _ = captor.processKeyboardEvent(event)
+                _ = await captor.processKeyboardEvent(event)
             }
         }
     }
@@ -282,11 +282,11 @@ public class Screen {
 
                         if let leave = leave {
                             assert(leave.screen === self)
-                            leave.handleMouseLeave(deviceId: event.deviceId, device: event.device)
+                            await leave.handleMouseLeave(deviceId: event.deviceId, device: event.device)
                         }
                         if let hover = hover {
                             assert(hover.screen === self)
-                            hover.handleMouseEnter(deviceId: event.deviceId, device: event.device)
+                            await hover.handleMouseEnter(deviceId: event.deviceId, device: event.device)
                         }
                     }
                 }
@@ -319,10 +319,10 @@ public class Screen {
                         pos = posInFrame
                         delta = posInFrame - posInFrameOld
                     }
-                    _ = captor.processMouseEvent(event, position: pos, delta: delta, exclusive: true)
+                    _ = await captor.processMouseEvent(event, position: pos, delta: delta, exclusive: true)
                 } else {
                     if frame.bounds.contains(pos) {
-                        _ = frame.processMouseEvent(event, position: pos, delta: delta, exclusive: false)
+                        _ = await frame.processMouseEvent(event, position: pos, delta: delta, exclusive: false)
                     }
                 }
             }

@@ -40,7 +40,7 @@ class MyFrame: Frame {
 
     var baseline = [CGPoint(x: 80, y: 450), CGPoint(x: 620, y: 180)]
 
-    override func loaded(screen: Screen) {
+    override func loaded(screen: Screen) async {
         if let fontData = loadResourceData(name: "Resources/Roboto-Regular.ttf") {
             self.textFont = Font(deviceContext: screen.graphicsDeviceContext!, data: fontData)
             self.outlineFont = Font(deviceContext: screen.graphicsDeviceContext!, data: fontData)
@@ -60,13 +60,13 @@ class MyFrame: Frame {
         }
     }
 
-    override func update(tick: UInt64, delta: Double, date: Date) {
+    override func update(tick: UInt64, delta: Double, date: Date) async {
         t += delta
         tickDelta = delta
     }
 
-    override func resolutionChanged(_ size: CGSize, scaleFactor: CGFloat) {
-        super.resolutionChanged(size, scaleFactor: scaleFactor)
+    override func resolutionChanged(_ size: CGSize, scaleFactor: CGFloat) async {
+        await super.resolutionChanged(size, scaleFactor: scaleFactor)
 
         var dpi = self.dpi
         dpi.x = UInt32(CGFloat(dpi.x) * scaleFactor)
@@ -77,7 +77,7 @@ class MyFrame: Frame {
         self.fpsFont?.dpi = dpi
     }
 
-    override func draw(canvas: Canvas) {
+    override func draw(canvas: Canvas) async {
         let v = Scalar(sin(t) + 1.0) * 0.5
         canvas.clear(color: Color(0, 0, 0.6))
         canvas.drawEllipse(bounds: CGRect(x: 150, y: 50, width: 200, height: 200),
@@ -109,7 +109,7 @@ class MyFrame: Frame {
         }
     }
 
-    override func handleMouseEvent(_ event: MouseEvent, position: CGPoint, delta: CGPoint) -> Bool {
+    override func handleMouseEvent(_ event: MouseEvent, position: CGPoint, delta: CGPoint) async -> Bool {
         if event.type != .move {
             // Log.debug("\(#function): event: \(event), position: \(position), delta: \(delta)")
         }
@@ -128,24 +128,24 @@ class MyFrame: Frame {
         return true 
     }
 
-    override func handleKeyboardEvent(_ event: KeyboardEvent) -> Bool {
+    override func handleKeyboardEvent(_ event: KeyboardEvent) async -> Bool {
         Log.debug("\(#function): event: \(event)")
         return true
     }
     
-    override func handleMouseEnter(deviceId: Int, device: MouseEventDevice) {
+    override func handleMouseEnter(deviceId: Int, device: MouseEventDevice) async {
         Log.debug("\(#function): deviceId: \(deviceId), device: \(device)")
     }
 
-    override func handleMouseLeave(deviceId: Int, device: MouseEventDevice) {
+    override func handleMouseLeave(deviceId: Int, device: MouseEventDevice) async {
         Log.debug("\(#function): deviceId: \(deviceId), device: \(device)")
     }
 
-    override func handleMouseLost(deviceId: Int) {
+    override func handleMouseLost(deviceId: Int) async {
         Log.debug("\(#function): deviceId: \(deviceId)")
     }
 
-    override func handleKeyboardLost(deviceId: Int) {
+    override func handleKeyboardLost(deviceId: Int) async {
         Log.debug("\(#function): deviceId: \(deviceId)")
     }
 
