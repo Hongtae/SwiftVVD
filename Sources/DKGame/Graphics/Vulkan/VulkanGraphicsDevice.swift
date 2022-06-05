@@ -14,7 +14,6 @@ public class VulkanGraphicsDevice : GraphicsDevice {
 
     public let device: VkDevice
     public var allocationCallbacks: UnsafePointer<VkAllocationCallbacks>? { self.instance.allocationCallbacks }
-    public let lock = NSLock()
 
     public var properties: VkPhysicalDeviceProperties { self.physicalDevice.properties }
     public var features: VkPhysicalDeviceFeatures { self.physicalDevice.features }
