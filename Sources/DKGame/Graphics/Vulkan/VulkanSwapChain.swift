@@ -16,7 +16,7 @@ public class VulkanSwapChain: SwapChain {
 
     var imageViews: [VulkanImageView] = []
 
-    private let lock = SpinLock()
+    private let lock = NSLock()
     private var deviceReset = false
 
     private var frameIndex: UInt32 = 0
@@ -281,7 +281,9 @@ public class VulkanSwapChain: SwapChain {
             swapchainCreateInfo.imageUsage |= UInt32(VK_IMAGE_USAGE_TRANSFER_SRC_BIT.rawValue)
         }
 
-        err = vkCreateSwapchainKHR(device.device, &swapchainCreateInfo, device.allocationCallbacks, &self.swapchain)
+        err = synchronizedBy(locking: self.lock) {
+            vkCreateSwapchainKHR(device.device, &swapchainCreateInfo, device.allocationCallbacks, &self.swapchain)
+        }
         if err != VK_SUCCESS {
             Log.err("vkCreateSwapchainKHR failed: \(err)")
             return false
@@ -305,7 +307,9 @@ public class VulkanSwapChain: SwapChain {
         // If an existing swap chain is re-created, destroy the old swap chain
         // This also cleans up all the presentable images
         if let swapchainOld = swapchainOld {
-            vkDestroySwapchainKHR(device.device, swapchainOld, device.allocationCallbacks)
+            synchronizedBy(locking: self.lock) {
+                vkDestroySwapchainKHR(device.device, swapchainOld, device.allocationCallbacks)
+            }
         }
 
         for imageView in self.imageViews {
@@ -391,15 +395,9 @@ public class VulkanSwapChain: SwapChain {
             await self.update()
         }
 
-#if DEBUG   // BUG? crash without below
-        do {
-            try await Task.sleep(nanoseconds:100000)
-        } catch {
-            await Task.yield()
+        synchronizedBy(locking: self.lock) {
+            vkAcquireNextImageKHR(device.device, self.swapchain, UInt64.max, self.frameReadySemaphore, nil, &self.frameIndex)
         }
-#endif
-
-        vkAcquireNextImageKHR(device.device, self.swapchain, UInt64.max, self.frameReadySemaphore, nil, &self.frameIndex)
 
         let colorAttachment = RenderPassColorAttachmentDescriptor(
             renderTarget: self.imageViews[Int(self.frameIndex)],
