@@ -42,6 +42,7 @@ public class VulkanCommandBuffer: CommandBuffer {
 
     public let commandQueue: CommandQueue
     public let device: GraphicsDevice   
+    public let lock = NSLock()
 
     private let commandPool: VkCommandPool
 
@@ -95,6 +96,9 @@ public class VulkanCommandBuffer: CommandBuffer {
     @discardableResult
     public func commit() -> Bool {
         let device = self.device as! VulkanGraphicsDevice
+
+        self.lock.lock()
+        defer { self.lock.unlock() }
 
         let cleanup = {
             if self.submitCommandBuffers.isEmpty == false {

@@ -80,7 +80,7 @@ public enum GraphicsAPI {
     case auto, vulkan, metal, d3d12
 }
 
-public func makeGraphicsDeviceContext(api: GraphicsAPI = .auto, dispatchQueue: DispatchQueue? = nil) -> GraphicsDeviceContext? {
+public func makeGraphicsDeviceContext(api: GraphicsAPI = .auto) -> GraphicsDeviceContext? {
     var enableValidation = false
 #if DEBUG
         enableValidation = true
@@ -89,7 +89,7 @@ public func makeGraphicsDeviceContext(api: GraphicsAPI = .auto, dispatchQueue: D
     if api == .vulkan || api == .auto {
 #if ENABLE_VULKAN        
         if let instance = VulkanInstance(enableValidation: enableValidation) {
-            if let device = instance.makeDevice(dispatchQueue: dispatchQueue) {
+            if let device = instance.makeDevice() {
                 return GraphicsDeviceContext(device: device)
             }
         }

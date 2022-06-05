@@ -39,9 +39,10 @@ private func dpiScaleForWindow(_ hWnd: HWND) -> CGFloat {
 
 private let windowClass = "_SwiftDKGame_WndClass"
 
-// TIMER ID
+// TIMER ID, Interval
 private let updateKeyboardMouseTimerId: UINT_PTR = 10
 private let updateKeyboardMouseTimeInterval: UINT = 10
+
 // WINDOW MESSAGE
 private let WM_DKWINDOW_SHOWCURSOR = (WM_USER + 0x1175)
 private let WM_DKWINDOW_UPDATEMOUSECAPTURE = (WM_USER + 0x1180)
@@ -50,7 +51,7 @@ private let HWND_TOP:HWND? = nil
 private let HWND_TOPMOST:HWND = HWND(bitPattern: -1)!
 private let HWND_NOTOPMOST:HWND = HWND(bitPattern: -2)!
 
-
+@MainActor
 public class Win32Window : Window {
 
     private struct MouseButtonDownMask: OptionSet {
@@ -272,7 +273,7 @@ public class Win32Window : Window {
         self.contentScaleFactor = dpiScaleForWindow(hWnd!)
         
         SetWindowPos(hWnd, HWND_TOP, 0, 0, 0, 0, UINT(SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED))
-        SetTimer(hWnd, updateKeyboardMouseTimerId, updateKeyboardMouseTimeInterval, nil);
+        SetTimer(hWnd, updateKeyboardMouseTimerId, updateKeyboardMouseTimeInterval, nil)
         postWindowEvent(type: .created)
 
         return hWnd
@@ -292,7 +293,7 @@ public class Win32Window : Window {
             }
             self.dropTarget = nil
 
-            KillTimer(hWnd, updateKeyboardMouseTimerId);
+            KillTimer(hWnd, updateKeyboardMouseTimerId)
 
             // set GWLP_USERDATA to 0, to forwarding messages to DefWindowProc.
             SetWindowLongPtrW(hWnd, GWLP_USERDATA, 0);
@@ -524,61 +525,80 @@ public class Win32Window : Window {
 
     func postWindowEvent(_ event: WindowEvent) {
         assert(event.window === self)
-        self.eventObservers.forEach { _, handlers in
-            if let handler = handlers.windowEventHandler { handler(event) }
+        var invalidHandlers: [ObjectIdentifier] = []
+        self.eventObservers.forEach { key, handlers in
+            if let _ = handlers.observer {
+                handlers.windowEventHandler?(event)
+            } else {
+                invalidHandlers.append(key)
+            }
         }
+        for key in invalidHandlers { self.eventObservers[key] = nil }
     }
 
     func postKeyboardEvent(_ event: KeyboardEvent) {
         assert(event.window === self)
-        self.eventObservers.forEach { _, handlers in
-            if let handler = handlers.keyboardEventHandler { handler(event) }
+        var invalidHandlers: [ObjectIdentifier] = []
+        self.eventObservers.forEach { key, handlers in
+            if let _ = handlers.observer {
+                handlers.keyboardEventHandler?(event)
+            } else {
+                invalidHandlers.append(key)
+            }
         }
+        for key in invalidHandlers { self.eventObservers[key] = nil }
     }
 
     func postMouseEvent(_ event: MouseEvent) {        
         assert(event.window === self)
-        self.eventObservers.forEach { _, handlers in
-            if let handler = handlers.mouseEventHandler { handler(event) }
+        var invalidHandlers: [ObjectIdentifier] = []
+        self.eventObservers.forEach { key, handlers in
+            if let _ = handlers.observer {
+                handlers.mouseEventHandler?(event)
+            } else {
+                invalidHandlers.append(key)
+            }
         }
+        for key in invalidHandlers { self.eventObservers[key] = nil }
     }
 
     private struct EventHandlers {
+        weak var observer: AnyObject?
         var windowEventHandler: ((_: WindowEvent)->Void)?
         var mouseEventHandler: ((_: MouseEvent)->Void)?
         var keyboardEventHandler: ((_: KeyboardEvent)->Void)?
     }
     private var eventObservers: [ObjectIdentifier: EventHandlers] = [:]
 
-    public func addEventObserver(_ key: AnyObject, handler: @escaping (_: WindowEvent)->Void) {
-        let key = ObjectIdentifier(key)
+    public func addEventObserver(_ observer: AnyObject, handler: @escaping (_: WindowEvent)->Void) {
+        let key = ObjectIdentifier(observer)
         if var handlers = self.eventObservers[key] {
             handlers.windowEventHandler = handler
             self.eventObservers[key] = handlers
         } else {
-            self.eventObservers[key] = EventHandlers(windowEventHandler: handler)
+            self.eventObservers[key] = EventHandlers(observer: observer, windowEventHandler: handler)
         }
     }
-    public func addEventObserver(_ key: AnyObject, handler: @escaping (_: MouseEvent)->Void) {
-        let key = ObjectIdentifier(key)
+    public func addEventObserver(_ observer: AnyObject, handler: @escaping (_: MouseEvent)->Void) {
+        let key = ObjectIdentifier(observer)
         if var handlers = self.eventObservers[key] {
             handlers.mouseEventHandler = handler
             self.eventObservers[key] = handlers
         } else {
-            self.eventObservers[key] = EventHandlers(mouseEventHandler: handler)
+            self.eventObservers[key] = EventHandlers(observer: observer, mouseEventHandler: handler)
         }
     }
-    public func addEventObserver(_ key: AnyObject, handler: @escaping (_: KeyboardEvent)->Void) {
-        let key = ObjectIdentifier(key)
+    public func addEventObserver(_ observer: AnyObject, handler: @escaping (_: KeyboardEvent)->Void) {
+        let key = ObjectIdentifier(observer)
         if var handlers = self.eventObservers[key] {
             handlers.keyboardEventHandler = handler
             self.eventObservers[key] = handlers
         } else {
-            self.eventObservers[key] = EventHandlers(keyboardEventHandler: handler)
+            self.eventObservers[key] = EventHandlers(observer: observer, keyboardEventHandler: handler)
         }
     }
-    public func removeEventObserver(_ key: AnyObject) {
-        let key = ObjectIdentifier(key)
+    public func removeEventObserver(_ observer: AnyObject) {
+        let key = ObjectIdentifier(observer)
         self.eventObservers[key] = nil
     }
 
@@ -633,11 +653,11 @@ public class Win32Window : Window {
                 }
                 return 0
             case UINT(WM_ENTERSIZEMOVE):
-                window.resizing = true;
+                window.resizing = true
                 return 0
             case UINT(WM_EXITSIZEMOVE):
-                window.resizing = false;
-                var rcClient: RECT = RECT(), rcWindow: RECT = RECT()
+                window.resizing = false
+                var rcClient = RECT(), rcWindow = RECT()
                 GetClientRect(hWnd, &rcClient)
                 GetWindowRect(hWnd, &rcWindow)
                 var resized = false
@@ -769,9 +789,8 @@ public class Win32Window : Window {
                 if wParam == updateKeyboardMouseTimerId {
                     window.synchronizeKeyStates()
                     window.synchronizeMouse()
-                    return 0;
+                    return 0
                 }
-                break
             case UINT(WM_MOUSEMOVE):
                 if window.activated {
                     let pt = MAKEPOINTS(lParam)

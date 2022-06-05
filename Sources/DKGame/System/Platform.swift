@@ -6,7 +6,7 @@ public protocol PlatformFactory {
      func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?) -> Window 
 }
 
-private var numberOfThreadsToWaitBeforeExiting = AtomicNumber64(0)
+var numberOfThreadsToWaitBeforeExiting = AtomicNumber64(0)
 
 func runServiceThread(_ block: @escaping () -> Void) {
     Thread.detachNewThread {
@@ -23,6 +23,7 @@ func appFinalize() {
         if let next = next, next.timeIntervalSinceNow <= 0.0 {
             continue
         }
+
         let numThreads = numberOfThreadsToWaitBeforeExiting.load()
         if numThreads > 0 {
             if timer.elapsed > 1.5 {
@@ -40,14 +41,15 @@ public class Platform {
 
     public class var factory: PlatformFactory {
 #if ENABLE_APPKIT
-        DKGameAppKit()
+        PlatformFactoryAppKit()
 #elseif ENABLE_UIKIT
-        DKGameUIKit()
+        PlatformFactoryUIKit()
 #elseif ENABLE_WIN32
-        DKGameWin32()
+        PlatformFactoryWin32()
 #endif
     }
 
+    @MainActor
     public class func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?) -> Window {
         factory.makeWindow(name: name, style: style, delegate: delegate)
     }

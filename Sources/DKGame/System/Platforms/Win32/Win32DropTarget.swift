@@ -2,6 +2,7 @@
 import WinSDK
 import Foundation
 
+@MainActor
 struct Win32DropTarget {
     internal private(set) var dropTarget: IDropTarget = IDropTarget()
     internal private(set) var vtbl: IDropTargetVtbl = IDropTargetVtbl()

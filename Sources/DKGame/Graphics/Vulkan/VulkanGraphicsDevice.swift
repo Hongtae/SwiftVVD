@@ -12,10 +12,9 @@ public class VulkanGraphicsDevice : GraphicsDevice {
     public let instance: VulkanInstance
     public let physicalDevice: VulkanPhysicalDeviceDescription
 
-    public private(set) var dispatchQueue: DispatchQueue?
-
     public let device: VkDevice
     public var allocationCallbacks: UnsafePointer<VkAllocationCallbacks>? { self.instance.allocationCallbacks }
+    public let lock = NSLock()
 
     public var properties: VkPhysicalDeviceProperties { self.physicalDevice.properties }
     public var features: VkPhysicalDeviceFeatures { self.physicalDevice.features }
@@ -34,9 +33,8 @@ public class VulkanGraphicsDevice : GraphicsDevice {
     }
     private var pendingFenceCallbacks: [FenceCallback] = []
     private var reusableFences: [VkFence] = []
-    private var fenceCompletionCond: NSCondition = NSCondition()
-    private var fenceCompletionThreadRunning = AtomicNumber32(0)
     private var numberOfFences: UInt = 0
+    private var fenceCompletionLock = SpinLock()
 
     public var autoIncrementTimelineEvent = false
 
@@ -49,13 +47,11 @@ public class VulkanGraphicsDevice : GraphicsDevice {
     public init?(instance: VulkanInstance,
                  physicalDevice: VulkanPhysicalDeviceDescription,
                  requiredExtensions: [String],
-                 optionalExtensions: [String],
-                 dispatchQueue: DispatchQueue?) {
+                 optionalExtensions: [String]) {
 
         self.instance = instance
         self.physicalDevice = physicalDevice
         self.name = physicalDevice.name
-        self.dispatchQueue = dispatchQueue
 
         let tempHolder = TemporaryBufferHolder(label: "VulkanGraphicsDevice.init")
 
@@ -215,128 +211,93 @@ public class VulkanGraphicsDevice : GraphicsDevice {
 
         self.loadPipelineCache()
 
-        // create queue completion handlr
-        fenceCompletionThreadRunning.store(1)
-        runServiceThread {
-            [weak self,
-             fenceCompletionCond = self.fenceCompletionCond,
-             fenceCompletionThreadRunning = self.fenceCompletionThreadRunning] in
+        Task.detached(priority: .background) { [weak self] in
 
-            Log.info("VulkanGraphicsDevice Helper thread is started.")
-
-            let fenceWaitInterval = 0.002
+            numberOfThreadsToWaitBeforeExiting.increment()
+            defer { numberOfThreadsToWaitBeforeExiting.decrement() }
 
             var err: VkResult = VK_SUCCESS
             var fences: [VkFence?] = []
             var waitingFences: [FenceCallback] = []
             var completionHandlers: [()->Void] = []
 
-            while fenceCompletionThreadRunning.load() != 0 {
-                var waitingFencesIsEmpty = false
+            let fenceWaitInterval = 0.01
+            var timer = TickCounter()
 
-                if let self = self {
-                    fenceCompletionCond.lock()
+            while true {
+                guard let self = self else { break }
+
+                synchronizedBy(locking: self.fenceCompletionLock) {
                     waitingFences.append(contentsOf: self.pendingFenceCallbacks)
                     self.pendingFenceCallbacks.removeAll(keepingCapacity: true)
-                
-                    waitingFencesIsEmpty = waitingFences.isEmpty
+                }
 
-                    if waitingFencesIsEmpty == false {
-                        // condition is unlocked from here.
-                        fenceCompletionCond.unlock()
+                if waitingFences.isEmpty == false {
+                    fences.removeAll(keepingCapacity: true)
+                    fences.reserveCapacity(waitingFences.count)
+                    waitingFences.forEach { fences.append($0.fence) }
 
-                        fences.removeAll(keepingCapacity: true)
-                        fences.reserveCapacity(waitingFences.count)
+                    err = vkWaitForFences(self.device, UInt32(fences.count), fences, VkBool32(VK_FALSE), 0)
+                    fences.removeAll(keepingCapacity: true)
+
+                    if err == VK_SUCCESS {
+                        var waitingFencesCopy: [FenceCallback] = []
+                        waitingFencesCopy.reserveCapacity(waitingFences.count)
+
                         for cb in waitingFences {
-                            fences.append(cb.fence)
-                        }
-
-                        err = vkWaitForFences(device, UInt32(fences.count), fences, VkBool32(VK_FALSE), 0)
-                        fences.removeAll(keepingCapacity: true)
-
-                        if err == VK_SUCCESS {
-                            var waitingFencesCopy: [FenceCallback] = []
-                            waitingFencesCopy.reserveCapacity(waitingFences.count)
-
-                            for cb in waitingFences {
-                                if vkGetFenceStatus(device, cb.fence) == VK_SUCCESS {
-                                    fences.append(cb.fence)
-                                    completionHandlers.append(cb.operation)
-                                } else {
-                                    waitingFencesCopy.append(cb)  // fence is not ready (unsignaled)
-                                }
-                            }
-                            // save unsignaled fences
-                            waitingFences = waitingFencesCopy
-
-                            // reset signaled fences
-                            if fences.count > 0 {
-                                err = vkResetFences(device, UInt32(fences.count), fences)
-                                if err != VK_SUCCESS {
-                                    Log.err("vkResetFences failed: \(err)")
-                                    assertionFailure("vkResetFences failed: \(err)")
-                                }
-                            }
-                        } else if err != VK_TIMEOUT {
-                            Log.err("vkWaitForFences failed: \(err)")
-                            assertionFailure("vkWaitForFences failed: \(err)")
-                        }
-
-                        if completionHandlers.count > 0 {
-                            if let dispatchQueue = self.dispatchQueue {
-                                for handler in completionHandlers {
-                                    dispatchQueue.async { handler() }
-                                }
+                            if vkGetFenceStatus(self.device, cb.fence) == VK_SUCCESS {
+                                fences.append(cb.fence)
+                                completionHandlers.append(cb.operation)
                             } else {
-                                for handler in completionHandlers {
-                                    handler()
-                                }
+                                waitingFencesCopy.append(cb)  // fence is not ready (unsignaled)
                             }
-                            completionHandlers.removeAll(keepingCapacity: true)
                         }
+                        // save unsignaled fences
+                        waitingFences = waitingFencesCopy
 
-                        // lock condition (requires to reset fences mutually exclusive)
-                        fenceCompletionCond.lock()
+                        // reset signaled fences
                         if fences.count > 0 {
-                            self.reusableFences.append(contentsOf: fences.compactMap{ $0 })
-                            fences.removeAll(keepingCapacity: true)
-                        }
-                        if err == VK_TIMEOUT {
-                            if fenceWaitInterval > 0.0 {
-                                _ = fenceCompletionCond.wait(until: Date(timeIntervalSinceNow: fenceWaitInterval))
-                            } else {
-                                threadYield()
+                            err = vkResetFences(self.device, UInt32(fences.count), fences)
+                            if err != VK_SUCCESS {
+                                Log.err("vkResetFences failed: \(err)")
+                                assertionFailure("vkResetFences failed: \(err)")
                             }
                         }
+                    } else if err != VK_TIMEOUT {
+                        Log.err("vkWaitForFences failed: \(err)")
+                        assertionFailure("vkWaitForFences failed: \(err)")
                     }
 
-                    fenceCompletionCond.unlock()
-                } else {
-                    break // self has gone.
-                }
+                    if completionHandlers.count > 0 {
+                        let dispatchQueue = DispatchQueue.global()
+                        for handler in completionHandlers {
+                            dispatchQueue.async { handler() }
+                        }
+                        completionHandlers.removeAll(keepingCapacity: true)
+                    }
 
-                // We should check fenceCompletionThreadRunning value.
-                // Because there is no guarantee that 'self' is still alive at this point.
-                fenceCompletionCond.lock()
-                if waitingFencesIsEmpty && fenceCompletionThreadRunning.load() != 0 {
-                    fenceCompletionCond.wait()
+                    if fences.count > 0 {
+                        synchronizedBy(locking: self.fenceCompletionLock) {
+                            self.reusableFences.append(contentsOf: fences.compactMap{ $0 })
+                        }
+                        fences.removeAll(keepingCapacity: true)
+                    }
+
+                    if err == VK_TIMEOUT {
+                        while timer.elapsed < fenceWaitInterval {
+                            await Task.yield()
+                        }
+                    }
+                    timer.reset()
                 }
-                fenceCompletionCond.unlock()
             }
-
             assert(completionHandlers.isEmpty, "completionHandlers must be empty!")
-
-            Log.info("VulkanGraphicsDevice Helper thread is finished.")
+            Log.info("VulkanGraphicsDevice Helper task is finished.")
         }
     }
     
     deinit {
         Log.debug("VulkanGraphicsDevice is being destroyed.")
-
-        fenceCompletionCond.lock()
-        fenceCompletionThreadRunning.store(0)
-        fenceCompletionCond.broadcast()
-        fenceCompletionCond.unlock()
 
         for maps in self.descriptorPoolChainMaps {
             maps.poolChainMap.forEach{
@@ -1700,15 +1661,14 @@ public class VulkanGraphicsDevice : GraphicsDevice {
     }
 
     public func addCompletionHandler(fence: VkFence, op: @escaping ()->Void) {
-        synchronizedBy(locking: self.fenceCompletionCond) {
+        synchronizedBy(locking: self.fenceCompletionLock) {
             let cb = FenceCallback(fence: fence, operation: op)
             self.pendingFenceCallbacks.append(cb)
-            self.fenceCompletionCond.broadcast()
         }
     }
 
     public func fence(device: VulkanGraphicsDevice) -> VkFence {
-        var fence: VkFence? = synchronizedBy(locking: self.fenceCompletionCond) {
+        var fence: VkFence? = synchronizedBy(locking: self.fenceCompletionLock) {
             if self.reusableFences.count > 0 {
                 return self.reusableFences.removeFirst()
             }

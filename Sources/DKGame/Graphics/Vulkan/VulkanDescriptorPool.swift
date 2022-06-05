@@ -115,6 +115,8 @@ public class VulkanDescriptorPool {
 
     public var numAllocatedSets: UInt32
 
+    private let lock = NSLock()
+
     public init(device: VulkanGraphicsDevice, pool: VkDescriptorPool, poolCreateInfo: VkDescriptorPoolCreateInfo, poolID: VulkanDescriptorPoolID) {
         self.device = device
         self.pool = pool
@@ -141,7 +143,9 @@ public class VulkanDescriptorPool {
         var descriptorSet: VkDescriptorSet? = nil
         let result: VkResult = withUnsafePointer(to: Optional(layout)) {
             allocateInfo.pSetLayouts = $0
-            return vkAllocateDescriptorSets(device.device, &allocateInfo, &descriptorSet)
+            return synchronizedBy(locking: self.lock) {
+                vkAllocateDescriptorSets(device.device, &allocateInfo, &descriptorSet)
+            }
         }
         if result == VK_SUCCESS {
             numAllocatedSets += 1
@@ -161,14 +165,18 @@ public class VulkanDescriptorPool {
 
         self.numAllocatedSets -= UInt32(descriptorSets.count)
         if self.numAllocatedSets == 0 {
-            let result = vkResetDescriptorPool(device.device, pool, 0);
+            let result = synchronizedBy(locking: self.lock) {
+                vkResetDescriptorPool(device.device, pool, 0)
+            }
             if result != VK_SUCCESS {
                 Log.err("vkResetDescriptorPool failed: \(result)")
             }
         } else if self.poolCreateFlags & UInt32(VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT.rawValue) != 0 {
             let optionalSets = descriptorSets.map{ Optional($0) }
-            let result = optionalSets.withUnsafeBufferPointer {
-                vkFreeDescriptorSets(device.device, self.pool, UInt32($0.count), $0.baseAddress);
+            let result = optionalSets.withUnsafeBufferPointer { buffer in
+                synchronizedBy(locking: self.lock) {
+                    vkFreeDescriptorSets(device.device, self.pool, UInt32(buffer.count), buffer.baseAddress)
+                }
             }
             assert(result == VK_SUCCESS)
             if result != VK_SUCCESS {

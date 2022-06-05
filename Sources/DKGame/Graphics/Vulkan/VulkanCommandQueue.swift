@@ -10,6 +10,8 @@ public class VulkanCommandQueue: CommandQueue {
     public let queue: VkQueue
     let family: VulkanQueueFamily
 
+    private let lock = NSLock()
+
     public init(device: VulkanGraphicsDevice, family: VulkanQueueFamily, queue: VkQueue) {
 
         let queueFlags = family.properties.queueFlags
@@ -55,15 +57,18 @@ public class VulkanCommandQueue: CommandQueue {
         return nil 
     }
 
-    public func makeSwapChain(target: Window) -> SwapChain? {
+    public func makeSwapChain(target: Window) async -> SwapChain? {
         guard self.family.supportPresentation else {
             Log.err("Vulkan WSI not supported with this queue family. Try to use other queue family!")
             return nil
         }
-
         if let swapchain = VulkanSwapChain(queue: self, window: target) {
-            if swapchain.setup() {
+            //if await swapchain.setup() {  // <__ BUG???
+            let r = await swapchain.setup()
+            if r {
                 return swapchain
+            } else {
+                Log.err("VulkanSwapChain.setup() failed.")
             }
         }
         return nil 
@@ -75,12 +80,16 @@ public class VulkanCommandQueue: CommandQueue {
 
         if let callback = callback {
             let fence: VkFence = device.fence(device: device)
-            result = vkQueueSubmit(self.queue, UInt32(submits.count), submits, fence)
+            result = synchronizedBy(locking: self.lock) {
+                vkQueueSubmit(self.queue, UInt32(submits.count), submits, fence)
+            }
             if result == VK_SUCCESS {
                 device.addCompletionHandler(fence: fence, op: callback)
             }
         } else {
-            result = vkQueueSubmit(self.queue, UInt32(submits.count), submits, nil)
+            result = synchronizedBy(locking: self.lock) {
+                vkQueueSubmit(self.queue, UInt32(submits.count), submits, nil)
+            }
         }
         if result != VK_SUCCESS {
             Log.error("vkQueueSubmit failed: \(result)")
@@ -88,6 +97,9 @@ public class VulkanCommandQueue: CommandQueue {
         return result == VK_SUCCESS 
     }
     
-    func waitIdle() -> Bool { vkQueueWaitIdle(self.queue) == VK_SUCCESS }
+    @discardableResult
+    func waitIdle() -> Bool { 
+        synchronizedBy(locking: self.lock) { vkQueueWaitIdle(self.queue) } == VK_SUCCESS
+    }
 }
 #endif //if ENABLE_VULKAN
