@@ -24,7 +24,7 @@ public class VulkanSwapChain: SwapChain {
 
     public var commandQueue: CommandQueue { queue }
 
-    public init?(queue: VulkanCommandQueue, window: Window) {
+    public init?(queue: VulkanCommandQueue, window: Window) async {
 
         let device = queue.device as! VulkanGraphicsDevice
         var semaphoreCreateInfo = VkSemaphoreCreateInfo()
@@ -44,12 +44,10 @@ public class VulkanSwapChain: SwapChain {
             colorAttachments: [],
             depthStencilAttachment: RenderPassDepthStencilAttachmentDescriptor())
 
-        Task {
-            await window.addEventObserver(self) { [weak self](event: WindowEvent) in
-                if event.type == .resized {
-                    if let self = self {
-                        synchronizedBy(locking: self.lock) { self.deviceReset = true }
-                    }
+        await window.addEventObserver(self) { [weak self](event: WindowEvent) in
+            if event.type == .resized {
+                if let self = self {
+                    synchronizedBy(locking: self.lock) { self.deviceReset = true }
                 }
             }
         }

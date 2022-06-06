@@ -62,7 +62,7 @@ public class VulkanCommandQueue: CommandQueue {
             Log.err("Vulkan WSI not supported with this queue family. Try to use other queue family!")
             return nil
         }
-        if let swapchain = VulkanSwapChain(queue: self, window: target) {
+        if let swapchain = await VulkanSwapChain(queue: self, window: target) {
             //if await swapchain.setup() {  // <__ BUG???
             let r = await swapchain.setup()
             if r {
