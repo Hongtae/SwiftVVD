@@ -185,6 +185,9 @@ public class Screen {
     }
 
     deinit {
+        self.keyboardCaptors.removeAll()
+        self.mouseCaptors.removeAll()
+
         self.window = nil
         self.frame = nil
         self.swapChain = nil
@@ -214,22 +217,142 @@ public class Screen {
         return nil
     }
 
-    public func captureKeyboard(frame: Frame?, forDeviceId: Int) -> Bool { false }
-    public func releaseKeyboard(frame: Frame?, forDeviceId: Int) -> Bool { false }
-    public func keyboardCaptor(forDeviceId: Int) -> Frame? { nil }
+    public func captureKeyboard(frame: Frame?, forDeviceID deviceID: Int) -> Bool {
+        let captor = self.keyboardCaptors[deviceID]
+        if captor === frame {
+            return true
+        }
 
-    public func captureMouse(frame: Frame?, forDeviceId: Int) -> Bool { false }
-    public func releaseMouse(frame: Frame?, forDeviceId: Int) -> Bool { false }
-    public func mouseCaptor(forDeviceId: Int) -> Frame? { nil }
+        if let frame = frame {
+            if frame.canHandleKeyboard && frame.isDescendant(of: self.frame) {
+                self.keyboardCaptors[deviceID] = frame
+                if let captor = captor {
+                    Task { await captor.handleKeyboardLost(deviceID: deviceID) }
+                }
+                return true
+            }
+            return false
+        }
+        if let captor = captor {
+            self.keyboardCaptors[deviceID] = nil
+            Task { await captor.handleKeyboardLost(deviceID: deviceID) }
+        }
+        return true
+    }
 
-    public func releaseAllKeyboardsCapturedBy(frame: Frame?) {}
-    public func releaseAllMiceCapturedBy(frame: Frame?) {}
+    public func releaseKeyboard(frame: Frame?, forDeviceID deviceID: Int) -> Bool {
+        if let captor = self.keyboardCaptors[deviceID], captor === frame {
+            self.keyboardCaptors[deviceID] = nil
+            Task { await captor.handleKeyboardLost(deviceID: deviceID) }
+            return true
+        }
+        return false
+    }
 
-    public func releaseAllKeyboards() {}
-    public func releaseAllMice() {}
+    public func keyboardCaptor(forDeviceID deviceID: Int) -> Frame? {
+        return self.keyboardCaptors[deviceID]
+    }
 
-    public func hoverFrame(forDeviceId: Int) -> Frame? { nil }
-    public func leaveHoverFrame(_ frame: Frame?) {}
+    public func captureMouse(frame: Frame?, forDeviceID deviceID: Int) -> Bool {
+        let captor = self.mouseCaptors[deviceID]
+        if captor === frame {
+            return true
+        }
+
+        if let frame = frame {
+            if frame.canHandleMouse && frame.isDescendant(of: self.frame) {
+                self.mouseCaptors[deviceID] = frame
+                if let captor = captor {
+                    Task { await captor.handleMouseLost(deviceID: deviceID) }
+                }
+                return true
+            }
+            return false
+        }
+        if let captor = captor {
+            self.mouseCaptors[deviceID] = nil
+            Task { await captor.handleMouseLost(deviceID: deviceID) }
+        }
+        return true
+    }
+
+    public func releaseMouse(frame: Frame?, forDeviceID deviceID: Int) -> Bool {
+        if let captor = self.mouseCaptors[deviceID], captor === frame {
+            self.mouseCaptors[deviceID] = nil
+            Task { await captor.handleMouseLost(deviceID: deviceID) }
+            return true
+        }
+        return false
+    }
+
+    public func mouseCaptor(forDeviceID deviceID: Int) -> Frame? {
+        return self.mouseCaptors[deviceID]
+    }
+
+    public func releaseAllKeyboardsCapturedBy(frame: Frame?) {
+        guard let frame = frame else { return }
+        var deviceIDs: [Int] = []
+        self.keyboardCaptors.forEach { (key, value) in
+            if value === frame {
+                deviceIDs.append(key)
+            }
+        }
+        for deviceID in deviceIDs {
+            self.keyboardCaptors[deviceID] = nil
+            Task { await frame.handleKeyboardLost(deviceID: deviceID) }
+        }
+    }
+
+    public func releaseAllMiceCapturedBy(frame: Frame?) {
+        guard let frame = frame else { return }
+        var deviceIDs: [Int] = []
+        self.mouseCaptors.forEach { (key, value) in
+            if value === frame {
+                deviceIDs.append(key)
+            }
+        }
+        for deviceID in deviceIDs {
+            self.mouseCaptors[deviceID] = nil
+            Task { await frame.handleMouseLost(deviceID: deviceID) }
+        }
+    }        
+
+    public func releaseAllKeyboards() {
+        let captors: [(frame: Frame, deviceID: Int)] = self.keyboardCaptors.map {
+            (key, value) in (frame: value, deviceID: key)
+        }
+        self.keyboardCaptors.removeAll()
+        for c in captors {
+            Task { await c.frame.handleKeyboardLost(deviceID: c.deviceID) }
+        }
+    }
+
+    public func releaseAllMice() {
+        let captors: [(frame: Frame, deviceID: Int)] = self.mouseCaptors.map {
+            (key, value) in (frame: value, deviceID: key)
+        }
+        self.mouseCaptors.removeAll()
+        for c in captors {
+            Task { await c.frame.handleMouseLost(deviceID: c.deviceID) }
+        }
+    }
+
+    public func hoverFrame(forDeviceID deviceID: Int) -> Frame? {
+        return self.hoverFrames[deviceID]?.frame
+    }
+
+    public func leaveHoverFrame(_ frame: Frame?) {
+        guard let frame = frame else { return }
+        var devices: [(deviceID: Int, device: MouseEventDevice)] = []
+        self.hoverFrames.forEach { (key, value) in
+            if value.frame === frame {
+                devices.append((deviceID: key, device: value.device))
+            }
+        }
+        for d in devices {
+            Task { await frame.handleMouseLeave(deviceID: d.deviceID, device: d.device) }
+        }
+    }
 
     public func windowToScreen(point: CGPoint) -> CGPoint {
         let x = point.x / self.windowContentBounds.width
@@ -280,7 +403,7 @@ public class Screen {
 
             Log.debug("Screen.\(#function) event:\(event)")
 
-            if let captor = self.keyboardCaptor(forDeviceId: event.deviceId) {
+            if let captor = self.keyboardCaptor(forDeviceID: event.deviceID) {
                 assert(captor.screen === self)
                 _ = await captor.processKeyboardEvent(event)
             }
@@ -308,30 +431,30 @@ public class Screen {
                 if event.type == .move {
                     let hover: Frame?  = frame.findHoverFrame(at: pos)
                     var leave: Frame? = nil
-                    if let fd = self.hoverFrames[event.deviceId] {
+                    if let fd = self.hoverFrames[event.deviceID] {
                         assert(fd.device == event.device)
                         leave = fd.frame
                     }
 
                     if hover !== leave {
                         if let hover = hover {
-                            self.hoverFrames[event.deviceId] = (frame: hover, device: event.device)
+                            self.hoverFrames[event.deviceID] = (frame: hover, device: event.device)
                         } else {
-                            self.hoverFrames[event.deviceId] = nil
+                            self.hoverFrames[event.deviceID] = nil
                         }
 
                         if let leave = leave {
                             assert(leave.screen === self)
-                            await leave.handleMouseLeave(deviceId: event.deviceId, device: event.device)
+                            await leave.handleMouseLeave(deviceID: event.deviceID, device: event.device)
                         }
                         if let hover = hover {
                             assert(hover.screen === self)
-                            await hover.handleMouseEnter(deviceId: event.deviceId, device: event.device)
+                            await hover.handleMouseEnter(deviceID: event.deviceID, device: event.device)
                         }
                     }
                 }
 
-                if let captor = self.mouseCaptor(forDeviceId: event.deviceId) {
+                if let captor = self.mouseCaptor(forDeviceID: event.deviceID) {
                     assert(captor.isDescendant(of: frame))
                     assert(captor.screen === self)
 

@@ -36,29 +36,29 @@ public class AppKitWindow: Window {
 
     }
 
-    public func showMouse(_: Bool, forDeviceId: Int) {
+    public func showMouse(_: Bool, forDeviceID: Int) {
 
     }
-    public func isMouseVisible(forDeviceId: Int) -> Bool {
+    public func isMouseVisible(forDeviceID: Int) -> Bool {
         false
     }
-    public func holdMouse(_: Bool, forDeviceId: Int) {
+    public func holdMouse(_: Bool, forDeviceID: Int) {
 
     }
-    public func isMouseHeld(forDeviceId: Int) -> Bool {
+    public func isMouseHeld(forDeviceID: Int) -> Bool {
         false
     }
-    public func setMousePosition(_: CGPoint, forDeviceId: Int) {
+    public func setMousePosition(_: CGPoint, forDeviceID: Int) {
 
     }
-    public func mousePosition(forDeviceId: Int) -> CGPoint {
+    public func mousePosition(forDeviceID: Int) -> CGPoint {
         .zero
     }
  
-    public func enableTextInput(_: Bool, forDeviceId: Int) {
+    public func enableTextInput(_: Bool, forDeviceID: Int) {
 
     }
-    public func isTextInputEnabled(forDeviceId: Int) -> Bool {
+    public func isTextInputEnabled(forDeviceID: Int) -> Bool {
         false
     }
 }

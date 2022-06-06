@@ -115,7 +115,7 @@ class MyFrame: Frame {
         }
 
         if event.type == .buttonDown {
-            switch event.buttonId {
+            switch event.buttonID {
             case 0:
                 self.baseline[0] = position
             case 1:
@@ -133,20 +133,20 @@ class MyFrame: Frame {
         return true
     }
     
-    override func handleMouseEnter(deviceId: Int, device: MouseEventDevice) async {
-        Log.debug("\(#function): deviceId: \(deviceId), device: \(device)")
+    override func handleMouseEnter(deviceID: Int, device: MouseEventDevice) async {
+        Log.debug("\(#function): deviceID: \(deviceID), device: \(device)")
     }
 
-    override func handleMouseLeave(deviceId: Int, device: MouseEventDevice) async {
-        Log.debug("\(#function): deviceId: \(deviceId), device: \(device)")
+    override func handleMouseLeave(deviceID: Int, device: MouseEventDevice) async {
+        Log.debug("\(#function): deviceID: \(deviceID), device: \(device)")
     }
 
-    override func handleMouseLost(deviceId: Int) async {
-        Log.debug("\(#function): deviceId: \(deviceId)")
+    override func handleMouseLost(deviceID: Int) async {
+        Log.debug("\(#function): deviceID: \(deviceID)")
     }
 
-    override func handleKeyboardLost(deviceId: Int) async {
-        Log.debug("\(#function): deviceId: \(deviceId)")
+    override func handleKeyboardLost(deviceID: Int) async {
+        Log.debug("\(#function): deviceID: \(deviceID)")
     }
 
 }

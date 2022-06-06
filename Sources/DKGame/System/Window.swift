@@ -34,8 +34,8 @@ public struct MouseEvent {
     public var type: MouseEventType
     public weak var window: Window?
     public var device: MouseEventDevice
-    public var deviceId: Int
-    public var buttonId: Int
+    public var deviceID: Int
+    public var buttonID: Int
     public var location: CGPoint
     public var delta: CGPoint = .zero
     public var pressure: Float = 0.0
@@ -52,7 +52,7 @@ public enum KeyboardEventType {
 public struct KeyboardEvent {
     public var type: KeyboardEventType
     public weak var window: Window?
-    public var deviceId: Int
+    public var deviceID: Int
     public var key: VirtualKey
     public var text: String
 }
@@ -134,15 +134,15 @@ public protocol Window: AnyObject {
     func activate()
     func minimize()
 
-    func showMouse(_: Bool, forDeviceId: Int)
-    func isMouseVisible(forDeviceId: Int) -> Bool
-    func holdMouse(_: Bool, forDeviceId: Int)
-    func isMouseHeld(forDeviceId: Int) -> Bool
-    func setMousePosition(_: CGPoint, forDeviceId: Int)
-    func mousePosition(forDeviceId: Int) -> CGPoint
+    func showMouse(_: Bool, forDeviceID: Int)
+    func isMouseVisible(forDeviceID: Int) -> Bool
+    func holdMouse(_: Bool, forDeviceID: Int)
+    func isMouseHeld(forDeviceID: Int) -> Bool
+    func setMousePosition(_: CGPoint, forDeviceID: Int)
+    func mousePosition(forDeviceID: Int) -> CGPoint
 
-    func enableTextInput(_: Bool, forDeviceId: Int)
-    func isTextInputEnabled(forDeviceId: Int) -> Bool
+    func enableTextInput(_: Bool, forDeviceID: Int)
+    func isTextInputEnabled(forDeviceID: Int) -> Bool
 
     func addEventObserver(_: AnyObject, handler: @escaping (_: WindowEvent)->Void)
     func addEventObserver(_: AnyObject, handler: @escaping (_: MouseEvent)->Void)
@@ -151,15 +151,15 @@ public protocol Window: AnyObject {
 }
 
 extension Window {
-    public func showMouse(_: Bool, forDeviceId: Int) {}
-    public func isMouseVisible(forDeviceId: Int) -> Bool { false }
-    public func holdMouse(_: Bool, forDeviceId: Int) {}
-    public func isMouseHeld(forDeviceId: Int) -> Bool { false }
-    public func setMousePosition(_: CGPoint, forDeviceId: Int) {}
-    public func mousePosition(forDeviceId: Int) -> CGPoint { .zero }
+    public func showMouse(_: Bool, forDeviceID: Int) {}
+    public func isMouseVisible(forDeviceID: Int) -> Bool { false }
+    public func holdMouse(_: Bool, forDeviceID: Int) {}
+    public func isMouseHeld(forDeviceID: Int) -> Bool { false }
+    public func setMousePosition(_: CGPoint, forDeviceID: Int) {}
+    public func mousePosition(forDeviceID: Int) -> CGPoint { .zero }
 
-    public func enableTextInput(_: Bool, forDeviceId: Int) {}
-    public func isTextInputEnabled(forDeviceId: Int) -> Bool { return false }
+    public func enableTextInput(_: Bool, forDeviceID: Int) {}
+    public func isTextInputEnabled(forDeviceID: Int) -> Bool { return false }
 }
 
 @MainActor

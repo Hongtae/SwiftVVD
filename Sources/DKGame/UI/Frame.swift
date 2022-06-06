@@ -401,15 +401,15 @@ open class Frame {
         return nil
     }
 
-    public func captureKeyboard(deviceId: Int) -> Bool { false }
-    public func captureMouse(deviceId: Int) -> Bool { false }
-    public func releaseKeyboard(deviceId: Int) {}
-    public func releaseMouse(deviceId: Int) {}
+    public func captureKeyboard(deviceID: Int) -> Bool { false }
+    public func captureMouse(deviceID: Int) -> Bool { false }
+    public func releaseKeyboard(deviceID: Int) {}
+    public func releaseMouse(deviceID: Int) {}
     public func releaseAllKeyboardsCapturedBySelf() {}
     public func releaseAllMiceCapturedBySelf() {}
 
-    public func isKeyboardCatpuredBySelf(deviceId: Int) -> Bool { false }
-    public func isMouseCapturedBySelf(deviceId: Int) -> Bool { false }
+    public func isKeyboardCatpuredBySelf(deviceID: Int) -> Bool { false }
+    public func isMouseCapturedBySelf(deviceID: Int) -> Bool { false }
 
     open func loaded(screen: Screen) async {}
     open func unload() async {}
@@ -426,10 +426,10 @@ open class Frame {
 
     open func handleMouseEvent(_: MouseEvent, position: CGPoint, delta: CGPoint) async -> Bool { false }
     open func handleKeyboardEvent(_: KeyboardEvent) async -> Bool { false }
-    open func handleMouseEnter(deviceId: Int, device: MouseEventDevice) async {}
-    open func handleMouseLeave(deviceId: Int, device: MouseEventDevice) async {}
-    open func handleMouseLost(deviceId: Int) async {}
-    open func handleKeyboardLost(deviceId: Int) async {}
+    open func handleMouseEnter(deviceID: Int, device: MouseEventDevice) async {}
+    open func handleMouseLeave(deviceID: Int, device: MouseEventDevice) async {}
+    open func handleMouseLost(deviceID: Int) async {}
+    open func handleKeyboardLost(deviceID: Int) async {}
 
     func updateHierarchy(tick: UInt64, delta: Double, date: Date) async {
         assert(self.loaded)

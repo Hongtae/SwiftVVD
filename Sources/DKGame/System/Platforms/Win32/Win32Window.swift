@@ -343,15 +343,15 @@ public class Win32Window : Window {
         }
     }
 
-    public func showMouse(_ show: Bool, forDeviceId deviceId: Int) {
-        if let hWnd = self.hWnd, deviceId == 0 {
+    public func showMouse(_ show: Bool, forDeviceID deviceID: Int) {
+        if let hWnd = self.hWnd, deviceID == 0 {
             let wParam = show ? WPARAM(1) : WPARAM(0)
             PostMessageW(hWnd, UINT(WM_DKWINDOW_SHOWCURSOR), wParam, 0)
         }
     }
 
-    public func isMouseVisible(forDeviceId deviceId: Int) -> Bool {
-        if deviceId == 0 {
+    public func isMouseVisible(forDeviceID deviceID: Int) -> Bool {
+        if deviceID == 0 {
             var info: CURSORINFO = CURSORINFO()
             if GetCursorInfo(&info) {
                 return info.flags != 0;
@@ -360,26 +360,26 @@ public class Win32Window : Window {
         return false
     }
 
-    public func holdMouse(_ hold: Bool, forDeviceId deviceId: Int) {
-        if deviceId == 0 {
+    public func holdMouse(_ hold: Bool, forDeviceID deviceID: Int) {
+        if deviceID == 0 {
             self.holdMouse = hold
 
-            self.mousePosition = self.mousePosition(forDeviceId: 0);
+            self.mousePosition = self.mousePosition(forDeviceID: 0);
             self.holdingMousePosition = mousePosition;
 
             PostMessageW(hWnd, UINT(WM_DKWINDOW_UPDATEMOUSECAPTURE), 0, 0);
         }
     }
 
-    public func isMouseHeld(forDeviceId deviceId: Int) -> Bool {
-        if deviceId == 0 {
+    public func isMouseHeld(forDeviceID deviceID: Int) -> Bool {
+        if deviceID == 0 {
             return self.holdMouse
         }
         return false
     }
 
-    public func mousePosition(forDeviceId deviceId: Int) -> CGPoint {
-        if let hWnd = self.hWnd, deviceId == 0 {
+    public func mousePosition(forDeviceID deviceID: Int) -> CGPoint {
+        if let hWnd = self.hWnd, deviceID == 0 {
             var pt: POINT = POINT()
             GetCursorPos(&pt)
             ScreenToClient(hWnd, &pt)
@@ -388,8 +388,8 @@ public class Win32Window : Window {
         return CGPoint(x: -1, y: -1)
     }
 
-    public func setMousePosition(_ pos: CGPoint, forDeviceId deviceId: Int) {
-        if let hWnd = self.hWnd, deviceId == 0 {
+    public func setMousePosition(_ pos: CGPoint, forDeviceID deviceID: Int) {
+        if let hWnd = self.hWnd, deviceID == 0 {
             var pt: POINT = POINT()
             pt.x = LONG(pos.x)
             pt.y = LONG(pos.y)
@@ -401,14 +401,14 @@ public class Win32Window : Window {
         }
     }
 
-    public func enableTextInput(_ enable: Bool, forDeviceId deviceId: Int) {
-        if deviceId == 0 {
+    public func enableTextInput(_ enable: Bool, forDeviceID deviceID: Int) {
+        if deviceID == 0 {
             self.textCompositionMode = enable
         }
     }
 
-    public func isTextInputEnabled(forDeviceId deviceId: Int) -> Bool {
-        if deviceId == 0 {
+    public func isTextInputEnabled(forDeviceID deviceID: Int) -> Bool {
+        if deviceID == 0 {
             return self.textCompositionMode
         }
         return false
@@ -460,14 +460,14 @@ public class Win32Window : Window {
                     // post keydown event
                     postKeyboardEvent(KeyboardEvent(type: .keyDown,
                                                     window: self,
-                                                    deviceId: 0,
+                                                    deviceID: 0,
                                                     key: virtualKey,
                                                     text: ""))
                 } else {
                     // post keyup event
                     postKeyboardEvent(KeyboardEvent(type: .keyUp,
                                                     window: self,
-                                                    deviceId: 0,
+                                                    deviceID: 0,
                                                     key: virtualKey,
                                                     text: ""))
                 }
@@ -480,14 +480,14 @@ public class Win32Window : Window {
                 // capslock on
                 postKeyboardEvent(KeyboardEvent(type: .keyDown,
                                                 window: self,
-                                                deviceId: 0,
+                                                deviceID: 0,
                                                 key: .capslock,
                                                 text: ""))
             } else {
                 // capslock off
                 postKeyboardEvent(KeyboardEvent(type: .keyUp,
                                                 window: self,
-                                                deviceId: 0,
+                                                deviceID: 0,
                                                 key: .capslock,
                                                 text: ""))
             }
@@ -505,7 +505,7 @@ public class Win32Window : Window {
             if keyboardStates[key] & 0x80 != 0 {
                 postKeyboardEvent(KeyboardEvent(type: .keyUp,
                                                 window: self,
-                                                deviceId: 0,
+                                                deviceID: 0,
                                                 key: virtualKey,
                                                 text: ""))
             }
@@ -515,7 +515,7 @@ public class Win32Window : Window {
         if keyboardStates[capslock] & 0x01 != 0 {
             postKeyboardEvent(KeyboardEvent(type: .keyUp,
                                             window: self,
-                                            deviceId: 0,
+                                            deviceID: 0,
                                             key: .capslock,
                                             text: ""))
         }
@@ -832,10 +832,10 @@ public class Win32Window : Window {
                             if pt.x == holdPtX && pt.y == holdPtY {
                                 postEvent = false
                             } else {
-                                window.setMousePosition(window.mousePosition, forDeviceId: 0)
+                                window.setMousePosition(window.mousePosition, forDeviceID: 0)
                                 // In Windows8 (or later) with scaled-DPI mode, setting mouse position generate inaccurate result.
                                 // We need to keep new position in hold-mouse state. (non-movable mouse)
-                                window.holdingMousePosition = window.mousePosition(forDeviceId: 0)
+                                window.holdingMousePosition = window.mousePosition(forDeviceID: 0)
                             }
                         } else {
                             window.mousePosition = CGPoint(x: Int(pt.x), y: Int(pt.y)) * (1.0 / window.contentScaleFactor)
@@ -845,8 +845,8 @@ public class Win32Window : Window {
                             window.postMouseEvent(MouseEvent(type: .move,
                                                              window: window,
                                                              device: .genericMouse,
-                                                             deviceId: 0,
-                                                             buttonId: 0,
+                                                             deviceID: 0,
+                                                             buttonID: 0,
                                                              location: window.mousePosition,
                                                              delta: delta))
                         }
@@ -861,8 +861,8 @@ public class Win32Window : Window {
                 window.postMouseEvent(MouseEvent(type: .buttonDown,
                                                  window: window,
                                                  device: .genericMouse,
-                                                 deviceId: 0,
-                                                 buttonId: 0,
+                                                 deviceID: 0,
+                                                 buttonID: 0,
                                                  location: pos))
                 PostMessageW(hWnd, UINT(WM_DKWINDOW_UPDATEMOUSECAPTURE), 0, 0)
                 return 0
@@ -874,8 +874,8 @@ public class Win32Window : Window {
                 window.postMouseEvent(MouseEvent(type: .buttonUp,
                                                  window: window,
                                                  device: .genericMouse,
-                                                 deviceId: 0,
-                                                 buttonId: 0,
+                                                 deviceID: 0,
+                                                 buttonID: 0,
                                                  location: pos))
                 PostMessageW(hWnd, UINT(WM_DKWINDOW_UPDATEMOUSECAPTURE), 0, 0)
                 return 0
@@ -887,8 +887,8 @@ public class Win32Window : Window {
                 window.postMouseEvent(MouseEvent(type: .buttonDown,
                                                  window: window,
                                                  device: .genericMouse,
-                                                 deviceId: 0,
-                                                 buttonId: 1,
+                                                 deviceID: 0,
+                                                 buttonID: 1,
                                                  location: pos))
                 PostMessageW(hWnd, UINT(WM_DKWINDOW_UPDATEMOUSECAPTURE), 0, 0)
                 return 0
@@ -900,8 +900,8 @@ public class Win32Window : Window {
                 window.postMouseEvent(MouseEvent(type: .buttonUp,
                                                  window: window,
                                                  device: .genericMouse,
-                                                 deviceId: 0,
-                                                 buttonId: 1,
+                                                 deviceID: 0,
+                                                 buttonID: 1,
                                                  location: pos))
                 PostMessageW(hWnd, UINT(WM_DKWINDOW_UPDATEMOUSECAPTURE), 0, 0)
                 return 0
@@ -913,8 +913,8 @@ public class Win32Window : Window {
                 window.postMouseEvent(MouseEvent(type: .buttonDown,
                                                  window: window,
                                                  device: .genericMouse,
-                                                 deviceId: 0,
-                                                 buttonId: 2,
+                                                 deviceID: 0,
+                                                 buttonID: 2,
                                                  location: pos))
                 PostMessageW(hWnd, UINT(WM_DKWINDOW_UPDATEMOUSECAPTURE), 0, 0)
                 return 0
@@ -926,8 +926,8 @@ public class Win32Window : Window {
                 window.postMouseEvent(MouseEvent(type: .buttonUp,
                                                  window: window,
                                                  device: .genericMouse,
-                                                 deviceId: 0,
-                                                 buttonId: 2,
+                                                 deviceID: 0,
+                                                 buttonID: 2,
                                                  location: pos))
                 PostMessageW(hWnd, UINT(WM_DKWINDOW_UPDATEMOUSECAPTURE), 0, 0)
                 return 0
@@ -942,8 +942,8 @@ public class Win32Window : Window {
                     window.postMouseEvent(MouseEvent(type: .buttonDown,
                                                      window: window,
                                                      device: .genericMouse,
-                                                     deviceId: 0,
-                                                     buttonId: 3,
+                                                     deviceID: 0,
+                                                     buttonID: 3,
                                                      location: pos))
                 } else if xButton == XBUTTON2 {
                     window.mouseButtonDownMask.insert(.button5)
@@ -951,8 +951,8 @@ public class Win32Window : Window {
                     window.postMouseEvent(MouseEvent(type: .buttonDown,
                                                      window: window,
                                                      device: .genericMouse,
-                                                     deviceId: 0,
-                                                     buttonId: 4,
+                                                     deviceID: 0,
+                                                     buttonID: 4,
                                                      location: pos))
                 }
                 PostMessageW(hWnd, UINT(WM_DKWINDOW_UPDATEMOUSECAPTURE), 0, 0)
@@ -968,8 +968,8 @@ public class Win32Window : Window {
                     window.postMouseEvent(MouseEvent(type: .buttonUp,
                                                      window: window,
                                                      device: .genericMouse,
-                                                     deviceId: 0,
-                                                     buttonId: 3,
+                                                     deviceID: 0,
+                                                     buttonID: 3,
                                                      location: pos))
                 } else if xButton == XBUTTON2 {
                     window.mouseButtonDownMask.remove(.button5)
@@ -977,8 +977,8 @@ public class Win32Window : Window {
                     window.postMouseEvent(MouseEvent(type: .buttonUp,
                                                      window: window,
                                                      device: .genericMouse,
-                                                     deviceId: 0,
-                                                     buttonId: 4,
+                                                     deviceID: 0,
+                                                     buttonID: 4,
                                                      location: pos))
                 }
                 PostMessageW(hWnd, UINT(WM_DKWINDOW_UPDATEMOUSECAPTURE), 0, 0);                    
@@ -996,8 +996,8 @@ public class Win32Window : Window {
                 window.postMouseEvent(MouseEvent(type: .wheel,
                                                  window: window,
                                                  device: .genericMouse,
-                                                 deviceId: 0,
-                                                 buttonId: 2,
+                                                 deviceID: 0,
+                                                 buttonID: 2,
                                                  location: pos,
                                                  delta: CGPoint(x: 0, y: Int(deltaYScaled))))
                 return 0
@@ -1012,7 +1012,7 @@ public class Win32Window : Window {
 
                     window.postKeyboardEvent(KeyboardEvent(type: .textInput,
                                                            window: window,
-                                                           deviceId: 0,
+                                                           deviceID: 0,
                                                            key: .none,
                                                            text: inputText))
                 }
@@ -1029,7 +1029,7 @@ public class Win32Window : Window {
                     // reset input-candidate characters here.
                     window.postKeyboardEvent(KeyboardEvent(type: .textComposition,
                                                            window: window,
-                                                           deviceId: 0,
+                                                           deviceID: 0,
                                                            key: .none,
                                                            text: ""))  
                 }
@@ -1049,14 +1049,14 @@ public class Win32Window : Window {
 
                                 window.postKeyboardEvent(KeyboardEvent(type: .textComposition,
                                                                        window: window,
-                                                                       deviceId: 0,
+                                                                       deviceID: 0,
                                                                        key: .none,
                                                                        text: compositionText))  
 
                             } else {    // composition character's length become 0. (erased)
                                 window.postKeyboardEvent(KeyboardEvent(type: .textComposition,
                                                                        window: window,
-                                                                       deviceId: 0,
+                                                                       deviceID: 0,
                                                                        key: .none,
                                                                        text: ""))  
                             }
