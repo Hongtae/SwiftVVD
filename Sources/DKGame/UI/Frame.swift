@@ -218,7 +218,7 @@ open class Frame {
 
         var resized = false
         if let screen = self.screen, screen.frame === self {
-            let scaleFactor = screen.contentScaleFactor
+            let scaleFactor = screen.windowContentScaleFactor
             let size = screen.resolution
             let w = max(size.width.rounded(), 1.0)
             let h = max(size.height.rounded(), 1.0)
@@ -239,7 +239,7 @@ open class Frame {
             if self.resolution.width.rounded() != w || self.resolution.height.rounded() != h {
                 resized = true
                 self.resolution = CGSize(width: w, height: h)
-                self._contentScaleFactor = self.screen?.contentScaleFactor ?? 1.0
+                self._contentScaleFactor = self.screen?.windowContentScaleFactor ?? 1.0
                 self.discardSurface()
             }
         }

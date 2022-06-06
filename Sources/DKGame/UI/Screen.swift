@@ -67,7 +67,8 @@ public class Screen {
                             self.swapChain = swapChain
                             self.resolution = CGSize(width: contentBounds.width * scaleFactor,
                                                      height: contentBounds.height * scaleFactor)
-                            self.contentScaleFactor = scaleFactor
+                            self.windowContentScaleFactor = scaleFactor
+                            self.windowContentBounds = contentBounds
                             self.activated = activated
                             self.visible = visible
                             self.frame?.updateResolution()
@@ -85,7 +86,8 @@ public class Screen {
     }
 
     public var resolution: CGSize = .zero
-    public var contentScaleFactor: CGFloat = 1.0
+    public var windowContentBounds: CGRect = .zero 
+    public var windowContentScaleFactor: CGFloat = 1.0
 
     private var swapChain: SwapChain?
 
@@ -150,7 +152,7 @@ public class Screen {
                     if frame.loaded == false {
                         await frame.loadHierarchy(screen: self,
                             resolution: self.resolution,
-                            scaleFactor: self.contentScaleFactor)
+                            scaleFactor: self.windowContentScaleFactor)
                     }
 
                     if suspended == false {
@@ -229,12 +231,49 @@ public class Screen {
     public func hoverFrame(forDeviceId: Int) -> Frame? { nil }
     public func leaveHoverFrame(_ frame: Frame?) {}
 
-    public func windowToScreen(point: CGPoint) -> CGPoint { point }
-    public func screenToWindow(point: CGPoint) -> CGPoint { point }
-    public func windowToScreen(size: CGSize) -> CGSize { size }
-    public func screenToWindow(size: CGSize) -> CGSize { size }
-    public func windowToScreen(rect: CGRect) -> CGRect { rect }
-    public func screenToWindow(rect: CGRect) -> CGRect { rect }
+    public func windowToScreen(point: CGPoint) -> CGPoint {
+        let x = point.x / self.windowContentBounds.width
+        let y = point.y / self.windowContentBounds.height
+        return CGPoint(x: x, y: y)
+    }
+
+    public func screenToWindow(point: CGPoint) -> CGPoint {
+        let x = point.x * self.windowContentBounds.width
+        let y = point.y * self.windowContentBounds.height
+        return CGPoint(x: x, y: y)
+    }
+
+    public func windowToScreen(size: CGSize) -> CGSize {
+        let w = size.width / self.windowContentBounds.width
+        let h = size.height / self.windowContentBounds.height
+        return CGSize(width: w, height: h)
+    }
+
+    public func screenToWindow(size: CGSize) -> CGSize {
+        let w = size.width * self.windowContentBounds.width
+        let h = size.height * self.windowContentBounds.height
+        return CGSize(width: w, height: h)
+    }
+
+    public func windowToScreen(rect: CGRect) -> CGRect {
+        let origin = windowToScreen(point: CGPoint(x: rect.minX, y: rect.minY))
+        let extent = windowToScreen(point: CGPoint(x: rect.maxX, y: rect.maxY))
+        let minX = min(origin.x, extent.x)
+        let maxX = max(origin.x, extent.x)
+        let minY = min(origin.y, extent.y)
+        let maxY = max(origin.y, extent.y)
+        return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+    }
+
+    public func screenToWindow(rect: CGRect) -> CGRect {
+        let origin = screenToWindow(point: CGPoint(x: rect.minX, y: rect.minY))
+        let extent = screenToWindow(point: CGPoint(x: rect.maxX, y: rect.maxY))
+        let minX = min(origin.x, extent.x)
+        let maxX = max(origin.x, extent.x)
+        let minY = min(origin.y, extent.y)
+        let maxY = max(origin.y, extent.y)
+        return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+    }
 
     public func processKeyboardEvent(_ event: KeyboardEvent) {
         Task { @ScreenActor in
@@ -256,8 +295,7 @@ public class Screen {
             }
 
             if let frame = self.frame {
-                let invScale = 1.0 / self.contentScaleFactor
-                let res = Vector2(Scalar(self.resolution.width * invScale), Scalar(self.resolution.height * invScale))
+                let res = Vector2(self.resolution * (1.0 / self.windowContentScaleFactor))
                 assert(res.x > 0.0 && res.y > 0.0)
                 let scale = Vector2(frame.contentScale)
                 assert(scale.x > 0.0 && scale.y > 0.0)
@@ -339,9 +377,10 @@ public class Screen {
             switch event.type {
             case .resized:
                 let scaleFactor = event.contentScaleFactor
-                let resolution = CGSize(width: event.contentBounds.width * scaleFactor,
-                                        height: event.contentBounds.height * scaleFactor)
-                self.contentScaleFactor = scaleFactor
+                let resolution = CGSize(width: event.contentBounds.width,
+                                        height: event.contentBounds.height) * scaleFactor
+                self.windowContentScaleFactor = scaleFactor
+                self.windowContentBounds = event.contentBounds
                 self.resolution = resolution
                 self.frame?.updateResolution()
             case .hidden, .minimized:
