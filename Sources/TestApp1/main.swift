@@ -165,7 +165,7 @@ class MyApplicationDelegate: ApplicationDelegate {
         self.window = makeWindow(name: "TestApp1",
                                  style: [.genericWindow, .acceptFileDrop],
                                  delegate: self.windowDelegate)
-        self.window?.contentSize = CGSize(width: 800, height: 600)
+        self.window?.resolution = CGSize(width: 800, height: 600)
 
         self.screen = await Screen()
         self.frame = await MyFrame()

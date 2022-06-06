@@ -109,8 +109,7 @@ struct Win32DropTarget {
             self.lastPosition = pos
 
             let op = delegate!.draggingEntered(target: self.target!, 
-                                               position: CGPoint(x: Int(pos.x),
-                                                                 y: Int(pos.y)),
+                                               position: CGPoint(x: Int(pos.x), y: Int(pos.y)),
                                                files: self.files)
             switch op {
             case .copy: self.lastEffectMask = DWORD(DROPEFFECT_COPY)
@@ -148,8 +147,7 @@ struct Win32DropTarget {
                 self.lastPosition = pos
 
                 let op = delegate.draggingUpdated(target: self.target!, 
-                                                  position: CGPoint(x: Int(pos.x),
-                                                                    y: Int(pos.y)),
+                                                  position: CGPoint(x: Int(pos.x), y: Int(pos.y)),
                                                   files: self.files)
                 switch op {
                 case .copy: self.lastEffectMask = DWORD(DROPEFFECT_COPY)
@@ -191,8 +189,7 @@ struct Win32DropTarget {
             self.lastPosition = pos
 
             let op = delegate.draggingDropped(target: self.target!, 
-                                              position: CGPoint(x: Int(pos.x),
-                                                                y: Int(pos.y)),
+                                              position: CGPoint(x: Int(pos.x), y: Int(pos.y)),
                                               files: self.files)
             switch op {
             case .copy: self.lastEffectMask = DWORD(DROPEFFECT_COPY)

@@ -170,9 +170,9 @@ public class VulkanSwapChain: SwapChain {
         //let instance = device.instance
         let physicalDevice = device.physicalDevice
 
-        let contentBounds = await self.window.contentBounds
-        var width = UInt32(contentBounds.width.rounded())
-        var height = UInt32(contentBounds.height.rounded())
+        let resolution = await self.window.resolution
+        var width = UInt32(resolution.width.rounded())
+        var height = UInt32(resolution.height.rounded())
 
         var err: VkResult = VK_SUCCESS
         let swapchainOld = self.swapchain

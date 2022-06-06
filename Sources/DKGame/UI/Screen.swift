@@ -65,7 +65,8 @@ public class Screen {
 
                         Task { @ScreenActor in
                             self.swapChain = swapChain
-                            self.resolution = CGSize(width: contentBounds.width, height: contentBounds.height)
+                            self.resolution = CGSize(width: contentBounds.width * scaleFactor,
+                                                     height: contentBounds.height * scaleFactor)
                             self.contentScaleFactor = scaleFactor
                             self.activated = activated
                             self.visible = visible
@@ -255,7 +256,8 @@ public class Screen {
             }
 
             if let frame = self.frame {
-                let res = Vector2(self.resolution)
+                let invScale = 1.0 / self.contentScaleFactor
+                let res = Vector2(Scalar(self.resolution.width * invScale), Scalar(self.resolution.height * invScale))
                 assert(res.x > 0.0 && res.y > 0.0)
                 let scale = Vector2(frame.contentScale)
                 assert(scale.x > 0.0 && scale.y > 0.0)
@@ -337,8 +339,8 @@ public class Screen {
             switch event.type {
             case .resized:
                 let scaleFactor = event.contentScaleFactor
-                let resolution = CGSize(width: event.contentBounds.width,
-                                        height: event.contentBounds.height)
+                let resolution = CGSize(width: event.contentBounds.width * scaleFactor,
+                                        height: event.contentBounds.height * scaleFactor)
                 self.contentScaleFactor = scaleFactor
                 self.resolution = resolution
                 self.frame?.updateResolution()

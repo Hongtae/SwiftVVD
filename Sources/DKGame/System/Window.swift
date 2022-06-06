@@ -120,6 +120,7 @@ public protocol Window: AnyObject {
     var contentBounds: CGRect { get }
     var windowFrame: CGRect { get }
     var contentScaleFactor: CGFloat { get }
+    var resolution: CGSize { get set }
 
     var origin: CGPoint { get set }
     var contentSize: CGSize { get set }

@@ -41,27 +41,43 @@ public extension CGPoint {
     var magnitudeSquared: CGFloat   { self.x * self.x + self.y * self.y }
     var magnitude: CGFloat          { self.magnitudeSquared.squareRoot() }
 
-    static func - (lhs: Self, rhs: Self) -> Self {
-        return Self(x: lhs.x - rhs.x, y: lhs.y - rhs.y)
-    }
-
     static func + (lhs: Self, rhs: Self) -> Self {
         return Self(x: lhs.x + rhs.x, y: lhs.y + rhs.y)
+    }
+
+    static func += (lhs: inout Self, rhs: Self) {
+        lhs = lhs + rhs
+    }
+
+    static func - (lhs: Self, rhs: Self) -> Self {
+        return Self(x: lhs.x - rhs.x, y: lhs.y - rhs.y)
     }
 
     static func -= (lhs: inout Self, rhs: Self) {
         lhs = lhs - rhs
     }
 
-    static func += (lhs: inout Self, rhs: Self) {
-        lhs = lhs + rhs
+    static func * (lhs: Self, rhs: CGFloat) -> Self {
+        return Self(x: lhs.x * rhs, y: lhs.y * rhs)
     }
+
+    static func *= (lhs: inout Self, rhs: CGFloat) {
+        lhs = lhs * rhs
+    }   
 }
 
 public extension CGSize {
     init(_ v: Vector2) {
         self.init(width: CGFloat(v.x), height: CGFloat(v.y))
     }
+
+    static func * (lhs: Self, rhs: CGFloat) -> Self {
+        return Self(width: lhs.width * rhs, height: lhs.height * rhs)
+    }
+
+    static func *= (lhs: inout Self, rhs: CGFloat) {
+        lhs = lhs * rhs
+    } 
 }
 
 public extension CGRect {
