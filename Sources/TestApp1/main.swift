@@ -36,7 +36,7 @@ class MyFrame: Frame {
     var outlineFont: Font?
     var fpsFont: Font?
 
-    let dpi: Font.DPI = (72, 72)
+    let dpi = Font.defaultDPI
 
     var baseline = [CGPoint(x: 80, y: 450), CGPoint(x: 620, y: 180)]
 

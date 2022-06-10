@@ -52,6 +52,7 @@ private func FT_HAS_FIXED_SIZES(_ face: FT_Face) -> Bool {
 
 public class Font {
     public typealias DPI = (x: UInt32, y: UInt32)
+    public static let defaultDPI = DPI(x: 96, y: 96)
 
     private let library: FTLibrary
     private var face: FT_Face
@@ -167,7 +168,7 @@ public class Font {
         self._outline = 0.0
         self._embolden = 0.0
         self._size26d6 = 10 * 64
-        self._dpi = (72, 72)
+        self._dpi = Self.defaultDPI
         self._kerningEnabled = true
         self._forceBitmap = false
 
@@ -198,7 +199,7 @@ public class Font {
         self._outline = 0.0
         self._embolden = 0.0
         self._size26d6 = 10 * 64
-        self._dpi = (72, 72)
+        self._dpi = Self.defaultDPI
         self._kerningEnabled = true
         self._forceBitmap = false
 
