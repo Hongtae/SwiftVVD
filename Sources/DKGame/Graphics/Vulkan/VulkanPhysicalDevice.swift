@@ -88,10 +88,10 @@ public class VulkanPhysicalDeviceDescription: CustomStringConvertible {
 
         var devicePriority = 0
         switch (properties.deviceType) {
-        case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:		devicePriority += 1; fallthrough 
+        case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:      devicePriority += 1; fallthrough 
         case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:    devicePriority += 1; fallthrough 
-        case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:		devicePriority += 1; fallthrough 
-        case VK_PHYSICAL_DEVICE_TYPE_CPU:				devicePriority += 1; fallthrough 
+        case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:       devicePriority += 1; fallthrough 
+        case VK_PHYSICAL_DEVICE_TYPE_CPU:               devicePriority += 1; fallthrough 
         default:    // VK_PHYSICAL_DEVICE_TYPE_OTHER
             break
         }
