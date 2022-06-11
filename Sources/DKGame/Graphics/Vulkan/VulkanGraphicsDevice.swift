@@ -211,9 +211,10 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         self.loadPipelineCache()
 
         Task.detached(priority: .background) { [weak self] in
-
             numberOfThreadsToWaitBeforeExiting.increment()
             defer { numberOfThreadsToWaitBeforeExiting.decrement() }
+
+            Log.info("VulkanGraphicsDevice Helper task is started.")
 
             var err: VkResult = VK_SUCCESS
             var fences: [VkFence?] = []

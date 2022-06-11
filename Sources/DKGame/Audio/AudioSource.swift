@@ -21,4 +21,8 @@ public class AudioSource {
     public var direction: Vector3 = .zero
 
     public var state: State = .unknown
+
+    public func numberOfBuffersInQueue() -> Int {
+        return 0
+    }
 }

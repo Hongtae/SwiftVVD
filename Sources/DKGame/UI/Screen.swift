@@ -109,17 +109,13 @@ public class Screen {
     public init(graphicsDeviceContext: GraphicsDeviceContext?,
                 audioDeviceContext: AudioDeviceContext?) {
 
-        var graphicsDeviceContext = graphicsDeviceContext
-        if graphicsDeviceContext == nil {
-            graphicsDeviceContext = makeGraphicsDeviceContext()
-        }
-        self.graphicsDeviceContext = graphicsDeviceContext
+        self.graphicsDeviceContext = graphicsDeviceContext ?? makeGraphicsDeviceContext()
+        self.audioDeviceContext = audioDeviceContext ?? makeAudioDeviceContext()
         self.commandQueue = self.graphicsDeviceContext?.renderQueue()
 
-        Canvas.cachePipelineContext(graphicsDeviceContext!)
+        Canvas.cachePipelineContext(self.graphicsDeviceContext!)
 
         Task.detached(priority: .userInitiated) { @ScreenActor [weak self] in
-
             numberOfThreadsToWaitBeforeExiting.increment()
             defer { numberOfThreadsToWaitBeforeExiting.decrement() }
 
