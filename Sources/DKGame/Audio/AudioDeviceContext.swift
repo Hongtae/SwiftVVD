@@ -13,18 +13,12 @@ public struct AudioListener {
 public class AudioDeviceContext {
     public let device: AudioDevice
     public let listener: AudioListener
-    public let context: ALCcontext
 
     public private(set) var players: [AudioPlayer] = []
     private let lock = NSLock()
 
-    public init?(device: AudioDevice) {
-        guard let context = alcCreateContext(device.device, nil) else { return nil }
-
+    public init(device: AudioDevice) {
         self.device = device
-        self.context = context
-        alcMakeContextCurrent(self.context)
-
         self.listener = AudioListener()
 
         Task.detached(priority: .background) { @AudioActor [weak self] in
@@ -42,7 +36,7 @@ public class AudioDeviceContext {
 
                 // update all active audio streams!
                 for player in players {
-                    if player.source?.state == .playing {
+                    if player.source.state == .playing {
                         //guard let stream = player.stream else { continue }
                         //let source = player.source!
 
@@ -58,14 +52,32 @@ public class AudioDeviceContext {
     }
 
     deinit {
-        if alcGetCurrentContext() == self.context {
-            alcMakeContextCurrent(nil)
-        }
-        alcDestroyContext(self.context)
+        self.players.removeAll()
     }
 
     public func makePlayer(stream: AudioStream) -> AudioPlayer? {
+        if let source = device.makeSource() {
+            let player = AudioPlayer(source: source, stream: stream)
+            player.playbackContext = self
+            return player
+        }
         return nil
+    }
+
+    func bindPlayer(_ player: AudioPlayer) {
+        synchronizedBy(locking: self.lock) {
+            if self.players.contains(where: { $0 === player }) == false {
+                self.players.append(player)
+            }
+        }
+    }
+
+    func unbindPlayer(_ player: AudioPlayer) {
+        synchronizedBy(locking: self.lock) {
+            if let index = self.players.firstIndex(where: { $0 === player } ) {
+                self.players.remove(at: index)
+            }
+        }
     }
 }
 

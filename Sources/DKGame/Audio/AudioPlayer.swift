@@ -10,6 +10,24 @@ public class AudioPlayer {
 
     public var position = 0.0
 
-    public var source: AudioSource? = nil
-    public var stream: AudioStream? = nil
+    public var source: AudioSource
+    public var stream: AudioStream
+
+    public weak var playbackContext: AudioDeviceContext? {
+        didSet {
+            if oldValue !== playbackContext {
+                if let device = oldValue {
+                    device.unbindPlayer(self)
+                }
+                if let device = playbackContext {
+                    device.bindPlayer(self)
+                }
+            }
+        }
+    }
+
+    public init(source: AudioSource, stream: AudioStream) {
+        self.source = source
+        self.stream = stream
+    }
 }
