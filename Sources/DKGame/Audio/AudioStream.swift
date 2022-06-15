@@ -26,6 +26,7 @@ private class DataStream: StreamWrapper {
             let range = stream.source[begin ..< end]
             let read = range.copyBytes(to: buffer)
             if read < 0 { return ~UInt64(0) }
+            stream.position += read
             return UInt64(read)
         }
         self.stream.write = nil // read-only stream!
