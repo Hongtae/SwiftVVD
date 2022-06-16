@@ -56,8 +56,6 @@ public enum AudioStreamEncodingFormat {
     case oggFLAC
     case flac
     case mp3
-    case aac
-    case ac3
     case wave
 }
 
