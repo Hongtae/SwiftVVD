@@ -1,33 +1,42 @@
-
+@AudioActor
 public class AudioPlayer {
 
     public typealias State = AudioSource.State
 
-    public var channels = 2
-    public var bits = 16
-    public var sampleRate = 441000
-    public var duration = 0.0
+    public nonisolated var sampleRate: Int  { stream.sampleRate }
+    public nonisolated var channels: Int    { stream.channels }
+    public nonisolated var bits: Int        { stream.bits }
+    public nonisolated var duration: Double { stream.timeTotal }
 
-    public var position = 0.0
+    public var position: Double { stream.timePosition }
 
-    public var source: AudioSource
-    public var stream: AudioStream
+    public let source: AudioSource
+    public let stream: AudioStream
 
-    public weak var playbackContext: AudioDeviceContext? {
-        didSet {
-            if oldValue !== playbackContext {
-                if let device = oldValue {
-                    device.unbindPlayer(self)
-                }
-                if let device = playbackContext {
-                    device.bindPlayer(self)
-                }
-            }
-        }
-    }
+    var playing = false
+    var buffering = false
+    var bufferedPosition: Double = 0.0
+    var playbackPosition: Double = 0.0
+    var playLoopCount = 0
+    var bufferSize = 0
+    var maxBufferingTime = 1.0
 
     public init(source: AudioSource, stream: AudioStream) {
         self.source = source
         self.stream = stream
+    }
+
+    deinit {
+        source.state = .stopped
+        source.dequeueBuffers()
+    }
+
+    func bufferingStateChanged(_: Bool, timeStamp: Double) {
+    }
+
+    func playbackStateChanged(_: Bool, position: Double) {
+    }
+
+    func processStream(data: UnsafeRawPointer, byteCount: Int, timeStamp: Double) {        
     }
 }

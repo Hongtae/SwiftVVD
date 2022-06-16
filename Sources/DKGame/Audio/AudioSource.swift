@@ -68,8 +68,19 @@ public class AudioSource {
         set { setSource(AL_DIRECTION, newValue) }
     }
 
-    public var state: State = .stopped {
-        didSet { if state == oldValue { return }
+    public var state: State {
+        get {
+            var st: ALint = 0
+            alGetSourcei(sourceID, AL_SOURCE_STATE, &st)
+            switch st {
+            case AL_PLAYING:    return .playing
+            case AL_PAUSED:     return .paused
+            default:            return .stopped
+            }
+        }
+        set (state) {
+            if state == self.state { return }
+
             self.bufferLock.lock()
             defer { self.bufferLock.unlock() }
 
@@ -165,9 +176,10 @@ public class AudioSource {
     public func enqueueBuffer(sampleRate: Int,
                               bits: Int,
                               channels: Int,
-                              data: UnsafeRawBufferPointer,
+                              data: UnsafeRawPointer,
+                              byteCount: Int,
                               timeStamp: Double) -> Bool {
-        if data.count > 0 && sampleRate > 0 {
+        if byteCount > 0 && sampleRate > 0 {
             let format = self.device.format(bits: bits, channels: channels)
             if format != 0 {
                 self.bufferLock.lock()
@@ -211,8 +223,8 @@ public class AudioSource {
                     alGenBuffers(1, &bufferID)
                 }
                 // enqueue buffer.
-                let bytes = ALsizei(data.count)
-                alBufferData(bufferID, format, data.baseAddress, bytes, ALsizei(sampleRate))
+                let bytes = ALsizei(byteCount)
+                alBufferData(bufferID, format, data, bytes, ALsizei(sampleRate))
                 alSourceQueueBuffers(sourceID, 1, &bufferID)
 
                 let bytesSecond = UInt(sampleRate * channels * (bits >> 3))

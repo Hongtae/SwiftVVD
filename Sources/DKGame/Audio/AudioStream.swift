@@ -74,9 +74,9 @@ public class AudioStream {
     public var pcmPosition: UInt64      { stream.pointee.pcmPosition(stream) }
     public var timePosition: Double     { stream.pointee.timePosition(stream) }
 
-    public var rawTotal: UInt64         { stream.pointee.rawTotal(stream) }
-    public var pcmTotal: UInt64         { stream.pointee.pcmTotal(stream) }
-    public var timeTotal: Double        { stream.pointee.timeTotal(stream) }
+    public let rawTotal: UInt64
+    public let pcmTotal: UInt64
+    public let timeTotal: Double    // 0 for streaming.
 
     public func read(_ buffer: UnsafeMutableRawPointer, count: Int) -> Int {
         let read = stream.pointee.read(stream, buffer, count)
@@ -120,6 +120,10 @@ public class AudioStream {
             default:
                 self.format = .unknown
             }
+            
+            self.rawTotal = stream.pointee.rawTotal(stream)
+            self.pcmTotal = stream.pointee.pcmTotal(stream)
+            self.timeTotal = stream.pointee.timeTotal(stream)
 
         } else { return nil }
     }
