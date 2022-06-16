@@ -270,7 +270,7 @@ DKAudioStream* DKAudioStreamWaveCreate(DKStream* stream)
 						}
 						else
 						{
-							DKLogE("AudioStreamWave: Read error!\n");
+							DKLogE("AudioStreamWave: Read error!");
                             DKFree(context);
                             return nullptr;
 						}

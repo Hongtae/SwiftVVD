@@ -29,6 +29,7 @@ typedef enum _DKAudioStreamEncodingFormat
     DKAudioStreamEncodingFormat_OggVorbis,
     DKAudioStreamEncodingFormat_OggFLAC,
     DKAudioStreamEncodingFormat_FLAC,
+    DKAudioStreamEncodingFormat_MP3,
     DKAudioStreamEncodingFormat_Wave,
 } DKAudioStreamEncodingFormat;
 
