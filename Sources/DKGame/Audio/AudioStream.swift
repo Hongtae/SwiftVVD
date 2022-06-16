@@ -55,9 +55,6 @@ public enum AudioStreamEncodingFormat {
     case oggVorbis
     case oggFLAC
     case flac
-    case mp3
-    case aac
-    case raw
     case wave
 }
 
