@@ -78,51 +78,57 @@ public class AudioSource {
             default:            return .stopped
             }
         }
-        set (state) {
-            if state == self.state { return }
+    }
 
-            self.bufferLock.lock()
-            defer { self.bufferLock.unlock() }
+    public func play() {
+        self.bufferLock.lock()
+        defer { self.bufferLock.unlock() }
 
-            switch state {
-            case .stopped:
-                alSourceStop(sourceID)
-                var buffersQueued: ALint = 0
-                var buffersProcessed: ALint = 0
-                alGetSourcei(sourceID, AL_BUFFERS_QUEUED, &buffersQueued)       // entire buffer
-                alGetSourcei(sourceID, AL_BUFFERS_PROCESSED, &buffersProcessed) // finished buffer
+        alSourcePlay(sourceID)
+    }
 
-                for _ in 0..<buffersProcessed {
-                    var bufferID: ALuint = 0
-                    alSourceUnqueueBuffers(sourceID, 1, &bufferID)
-                }
+    public func pause() {
+        self.bufferLock.lock()
+        defer { self.bufferLock.unlock() }
 
-                if buffersProcessed != buffers.count {
-                    Log.warn("Buffer mismatch! (\(buffers.count) allocated, \(buffersProcessed) released)")
-                }
+        alSourcePause(sourceID)
+    }
 
-                alSourcei(sourceID, AL_LOOPING, 0)
-                alSourcei(sourceID, AL_BUFFER, 0)
-                alSourceRewind(sourceID)
+    public func stop() {
+        self.bufferLock.lock()
+        defer { self.bufferLock.unlock() }
+ 
+        alSourceStop(sourceID)
+        var buffersQueued: ALint = 0
+        var buffersProcessed: ALint = 0
+        alGetSourcei(sourceID, AL_BUFFERS_QUEUED, &buffersQueued)       // entire buffer
+        alGetSourcei(sourceID, AL_BUFFERS_PROCESSED, &buffersProcessed) // finished buffer
 
-                for buffer in buffers {
-                    var bufferID = buffer.bufferID
-                    alDeleteBuffers(1, &bufferID)
-                }
-                buffers.removeAll()
-
-                // check error.
-                let err = alGetError()
-                if err != AL_NO_ERROR {
-                    Log.err("AudioSource Error: \(String(format: "0x%x (%s)", err, alGetString(err)))")
-                }
-
-            case .playing:
-                alSourcePlay(sourceID)
-            case .paused:
-                alSourcePause(sourceID)
-            }
+        for _ in 0..<buffersProcessed {
+            var bufferID: ALuint = 0
+            alSourceUnqueueBuffers(sourceID, 1, &bufferID)
         }
+
+        if buffersProcessed != buffers.count {
+            Log.warn("Buffer mismatch! (\(buffers.count) allocated, \(buffersProcessed) released)")
+        }
+
+        alSourcei(sourceID, AL_LOOPING, 0)
+        alSourcei(sourceID, AL_BUFFER, 0)
+        alSourceRewind(sourceID)
+
+        for buffer in buffers {
+            var bufferID = buffer.bufferID
+            alDeleteBuffers(1, &bufferID)
+        }
+        buffers.removeAll()
+
+        // check error.
+        let err = alGetError()
+        if err != AL_NO_ERROR {
+            Log.err("AudioSource Error: \(String(format: "0x%x (%s)", err, alGetString(err)))")
+        }
+
     }
 
     public func numberOfBuffersInQueue() -> Int {
@@ -366,9 +372,9 @@ public class AudioSource {
 
     deinit {
         assert(alIsSource(sourceID) != 0)
-        assert(buffers.isEmpty)
 
-        self.state = .stopped
+        self.stop()
+        assert(buffers.isEmpty)
 
         var sourceID = self.sourceID
     	alDeleteSources(1, &sourceID)

@@ -1,6 +1,10 @@
 import Foundation
 import OpenAL
 
+private let maxBufferCount = 3
+private let minBufferTime = 0.4
+private let maxBufferTime = 10.0
+
 public class AudioDeviceContext {
     public let device: AudioDevice
     public let listener: AudioListener
@@ -32,99 +36,91 @@ public class AudioDeviceContext {
                     return r
                 }
 
-                let maxBufferCount = 3
-
                 // update all active audio streams!
                 for player in players {
-                    let source = player.source
-                    let bufferSize = player.bufferSize
-                    if bufferSize > 0 {
-                        if source.numberOfBuffersInQueue() >= maxBufferCount { continue }
-
-                        let stream = player.stream
-                        if bufferSize > buffer.count {
-                            buffer.deallocate()
-                            buffer = .allocate(byteCount: player.bufferSize, alignment: 1)
-                        }
-
-                        let bufferPos = stream.timePosition
-                        let bytesRead = stream.read(buffer.baseAddress!, count: bufferSize)
-                        if bytesRead > 0 {
-                            if player.buffering == false {
-                                player.buffering = true
-                                player.bufferingStateChanged(true, timeStamp: bufferPos)
-                            }
-                            player.processStream(data: buffer.baseAddress!, byteCount: bufferSize, timeStamp: bufferPos)
-
-                            if source.enqueueBuffer(sampleRate: stream.sampleRate,
-                                                    bits: stream.bits,
-                                                    channels: stream.channels,
-                                                    data: buffer.baseAddress!,
-                                                    byteCount: bufferSize,
-                                                    timeStamp: bufferPos) {
-                                source.state = .playing
-                                player.playing = true
-                                player.bufferedPosition = stream.timePosition
-                            } else {    // error
-                                Log.err("AudioSource.enqueueBuffer failed")
-
-                                player.buffering = false
-                                player.playing = false
-
-                                player.bufferingStateChanged(false, timeStamp: stream.timePosition)
-                                player.playbackStateChanged(false, position: player.playbackPosition)
-                            }
-                        } else if bytesRead == 0 {  // buffering finished.
-                            source.dequeueBuffers()
-                            if player.playLoopCount > 1 {
-                                player.playLoopCount -= 1
-                                _=stream.seek(pcm: 0)   // rewind
-                                if player.playing == false {
-                                    player.playing = true
-                                    player.playbackStateChanged(true, position: player.playbackPosition)
-                                } else {
-                                    if player.buffering {
-                                        player.buffering = false
-                                        player.bufferingStateChanged(false, timeStamp: stream.timePosition)
-                                    }
-
-                                    if source.state != .playing {
-                                        if player.playing {
-                                            player.playing = false
-                                            player.playbackStateChanged(false, position: player.playbackPosition)
-                                        }
-                                    }
-                                }
-
-                            }
-
-                        } else { // error, stop playing
-                            Log.err("AudioStream.read failed.")
-                        }
-                    } else { // bufferSize == 0
+                    if player.playing {
+                        let source = player.source
                         source.dequeueBuffers()
 
-                        if source.state != .playing {
-                            if player.playing {
+                        if player.buffering && source.numberOfBuffersInQueue() < maxBufferCount {
+                            // buffering!                            
+                            let stream = player.stream
+                            let bufferingTime = clamp(player.maxBufferingTime, min: minBufferTime, max: maxBufferTime)
+                            let sampleAlignment = stream.channels * stream.bits >> 3
+                            let bufferSize = Int(bufferingTime * Double(stream.sampleRate)) * sampleAlignment
+
+                            if bufferSize > buffer.count {  // resize buffer
+                                buffer.deallocate()
+                                buffer = .allocate(byteCount: bufferSize, alignment: 1)
+                            }
+
+                            let bufferPos = stream.timePosition
+                            let bytesRead = stream.read(buffer.baseAddress!, count: bufferSize)
+                            if bytesRead > 0 {
+                                player.processStream(data: buffer.baseAddress!, byteCount: bytesRead, timeStamp: bufferPos)
+                                if source.enqueueBuffer(sampleRate: stream.sampleRate,
+                                                        bits: stream.bits,
+                                                        channels: stream.channels,
+                                                        data: buffer.baseAddress!,
+                                                        byteCount: bufferSize,
+                                                        timeStamp: bufferPos) {
+                                    player.playing = true
+                                    player.bufferedPosition = stream.timePosition
+
+                                    player.bufferingStateChanged(true, timeStamp: bufferPos)
+                                } else {    // error
+                                    Log.err("AudioSource.enqueueBuffer failed")
+
+                                    player.buffering = false
+                                    player.playing = false
+                                }
+                            } else if bytesRead == 0 {  // EOF
+                                if player.playLoopCount > 1 {
+                                    player.playLoopCount -= 1
+                                    _=stream.seek(pcm: 0) // rewind
+                                } else {
+                                    player.buffering = false
+                                }
+                            } else {    // error!
+                                Log.err("AudioStream.read failed.")
                                 player.playing = false
-                                player.playbackStateChanged(false, position: player.playbackPosition)
+                                player.buffering = false
+                                source.stop()
+                                source.dequeueBuffers()
+                            }
+
+                            if player.buffering == false {
+                                player.bufferingStateChanged(false, timeStamp: bufferPos)
                             }
                         }
-                        if player.buffering {
-                            player.buffering = false
-                            player.bufferingStateChanged(false, timeStamp: player.bufferedPosition)
+
+                        // update state
+                        if player.playing {
+                            if source.state == .stopped {
+                                if source.numberOfBuffersInQueue() > 0 {
+                                    source.play()
+                                } else {
+                                    // done.
+                                    player.playing = false
+                                }
+                            }
+                        }
+
+                        if player.playing {
+                            let pos = source.timePosition
+                            if player.playbackPosition != pos {
+                                player.playbackPosition = pos
+                                player.playbackStateChanged(true, position: player.playbackPosition)
+                            }
+                        } else {
+                            player.playbackStateChanged(false, position: player.playbackPosition)
                         }
                     }
-
-                    if player.playing {
-                        player.playbackPosition = source.timePosition
-                        player.playbackStateChanged(true, position: player.playbackPosition)
-                    }                    
                 }
 
                 //await Task.yield()
                 do {
-                    try await Task.sleep(nanoseconds: 100_000_000) // 100ms
+                    try await Task.sleep(nanoseconds: 200_000_000) // 200ms
                 } catch {
                     await Task.yield()
                 }

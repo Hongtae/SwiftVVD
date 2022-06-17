@@ -265,7 +265,7 @@ DKAudioStream* DKAudioStreamWaveCreate(DKStream* stream)
 							}
 							else
 							{
-								DKLogE("AudioStreamWave: Unknown format! (0x%x)", format.formatTag);
+								DKLogE("AudioStreamWave: Unknown format! (0x%x)\n", format.formatTag);
 							}
 						}
 						else
@@ -295,9 +295,9 @@ DKAudioStream* DKAudioStreamWaveCreate(DKStream* stream)
                     DKSTREAM_SET_POSITION(stream, DKSTREAM_GET_POSITION(stream) + 1);
 			}
 
-			DKLog("AudioStreamWave: dataSize:%d", (int)context->dataSize);
-			DKLog("AudioStreamWave: dataOffset:%d", (int)context->dataOffset);
-			DKLog("AudioStreamWave: formatType:%d", (int)context->formatType);
+			DKLog("AudioStreamWave: dataSize:%d\n", (int)context->dataSize);
+			DKLog("AudioStreamWave: dataOffset:%d\n", (int)context->dataOffset);
+			DKLog("AudioStreamWave: formatType:%d\n", (int)context->formatType);
 
 			if (context->dataSize && context->dataOffset &&
 				(context->formatType == WaveFormatTypePCM ||

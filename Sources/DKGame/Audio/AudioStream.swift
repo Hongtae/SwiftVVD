@@ -23,8 +23,15 @@ private class DataStream: StreamWrapper {
             let buffer = UnsafeMutableRawBufferPointer(start: buff, count: Int(size))
             let begin = stream.position
             let end = begin + Int(size)
-            let range = stream.source[begin ..< end]
-            let read = range.copyBytes(to: buffer)
+            let read: Int = stream.source.withUnsafeBytes { ptr in
+                let range: UnsafeRawBufferPointer.SubSequence
+                if end > ptr.count {
+                    range = ptr[begin...]
+                } else {
+                    range = ptr[begin..<end]
+                }
+                return range.copyBytes(to: buffer)
+            }
             if read < 0 { return ~UInt64(0) }
             stream.position += read
             return UInt64(read)
@@ -32,7 +39,7 @@ private class DataStream: StreamWrapper {
         self.stream.write = nil // read-only stream!
         self.stream.setPosition = { (ctxt, pos) -> UInt64 in
             let stream = unsafeBitCast(ctxt, to: AnyObject.self) as! DataStream
-            stream.position = min(stream.source.count, stream.position + Int(pos))
+            stream.position = clamp(Int(pos), min: 0, max: stream.source.count)
             return UInt64(stream.position) 
         }
         self.stream.getPosition = { (ctxt) -> UInt64 in
