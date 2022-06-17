@@ -27,6 +27,8 @@ public class AudioDeviceContext {
 
             var buffer: UnsafeMutableRawBufferPointer = .allocate(byteCount: 1024, alignment: 1)
 
+            var retainedPlayers: [AudioPlayer] = []
+
             while true {
                 guard let self = self else { break }
 
@@ -35,6 +37,8 @@ public class AudioDeviceContext {
                     self.players = r.map { Player(player: $0) }
                     return r
                 }
+
+                retainedPlayers.removeAll(keepingCapacity: true)
 
                 // update all active audio streams!
                 for player in players {
@@ -112,6 +116,9 @@ public class AudioDeviceContext {
                                 player.playbackPosition = pos
                                 player.playbackStateChanged(true, position: player.playbackPosition)
                             }
+                            if player.retainedWhilePlaying {
+                                retainedPlayers.append(player)
+                            }
                         } else {
                             player.playbackStateChanged(false, position: player.playbackPosition)
                         }
@@ -125,8 +132,8 @@ public class AudioDeviceContext {
                     await Task.yield()
                 }
             }
-
             buffer.deallocate()
+            retainedPlayers.removeAll()
 
             Log.info("AudioDeviceContext playback task is finished.")
         }

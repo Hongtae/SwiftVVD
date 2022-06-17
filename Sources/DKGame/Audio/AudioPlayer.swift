@@ -18,6 +18,8 @@ public class AudioPlayer {
     var playLoopCount = 0
     var maxBufferingTime = 1.0
 
+    public var retainedWhilePlaying = false
+
     public init(source: AudioSource, stream: AudioStream) {
         self.source = source
         self.stream = stream
