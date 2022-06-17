@@ -69,13 +69,13 @@ extern "C" DKAudioStream* DKAudioStreamCreate(DKStream* stream)
     {
         DKSTREAM_SET_POSITION(stream, 0);
 
-		// reading file header.
-		char header[AUDIO_FORMAT_HEADER_LENGTH];
-		memset(header, 0, AUDIO_FORMAT_HEADER_LENGTH);
+        // reading file header.
+        char header[AUDIO_FORMAT_HEADER_LENGTH];
+        memset(header, 0, AUDIO_FORMAT_HEADER_LENGTH);
         DKSTREAM_READ(stream, header, AUDIO_FORMAT_HEADER_LENGTH);
         DKSTREAM_SET_POSITION(stream, 0);
 
-		DKAudioStreamEncodingFormat format = DKAudioStreamDetermineFormatFromHeader(header, AUDIO_FORMAT_HEADER_LENGTH);
+        DKAudioStreamEncodingFormat format = DKAudioStreamDetermineFormatFromHeader(header, AUDIO_FORMAT_HEADER_LENGTH);
         switch (format)
         {
         case DKAudioStreamEncodingFormat_OggVorbis:
@@ -90,9 +90,9 @@ extern "C" DKAudioStream* DKAudioStreamCreate(DKStream* stream)
             return DKAudioStreamWaveCreate(stream);
         default:
             break;
-    	}
+        }
     }
-	return nullptr;
+    return nullptr;
 }
 
 extern "C" void DKAudioStreamDestroy(DKAudioStream* stream)

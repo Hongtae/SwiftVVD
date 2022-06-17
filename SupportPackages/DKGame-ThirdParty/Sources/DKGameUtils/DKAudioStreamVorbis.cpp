@@ -82,119 +82,119 @@ uint64_t DKAudioStreamVorbisRead(DKAudioStream* stream, void* buffer, size_t siz
 {
     VorbisFileContext* context = reinterpret_cast<VorbisFileContext*>(stream->decoder);
 
-	if (context->vorbis.datasource == NULL)
-		return -1;
-	if (size == 0)
-		return 0;
+    if (context->vorbis.datasource == NULL)
+        return -1;
+    if (size == 0)
+        return 0;
 
-	int current_section;
-	int nDecoded = 0;
-	while (nDecoded < size)
-	{
-		int nDec = ov_read(&context->vorbis, (char*)buffer + nDecoded, size - nDecoded, 0,2,1, &current_section);
-		if (nDec <= 0)
-		{
-			// error or eof.
-			break;
-		}
-		nDecoded += nDec;
-	}
+    int current_section;
+    int nDecoded = 0;
+    while (nDecoded < size)
+    {
+        int nDec = ov_read(&context->vorbis, (char*)buffer + nDecoded, size - nDecoded, 0,2,1, &current_section);
+        if (nDec <= 0)
+        {
+            // error or eof.
+            break;
+        }
+        nDecoded += nDec;
+    }
 
-	if (stream->channels == 6)
-	{
-		short *p = (short*)buffer;
-		for ( int i = 0; i < nDecoded / 2; i+=6)
-		{
-			SWAP_CHANNEL16(p[i+1], p[i+2]);
-			SWAP_CHANNEL16(p[i+3], p[i+5]);
-			SWAP_CHANNEL16(p[i+4], p[i+5]);
-		}
-	}
-	return nDecoded;
+    if (stream->channels == 6)
+    {
+        short *p = (short*)buffer;
+        for ( int i = 0; i < nDecoded / 2; i+=6)
+        {
+            SWAP_CHANNEL16(p[i+1], p[i+2]);
+            SWAP_CHANNEL16(p[i+3], p[i+5]);
+            SWAP_CHANNEL16(p[i+4], p[i+5]);
+        }
+    }
+    return nDecoded;
 }
 
 uint64_t DKAudioStreamVorbisSeekRaw(DKAudioStream* stream, uint64_t pos)
 {
     VorbisFileContext* context = reinterpret_cast<VorbisFileContext*>(stream->decoder);
-	if (context->vorbis.datasource == NULL)
-		return -1;
+    if (context->vorbis.datasource == NULL)
+        return -1;
 
-	ov_raw_seek(&context->vorbis, pos);
-	return ov_raw_tell(&context->vorbis);
+    ov_raw_seek(&context->vorbis, pos);
+    return ov_raw_tell(&context->vorbis);
 }
 
 uint64_t DKAudioStreamVorbisSeekPcm(DKAudioStream* stream, uint64_t pos)
 {
     VorbisFileContext* context = reinterpret_cast<VorbisFileContext*>(stream->decoder);
-	if (context->vorbis.datasource == NULL)
-		return -1;
+    if (context->vorbis.datasource == NULL)
+        return -1;
 
-	ov_pcm_seek(&context->vorbis, pos);
-	return ov_pcm_tell(&context->vorbis);
+    ov_pcm_seek(&context->vorbis, pos);
+    return ov_pcm_tell(&context->vorbis);
 }
 
 double DKAudioStreamVorbisSeekTime(DKAudioStream* stream, double t)
 {
     VorbisFileContext* context = reinterpret_cast<VorbisFileContext*>(stream->decoder);
-	if (context->vorbis.datasource == NULL)
-		return -1;
+    if (context->vorbis.datasource == NULL)
+        return -1;
 
-	ov_time_seek(&context->vorbis, t);
-	return ov_time_tell(&context->vorbis);
+    ov_time_seek(&context->vorbis, t);
+    return ov_time_tell(&context->vorbis);
 }
 
 uint64_t DKAudioStreamVorbisRawPosition(DKAudioStream* stream)
 {
     VorbisFileContext* context = reinterpret_cast<VorbisFileContext*>(stream->decoder);
-	if (context->vorbis.datasource == NULL)
-		return -1;
+    if (context->vorbis.datasource == NULL)
+        return -1;
 
-	return ov_raw_tell(&context->vorbis);
+    return ov_raw_tell(&context->vorbis);
 }
 
 uint64_t DKAudioStreamVorbisPcmPosition(DKAudioStream* stream)
 {
     VorbisFileContext* context = reinterpret_cast<VorbisFileContext*>(stream->decoder);
-	if (context->vorbis.datasource == NULL)
-		return -1;
+    if (context->vorbis.datasource == NULL)
+        return -1;
 
-	return ov_pcm_tell(&context->vorbis);
+    return ov_pcm_tell(&context->vorbis);
 }
 
 double DKAudioStreamVorbisTimePosition(DKAudioStream* stream)
 {
     VorbisFileContext* context = reinterpret_cast<VorbisFileContext*>(stream->decoder);
-	if (context->vorbis.datasource == NULL)
-		return -1;
+    if (context->vorbis.datasource == NULL)
+        return -1;
 
-	return ov_time_tell(&context->vorbis);
+    return ov_time_tell(&context->vorbis);
 }
 
 uint64_t DKAudioStreamVorbisRawTotal(DKAudioStream* stream)
 {
     VorbisFileContext* context = reinterpret_cast<VorbisFileContext*>(stream->decoder);
-	if (context->vorbis.datasource == NULL)
-		return -1;
+    if (context->vorbis.datasource == NULL)
+        return -1;
 
-	return ov_raw_total(&context->vorbis, -1);
+    return ov_raw_total(&context->vorbis, -1);
 }
 
 uint64_t DKAudioStreamVorbisPcmTotal(DKAudioStream* stream)
 {
     VorbisFileContext* context = reinterpret_cast<VorbisFileContext*>(stream->decoder);
-	if (context->vorbis.datasource == NULL)
-		return -1;
+    if (context->vorbis.datasource == NULL)
+        return -1;
 
-	return ov_pcm_total(&context->vorbis, -1);
+    return ov_pcm_total(&context->vorbis, -1);
 }
 
 double DKAudioStreamVorbisTimeTotal(DKAudioStream* stream)
 {
     VorbisFileContext* context = reinterpret_cast<VorbisFileContext*>(stream->decoder);
-	if (context->vorbis.datasource == NULL)
-		return -1;
+    if (context->vorbis.datasource == NULL)
+        return -1;
 
-	return ov_time_total(&context->vorbis, -1);
+    return ov_time_total(&context->vorbis, -1);
 }
 
 DKAudioStream* DKAudioStreamVorbisCreate(const char* file)
@@ -202,11 +202,11 @@ DKAudioStream* DKAudioStreamVorbisCreate(const char* file)
     VorbisFileContext* context = (VorbisFileContext*)DKMalloc(sizeof(VorbisFileContext));
     memset(context, 0, sizeof(VorbisFileContext));
 
-	if (ov_fopen(file, &context->vorbis) == 0)
-	{
-		vorbis_info *info = ov_info(&context->vorbis, -1);
-		if (info)
-		{
+    if (ov_fopen(file, &context->vorbis) == 0)
+    {
+        vorbis_info *info = ov_info(&context->vorbis, -1);
+        if (info)
+        {
             DKAudioStream* audioStream = (DKAudioStream*)DKMalloc(sizeof(DKAudioStream));
             memset(audioStream, 0, sizeof(DKAudioStream));
             audioStream->decoder = reinterpret_cast<void*>(context);
@@ -229,8 +229,8 @@ DKAudioStream* DKAudioStreamVorbisCreate(const char* file)
             audioStream->timeTotal = DKAudioStreamVorbisTimeTotal;
             
             return audioStream;
-		}
-	}
+        }
+    }
     DKFree(context);
     return nullptr;
 }
@@ -241,7 +241,7 @@ DKAudioStream* DKAudioStreamVorbisCreate(DKStream* stream)
         !DKSTREAM_IS_READABLE(stream) ||
         !DKSTREAM_IS_SEEKABLE(stream) ||
         !DKSTREAM_HAS_LENGTH(stream))
-		return nullptr;
+        return nullptr;
 
     VorbisFileContext* context = (VorbisFileContext*)DKMalloc(sizeof(VorbisFileContext));
     memset(context, 0, sizeof(VorbisFileContext));
@@ -250,17 +250,17 @@ DKAudioStream* DKAudioStreamVorbisCreate(DKStream* stream)
     memset(vorbisStream, 0, sizeof(VorbisStream));
     vorbisStream->stream = stream;
 
-	ov_callbacks	ogg_callbacks;
-	ogg_callbacks.read_func = VorbisStreamRead;
-	ogg_callbacks.seek_func = VorbisStreamSeek;
-	ogg_callbacks.tell_func = VorbisStreamTell;
-	ogg_callbacks.close_func = VorbisStreamClose;
+    ov_callbacks	ogg_callbacks;
+    ogg_callbacks.read_func = VorbisStreamRead;
+    ogg_callbacks.seek_func = VorbisStreamSeek;
+    ogg_callbacks.tell_func = VorbisStreamTell;
+    ogg_callbacks.close_func = VorbisStreamClose;
 
-	if (ov_open_callbacks(vorbisStream, &context->vorbis, 0, 0, ogg_callbacks) == 0)
-	{
-		vorbis_info *info = ov_info(&context->vorbis, -1);
-		if (info)
-		{
+    if (ov_open_callbacks(vorbisStream, &context->vorbis, 0, 0, ogg_callbacks) == 0)
+    {
+        vorbis_info *info = ov_info(&context->vorbis, -1);
+        if (info)
+        {
             DKAudioStream* audioStream = (DKAudioStream*)DKMalloc(sizeof(DKAudioStream));
             memset(audioStream, 0, sizeof(DKAudioStream));
 
@@ -284,9 +284,9 @@ DKAudioStream* DKAudioStreamVorbisCreate(DKStream* stream)
             audioStream->pcmTotal = DKAudioStreamVorbisPcmTotal;
             audioStream->timeTotal = DKAudioStreamVorbisTimeTotal;
             
-			return audioStream;
-		}
-	}
+            return audioStream;
+        }
+    }
     DKFree(context);
     DKFree(vorbisStream);
     return nullptr;
@@ -296,7 +296,7 @@ void DKAudioStreamVorbisDestroy(DKAudioStream* stream)
 {
     VorbisFileContext* context = reinterpret_cast<VorbisFileContext*>(stream->decoder);
     if (context->vorbis.datasource)
-		ov_clear(&context->vorbis);
+        ov_clear(&context->vorbis);
 
     if (context->stream)
         DKFree(context->stream);

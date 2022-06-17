@@ -144,7 +144,7 @@ DKAudioStream* DKAudioStreamMP3Create(DKStream* stream)
         memset(context, 0, sizeof(MP3Context));
         new(context) MP3Context();
 
-		context->stream = stream;
+        context->stream = stream;
 
         int result = -1;
 
