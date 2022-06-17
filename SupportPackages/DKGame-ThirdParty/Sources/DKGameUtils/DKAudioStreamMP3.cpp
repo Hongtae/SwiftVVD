@@ -161,8 +161,8 @@ DKAudioStream* DKAudioStreamMP3Create(DKStream* stream)
             {
                 MP3Context* context = (MP3Context*)userData;
                 if (DKSTREAM_SET_POSITION(context->stream, position) == DKSTREAM_ERROR)
-                    return 0;
-                return 1;
+                    return -1;
+                return 0;
             };
 
             result = mp3dec_ex_open_cb(&context->dec, &context->io, MP3D_SEEK_TO_SAMPLE);

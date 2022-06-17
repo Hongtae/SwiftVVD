@@ -18,39 +18,47 @@
 extern "C" DKAudioStreamEncodingFormat
 DKAudioStreamDetermineFormatFromHeader(char* data, size_t len)
 {
-	if (len >= 4 && memcmp(data, "OggS", 4) == 0)
-	{
-		// vorbis or flac.
-		if (len >= 32 && memcmp(&data[29], "fLaC", 4) == 0)
-		{
-			return DKAudioStreamEncodingFormat_OggFLAC;
-		}
-		if (len >= 35 && memcmp(&data[29], "vorbis", 6) == 0)
-		{
-			return DKAudioStreamEncodingFormat_OggVorbis;
-		}
-		return DKAudioStreamEncodingFormat_Unknown;
-	}
-	else if (len >= 4 && memcmp(data, "fLaC", 4) == 0)
-	{
-		return DKAudioStreamEncodingFormat_FLAC;
-	}
-	else if (len >= 4 && memcmp(data, "RIFF", 4) == 0)
-	{
-		return DKAudioStreamEncodingFormat_Wave;
-	}
-	return DKAudioStreamEncodingFormat_Unknown;
+    if (len >= 4 && memcmp(data, "OggS", 4) == 0)
+    {
+        // vorbis or flac.
+        if (len >= 32 && memcmp(&data[29], "fLaC", 4) == 0)
+        {
+            return DKAudioStreamEncodingFormat_OggFLAC;
+        }
+        if (len >= 35 && memcmp(&data[29], "vorbis", 6) == 0)
+        {
+            return DKAudioStreamEncodingFormat_OggVorbis;
+        }
+        return DKAudioStreamEncodingFormat_Unknown;
+    }
+    else if (len >= 4 && memcmp(data, "fLaC", 4) == 0)
+    {
+        return DKAudioStreamEncodingFormat_FLAC;
+    }
+    else if (len >= 10 && memcmp(data, "ID3", 3) == 0 && (data[5] & 0xF) == 0 &&
+        (data[6] & 0x80) == 0 && (data[7] & 0x80) == 0 &&
+        (data[8] & 0x80) == 0 && (data[9] & 0x80) == 0)
+    {
+        return DKAudioStreamEncodingFormat_MP3;
+    }
+    else if (len >= 4 && memcmp(data, "RIFF", 4) == 0)
+    {
+        return DKAudioStreamEncodingFormat_Wave;
+    }
+    return DKAudioStreamEncodingFormat_Unknown;
 }
 
 DKAudioStream* DKAudioStreamVorbisCreate(const char* file);
 DKAudioStream* DKAudioStreamVorbisCreate(DKStream* stream);
 DKAudioStream* DKAudioStreamOggFLACCreate(DKStream* stream);
 DKAudioStream* DKAudioStreamFLACCreate(DKStream* stream);
+DKAudioStream* DKAudioStreamMP3Create(DKStream* stream);
 DKAudioStream* DKAudioStreamWaveCreate(DKStream* stream);
 
 void DKAudioStreamVorbisDestroy(DKAudioStream* stream);
 void DKAudioStreamOggFLACDestroy(DKAudioStream* stream);
 void DKAudioStreamFLACDestroy(DKAudioStream* stream);
+void DKAudioStreamMP3Destroy(DKAudioStream* stream);
 void DKAudioStreamWaveDestroy(DKAudioStream* stream);
 
 #define AUDIO_FORMAT_HEADER_LENGTH		35
@@ -76,6 +84,8 @@ extern "C" DKAudioStream* DKAudioStreamCreate(DKStream* stream)
             return DKAudioStreamOggFLACCreate(stream);
         case DKAudioStreamEncodingFormat_FLAC:
             return DKAudioStreamFLACCreate(stream);
+        case DKAudioStreamEncodingFormat_MP3:
+            return DKAudioStreamMP3Create(stream);
         case DKAudioStreamEncodingFormat_Wave:
             return DKAudioStreamWaveCreate(stream);
         default:
@@ -97,6 +107,9 @@ extern "C" void DKAudioStreamDestroy(DKAudioStream* stream)
         break;
     case DKAudioStreamEncodingFormat_FLAC:
         DKAudioStreamFLACDestroy(stream);
+        break;
+    case DKAudioStreamEncodingFormat_MP3:
+        DKAudioStreamMP3Destroy(stream);
         break;
     case DKAudioStreamEncodingFormat_Wave:
         DKAudioStreamWaveDestroy(stream);
