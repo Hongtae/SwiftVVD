@@ -462,7 +462,7 @@ static DKImageDecodeContext DecodeBmp(const void* p, size_t s)
         {
             if (s < pos)
             {
-                DKLogE("[DKImage::Create] Error: BMP data overflow!");
+                DKLogE("[DKImage::Create] Error: BMP data overflow!\n");
                 return false;
             }
             return true;

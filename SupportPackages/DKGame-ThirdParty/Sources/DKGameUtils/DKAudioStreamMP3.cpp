@@ -40,7 +40,7 @@ uint64_t DKAudioStreamMP3Read(DKAudioStream* stream, void* buffer, size_t size)
         if (context->dec.last_error)
         {
             /* error */
-            DKLogE("AudioStreamMP3: Read error! (%x)", context->dec.last_error);
+            DKLogE("AudioStreamMP3: Read error! (%x)\n", context->dec.last_error);
 
             if (samples == 0)
                 return -1;
@@ -59,7 +59,7 @@ uint64_t DKAudioStreamMP3SeekRaw(DKAudioStream* stream, uint64_t pos)
     int result = mp3dec_ex_seek(&context->dec, pos);
     if (result)
     {
-        DKLogE("AudioStreamMP3: Seek error! (%x)", result);
+        DKLogE("AudioStreamMP3: Seek error! (%x)\n", result);
         return DKSTREAM_ERROR;
     }
     return (context->dec.offset - context->dec.start_offset);
@@ -74,7 +74,7 @@ uint64_t DKAudioStreamMP3SeekPcm(DKAudioStream* stream, uint64_t pos)
     int result = mp3dec_ex_seek(&context->dec, pos);
     if (result)
     {
-        DKLogE("AudioStreamMP3: Seek error! (%x)", result);
+        DKLogE("AudioStreamMP3: Seek error! (%x)\n", result);
         return DKSTREAM_ERROR;
     }
     return (context->dec.offset - context->dec.start_offset) / sizeof(mp3d_sample_t);
@@ -90,7 +90,7 @@ double DKAudioStreamMP3SeekTime(DKAudioStream* stream, double t)
     int result = mp3dec_ex_seek(&context->dec, pos);
     if (result)
     {
-        DKLogE("AudioStreamMP3: Seek error! (%x)", result);
+        DKLogE("AudioStreamMP3: Seek error! (%x)\n", result);
         return -1.0;
     }
     return t;

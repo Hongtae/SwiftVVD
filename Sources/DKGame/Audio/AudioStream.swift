@@ -23,8 +23,15 @@ private class DataStream: StreamWrapper {
             let buffer = UnsafeMutableRawBufferPointer(start: buff, count: Int(size))
             let begin = stream.position
             let end = begin + Int(size)
-            let range = stream.source[begin ..< end]
-            let read = range.copyBytes(to: buffer)
+            let read: Int = stream.source.withUnsafeBytes { ptr in
+                let range: UnsafeRawBufferPointer.SubSequence
+                if end > ptr.count {
+                    range = ptr[begin...]
+                } else {
+                    range = ptr[begin..<end]
+                }
+                return range.copyBytes(to: buffer)
+            }
             if read < 0 { return ~UInt64(0) }
             stream.position += read
             return UInt64(read)
@@ -32,7 +39,7 @@ private class DataStream: StreamWrapper {
         self.stream.write = nil // read-only stream!
         self.stream.setPosition = { (ctxt, pos) -> UInt64 in
             let stream = unsafeBitCast(ctxt, to: AnyObject.self) as! DataStream
-            stream.position = min(stream.source.count, stream.position + Int(pos))
+            stream.position = clamp(Int(pos), min: 0, max: stream.source.count)
             return UInt64(stream.position) 
         }
         self.stream.getPosition = { (ctxt) -> UInt64 in
@@ -75,9 +82,9 @@ public class AudioStream {
     public var pcmPosition: UInt64      { stream.pointee.pcmPosition(stream) }
     public var timePosition: Double     { stream.pointee.timePosition(stream) }
 
-    public var rawTotal: UInt64         { stream.pointee.rawTotal(stream) }
-    public var pcmTotal: UInt64         { stream.pointee.pcmTotal(stream) }
-    public var timeTotal: Double        { stream.pointee.timeTotal(stream) }
+    public let rawTotal: UInt64
+    public let pcmTotal: UInt64
+    public let timeTotal: Double    // 0 for streaming.
 
     public func read(_ buffer: UnsafeMutableRawPointer, count: Int) -> Int {
         let read = stream.pointee.read(stream, buffer, count)
@@ -123,6 +130,10 @@ public class AudioStream {
             default:
                 self.format = .unknown
             }
+            
+            self.rawTotal = stream.pointee.rawTotal(stream)
+            self.pcmTotal = stream.pointee.pcmTotal(stream)
+            self.timeTotal = stream.pointee.timeTotal(stream)
 
         } else { return nil }
     }

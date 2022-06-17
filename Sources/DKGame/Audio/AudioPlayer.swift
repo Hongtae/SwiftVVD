@@ -1,33 +1,80 @@
-
+@AudioActor
 public class AudioPlayer {
 
-    public typealias State = AudioSource.State
+    public nonisolated var sampleRate: Int  { stream.sampleRate }
+    public nonisolated var channels: Int    { stream.channels }
+    public nonisolated var bits: Int        { stream.bits }
+    public nonisolated var duration: Double { stream.timeTotal }
 
-    public var channels = 2
-    public var bits = 16
-    public var sampleRate = 441000
-    public var duration = 0.0
+    public var position: Double { stream.timePosition }
 
-    public var position = 0.0
+    public let source: AudioSource
+    public let stream: AudioStream
 
-    public var source: AudioSource
-    public var stream: AudioStream
-
-    public weak var playbackContext: AudioDeviceContext? {
-        didSet {
-            if oldValue !== playbackContext {
-                if let device = oldValue {
-                    device.unbindPlayer(self)
-                }
-                if let device = playbackContext {
-                    device.bindPlayer(self)
-                }
-            }
-        }
-    }
+    var playing = false
+    var buffering = false
+    var bufferedPosition: Double = 0.0
+    var playbackPosition: Double = 0.0
+    var playLoopCount = 0
+    var maxBufferingTime = 1.0
 
     public init(source: AudioSource, stream: AudioStream) {
         self.source = source
         self.stream = stream
+    }
+
+    deinit {
+        source.stop()
+        source.dequeueBuffers()
+    }
+
+    public func play() {
+        if self.playing == false {
+            self.playing = true
+            self.buffering = true
+            self.playLoopCount = 1
+        }
+    }
+
+    public func play(start: Double, loopCount: Int = 1) {
+        if self.playing == false {
+            self.source.stop()
+            self.source.dequeueBuffers()
+
+            self.playing = true
+            self.buffering = true
+            self.playLoopCount = loopCount
+            _=self.stream.seek(time: start)
+            self.playbackPosition = self.stream.timePosition
+        }
+    }
+
+    public func stop() {
+        _=self.stream.seek(pcm: 0)
+        self.source.stop()
+        self.source.dequeueBuffers()
+        
+        self.playing = false
+        self.playbackPosition = 0
+        self.bufferedPosition = 0
+    }
+
+    public func pause() {
+        if self.playing {
+            self.source.pause()
+        }
+    }
+
+    public var isPaused: Bool {
+        return self.source.state == .paused
+    }
+
+    open func bufferingStateChanged(_: Bool, timeStamp: Double) {
+    }
+
+    open func playbackStateChanged(_: Bool, position: Double) {
+    }
+
+    open func processStream(data: UnsafeRawPointer, byteCount: Int, timeStamp: Double) {        
     }
 }

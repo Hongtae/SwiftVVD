@@ -68,50 +68,67 @@ public class AudioSource {
         set { setSource(AL_DIRECTION, newValue) }
     }
 
-    public var state: State = .stopped {
-        didSet { if state == oldValue { return }
-            self.bufferLock.lock()
-            defer { self.bufferLock.unlock() }
-
-            switch state {
-            case .stopped:
-                alSourceStop(sourceID)
-                var buffersQueued: ALint = 0
-                var buffersProcessed: ALint = 0
-                alGetSourcei(sourceID, AL_BUFFERS_QUEUED, &buffersQueued)       // entire buffer
-                alGetSourcei(sourceID, AL_BUFFERS_PROCESSED, &buffersProcessed) // finished buffer
-
-                for _ in 0..<buffersProcessed {
-                    var bufferID: ALuint = 0
-                    alSourceUnqueueBuffers(sourceID, 1, &bufferID)
-                }
-
-                if buffersProcessed != buffers.count {
-                    Log.warn("Buffer mismatch! (\(buffers.count) allocated, \(buffersProcessed) released)")
-                }
-
-                alSourcei(sourceID, AL_LOOPING, 0)
-                alSourcei(sourceID, AL_BUFFER, 0)
-                alSourceRewind(sourceID)
-
-                for buffer in buffers {
-                    var bufferID = buffer.bufferID
-                    alDeleteBuffers(1, &bufferID)
-                }
-                buffers.removeAll()
-
-                // check error.
-                let err = alGetError()
-                if err != AL_NO_ERROR {
-                    Log.err("AudioSource Error: \(String(format: "0x%x (%s)", err, alGetString(err)))")
-                }
-
-            case .playing:
-                alSourcePlay(sourceID)
-            case .paused:
-                alSourcePause(sourceID)
+    public var state: State {
+        get {
+            var st: ALint = 0
+            alGetSourcei(sourceID, AL_SOURCE_STATE, &st)
+            switch st {
+            case AL_PLAYING:    return .playing
+            case AL_PAUSED:     return .paused
+            default:            return .stopped
             }
         }
+    }
+
+    public func play() {
+        self.bufferLock.lock()
+        defer { self.bufferLock.unlock() }
+
+        alSourcePlay(sourceID)
+    }
+
+    public func pause() {
+        self.bufferLock.lock()
+        defer { self.bufferLock.unlock() }
+
+        alSourcePause(sourceID)
+    }
+
+    public func stop() {
+        self.bufferLock.lock()
+        defer { self.bufferLock.unlock() }
+ 
+        alSourceStop(sourceID)
+        var buffersQueued: ALint = 0
+        var buffersProcessed: ALint = 0
+        alGetSourcei(sourceID, AL_BUFFERS_QUEUED, &buffersQueued)       // entire buffer
+        alGetSourcei(sourceID, AL_BUFFERS_PROCESSED, &buffersProcessed) // finished buffer
+
+        for _ in 0..<buffersProcessed {
+            var bufferID: ALuint = 0
+            alSourceUnqueueBuffers(sourceID, 1, &bufferID)
+        }
+
+        if buffersProcessed != buffers.count {
+            Log.warn("Buffer mismatch! (\(buffers.count) allocated, \(buffersProcessed) released)")
+        }
+
+        alSourcei(sourceID, AL_LOOPING, 0)
+        alSourcei(sourceID, AL_BUFFER, 0)
+        alSourceRewind(sourceID)
+
+        for buffer in buffers {
+            var bufferID = buffer.bufferID
+            alDeleteBuffers(1, &bufferID)
+        }
+        buffers.removeAll()
+
+        // check error.
+        let err = alGetError()
+        if err != AL_NO_ERROR {
+            Log.err("AudioSource Error: \(String(format: "0x%x (%s)", err, alGetString(err)))")
+        }
+
     }
 
     public func numberOfBuffersInQueue() -> Int {
@@ -165,9 +182,10 @@ public class AudioSource {
     public func enqueueBuffer(sampleRate: Int,
                               bits: Int,
                               channels: Int,
-                              data: UnsafeRawBufferPointer,
+                              data: UnsafeRawPointer,
+                              byteCount: Int,
                               timeStamp: Double) -> Bool {
-        if data.count > 0 && sampleRate > 0 {
+        if byteCount > 0 && sampleRate > 0 {
             let format = self.device.format(bits: bits, channels: channels)
             if format != 0 {
                 self.bufferLock.lock()
@@ -211,8 +229,8 @@ public class AudioSource {
                     alGenBuffers(1, &bufferID)
                 }
                 // enqueue buffer.
-                let bytes = ALsizei(data.count)
-                alBufferData(bufferID, format, data.baseAddress, bytes, ALsizei(sampleRate))
+                let bytes = ALsizei(byteCount)
+                alBufferData(bufferID, format, data, bytes, ALsizei(sampleRate))
                 alSourceQueueBuffers(sourceID, 1, &bufferID)
 
                 let bytesSecond = UInt(sampleRate * channels * (bits >> 3))
@@ -354,9 +372,9 @@ public class AudioSource {
 
     deinit {
         assert(alIsSource(sourceID) != 0)
-        assert(buffers.isEmpty)
 
-        self.state = .stopped
+        self.stop()
+        assert(buffers.isEmpty)
 
         var sourceID = self.sourceID
     	alDeleteSources(1, &sourceID)
