@@ -207,253 +207,252 @@ namespace {
 uint64_t DKAudioStreamFLACRead(DKAudioStream* stream, void* buffer, size_t size)
 {
     FLAC_Context* context = reinterpret_cast<FLAC_Context*>(stream->decoder);
-	if (context->decoder)
-	{
-		// reading until buffer become full
-		while ( context->buffer.size() < size )
-		{
-			if (FLAC__stream_decoder_process_single(context->decoder))
-			{
-				FLAC__StreamDecoderState st = FLAC__stream_decoder_get_state(context->decoder);
-				if (st == FLAC__STREAM_DECODER_END_OF_STREAM || st == FLAC__STREAM_DECODER_ABORTED)
-				{
-					DKLog("FLAC State:%s\n", FLAC__StreamDecoderStateString[st]);
-					break;
-				}
-			}
-			else
-			{
-				FLAC__StreamDecoderState st = FLAC__stream_decoder_get_state(context->decoder);
-				DKLog("FLAC__stream_decoder_process_single failed. (state:%s)\n", FLAC__StreamDecoderStateString[st]);
-				break;
-			}
-		}
+    if (context->decoder)
+    {
+        // reading until buffer become full
+        while ( context->buffer.size() < size )
+        {
+            if (FLAC__stream_decoder_process_single(context->decoder))
+            {
+                FLAC__StreamDecoderState st = FLAC__stream_decoder_get_state(context->decoder);
+                if (st == FLAC__STREAM_DECODER_END_OF_STREAM || st == FLAC__STREAM_DECODER_ABORTED)
+                {
+                    DKLog("FLAC State:%s\n", FLAC__StreamDecoderStateString[st]);
+                    break;
+                }
+            }
+            else
+            {
+                FLAC__StreamDecoderState st = FLAC__stream_decoder_get_state(context->decoder);
+                DKLog("FLAC__stream_decoder_process_single failed. (state:%s)\n", FLAC__StreamDecoderStateString[st]);
+                break;
+            }
+        }
 
-		size_t numSamples = context->buffer.size();	
-		if (numSamples > 0)
-		{
-			size_t copiedSamples = 0;
-			size_t bytesCopied = 0;
+        size_t numSamples = context->buffer.size();	
+        if (numSamples > 0)
+        {
+            size_t copiedSamples = 0;
+            size_t bytesCopied = 0;
 
-			FLAC__int32* p = (FLAC__int32*)context->buffer.data();
+            FLAC__int32* p = (FLAC__int32*)context->buffer.data();
 
-			if (context->bps == 8)
-			{
-				for (copiedSamples = 0; (bytesCopied + 1) < size && copiedSamples < numSamples ; ++copiedSamples)
-				{
-					reinterpret_cast<FLAC__int8*>(buffer)[copiedSamples] = static_cast<FLAC__int8>(p[copiedSamples]);
-					bytesCopied += 1;
-				}
-			}
-			else if (context->bps == 16)
-			{
-				for (copiedSamples = 0; (bytesCopied + 2) <= size && copiedSamples < numSamples ; ++copiedSamples)
-				{
-					reinterpret_cast<FLAC__int16*>(buffer)[copiedSamples] = static_cast<FLAC__int16>(p[copiedSamples]);
-					bytesCopied += 2;
-				}			
-			}
-			else if (context->bps == 24)
-			{
-				static_assert(sizeof(FLAC__int16) == sizeof(short), "size mismatch?");
+            if (context->bps == 8)
+            {
+                for (copiedSamples = 0; (bytesCopied + 1) < size && copiedSamples < numSamples ; ++copiedSamples)
+                {
+                    reinterpret_cast<FLAC__int8*>(buffer)[copiedSamples] = static_cast<FLAC__int8>(p[copiedSamples]);
+                    bytesCopied += 1;
+                }
+            }
+            else if (context->bps == 16)
+            {
+                for (copiedSamples = 0; (bytesCopied + 2) <= size && copiedSamples < numSamples ; ++copiedSamples)
+                {
+                    reinterpret_cast<FLAC__int16*>(buffer)[copiedSamples] = static_cast<FLAC__int16>(p[copiedSamples]);
+                    bytesCopied += 2;
+                }			
+            }
+            else if (context->bps == 24)
+            {
+                static_assert(sizeof(FLAC__int16) == sizeof(short), "size mismatch?");
 
-				for (copiedSamples = 0; (bytesCopied + 2) <= size && copiedSamples < numSamples; ++copiedSamples)
-				{
-					// float has 23bits fraction (on IEEE754)
-					// which can have int24(23+1) without loss.
-					float sig = static_cast<float>(p[copiedSamples]);		
-					sig = (sig / float(1<<23)) * float(1<<15);				// int24 -> float -> int16.
-					FLAC__int16 sample = (FLAC__int16)std::clamp<int>( (sig+0.5), -32768, 32767);
-					reinterpret_cast<FLAC__int16*>(buffer)[copiedSamples] = sample;
-					bytesCopied += 2;
-				}				
-			}
-			else
-			{
-				//DKERROR_THROW_DEBUG("Unsupported bps!");
-				DKLogE("FLAC: Unsupported bps!\n");
-				context->buffer.clear();
-				return -1;
-			}
+                for (copiedSamples = 0; (bytesCopied + 2) <= size && copiedSamples < numSamples; ++copiedSamples)
+                {
+                    // float has 23bits fraction (on IEEE754)
+                    // which can have int24(23+1) without loss.
+                    float sig = static_cast<float>(p[copiedSamples]);		
+                    sig = (sig / float(1<<23)) * float(1<<15);				// int24 -> float -> int16.
+                    FLAC__int16 sample = (FLAC__int16)std::clamp<int>( (sig+0.5), -32768, 32767);
+                    reinterpret_cast<FLAC__int16*>(buffer)[copiedSamples] = sample;
+                    bytesCopied += 2;
+                }				
+            }
+            else
+            {
+                //DKERROR_THROW_DEBUG("Unsupported bps!");
+                DKLogE("FLAC: Unsupported bps!\n");
+                context->buffer.clear();
+                return -1;
+            }
             context->buffer.erase(context->buffer.begin(), context->buffer.begin() + copiedSamples);
-			return bytesCopied;
-		}
-	}
-	return -1;
+            return bytesCopied;
+        }
+    }
+    return -1;
 }
 
 uint64_t DKAudioStreamFLACSeekRaw(DKAudioStream* stream, uint64_t pos)
 {
     FLAC_Context* context = reinterpret_cast<FLAC_Context*>(stream->decoder);
-	if (context->decoder)
-	{
-		pos = (pos / context->channels) / (context->bps / 8);		// raw to pcm(sample)
-		pos = std::clamp(pos, 0ULL, context->totalSamples);
-		if (FLAC__stream_decoder_seek_absolute(context->decoder, pos))
-		{
-			FLAC__stream_decoder_process_single(context->decoder);
-			return pos * context->channels * (context->bps / 8);
-		}
-		else
-		{
-			FLAC__StreamDecoderState st = FLAC__stream_decoder_get_state(context->decoder);
-			DKLog("FLAC__stream_decoder_process_until_end_of_metadata failed:%s\n", FLAC__StreamDecoderStateString[st]);
-			if (st == FLAC__STREAM_DECODER_SEEK_ERROR)
-				FLAC__stream_decoder_flush(context->decoder);
-		}
-	}
-	return 0;
+    if (context->decoder)
+    {
+        pos = (pos / context->channels) / (context->bps / 8);		// raw to pcm(sample)
+        pos = std::clamp(pos, 0ULL, context->totalSamples);
+        if (FLAC__stream_decoder_seek_absolute(context->decoder, pos))
+        {
+            FLAC__stream_decoder_process_single(context->decoder);
+            return pos * context->channels * (context->bps / 8);
+        }
+        else
+        {
+            FLAC__StreamDecoderState st = FLAC__stream_decoder_get_state(context->decoder);
+            DKLog("FLAC__stream_decoder_process_until_end_of_metadata failed:%s\n", FLAC__StreamDecoderStateString[st]);
+            if (st == FLAC__STREAM_DECODER_SEEK_ERROR)
+                FLAC__stream_decoder_flush(context->decoder);
+        }
+    }
+    return 0;
 }
 
 uint64_t DKAudioStreamFLACSeekPcm(DKAudioStream* stream, uint64_t pos)
 {
     FLAC_Context* context = reinterpret_cast<FLAC_Context*>(stream->decoder);
-	if (context->decoder)
-	{
-		pos = std::clamp(pos, 0ULL, context->totalSamples);
-		if (FLAC__stream_decoder_seek_absolute(context->decoder, pos))
-		{
-			FLAC__stream_decoder_process_single(context->decoder);
-			return pos;
-		}
-		else
-		{
-			FLAC__StreamDecoderState st = FLAC__stream_decoder_get_state(context->decoder);
-			DKLog("FLAC__stream_decoder_process_until_end_of_metadata failed:%s\n", FLAC__StreamDecoderStateString[st]);
-			if (st == FLAC__STREAM_DECODER_SEEK_ERROR)
-				FLAC__stream_decoder_flush(context->decoder);
-		}
-	}
-	return 0;
+    if (context->decoder)
+    {
+        pos = std::clamp(pos, 0ULL, context->totalSamples);
+        if (FLAC__stream_decoder_seek_absolute(context->decoder, pos))
+        {
+            FLAC__stream_decoder_process_single(context->decoder);
+            return pos;
+        }
+        else
+        {
+            FLAC__StreamDecoderState st = FLAC__stream_decoder_get_state(context->decoder);
+            DKLog("FLAC__stream_decoder_process_until_end_of_metadata failed:%s\n", FLAC__StreamDecoderStateString[st]);
+            if (st == FLAC__STREAM_DECODER_SEEK_ERROR)
+                FLAC__stream_decoder_flush(context->decoder);
+        }
+    }
+    return 0;
 }
 
 double DKAudioStreamFLACSeekTime(DKAudioStream* stream, double t)
 {
     FLAC_Context* context = reinterpret_cast<FLAC_Context*>(stream->decoder);
-	if (context->decoder)
-	{
-		FLAC__uint64 pos = t * context->sampleRate;
-		pos = std::clamp(pos, 0ULL, context->totalSamples);
-		if (FLAC__stream_decoder_seek_absolute(context->decoder, pos))
-		{
-			FLAC__stream_decoder_process_single(context->decoder);
-			return static_cast<double>(pos) / context->sampleRate;
-		}
-		else
-		{
-			FLAC__StreamDecoderState st = FLAC__stream_decoder_get_state(context->decoder);
-			DKLogE("FLAC__stream_decoder_process_until_end_of_metadata failed:%s\n", FLAC__StreamDecoderStateString[st]);
-			if (st == FLAC__STREAM_DECODER_SEEK_ERROR)
-				FLAC__stream_decoder_flush(context->decoder);
-		}
-	}
-	return 0;
+    if (context->decoder)
+    {
+        FLAC__uint64 pos = t * context->sampleRate;
+        pos = std::clamp(pos, 0ULL, context->totalSamples);
+        if (FLAC__stream_decoder_seek_absolute(context->decoder, pos))
+        {
+            FLAC__stream_decoder_process_single(context->decoder);
+            return static_cast<double>(pos) / context->sampleRate;
+        }
+        else
+        {
+            FLAC__StreamDecoderState st = FLAC__stream_decoder_get_state(context->decoder);
+            DKLogE("FLAC__stream_decoder_process_until_end_of_metadata failed:%s\n", FLAC__StreamDecoderStateString[st]);
+            if (st == FLAC__STREAM_DECODER_SEEK_ERROR)
+                FLAC__stream_decoder_flush(context->decoder);
+        }
+    }
+    return 0;
 }
 
 uint64_t DKAudioStreamFLACRawPosition(DKAudioStream* stream)
 {
     FLAC_Context* context = reinterpret_cast<FLAC_Context*>(stream->decoder);
-	if (context->decoder)
-	{
-		uint64_t pos = context->sampleNumber;
-		uint64_t samplesRemain = context->buffer.size() / context->channels;
-		if (pos >= samplesRemain)
-			pos -= samplesRemain;
-		return pos * context->channels * (context->bps / 8);
-	}
-	return 0;
+    if (context->decoder)
+    {
+        uint64_t pos = context->sampleNumber;
+        uint64_t samplesRemain = context->buffer.size() / context->channels;
+        if (pos >= samplesRemain)
+            pos -= samplesRemain;
+        return pos * context->channels * (context->bps / 8);
+    }
+    return 0;
 }
 
 uint64_t DKAudioStreamFLACPcmPosition(DKAudioStream* stream)
 {
     FLAC_Context* context = reinterpret_cast<FLAC_Context*>(stream->decoder);
-	if (context->decoder)
-	{
-		uint64_t pos = context->sampleNumber;
-		uint64_t samplesRemain = context->buffer.size() / context->channels;
-		if (pos >= samplesRemain)
-			pos -= samplesRemain;
-		return pos;
-	}
-	return 0;
+    if (context->decoder)
+    {
+        uint64_t pos = context->sampleNumber;
+        uint64_t samplesRemain = context->buffer.size() / context->channels;
+        if (pos >= samplesRemain)
+            pos -= samplesRemain;
+        return pos;
+    }
+    return 0;
 }
 
 double DKAudioStreamFLACTimePosition(DKAudioStream* stream)
 {
     FLAC_Context* context = reinterpret_cast<FLAC_Context*>(stream->decoder);
-	if (context->decoder)
-	{
-		uint64_t pos = context->sampleNumber;
-		uint64_t samplesRemain = context->buffer.size() / context->channels;
-		if (pos >= samplesRemain)
-			pos -= samplesRemain;
-		return static_cast<double>(pos) / static_cast<double>(context->sampleRate);
-	}
-	return 0;
+    if (context->decoder)
+    {
+        uint64_t pos = context->sampleNumber;
+        uint64_t samplesRemain = context->buffer.size() / context->channels;
+        if (pos >= samplesRemain)
+            pos -= samplesRemain;
+        return static_cast<double>(pos) / static_cast<double>(context->sampleRate);
+    }
+    return 0;
 }
 
 uint64_t DKAudioStreamFLACRawTotal(DKAudioStream* stream)
 {
     FLAC_Context* context = reinterpret_cast<FLAC_Context*>(stream->decoder);
-	if (context->decoder)
-	{
-		return context->totalSamples * context->channels * (context->bps / 8);
-	}
-	return 0;
+    if (context->decoder)
+    {
+        return context->totalSamples * context->channels * (context->bps / 8);
+    }
+    return 0;
 }
 
 uint64_t DKAudioStreamFLACPcmTotal(DKAudioStream* stream)
 {
     FLAC_Context* context = reinterpret_cast<FLAC_Context*>(stream->decoder);
-	if (context->decoder)
-	{
-		return context->totalSamples;
-	}
-	return 0;
+    if (context->decoder)
+    {
+        return context->totalSamples;
+    }
+    return 0;
 }
 
 double DKAudioStreamFLACTimeTotal(DKAudioStream* stream)
 {
     FLAC_Context* context = reinterpret_cast<FLAC_Context*>(stream->decoder);
-	if (context->decoder)
-	{
-		return static_cast<double>(context->totalSamples) / static_cast<double>(context->sampleRate);
-	}
-	return 0;
+    if (context->decoder)
+    {
+        return static_cast<double>(context->totalSamples) / static_cast<double>(context->sampleRate);
+    }
+    return 0;
 }
-
 
 DKAudioStream* DKAudioStreamFLACCreate(DKStream* stream)
 {
     if (stream && DKSTREAM_IS_READABLE(stream))
-	{
+    {
         FLAC_Context* context = (FLAC_Context*)DKMalloc(sizeof(FLAC_Context));
         memset(context, 0, sizeof(FLAC_Context));
         new(context) FLAC_Context();
 
-		context->stream = stream;
-		context->decoder = FLAC__stream_decoder_new();
+        context->stream = stream;
+        context->decoder = FLAC__stream_decoder_new();
 
-		FLAC__StreamDecoderInitStatus st = FLAC__stream_decoder_init_stream(context->decoder,
-			FLAC_Read,
-			FLAC_Seek,
-			FLAC_Tell,
-			FLAC_Length,
-			FLAC_IsEOF,
-			FLAC_Write,
-			FLAC_Metadata,
-			FLAC_Error,
-			context);
+        FLAC__StreamDecoderInitStatus st = FLAC__stream_decoder_init_stream(context->decoder,
+            FLAC_Read,
+            FLAC_Seek,
+            FLAC_Tell,
+            FLAC_Length,
+            FLAC_IsEOF,
+            FLAC_Write,
+            FLAC_Metadata,
+            FLAC_Error,
+            context);
 
-		if (st == FLAC__STREAM_DECODER_INIT_STATUS_OK)
-		{
+        if (st == FLAC__STREAM_DECODER_INIT_STATUS_OK)
+        {
             DKAudioStream* audioStream = (DKAudioStream*)DKMalloc(sizeof(DKAudioStream));
             memset(audioStream, 0, sizeof(DKAudioStream));
             audioStream->mediaType = DKAudioStreamEncodingFormat_FLAC;
             audioStream->decoder = reinterpret_cast<void*>(context);
 
-			if (FLAC_InitMetadata(audioStream, context))
-			{
+            if (FLAC_InitMetadata(audioStream, context))
+            {
                 audioStream->read = DKAudioStreamFLACRead;
                 audioStream->seekRaw = DKAudioStreamFLACSeekRaw;
                 audioStream->seekPcm = DKAudioStreamFLACSeekPcm;
@@ -464,54 +463,54 @@ DKAudioStream* DKAudioStreamFLACCreate(DKStream* stream)
                 audioStream->rawTotal = DKAudioStreamFLACRawTotal;
                 audioStream->pcmTotal = DKAudioStreamFLACPcmTotal;
                 audioStream->timeTotal = DKAudioStreamFLACTimeTotal;
-				return audioStream;
-			}
-			FLAC__stream_decoder_finish(context->decoder);
-		}
-		else
-		{
-			DKLog("FLAC__stream_decoder_init_stream failed:%s\n", FLAC__StreamDecoderInitStatusString[st]);
-		}
-		FLAC__stream_decoder_delete(context->decoder);
-		context->stream = NULL;
-		context->decoder = NULL;
+                return audioStream;
+            }
+            FLAC__stream_decoder_finish(context->decoder);
+        }
+        else
+        {
+            DKLog("FLAC__stream_decoder_init_stream failed:%s\n", FLAC__StreamDecoderInitStatusString[st]);
+        }
+        FLAC__stream_decoder_delete(context->decoder);
+        context->stream = NULL;
+        context->decoder = NULL;
         context->~FLAC_Context();
         DKFree(context);
-	}
-	return nullptr;
+    }
+    return nullptr;
 }
 
 DKAudioStream* DKAudioStreamOggFLACCreate(DKStream* stream)
 {
     if (stream && DKSTREAM_IS_READABLE(stream))
-	{
+    {
         FLAC_Context* context = (FLAC_Context*)DKMalloc(sizeof(FLAC_Context));
         memset(context, 0, sizeof(FLAC_Context));
         new(context) FLAC_Context();
 
-		context->stream = stream;
-		context->decoder = FLAC__stream_decoder_new();
+        context->stream = stream;
+        context->decoder = FLAC__stream_decoder_new();
 
-		FLAC__StreamDecoderInitStatus st = FLAC__stream_decoder_init_ogg_stream(context->decoder,
-			FLAC_Read,
-			FLAC_Seek,
-			FLAC_Tell,
-			FLAC_Length,
-			FLAC_IsEOF,
-			FLAC_Write,
-			FLAC_Metadata,
-			FLAC_Error,
-			context);
+        FLAC__StreamDecoderInitStatus st = FLAC__stream_decoder_init_ogg_stream(context->decoder,
+            FLAC_Read,
+            FLAC_Seek,
+            FLAC_Tell,
+            FLAC_Length,
+            FLAC_IsEOF,
+            FLAC_Write,
+            FLAC_Metadata,
+            FLAC_Error,
+            context);
 
-		if (st == FLAC__STREAM_DECODER_INIT_STATUS_OK)
-		{
+        if (st == FLAC__STREAM_DECODER_INIT_STATUS_OK)
+        {
             DKAudioStream* audioStream = (DKAudioStream*)DKMalloc(sizeof(DKAudioStream));
             memset(audioStream, 0, sizeof(DKAudioStream));
             audioStream->mediaType = DKAudioStreamEncodingFormat_OggFLAC;
             audioStream->decoder = reinterpret_cast<void*>(context);
 
-			if (FLAC_InitMetadata(audioStream, context))
-			{
+            if (FLAC_InitMetadata(audioStream, context))
+            {
                 audioStream->read = DKAudioStreamFLACRead;
                 audioStream->seekRaw = DKAudioStreamFLACSeekRaw;
                 audioStream->seekPcm = DKAudioStreamFLACSeekPcm;
@@ -522,31 +521,31 @@ DKAudioStream* DKAudioStreamOggFLACCreate(DKStream* stream)
                 audioStream->rawTotal = DKAudioStreamFLACRawTotal;
                 audioStream->pcmTotal = DKAudioStreamFLACPcmTotal;
                 audioStream->timeTotal = DKAudioStreamFLACTimeTotal;
-				return audioStream;
-			}
-			FLAC__stream_decoder_finish(context->decoder);
-		}
-		else
-		{
-			DKLogE("FLAC__stream_decoder_init_stream failed:%s\n", FLAC__StreamDecoderInitStatusString[st]);
-		}
-		FLAC__stream_decoder_delete(context->decoder);
-		context->stream = NULL;
-		context->decoder = NULL;
+                return audioStream;
+            }
+            FLAC__stream_decoder_finish(context->decoder);
+        }
+        else
+        {
+            DKLogE("FLAC__stream_decoder_init_stream failed:%s\n", FLAC__StreamDecoderInitStatusString[st]);
+        }
+        FLAC__stream_decoder_delete(context->decoder);
+        context->stream = NULL;
+        context->decoder = NULL;
         context->~FLAC_Context();
         DKFree(context);
-	}
+    }
     return nullptr;
 }
 
 void DKAudioStreamFLACDestroy(DKAudioStream* stream)
 {
     FLAC_Context* context = reinterpret_cast<FLAC_Context*>(stream->decoder);
-	if (context->decoder)
-	{
-		FLAC__stream_decoder_finish(context->decoder);
-		FLAC__stream_decoder_delete(context->decoder);
-	}
+    if (context->decoder)
+    {
+        FLAC__stream_decoder_finish(context->decoder);
+        FLAC__stream_decoder_delete(context->decoder);
+    }
     context->~FLAC_Context();
 #if DEBUG
     memset(context, 0, sizeof(FLAC_Context));

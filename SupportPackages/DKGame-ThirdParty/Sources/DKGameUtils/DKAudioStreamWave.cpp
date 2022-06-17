@@ -121,188 +121,188 @@ static_assert(sizeof(WaveFormatExt) == 44, "sizeof(WaveFormatEX) == 44");
 uint64_t DKAudioStreamWaveRead(DKAudioStream* stream, void* buffer, size_t size)
 {
     WaveFileContext* context = reinterpret_cast<WaveFileContext*>(stream->decoder);
-	if (context->stream)
-	{
-		size_t pos = DKSTREAM_GET_POSITION(context->stream);
-		if (pos + size > context->dataSize)
-			size = context->dataSize - pos;
+    if (context->stream)
+    {
+        size_t pos = DKSTREAM_GET_POSITION(context->stream);
+        if (pos + size > context->dataSize)
+            size = context->dataSize - pos;
 
-		if (size > context->formatExt.format.blockAlign)
-		{
-			// buffer should be aligned with format.blockAlign
-			if (context->formatExt.format.blockAlign > 0)
-				size = size - (size % context->formatExt.format.blockAlign);
+        if (size > context->formatExt.format.blockAlign)
+        {
+            // buffer should be aligned with format.blockAlign
+            if (context->formatExt.format.blockAlign > 0)
+                size = size - (size % context->formatExt.format.blockAlign);
 
-			if (size > 0)
-				return DKSTREAM_READ(context->stream, buffer, size);
-		}
-	}
-	return 0;
+            if (size > 0)
+                return DKSTREAM_READ(context->stream, buffer, size);
+        }
+    }
+    return 0;
 }
 
 uint64_t DKAudioStreamWaveSeekRaw(DKAudioStream* stream, uint64_t pos)
 {
     WaveFileContext* context = reinterpret_cast<WaveFileContext*>(stream->decoder);
-	if (context->stream)
-	{
-		// alignment
-		if (context->formatExt.format.blockAlign > 0)
-			pos = pos - (pos % context->formatExt.format.blockAlign);
+    if (context->stream)
+    {
+        // alignment
+        if (context->formatExt.format.blockAlign > 0)
+            pos = pos - (pos % context->formatExt.format.blockAlign);
 
-		pos = DKSTREAM_SET_POSITION(context->stream, context->dataOffset + std::clamp(pos, 0ULL, context->dataSize));
-		return std::clamp(pos - context->dataOffset, 0ULL, context->dataSize);
-	}
-	return 0;
+        pos = DKSTREAM_SET_POSITION(context->stream, context->dataOffset + std::clamp(pos, 0ULL, context->dataSize));
+        return std::clamp(pos - context->dataOffset, 0ULL, context->dataSize);
+    }
+    return 0;
 }
 
 double DKAudioStreamWaveSeekTime(DKAudioStream* stream, double t)
 {
     WaveFileContext* context = reinterpret_cast<WaveFileContext*>(stream->decoder);
-	if (context->stream)
-	{
-		uint64_t pos = DKAudioStreamWaveSeekRaw(stream, static_cast<uint64_t>(t * static_cast<double>(context->formatExt.format.avgBytesPerSec)));
-		return static_cast<double>(pos) / static_cast<double>(context->formatExt.format.avgBytesPerSec);
-	}
-	return 0.0;
+    if (context->stream)
+    {
+        uint64_t pos = DKAudioStreamWaveSeekRaw(stream, static_cast<uint64_t>(t * static_cast<double>(context->formatExt.format.avgBytesPerSec)));
+        return static_cast<double>(pos) / static_cast<double>(context->formatExt.format.avgBytesPerSec);
+    }
+    return 0.0;
 }
 
 uint64_t DKAudioStreamWaveRawPosition(DKAudioStream* stream)
 {
     WaveFileContext* context = reinterpret_cast<WaveFileContext*>(stream->decoder);
-	if (context->stream)
-	{
-		return DKSTREAM_GET_POSITION(context->stream) - context->dataOffset;
-	}
-	return 0;
+    if (context->stream)
+    {
+        return DKSTREAM_GET_POSITION(context->stream) - context->dataOffset;
+    }
+    return 0;
 }
 
 double DKAudioStreamWaveTimePosition(DKAudioStream* stream)
 {
     WaveFileContext* context = reinterpret_cast<WaveFileContext*>(stream->decoder);
-	if (context->stream)
-	{
-		uint64_t pos = DKSTREAM_GET_POSITION(context->stream) - context->dataOffset;
-		return static_cast<double>(pos) / static_cast<double>(context->formatExt.format.avgBytesPerSec);
-	}
-	return 0;
+    if (context->stream)
+    {
+        uint64_t pos = DKSTREAM_GET_POSITION(context->stream) - context->dataOffset;
+        return static_cast<double>(pos) / static_cast<double>(context->formatExt.format.avgBytesPerSec);
+    }
+    return 0;
 }
 
 uint64_t DKAudioStreamWaveRawTotal(DKAudioStream* stream)
 {
     WaveFileContext* context = reinterpret_cast<WaveFileContext*>(stream->decoder);
-	if (context->stream)
-	{
-		return context->dataSize;
-	}
-	return 0;
+    if (context->stream)
+    {
+        return context->dataSize;
+    }
+    return 0;
 }
 
 double DKAudioStreamWaveTimeTotal(DKAudioStream* stream)
 {
     WaveFileContext* context = reinterpret_cast<WaveFileContext*>(stream->decoder);
-	if (context->stream)
-	{
-		return static_cast<double>(context->dataSize) / static_cast<double>(context->formatExt.format.avgBytesPerSec);
-	}
-	return 0;
+    if (context->stream)
+    {
+        return static_cast<double>(context->dataSize) / static_cast<double>(context->formatExt.format.avgBytesPerSec);
+    }
+    return 0;
 }
 
 DKAudioStream* DKAudioStreamWaveCreate(DKStream* stream)
 {
-	if (stream == nullptr || !DKSTREAM_IS_READABLE(stream) || !DKSTREAM_IS_SEEKABLE(stream))
-		return nullptr;
+    if (stream == nullptr || !DKSTREAM_IS_READABLE(stream) || !DKSTREAM_IS_SEEKABLE(stream))
+        return nullptr;
 
     WaveFileContext* context = (WaveFileContext*)DKMalloc(sizeof(WaveFileContext));
     memset(context, 0, sizeof(WaveFileContext));
     context->stream = stream;
-	context->dataSize = 0;
-	context->dataOffset = 0;
-	context->formatType = WaveFormatTypeUnknown;
+    context->dataSize = 0;
+    context->dataOffset = 0;
+    context->formatType = WaveFormatTypeUnknown;
 
-	WaveFileHeader header;
-	memset(&header, 0, sizeof(WaveFileHeader));
-	if (DKSTREAM_READ(stream, &header, sizeof(WaveFileHeader)) == sizeof(WaveFileHeader))
-	{
-		if (strncasecmp(header.riff, "RIFF", 4) == 0 && strncasecmp(header.wave, "WAVE", 4) == 0)
-		{
-			// swap byte order (from little-endian to system)
-			header.riffSize = DKLittleEndianToSystem(header.riffSize);
+    WaveFileHeader header;
+    memset(&header, 0, sizeof(WaveFileHeader));
+    if (DKSTREAM_READ(stream, &header, sizeof(WaveFileHeader)) == sizeof(WaveFileHeader))
+    {
+        if (strncasecmp(header.riff, "RIFF", 4) == 0 && strncasecmp(header.wave, "WAVE", 4) == 0)
+        {
+            // swap byte order (from little-endian to system)
+            header.riffSize = DKLittleEndianToSystem(header.riffSize);
 
-			// read all chunk
-			RiffChunk chunk;
-			while (DKSTREAM_READ(stream, &chunk, sizeof(RiffChunk)) == sizeof(RiffChunk))
-			{
-				chunk.size = DKLittleEndianToSystem(chunk.size);
+            // read all chunk
+            RiffChunk chunk;
+            while (DKSTREAM_READ(stream, &chunk, sizeof(RiffChunk)) == sizeof(RiffChunk))
+            {
+                chunk.size = DKLittleEndianToSystem(chunk.size);
 
-				if (strncasecmp(chunk.name, "fmt ", 4) == 0)
-				{
-					if (chunk.size <= sizeof(WaveFormat))
-					{
-						WaveFormat format;
-						memset(&format, 0, sizeof(WaveFormat));
-						if (DKSTREAM_READ(stream, &format, chunk.size) == chunk.size)
-						{
-							// swap byte order
-							format.formatTag = DKLittleEndianToSystem(format.formatTag);
-							format.channels = DKLittleEndianToSystem(format.channels);
-							format.samplesPerSec = DKLittleEndianToSystem(format.samplesPerSec);
-							format.avgBytesPerSec = DKLittleEndianToSystem(format.avgBytesPerSec);
-							format.blockAlign = DKLittleEndianToSystem(format.blockAlign);
-							format.bitsPerSample = DKLittleEndianToSystem(format.bitsPerSample);
-							format.size = DKLittleEndianToSystem(format.size);
-							format.reserved = DKLittleEndianToSystem(format.reserved);
-							format.channelMask = DKLittleEndianToSystem(format.channelMask);
+                if (strncasecmp(chunk.name, "fmt ", 4) == 0)
+                {
+                    if (chunk.size <= sizeof(WaveFormat))
+                    {
+                        WaveFormat format;
+                        memset(&format, 0, sizeof(WaveFormat));
+                        if (DKSTREAM_READ(stream, &format, chunk.size) == chunk.size)
+                        {
+                            // swap byte order
+                            format.formatTag = DKLittleEndianToSystem(format.formatTag);
+                            format.channels = DKLittleEndianToSystem(format.channels);
+                            format.samplesPerSec = DKLittleEndianToSystem(format.samplesPerSec);
+                            format.avgBytesPerSec = DKLittleEndianToSystem(format.avgBytesPerSec);
+                            format.blockAlign = DKLittleEndianToSystem(format.blockAlign);
+                            format.bitsPerSample = DKLittleEndianToSystem(format.bitsPerSample);
+                            format.size = DKLittleEndianToSystem(format.size);
+                            format.reserved = DKLittleEndianToSystem(format.reserved);
+                            format.channelMask = DKLittleEndianToSystem(format.channelMask);
 
-							if (format.formatTag == WaveFormatTypePCM)
-							{
-								context->formatType = WaveFormatTypePCM;
-								memcpy(&context->formatExt.format, &format, sizeof(WaveFormatPCM));
-							}
-							else if (format.formatTag == WaveFormatTypeEXT)
-							{
-								context->formatType = WaveFormatTypeEXT;
-								memcpy(&context->formatExt, &format, sizeof(WaveFormatExt));
-							}
-							else
-							{
-								DKLogE("AudioStreamWave: Unknown format! (0x%x)\n", format.formatTag);
-							}
-						}
-						else
-						{
-							DKLogE("AudioStreamWave: Read error!\n");
+                            if (format.formatTag == WaveFormatTypePCM)
+                            {
+                                context->formatType = WaveFormatTypePCM;
+                                memcpy(&context->formatExt.format, &format, sizeof(WaveFormatPCM));
+                            }
+                            else if (format.formatTag == WaveFormatTypeEXT)
+                            {
+                                context->formatType = WaveFormatTypeEXT;
+                                memcpy(&context->formatExt, &format, sizeof(WaveFormatExt));
+                            }
+                            else
+                            {
+                                DKLogE("AudioStreamWave: Unknown format! (0x%x)\n", format.formatTag);
+                            }
+                        }
+                        else
+                        {
+                            DKLogE("AudioStreamWave: Read error!\n");
                             DKFree(context);
                             return nullptr;
-						}
-					}
-					else
-					{
+                        }
+                    }
+                    else
+                    {
                         DKSTREAM_SET_POSITION(stream, DKSTREAM_GET_POSITION(stream) + chunk.size);
-					}
-				}
-				else if (strncasecmp(chunk.name, "data", 4) == 0)
-				{
-					context->dataSize = chunk.size;
-					context->dataOffset = DKSTREAM_GET_POSITION(stream);
+                    }
+                }
+                else if (strncasecmp(chunk.name, "data", 4) == 0)
+                {
+                    context->dataSize = chunk.size;
+                    context->dataOffset = DKSTREAM_GET_POSITION(stream);
                     DKSTREAM_SET_POSITION(stream, DKSTREAM_GET_POSITION(stream) + chunk.size);
-				}
-				else
-				{
+                }
+                else
+                {
                     DKSTREAM_SET_POSITION(stream, DKSTREAM_GET_POSITION(stream) + chunk.size);
-				}
+                }
 
-				if (chunk.size & 1)	// byte align
+                if (chunk.size & 1)	// byte align
                     DKSTREAM_SET_POSITION(stream, DKSTREAM_GET_POSITION(stream) + 1);
-			}
+            }
 
-			DKLog("AudioStreamWave: dataSize:%d\n", (int)context->dataSize);
-			DKLog("AudioStreamWave: dataOffset:%d\n", (int)context->dataOffset);
-			DKLog("AudioStreamWave: formatType:%d\n", (int)context->formatType);
+            DKLog("AudioStreamWave: dataSize:%d\n", (int)context->dataSize);
+            DKLog("AudioStreamWave: dataOffset:%d\n", (int)context->dataOffset);
+            DKLog("AudioStreamWave: formatType:%d\n", (int)context->formatType);
 
-			if (context->dataSize && context->dataOffset &&
-				(context->formatType == WaveFormatTypePCM ||
-                 context->formatType == WaveFormatTypeEXT))
-			{
+            if (context->dataSize && context->dataOffset &&
+                (context->formatType == WaveFormatTypePCM ||
+                context->formatType == WaveFormatTypeEXT))
+            {
                 DKAudioStream* audioStream = (DKAudioStream*)DKMalloc(sizeof(DKAudioStream));
                 memset(audioStream, 0, sizeof(DKAudioStream));
 
@@ -324,10 +324,10 @@ DKAudioStream* DKAudioStreamWaveCreate(DKStream* stream)
                 audioStream->pcmTotal = DKAudioStreamWaveRawTotal;
                 audioStream->timeTotal = DKAudioStreamWaveTimeTotal;
 
-				return audioStream;
-			}
-		}
-	}
+                return audioStream;
+            }
+        }
+    }
     DKFree(context);
     return nullptr;
 }

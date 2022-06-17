@@ -62,6 +62,7 @@ public enum AudioStreamEncodingFormat {
     case oggVorbis
     case oggFLAC
     case flac
+    case mp3
     case wave
 }
 
@@ -122,6 +123,8 @@ public class AudioStream {
                 self.format = .oggFLAC
             case DKAudioStreamEncodingFormat_FLAC:
                 self.format = .flac
+            case DKAudioStreamEncodingFormat_MP3:
+                self.format = .mp3
             case DKAudioStreamEncodingFormat_Wave:
                 self.format = .wave
             default:

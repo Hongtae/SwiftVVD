@@ -37,43 +37,43 @@ extern "C" void DKThreadSleep(double d)
         d = 0.0;
 
 #ifdef _WIN32
-	DWORD dwTime = static_cast<DWORD>(d * 1000.0f);
-	::Sleep(dwTime);
+    DWORD dwTime = static_cast<DWORD>(d * 1000.0f);
+    ::Sleep(dwTime);
 #elif POSIX_USE_SELECT_SLEEP
-	timeval tm;
-	uint64_t ms = (uint64_t)(d * 1000000.0);
-	tm.tv_sec = ms / 1000000;
-	tm.tv_usec = ms % 1000000;
-	select(0, 0, 0, 0, &tm);
+    timeval tm;
+    uint64_t ms = (uint64_t)(d * 1000000.0);
+    tm.tv_sec = ms / 1000000;
+    tm.tv_usec = ms % 1000000;
+    select(0, 0, 0, 0, &tm);
 #else
-	long sec = static_cast<long>(d);
-	long usec = (d - sec) * 1000000;
-	struct timespec req = {sec, usec * 1000};
-	while ( nanosleep(&req, &req) != 0 )
-	{
-		// internal error! (except for signal, intrrupt)
-		if (errno != EINTR)
-			break;
-	}
+    long sec = static_cast<long>(d);
+    long usec = (d - sec) * 1000000;
+    struct timespec req = {sec, usec * 1000};
+    while ( nanosleep(&req, &req) != 0 )
+    {
+        // internal error! (except for signal, intrrupt)
+        if (errno != EINTR)
+            break;
+    }
 #endif
 }
 
 extern "C" void DKThreadYield()
 {
 #ifdef _WIN32
-	if (SwitchToThread() == 0)
-		DKThreadSleep(0);
+    if (SwitchToThread() == 0)
+        DKThreadSleep(0);
 #else
-	if (sched_yield() != 0)
-		DKThreadSleep(0);
+    if (sched_yield() != 0)
+        DKThreadSleep(0);
 #endif
 }
 
 extern "C" uintptr_t DKThreadCurrentId()
 {
-	#ifdef _WIN32
-	return (uintptr_t)::GetCurrentThreadId();
+    #ifdef _WIN32
+    return (uintptr_t)::GetCurrentThreadId();
 #else
-	return (uintptr_t)pthread_self();	
+    return (uintptr_t)pthread_self();	
 #endif
 }
