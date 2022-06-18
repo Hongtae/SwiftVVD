@@ -1,8 +1,8 @@
 #if ENABLE_VULKAN
 import Vulkan
 
-extension VertexFormat {
-    public func vkFormat() -> VkFormat {
+public extension VertexFormat {
+    func vkFormat() -> VkFormat {
         switch (self) {
         case .uchar2:               return VK_FORMAT_R8G8_UINT
         case .uchar3:               return VK_FORMAT_R8G8B8_UINT

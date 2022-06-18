@@ -2,8 +2,8 @@
 import Vulkan
 import Foundation
 
-extension ShaderDescriptorType {
-    public func vkType() -> VkDescriptorType {
+public extension ShaderDescriptorType {
+    func vkType() -> VkDescriptorType {
         switch (self) {
         case .uniformBuffer:
             return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER

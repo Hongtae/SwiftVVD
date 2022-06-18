@@ -1,10 +1,15 @@
 #if ENABLE_UIKIT
+import Foundation
+import CoreGraphics
 
 public class UIKitWindow: Window {
+    public var activated: Bool = false
+    public var visible: Bool = false
+    public var resolution: CGSize = .zero
 
     public private(set) var contentBounds: CGRect = .null
     public private(set) var windowFrame: CGRect = .null
-    public private(set) var contentScaleFactor: Float = 0.0
+    public private(set) var contentScaleFactor: CGFloat = 0.0
 
     public var origin: CGPoint {
         get { .zero }
@@ -61,6 +66,19 @@ public class UIKitWindow: Window {
     public func isTextInputEnabled(forDeviceID: Int) -> Bool {
         false
     }
+
+    public func addEventObserver(_: AnyObject, handler: @escaping (WindowEvent) -> Void) {
+    }
+
+    public func addEventObserver(_: AnyObject, handler: @escaping (MouseEvent) -> Void) {
+    }
+
+    public func addEventObserver(_: AnyObject, handler: @escaping (KeyboardEvent) -> Void) {
+    }
+
+    public func removeEventObserver(_: AnyObject) {
+    }
+
 }
 
-#endif //ENABLE_UIKIT
+#endif //if ENABLE_UIKIT

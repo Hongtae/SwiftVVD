@@ -3,16 +3,17 @@
 public struct PlatformFactoryUIKit: PlatformFactory {
 
     public func sharedApplication() -> Application? {
-        return iOSApplication.shared
+        return UIKitApplication.shared
     }
 
     public func runApplication(delegate: ApplicationDelegate?) -> Int {
-        return iOSApplication.run(delegate: delegate)
+        return UIKitApplication.run(delegate: delegate)
     }
 
+    @MainActor
     public func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?) -> Window {
-        return iOSWindow(name: name, style: style, delegate: delegate)
+        return UIKitWindow(name: name, style: style, delegate: delegate)
     }
 }
 
-#endif //ENABLE_UIKIT
+#endif //if ENABLE_UIKIT

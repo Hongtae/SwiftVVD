@@ -1,5 +1,5 @@
-import SPIRV_Cross
 import Foundation
+import SPIRV_Cross
 
 public struct ShaderAttribute {
     public var name : String
