@@ -1,4 +1,12 @@
 import Foundation
+#if canImport(CoreGraphics)
+import CoreGraphics
+
+public typealias CGFloat = CoreGraphics.CGFloat
+public typealias CGPoint = CoreGraphics.CGPoint
+public typealias CGSize = CoreGraphics.CGSize
+public typealias CGRect = CoreGraphics.CGRect
+#endif
 
 public extension Vector2 {
     init(_ pt: CGPoint) {
