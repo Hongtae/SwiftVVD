@@ -4,7 +4,7 @@ public protocol Application {
     static var shared: Application? { get }
 }
 
-public protocol ApplicationDelegate {
+public protocol ApplicationDelegate: AnyObject {
     @MainActor func initialize(application: Application) async
     @MainActor func finalize(application: Application) async
 }
