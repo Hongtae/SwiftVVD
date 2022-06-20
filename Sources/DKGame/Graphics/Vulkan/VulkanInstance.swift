@@ -1,6 +1,13 @@
+//
+//  File: VulkanInstance.swift
+//  Author: Hongtae Kim (tiff2766@gmail.com)
+//
+//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//
+
 #if ENABLE_VULKAN
-import Vulkan
 import Foundation
+import Vulkan
 
 let VK_MAKE_VERSION = { (major: UInt32, minor: UInt32, patch: UInt32)->UInt32 in
     (((major) << 22) | ((minor) << 12) | (patch))
@@ -128,7 +135,7 @@ public class VulkanInstance {
         appInfo.pApplicationName = applicationName
         appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0)
         appInfo.pEngineName = engineName
-        appInfo.engineVersion = VK_MAKE_VERSION(2, 0, 0);
+        appInfo.engineVersion = VK_MAKE_VERSION(2, 0, 0)
         appInfo.apiVersion = VK_MAKE_VERSION(1, 2, 0) // Vulkan-1.2
 
         var instanceVersion : UInt32 = 0
@@ -415,7 +422,7 @@ public class VulkanInstance {
                 VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT.rawValue |
                 VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT.rawValue)
 
-            debugUtilsMessengerCreateInfo.pUserData = nil;
+            debugUtilsMessengerCreateInfo.pUserData = nil
             debugUtilsMessengerCreateInfo.pfnUserCallback = debugUtilsMessengerCallback
 
             err = self.extensionProc.vkCreateDebugUtilsMessengerEXT!(instance, &debugUtilsMessengerCreateInfo, self.allocationCallbacks, &self.debugMessenger)

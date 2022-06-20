@@ -1,6 +1,13 @@
+//
+//  File: VulkanShaderBindingSet.swift
+//  Author: Hongtae Kim (tiff2766@gmail.com)
+//
+//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//
+
 #if ENABLE_VULKAN
-import Vulkan
 import Foundation
+import Vulkan
 
 public class VulkanShaderBindingSet: ShaderBindingSet {
     public let device: GraphicsDevice
@@ -191,7 +198,7 @@ public class VulkanShaderBindingSet: ShaderBindingSet {
                             let image = imageView.image!
                             if (descriptor.descriptorType == VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT) {
                                 if (image.usage & UInt32(VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT.rawValue)) == 0 {
-                                    Log.err("ImageView image does not have usage flag:VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT");
+                                    Log.err("ImageView image does not have usage flag:VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT")
                                 }
                             }
 
@@ -265,7 +272,7 @@ public class VulkanShaderBindingSet: ShaderBindingSet {
                     if let sampler = sampler {
                         descriptorBinding.imageInfos[i].sampler = sampler.sampler
                         // take ownership of sampler
-                        descriptorBinding.samplers.append(sampler);
+                        descriptorBinding.samplers.append(sampler)
                     }
             }
             default:

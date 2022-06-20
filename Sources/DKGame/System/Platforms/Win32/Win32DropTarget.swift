@@ -1,3 +1,10 @@
+//
+//  File: Win32DropTarget.swift
+//  Author: Hongtae Kim (tiff2766@gmail.com)
+//
+//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//
+
 #if ENABLE_WIN32
 import WinSDK
 import Foundation
@@ -15,7 +22,7 @@ struct Win32DropTarget {
         let isEqualIID = { (iid1: UnsafePointer<IID>, id2: IID)->Bool in
             withUnsafePointer(to: id2) { ptr2 in
                 memcmp(iid1, ptr2, MemoryLayout<IID>.size) == 0
-            }               
+            }
         }
         if isEqualIID(riid!, IID_IUnknown) || isEqualIID(riid!, IID_IDropTarget) {
             withUnsafeMutablePointer(to: &self) {
@@ -78,6 +85,7 @@ struct Win32DropTarget {
         }
         return files
     }
+
     private mutating func dragEnter(_ pDataObj: UnsafeMutablePointer<IDataObject>?,
                                     _ grfKeyState: DWORD,
                                     _ pt: POINTL,
@@ -126,6 +134,7 @@ struct Win32DropTarget {
         }
         return S_OK
     }
+
     private mutating func dragOver(_ grfKeyState: DWORD,
                                    _ pt: POINTL,
                                    _ pdwEffect: UnsafeMutablePointer<DWORD>?) -> HRESULT {
@@ -153,7 +162,7 @@ struct Win32DropTarget {
                 case .copy: self.lastEffectMask = DWORD(DROPEFFECT_COPY)
                 case .move: self.lastEffectMask = DWORD(DROPEFFECT_MOVE)
                 case .link: self.lastEffectMask = DWORD(DROPEFFECT_LINK)
-                case .none: self.lastEffectMask = DWORD(DROPEFFECT_NONE)  
+                case .none: self.lastEffectMask = DWORD(DROPEFFECT_NONE)
                 default: // .reject
                     self.lastEffectMask = DWORD(DROPEFFECT_NONE)
                     self.dropAllowed = false
@@ -166,6 +175,7 @@ struct Win32DropTarget {
         }
         return S_OK
     }
+
     private mutating func dragLeave() -> HRESULT {
         if let delegate = self.target?.delegate, self.dropAllowed {
             delegate.draggingExited(target: self.target!, files: self.files)
@@ -173,9 +183,10 @@ struct Win32DropTarget {
             self.dropAllowed = false
         }
         self.files = [String]()
-        self.lastEffectMask = DWORD(DROPEFFECT_NONE)        
+        self.lastEffectMask = DWORD(DROPEFFECT_NONE)
         return S_OK
     }
+
     private mutating func drop(_ pDataObj: UnsafeMutablePointer<IDataObject>?,
                                _ grfKeyState: DWORD,
                                _ pt: POINTL,
@@ -206,9 +217,10 @@ struct Win32DropTarget {
             pdwEffect!.pointee = DWORD(DROPEFFECT_NONE)
         }
         self.files = [String]()
-        self.lastEffectMask = DWORD(DROPEFFECT_NONE)        
+        self.lastEffectMask = DWORD(DROPEFFECT_NONE)
         return S_OK
     }
+
     static func makeMutablePointer(target: Win32Window) -> UnsafeMutablePointer<Win32DropTarget> {
         let dt: UnsafeMutablePointer<Win32DropTarget> = .allocate(capacity: 1)
         dt.initialize(to: Win32DropTarget(target: target))

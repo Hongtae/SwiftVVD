@@ -1,6 +1,13 @@
+//
+//  File: Win32Window.swift
+//  Author: Hongtae Kim (tiff2766@gmail.com)
+//
+//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//
+
 #if ENABLE_WIN32
-import WinSDK
 import Foundation
+import WinSDK
 
 private func win32ErrorString(_ code: DWORD) -> String {
 
@@ -92,7 +99,7 @@ public class Win32Window : Window {
 
     private var dropTarget: UnsafeMutablePointer<Win32DropTarget>?
 
-    private lazy var registeredWindowClass: ATOM? = {      
+    private lazy var registeredWindowClass: ATOM? = {
         let atom: ATOM? = windowClass.withCString(encodedAs: UTF16.self) {
             className in
 
@@ -122,6 +129,7 @@ public class Win32Window : Window {
         }
         return atom
     }()
+
     public required init(name: String, style: WindowStyle, delegate: WindowDelegate?) {
 
         OleInitialize(nil)
@@ -458,7 +466,7 @@ public class Win32Window : Window {
         for key in 0..<256 {
             if key == VK_CAPITAL { continue }
 
-            let virtualKey: VirtualKey = .fromWin32VK(key)
+            let virtualKey: VirtualKey = .from(win32VK: key)
             if virtualKey == .none { continue }
 
             if keyStates[key] & 0x80 != self.keyboardStates[key] & 0x80 {
@@ -505,7 +513,7 @@ public class Win32Window : Window {
         for key in 0..<256 {
             if key == VK_CAPITAL { continue }
 
-            let virtualKey: VirtualKey = .fromWin32VK(key)
+            let virtualKey: VirtualKey = .from(win32VK: key)
             if virtualKey == .none { continue }
 
             if keyboardStates[key] & 0x80 != 0 {

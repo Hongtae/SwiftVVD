@@ -1,3 +1,10 @@
+//
+//  File: Win32Application.swift
+//  Author: Hongtae Kim (tiff2766@gmail.com)
+//
+//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//
+
 #if ENABLE_WIN32
 import WinSDK
 import Foundation
@@ -27,7 +34,7 @@ private func keyboardHookProc(_ nCode: Int32, _ wParam: WPARAM, _ lParam: LPARAM
         }
     }
 
-    return CallNextHookEx(keyboardHook, nCode, wParam, lParam);
+    return CallNextHookEx(keyboardHook, nCode, wParam, lParam)
 }
 
 private var mainLoopMaxInterval: UINT = 10
@@ -68,7 +75,7 @@ public class Win32Application : Application {
         if self.running && threadId != 0 {
             self.running = false
             self.exitCode = exitCode
-            PostThreadMessageW(threadId, UINT(WM_NULL), 0, 0);
+            PostThreadMessageW(threadId, UINT(WM_NULL), 0, 0)
         }
     }
 
@@ -83,7 +90,7 @@ public class Win32Application : Application {
             if keyboardHook != nil {
                 Log.err("Keyboard hook state invalid. (already installed?)")
                 UnhookWindowsHookEx(keyboardHook)
-                keyboardHook = nil;
+                keyboardHook = nil
             }
 
             let installHook = UserDefaults.standard.bool(forKey:"Win32.DisableWindowKey")
@@ -91,7 +98,7 @@ public class Win32Application : Application {
             if installHook {
                 keyboardHook = SetWindowsHookExW(WH_KEYBOARD_LL, keyboardHookProc, GetModuleHandleW(nil), 0)
                 if keyboardHook == nil {
-                    Log.err("SetWindowsHookEx Failed.");
+                    Log.err("SetWindowsHookEx Failed.")
                 }
             }
         }
@@ -111,7 +118,7 @@ public class Win32Application : Application {
         mainLoopTimerId = SetTimer(nil, 0, mainLoopMaxInterval, mainLoopTimerProc)
 
         var msg = MSG()
-        PostMessageW(nil, UINT(WM_NULL), 0, 0); // To process first enqueued events.
+        PostMessageW(nil, UINT(WM_NULL), 0, 0) // To process first enqueued events.
         mainLoop: while true {
             while PeekMessageW(&msg, nil, 0, 0, UINT(PM_REMOVE)) {
                 if msg.message == UINT(WM_QUIT) {

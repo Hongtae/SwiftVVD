@@ -1,3 +1,10 @@
+//
+//  File: Font.swift
+//  Author: Hongtae Kim (tiff2766@gmail.com)
+//
+//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//
+
 import Foundation
 import FreeType
 
@@ -474,7 +481,7 @@ public class Font {
                 FT_Bitmap_Init(&ftBitmap)
 
                 var cbox = FT_BBox()
-                FT_Outline_Get_CBox(&ftOutline, &cbox); 
+                FT_Outline_Get_CBox(&ftOutline, &cbox)
 
                 cbox.xMin = cbox.xMin & ~63
                 cbox.yMin = cbox.yMin & ~63

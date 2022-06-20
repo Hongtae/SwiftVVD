@@ -1,5 +1,12 @@
-import DKGameUtils
+//
+//  File: TickCounter.swift
+//  Author: Hongtae Kim (tiff2766@gmail.com)
+//
+//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//
+
 import Foundation
+import DKGameUtils
 
 public struct TickCounter: Equatable, Comparable {
     public private(set) var timestamp: UInt64

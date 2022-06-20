@@ -1,6 +1,13 @@
+//
+//  File: VulkanRenderCommandEncoder.swift
+//  Author: Hongtae Kim (tiff2766@gmail.com)
+//
+//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//
+
 #if ENABLE_VULKAN
-import Vulkan
 import Foundation
+import Vulkan
 
 fileprivate let flipViewportY = true
 
@@ -218,7 +225,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
 
             var framebufferCreateInfo = VkFramebufferCreateInfo()
             framebufferCreateInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO
-            framebufferCreateInfo.renderPass = self.renderPass;
+            framebufferCreateInfo.renderPass = self.renderPass
             framebufferCreateInfo.attachmentCount = UInt32(framebufferImageViews.count)
             framebufferCreateInfo.pAttachments = unsafePointerCopy(collection: framebufferImageViews, holder: tempHolder)
             framebufferCreateInfo.width = frameWidth

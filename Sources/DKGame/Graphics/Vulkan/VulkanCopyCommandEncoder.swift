@@ -1,6 +1,13 @@
+//
+//  File: VulkanCopyCommandEncoder.swift
+//  Author: Hongtae Kim (tiff2766@gmail.com)
+//
+//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//
+
 #if ENABLE_VULKAN
-import Vulkan
 import Foundation
+import Vulkan
 
 public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder {
 
@@ -112,7 +119,7 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
         assert(dstBuffer.buffer != nil)
 
         if srcOffset + size > srcBuffer.length || dstOffset + size > dstBuffer.length {
-            Log.err("VulkanCopyCommandEncoder.\(#function) failed: Invalid buffer region");
+            Log.err("VulkanCopyCommandEncoder.\(#function) failed: Invalid buffer region")
             return
         }
 

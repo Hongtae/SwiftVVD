@@ -1,3 +1,10 @@
+//
+//  File: Color.swift
+//  Author: Hongtae Kim (tiff2766@gmail.com)
+//
+//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//
+
 public struct Color {
     public var r : Scalar = 0.0
     public var g : Scalar = 0.0

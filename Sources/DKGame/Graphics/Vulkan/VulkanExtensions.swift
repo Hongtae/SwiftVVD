@@ -1,6 +1,13 @@
+//
+//  File: VulkanExtensions.swift
+//  Author: Hongtae Kim (tiff2766@gmail.com)
+//
+//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//
+
 #if ENABLE_VULKAN
-import Vulkan
 import Foundation
+import Vulkan
 
 public struct VulkanInstanceExtensions {
     // VK_EXT_debug_utils

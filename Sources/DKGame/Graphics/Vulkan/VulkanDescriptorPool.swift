@@ -1,6 +1,13 @@
+//
+//  File: VulkanDescriptorPool.swift
+//  Author: Hongtae Kim (tiff2766@gmail.com)
+//
+//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//
+
 #if ENABLE_VULKAN
-import Vulkan
 import Foundation
+import Vulkan
 
 let descriptorTypes: [VkDescriptorType] = [
     VK_DESCRIPTOR_TYPE_SAMPLER,

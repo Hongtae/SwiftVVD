@@ -1,3 +1,10 @@
+//
+//  File: Hash.swift
+//  Author: Hongtae Kim (tiff2766@gmail.com)
+//
+//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//
+
 import Foundation
 
 public struct CRC32Digest: CustomStringConvertible {
@@ -237,19 +244,35 @@ public struct SHA1 {
         var T: UInt32 = 0
         for n in 0..<20 {
             T = leftRotate(A, 5) &+ ((B & C) | ((~B) & D)) &+ E &+ W[n] &+ 0x5A827999
-            E = D; D = C; C = leftRotate(B, 30); B = A; A = T
+            E = D
+            D = C
+            C = leftRotate(B, 30)
+            B = A
+            A = T
         }
         for n in 20..<40 {
             T = leftRotate(A, 5) &+ (B ^ C ^ D) &+ E &+ W[n] &+ 0x6ED9EBA1
-            E = D; D = C; C = leftRotate(B, 30); B = A; A = T
+            E = D
+            D = C
+            C = leftRotate(B, 30)
+            B = A
+            A = T
         }
         for n in 40..<60 {
             T = leftRotate(A, 5) &+ ((B & C) | (B & D) | (C & D)) &+ E &+ W[n] &+ 0x8F1BBCDC
-            E = D; D = C; C = leftRotate(B, 30); B = A; A = T
+            E = D
+            D = C
+            C = leftRotate(B, 30)
+            B = A
+            A = T
         }
         for n in 60..<80 {
             T = leftRotate(A, 5) &+ (B ^ C ^ D) &+ E &+ W[n] &+ 0xCA62C1D6
-            E = D; D = C; C = leftRotate(B, 30); B = A; A = T
+            E = D
+            D = C
+            C = leftRotate(B, 30)
+            B = A
+            A = T
         }
 
         self.state.0 &+= A
@@ -331,9 +354,9 @@ public struct SHA256 {
             W[x] = ptr[x].bigEndian
         }
         for x in 16..<64 {
-            let s0: UInt32 = rightRotate(W[x-15],7) ^ rightRotate(W[x-15],18) ^ (W[x-15] >> 3);
-            let s1: UInt32 = rightRotate(W[x-2],17) ^ rightRotate(W[x-2],19) ^ (W[x-2] >> 10);
-            W[x] = W[x-16] &+ s0 &+ W[x-7] &+ s1;
+            let s0: UInt32 = rightRotate(W[x-15],7) ^ rightRotate(W[x-15],18) ^ (W[x-15] >> 3)
+            let s1: UInt32 = rightRotate(W[x-2],17) ^ rightRotate(W[x-2],19) ^ (W[x-2] >> 10)
+            W[x] = W[x-16] &+ s0 &+ W[x-7] &+ s1
         }
 
 		var s0, s1: UInt32

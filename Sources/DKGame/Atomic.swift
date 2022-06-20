@@ -1,5 +1,12 @@
-import DKGameUtils
+//
+//  File: Atomic.swift
+//  Author: Hongtae Kim (tiff2766@gmail.com)
+//
+//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//
+
 import Foundation
+import DKGameUtils
 
 public class AtomicNumber32 {
     private var atomic: DKAtomicNumber32 = DKAtomicNumber32()

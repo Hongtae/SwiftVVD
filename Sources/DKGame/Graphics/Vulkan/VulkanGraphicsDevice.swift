@@ -1,7 +1,13 @@
-#if ENABLE_VULKAN
-import Vulkan
-import Foundation
+//
+//  File: VulkanGraphicsDevice.swift
+//  Author: Hongtae Kim (tiff2766@gmail.com)
+//
+//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//
 
+#if ENABLE_VULKAN
+import Foundation
+import Vulkan
 
 private let pipelineCacheDataKey = "_SavedSystemStates.Vulkan.PipelineCacheData"
 
@@ -89,8 +95,8 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         requiredExtensions.append(VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME)
         // requiredExtensions.append(VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME)
 
-        optionalExtensions.append(VK_KHR_MAINTENANCE2_EXTENSION_NAME);
-        optionalExtensions.append(VK_KHR_MAINTENANCE3_EXTENSION_NAME);
+        optionalExtensions.append(VK_KHR_MAINTENANCE2_EXTENSION_NAME)
+        optionalExtensions.append(VK_KHR_MAINTENANCE3_EXTENSION_NAME)
 
         // setup extensions
         var deviceExtensions: [String] = []
@@ -184,7 +190,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         self.queueFamilies = queueCreateInfos.map {
             var supportPresentation = false
 #if VK_USE_PLATFORM_ANDROID_KHR
-            supportPresentation = true;	// always true on Android
+            supportPresentation = true  // always true on Android
 #endif
 #if VK_USE_PLATFORM_WIN32_KHR
             supportPresentation = instance.extensionProc.vkGetPhysicalDeviceWin32PresentationSupportKHR?(physicalDevice.device, $0.queueFamilyIndex) ?? VkBool32(VK_FALSE) != VkBool32(VK_FALSE)
@@ -545,7 +551,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
     public func makeRenderPipelineState(descriptor desc: RenderPipelineDescriptor,
         reflection: UnsafeMutablePointer<PipelineReflection>?) -> RenderPipelineState? {
 
-        var result: VkResult = VK_SUCCESS;
+        var result: VkResult = VK_SUCCESS
 
         var pipelineLayout: VkPipelineLayout? = nil
         var renderPass: VkRenderPass? = nil
@@ -608,8 +614,8 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         pipelineCreateInfo.layout = pipelineLayout
 
         // vertex input state
-    	var vertexBindingDescriptions: [VkVertexInputBindingDescription] = []
-	    vertexBindingDescriptions.reserveCapacity(desc.vertexDescriptor.layouts.count)
+        var vertexBindingDescriptions: [VkVertexInputBindingDescription] = []
+        vertexBindingDescriptions.reserveCapacity(desc.vertexDescriptor.layouts.count)
         for layout in desc.vertexDescriptor.layouts {   // buffer layout
             var binding = VkVertexInputBindingDescription()
             binding.binding = layout.bufferIndex
@@ -684,7 +690,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         case .ccw:  rasterizationState.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE
         }
 
-    	rasterizationState.depthClampEnable = VkBool32(VK_FALSE)
+        rasterizationState.depthClampEnable = VkBool32(VK_FALSE)
         if desc.depthClipMode == .clamp {
             if self.features.depthClamp != 0 {
                 rasterizationState.depthClampEnable = VkBool32(VK_TRUE)
@@ -761,9 +767,9 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             depthStencilState.depthTestEnable = VkBool32(VK_FALSE)
         }
 
-    	pipelineCreateInfo.pDepthStencilState = unsafePointerCopy(from: depthStencilState, holder: tempHolder)
+        pipelineCreateInfo.pDepthStencilState = unsafePointerCopy(from: depthStencilState, holder: tempHolder)
 
-	    // dynamic states
+        // dynamic states
         let dynamicStateEnables: [VkDynamicState] = [
             VK_DYNAMIC_STATE_VIEWPORT,
             VK_DYNAMIC_STATE_SCISSOR,
@@ -830,10 +836,10 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             assert(attachment.pixelFormat.isColorFormat())
             colorAttachmentRefCount = max(colorAttachmentRefCount, attachment.index + 1)
         }
-    	if colorAttachmentRefCount > self.properties.limits.maxColorAttachments {
-    		Log.err("The number of colors attached exceeds the device limit. (\(colorAttachmentRefCount) > \(self.properties.limits.maxColorAttachments))")
-    		return nil
-	    }
+        if colorAttachmentRefCount > self.properties.limits.maxColorAttachments {
+            Log.err("The number of colors attached exceeds the device limit. (\(colorAttachmentRefCount) > \(self.properties.limits.maxColorAttachments))")
+            return nil
+        }
         subpassColorAttachmentRefs.append(contentsOf: 
             [VkAttachmentReference](repeating: VkAttachmentReference(attachment: VK_ATTACHMENT_UNUSED, layout: VK_IMAGE_LAYOUT_UNDEFINED),
                                     count: Int(colorAttachmentRefCount)))
@@ -875,7 +881,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             }
             colorBlendAttachmentStates.append(blendState)
 
-    		assert(subpassColorAttachmentRefs.count > attachment.index)
+            assert(subpassColorAttachmentRefs.count > attachment.index)
             subpassColorAttachmentRefs[Int(attachment.index)].attachment = UInt32(index) // index of render-pass-attachment 
             subpassColorAttachmentRefs[Int(attachment.index)].layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
         }
@@ -885,7 +891,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         subpassDesc.inputAttachmentCount = UInt32(subpassInputAttachmentRefs.count)
         subpassDesc.pInputAttachments = unsafePointerCopy(collection: subpassInputAttachmentRefs, holder: tempHolder)
 
-	    if desc.depthStencilAttachmentPixelFormat.isDepthFormat() ||
+        if desc.depthStencilAttachmentPixelFormat.isDepthFormat() ||
            desc.depthStencilAttachmentPixelFormat.isStencilFormat() {
 
             var subpassDepthStencilAttachment = VkAttachmentReference()
@@ -944,8 +950,8 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             for fn in shaderFunctions {
                 let fn = fn as! VulkanShaderFunction
                 let module = fn.module
-				maxResourceCount += module.resources.count
-				maxPushConstantLayoutCount += module.pushConstantLayouts.count
+                maxResourceCount += module.resources.count
+                maxPushConstantLayoutCount += module.pushConstantLayouts.count
 
                 if module.stage == .vertex {
                     inputAttributes.reserveCapacity(module.inputAttributes.count)
@@ -1071,7 +1077,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             layoutDefaultStageFlags: VkShaderStageFlags(VK_SHADER_STAGE_ALL.rawValue))
         if pipelineLayout == nil { return nil }
 
-        pipelineCreateInfo.layout = pipelineLayout;
+        pipelineCreateInfo.layout = pipelineLayout
         assert(pipelineCreateInfo.stage.stage == VK_SHADER_STAGE_COMPUTE_BIT)
 
         result = vkCreateComputePipelines(self.device, pipelineCache, 1, &pipelineCreateInfo, self.allocationCallbacks, &pipeline)
@@ -1627,7 +1633,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
 
                 var layoutSupport = VkDescriptorSetLayoutSupport()
                 layoutSupport.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_SUPPORT
-                vkGetDescriptorSetLayoutSupport(device, &setLayoutCreateInfo, &layoutSupport);
+                vkGetDescriptorSetLayoutSupport(device, &setLayoutCreateInfo, &layoutSupport)
                 assert(layoutSupport.supported != 0)
 
                 return vkCreateDescriptorSetLayout(self.device, &setLayoutCreateInfo, self.allocationCallbacks, &setLayout)

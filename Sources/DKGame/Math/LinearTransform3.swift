@@ -1,3 +1,10 @@
+//
+//  File: LinearTransform3.swift
+//  Author: Hongtae Kim (tiff2766@gmail.com)
+//
+//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//
+
 import Foundation
 
 public struct LinearTransform3: Transform {
@@ -12,9 +19,9 @@ public struct LinearTransform3: Transform {
         var y = sqrt(max(0.0, 1 - matrix3.m11 + matrix3.m22 - matrix3.m33)) * 0.5
         var z = sqrt(max(0.0, 1 - matrix3.m11 - matrix3.m22 + matrix3.m33)) * 0.5
         let w = sqrt(max(0.0, 1 + matrix3.m11 + matrix3.m22 + matrix3.m33)) * 0.5
-        x = copysign(x, matrix3.m23 - matrix3.m32);
-        y = copysign(y, matrix3.m31 - matrix3.m13);
-        z = copysign(z, matrix3.m12 - matrix3.m21);
+        x = copysign(x, matrix3.m23 - matrix3.m32)
+        y = copysign(y, matrix3.m31 - matrix3.m13)
+        z = copysign(z, matrix3.m12 - matrix3.m21)
 
 	    return Quaternion(x, y, z, w)
     }

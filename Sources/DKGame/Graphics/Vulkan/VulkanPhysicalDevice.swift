@@ -1,6 +1,13 @@
+//
+//  File: VulkanPhysicalDevice.swift
+//  Author: Hongtae Kim (tiff2766@gmail.com)
+//
+//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//
+
 #if ENABLE_VULKAN
-import Vulkan
 import Foundation
+import Vulkan
 
 public class VulkanPhysicalDeviceDescription: CustomStringConvertible {
 
@@ -64,12 +71,12 @@ public class VulkanPhysicalDeviceDescription: CustomStringConvertible {
         self.maxQueues = maxQueues
 
         var properties = VkPhysicalDeviceProperties()
-        vkGetPhysicalDeviceProperties(device, &properties);
+        vkGetPhysicalDeviceProperties(device, &properties)
 
         self.properties = properties
 
         var memoryProperties = VkPhysicalDeviceMemoryProperties()
-        vkGetPhysicalDeviceMemoryProperties(device, &memoryProperties);
+        vkGetPhysicalDeviceMemoryProperties(device, &memoryProperties)
         self.memory = memoryProperties
 
         var timelineSemaphoreSupport = VkPhysicalDeviceTimelineSemaphoreFeaturesKHR()
@@ -81,17 +88,25 @@ public class VulkanPhysicalDeviceDescription: CustomStringConvertible {
 
         withUnsafeMutablePointer(to: &timelineSemaphoreSupport) {
             features.pNext = UnsafeMutableRawPointer($0)
-            vkGetPhysicalDeviceFeatures2(device, &features);
+            vkGetPhysicalDeviceFeatures2(device, &features)
         }
         self.features = features.features
         self.timelineSemaphoreSupported = timelineSemaphoreSupport.timelineSemaphore != 0
 
         var devicePriority = 0
         switch (properties.deviceType) {
-        case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:      devicePriority += 1; fallthrough 
-        case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:    devicePriority += 1; fallthrough 
-        case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:       devicePriority += 1; fallthrough 
-        case VK_PHYSICAL_DEVICE_TYPE_CPU:               devicePriority += 1; fallthrough 
+        case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:
+            devicePriority += 1
+            fallthrough
+        case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:
+            devicePriority += 1
+            fallthrough
+        case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:
+            devicePriority += 1
+            fallthrough
+        case VK_PHYSICAL_DEVICE_TYPE_CPU:
+            devicePriority += 1
+            fallthrough
         default:    // VK_PHYSICAL_DEVICE_TYPE_OTHER
             break
         }

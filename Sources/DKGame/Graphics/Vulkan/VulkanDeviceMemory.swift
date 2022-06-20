@@ -1,6 +1,13 @@
+//
+//  File: VulkanDeviceMemory.swift
+//  Author: Hongtae Kim (tiff2766@gmail.com)
+//
+//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//
+
 #if ENABLE_VULKAN
-import Vulkan
 import Foundation
+import Vulkan
 
 public class VulkanDeviceMemory {
 
@@ -22,7 +29,7 @@ public class VulkanDeviceMemory {
             let offset: VkDeviceSize = 0
             let size: VkDeviceSize = VK_WHOLE_SIZE
 
-            let result = vkMapMemory(device.device, memory, offset, size, 0, &mapped);
+            let result = vkMapMemory(device.device, memory, offset, size, 0, &mapped)
             if result != VK_SUCCESS {
                 Log.err("vkMapMemory failed: \(result)")
             }
