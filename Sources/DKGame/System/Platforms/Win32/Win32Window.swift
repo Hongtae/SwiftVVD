@@ -17,7 +17,7 @@ private func win32ErrorString(_ code: DWORD) -> String {
                 nil, code,
                 MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
                 $0,
-                0, nil);
+                0, nil)
         }
     }
 
@@ -136,7 +136,13 @@ public class Win32Window : Window {
             Log.err("CreateWindow failed: \(win32ErrorString(GetLastError()))")
         }
     }
+
     deinit {
+        if let hWnd = self.hWnd {
+            KillTimer(hWnd, updateKeyboardMouseTimerId)
+            SetWindowLongPtrW(hWnd, GWLP_USERDATA, 0)
+            PostMessageW(hWnd, UINT(WM_CLOSE), 0, 0)
+        }
         OleUninitialize()
     }
 
@@ -152,18 +158,18 @@ public class Win32Window : Window {
 
     public func hide() {
         if let hWnd = self.hWnd {
-            ShowWindow(hWnd, SW_HIDE);
+            ShowWindow(hWnd, SW_HIDE)
         }
     }
 
     public func activate() {
         if let hWnd = self.hWnd {
             if IsIconic(hWnd) {
-                ShowWindow(hWnd, SW_RESTORE);
+                ShowWindow(hWnd, SW_RESTORE)
             }
-            ShowWindow(hWnd, SW_SHOW);
-            SetWindowPos(hWnd, HWND_TOP, 0, 0, 0, 0, UINT(SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW));
-            SetForegroundWindow(hWnd);
+            ShowWindow(hWnd, SW_SHOW)
+            SetWindowPos(hWnd, HWND_TOP, 0, 0, 0, 0, UINT(SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW))
+            SetForegroundWindow(hWnd)
         }
     }
 
@@ -173,7 +179,7 @@ public class Win32Window : Window {
             if let hWnd = self.hWnd {
                 let x = Int32(value.x)
                 let y = Int32(value.y)
-                SetWindowPos(hWnd, HWND_TOP, x, y, 0, 0, UINT(SWP_NOSIZE | SWP_NOOWNERZORDER | SWP_NOACTIVATE));
+                SetWindowPos(hWnd, HWND_TOP, x, y, 0, 0, UINT(SWP_NOSIZE | SWP_NOOWNERZORDER | SWP_NOACTIVATE))
             }
         }
     }
@@ -210,7 +216,7 @@ public class Win32Window : Window {
 
     public func minimize() {
         if let hWnd = self.hWnd {
-            ShowWindow(hWnd, SW_MINIMIZE);
+            ShowWindow(hWnd, SW_MINIMIZE)
         }
     }
 
@@ -304,11 +310,11 @@ public class Win32Window : Window {
             KillTimer(hWnd, updateKeyboardMouseTimerId)
 
             // set GWLP_USERDATA to 0, to forwarding messages to DefWindowProc.
-            SetWindowLongPtrW(hWnd, GWLP_USERDATA, 0);
-            SetWindowPos(hWnd, HWND_TOP, 0, 0, 0, 0, UINT(SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED));
+            SetWindowLongPtrW(hWnd, GWLP_USERDATA, 0)
+            SetWindowPos(hWnd, HWND_TOP, 0, 0, 0, 0, UINT(SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED))
 
             // Post WM_CLOSE to destroy window from DefWindowProc().
-            PostMessageW(hWnd, UINT(WM_CLOSE), 0, 0);
+            PostMessageW(hWnd, UINT(WM_CLOSE), 0, 0)
 
             Log.verbose("Window: \(self.name) destroyed")
 
@@ -354,7 +360,7 @@ public class Win32Window : Window {
         if deviceID == 0 {
             var info: CURSORINFO = CURSORINFO()
             if GetCursorInfo(&info) {
-                return info.flags != 0;
+                return info.flags != 0
             }
         }
         return false
@@ -364,10 +370,10 @@ public class Win32Window : Window {
         if deviceID == 0 {
             self.holdMouse = hold
 
-            self.mousePosition = self.mousePosition(forDeviceID: 0);
-            self.holdingMousePosition = mousePosition;
+            self.mousePosition = self.mousePosition(forDeviceID: 0)
+            self.holdingMousePosition = mousePosition
 
-            PostMessageW(hWnd, UINT(WM_DKWINDOW_UPDATEMOUSECAPTURE), 0, 0);
+            PostMessageW(hWnd, UINT(WM_DKWINDOW_UPDATEMOUSECAPTURE), 0, 0)
         }
     }
 
@@ -735,7 +741,7 @@ public class Win32Window : Window {
                     let x: Int = Int(lParam & 0xffff)         // horizontal position 
                     let y: Int = Int((lParam >> 16) & 0xffff) // vertical position 
 
-                    window.windowFrame.origin = CGPoint(x: x, y: y);
+                    window.windowFrame.origin = CGPoint(x: x, y: y)
                     window.postWindowEvent(type: .moved)
                 }
                 return 0
@@ -981,7 +987,7 @@ public class Win32Window : Window {
                                                      buttonID: 4,
                                                      location: pos))
                 }
-                PostMessageW(hWnd, UINT(WM_DKWINDOW_UPDATEMOUSECAPTURE), 0, 0);                    
+                PostMessageW(hWnd, UINT(WM_DKWINDOW_UPDATEMOUSECAPTURE), 0, 0)                  
                 return 1 // should return TRUE
             case UINT(WM_MOUSEWHEEL):
                 var origin: POINT = POINT(x:0, y:0)
@@ -1109,7 +1115,7 @@ public class Win32Window : Window {
                 } else {
                     while ShowCursor(false) >= 0 {}
                 }
-                return 0;
+                return 0
             case UINT(WM_DKWINDOW_UPDATEMOUSECAPTURE):
                 if GetCapture() == hWnd {
                     if window.mouseButtonDownMask.rawValue == 0 && !window.holdMouse {

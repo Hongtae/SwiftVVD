@@ -16,13 +16,13 @@ struct Win32DropTarget {
             withUnsafePointer(to: id2) { ptr2 in
                 memcmp(iid1, ptr2, MemoryLayout<IID>.size) == 0
             }               
-        };
+        }
         if isEqualIID(riid!, IID_IUnknown) || isEqualIID(riid!, IID_IDropTarget) {
             withUnsafeMutablePointer(to: &self) {
                 ptr in ppv!.pointee = UnsafeMutableRawPointer(ptr)
             }
             _ = self.addRef()
-            return S_OK;
+            return S_OK
         }
         ppv!.pointee = nil
         return HRESULT(bitPattern:0x80004002) // E_NOINTERFACE
@@ -124,7 +124,7 @@ struct Win32DropTarget {
         } else {
             pdwEffect!.pointee = DWORD(DROPEFFECT_NONE)
         }
-        return S_OK;
+        return S_OK
     }
     private mutating func dragOver(_ grfKeyState: DWORD,
                                    _ pt: POINTL,
@@ -164,7 +164,7 @@ struct Win32DropTarget {
             self.dropAllowed = false
             pdwEffect!.pointee = DWORD(DROPEFFECT_NONE)
         }
-        return S_OK;
+        return S_OK
     }
     private mutating func dragLeave() -> HRESULT {
         if let delegate = self.target?.delegate, self.dropAllowed {
@@ -174,7 +174,7 @@ struct Win32DropTarget {
         }
         self.files = [String]()
         self.lastEffectMask = DWORD(DROPEFFECT_NONE)        
-        return S_OK;
+        return S_OK
     }
     private mutating func drop(_ pDataObj: UnsafeMutablePointer<IDataObject>?,
                                _ grfKeyState: DWORD,
@@ -207,7 +207,7 @@ struct Win32DropTarget {
         }
         self.files = [String]()
         self.lastEffectMask = DWORD(DROPEFFECT_NONE)        
-        return S_OK;
+        return S_OK
     }
     static func makeMutablePointer(target: Win32Window) -> UnsafeMutablePointer<Win32DropTarget> {
         let dt: UnsafeMutablePointer<Win32DropTarget> = .allocate(capacity: 1)
