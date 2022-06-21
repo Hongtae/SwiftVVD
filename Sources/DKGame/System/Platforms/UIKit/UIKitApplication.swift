@@ -1,3 +1,10 @@
+//
+//  File: UIKitApplication.swift
+//  Author: Hongtae Kim (tiff2766@gmail.com)
+//
+//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//
+
 #if ENABLE_UIKIT
 import Foundation
 import UIKit
@@ -7,10 +14,22 @@ class AppLoader: NSObject, UIApplicationDelegate {
                      willFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]?) -> Bool {
         let app = UIKitApplication.shared as! UIKitApplication
         Task { @MainActor in
-            await app.delegate?.initialize(application: app)
-            app.initialized = true
+            if app.initialized == false {
+                await app.delegate?.initialize(application: app)
+                app.initialized = true
+            }
         }
         return true
+    }
+
+    func applicationWillTerminate(_ application: UIApplication) {
+        let app = UIKitApplication.shared as! UIKitApplication
+        Task { @MainActor in
+            if app.initialized {
+                await app.delegate?.finalize(application: app)
+                app.initialized = false
+            }
+        }
     }
 }
 
