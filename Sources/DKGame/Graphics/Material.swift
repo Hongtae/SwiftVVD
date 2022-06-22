@@ -41,6 +41,17 @@ public enum VertexStreamSemantic {
     case boneWeights
 }
 
+public typealias MaterialResourceBufferWriter = (_: UnsafeRawPointer, _ byteCount: Int) -> Int
+
+public protocol MaterialResourceBinder {
+    func bufferResource(_: ShaderResource) -> [Material.BufferInfo]
+    func textureResource(_: ShaderResource) -> [Texture]
+    func SamplerResource(_: ShaderResource) -> [SamplerState]
+
+    func writeStructElement(path: String, element: ShaderResourceStructMember, index: Int, writer: MaterialResourceBufferWriter) -> Bool
+    func writeStruct(path: String, size: Int, index: Int, writer: MaterialResourceBufferWriter) -> Bool
+}
+
 public class Material {
 
     public struct ShaderTemplate {
