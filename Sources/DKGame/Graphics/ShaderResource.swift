@@ -101,6 +101,102 @@ public enum ShaderDataType {
     case double4x4
 }
 
+public extension ShaderDataType {
+    func size() -> Int {
+        switch (self)
+        {
+        case .bool:         return MemoryLayout<Bool>.stride
+        case .bool2:        return MemoryLayout<Bool>.stride * 2
+        case .bool3:        return MemoryLayout<Bool>.stride * 3
+        case .bool4:        return MemoryLayout<Bool>.stride * 4
+
+        case .char:         return MemoryLayout<Int8>.stride
+        case .char2:        return MemoryLayout<Int8>.stride * 2
+        case .char3:        return MemoryLayout<Int8>.stride * 3
+        case .char4:        return MemoryLayout<Int8>.stride * 4
+
+        case .uchar:        return MemoryLayout<UInt8>.stride
+        case .uchar2:       return MemoryLayout<UInt8>.stride * 2
+        case .uchar3:       return MemoryLayout<UInt8>.stride * 3
+        case .uchar4:       return MemoryLayout<UInt8>.stride * 4
+
+        case .short:        return MemoryLayout<Int16>.stride
+        case .short2:       return MemoryLayout<Int16>.stride * 2
+        case .short3:       return MemoryLayout<Int16>.stride * 3
+        case .short4:       return MemoryLayout<Int16>.stride * 4
+
+        case .ushort:       return MemoryLayout<UInt16>.stride
+        case .ushort2:      return MemoryLayout<UInt16>.stride * 2
+        case .ushort3:      return MemoryLayout<UInt16>.stride * 3
+        case .ushort4:      return MemoryLayout<UInt16>.stride * 4
+
+        case .int:          return MemoryLayout<Int32>.stride
+        case .int2:         return MemoryLayout<Int32>.stride * 2
+        case .int3:         return MemoryLayout<Int32>.stride * 3
+        case .int4:         return MemoryLayout<Int32>.stride * 4
+
+        case .uint:         return MemoryLayout<UInt32>.stride
+        case .uint2:        return MemoryLayout<UInt32>.stride * 2
+        case .uint3:        return MemoryLayout<UInt32>.stride * 3
+        case .uint4:        return MemoryLayout<UInt32>.stride * 4
+
+        case .long:         return MemoryLayout<Int64>.stride
+        case .long2:        return MemoryLayout<Int64>.stride * 2
+        case .long3:        return MemoryLayout<Int64>.stride * 3
+        case .long4:        return MemoryLayout<Int64>.stride * 4
+
+        case .ulong:        return MemoryLayout<UInt64>.stride
+        case .ulong2:       return MemoryLayout<UInt64>.stride * 2
+        case .ulong3:       return MemoryLayout<UInt64>.stride * 3
+        case .ulong4:       return MemoryLayout<UInt64>.stride * 4
+
+        case .half:         return MemoryLayout<Float16>.stride
+        case .half2:        return MemoryLayout<Float16>.stride * 2
+        case .half3:        return MemoryLayout<Float16>.stride * 3
+        case .half4:        return MemoryLayout<Float16>.stride * 4
+        case .half2x2:      return MemoryLayout<Float16>.stride * 4
+        case .half2x3:      return MemoryLayout<Float16>.stride * 6
+        case .half2x4:      return MemoryLayout<Float16>.stride * 8
+        case .half3x2:      return MemoryLayout<Float16>.stride * 6
+        case .half3x3:      return MemoryLayout<Float16>.stride * 9
+        case .half3x4:      return MemoryLayout<Float16>.stride * 12
+        case .half4x2:      return MemoryLayout<Float16>.stride * 8
+        case .half4x3:      return MemoryLayout<Float16>.stride * 12
+        case .half4x4:      return MemoryLayout<Float16>.stride * 16
+
+        case .float:        return MemoryLayout<Float32>.stride
+        case .float2:       return MemoryLayout<Float32>.stride * 2
+        case .float3:       return MemoryLayout<Float32>.stride * 3
+        case .float4:       return MemoryLayout<Float32>.stride * 4
+        case .float2x2:     return MemoryLayout<Float32>.stride * 4
+        case .float2x3:     return MemoryLayout<Float32>.stride * 6
+        case .float2x4:     return MemoryLayout<Float32>.stride * 8
+        case .float3x2:     return MemoryLayout<Float32>.stride * 6
+        case .float3x3:     return MemoryLayout<Float32>.stride * 9
+        case .float3x4:     return MemoryLayout<Float32>.stride * 12
+        case .float4x2:     return MemoryLayout<Float32>.stride * 8
+        case .float4x3:     return MemoryLayout<Float32>.stride * 12
+        case .float4x4:     return MemoryLayout<Float32>.stride * 16
+
+        case .double:       return MemoryLayout<Float64>.stride
+        case .double2:      return MemoryLayout<Float64>.stride * 2
+        case .double3:      return MemoryLayout<Float64>.stride * 3
+        case .double4:      return MemoryLayout<Float64>.stride * 4
+        case .double2x2:    return MemoryLayout<Float64>.stride * 4
+        case .double2x3:    return MemoryLayout<Float64>.stride * 6
+        case .double2x4:    return MemoryLayout<Float64>.stride * 8
+        case .double3x2:    return MemoryLayout<Float64>.stride * 6
+        case .double3x3:    return MemoryLayout<Float64>.stride * 9
+        case .double3x4:    return MemoryLayout<Float64>.stride * 12
+        case .double4x2:    return MemoryLayout<Float64>.stride * 8
+        case .double4x3:    return MemoryLayout<Float64>.stride * 12
+        case .double4x4:    return MemoryLayout<Float64>.stride * 16
+        default:
+            return 0
+        }
+    }
+}
+
 public enum ShaderStage {
     case unknown
     case vertex
