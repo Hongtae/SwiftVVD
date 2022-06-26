@@ -45,8 +45,8 @@ public struct MouseEvent {
     public var buttonID: Int
     public var location: CGPoint
     public var delta: CGPoint = .zero
+    public var tilt: CGPoint = .zero
     public var pressure: Float = 0.0
-    public var tilt: Float = 0.0
 }
 
 public enum KeyboardEventType {

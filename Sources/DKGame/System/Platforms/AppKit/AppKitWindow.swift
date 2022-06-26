@@ -18,6 +18,8 @@ public class AppKitWindow: Window {
     public private(set) var windowFrame: CGRect = .null
     public private(set) var contentScaleFactor: CGFloat = 0.0
 
+    var window: NSWindow?
+
     public var origin: CGPoint {
         get { .zero }
         set(value) {
@@ -84,6 +86,15 @@ public class AppKitWindow: Window {
     }
 
     public func removeEventObserver(_: AnyObject) {
+    }
+
+    func postWindowEvent(_ event: WindowEvent) {
+    }
+
+    func postKeyboardEvent(_ event: KeyboardEvent) {
+    }
+
+    func postMouseEvent(_ event: MouseEvent) {
     }
 }
 

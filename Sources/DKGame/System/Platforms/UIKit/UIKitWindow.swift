@@ -86,6 +86,14 @@ public class UIKitWindow: Window {
     public func removeEventObserver(_: AnyObject) {
     }
 
+    func postWindowEvent(_ event: WindowEvent) {
+    }
+
+    func postKeyboardEvent(_ event: KeyboardEvent) {
+    }
+
+    func postMouseEvent(_ event: MouseEvent) {
+    }
 }
 
 #endif //if ENABLE_UIKIT
