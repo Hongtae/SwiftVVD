@@ -31,6 +31,39 @@ class AppKitView: NSView, NSTextInputClient, NSWindowDelegate {
 
     var isFliped: Bool { true } // upper-left is origin
 
+    var observers: [NSObjectProtocol] = []
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        self.setup()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        self.setup()
+    }
+
+    func setup() {
+        let queue = OperationQueue.main
+        let center = NotificationCenter.default
+        self.observers = [
+            center.addObserver(forName: NSApplication.didHideNotification,
+                               object: nil,
+                               queue: queue) { [weak self](notification) in
+                                   self?.applicationDidHide(notification)
+                               },
+            center.addObserver(forName: NSApplication.didUnhideNotification,
+                               object: nil,
+                               queue: queue) { [weak self](notification) in
+                                   self?.applicationDidUnhide(notification)
+                               }
+        ]
+    }
+
+    deinit {
+        observers.forEach { NotificationCenter.default.removeObserver($0) }
+    }
+
     // MARK: - Mouse Event
     override func mouseDown(with event: NSEvent)        { self.handleMouseDown(event: event) }
     override func rightMouseDown(with event: NSEvent)   { self.handleMouseDown(event: event) }
@@ -298,6 +331,111 @@ class AppKitView: NSView, NSTextInputClient, NSWindowDelegate {
         }
         return []
     }
+
+    // MARK: - NSWindowDelegate
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        if self.window === sender {
+           return self.proxyWindow?.delegate?.shouldClose(window: self.proxyWindow!) ?? true
+        }
+        return true
+    }
+
+    func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
+        if self.window === sender {
+            var contentRect = sender.contentRect(forFrameRect: NSRect(origin: .zero, size: frameSize))
+            if let size = self.proxyWindow?.delegate?.minimumContentSize(window: self.proxyWindow!) {
+                contentRect.size.width = max(contentRect.size.width, size.width)
+                contentRect.size.height = max(contentRect.size.height, size.height)
+            }
+            if let size = self.proxyWindow?.delegate?.maximumContentSize(window: self.proxyWindow!) {
+                if size.width > 0 {
+                    contentRect.size.width = min(contentRect.size.width, size.width)
+                }
+                if size.height > 0 {
+                    contentRect.size.height = min(contentRect.size.height, size.height)
+                }
+            }
+
+            let rect = sender.frameRect(forContentRect: contentRect)
+            return NSSize(width: rect.width, height: rect.height)
+        }
+        return frameSize
+    }
+
+    func windowDidResize(_ notification: Notification) {
+        //    NSRect rc = [[notification object] frame];
+        //    NSRect rc = [self bounds];
+        //    DKLog("Window resized. (%f x %f)\n", rc.size.width, rc.size.height);
+
+        if notification.object as? NSWindow === self.window {
+            self.postWindowEvent(type: .resized)
+        }
+     }
+
+    func windowWillMiniaturize(_ notification: Notification) {
+        if notification.object as? NSWindow === self.window {
+            self.postWindowEvent(type: .inactivated)
+        }
+    }
+
+    func windowDidMiniaturize(_ notification: Notification) {
+        if notification.object as? NSWindow === self.window {
+            self.postWindowEvent(type: .minimized)
+        }
+    }
+
+    func windowDidDeminiaturize(_ notification: Notification) {
+        if notification.object as? NSWindow === self.window {
+            self.postWindowEvent(type: .shown)
+        }
+    }
+
+    func windowDidBecomeKey(_ notification: Notification) {
+        if notification.object as? NSWindow === self.window {
+            let currentEvent = NSApp.currentEvent!
+            self.postWindowEvent(type: .activated)
+            self.updateModifier(flags: currentEvent.modifierFlags)
+        }
+    }
+
+    func windowDidResignKey(_ notification: Notification) {
+        if notification.object as? NSWindow === self.window {
+            if self.textInput {
+                self.unmarkText()
+            }
+
+            self.postWindowEvent(type: .inactivated)
+        }
+    }
+
+    func windowDidMove(_ notification: Notification) {
+        if notification.object as? NSWindow === self.window {
+            self.postWindowEvent(type: .moved)
+        }
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        if notification.object as? NSWindow === self.window {
+            self.postWindowEvent(type: .closed)
+        }
+    }
+
+    // MARK: - NSApplication Notifications
+    func applicationDidHide(_ notification: Notification) {
+        if self.window?.isVisible == true {
+            self.postWindowEvent(type: .hidden)
+        }
+    }
+
+    func applicationDidUnhide(_ notification: Notification) {
+        if self.window?.isVisible == true {
+            self.postWindowEvent(type: .shown)
+            if self.window?.isKeyWindow == true {
+                self.postWindowEvent(type: .activated)
+            }
+        }
+    }
+
     // MARK: - Event
     func postWindowEvent(type: WindowEventType) {
     }
@@ -392,5 +530,6 @@ class AppKitView: NSView, NSTextInputClient, NSWindowDelegate {
                                                    text: text))
         }
     }
+
 }
 #endif //if ENABLE_APPKIT

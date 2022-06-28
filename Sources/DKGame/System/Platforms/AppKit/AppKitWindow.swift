@@ -9,16 +9,35 @@
 import Foundation
 import AppKit
 
+class MainKeyWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+}
+
 public class AppKitWindow: Window {
     public var activated: Bool = false
     public var visible: Bool = false
     public var resolution: CGSize = .zero
 
-    public private(set) var contentBounds: CGRect = .null
-    public private(set) var windowFrame: CGRect = .null
-    public private(set) var contentScaleFactor: CGFloat = 0.0
+    public var contentBounds: CGRect {
+        var rect = view!.bounds
+        if view!.window != nil {
+            rect = view!.convert(rect, to: nil)
+        }
+        return CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: rect.height)
+    }
+
+    public var windowFrame: CGRect {
+        let rect = view!.window?.frame ?? view!.frame
+        return CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: rect.height)
+    }
+
+    public var contentScaleFactor: CGFloat {
+        return view!.window?.backingScaleFactor ?? 1.0
+    }
 
     var window: NSWindow?
+    var view: NSView?
 
     public var origin: CGPoint {
         get { .zero }
@@ -34,7 +53,40 @@ public class AppKitWindow: Window {
     public private(set) var delegate: WindowDelegate?
 
     public required init(name: String, style: WindowStyle, delegate: WindowDelegate?) {
+        var styleMask: NSWindow.StyleMask = []
+        let backingStoreType: NSWindow.BackingStoreType = .buffered
+        let contentRect = NSMakeRect(0, 0, 640, 480)
 
+        if style.contains(.title)           { styleMask.insert(.titled) }
+        if style.contains(.closeButton)     { styleMask.insert(.closable) }
+        if style.contains(.minimizeButton)  { styleMask.insert(.miniaturizable) }
+        if style.contains(.maximizeButton)  {  }
+        if style.contains(.resizableBorder) { styleMask.insert(.resizable) }
+
+        self.window = MainKeyWindow(contentRect: contentRect,
+                                    styleMask: styleMask,
+                                    backing: backingStoreType,
+                                    defer: true)
+
+        let view = AppKitView(frame: contentRect)
+        view.proxyWindow = self
+        self.view = view
+
+        window!.contentView = view
+        window!.delegate = view
+        window!.isReleasedWhenClosed = false
+        window!.acceptsMouseMovedEvents = true
+        window!.title = name
+
+        if style.contains(.acceptFileDrop) {
+            view.registerForDraggedTypes([.fileURL])
+        }
+
+        self.postWindowEvent(WindowEvent(type: .created,
+                                         window: self,
+                                         windowFrame: self.windowFrame,
+                                         contentBounds: self.contentBounds,
+                                         contentScaleFactor: self.contentScaleFactor))
     }
 
     public func show() {
