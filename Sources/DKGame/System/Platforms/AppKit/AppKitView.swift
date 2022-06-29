@@ -22,16 +22,58 @@ private let RIGHT_COMMAND_BIT = UInt(0x100010)
 
 class AppKitView: NSView, NSTextInputClient, NSWindowDelegate {
 
-    var holdMouse: Bool = false
+    var holdMouse: Bool = false {
+        didSet {
+            CGAssociateMouseAndMouseCursorPosition( (!holdMouse) ? 1 : 0 );
+        }
+    }
+
     var textInput: Bool = false
     var modifierKeyFlags: NSEvent.ModifierFlags = []
     var markedText: String = ""
 
     weak var proxyWindow: AppKitWindow?
 
-    var isFliped: Bool { true } // upper-left is origin
+    override var isFlipped: Bool { true } // upper-left is origin
+    override var acceptsFirstResponder: Bool { true }
 
     var observers: [NSObjectProtocol] = []
+
+    var contentBounds: CGRect {
+        var rect = self.bounds
+        if self.window != nil {
+            rect = self.convert(rect, to: nil)
+        }
+        return CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: rect.height)
+    }
+
+    var windowFrame: CGRect {
+        let rect = self.window?.frame ?? self.frame
+        return CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: rect.height)
+    }
+
+    var contentScaleFactor: CGFloat {
+        return self.window?.backingScaleFactor ?? 1.0
+    }
+
+    var mousePosition: CGPoint {
+        get {
+            // get mouse pos with screen-space
+            let ptScreen = NSEvent.mouseLocation
+            // convert pos to window-space
+            let ptWindow = self.window?.convertPoint(fromScreen: ptScreen) ?? ptScreen
+            // convert pos to view-space
+            return self.convert(ptWindow, from: nil)
+        }
+        set(pt) {
+            let ptInWindow = self.convert(pt, to: nil)
+            let screenPos = self.window?.convertPoint(toScreen: ptInWindow) ?? ptInWindow
+
+            let toMove = CGPoint(x: screenPos.x,
+                                 y: CGFloat(CGDisplayPixelsHigh(CGMainDisplayID())) - screenPos.y)
+            CGWarpMouseCursorPosition(toMove)
+        }
+    }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -44,6 +86,7 @@ class AppKitView: NSView, NSTextInputClient, NSWindowDelegate {
     }
 
     func setup() {
+        self.canDrawConcurrently = true
         let queue = OperationQueue.main
         let center = NotificationCenter.default
         self.observers = [
@@ -62,6 +105,17 @@ class AppKitView: NSView, NSTextInputClient, NSWindowDelegate {
 
     deinit {
         observers.forEach { NotificationCenter.default.removeObserver($0) }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+//        NSColor(red: 1, green: 1, blue: 1, alpha: 1).setFill()
+//        dirtyRect.fill()
+
+        self.postWindowEvent(type: .update)
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        return true
     }
 
     // MARK: - Mouse Event
@@ -438,6 +492,14 @@ class AppKitView: NSView, NSTextInputClient, NSWindowDelegate {
 
     // MARK: - Event
     func postWindowEvent(type: WindowEventType) {
+        if let window = self.proxyWindow {
+            window.postWindowEvent(
+                WindowEvent(type: type,
+                            window: window,
+                            windowFrame: self.windowFrame,
+                            contentBounds: self.contentBounds,
+                            contentScaleFactor: self.contentScaleFactor))
+        }
     }
 
     func postMouseEvent(_ event: NSEvent) {
