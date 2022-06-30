@@ -28,6 +28,9 @@ class AppKitView: NSView, NSTextInputClient, NSWindowDelegate {
         }
     }
 
+    var activated: Bool = false
+    var visible: Bool = false
+
     var textInput: Bool = false
     var modifierKeyFlags: NSEvent.ModifierFlags = []
     var markedText: String = ""
@@ -434,18 +437,21 @@ class AppKitView: NSView, NSTextInputClient, NSWindowDelegate {
 
     func windowDidMiniaturize(_ notification: Notification) {
         if notification.object as? NSWindow === self.window {
+            self.visible = false
             self.postWindowEvent(type: .minimized)
         }
     }
 
     func windowDidDeminiaturize(_ notification: Notification) {
         if notification.object as? NSWindow === self.window {
+            self.visible = true
             self.postWindowEvent(type: .shown)
         }
     }
 
     func windowDidBecomeKey(_ notification: Notification) {
         if notification.object as? NSWindow === self.window {
+            self.activated = true
             let currentEvent = NSApp.currentEvent!
             self.postWindowEvent(type: .activated)
             self.updateModifier(flags: currentEvent.modifierFlags)
@@ -457,7 +463,7 @@ class AppKitView: NSView, NSTextInputClient, NSWindowDelegate {
             if self.textInput {
                 self.unmarkText()
             }
-
+            self.activated = false
             self.postWindowEvent(type: .inactivated)
         }
     }
@@ -477,14 +483,18 @@ class AppKitView: NSView, NSTextInputClient, NSWindowDelegate {
     // MARK: - NSApplication Notifications
     func applicationDidHide(_ notification: Notification) {
         if self.window?.isVisible == true {
+            self.activated = false
+            self.visible = false
             self.postWindowEvent(type: .hidden)
         }
     }
 
     func applicationDidUnhide(_ notification: Notification) {
         if self.window?.isVisible == true {
+            self.visible = true
             self.postWindowEvent(type: .shown)
             if self.window?.isKeyWindow == true {
+                self.activated = true
                 self.postWindowEvent(type: .activated)
             }
         }

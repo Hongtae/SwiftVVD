@@ -14,10 +14,30 @@ class MainKeyWindow: NSWindow {
     override var canBecomeMain: Bool { true }
 }
 
+private var hideCursorCount = 0
+
 public class AppKitWindow: Window {
-    public var activated: Bool = false
-    public var visible: Bool = false
-    public var resolution: CGSize = .zero
+
+    public var activated: Bool { self.view.activated }
+    public var visible: Bool { self.view.visible }
+
+    public var resolution: CGSize {
+        get {
+            let pixelBounds = self.view.convertToBacking(self.view.bounds)
+            return CGSize(width: pixelBounds.width, height: pixelBounds.height)
+        }
+        set (value) {
+            if self.view.window?.contentView === self.view {
+                let pixelBounds = self.view.window!.convertFromBacking(NSMakeRect(0, 0, value.width, value.height))
+                self.view.window?.setContentSize(CGSize(width: pixelBounds.width, height: pixelBounds.height))
+                self.view.window?.displayIfNeeded()
+            } else {
+                let s = self.view.convertFromBacking(value)
+                self.view.frame.size = s
+                self.view.window?.layoutIfNeeded()
+            }
+        }
+    }
 
     public var contentBounds: CGRect { self.view.contentBounds }
     public var windowFrame: CGRect { self.view.windowFrame }
@@ -32,13 +52,40 @@ public class AppKitWindow: Window {
     var view: AppKitView
 
     public var origin: CGPoint {
-        get { .zero }
+        get {
+            if self.view.window?.contentView === self.view {
+                return self.view.window!.frame.origin
+            } else {
+                return self.view.frame.origin
+            }
+        }
         set(value) {
+            if self.view.window?.contentView === self.view {
+                self.view.window?.setFrameOrigin(value)
+                self.view.window?.displayIfNeeded()
+            } else {
+                self.view.frame.origin = origin
+                self.view.window?.layoutIfNeeded()
+            }
         }
     }
+
     public var contentSize: CGSize {
-        get { .zero }
+        get {
+            var bounds = self.view.bounds
+            if self.view.window != nil {
+                bounds = view.convert(bounds, to: nil)
+            }
+            return CGSize(width: bounds.width, height: bounds.height)
+        }
         set(value) {
+            if self.view.window?.contentView === self.view {
+                self.view.window?.setContentSize(value)
+                self.view.window?.displayIfNeeded()
+            } else {
+                self.view.frame.size = contentSize
+                self.view.window?.layoutIfNeeded()
+            }
         }
     }
 
@@ -112,17 +159,15 @@ public class AppKitWindow: Window {
         self.view.window?.miniaturize(nil)
     }
 
-    private var hideCursorCount = 0
-
     public func showMouse(_ show: Bool, forDeviceID deviceID: Int) {
         if deviceID == 0 {
             if show {
                 if CGDisplayShowCursor(CGMainDisplayID()) == .success {
-                    self.hideCursorCount -= 1
+                    hideCursorCount -= 1
                 }
             } else {
                 if CGDisplayHideCursor(CGMainDisplayID()) == .success {
-                    self.hideCursorCount += 1
+                    hideCursorCount += 1
                 }
             }
         }
@@ -130,7 +175,7 @@ public class AppKitWindow: Window {
 
     public func isMouseVisible(forDeviceID deviceID: Int) -> Bool {
         if deviceID == 0 {
-            return self.hideCursorCount >= 0
+            return hideCursorCount >= 0
         }
         return false
     }
