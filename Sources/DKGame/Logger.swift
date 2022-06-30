@@ -73,7 +73,7 @@ open class Logger {
     }
 
     public func log(level: Level, _ mesg: String) {
-        let tid = String(format: "%X", currentThreadId())
+        let tid = String(format: "%X", currentThreadID())
         print("[\(self.category):\(level):\(tid)] \(mesg)")
     }
 

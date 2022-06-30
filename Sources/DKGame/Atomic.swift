@@ -94,7 +94,7 @@ public class SpinLock: NSLocking {
     public func tryLock() -> Bool {
         if atomic.compareAndSet(comparand: free, newValue: locked) {
 #if DEBUG
-            self.ownerThread = currentThreadId()
+            self.ownerThread = currentThreadID()
 #endif
             return true
         }
@@ -102,7 +102,7 @@ public class SpinLock: NSLocking {
     }
     public func lock() {
 #if DEBUG
-        assert(self.ownerThread != currentThreadId(), "Deadlock detected!")
+        assert(self.ownerThread != currentThreadID(), "Deadlock detected!")
 #endif
         while tryLock() == false {
             DKThreadYield()
@@ -110,7 +110,7 @@ public class SpinLock: NSLocking {
     }
     public func unlock() {
 #if DEBUG
-        assert(self.ownerThread == currentThreadId(), "Thread does not own lock!")
+        assert(self.ownerThread == currentThreadID(), "Thread does not own lock!")
         self.ownerThread = 0
 #endif
         guard atomic.compareAndSet(comparand: locked, newValue: free) else {
@@ -355,6 +355,6 @@ public func threadYield() {
     DKThreadYield()
 }
 
-public func currentThreadId() -> UInt {
+public func currentThreadID() -> UInt {
     return DKThreadCurrentId()
 }
