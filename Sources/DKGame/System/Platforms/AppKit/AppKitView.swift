@@ -224,7 +224,7 @@ class AppKitView: NSView, NSTextInputClient, NSWindowDelegate {
         self.postTextInputEvent(str)
 
         if self.markedText.count > 0 {
-            self.postTextCompositingEvent("")
+            self.postTextCompositionEvent("")
         }
 
         self.markedText = ""
@@ -269,9 +269,9 @@ class AppKitView: NSView, NSTextInputClient, NSWindowDelegate {
                 self.markedText = str
                 Log.debug("self.markedText: \(self.markedText)")
 
-                self.postTextCompositingEvent(str)
+                self.postTextCompositionEvent(str)
             } else {
-                self.postTextCompositingEvent("")
+                self.postTextCompositionEvent("")
 
                 self.markedText = ""
                 self.inputContext?.discardMarkedText()
@@ -593,7 +593,7 @@ class AppKitView: NSView, NSTextInputClient, NSWindowDelegate {
         }
     }
 
-    func postTextCompositingEvent(_ text: String) {
+    func postTextCompositionEvent(_ text: String) {
         if let window = self.proxyWindow {
             window.postKeyboardEvent(KeyboardEvent(type: .textComposition,
                                                    window: window,

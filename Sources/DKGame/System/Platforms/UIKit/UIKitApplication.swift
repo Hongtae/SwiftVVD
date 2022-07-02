@@ -9,9 +9,35 @@
 import Foundation
 import UIKit
 
+var activeWindowScenes: [UIWindowScene] = []
+var activeWindows: [UIWindow] = []
+
+class SceneDelegate: NSObject, UIWindowSceneDelegate {
+    func scene(
+        _ scene: UIScene,
+        willConnectTo session: UISceneSession,
+        options connectionOptions: UIScene.ConnectionOptions
+    ) {
+        if let windowScene = scene as? UIWindowScene {
+            activeWindowScenes.append(windowScene)
+            if let window = activeWindows.first, window.windowScene == nil {
+                window.windowScene = windowScene
+            }
+        }
+    }
+
+    func sceneDidDisconnect(_ scene: UIScene) {
+        if scene is UIWindowScene {
+            activeWindowScenes.removeAll { $0 === scene }
+        }
+    }
+}
+
 class AppLoader: NSObject, UIApplicationDelegate {
-    func application(_ application: UIApplication,
-                     willFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]?) -> Bool {
+    func application(
+        _ application: UIApplication,
+        willFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]?
+    ) -> Bool {
         let app = UIKitApplication.shared as! UIKitApplication
         Task { @MainActor in
             if app.initialized == false {
@@ -30,6 +56,19 @@ class AppLoader: NSObject, UIApplicationDelegate {
                 app.initialized = false
             }
         }
+    }
+
+    func application(
+        _ application: UIApplication,
+        configurationForConnecting connectingSceneSession: UISceneSession,
+        options: UIScene.ConnectionOptions
+    ) -> UISceneConfiguration {
+
+        let config = UISceneConfiguration(name: nil,
+                                          sessionRole: connectingSceneSession.role)
+        config.sceneClass = UIWindowScene.self
+        config.delegateClass = SceneDelegate.self
+        return config
     }
 }
 

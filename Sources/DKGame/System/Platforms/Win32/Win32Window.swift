@@ -83,7 +83,7 @@ public class Win32Window : Window {
 
     public var name: String
 
-    public private(set) weak var delegate: WindowDelegate?
+    public weak var delegate: WindowDelegate?
 
     public private(set) var resizing: Bool = false
     public private(set) var activated: Bool = false

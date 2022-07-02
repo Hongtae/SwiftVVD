@@ -89,7 +89,7 @@ public class AppKitWindow: Window {
         }
     }
 
-    public private(set) var delegate: WindowDelegate?
+    public var delegate: WindowDelegate?
 
     public required init(name: String, style: WindowStyle, delegate: WindowDelegate?) {
         var styleMask: NSWindow.StyleMask = []

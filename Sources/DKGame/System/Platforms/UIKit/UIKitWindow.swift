@@ -12,40 +12,91 @@ import UIKit
 public class UIKitWindow: Window {
     public var activated: Bool = false
     public var visible: Bool = false
-    public var resolution: CGSize = .zero
 
-    public private(set) var contentBounds: CGRect = .null
-    public private(set) var windowFrame: CGRect = .null
-    public private(set) var contentScaleFactor: CGFloat = 0.0
+    public var contentBounds: CGRect { self.view.contentBounds }
+    public var windowFrame: CGRect { self.view.windowFrame }
+    public var contentScaleFactor: CGFloat { self.view.contentScaleFactor }
 
     public var origin: CGPoint {
-        get { .zero }
-        set(value) {
-        }
+        get { self.view.frame.origin }
+        set(value) { self.view.frame.origin = value }
     }
+
     public var contentSize: CGSize {
-        get { .zero }
+        get {
+            let bounds = self.view.bounds
+            return CGSize(width: bounds.width, height: bounds.height)
+        }
         set(value) {
+            self.view.bounds.size = value
         }
     }
 
-    public private(set) var delegate: WindowDelegate?
+    public var resolution: CGSize {
+        get {
+            let bounds = self.view.bounds
+            let scale = self.view.contentScaleFactor
+            return CGSize(width: bounds.width * scale, height: bounds.height * scale)
+        }
+        set(value) {
+            let scale = 1.0 / self.view.contentScaleFactor
+            let size = CGSize(width: value.width * scale, height: value.height * scale)
+            self.view.bounds.size = size
+        }
+    }
+
+    public var delegate: WindowDelegate?
+
+    var window: UIWindow
+    var view: UIKitView
 
     public required init(name: String, style: WindowStyle, delegate: WindowDelegate?) {
 
+        let viewController = UIKitViewController()
+        self.view = viewController.view as! UIKitView
+
+        if style.contains(.autoResize) {
+            view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        } else {
+            view.autoresizingMask = [.flexibleRightMargin, .flexibleBottomMargin]
+        }
+        viewController.title = name
+
+        if let scene = activeWindowScenes.first {
+            self.window = UIWindow(windowScene: scene)
+        } else {
+            self.window = UIWindow()
+        }
+        self.window.isHidden = true
+        self.window.rootViewController = viewController
+
+        (self.view as! UIKitView).proxyWindow = self
+
+        activeWindows.append(window)
+    }
+
+    deinit {
+        let window = self.window
+        window.windowScene = nil
+        activeWindows.removeAll { $0 === window }
     }
 
     public func show() {
-
+        self.view.isHidden = false
     }
+
     public func hide() {
-
+        self.view.isHidden = true
     }
+
     public func activate() {
-
+        self.view.isHidden = false
+        self.window.makeKeyAndVisible()
+        self.view.becomeFirstResponder()
     }
-    public func minimize() {
 
+    public func minimize() {
+        self.view.isHidden = true
     }
 
     public func showMouse(_ show: Bool, forDeviceID deviceID: Int) {
@@ -68,11 +119,16 @@ public class UIKitWindow: Window {
     }
 
     public func enableTextInput(_ enable: Bool, forDeviceID deviceID: Int) {
-
+        if deviceID == 0 {
+            self.view.textInput = enable
+        }
     }
 
     public func isTextInputEnabled(forDeviceID deviceID: Int) -> Bool {
-        false
+        if deviceID == 0 {
+            return self.view.textInput
+        }
+        return false
     }
 
     func postWindowEvent(type: WindowEventType) {

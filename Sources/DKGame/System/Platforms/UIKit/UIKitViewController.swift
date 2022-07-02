@@ -11,15 +11,15 @@ import UIKit
 
 class UIKitViewController: UIViewController {
 
-    var dkGameView: UIKitView? = nil
+    var ukview: UIKitView? = nil
 
     override var supportedInterfaceOrientations: UIInterfaceOrientationMask { .all }
 
     override func loadView() {
-        if self.dkGameView == nil {
-            self.dkGameView = UIKitView()
+        if self.ukview == nil {
+            self.ukview = UIKitView()
         }
-        self.view = self.dkGameView
+        self.view = self.ukview
     }
 }
 #endif
