@@ -167,11 +167,11 @@ public class VulkanImage {
         return VkImageLayout(VK_IMAGE_LAYOUT_UNDEFINED.rawValue)
     }
 
-    public var width: UInt32    { self.extent.width }
-    public var height: UInt32   { self.extent.height }
-    public var depth: UInt32    { self.extent.depth }
-    public var mipmapCount: UInt32 { self.mipLevels }
-    public var arrayLength: UInt32 { self.arrayLayers }
+    public var width: Int       { self.extent.width }
+    public var height: Int      { self.extent.height }
+    public var depth: Int       { self.extent.depth }
+    public var mipmapCount: Int { self.mipLevels }
+    public var arrayLength: Int { self.arrayLayers }
 
     public var type: TextureType {
         switch (self.imageType) {

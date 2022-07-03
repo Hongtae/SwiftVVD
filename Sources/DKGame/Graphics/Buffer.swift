@@ -13,6 +13,6 @@ public enum StorageMode: UInt {
 public protocol Buffer: AnyObject {
     func contents() -> UnsafeMutableRawPointer?
     func flush()
-    var length: UInt { get }
+    var length: Int { get }
     var device: GraphicsDevice { get }
 }

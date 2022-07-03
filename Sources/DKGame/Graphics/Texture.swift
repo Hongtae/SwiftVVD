@@ -29,11 +29,11 @@ public struct TextureUsage: OptionSet {
 }
 
 public protocol Texture: AnyObject {
-    var width: UInt32 { get }
-    var height: UInt32 { get }
-    var depth: UInt32 { get }
-    var mipmapCount: UInt32 { get }
-    var arrayLength: UInt32 { get }
+    var width: Int { get }
+    var height: Int { get }
+    var depth: Int { get }
+    var mipmapCount: Int { get }
+    var arrayLength: Int { get }
 
     var type: TextureType { get }
     var pixelFormat: PixelFormat { get }

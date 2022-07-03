@@ -42,7 +42,7 @@ public class VulkanBuffer {
         }
     }
 
-    public var length: UInt { UInt(self.deviceMemory!.length) }
+    public var length: Int { Int(self.deviceMemory!.length) }
 
     public func contents() -> UnsafeMutableRawPointer? {
         return self.deviceMemory!.mapped

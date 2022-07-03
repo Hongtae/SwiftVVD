@@ -9,7 +9,13 @@
 import Foundation
 import Metal
 
-public class MetalSemaphore {
+public class MetalSemaphore: Semaphore {
+    public let device: GraphicsDevice
+    let event: MTLEvent
 
+    init(device: MetalGraphicsDevice, event: MTLEvent) {
+        self.device = device
+        self.event = event
+    }
 }
 #endif //if ENABLE_METAL

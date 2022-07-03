@@ -42,11 +42,11 @@ public class VulkanImageView: Texture {
         }
     }
 
-    public var width: UInt32        { self.image!.width }
-    public var height: UInt32       { self.image!.height }
-    public var depth: UInt32        { self.image!.depth }
-    public var mipmapCount: UInt32  { self.image!.mipmapCount }
-    public var arrayLength: UInt32  { self.image!.arrayLength }
+    public var width: Int       { self.image!.width }
+    public var height: Int      { self.image!.height }
+    public var depth: Int       { self.image!.depth }
+    public var mipmapCount: Int { self.image!.mipmapCount }
+    public var arrayLength: Int { self.image!.arrayLength }
 
     public var type: TextureType    { self.image!.type }
     public var pixelFormat: PixelFormat { self.image!.pixelFormat }

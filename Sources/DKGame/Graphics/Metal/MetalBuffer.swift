@@ -9,7 +9,27 @@
 import Foundation
 import Metal
 
-public class MetalBuffer {
+public class MetalBuffer: Buffer {
+    public let device: GraphicsDevice
+    public var length: Int { buffer.length }
 
+    let buffer: MTLBuffer
+
+    init(device: MetalGraphicsDevice, buffer: MTLBuffer) {
+        self.device = device
+        self.buffer = buffer
+    }
+
+    public func contents() -> UnsafeMutableRawPointer? {
+        return self.buffer.contents()
+    }
+
+    public func flush() {
+#if os(macOS)
+        if buffer.storageMode == .managed {
+            buffer.didModifyRange(0..<buffer.length)
+        }
+#endif
+    }
 }
 #endif //if ENABLE_METAL
