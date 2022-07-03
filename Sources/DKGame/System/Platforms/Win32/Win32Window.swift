@@ -378,7 +378,7 @@ public class Win32Window : Window {
         if deviceID == 0 {
             self.holdMouse = hold
 
-            self.mousePosition = self.mousePosition(forDeviceID: 0)
+            self.mousePosition = self.mousePosition(forDeviceID: 0)!
             self.holdingMousePosition = mousePosition
 
             PostMessageW(hWnd, UINT(WM_DKWINDOW_UPDATEMOUSECAPTURE), 0, 0)
@@ -849,7 +849,7 @@ public class Win32Window : Window {
                                 window.setMousePosition(window.mousePosition, forDeviceID: 0)
                                 // In Windows8 (or later) with scaled-DPI mode, setting mouse position generate inaccurate result.
                                 // We need to keep new position in hold-mouse state. (non-movable mouse)
-                                window.holdingMousePosition = window.mousePosition(forDeviceID: 0)
+                                window.holdingMousePosition = window.mousePosition(forDeviceID: 0)!
                             }
                         } else {
                             window.mousePosition = CGPoint(x: Int(pt.x), y: Int(pt.y)) * (1.0 / window.contentScaleFactor)

@@ -81,8 +81,8 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
             var state = EncodingState()
 
             // initialize render pass
-            var frameWidth: UInt32 = 0
-            var frameHeight: UInt32 = 0
+            var frameWidth: Int = 0
+            var frameHeight: Int = 0
 
             var attachments: [VkAttachmentDescription] = []
             attachments.reserveCapacity(self.renderPassDescriptor.colorAttachments.count + 1)
@@ -228,8 +228,8 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
             framebufferCreateInfo.renderPass = self.renderPass
             framebufferCreateInfo.attachmentCount = UInt32(framebufferImageViews.count)
             framebufferCreateInfo.pAttachments = unsafePointerCopy(collection: framebufferImageViews, holder: tempHolder)
-            framebufferCreateInfo.width = frameWidth
-            framebufferCreateInfo.height = frameHeight
+            framebufferCreateInfo.width = UInt32(frameWidth)
+            framebufferCreateInfo.height = UInt32(frameHeight)
             framebufferCreateInfo.layers = 1
             err = vkCreateFramebuffer(device.device, &framebufferCreateInfo, device.allocationCallbacks, &self.framebuffer)
             if err != VK_SUCCESS {
@@ -266,8 +266,8 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
             renderPassBeginInfo.pClearValues = unsafePointerCopy(collection: attachmentClearValues, holder: tempHolder)
             renderPassBeginInfo.renderArea.offset.x = 0
             renderPassBeginInfo.renderArea.offset.y = 0
-            renderPassBeginInfo.renderArea.extent.width = frameWidth
-            renderPassBeginInfo.renderArea.extent.height = frameHeight
+            renderPassBeginInfo.renderArea.extent.width = UInt32(frameWidth)
+            renderPassBeginInfo.renderArea.extent.height = UInt32(frameHeight)
             renderPassBeginInfo.framebuffer = self.framebuffer
             vkCmdBeginRenderPass(commandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE)
 
@@ -286,7 +286,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
 
             // setup scissor
             var scissorRect = VkRect2D(offset: VkOffset2D(x: 0, y: 0),
-                                       extent: VkExtent2D(width: frameWidth, height: frameHeight))
+                                       extent: VkExtent2D(width: UInt32(frameWidth), height: UInt32(frameHeight)))
             vkCmdSetScissor(commandBuffer, 0, 1, &scissorRect)
 
             // recording commands

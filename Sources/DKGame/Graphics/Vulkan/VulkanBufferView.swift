@@ -40,14 +40,14 @@ public class VulkanBufferView: Buffer {
     }
 
     public func contents() -> UnsafeMutableRawPointer? {
-        return self.buffer!.contents()
+        return self.buffer?.contents()
     }
 
     public func flush() {
-        self.buffer!.flush(offset: 0, size: UInt(VK_WHOLE_SIZE))
+        self.buffer?.flush(offset: 0, size: UInt(VK_WHOLE_SIZE))
     }
 
-    public var length: UInt { self.buffer!.length }
+    public var length: Int { self.buffer?.length ?? 0 }
 }
 
 #endif //if ENABLE_VULKAN

@@ -105,10 +105,10 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
     }
     
     public func copy(from src: Buffer,
-                     sourceOffset srcOffset: UInt64,
+                     sourceOffset srcOffset: Int,
                      to dst: Buffer,
-                     destinationOffset dstOffset: UInt64,
-                     size: UInt64) {
+                     destinationOffset dstOffset: Int,
+                     size: Int) {
         assert(src is VulkanBufferView)
         assert(dst is VulkanBufferView)
 
@@ -123,7 +123,9 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
             return
         }
 
-        var region = VkBufferCopy(srcOffset: srcOffset, dstOffset: dstOffset, size: size)
+        var region = VkBufferCopy(srcOffset: VkDeviceSize(srcOffset),
+                                  dstOffset: VkDeviceSize(dstOffset),
+                                       size: VkDeviceSize(size))
         let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
             vkCmdCopyBuffer(commandBuffer, srcBuffer.buffer, dstBuffer.buffer, 1, &region)
         }
@@ -167,7 +169,7 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
         let bytesPerPixel = pixelFormat.bytesPerPixel()
         assert(bytesPerPixel > 0)
 
-        let requiredBufferLengthForCopy = UInt(srcOffset.imageWidth) * UInt(srcOffset.imageHeight) * UInt(size.depth) * UInt(bytesPerPixel) + srcOffset.offset
+        let requiredBufferLengthForCopy = srcOffset.imageWidth * srcOffset.imageHeight * size.depth * bytesPerPixel + srcOffset.offset
         if requiredBufferLengthForCopy > bufferLength {
             Log.err("VulkanCopyCommandEncoder.\(#function) failed: buffer is too small!")
             return
@@ -175,10 +177,10 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
 
         var region = VkBufferImageCopy()
         region.bufferOffset = VkDeviceSize(srcOffset.offset)
-        region.bufferRowLength = srcOffset.imageWidth
-        region.bufferImageHeight = srcOffset.imageHeight
+        region.bufferRowLength = UInt32(srcOffset.imageWidth)
+        region.bufferImageHeight = UInt32(srcOffset.imageHeight)
         region.imageOffset = VkOffset3D(x: Int32(dstOffset.x), y: Int32(dstOffset.y), z: Int32(dstOffset.z))
-        region.imageExtent = VkExtent3D(width: size.width, height: size.height, depth: size.depth)
+        region.imageExtent = VkExtent3D(width: UInt32(size.width), height: UInt32(size.height), depth: UInt32(size.depth))
         self.setupSubresource(&region.imageSubresource, origin: dstOffset, layerCount: 1, pixelFormat: pixelFormat)
 
         let queueFamilyIndex = self.encoder!.commandBuffer.queueFamily.familyIndex
@@ -237,7 +239,7 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
         let bytesPerPixel = pixelFormat.bytesPerPixel()
         assert(bytesPerPixel > 0)   // Unsupported texture format!
 
-        let requiredBufferLengthForCopy = UInt(dstOffset.imageWidth) * UInt(dstOffset.imageHeight) * UInt(size.depth) * UInt(bytesPerPixel) + dstOffset.offset
+        let requiredBufferLengthForCopy = dstOffset.imageWidth * dstOffset.imageHeight * size.depth * bytesPerPixel + dstOffset.offset
         if requiredBufferLengthForCopy > bufferLength {
             Log.err("VulkanCopyCommandEncoder.\(#function) failed: buffer is too small!")
             return
@@ -245,10 +247,10 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
 
         var region = VkBufferImageCopy()
         region.bufferOffset = VkDeviceSize(dstOffset.offset)
-        region.bufferRowLength = dstOffset.imageWidth
-        region.bufferImageHeight = dstOffset.imageHeight
+        region.bufferRowLength = UInt32(dstOffset.imageWidth)
+        region.bufferImageHeight = UInt32(dstOffset.imageHeight)
         region.imageOffset = VkOffset3D(x: Int32(srcOffset.x), y: Int32(srcOffset.y), z: Int32(srcOffset.z))
-        region.imageExtent = VkExtent3D(width: size.width, height: size.height, depth: size.depth)
+        region.imageExtent = VkExtent3D(width: UInt32(size.width), height: UInt32(size.height), depth: UInt32(size.depth))
         self.setupSubresource(&region.imageSubresource, origin: srcOffset, layerCount: 1, pixelFormat: pixelFormat)
 
         let queueFamilyIndex = self.encoder!.commandBuffer.queueFamily.familyIndex
@@ -328,7 +330,7 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
 
         region.srcOffset = VkOffset3D(x: Int32(srcOffset.x), y: Int32(srcOffset.y), z: Int32(srcOffset.z))
         region.dstOffset = VkOffset3D(x: Int32(dstOffset.x), y: Int32(dstOffset.y), z: Int32(dstOffset.z))
-        region.extent = VkExtent3D(width: size.width, height: size.height, depth: size.depth)
+        region.extent = VkExtent3D(width: UInt32(size.width), height: UInt32(size.height), depth: UInt32(size.depth))
 
         let queueFamilyIndex = self.encoder!.commandBuffer.queueFamily.familyIndex
 
@@ -360,7 +362,7 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
         self.encoder!.textures.append(dst)
     }
 
-    public func fill(buffer: Buffer, offset: UInt64, length: UInt64, value: UInt8) {
+    public func fill(buffer: Buffer, offset: Int, length: Int, value: UInt8) {
         assert(buffer is VulkanBufferView)
         let buf = (buffer as! VulkanBufferView).buffer!
 
@@ -385,7 +387,7 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
 
     private func setupSubresource(_ subresource: inout VkImageSubresourceLayers,
                                   origin: TextureOrigin,
-                                  layerCount: UInt32, 
+                                  layerCount: Int, 
                                   pixelFormat: PixelFormat) {
         if pixelFormat.isColorFormat() {
             subresource.aspectMask = VkImageAspectFlags(VK_IMAGE_ASPECT_COLOR_BIT.rawValue)
@@ -398,15 +400,15 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
                 subresource.aspectMask |= VkImageAspectFlags(VK_IMAGE_ASPECT_STENCIL_BIT.rawValue)
             }
         }
-        subresource.mipLevel = origin.level
-        subresource.baseArrayLayer = origin.layer
-        subresource.layerCount = layerCount
+        subresource.mipLevel = UInt32(origin.level)
+        subresource.baseArrayLayer = UInt32(origin.layer)
+        subresource.layerCount = UInt32(layerCount)
     }
 
     private func setupSubresource(_ subresource: inout VkImageSubresourceRange,
                                   origin: TextureOrigin,
-                                  layerCount: UInt32,
-                                  levelCount: UInt32,
+                                  layerCount: Int,
+                                  levelCount: Int,
                                   pixelFormat: PixelFormat) {
         if pixelFormat.isColorFormat() {
             subresource.aspectMask = VkImageAspectFlags(VK_IMAGE_ASPECT_COLOR_BIT.rawValue)
@@ -419,10 +421,10 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
                 subresource.aspectMask |= VkImageAspectFlags(VK_IMAGE_ASPECT_STENCIL_BIT.rawValue)
             }
         }
-        subresource.baseMipLevel = origin.level
-        subresource.baseArrayLayer = origin.layer
-        subresource.layerCount = layerCount
-        subresource.levelCount = levelCount
+        subresource.baseMipLevel = UInt32(origin.level)
+        subresource.baseArrayLayer = UInt32(origin.layer)
+        subresource.layerCount = UInt32(layerCount)
+        subresource.levelCount = UInt32(levelCount)
     }
 }
 

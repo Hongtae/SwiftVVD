@@ -160,9 +160,9 @@ public class Font {
 
     private struct GlyphTextureAtlas {
         let texture: Texture
-        var filledVertical: UInt32
-        var currentLineWidth: UInt32
-        var currentLineMaxHeight: UInt32
+        var filledVertical: Int
+        var currentLineWidth: Int
+        var currentLineMaxHeight: Int
     }
 
     private var glyphMap: [UnicodeScalar: GlyphData] = [:]
@@ -602,28 +602,30 @@ public class Font {
             return nil
         }
         let data = data!
+        let width = Int(width)
+        let height = Int(height)
 
         let device = deviceContext.device
         let queue = deviceContext.copyQueue()!
         var texture: Texture? = nil
 
         let updateTexture = { (queue: CommandQueue, texture: Texture, rect: CGRect, data: UnsafePointer<UInt8>) in
-            let x = UInt32(rect.minX.rounded())
-            let y = UInt32(rect.minY.rounded())
-            let width = UInt32(rect.width.rounded())
-            let height = UInt32(rect.height.rounded())
+            let x = Int(rect.minX.rounded())
+            let y = Int(rect.minY.rounded())
+            let width = Int(rect.width.rounded())
+            let height = Int(rect.height.rounded())
 
-            let bufferLength = Int(width * height)
+            let bufferLength = width * height
 
             let device = queue.device
             if let stagingBuffer = device.makeBuffer(length: bufferLength, storageMode: .shared, cpuCacheMode: .writeCombined) {
                 let buff = stagingBuffer.contents()!
 
                 for i in 0..<height {
-                    let src = data.advanced(by: Int(i * width))
-                    let dst = buff.advanced(by: Int(i * width))
+                    let src = data.advanced(by: i * width)
+                    let dst = buff.advanced(by: i * width)
 
-                    dst.copyMemory(from: src, byteCount: Int(width))
+                    dst.copyMemory(from: src, byteCount: width)
                 }
 
                 let cb = queue.makeCommandBuffer()!
@@ -638,7 +640,7 @@ public class Font {
             }
         }
 
-        let haveEnoughSpace = { (atlas: GlyphTextureAtlas, width: UInt32, height: UInt32) -> Bool in
+        let haveEnoughSpace = { (atlas: GlyphTextureAtlas, width: Int, height: Int) -> Bool in
             let texWidth = atlas.texture.width
             let texHeight = atlas.texture.height
 
@@ -655,10 +657,10 @@ public class Font {
             return true
         }
 
-        let leftMargin: UInt32 = 1
-        let rightMargin: UInt32 = 1
-        let topMargin: UInt32 = 1
-        let bottomMargin: UInt32 = 1
+        let leftMargin: Int = 1
+        let rightMargin: Int = 1
+        let topMargin: Int = 1
+        let bottomMargin: Int = 1
         let hPadding = leftMargin + rightMargin
         let vPadding = topMargin + bottomMargin
 
@@ -673,10 +675,10 @@ public class Font {
                     gta.currentLineWidth = 0
                     gta.currentLineMaxHeight = 0
                 }
-                frame = CGRect(x: CGFloat(gta.currentLineWidth + leftMargin),
-                               y: CGFloat(gta.filledVertical + topMargin),
-                               width: CGFloat(width),
-                               height: CGFloat(height))
+                frame = CGRect(x: gta.currentLineWidth + leftMargin,
+                               y: gta.filledVertical + topMargin,
+                               width: width,
+                               height: height)
                 updateTexture(queue, gta.texture, frame, data)
 
                 gta.currentLineWidth += width + hPadding
@@ -746,8 +748,8 @@ public class Font {
                 let gta = GlyphTextureAtlas(
                     texture: texture,
                     filledVertical: 0,
-                    currentLineWidth: UInt32(width + hPadding),
-                    currentLineMaxHeight: UInt32(height + vPadding))
+                    currentLineWidth: width + hPadding,
+                    currentLineMaxHeight: height + vPadding)
                 textures.append(gta)
             } else {
                 assertionFailure("Failed to create new texture with resolution: \(desc.width)x\(desc.height).")
