@@ -46,7 +46,7 @@ public struct MouseEvent {
     public var location: CGPoint
     public var delta: CGPoint = .zero
     public var tilt: CGPoint = .zero
-    public var pressure: Float = 0.0
+    public var pressure: CGFloat = 0.0
 }
 
 public enum KeyboardEventType {
@@ -146,7 +146,7 @@ public protocol Window: AnyObject {
     func holdMouse(_: Bool, forDeviceID: Int)
     func isMouseHeld(forDeviceID: Int) -> Bool
     func setMousePosition(_: CGPoint, forDeviceID: Int)
-    func mousePosition(forDeviceID: Int) -> CGPoint
+    func mousePosition(forDeviceID: Int) -> CGPoint?
 
     func enableTextInput(_: Bool, forDeviceID: Int)
     func isTextInputEnabled(forDeviceID: Int) -> Bool
@@ -163,10 +163,10 @@ extension Window {
     public func holdMouse(_: Bool, forDeviceID: Int) {}
     public func isMouseHeld(forDeviceID: Int) -> Bool { false }
     public func setMousePosition(_: CGPoint, forDeviceID: Int) {}
-    public func mousePosition(forDeviceID: Int) -> CGPoint { .zero }
+    public func mousePosition(forDeviceID: Int) -> CGPoint? { nil }
 
     public func enableTextInput(_: Bool, forDeviceID: Int) {}
-    public func isTextInputEnabled(forDeviceID: Int) -> Bool { return false }
+    public func isTextInputEnabled(forDeviceID: Int) -> Bool { false }
 }
 
 @MainActor

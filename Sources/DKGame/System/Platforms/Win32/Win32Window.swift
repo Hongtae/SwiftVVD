@@ -392,14 +392,14 @@ public class Win32Window : Window {
         return false
     }
 
-    public func mousePosition(forDeviceID deviceID: Int) -> CGPoint {
+    public func mousePosition(forDeviceID deviceID: Int) -> CGPoint? {
         if let hWnd = self.hWnd, deviceID == 0 {
             var pt: POINT = POINT()
             GetCursorPos(&pt)
             ScreenToClient(hWnd, &pt)
             return CGPoint(x: Int(pt.x), y: Int(pt.y)) * (1.0 / self.contentScaleFactor)
         }
-        return CGPoint(x: -1, y: -1)
+        return nil
     }
 
     public func setMousePosition(_ pos: CGPoint, forDeviceID deviceID: Int) {

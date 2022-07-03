@@ -45,6 +45,11 @@ public class UIKitWindow: Window {
         }
     }
 
+    public var title: String {
+        get { self.view.window?.rootViewController?.title ?? "" }
+        set { self.view.window?.rootViewController?.title = newValue }
+    }
+
     public var delegate: WindowDelegate?
 
     var window: UIWindow
@@ -69,8 +74,7 @@ public class UIKitWindow: Window {
         }
         self.window.isHidden = true
         self.window.rootViewController = viewController
-
-        (self.view as! UIKitView).proxyWindow = self
+        self.view.proxyWindow = self
 
         activeWindows.append(window)
     }
@@ -92,7 +96,7 @@ public class UIKitWindow: Window {
     public func activate() {
         self.view.isHidden = false
         self.window.makeKeyAndVisible()
-        self.view.becomeFirstResponder()
+        _=self.view.becomeFirstResponder()
     }
 
     public func minimize() {
@@ -100,22 +104,24 @@ public class UIKitWindow: Window {
     }
 
     public func showMouse(_ show: Bool, forDeviceID deviceID: Int) {
-
     }
+
     public func isMouseVisible(forDeviceID deviceID: Int) -> Bool {
-        false
+        return false
     }
+
     public func holdMouse(_ hold: Bool, forDeviceID deviceID: Int) {
-
     }
+
     public func isMouseHeld(forDeviceID deviceID: Int) -> Bool {
-        false
+        return false
     }
-    public func setMousePosition(_ pos: CGPoint, forDeviceID deviceID: Int) {
 
+    public func setMousePosition(_ pos: CGPoint, forDeviceID deviceID: Int) {
     }
-    public func mousePosition(forDeviceID deviceID: Int) -> CGPoint {
-        .zero
+
+    public func mousePosition(forDeviceID deviceID: Int) -> CGPoint? {
+        return self.view.touchLocation(atIndex: deviceID)
     }
 
     public func enableTextInput(_ enable: Bool, forDeviceID deviceID: Int) {
@@ -132,11 +138,15 @@ public class UIKitWindow: Window {
     }
 
     func postWindowEvent(type: WindowEventType) {
-        self.postWindowEvent(WindowEvent(type: type,
-                                         window: self,
-                                         windowFrame: self.windowFrame,
-                                         contentBounds: self.contentBounds,
-                                         contentScaleFactor: self.contentScaleFactor))
+        self.postWindowEvent(
+            WindowEvent(
+                type: type,
+                window: self,
+                windowFrame: self.windowFrame,
+                contentBounds: self.contentBounds,
+                contentScaleFactor: self.contentScaleFactor
+            )
+        )
     }
 
     func postWindowEvent(_ event: WindowEvent) {

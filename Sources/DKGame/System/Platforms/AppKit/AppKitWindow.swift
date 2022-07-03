@@ -179,6 +179,7 @@ public class AppKitWindow: Window {
         }
         return false
     }
+
     public func holdMouse(_ hold: Bool, forDeviceID deviceID: Int) {
         if deviceID == 0 {
             self.view.holdMouse = hold
@@ -191,16 +192,18 @@ public class AppKitWindow: Window {
         }
         return false
     }
+
     public func setMousePosition(_ pos: CGPoint, forDeviceID deviceID: Int) {
         if deviceID == 0 {
             self.view.mousePosition = pos
         }
     }
-    public func mousePosition(forDeviceID deviceID: Int) -> CGPoint {
+
+    public func mousePosition(forDeviceID deviceID: Int) -> CGPoint? {
         if deviceID == 0 {
             return self.view.mousePosition
         }
-        return CGPoint(x: -1, y: -1)
+        return nil
     }
  
     public func enableTextInput(_ enable: Bool, forDeviceID deviceID: Int) {
@@ -208,6 +211,7 @@ public class AppKitWindow: Window {
             self.view.textInput = enable
         }
     }
+    
     public func isTextInputEnabled(forDeviceID deviceID: Int) -> Bool {
         if deviceID == 0 {
             return self.view.textInput

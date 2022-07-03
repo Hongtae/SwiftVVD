@@ -516,7 +516,7 @@ class AppKitView: NSView, NSTextInputClient, NSWindowDelegate {
         if let window = self.proxyWindow {
             var deviceType: MouseEventDevice = .genericMouse
             var eventType: MouseEventType
-            var pressure: Float = 0.0
+            var pressure: CGFloat = 0.0
             var tilt: CGPoint = .zero
 
             switch event.type {
@@ -531,12 +531,12 @@ class AppKitView: NSView, NSTextInputClient, NSWindowDelegate {
             case .tabletPoint, .tabletProximity:
                 deviceType = .stylus
                 eventType = .pointing
-                pressure = event.pressure
+                pressure = CGFloat(event.pressure)
                 tilt = event.tilt
             case .pressure:
                 deviceType = .stylus
                 eventType = .pointing
-                pressure = event.pressure
+                pressure = CGFloat(event.pressure)
             default:    // unsupported event
                 return
             }
