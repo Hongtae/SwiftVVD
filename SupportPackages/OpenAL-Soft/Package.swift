@@ -9,6 +9,8 @@ let cxxSettings: [CXXSetting] = [
     .headerSearchPath("openal-soft/common"),
     .headerSearchPath("openal-soft/include"),
     .headerSearchPath("openal-soft"),
+    // Temporarily changed the optimization flag due to an internal compiler error
+    .unsafeFlags(["-Oz"], .when(platforms: [.windows], configuration: .release)),
 ]
 
 let package = Package(
@@ -49,6 +51,9 @@ let package = Package(
             cxxSettings: cxxSettings + [
                 //.define("AL_ALEXT_PROTOTYPES"),
                 //.unsafeFlags(["-fms-extensions"], .when(platforms: [.windows]))
+
+                // Temporarily changed the optimization flag due to an internal compiler error
+                .unsafeFlags(["-Oz"], .when(platforms: [.windows], configuration: .release)),
                 .unsafeFlags(["-Wno-unused-value"])
             ],
             linkerSettings: [

@@ -60,7 +60,11 @@ let package = Package(
                 "spirv_msl.cpp",
                 "spirv_parser.cpp",
                 "spirv_reflect.cpp"],
-            publicHeadersPath: "."),
+            publicHeadersPath: ".",
+            cxxSettings: [
+                // Temporarily changed the optimization flag due to an internal compiler error
+                .unsafeFlags(["-Oz"], .when(platforms: [.windows], configuration: .release))
+            ]),
         .target(
             name: "FreeType",
             dependencies: [.target(name: "zlib")],
