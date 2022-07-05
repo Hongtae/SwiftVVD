@@ -20,23 +20,33 @@
 
 #include "config.h"
 
-#include <cmath>
-#include <cstdlib>
-#include <array>
-#include <complex>
 #include <algorithm>
+#include <array>
+#include <cmath>
+#include <complex>
+#include <cstdlib>
+#include <iterator>
 
-#include "alcmain.h"
+#include "alc/effects/base.h"
 #include "alcomplex.h"
-#include "alcontext.h"
+#include "almalloc.h"
+#include "alnumbers.h"
 #include "alnumeric.h"
-#include "alu.h"
-#include "effectslot.h"
-#include "math_defs.h"
+#include "alspan.h"
+#include "core/bufferline.h"
+#include "core/devformat.h"
+#include "core/device.h"
+#include "core/effectslot.h"
+#include "core/mixer.h"
+#include "core/mixer/defs.h"
+#include "intrusive_ptr.h"
+
+struct ContextBase;
 
 
 namespace {
 
+using uint = unsigned int;
 using complex_d = std::complex<double>;
 
 #define STFT_SIZE      1024
@@ -53,7 +63,7 @@ std::array<double,STFT_SIZE> InitHannWindow()
     /* Create lookup table of the Hann window for the desired size, i.e. STFT_SIZE */
     for(size_t i{0};i < STFT_SIZE>>1;i++)
     {
-        constexpr double scale{al::MathDefs<double>::Pi() / double{STFT_SIZE}};
+        constexpr double scale{al::numbers::pi / double{STFT_SIZE}};
         const double val{std::sin(static_cast<double>(i+1) * scale)};
         ret[i] = ret[STFT_SIZE-1-i] = val * val;
     }
@@ -93,8 +103,8 @@ struct PshifterState final : public EffectState {
     float mTargetGains[MAX_OUTPUT_CHANNELS];
 
 
-    void deviceUpdate(const ALCdevice *device, const Buffer &buffer) override;
-    void update(const ALCcontext *context, const EffectSlot *slot, const EffectProps *props,
+    void deviceUpdate(const DeviceBase *device, const Buffer &buffer) override;
+    void update(const ContextBase *context, const EffectSlot *slot, const EffectProps *props,
         const EffectTarget target) override;
     void process(const size_t samplesToDo, const al::span<const FloatBufferLine> samplesIn,
         const al::span<FloatBufferLine> samplesOut) override;
@@ -102,7 +112,7 @@ struct PshifterState final : public EffectState {
     DEF_NEWDEL(PshifterState)
 };
 
-void PshifterState::deviceUpdate(const ALCdevice*, const Buffer&)
+void PshifterState::deviceUpdate(const DeviceBase*, const Buffer&)
 {
     /* (Re-)initializing parameters and clear the buffers. */
     mCount       = 0;
@@ -122,7 +132,7 @@ void PshifterState::deviceUpdate(const ALCdevice*, const Buffer&)
     std::fill(std::begin(mTargetGains),  std::end(mTargetGains),  0.0f);
 }
 
-void PshifterState::update(const ALCcontext*, const EffectSlot *slot,
+void PshifterState::update(const ContextBase*, const EffectSlot *slot,
     const EffectProps *props, const EffectTarget target)
 {
     const int tune{props->Pshifter.CoarseTune*100 + props->Pshifter.FineTune};
@@ -145,7 +155,7 @@ void PshifterState::process(const size_t samplesToDo, const al::span<const Float
     /* Cycle offset per update expected of each frequency bin (bin 0 is none,
      * bin 1 is x1, bin 2 is x2, etc).
      */
-    constexpr double expected_cycles{al::MathDefs<double>::Tau() / OVERSAMP};
+    constexpr double expected_cycles{al::numbers::pi*2.0 / OVERSAMP};
 
     for(size_t base{0u};base < samplesToDo;)
     {
@@ -188,8 +198,8 @@ void PshifterState::process(const size_t samplesToDo, const al::span<const Float
             double tmp{(phase - mLastPhase[k]) - static_cast<double>(k)*expected_cycles};
 
             /* Map delta phase into +/- Pi interval */
-            int qpd{double2int(tmp / al::MathDefs<double>::Pi())};
-            tmp -= al::MathDefs<double>::Pi() * (qpd + (qpd%2));
+            int qpd{double2int(tmp / al::numbers::pi)};
+            tmp -= al::numbers::pi * (qpd + (qpd%2));
 
             /* Get deviation from bin frequency from the +/- Pi interval */
             tmp /= expected_cycles;
