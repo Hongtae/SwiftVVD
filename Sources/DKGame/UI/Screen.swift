@@ -292,7 +292,7 @@ public class Screen {
         return self.mouseCaptors[deviceID]
     }
 
-    public func releaseAllKeyboardsCapturedBy(frame: Frame?) {
+    public func releaseAllKeyboardsCaptured(by frame: Frame?) {
         guard let frame = frame else { return }
         var deviceIDs: [Int] = []
         self.keyboardCaptors.forEach { (key, value) in
@@ -306,7 +306,7 @@ public class Screen {
         }
     }
 
-    public func releaseAllMiceCapturedBy(frame: Frame?) {
+    public func releaseAllMiceCaptured(by frame: Frame?) {
         guard let frame = frame else { return }
         var deviceIDs: [Int] = []
         self.mouseCaptors.forEach { (key, value) in

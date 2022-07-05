@@ -308,8 +308,8 @@ open class Frame {
         if let parent = self.superframe {
             if let screen = self.screen {
                 screen.leaveHoverFrame(self)
-                screen.releaseAllKeyboardsCapturedBy(frame: self)
-                screen.releaseAllMiceCapturedBy(frame: self)
+                screen.releaseAllKeyboardsCaptured(by: self)
+                screen.releaseAllMiceCaptured(by: self)
             }
             
             for i in 0..<parent.subframes.count {
@@ -412,11 +412,11 @@ open class Frame {
     public func captureMouse(deviceID: Int) -> Bool { false }
     public func releaseKeyboard(deviceID: Int) {}
     public func releaseMouse(deviceID: Int) {}
-    public func releaseAllKeyboardsCapturedBySelf() {}
-    public func releaseAllMiceCapturedBySelf() {}
+    public func releaseAllCapturedKeyboards() {}
+    public func releaseAllCapturedMice() {}
 
-    public func isKeyboardCatpuredBySelf(deviceID: Int) -> Bool { false }
-    public func isMouseCapturedBySelf(deviceID: Int) -> Bool { false }
+    public func hasCapturedKeyboard(deviceID: Int) -> Bool { false }
+    public func hasCapturedMouse(deviceID: Int) -> Bool { false }
 
     open func loaded(screen: Screen) async {}
     open func unload() async {}
@@ -586,8 +586,8 @@ open class Frame {
                 taskGroup.addTask{
                     if let screen = await self.screen {
                         await screen.leaveHoverFrame(self)
-                        await screen.releaseAllKeyboardsCapturedBy(frame: self)
-                        await screen.releaseAllMiceCapturedBy(frame: self)
+                        await screen.releaseAllKeyboardsCaptured(by: self)
+                        await screen.releaseAllMiceCaptured(by: self)
                     }
                     await self.unload()
                 }
