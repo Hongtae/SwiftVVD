@@ -1,29 +1,18 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-#define AL_ALEXT_PROTOTYPES
+/* #define AL_ALEXT_PROTOTYPES */
+
+/* Define if deprecated EAX extensions are enabled */
+#define ALSOFT_EAX
+
+/* Define if HRTF data is embedded in the library */
+#define ALSOFT_EMBED_HRTF_DATA
 
 #ifdef _WIN32
-#ifdef AL_LIBTYPE_STATIC
-#define AL_API
-#define ALC_API
-#else
-#define AL_API  __declspec(dllexport)
-#define ALC_API __declspec(dllexport)
-#endif
-
-#define ALIGN(x) __declspec(align(x))
 
 #define SIZEOF_LONG			4
 #define SIZEOF_LONG_LONG	8
-
-#define NOMINMAX
-#define RESTRICT __restrict
-#define _CRT_SECURE_NO_WARNINGS
-#define _CRT_NONSTDC_NO_DEPRECATE
-#define strcasecmp	_stricmp
-#define strncasecmp	_strnicmp
-
 
 #define HAVE__ALIGNED_MALLOC
 #ifdef __clang__
@@ -31,6 +20,7 @@
 #define HAVE_CPUID_H
 #endif
 #define HAVE_CPUID_INTRINSIC
+#define HAVE_SSE_INTRINSICS
 #define HAVE_SSE
 #define HAVE_SSE2
 #define HAVE_SSE3
@@ -40,14 +30,10 @@
 #define HAVE_WINMM
 #define HAVE_WAVE
 #define HAVE_WASAPI
-#define HAVE_STAT
-#define HAVE_STDINT_H
-#define HAVE_WINDOWS_H
 #define HAVE_XMMINTRIN_H
 #define HAVE_MALLOC_H
+#define HAVE_INTRIN_H
 #define HAVE_GUIDDEF_H
-#define HAVE_FLOAT_H
-#define HAVE__CONTROLFP
 #endif	/*fdef _WIN32*/
 
 #if defined(__APPLE__) && defined(__MACH__)

@@ -9,6 +9,10 @@ let cxxSettings: [CXXSetting] = [
     .headerSearchPath("openal-soft/common"),
     .headerSearchPath("openal-soft/include"),
     .headerSearchPath("openal-soft"),
+
+    .define("NOMINMAX", .when(platforms: [.windows])),
+    .define("RESTRICT", to: "__restrict", .when(platforms: [.windows])),
+    .define("_CRT_SECURE_NO_WARNINGS", .when(platforms: [.windows])),
 ]
 
 let package = Package(
@@ -36,8 +40,10 @@ let package = Package(
                 "openal-soft/core/mixer/mixer_sse.cpp",
                 "openal-soft/core/mixer/mixer_sse2.cpp",
                 "openal-soft/core/mixer/mixer_sse3.cpp",
-                "openal-soft/core/mixer/mixer_sse41.cpp", 
-                "openal-soft/core/mixer/mixer_neon.cpp",               
+                "openal-soft/core/mixer/mixer_sse41.cpp",
+                "openal-soft/core/mixer/mixer_neon.cpp",
+                "openal-soft/core/rtkit.cpp",
+                "openal-soft/core/dbus_wrap.cpp",
             ],
             sources: [
                 "openal-soft/common",
@@ -47,9 +53,15 @@ let package = Package(
             ],
             publicHeadersPath: "openal-soft/include",
             cxxSettings: cxxSettings + [
-                //.define("AL_ALEXT_PROTOTYPES"),
-                //.unsafeFlags(["-fms-extensions"], .when(platforms: [.windows]))
-                .unsafeFlags(["-Wno-unused-value"])
+                .define("AL_BUILD_LIBRARY"),
+                .define("AL_ALEXT_PROTOTYPES"),
+
+                .define("ALC_API", to: "__declspec(dllexport)", .when(platforms: [.windows])),
+                .define("AL_API", to: "__declspec(dllexport)", .when(platforms: [.windows])),
+                
+                //.unsafeFlags(["-fms-extensions"], .when(platforms: [.windows])),
+                .unsafeFlags(["-Wno-unused-value"]),
+                .unsafeFlags(["-Oz"], .when(platforms: [.windows], configuration: .release)),
             ],
             linkerSettings: [
                 .linkedLibrary("Shell32", .when(platforms: [.windows])),
@@ -97,7 +109,9 @@ let package = Package(
                 "openal-soft/alc/backends/wasapi.cpp"
             ],
             publicHeadersPath: "swift_module",
-            cxxSettings: cxxSettings),
+            cxxSettings: cxxSettings + [
+                .unsafeFlags(["-Oz"], .when(platforms: [.windows], configuration: .release)),
+            ]),
         .target(
             name: "OpenAL_backend_coreaudio",
             path: "Sources",
