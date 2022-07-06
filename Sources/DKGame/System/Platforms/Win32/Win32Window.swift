@@ -627,7 +627,7 @@ public class Win32Window : Window {
 
     private static func windowProc(_ hWnd: HWND?, _ uMsg: UINT, _ wParam: WPARAM, _ lParam: LPARAM) -> LRESULT {
         let userData = GetWindowLongPtrW(hWnd, GWLP_USERDATA)
-        let obj: AnyObject? = unsafeBitCast(userData, to: AnyObject.self)
+        let window: Win32Window? = userData == 0 ? nil : unsafeBitCast(userData, to: AnyObject.self) as? Win32Window
 
         let MAKEPOINTS = { (lParam: LPARAM) -> POINTS in
             var pt: POINTS = POINTS()
@@ -638,7 +638,7 @@ public class Win32Window : Window {
             return pt
         }
 
-        if let window = obj as? Win32Window, window.hWnd == hWnd {
+        if let window = window, window.hWnd == hWnd {
             switch (uMsg){
             case UINT(WM_ACTIVATE):
                 if wParam == WA_ACTIVE || wParam == WA_CLICKACTIVE {
