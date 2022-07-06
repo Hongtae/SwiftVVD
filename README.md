@@ -1,4 +1,4 @@
-# DKGL/DKGame for swift
+# Swift-VV&D
 
 Game Engine for swift programming language.
 
@@ -20,9 +20,9 @@ Game Engine for swift programming language.
 3. Install Swift 5.6 for Windows 10 (or Lastest stable)
 4. Run "x64 Native Tools Command Prompt for VS 2022" from Visual Studio 2022 Start Menu Group
     * You can also run 'vs2022pro.bat' or 'vs2022com.bat' from your project folder instead. (useful for VSCode terminal)
-5. change directory to SwiftDKGL (ex: cd D:\repo\SwiftDKGL)
+5. change directory to SwiftVVD (ex: cd D:\repo\SwiftVVD)
 6. (from command prompt) swift build
-7. (from command prompt) swift run
+7. (from command prompt) swift run TestApp1
 ```
 
 ### Downloads
@@ -34,6 +34,6 @@ Game Engine for swift programming language.
 If you get an "Invalid manifest..." error when compiling, follow these steps:
 ```
 1. Run "x64 Native Tools Command Prompt for VS 2022" with administrator privileges. (Run as administrator)
-2. Change directory to SwiftDKGL
+2. Change directory to SwiftVVD
 3. Execute fixup_vs2022.bat from the command prompt. This will resolve the missing symbols.
 ```

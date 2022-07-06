@@ -10,8 +10,7 @@ let package = Package(
         .library(
             name: "DKGame-ThirdParty",
             targets: [
-                "DKGameSupport",
-                "DKGameUtils",
+                "DKWrapper",
                 "SPIRV_Cross",
                 "FreeType",
                 ]),
@@ -19,11 +18,7 @@ let package = Package(
     dependencies: [],
     targets: [
         .target(
-            name: "DKGameSupport",
-            dependencies: [],
-            path: "Sources/DKGameSupport"),
-        .target(
-            name: "DKGameUtils",
+            name: "DKWrapper",
             dependencies: [
                 "libpng",
                 "jpeg",
@@ -35,7 +30,7 @@ let package = Package(
                 "libvorbis",
                 "libFLAC",
                 ],
-            path: "Sources/DKGameUtils",
+            path: "Sources/DKWrapper",
             publicHeadersPath: ".",
             cSettings: [],
             cxxSettings: [

@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import DKGameUtils
+import DKWrapper
 
 public class AtomicNumber32 {
     private var atomic: DKAtomicNumber32 = DKAtomicNumber32()

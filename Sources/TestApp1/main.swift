@@ -88,7 +88,7 @@ class MyFrame: Frame {
 
             canvas.drawLines(baseline, lineWidth: 2, color: Color(1, 1, 1))
 
-            let text = "Swift DKGL"
+            let text = "Swift-VV&D"
             
             canvas.drawText(text, font: outlineFont,
                 baselineBegin: baseline[0],

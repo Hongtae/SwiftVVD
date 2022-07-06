@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import DKGameUtils
+import DKWrapper
 
 public enum CompressionAlgorithm {
     case zlib

@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import DKGameUtils
+import DKWrapper
 
 @globalActor public actor AudioActor: GlobalActor {
     public static let shared = AudioActor()

@@ -10,7 +10,7 @@ let package = Package(
         .library(
             name: "DKGame",
             type: .dynamic,
-            targets: ["DKGame"]),
+            targets: ["DKGame", "DKGUI", "DKGameEditor"]),
     ],
     dependencies: [
         // Dependencies declare other packages that this package depends on.
@@ -73,6 +73,17 @@ let package = Package(
                 // .unsafeFlags([
                 //     "-LSupportPackages/Vulkan/lib/Win32"
                 //     ], .when(platforms: [.windows]))
+            ]),
+        .target(
+            name: "DKGUI",
+            dependencies: [
+                .target(name: "DKGame"),
+            ]),
+        .executableTarget(
+            name: "DKGameEditor",
+            dependencies: [
+                .target(name: "DKGame"),
+                .target(name: "DKGUI"),
             ]),
         .testTarget(
             name: "DKGameTests",

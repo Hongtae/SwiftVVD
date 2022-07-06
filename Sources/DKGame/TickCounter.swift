@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import DKGameUtils
+import DKWrapper
 
 public struct TickCounter: Equatable, Comparable {
     public private(set) var timestamp: UInt64
