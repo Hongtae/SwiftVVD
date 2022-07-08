@@ -83,7 +83,7 @@ public class VulkanSwapChain: SwapChain {
     	vkDestroySemaphore(device.device, self.frameReadySemaphore, device.allocationCallbacks)
     }
 
-    public func setup() async -> Bool {
+    func setup() async -> Bool {
         let device = queue.device as! VulkanGraphicsDevice
         let instance = device.instance
         let physicalDevice = device.physicalDevice
@@ -170,7 +170,7 @@ public class VulkanSwapChain: SwapChain {
     }
 
     @discardableResult
-    public func update() async -> Bool {
+    func update() async -> Bool {
         let device = self.queue.device as! VulkanGraphicsDevice
         //let instance = device.instance
         let physicalDevice = device.physicalDevice
@@ -390,7 +390,7 @@ public class VulkanSwapChain: SwapChain {
         return true 
     }
 
-    public func setupFrame() async {
+    func setupFrame() async {
         let device = self.queue.device as! VulkanGraphicsDevice
 
         let resetSwapchain = synchronizedBy(locking: self.lock) { self.deviceReset }
@@ -460,8 +460,8 @@ public class VulkanSwapChain: SwapChain {
         }
     }
 
-    public var maximumBufferCount: UInt {
-        synchronizedBy(locking: self.lock) { UInt(self.imageViews.count) }
+    public var maximumBufferCount: Int {
+        synchronizedBy(locking: self.lock) { self.imageViews.count }
     }
 
     public func currentRenderPassDescriptor() async -> RenderPassDescriptor {
