@@ -8,12 +8,12 @@
 public struct ShaderFunctionConstant {
     public var name: String
     public var type: ShaderDataType
-    public var index: UInt32
+    public var index: Int
     public var required: Bool
 
     public init(name: String,
                 type: ShaderDataType,
-                index: UInt32,
+                index: Int,
                 required: Bool) {
         self.name = name
         self.type = type

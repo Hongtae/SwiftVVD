@@ -10,7 +10,7 @@ import SPIRV_Cross
 
 public struct ShaderAttribute {
     public var name : String
-    public var location : UInt32
+    public var location : Int
     public var type : ShaderDataType
     public var enabled : Bool
 }
@@ -27,9 +27,9 @@ public enum ShaderDescriptorType {
 }
 
 public struct ShaderDescriptor {
-    public var set : UInt32
-    public var binding : UInt32
-    public var count : UInt32 // array size
+    public var set : Int
+    public var binding : Int
+    public var count : Int // array size
     public var type : ShaderDescriptorType
 }
 

@@ -9,7 +9,81 @@
 import Foundation
 import Metal
 
-public class MetalShaderModule {
+struct MetalResourceBinding {
+    var set: Int
+    var binding: Int
 
+    var bufferIndex: Int
+    var textureIndex: Int
+    var samplerIndex: Int
+
+    var type: ShaderResourceType
+}
+
+struct MetalStageResourceBindingMap {
+    var resourceBindings: [MetalResourceBinding] // spir-v to msl bind mapping
+    var inputAttributeIndexOffset: Int
+    var pushConstantIndex: Int
+    var pushConstantOffset: Int
+    var pushConstantSize: Int
+    var pushConstantBufferSize: Int     // buffer size in MSL (not spir-v)
+}
+
+public class MetalShaderModule: ShaderModule {
+
+    public var device: GraphicsDevice
+    let library: MTLLibrary
+
+    struct NameConversion {
+        var original: String
+        var cleansed: String
+    }
+
+    public let functionNames: [String] // spirv names
+    let functionNameMap: [String: String]   // spirv to msl table
+    let workgroupSize: MTLSize
+
+    let bindings: MetalStageResourceBindingMap
+
+
+    init(device: MetalGraphicsDevice, library: MTLLibrary, names: [NameConversion]) {
+        self.device = device
+        self.library = library
+
+        var fnames: [String] = []
+        var fnameMap: [String: String] = [:]
+
+        for nc in names {
+            fnames.append(nc.original)
+            fnameMap[nc.original] = nc.cleansed
+        }
+
+        self.functionNames = fnames
+        self.functionNameMap = fnameMap
+        self.workgroupSize = MTLSize(width: 1, height: 1, depth: 1)
+        self.bindings = MetalStageResourceBindingMap(
+            resourceBindings: [],
+            inputAttributeIndexOffset: 0,
+            pushConstantIndex: 0,
+            pushConstantOffset: 0,
+            pushConstantSize: 0,
+            pushConstantBufferSize: 0)
+
+        // Check function availability
+        fnames = library.functionNames
+        for nc in names {
+            if fnames.contains(nc.cleansed) == false {
+                Log.err("MTLLibrary function not found: \(nc.cleansed)")
+            }
+        }
+    }
+
+    public func makeFunction(name: String) -> ShaderFunction? {
+        return nil
+    }
+
+    public func makeFunction(name: String, specializedValues: [ShaderSpecialization]) -> ShaderFunction? {
+        return nil
+    }
 }
 #endif //if ENABLE_METAL
