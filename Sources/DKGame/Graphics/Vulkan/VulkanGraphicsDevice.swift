@@ -508,9 +508,9 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             layoutBindings.reserveCapacity(layout.bindings.count)
             for binding in layout.bindings {
                 var layoutBinding = VkDescriptorSetLayoutBinding()
-                layoutBinding.binding = binding.binding
+                layoutBinding.binding = UInt32(binding.binding)
                 layoutBinding.descriptorType = binding.type.vkType()
-                layoutBinding.descriptorCount = binding.arrayLength
+                layoutBinding.descriptorCount = UInt32(binding.arrayLength)
 
                 // input-attachment is for the fragment shader only! (framebuffer load operation)
                 if layoutBinding.descriptorType == VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT &&
@@ -1557,7 +1557,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         pushConstantRanges.reserveCapacity(numPushConstantRanges)
 
         var maxDescriptorBindings = 0   // maximum number of descriptor
-        var maxDescriptorSets: UInt32 = 0       // maximum number of sets
+        var maxDescriptorSets = 0       // maximum number of sets
 
         for fn in functions {
             let f = fn as! VulkanShaderFunction
@@ -1601,7 +1601,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
                             if b.binding == desc.binding {  // exist binding!! (conflict)
                                 newBinding = false
                                 if b.descriptorType == desc.type.vkType() {
-                                    b.descriptorCount = max(b.descriptorCount, desc.count)
+                                    b.descriptorCount = max(b.descriptorCount, UInt32(desc.count))
                                     b.stageFlags |= module.stage.vkFlags()
                                     descriptorBindings[i] = b // udpate.
                                 } else {
@@ -1612,9 +1612,9 @@ public class VulkanGraphicsDevice : GraphicsDevice {
                         }
                         if newBinding {
                             let binding = VkDescriptorSetLayoutBinding(
-                                binding: desc.binding,
+                                binding: UInt32(desc.binding),
                                 descriptorType: desc.type.vkType(),
-                                descriptorCount: desc.count,
+                                descriptorCount: UInt32(desc.count),
                                 stageFlags: layoutDefaultStageFlags | module.stage.vkFlags(), 
                                 pImmutableSamplers: nil  /* VkSampler* pImmutableSamplers */
                             )

@@ -188,7 +188,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
                 framebufferImageViews.append(rt.imageView)
 
                 var clearValue = VkClearValue()
-                clearValue.depthStencil.depth = self.renderPassDescriptor.depthStencilAttachment.clearDepth
+                clearValue.depthStencil.depth = Float(self.renderPassDescriptor.depthStencilAttachment.clearDepth)
                 clearValue.depthStencil.stencil = self.renderPassDescriptor.depthStencilAttachment.clearStencil
                 attachmentClearValues.append(clearValue)
 
@@ -355,7 +355,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
         }
     }
     
-    public func setResource(_ set: ShaderBindingSet, atIndex index: UInt32) {
+    public func setResource(_ set: ShaderBindingSet, atIndex index: Int) {
         assert(set is VulkanShaderBindingSet)
         var descriptorSet: VulkanDescriptorSet? = nil
         if let bindingSet = set as? VulkanShaderBindingSet {
@@ -374,7 +374,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
                     vkCmdBindDescriptorSets(commandBuffer,
                                             VK_PIPELINE_BIND_POINT_GRAPHICS,
                                             pipelineState.layout,
-                                            index,
+                                            UInt32(index),
                                             1,
                                             &ds,
                                             0,      // dynamic offsets
@@ -432,7 +432,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
                 if let bufferView = buffer as? VulkanBufferView {
                     assert(bufferView.buffer != nil)
                     bufferArray.append(bufferView.buffer!.buffer)
-                    offsetArray.append(offset)
+                    offsetArray.append(VkDeviceSize(offset))
 
                     self.encoder!.buffers.append(buffer)
                 } else {
@@ -444,7 +444,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
             assert(offsetArray.count == count)
 
             let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
-                vkCmdBindVertexBuffers(commandBuffer, index, UInt32(count), &bufferArray, &offsetArray)
+                vkCmdBindVertexBuffers(commandBuffer, UInt32(index), UInt32(count), &bufferArray, &offsetArray)
             }
             self.encoder!.commands.append(command)
         }
@@ -462,7 +462,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
             case .uint32:   indexType = VK_INDEX_TYPE_UINT32
         }
         let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
-            vkCmdBindIndexBuffer(commandBuffer, buffer.buffer, offset, indexType)
+            vkCmdBindIndexBuffer(commandBuffer, buffer.buffer, VkDeviceSize(offset), indexType)
         }
         self.encoder!.buffers.append(bufferView)
         self.encoder!.commands.append(command)
@@ -479,7 +479,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
                     vkCmdPushConstants(commandBuffer,
                                        pipelineState.layout,
                                        stageFlags,
-                                       offset,
+                                       UInt32(offset),
                                        UInt32(buffer.count),
                                        &buffer)
                 }

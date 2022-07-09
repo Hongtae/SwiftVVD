@@ -216,7 +216,7 @@ private func descriptorFromSPVC(compiler: spvc_compiler,
     for i in 0..<spvc_type_get_num_array_dimensions(spvcType) {
         count = count * spvc_type_get_array_dimension(spvcType, i)
     }
-    return ShaderDescriptor(set: set, binding: binding, count: count, type: type)
+    return ShaderDescriptor(set: Int(set), binding: Int(binding), count: Int(count), type: type)
 }
 
 private func resourceStructMembersFromSPVC(compiler: spvc_compiler,
@@ -356,7 +356,7 @@ private func attributeFromSPVC(compiler: spvc_compiler,
     }
     
     return ShaderAttribute(name: name,
-                          location: location,
+                          location: Int(location),
                           type: type,
                           enabled: enabled)
 }

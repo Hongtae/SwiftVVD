@@ -81,7 +81,7 @@ public struct VulkanDescriptorPoolID: Hashable, Equatable {
         for binding in layout.bindings {
             let type = binding.type.vkType()
             let index = index(of: type)
-            typeSize[index] += binding.arrayLength
+            typeSize[index] += UInt32(binding.arrayLength)
         }
         var mask: UInt32 = 0
         for i in 0..<typeSize.count {

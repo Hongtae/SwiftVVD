@@ -101,8 +101,8 @@ public class VulkanShaderBindingSet: ShaderBindingSet {
                     if let buffer = buffer {
                         var bufferInfo = VkDescriptorBufferInfo()
                         bufferInfo.buffer = buffer.buffer
-                        bufferInfo.offset = buffers[i].offset
-                        bufferInfo.range = buffers[i].length
+                        bufferInfo.offset = VkDeviceSize(buffers[i].offset)
+                        bufferInfo.range = VkDeviceSize(buffers[i].length)
 
                         descriptorBinding.bufferInfos.append(bufferInfo)
                     }

@@ -141,7 +141,7 @@ public class VulkanComputeCommandEncoder: VulkanCommandEncoder, ComputeCommandEn
                     vkCmdBindDescriptorSets(commandBuffer,
                                             VK_PIPELINE_BIND_POINT_COMPUTE,
                                             pipelineState.layout,
-                                            index,
+                                            UInt32(index),
                                             1,
                                             &ds,
                                             0,      // dynamic offsets
@@ -175,7 +175,7 @@ public class VulkanComputeCommandEncoder: VulkanCommandEncoder, ComputeCommandEn
                     vkCmdPushConstants(commandBuffer,
                                        pipelineState.layout,
                                        stageFlags,
-                                       offset,
+                                       UInt32(offset),
                                        UInt32(buffer.count),
                                        &buffer)
                 }
@@ -186,7 +186,7 @@ public class VulkanComputeCommandEncoder: VulkanCommandEncoder, ComputeCommandEn
 
     public func dispatch(numGroupX: Int, numGroupY: Int, numGroupZ: Int) {
         let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
-            vkCmdDispatch(commandBuffer, numGroupX, numGroupY, numGroupZ)
+            vkCmdDispatch(commandBuffer, UInt32(numGroupX), UInt32(numGroupY), UInt32(numGroupZ))
         }
         self.encoder!.commands.append(command)
     }
