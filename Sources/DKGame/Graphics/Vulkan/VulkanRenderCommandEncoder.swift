@@ -414,11 +414,11 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
         self.encoder!.commands.append(command)
     }
 
-    public func setVertexBuffer(_ buffer: Buffer, offset: UInt64, index: UInt32) {
+    public func setVertexBuffer(_ buffer: Buffer, offset: Int, index: Int) {
         setVertexBuffers([buffer], offsets: [offset], index: index)
     }
 
-    public func setVertexBuffers(_ buffers: [Buffer], offsets: [UInt64], index: UInt32) {
+    public func setVertexBuffers(_ buffers: [Buffer], offsets: [Int], index: Int) {
         assert(buffers.count == offsets.count)
         let count = min(buffers.count, offsets.count)
         if count > 0 {
@@ -450,7 +450,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func setIndexBuffer(_ buffer: Buffer, offset: UInt64, type: IndexType) {
+    public func setIndexBuffer(_ buffer: Buffer, offset: Int, type: IndexType) {
         assert(buffer is VulkanBufferView)
         guard let bufferView = buffer as? VulkanBufferView else { return }
         assert(bufferView.buffer != nil)
@@ -468,7 +468,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
         self.encoder!.commands.append(command)
     }
  
-    public func pushConstant<D: DataProtocol>(stages: ShaderStageFlags, offset: UInt32, data: D) {
+    public func pushConstant<D: DataProtocol>(stages: ShaderStageFlags, offset: Int, data: D) {
         let stageFlags = stages.vkFlags()
         if stageFlags != 0 && data.count > 0 {
             var buffer: [UInt8] = .init(data)

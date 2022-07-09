@@ -122,7 +122,7 @@ public class VulkanComputeCommandEncoder: VulkanCommandEncoder, ComputeCommandEn
         }
     }
     
-    public func setResource(_ set: ShaderBindingSet, atIndex index: UInt32) {
+    public func setResource(_ set: ShaderBindingSet, atIndex index: Int) {
         assert(set is VulkanShaderBindingSet)
         var descriptorSet: VulkanDescriptorSet? = nil
         if let bindingSet = set as? VulkanShaderBindingSet {
@@ -164,7 +164,7 @@ public class VulkanComputeCommandEncoder: VulkanCommandEncoder, ComputeCommandEn
         }
     }
 
-    public func pushConstant<D: DataProtocol>(stages: ShaderStageFlags, offset: UInt32, data: D) {
+    public func pushConstant<D: DataProtocol>(stages: ShaderStageFlags, offset: Int, data: D) {
         if stages.contains(.compute) && data.count > 0 {
             let stageFlags = stages.vkFlags()
             var buffer: [UInt8] = .init(data)
@@ -184,7 +184,7 @@ public class VulkanComputeCommandEncoder: VulkanCommandEncoder, ComputeCommandEn
         }
     }
 
-    public func dispatch(numGroupX: UInt32, numGroupY: UInt32, numGroupZ: UInt32) {
+    public func dispatch(numGroupX: Int, numGroupY: Int, numGroupZ: Int) {
         let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
             vkCmdDispatch(commandBuffer, numGroupX, numGroupY, numGroupZ)
         }

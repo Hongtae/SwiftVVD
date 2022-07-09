@@ -17,9 +17,9 @@ public enum RenderPassAttachmentStoreAction {
 }
 
 public protocol RenderPassAttachmentDescriptor {
-    var renderTarget: Texture? { get }
-    var loadAction: RenderPassAttachmentLoadAction { get }
-    var storeAction: RenderPassAttachmentStoreAction { get }
+    var renderTarget: Texture? { get set }
+    var loadAction: RenderPassAttachmentLoadAction { get set }
+    var storeAction: RenderPassAttachmentStoreAction { get set }
 }
 
 public struct RenderPassColorAttachmentDescriptor: RenderPassAttachmentDescriptor {
@@ -45,13 +45,13 @@ public struct RenderPassDepthStencilAttachmentDescriptor: RenderPassAttachmentDe
     public var loadAction: RenderPassAttachmentLoadAction
     public var storeAction: RenderPassAttachmentStoreAction
 
-    public var clearDepth: Float
+    public var clearDepth: Double
     public var clearStencil: UInt32
 
     public init(renderTarget: Texture? = nil,
                 loadAction: RenderPassAttachmentLoadAction = .dontCare,
                 storeAction: RenderPassAttachmentStoreAction = .dontCare,
-                clearDepth: Float = 1.0,
+                clearDepth: Double = 1.0,
                 clearStencil: UInt32 = 0) {
         self.renderTarget = renderTarget
         self.loadAction = loadAction
@@ -65,11 +65,11 @@ public struct RenderPassDescriptor {
     public var colorAttachments: [RenderPassColorAttachmentDescriptor]
     public var depthStencilAttachment: RenderPassDepthStencilAttachmentDescriptor
 
-    public var numberOfActiveLayers: UInt64
+    public var numberOfActiveLayers: Int
 
     public init(colorAttachments: [RenderPassColorAttachmentDescriptor] = [],
                 depthStencilAttachment: RenderPassDepthStencilAttachmentDescriptor = .init(),
-                numberOfActiveLayers: UInt64 = 0) {
+                numberOfActiveLayers: Int = 0) {
         self.colorAttachments = colorAttachments
         self.depthStencilAttachment = depthStencilAttachment
         self.numberOfActiveLayers = numberOfActiveLayers

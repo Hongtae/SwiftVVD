@@ -37,14 +37,14 @@ public struct Viewport {
 }
 
 public protocol RenderCommandEncoder: CommandEncoder {
-    func setResource(_: ShaderBindingSet, atIndex: UInt32)
+    func setResource(_: ShaderBindingSet, atIndex: Int)
     func setViewport(_: Viewport)
     func setRenderPipelineState(_: RenderPipelineState)
-    func setVertexBuffer(_: Buffer, offset: UInt64, index: UInt32)
-    func setVertexBuffers(_: [Buffer], offsets: [UInt64], index: UInt32)
-    func setIndexBuffer(_: Buffer, offset: UInt64, type: IndexType)
+    func setVertexBuffer(_: Buffer, offset: Int, index: Int)
+    func setVertexBuffers(_: [Buffer], offsets: [Int], index: Int)
+    func setIndexBuffer(_: Buffer, offset: Int, type: IndexType)
     
-    func pushConstant<D: DataProtocol>(stages: ShaderStageFlags, offset: UInt32, data: D)
+    func pushConstant<D: DataProtocol>(stages: ShaderStageFlags, offset: Int, data: D)
 
     func draw(numVertices: Int, numInstances: Int, baseVertex: Int, baseInstance: Int)
     func drawIndexed(numIndices: Int, numInstances: Int, indexOffset: Int, vertexOffset: Int, baseInstance: Int)

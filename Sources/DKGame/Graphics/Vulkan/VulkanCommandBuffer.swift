@@ -258,9 +258,7 @@ public class VulkanCommandBuffer: CommandBuffer {
 
             let commandQueue = self.commandQueue as! VulkanCommandQueue
             return commandQueue.submit(self.submitInfos) {
-                for op in self.completedHandlers {
-                    op(self)
-                }
+                self.completedHandlers.forEach { $0(self) }
             }
         }
 

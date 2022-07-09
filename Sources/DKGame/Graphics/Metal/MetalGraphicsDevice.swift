@@ -24,12 +24,17 @@ public class MetalGraphicsDevice: GraphicsDevice {
         if name.isEmpty {
             device = MTLCreateSystemDefaultDevice()
         } else {
+#if os(macOS) || targetEnvironment(macCatalyst)
             let devices = MTLCopyAllDevices()
             for dev in devices {
                 if name.caseInsensitiveCompare(dev.name) == .orderedSame {
                     device = dev
                     break
                 }
+            }
+#endif
+            if device == nil {
+                device = MTLCreateSystemDefaultDevice()
             }
         }
 
