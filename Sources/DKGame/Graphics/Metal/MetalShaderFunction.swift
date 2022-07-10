@@ -14,11 +14,14 @@ public class MetalShaderFunction: ShaderFunction {
     public let functionConstants: [String : ShaderFunctionConstant]
     public let functionName: String
     public let stage: ShaderStage
-    public let device: GraphicsDevice
-    let function: MTLFunction
 
-    init(device: MetalGraphicsDevice, function: MTLFunction, workgroupSize: MTLSize, name: String) {
-        self.device = device
+    public var device: GraphicsDevice { self.module.device }
+
+    let function: MTLFunction
+    let module: MetalShaderModule
+
+    init(module: MetalShaderModule, function: MTLFunction, workgroupSize: MTLSize, name: String) {
+        self.module = module
         self.function = function
         self.functionName = name
 

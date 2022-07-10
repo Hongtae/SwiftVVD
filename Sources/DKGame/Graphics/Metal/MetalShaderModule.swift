@@ -79,10 +79,41 @@ public class MetalShaderModule: ShaderModule {
     }
 
     public func makeFunction(name: String) -> ShaderFunction? {
+        if let fname = functionNameMap[name] {
+            if let fn = self.library.makeFunction(name: fname) {
+                return MetalShaderFunction(module: self, function: fn, workgroupSize: workgroupSize, name: name)
+            }
+        }
         return nil
     }
 
-    public func makeFunction(name: String, specializedValues: [ShaderSpecialization]) -> ShaderFunction? {
+    public func makeFunction(name: String, constantValues: [ShaderFunctionConstantValue]) -> ShaderFunction? {
+        if constantValues.isEmpty {
+            return makeFunction(name: name)
+        }
+
+        if let fname = functionNameMap[name] {
+
+            let fcv = MTLFunctionConstantValues()
+            for value in constantValues {
+                value.data.withUnsafeBytes {
+                    if $0.count >= value.size {
+                        fcv.setConstantValue($0.baseAddress!,
+                                             type: value.type.mtlDataType(),
+                                             index: value.index)
+                    } else {
+                        Log.err("ShaderFunctionConstantValue invalid data! (type:\(value.type), index:\(value.index), size: \(value.size))")
+                    }
+                }
+            }
+
+            do {
+                let fn = try self.library.makeFunction(name: fname, constantValues: fcv)
+                return MetalShaderFunction(module: self, function: fn, workgroupSize: workgroupSize, name: name)
+            } catch {
+                Log.err("MTLLibrary.makeFunction failed: \(error.localizedDescription)")
+            }
+        }
         return nil
     }
 }

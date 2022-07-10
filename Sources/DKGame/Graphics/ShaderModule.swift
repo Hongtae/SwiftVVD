@@ -7,15 +7,15 @@
 
 import Foundation
 
-public struct ShaderSpecialization {
+public struct ShaderFunctionConstantValue {
     public var type: ShaderDataType
     public var data: ContiguousBytes
-    public var index: UInt32
+    public var index: Int
     public var size: Int
 
     public init(type: ShaderDataType,
                 data: ContiguousBytes,
-                index: UInt32,
+                index: Int,
                 size: Int) {
         self.type = type
         self.data = data
@@ -26,7 +26,7 @@ public struct ShaderSpecialization {
 
 public protocol ShaderModule {
     func makeFunction(name: String) -> ShaderFunction?
-    func makeFunction(name: String, specializedValues: [ShaderSpecialization]) -> ShaderFunction?
+    func makeFunction(name: String, constantValues: [ShaderFunctionConstantValue]) -> ShaderFunction?
 
     var functionNames: [String] { get }
     var device: GraphicsDevice { get }
