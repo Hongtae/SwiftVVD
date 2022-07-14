@@ -164,7 +164,7 @@ public class VulkanImage {
     }
 
     public func layout() -> VkImageLayout {
-        return VkImageLayout(VK_IMAGE_LAYOUT_UNDEFINED.rawValue)
+        synchronizedBy(locking: self.layoutLock) { self.layoutInfo.layout }
     }
 
     public var width: Int       { Int(self.extent.width) }
