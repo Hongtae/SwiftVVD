@@ -216,7 +216,6 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
             renderPassCreateInfo.subpassCount = 1
             renderPassCreateInfo.pSubpasses = unsafePointerCopy(from: subpassDescription, holder: tempHolder)
 
-            let device = self.commandBuffer.device as! VulkanGraphicsDevice
             var err = vkCreateRenderPass(device.device, &renderPassCreateInfo, device.allocationCallbacks, &self.renderPass)
             if err != VK_SUCCESS {
                 Log.err("vkCreateRenderPass failed: \(err)")
@@ -303,6 +302,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
             return true
         }
     }
+
     private var encoder: Encoder?
     public let commandBuffer: CommandBuffer
 

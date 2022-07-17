@@ -70,6 +70,7 @@ public class VulkanComputeCommandEncoder: VulkanCommandEncoder, ComputeCommandEn
             return true
         }        
     }
+    
     private var encoder: Encoder?
     public let commandBuffer: CommandBuffer
 

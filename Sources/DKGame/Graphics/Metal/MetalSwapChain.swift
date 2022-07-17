@@ -163,6 +163,5 @@ public class MetalSwapChain: SwapChain {
             // update
         }
     }
-
 }
 #endif //if ENABLE_METAL
