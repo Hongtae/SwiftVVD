@@ -155,7 +155,7 @@ public class MetalComputeCommandEncoder: ComputeCommandEncoder {
         let size = data.count
         if stages.contains(.compute), size > 0 {
             let buffer = Array<UInt8>(data)
-            encoder!.commands.append {
+            self.encoder?.commands.append {
                 (encoder: MTLComputeCommandEncoder, state: inout EncodingState) in
 
                 if let pipelineState = state.pipelineState {
@@ -184,7 +184,7 @@ public class MetalComputeCommandEncoder: ComputeCommandEncoder {
 
     public func dispatch(numGroupX: Int, numGroupY: Int, numGroupZ: Int) {
         assert(self.encoder != nil)
-        self.encoder!.commands.append {
+        self.encoder?.commands.append {
             (encoder: MTLComputeCommandEncoder, state: inout EncodingState) in
 
             if let pipelineState = state.pipelineState {
@@ -198,8 +198,11 @@ public class MetalComputeCommandEncoder: ComputeCommandEncoder {
     }
 
     public func endEncoding() {
-        let commandBuffer = self.commandBuffer as! MetalCommandBuffer
-        commandBuffer.endEncoder(self.encoder!)
+        assert(self.encoder != nil)
+        if let commandBuffer = self.commandBuffer as? MetalCommandBuffer,
+           let encoder = self.encoder {
+            commandBuffer.endEncoder(encoder)
+        }
         self.encoder = nil
     }
 
