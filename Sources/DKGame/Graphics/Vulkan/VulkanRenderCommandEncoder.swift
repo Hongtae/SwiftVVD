@@ -398,12 +398,12 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
     }
 
     public func setViewport(_ v: Viewport) {
-        var viewport = VkViewport(x: v.x,
-                                  y: v.y,
-                                  width: v.width,
-                                  height: v.height,
-                                  minDepth: v.nearZ,
-                                  maxDepth: v.farZ)
+        var viewport = VkViewport(x: Float(v.x),
+                                  y: Float(v.y),
+                                  width: Float(v.width),
+                                  height: Float(v.height),
+                                  minDepth: Float(v.nearZ),
+                                  maxDepth: Float(v.farZ))
         if flipViewportY {
             viewport.y = viewport.y + viewport.height // set origin to lower-left.
             viewport.height = -(viewport.height) // negative height.

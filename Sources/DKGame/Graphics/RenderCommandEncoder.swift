@@ -14,19 +14,19 @@ public enum VisibilityResultMode {
 }
 
 public struct Viewport {
-    public var x: Float
-    public var y: Float
-    public var width: Float
-    public var height: Float
-    public var nearZ: Float
-    public var farZ: Float
+    public var x: Double
+    public var y: Double
+    public var width: Double
+    public var height: Double
+    public var nearZ: Double
+    public var farZ: Double
 
-    public init(x: Float,
-                y: Float,
-                width: Float,
-                height: Float,
-                nearZ: Float,
-                farZ: Float) {
+    public init(x: Double,
+                y: Double,
+                width: Double,
+                height: Double,
+                nearZ: Double,
+                farZ: Double) {
         self.x = x
         self.y = y
         self.width = width
