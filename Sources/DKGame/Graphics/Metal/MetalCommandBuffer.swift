@@ -47,8 +47,7 @@ public class MetalCommandBuffer: CommandBuffer {
 
         let desc = MTLRenderPassDescriptor()
 
-        for i in 0..<descriptor.colorAttachments.count {
-            let ca = descriptor.colorAttachments[i]
+        for (i, ca) in descriptor.colorAttachments.enumerated() {
             let attachment = MTLRenderPassColorAttachmentDescriptor()
 
             if let rt = ca.renderTarget as? MetalTexture {

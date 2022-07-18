@@ -202,17 +202,12 @@ class UIKitView: UIView, UITextFieldDelegate {
     // MARK: - UITouch, Touch Events
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         for touch in touches {
-            var index = self.touches.count
             // find empty slot in self.touches
-            for i in 0..<self.touches.count {
-                if self.touches[i] == nil {
-                    index = i
-                    break
-                }
-            }
+            let index = self.touches.firstIndex(of: nil) ?? self.touches.count
             if index == self.touches.count {    // no empty slot, add one
                 self.touches.append(nil)
             }
+            assert(index < self.touches.count)
 
             if let window = self.proxyWindow {
                 let device: MouseEventDevice = touch.type == .stylus ? .stylus : .touch
@@ -238,25 +233,22 @@ class UIKitView: UIView, UITextFieldDelegate {
         for touch in touches {
             var processed = false
 
-            for index in 0..<self.touches.count {
-                if self.touches[index] === touch {
-                    let device: MouseEventDevice = touch.type == .stylus ? .stylus : .touch
-                    let pos = touch.location(in: self)
-                    let old = touch.previousLocation(in: self)
-                    let delta = CGPoint(x: pos.x - old.x, y: pos.y - old.y)
-                    let tilt = CGPoint(x: touch.azimuthAngle(in: self), y: touch.altitudeAngle)
-                    window.postMouseEvent(MouseEvent(type: .move,
-                                                     window: window,
-                                                     device: device,
-                                                     deviceID: index,
-                                                     buttonID: 0,
-                                                     location: pos,
-                                                     delta: delta,
-                                                     tilt: tilt,
-                                                     pressure: touch.force))
-                    processed = true
-                    break
-                }
+            if let index = self.touches.firstIndex(of: touch) {
+                let device: MouseEventDevice = touch.type == .stylus ? .stylus : .touch
+                let pos = touch.location(in: self)
+                let old = touch.previousLocation(in: self)
+                let delta = CGPoint(x: pos.x - old.x, y: pos.y - old.y)
+                let tilt = CGPoint(x: touch.azimuthAngle(in: self), y: touch.altitudeAngle)
+                window.postMouseEvent(MouseEvent(type: .move,
+                                                 window: window,
+                                                 device: device,
+                                                 deviceID: index,
+                                                 buttonID: 0,
+                                                 location: pos,
+                                                 delta: delta,
+                                                 tilt: tilt,
+                                                 pressure: touch.force))
+                processed = true
             }
             if processed == false {
                 Log.err("Untrackable touch event: \(touch)")
@@ -268,30 +260,25 @@ class UIKitView: UIView, UITextFieldDelegate {
         for touch in touches {
             var processed = false
 
-            for index in 0..<self.touches.count {
-                if self.touches[index] === touch {
-
-
-                    if let window = self.proxyWindow {
-                        let device: MouseEventDevice = touch.type == .stylus ? .stylus : .touch
-                        let pos = touch.location(in: self)
-                        let old = touch.previousLocation(in: self)
-                        let delta = CGPoint(x: pos.x - old.x, y: pos.y - old.y)
-                        let tilt = CGPoint(x: touch.azimuthAngle(in: self), y: touch.altitudeAngle)
-                        window.postMouseEvent(MouseEvent(type: .buttonUp,
-                                                         window: window,
-                                                         device: device,
-                                                         deviceID: index,
-                                                         buttonID: 0,
-                                                         location: pos,
-                                                         delta: delta,
-                                                         tilt: tilt,
-                                                         pressure: touch.force))
-                    }
-                    self.touches[index] = nil
-                    processed = true
-                    break
+            if let index = self.touches.firstIndex(of: touch) {
+                if let window = self.proxyWindow {
+                    let device: MouseEventDevice = touch.type == .stylus ? .stylus : .touch
+                    let pos = touch.location(in: self)
+                    let old = touch.previousLocation(in: self)
+                    let delta = CGPoint(x: pos.x - old.x, y: pos.y - old.y)
+                    let tilt = CGPoint(x: touch.azimuthAngle(in: self), y: touch.altitudeAngle)
+                    window.postMouseEvent(MouseEvent(type: .buttonUp,
+                                                     window: window,
+                                                     device: device,
+                                                     deviceID: index,
+                                                     buttonID: 0,
+                                                     location: pos,
+                                                     delta: delta,
+                                                     tilt: tilt,
+                                                     pressure: touch.force))
                 }
+                self.touches[index] = nil
+                processed = true
             }
             if processed == false {
                 Log.err("Untrackable touch event: \(touch)")
