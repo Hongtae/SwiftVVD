@@ -29,8 +29,7 @@ public class VulkanDescriptorPoolChain {
     }
 
     public func allocateDescriptorSet(layout: VkDescriptorSetLayout) -> AllocationInfo? {
-        for i in 0..<self.descriptorPools.count {
-            let pool = self.descriptorPools[i]
+        for (i, pool) in self.descriptorPools.enumerated() {
             if let ds = pool.allocateDescriptorSet(layout: layout) {
                 if i > 0 {
                     self.descriptorPools.swapAt(i, 0)                    

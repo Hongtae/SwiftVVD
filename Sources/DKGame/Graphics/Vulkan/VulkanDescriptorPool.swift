@@ -61,14 +61,13 @@ public struct VulkanDescriptorPoolID: Hashable, Equatable {
 
     public init(poolSizes: [VkDescriptorPoolSize]) {
         var typeSize: [UInt32] = .init(repeating: 0, count: descriptorTypes.count)
-        for i in 0..<poolSizes.count {
-            let poolSize = poolSizes[i]
-            let index = index(of: poolSize.type)
-            typeSize[index] += poolSize.descriptorCount
+        for ps in poolSizes {
+            let index = index(of: ps.type)
+            typeSize[index] += ps.descriptorCount
         }
         var mask: UInt32 = 0
-        for i in 0..<typeSize.count {
-            if typeSize[i] > 0 {
+        for (i, ts) in typeSize.enumerated() {
+            if ts > 0 {
                 mask = mask | (1 << i)
             }
         }
@@ -84,8 +83,8 @@ public struct VulkanDescriptorPoolID: Hashable, Equatable {
             typeSize[index] += UInt32(binding.arrayLength)
         }
         var mask: UInt32 = 0
-        for i in 0..<typeSize.count {
-            if typeSize[i] > 0 {
+        for (i, ts) in typeSize.enumerated() {
+            if ts > 0 {
                 mask = mask | (1 << i)
             }
         }

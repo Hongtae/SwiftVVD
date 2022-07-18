@@ -312,11 +312,10 @@ open class Frame {
                 screen.releaseAllMiceCaptured(by: self)
             }
             
-            for i in 0..<parent.subframes.count {
-                if parent.subframes[i] === self {
-                    parent.subframes.remove(at: i)
-                    break
-                }
+            if let index = parent.subframes.firstIndex(where: { $0 === self }) {
+                parent.subframes.remove(at: index)
+            } else {
+                assertionFailure()
             }
             parent.redraw()
             self.superframe = nil

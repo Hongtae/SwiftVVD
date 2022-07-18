@@ -723,21 +723,18 @@ public class Shader: CustomStringConvertible {
     public var description: String {
         var str = "Shader(name: \"\(self.name)\"), stage: \(self.stage), \(self.spirvData?.count ?? 0) bytes."
         str += "\nShader<\(self.stage).SPIR-V>.inputAttributes: \(self.inputAttributes.count)"
-        for i in 0..<self.inputAttributes.count {
-            let attr = self.inputAttributes[i]
+        for (i, attr) in self.inputAttributes.enumerated() {
             str += "\n [in] ShaderAttribute[\(i)]: \"\(attr.name)\" (type: \(attr.type), location: \(attr.location))"
         }
         str += "\nShader<\(self.stage).SPIR-V>.outputAttributes: \(self.outputAttributes.count)"
-        for i in 0..<self.outputAttributes.count {
-            let attr = self.outputAttributes[i]
+        for (i, attr) in self.outputAttributes.enumerated() {
             str += "\n [out] ShaderAttribute[\(i)]: \"\(attr.name)\" (type: \(attr.type), location: \(attr.location))"
         }
         str += "\nShader<\(self.stage).SPIR-V>.resources: \(self.resources.count)"
         for res in self.resources {
             str += "\n" + res.description
         }
-        for i in 0..<self.pushConstantLayouts.count {
-            let layout = self.pushConstantLayouts[i]
+        for (i, layout) in self.pushConstantLayouts.enumerated() {
             str += "\npushConstant[\(i)] \"\(layout.name)\" (offset: \(layout.offset), size: \(layout.size), stages: \(layout.stages))"
             for mem in layout.members {
                 str += "\n" + describeShaderResourceStructMember(mem, indent: 1)

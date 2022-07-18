@@ -843,9 +843,8 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         subpassColorAttachmentRefs.append(contentsOf: 
             [VkAttachmentReference](repeating: VkAttachmentReference(attachment: VK_ATTACHMENT_UNUSED, layout: VK_IMAGE_LAYOUT_UNDEFINED),
                                     count: Int(colorAttachmentRefCount)))
-        for index in 0..<desc.colorAttachments.count {
-            let attachment = desc.colorAttachments[index]
 
+        for (index, attachment) in desc.colorAttachments.enumerated() {
             var attachmentDesc = VkAttachmentDescription()
             attachmentDesc.format = attachment.pixelFormat.vkFormat()
             attachmentDesc.samples = VK_SAMPLE_COUNT_1_BIT
@@ -973,8 +972,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
                     if res.enabled == false { continue }
 
                     var exist = false
-                    for i in 0..<resources.count {
-                        var res2 = resources[i]
+                    for (i, var res2) in resources.enumerated() {
                         if res.set == res2.set && res.binding == res2.binding {
                             assert(res.type == res2.type)
                             res2.stages.insert(ShaderStageFlags(stage:fn.stage))
@@ -991,8 +989,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
                 }
                 for layout in module.pushConstantLayouts {
                     var exist = false
-                    for i in 0..<pushConstantLayouts.count {
-                        var layout2 = pushConstantLayouts[i]
+                    for (i, var layout2) in pushConstantLayouts.enumerated() {
                         if layout.offset == layout2.offset && layout.size == layout2.size {
                             layout2.stages.insert(ShaderStageFlags(stage: fn.stage))
                             pushConstantLayouts[i] = layout2
@@ -1596,8 +1593,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
                     if desc.set == setIndex {
                         var newBinding = true
 
-                        for i in 0..<descriptorBindings.count {
-                            var b = descriptorBindings[i]
+                        for (i, var b) in descriptorBindings.enumerated() {
                             if b.binding == desc.binding {  // exist binding!! (conflict)
                                 newBinding = false
                                 if b.descriptorType == desc.type.vkType() {

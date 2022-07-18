@@ -47,8 +47,7 @@ public class VulkanShaderFunction: ShaderFunction {
                 self.specializationInfo.pData = UnsafeRawPointer(data)
 
                 var offset = 0
-                for i in 0..<constantValues.count {
-                    let sp = constantValues[i]
+                for (i, sp) in constantValues.enumerated() {
                     mapEntry[i].constantID = UInt32(sp.index)
                     mapEntry[i].offset = UInt32(offset)
                     mapEntry[i].size = sp.size
