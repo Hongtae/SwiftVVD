@@ -14,7 +14,7 @@ public struct ALDevice {
     public let minorVersion: Int
 }
 
-public func AvailableALDevices() -> [ALDevice] {
+public func availableALDevices() -> [ALDevice] {
     var devices: [ALDevice] = []
     if alcIsExtensionPresent(nil, "ALC_ENUMERATION_EXT") == AL_TRUE {
 

@@ -166,7 +166,7 @@ public class AudioDeviceContext {
 }
 
 public func makeAudioDeviceContext() -> AudioDeviceContext? {
-    let devices = AvailableALDevices()
+    let devices = availableALDevices()
     if devices.count > 0 {
         if let device = AudioDevice(deviceName: devices[0].name) {
             return AudioDeviceContext(device: device)
