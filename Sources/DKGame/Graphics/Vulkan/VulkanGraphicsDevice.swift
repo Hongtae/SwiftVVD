@@ -432,7 +432,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
                 }
             }
         }
-    	// find any queue that satisfies the condition.
+        // find any queue that satisfies the condition.
         for family in self.queueFamilies {
             if family.properties.queueFlags & queueFlags == queueFlags {
                 if let queue = family.makeCommandQueue(device: self) {
@@ -631,7 +631,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
 
         var vertexAttributeDescriptions: [VkVertexInputAttributeDescription] = []
         vertexAttributeDescriptions.reserveCapacity(desc.vertexDescriptor.attributes.count)
-    	for attrDesc in desc.vertexDescriptor.attributes {
+        for attrDesc in desc.vertexDescriptor.attributes {
             var attr = VkVertexInputAttributeDescription()
             attr.location = attrDesc.location
             attr.binding = attrDesc.bufferIndex
@@ -658,7 +658,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         case .triangle:         inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
         case .triangleStrip:    inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP
         }
-    	pipelineCreateInfo.pInputAssemblyState = unsafePointerCopy(from: inputAssemblyState, holder: tempHolder)
+        pipelineCreateInfo.pInputAssemblyState = unsafePointerCopy(from: inputAssemblyState, holder: tempHolder)
 
         // setup viewport
         var viewportState = VkPipelineViewportStateCreateInfo()
@@ -865,7 +865,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             blendState.dstAlphaBlendFactor = blendFactor(attachment.blendState.destinationAlphaBlendFactor)
             blendState.alphaBlendOp = blendOperation(attachment.blendState.alphaBlendOperation)
 
-		    blendState.colorWriteMask = 0
+            blendState.colorWriteMask = 0
             if attachment.blendState.writeMask.contains(.red) {
                 blendState.colorWriteMask |= VkColorComponentFlags(VK_COLOR_COMPONENT_R_BIT.rawValue)
             }
@@ -915,11 +915,11 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         renderPassCreateInfo.subpassCount = 1
         renderPassCreateInfo.pSubpasses = unsafePointerCopy(from: subpassDesc, holder: tempHolder)
 
-	    result = vkCreateRenderPass(self.device, &renderPassCreateInfo, self.allocationCallbacks, &renderPass)
-    	if result != VK_SUCCESS {
-		    Log.err("vkCreateRenderPass failed: \(result)")
-    		return nil
-	    }
+        result = vkCreateRenderPass(self.device, &renderPassCreateInfo, self.allocationCallbacks, &renderPass)
+        if result != VK_SUCCESS {
+            Log.err("vkCreateRenderPass failed: \(result)")
+            return nil
+        }
         pipelineCreateInfo.renderPass = renderPass
 
         // color blending
@@ -929,12 +929,12 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         colorBlendState.pAttachments = unsafePointerCopy(collection: colorBlendAttachmentStates, holder: tempHolder)
         pipelineCreateInfo.pColorBlendState = unsafePointerCopy(from: colorBlendState, holder: tempHolder)
 
-    	result = vkCreateGraphicsPipelines(self.device, pipelineCache, 1, &pipelineCreateInfo, self.allocationCallbacks, &pipeline)
-	    if result != VK_SUCCESS {
-		    Log.err("vkCreateGraphicsPipelines failed: \(result)")
-    		return nil
+        result = vkCreateGraphicsPipelines(self.device, pipelineCache, 1, &pipelineCreateInfo, self.allocationCallbacks, &pipeline)
+        if result != VK_SUCCESS {
+            Log.err("vkCreateGraphicsPipelines failed: \(result)")
+            return nil
         }
-		
+        
         self.savePipelineCache()
 
         if let reflection = reflection {
@@ -959,10 +959,10 @@ public class VulkanGraphicsDevice : GraphicsDevice {
                             inputAttributes.append(attr)
                         }
                     }
-				}
+                }
             }
             resources.reserveCapacity(maxResourceCount)
-    		pushConstantLayouts.reserveCapacity(maxPushConstantLayoutCount)
+            pushConstantLayouts.reserveCapacity(maxPushConstantLayoutCount)
 
             for fn in shaderFunctions {
                 let fn = fn as! VulkanShaderFunction

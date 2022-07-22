@@ -43,7 +43,7 @@ public extension CGPoint {
     func transformed(by m: Matrix3) -> Self {
         let x = self.x * CGFloat(m.m11) + self.y * CGFloat(m.m21)
         let y = self.x * CGFloat(m.m12) + self.y * CGFloat(m.m22)
-	    var w = self.x * CGFloat(m.m13) + self.y * CGFloat(m.m23) + CGFloat(m.m33)
+        var w = self.x * CGFloat(m.m13) + self.y * CGFloat(m.m23) + CGFloat(m.m33)
         assert(abs(w) != 0.0)
         w = 1.0 / w
         return Self(x: x * w, y: y * w)
@@ -151,7 +151,7 @@ public extension CGRect {
         let pos1 = CGPoint(x: (pt2.x - origin.x) / size.width, y: (pt2.y - origin.y) / size.height)
         let pos2 = CGPoint(x: (pt3.x - origin.x) / size.width, y: (pt3.y - origin.y) / size.height)
 
-	    // check each point located over each axis
+        // check each point located over each axis
         if pos0.x < 0.0 && pos1.x < 0.0 && pos2.x < 0.0 { return false }
         if pos0.x > 1.0 && pos1.x > 1.0 && pos2.x > 1.0 { return false }
         if pos0.y < 0.0 && pos1.y < 0.0 && pos2.y < 0.0 { return false }
@@ -175,30 +175,30 @@ public extension CGRect {
                 // v2 is inside
                 result = true
             } else {
-				let dx = v2.x - v1.x
-				let dy = v2.y - v1.y
-				// no intersection with vertical, horizontal (calculated above)
-				if abs(dx) == 0.0 {
+                let dx = v2.x - v1.x
+                let dy = v2.y - v1.y
+                // no intersection with vertical, horizontal (calculated above)
+                if abs(dx) == 0.0 {
                     // vertical aligned
-				} else if abs(dy) == 0.0 {
+                } else if abs(dy) == 0.0 {
                     // horizontal aligned
-				} else {
-					// formula y = a * x + b, (a = dy/dx)
-					let a = dy / dx
-					let b = v1.y - a * v1.x     // y-intercept (y for x = 0)
-					if a > 0 {                  // positive slope
-						let y0 = (-b) / a       // x-intercept (x for y = 0)
-						if b <= 1.0 && y0 <= 1.0 {
-							result = true
+                } else {
+                    // formula y = a * x + b, (a = dy/dx)
+                    let a = dy / dx
+                    let b = v1.y - a * v1.x     // y-intercept (y for x = 0)
+                    if a > 0 {                  // positive slope
+                        let y0 = (-b) / a       // x-intercept (x for y = 0)
+                        if b <= 1.0 && y0 <= 1.0 {
+                            result = true
                         }
-					} else {
-						let x1 = a + b          // y for x = 1
-						if b >= 0.0 && x1 <= 1.0 {
-							result = true
+                    } else {
+                        let x1 = a + b          // y for x = 1
+                        if b >= 0.0 && x1 <= 1.0 {
+                            result = true
                         }
-					}
-				}
-			}
+                    }
+                }
+            }
             return result
         }
         if lineIntersection(pos0, pos1) { return true }

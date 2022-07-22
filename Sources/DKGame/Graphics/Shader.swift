@@ -42,8 +42,8 @@ private func dataTypeFromSPVC(type: spvc_type) -> ShaderDataType {
 
     switch basetype {
     case SPVC_BASETYPE_UNKNOWN: return .unknown
-	case SPVC_BASETYPE_VOID:    return .none
-	case SPVC_BASETYPE_BOOLEAN:
+    case SPVC_BASETYPE_VOID:    return .none
+    case SPVC_BASETYPE_BOOLEAN:
         switch vecsize {
         case 1:     return .bool
         case 2:     return .bool2
@@ -51,7 +51,7 @@ private func dataTypeFromSPVC(type: spvc_type) -> ShaderDataType {
         case 4:     return .bool4
         default:    break
         }
-	case SPVC_BASETYPE_INT8:
+    case SPVC_BASETYPE_INT8:
         switch vecsize {
         case 1:     return .char
         case 2:     return .char2
@@ -59,7 +59,7 @@ private func dataTypeFromSPVC(type: spvc_type) -> ShaderDataType {
         case 4:     return .char4
         default:    break
         }
-	case SPVC_BASETYPE_UINT8:
+    case SPVC_BASETYPE_UINT8:
         switch vecsize {
         case 1:     return .uchar
         case 2:     return .uchar2
@@ -67,7 +67,7 @@ private func dataTypeFromSPVC(type: spvc_type) -> ShaderDataType {
         case 4:     return .uchar4
         default:    break
         }
-	case SPVC_BASETYPE_INT16:
+    case SPVC_BASETYPE_INT16:
         switch vecsize {
         case 1:     return .short
         case 2:     return .short2
@@ -75,7 +75,7 @@ private func dataTypeFromSPVC(type: spvc_type) -> ShaderDataType {
         case 4:     return .short4
         default:    break
         }
-	case SPVC_BASETYPE_UINT16:
+    case SPVC_BASETYPE_UINT16:
         switch vecsize {
         case 1:     return .ushort
         case 2:     return .ushort2
@@ -83,7 +83,7 @@ private func dataTypeFromSPVC(type: spvc_type) -> ShaderDataType {
         case 4:     return .ushort4
         default:    break
         }
-	case SPVC_BASETYPE_INT32:
+    case SPVC_BASETYPE_INT32:
         switch vecsize {
         case 1:     return .int
         case 2:     return .int2
@@ -91,7 +91,7 @@ private func dataTypeFromSPVC(type: spvc_type) -> ShaderDataType {
         case 4:     return .int4
         default:    break
         }
-	case SPVC_BASETYPE_UINT32:
+    case SPVC_BASETYPE_UINT32:
         switch vecsize {
         case 1:     return .uint
         case 2:     return .uint2
@@ -99,7 +99,7 @@ private func dataTypeFromSPVC(type: spvc_type) -> ShaderDataType {
         case 4:     return .uint4
         default:    break
         }
-	case SPVC_BASETYPE_INT64:
+    case SPVC_BASETYPE_INT64:
         switch vecsize {
         case 1:     return .long
         case 2:     return .long2
@@ -107,7 +107,7 @@ private func dataTypeFromSPVC(type: spvc_type) -> ShaderDataType {
         case 4:     return .long4
         default:    break
         }
-	case SPVC_BASETYPE_UINT64:
+    case SPVC_BASETYPE_UINT64:
         switch vecsize {
         case 1:     return .ulong
         case 2:     return .ulong2
@@ -115,7 +115,7 @@ private func dataTypeFromSPVC(type: spvc_type) -> ShaderDataType {
         case 4:     return .ulong4
         default:    break
         }
-	case SPVC_BASETYPE_FP16:
+    case SPVC_BASETYPE_FP16:
         switch (vecsize, columns) {
         case (1, _):    return .half
         case (2, 1):    return .half2
@@ -132,7 +132,7 @@ private func dataTypeFromSPVC(type: spvc_type) -> ShaderDataType {
         case (4, 4):    return .half4x4
         default:        break
         }
-	case SPVC_BASETYPE_FP32:
+    case SPVC_BASETYPE_FP32:
         switch (vecsize, columns) {
         case (1, _):    return .float
         case (2, 1):    return .float2
@@ -149,7 +149,7 @@ private func dataTypeFromSPVC(type: spvc_type) -> ShaderDataType {
         case (4, 4):    return .float4x4
         default:        break
         }
-	case SPVC_BASETYPE_FP64:
+    case SPVC_BASETYPE_FP64:
         switch (vecsize, columns) {
         case (1, _):    return .double
         case (2, 1):    return .double2
@@ -166,10 +166,10 @@ private func dataTypeFromSPVC(type: spvc_type) -> ShaderDataType {
         case (4, 4):    return .double4x4
         default:        break
         }
-	case SPVC_BASETYPE_STRUCT:          return .struct
-	case SPVC_BASETYPE_IMAGE,
-	     SPVC_BASETYPE_SAMPLED_IMAGE:   return .texture
-	case SPVC_BASETYPE_SAMPLER:         return .sampler
+    case SPVC_BASETYPE_STRUCT:          return .struct
+    case SPVC_BASETYPE_IMAGE,
+         SPVC_BASETYPE_SAMPLED_IMAGE:   return .texture
+    case SPVC_BASETYPE_SAMPLER:         return .sampler
     default:
         break
     }

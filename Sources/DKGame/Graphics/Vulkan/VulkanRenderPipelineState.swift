@@ -25,8 +25,8 @@ public class VulkanRenderPipelineState: RenderPipelineState {
     deinit {
         let device = self.device as! VulkanGraphicsDevice
         vkDestroyPipeline(device.device, pipeline, device.allocationCallbacks)
-	    vkDestroyPipelineLayout(device.device, layout, device.allocationCallbacks)
-    	vkDestroyRenderPass(device.device, renderPass, device.allocationCallbacks)
+        vkDestroyPipelineLayout(device.device, layout, device.allocationCallbacks)
+        vkDestroyRenderPass(device.device, renderPass, device.allocationCallbacks)
     }
 }
 

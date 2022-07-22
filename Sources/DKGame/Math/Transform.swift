@@ -37,17 +37,17 @@ public struct TransformUnit: Transform, Interpolatable {
     public var matrix3: Matrix3 {
         var mat3 = self.rotation.matrix3
 
-	    mat3.m11 *= scale.x
-	    mat3.m12 *= scale.x
-	    mat3.m13 *= scale.x
+        mat3.m11 *= scale.x
+        mat3.m12 *= scale.x
+        mat3.m13 *= scale.x
 
-	    mat3.m21 *= scale.y
-	    mat3.m22 *= scale.y
-	    mat3.m23 *= scale.y
+        mat3.m21 *= scale.y
+        mat3.m22 *= scale.y
+        mat3.m23 *= scale.y
 
-	    mat3.m31 *= scale.z
-	    mat3.m32 *= scale.z
-	    mat3.m33 *= scale.z
+        mat3.m31 *= scale.z
+        mat3.m32 *= scale.z
+        mat3.m33 *= scale.z
 
         return mat3
     }

@@ -182,7 +182,7 @@ public class AudioSource {
         }
 
         if bufferProcessed > 0 {
-        	// Log.debug("AudioSource buffer dequeued. remains: \(buffers.count)")
+            // Log.debug("AudioSource buffer dequeued. remains: \(buffers.count)")
         }
     }
 
@@ -384,7 +384,7 @@ public class AudioSource {
         assert(buffers.isEmpty)
 
         var sourceID = self.sourceID
-    	alDeleteSources(1, &sourceID)
+        alDeleteSources(1, &sourceID)
 
         // check error.
         let err = alGetError()

@@ -30,8 +30,8 @@ namespace {
     enum WaveFormatType
     {
         WaveFormatTypeUnknown = 0,
-        WaveFormatTypePCM = 1,			// WAVE_FORMAT_PCM
-        WaveFormatTypeEXT = 0xFFFE,		// WAVE_FORMAT_EXTENSIBLE
+        WaveFormatTypePCM = 1,          // WAVE_FORMAT_PCM
+        WaveFormatTypeEXT = 0xFFFE,     // WAVE_FORMAT_EXTENSIBLE
     };
     struct WaveFileHeader
     {

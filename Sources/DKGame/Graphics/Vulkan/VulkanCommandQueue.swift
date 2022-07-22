@@ -103,7 +103,7 @@ public class VulkanCommandQueue: CommandQueue {
         }        
         return result == VK_SUCCESS 
     }
-    
+
     @discardableResult
     func waitIdle() -> Bool { 
         synchronizedBy(locking: self.lock) { vkQueueWaitIdle(self.queue) } == VK_SUCCESS

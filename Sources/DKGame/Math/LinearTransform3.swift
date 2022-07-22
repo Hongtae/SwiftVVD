@@ -23,7 +23,7 @@ public struct LinearTransform3: Transform {
         y = copysign(y, matrix3.m31 - matrix3.m13)
         z = copysign(z, matrix3.m12 - matrix3.m21)
 
-	    return Quaternion(x, y, z, w)
+        return Quaternion(x, y, z, w)
     }
 
     public var scale: Vector3 {

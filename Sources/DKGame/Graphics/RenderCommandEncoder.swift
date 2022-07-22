@@ -43,7 +43,7 @@ public protocol RenderCommandEncoder: CommandEncoder {
     func setVertexBuffer(_: Buffer, offset: Int, index: Int)
     func setVertexBuffers(_: [Buffer], offsets: [Int], index: Int)
     func setIndexBuffer(_: Buffer, offset: Int, type: IndexType)
-    
+
     func pushConstant<D: DataProtocol>(stages: ShaderStageFlags, offset: Int, data: D)
 
     func draw(numVertices: Int, numInstances: Int, baseVertex: Int, baseInstance: Int)

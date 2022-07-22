@@ -20,11 +20,11 @@ public struct RenderPipelineColorAttachmentDescriptor {
 }
 
 public enum PrimitiveType {
-	case point
-	case line
-	case lineStrip
-	case triangle
-	case triangleStrip
+    case point
+    case line
+    case lineStrip
+    case triangle
+    case triangleStrip
 }
 
 public enum IndexType {

@@ -90,7 +90,6 @@ public struct VulkanInstanceExtensions {
 
 public struct VulkanDeviceExtensions {
 
-
     mutating func load(device: VkDevice) {
 
     }

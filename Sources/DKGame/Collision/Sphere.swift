@@ -92,10 +92,10 @@ public struct Sphere {
                 return nil
             }
 
-		    let m2 = l2 - s2  // calculate intersect length
-		    if m2 > r2 {
+            let m2 = l2 - s2  // calculate intersect length
+            if m2 > r2 {
                 // intersect length^2 is bigger than radius^2, no-intersection
-			    return nil
+                return nil
             }
 
             var t: Scalar = 0.0

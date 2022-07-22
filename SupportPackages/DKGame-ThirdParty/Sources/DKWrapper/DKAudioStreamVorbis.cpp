@@ -23,7 +23,7 @@
 #include "DKAudioStream.h"
 #include "DKMalloc.h"
 
-#define SWAP_CHANNEL16(x, y)		{int16_t t = x; x = y ; y = t;}
+#define SWAP_CHANNEL16(x, y)        {int16_t t = x; x = y ; y = t;}
 
 namespace {
     struct VorbisStream
