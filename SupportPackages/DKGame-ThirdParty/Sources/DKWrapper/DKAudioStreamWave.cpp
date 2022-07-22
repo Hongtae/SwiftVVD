@@ -291,7 +291,7 @@ DKAudioStream* DKAudioStreamWaveCreate(DKStream* stream)
                     DKSTREAM_SET_POSITION(stream, DKSTREAM_GET_POSITION(stream) + chunk.size);
                 }
 
-                if (chunk.size & 1)	// byte align
+                if (chunk.size & 1) // byte align
                     DKSTREAM_SET_POSITION(stream, DKSTREAM_GET_POSITION(stream) + 1);
             }
 

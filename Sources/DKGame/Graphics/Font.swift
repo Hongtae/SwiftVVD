@@ -736,7 +736,7 @@ public class Font {
                 arrayLength: 1,
                 usage: [.copyDestination, .sampled]
             )
-			texture = device.makeTexture(descriptor: desc)
+            texture = device.makeTexture(descriptor: desc)
 
             if let texture = texture {
                 frame = CGRect(x: CGFloat(leftMargin),

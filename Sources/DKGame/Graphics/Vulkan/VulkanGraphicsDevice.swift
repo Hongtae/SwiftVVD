@@ -818,12 +818,12 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             case .sourceColor:              return VK_BLEND_FACTOR_SRC_COLOR
             case .oneMinusSourceColor:      return VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR
             case .sourceAlpha:              return VK_BLEND_FACTOR_SRC_ALPHA
-            case .oneMinusSourceAlpha:		return VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA
-            case .destinationColor:			return VK_BLEND_FACTOR_DST_COLOR
+            case .oneMinusSourceAlpha:      return VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA
+            case .destinationColor:         return VK_BLEND_FACTOR_DST_COLOR
             case .oneMinusDestinationColor: return VK_BLEND_FACTOR_ONE_MINUS_DST_COLOR
-            case .destinationAlpha:			return VK_BLEND_FACTOR_DST_ALPHA
+            case .destinationAlpha:         return VK_BLEND_FACTOR_DST_ALPHA
             case .oneMinusDestinationAlpha: return VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA
-            case .sourceAlphaSaturated:		return VK_BLEND_FACTOR_SRC_ALPHA_SATURATE
+            case .sourceAlphaSaturated:     return VK_BLEND_FACTOR_SRC_ALPHA_SATURATE
             case .blendColor:               return VK_BLEND_FACTOR_CONSTANT_COLOR
             case .oneMinusBlendColor:       return VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_COLOR
             case .blendAlpha:               return VK_BLEND_FACTOR_CONSTANT_ALPHA

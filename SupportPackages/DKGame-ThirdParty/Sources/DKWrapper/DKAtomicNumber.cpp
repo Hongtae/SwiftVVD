@@ -67,7 +67,7 @@ extern "C" int32_t DKAtomicNumber32_Exchange(DKAtomicNumber32* atomic, int32_t v
 #ifdef _WIN32
     prev = ::InterlockedExchange((LONG*)&atomic->value, value);
 #elif defined(__APPLE__) && defined(__MACH__)
-    do 	{
+    do {
         prev = atomic->value;
     } while (!::OSAtomicCompareAndSwap32(prev, value, &atomic->value));
 #else
@@ -140,7 +140,7 @@ extern "C" int64_t DKAtomicNumber64_Exchange(DKAtomicNumber64* atomic, int64_t v
 #ifdef _WIN32
     prev = ::InterlockedExchange64((LONGLONG*)&atomic->value, value);
 #elif defined(__APPLE__) && defined(__MACH__)
-    do 	{
+    do {
         prev = atomic->value;
     } while (!::OSAtomicCompareAndSwap64(prev, value, &atomic->value));
 #else

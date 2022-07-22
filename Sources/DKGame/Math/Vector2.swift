@@ -57,8 +57,8 @@ public struct Vector2: Vector {
         // Rotate
         // | cos  sin|
         // |-sin  cos|
-    	let cosR = cos(angle)
-    	let sinR = sin(angle)
+        let cosR = cos(angle)
+        let sinR = sin(angle)
         return Self(x * cosR - y * sinR, x * sinR + y * cosR)
     }
 

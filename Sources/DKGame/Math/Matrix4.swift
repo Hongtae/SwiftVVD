@@ -225,7 +225,7 @@ public struct Matrix4: Matrix {
     }
 
     public var determinant: Scalar {
-    	return m14 * m23 * m32 * m41 - m13 * m24 * m32 * m41 -
+        return m14 * m23 * m32 * m41 - m13 * m24 * m32 * m41 -
                m14 * m22 * m33 * m41 + m12 * m24 * m33 * m41 +
                m13 * m22 * m34 * m41 - m12 * m23 * m34 * m41 -
                m14 * m23 * m31 * m42 + m13 * m24 * m31 * m42 +

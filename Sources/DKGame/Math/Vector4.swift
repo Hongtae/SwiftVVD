@@ -58,7 +58,7 @@ public struct Vector4: Vector {
     }
 
     public static func dot(_ lhs: Vector4, _ rhs: Vector4) -> Scalar {
-    	return (lhs.x * rhs.x) + (lhs.y * rhs.y) + (lhs.z * rhs.z) + (lhs.w * rhs.w)
+        return (lhs.x * rhs.x) + (lhs.y * rhs.y) + (lhs.z * rhs.z) + (lhs.w * rhs.w)
     }
 
     public static func cross(_ v1: Vector4, _ v2: Vector4, _ v3: Vector4) -> Vector4 {

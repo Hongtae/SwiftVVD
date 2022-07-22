@@ -182,7 +182,7 @@ DKImagePixelFormat DKImagePixelFormatEncodingSupported(DKImageFormat format,
     case DKImageFormat_JPEG:
         switch (pixelFormat)
         {
-        case DKImagePixelFormat_R8:				
+        case DKImagePixelFormat_R8:
         case DKImagePixelFormat_R16:
         case DKImagePixelFormat_R32:
         case DKImagePixelFormat_R32F:
@@ -594,14 +594,14 @@ static DKImageDecodeContext DecodeBmp(const void* p, size_t s)
                 {
                     switch (second)
                     {
-                    case 0:		// end of line
+                    case 0:     // end of line
                         x = 0;
                         y++;
                         break;
-                    case 1:		// end of bitmap
+                    case 1:     // end of bitmap
                         y = info.height;
                         break;
-                    case 2:		// move position 
+                    case 2:     // move position 
                         if (pos + 1 < s)
                         {
                             uint8_t deltaX = data[pos++];
@@ -610,7 +610,7 @@ static DKImageDecodeContext DecodeBmp(const void* p, size_t s)
                             y += deltaY;
                         }
                         break;
-                    default:	// absolute mode.
+                    default:    // absolute mode.
                         if (info.compression == BMPCompressionRLE8)
                         {
                             for (uint32_t i = 0; i < second && pos < s && x < info.width; ++i)
@@ -1334,8 +1334,8 @@ static DKImageEncodeContext EncodeBmp(uint32_t width,
         uint16_t bitCount = uint16_t(bytesPerPixel) * 8;
 
         uint8_t* buffer = reinterpret_cast<uint8_t*>(output);
-        BMPFileHeader* header = reinterpret_cast<BMPFileHeader*>(buffer);	buffer += sizeof(BMPFileHeader);
-        BMPInfoHeader* info = reinterpret_cast<BMPInfoHeader*>(buffer);		buffer += sizeof(BMPInfoHeader);
+        BMPFileHeader* header = reinterpret_cast<BMPFileHeader*>(buffer);   buffer += sizeof(BMPFileHeader);
+        BMPInfoHeader* info = reinterpret_cast<BMPInfoHeader*>(buffer);     buffer += sizeof(BMPInfoHeader);
 
         size_t fileSize = sizeof(BMPFileHeader) + sizeof(BMPInfoHeader) + imageSize;
         header->b = 'B'; header->m = 'M';

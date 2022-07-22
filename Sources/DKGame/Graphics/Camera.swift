@@ -192,12 +192,12 @@ public struct Camera {
         for i in 0..<8 {
             vec[i].transform(by: mat)
         }
-        // far		(4,5,6,7)
-        // near		(0,1,2,3)
-        // top		(0,4,7,3)
-        // bottom	(1,5,6,2)
-        // right	(0,1,5,4)
-        // left		(2,3,7,6)
+        // far      (4,5,6,7)
+        // near     (0,1,2,3)
+        // top      (0,4,7,3)
+        // bottom   (1,5,6,2)
+        // right    (0,1,5,4)
+        // left     (2,3,7,6)
 
         frustumFar =    Plane(vec[4], vec[7], vec[5])
         frustumNear =   Plane(vec[3], vec[0], vec[2])

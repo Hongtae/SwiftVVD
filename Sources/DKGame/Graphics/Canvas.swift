@@ -99,7 +99,7 @@ private let fsEllipseGLSL = """
     {
         vec2 outerRadiusSqInv; /* vec2(1/A^2, 1/B^2) where X^2 / A^2 + Y^2 / B^2 = 1 */
         vec2 innerRadiusSqInv;
-        vec2 center;	/* center of ellipse */
+        vec2 center; /* center of ellipse */
     } ellipse;
 
     layout (location=0) in vec2 position;
@@ -138,7 +138,7 @@ private let fsEllipseHoleGLSL = """
     {
         vec2 outerRadiusSqInv; /* vec2(1/A^2, 1/B^2) where X^2 / A^2 + Y^2 / B^2 = 1 */
         vec2 innerRadiusSqInv;
-        vec2 center;	/* center of ellipse */
+        vec2 center; /* center of ellipse */
     } ellipse;
 
     layout (location=0) in vec2 position;
@@ -186,7 +186,7 @@ private let fsTextureEllipseGLSL = """
     {
         vec2 outerRadiusSqInv; /* vec2(1/A^2, 1/B^2) where X^2 / A^2 + Y^2 / B^2 = 1 */
         vec2 innerRadiusSqInv;
-        vec2 center;	/* center of ellipse */
+        vec2 center; /* center of ellipse */
     } ellipse;
 
     layout (location=0) in vec2 position;

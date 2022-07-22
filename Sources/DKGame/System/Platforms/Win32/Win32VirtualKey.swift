@@ -90,7 +90,7 @@ public extension VirtualKey {
         case 0x67:  return .pad7            // VK_NUMPAD7
         case 0x68:  return .pad8            // VK_NUMPAD8
         case 0x69:  return .pad9            // VK_NUMPAD9
-        case 0x6A:  return .padAsterisk	    // VK_MULTIPLY
+        case 0x6A:  return .padAsterisk     // VK_MULTIPLY
         case 0x6B:  return .padPlus         // VK_ADD
         case 0x6C:  return .none            // VK_SEPARATOR
         case 0x6D:  return .padMinus        // VK_SUBTRACT

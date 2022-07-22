@@ -70,7 +70,7 @@ static DKCompressionResult EncodeDeflate(DKStream* input, DKStream* output, int 
     stream.zfree = Z_NULL;
     stream.opaque = Z_NULL;
 
-    int compressLevel = level;	// Z_DEFAULT_COMPRESSION is 6
+    int compressLevel = level;  // Z_DEFAULT_COMPRESSION is 6
     err = deflateInit(&stream, compressLevel);
     if (err == Z_OK)
     {
@@ -384,8 +384,8 @@ static DKCompressionResult EncodeLz4(DKStream* input, DKStream* output, int leve
 {
     LZ4F_preferences_t prefs = {};
     prefs.autoFlush = 1;
-    prefs.compressionLevel = level;	// 0 for LZ4 fast, 9 for LZ4HC
-    prefs.frameInfo.blockMode = LZ4F_blockLinked;	// for better compression ratio.
+    prefs.compressionLevel = level; // 0 for LZ4 fast, 9 for LZ4HC
+    prefs.frameInfo.blockMode = LZ4F_blockLinked; // for better compression ratio.
     prefs.frameInfo.contentChecksumFlag = LZ4F_contentChecksumEnabled; // to detect data corruption.
     prefs.frameInfo.blockSizeID = LZ4F_max4MB;
 

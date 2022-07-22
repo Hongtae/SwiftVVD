@@ -39,8 +39,8 @@ public struct LinearTransform2: Transform {
         // Rotate
         // | cos  sin|
         // |-sin  cos|
-    	let cosR = cos(angle)
-    	let sinR = sin(angle)
+        let cosR = cos(angle)
+        let sinR = sin(angle)
 
         let matrix = Matrix2(cosR, sinR, -sinR, cosR)
         return Self(self.matrix2 * matrix)

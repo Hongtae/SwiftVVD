@@ -250,7 +250,7 @@ DKAudioStream* DKAudioStreamVorbisCreate(DKStream* stream)
     memset(vorbisStream, 0, sizeof(VorbisStream));
     vorbisStream->stream = stream;
 
-    ov_callbacks	ogg_callbacks;
+    ov_callbacks ogg_callbacks;
     ogg_callbacks.read_func = VorbisStreamRead;
     ogg_callbacks.seek_func = VorbisStreamSeek;
     ogg_callbacks.tell_func = VorbisStreamTell;

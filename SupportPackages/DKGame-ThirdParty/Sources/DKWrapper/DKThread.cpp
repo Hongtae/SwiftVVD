@@ -18,7 +18,7 @@
 #else
 #include <pthread.h>
 #include <sys/select.h>
-#include <sched.h>		// to using sched_yield() in DKThread::Yield()
+#include <sched.h>  // to using sched_yield() in DKThread::Yield()
 #include <errno.h>
 #include <limits.h>
 #endif
@@ -28,7 +28,7 @@
 #ifndef POSIX_USE_SELECT_SLEEP
 /// Set POSIX_USE_SELECT_SLEEP to 1 if you want use 'select' instead of 'nanosleep'.
 /// ignored on Win32.
-#define POSIX_USE_SELECT_SLEEP	1
+#define POSIX_USE_SELECT_SLEEP  1
 #endif
 
 extern "C" void DKThreadSleep(double d)
@@ -74,6 +74,6 @@ extern "C" uintptr_t DKThreadCurrentId()
     #ifdef _WIN32
     return (uintptr_t)::GetCurrentThreadId();
 #else
-    return (uintptr_t)pthread_self();	
+    return (uintptr_t)pthread_self();
 #endif
 }
