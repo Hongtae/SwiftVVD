@@ -97,7 +97,7 @@ public class MetalShaderModule: ShaderModule {
             let fcv = MTLFunctionConstantValues()
             for value in constantValues {
                 value.data.withUnsafeBytes {
-                    if $0.count >= value.size {
+                    if $0.count >= value.size, value.size >= value.type.size() {
                         fcv.setConstantValue($0.baseAddress!,
                                              type: value.type.mtlDataType(),
                                              index: value.index)
