@@ -51,6 +51,5 @@ public class MetalShaderFunction: ShaderFunction {
             self.stage = .unknown
         }
     }
-
 }
 #endif //if ENABLE_METAL

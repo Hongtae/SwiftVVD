@@ -9,7 +9,7 @@
 import Foundation
 import Metal
 
-public extension ShaderDataType {
+extension ShaderDataType {
     static func from(mtlDataType dataType: MTLDataType) -> ShaderDataType {
         switch (dataType)
         {

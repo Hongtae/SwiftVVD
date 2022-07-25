@@ -241,8 +241,8 @@ public struct ShaderStageFlags: OptionSet {
 
 public struct ShaderResourceBuffer {
     public var dataType: ShaderDataType
-    public var alignment: UInt32
-    public var size: UInt32
+    public var alignment: Int
+    public var size: Int
 }
 
 public struct ShaderResourceTexture {
@@ -251,17 +251,17 @@ public struct ShaderResourceTexture {
 }
 
 public struct ShaderResourceThreadgroup {
-    public var alignment: UInt32
-    public var size: UInt32
+    public var alignment: Int
+    public var size: Int
 }
 
 public struct ShaderResourceStructMember {
     public var dataType: ShaderDataType
     public var name: String
-    public var offset: UInt32
-    public var size: UInt32   // declared size
-    public var count: UInt32  // array length
-    public var stride: UInt32 // stride between array elements
+    public var offset: Int
+    public var size: Int   // declared size
+    public var count: Int  // array length
+    public var stride: Int // stride between array elements
 
     public var members: [ShaderResourceStructMember]
 }
@@ -280,14 +280,14 @@ public enum ShaderResourceAccess {
 }
 
 public struct ShaderResource {
-    public var set: UInt32
-    public var binding: UInt32
+    public var set: Int
+    public var binding: Int
     public var name: String
     public var type: ShaderResourceType
     public var stages: ShaderStageFlags
 
-    public var count: UInt32  // array length
-    public var stride: UInt32 // stride between array elements
+    public var count: Int  // array length
+    public var stride: Int // stride between array elements
 
     public var enabled: Bool
     public var access: ShaderResourceAccess
@@ -303,8 +303,8 @@ public struct ShaderResource {
 
 public struct ShaderPushConstantLayout {
     public var name: String
-    public var offset: UInt32
-    public var size: UInt32
+    public var offset: Int
+    public var size: Int
     public var stages: ShaderStageFlags
     public var members: [ShaderResourceStructMember]
 }
