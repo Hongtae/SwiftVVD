@@ -258,10 +258,10 @@ private func resourceStructMembersFromSPVC(compiler: spvc_compiler,
 
         members.append(ShaderResourceStructMember(dataType: dataType,
                                                   name: name,
-                                                  offset: offset,
-                                                  size: UInt32(size),
-                                                  count: count,
-                                                  stride: stride,
+                                                  offset: Int(offset),
+                                                  size: size,
+                                                  count: Int(count),
+                                                  stride: Int(stride),
                                                   members:structMembers))
     }
     return members
@@ -317,7 +317,7 @@ private func resourceFromSPVC(compiler: spvc_compiler,
         let result = spvc_compiler_get_declared_struct_size(compiler, spvctype, &size)
         if result != SPVC_SUCCESS { throw SPVCError.spvcResult(result) }
 
-        bufferTypeInfo = ShaderResourceBuffer(dataType: .struct, alignment: alignment, size: UInt32(size))
+        bufferTypeInfo = ShaderResourceBuffer(dataType: .struct, alignment: Int(alignment), size: size)
     default:
         assert(false, "Unsupported shader resource type")
     }
@@ -325,13 +325,14 @@ private func resourceFromSPVC(compiler: spvc_compiler,
     let basetype = spvc_compiler_get_type_handle(compiler, resource.base_type_id)
     let members: [ShaderResourceStructMember] = try resourceStructMembersFromSPVC(compiler: compiler, type: basetype!)
 
-    return ShaderResource(set: set,
-        binding: binding,
+    return ShaderResource(
+        set: Int(set),
+        binding: Int(binding),
         name: name,
         type: type,
         stages: ShaderStageFlags(stage: stage),
-        count: count,
-        stride: stride,
+        count: Int(count),
+        stride: Int(stride),
         enabled: enabled,
         access: access,
         bufferTypeInfo: bufferTypeInfo,
@@ -652,8 +653,8 @@ public class Shader: CustomStringConvertible {
                         let basetype = spvc_compiler_get_type_handle(compiler, ptr[i].base_type_id)
                         let members = try resourceStructMembersFromSPVC(compiler: compiler, type: basetype!)
                         let layout = ShaderPushConstantLayout(name: name,
-                                                            offset: UInt32(rangeBegin),
-                                                            size: UInt32(rangeEnd - rangeBegin),
+                                                            offset: rangeBegin,
+                                                            size: rangeEnd - rangeBegin,
                                                             stages: ShaderStageFlags(stage: self.stage),
                                                             members: members)
 

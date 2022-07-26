@@ -1564,8 +1564,8 @@ public class VulkanGraphicsDevice : GraphicsDevice {
                 if layout.size > 0 {
                     var range = VkPushConstantRange()
                     range.stageFlags = module.stage.vkFlags()
-                    range.offset = layout.offset
-                    range.size = layout.size
+                    range.offset = UInt32(layout.offset)
+                    range.size = UInt32(layout.size)
                     pushConstantRanges.append(range)
                 }
             }
