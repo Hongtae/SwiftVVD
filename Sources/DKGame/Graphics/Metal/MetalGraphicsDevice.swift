@@ -57,7 +57,7 @@ public class MetalGraphicsDevice: GraphicsDevice {
     }
 
     public func makeShaderBindingSet(layout: ShaderBindingSetLayout) -> ShaderBindingSet? {
-        return nil
+        return MetalShaderBindingSet(device: self, layout: layout.bindings)
     }
 
     public func makeRenderPipelineState(descriptor: RenderPipelineDescriptor, reflection: UnsafeMutablePointer<PipelineReflection>?) -> RenderPipelineState? {
