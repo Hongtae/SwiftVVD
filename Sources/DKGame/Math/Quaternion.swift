@@ -279,9 +279,20 @@ public extension Vector3 {
         self.rotate(by: q)
     }
 
-    static func * (lhs: Vector3, rhs: Quaternion) -> Vector3 {
-        return lhs.transformed(by: rhs)
+    // static func * (lhs: Vector3, rhs: Quaternion) -> Vector3 {
+    //     return lhs.transformed(by: rhs)
+    // }
+
+    // static func *= (lhs: inout Vector3, rhs: Quaternion) { lhs = lhs * rhs }
+}
+
+extension Quaternion: VectorTransformer {
+    public static func != (lhs: Self, rhs: Self) -> Bool {
+        return !(lhs == rhs)
     }
 
-    static func *= (lhs: inout Vector3, rhs: Quaternion) { lhs = lhs * rhs }
+    public typealias Vector = Vector3
+    public static func * (_ lhs: Vector3, _ rhs: Self) -> Vector3 {
+        return lhs.transformed(by: rhs)
+    }
 }

@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct LinearTransform3: Transform {
+public struct LinearTransform3: VectorTransformer {
     public typealias Vector = Vector3
 
     public var matrix3: Matrix3
