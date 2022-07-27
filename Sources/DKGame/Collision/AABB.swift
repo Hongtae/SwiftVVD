@@ -6,6 +6,11 @@
 //
 
 public struct AABB {
-    let min: Vector3
-    let max: Vector3
+    public let min: Vector3
+    public let max: Vector3
+
+    public init(min: Vector3, max: Vector3) {
+        self.min = min
+        self.max = max
+    }
 }
