@@ -9,8 +9,65 @@
 import Foundation
 import Metal
 
-private func shaderResourceStructMember(from: MTLStructType) -> [ShaderResourceStructMember] {
-    return []
+private func shaderResourceStructMember(from st: MTLStructType) -> [ShaderResourceStructMember] {
+    var members: [ShaderResourceStructMember] = []
+    members.reserveCapacity(st.members.count)
+
+    for member in st.members {
+        var mb = ShaderResourceStructMember(dataType: .unknown,
+                                            name: member.name,
+                                            offset: member.offset,
+                                            size: 0,
+                                            count: 0,
+                                            stride: 0,
+                                            members: [])
+
+        let type = member.dataType
+        var memberStruct: MTLStructType? = nil
+
+        if type == .array {
+            let arrayType = member.arrayType()!
+            mb.count = arrayType.arrayLength
+            mb.stride = arrayType.stride
+            mb.dataType = .from(mtlDataType: arrayType.elementType)
+            if arrayType.elementType == .struct {
+                memberStruct = arrayType.elementStructType()
+            }
+        } else {
+            mb.count = 1
+            mb.dataType = .from(mtlDataType: type)
+        }
+        if type == .struct {
+            memberStruct = member.structType()
+        }
+        if let memberStruct = memberStruct {
+            mb.members = shaderResourceStructMember(from: memberStruct)
+            var size = 0
+            mb.members.forEach {
+                size = max(size, $0.offset + $0.size)
+            }
+            if (size & 0x3) != 0 {
+                size = (size | 0x3) + 1     // 4-bytes alignment
+            }
+            mb.size = size
+        } else {
+            if mb.count > 1 {
+                mb.size = mb.stride * mb.count
+            } else {
+                mb.size = mb.dataType.size()
+            }
+        }
+        if type == .pointer {
+            Log.error("Pointer in struct!")
+            assertionFailure("Not Implemented!")
+        }
+        if type == .texture {
+            Log.error("TextureReference in struct!")
+            assertionFailure("Not Implemented!")
+        }
+        members.append(mb)
+    }
+    return members
 }
 
 extension ShaderResource {
