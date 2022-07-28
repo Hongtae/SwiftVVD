@@ -263,6 +263,18 @@ public extension Matrix3 {
             self.row3.double3 = v.2
         }
     }
+
+    init(_ m: Half3x3) {
+        self.init(row1: Vector3(m.0), row2: Vector3(m.1), row3: Vector3(m.2))
+    }
+
+    init(_ m: Float3x3) {
+        self.init(row1: Vector3(m.0), row2: Vector3(m.1), row3: Vector3(m.2))
+    }
+
+    init(_ m: Double3x3) {
+        self.init(row1: Vector3(m.0), row2: Vector3(m.1), row3: Vector3(m.2))
+    }
 }
 
 public extension Vector2 {

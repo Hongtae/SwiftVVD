@@ -123,4 +123,19 @@ public extension Vector2 {
             self.y = Scalar(v.1)
         }
     }
+
+    init(_ v: Half2) {
+        self.x = Scalar(v.0)
+        self.y = Scalar(v.1)
+    }
+
+    init(_ v: Float2) {
+        self.x = Scalar(v.0)
+        self.y = Scalar(v.1)
+    }
+    
+    init(_ v: Double2) {
+        self.x = Scalar(v.0)
+        self.y = Scalar(v.1)
+    }
 }

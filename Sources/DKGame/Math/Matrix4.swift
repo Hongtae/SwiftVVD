@@ -350,6 +350,18 @@ public extension Matrix4 {
             self.row4.double4 = v.3
         }
     }
+
+    init(_ m: Half4x4) {
+        self.init(row1: Vector4(m.0), row2: Vector4(m.1), row3: Vector4(m.2), row4: Vector4(m.3))
+    }
+
+    init(_ m: Float4x4) {
+        self.init(row1: Vector4(m.0), row2: Vector4(m.1), row3: Vector4(m.2), row4: Vector4(m.3))
+    }
+
+    init(_ m: Double4x4) {
+        self.init(row1: Vector4(m.0), row2: Vector4(m.1), row3: Vector4(m.2), row4: Vector4(m.3))
+    }
 }
 
 public extension Vector3 {

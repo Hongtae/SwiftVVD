@@ -29,10 +29,10 @@ public struct Triangle {
     }
 
     /// RayTestResult: ray intersection test result with t,u,v
-    /// parameter t: the distance from ray-origin to the triangle plane
-    ///              intersection point p = ray-origin + ray-dir * t
-    /// parameter u,v: barycentric coordinates of intersection point inside the triangle.
-    ///                w = 1 - u - v.
+    /// t: the distance from ray origin to the triangle plane
+    ///   intersection point P(t) = rayOrigin + rayDir * t
+    /// u,v: barycentric coordinates of intersection point inside the triangle.
+    ///   intersection point T(u,v) = (1-u-v)*p0 + u*p1 + v*p2
     public typealias RayTestResult = (t: Scalar, u: Scalar, v: Scalar)
 
     public func rayIntersectionTestFront(rayOrigin origin: Vector3, dir: Vector3) -> RayTestResult? {

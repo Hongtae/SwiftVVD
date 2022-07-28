@@ -138,4 +138,25 @@ public extension Vector4 {
             self.w = Scalar(v.3)
         }
     }
+
+    init(_ v: Half4) {
+        self.x = Scalar(v.0)
+        self.y = Scalar(v.1)
+        self.z = Scalar(v.2)
+        self.w = Scalar(v.3)
+    }
+
+    init(_ v: Float4) {
+        self.x = Scalar(v.0)
+        self.y = Scalar(v.1)
+        self.z = Scalar(v.2)
+        self.w = Scalar(v.3)
+    }
+    
+    init(_ v: Double4) {
+        self.x = Scalar(v.0)
+        self.y = Scalar(v.1)
+        self.z = Scalar(v.2)
+        self.w = Scalar(v.3)
+    }
 }

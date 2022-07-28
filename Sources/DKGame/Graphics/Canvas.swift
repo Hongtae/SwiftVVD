@@ -1229,14 +1229,14 @@ public class Canvas {
         let baselinePixelEnd = CGPoint(x: baselineEnd.x * scaleToScreen.width,
                                        y: baselineEnd.y * scaleToScreen.height)
         let scale = (baselinePixelEnd - baselinePixelBegin).magnitude
-        let baselinePixelDir = Vector2(baselinePixelEnd - baselinePixelBegin).normalized()
-        let angle = acosf(baselinePixelDir.x) * ((baselinePixelDir.y < 0) ? -1.0 : 1.0)
+        let baselinePixelDir = Vector2(baselinePixelEnd - baselinePixelBegin).normalized().float2
+        let angle = acosf(baselinePixelDir.0) * ((baselinePixelDir.1 < 0) ? -1.0 : 1.0)
 
         // calculate transform (matrix)
         var transform = AffineTransform2(x: 0, y: Scalar(-ascender))    // move pivot to baseline
         transform *= LinearTransform2()
-            .scaled(by: Scalar(scale / lineWidth))                  // scale
-            .rotated(by: angle)                             // rotate
+            .scaled(by: Scalar(scale / lineWidth))          // scale
+            .rotated(by: Scalar(angle))                     // rotate
             .scaled(x: Scalar(1.0 / viewportSize.width),
                     y: Scalar(1.0 / viewportSize.height))   // normalize (0~1)
             .scaled(by: Vector2(contentScale))              // apply contentScale
