@@ -35,7 +35,7 @@ public struct SamplerDescriptor {
     public var minLod: Float
     public var maxLod: Float
 
-    public var maxAnisotropy: UInt32
+    public var maxAnisotropy: Int
     public var normalizedCoordinates: Bool
 
     // comparison function used when sampling texels from a depth texture.
@@ -49,7 +49,7 @@ public struct SamplerDescriptor {
                 mipFilter: SamplerMipFilter = .notMipmapped,
                 minLod: Float = 0.0,
                 maxLod: Float = .greatestFiniteMagnitude, // 3.402823466e+38 // FLT_MAX
-                maxAnisotropy: UInt32 = 1,
+                maxAnisotropy: Int = 1,
                 normalizedCoordinates: Bool = true,
                 compareFunction: CompareFunction = .never) {
         self.addressModeU = addressModeU
