@@ -1187,17 +1187,17 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             Log.err("VulkanGraphicsDevice.makeTexture(): Invalid texture type!")
             return nil
         }
-        imageCreateInfo.arrayLayers = max(desc.arrayLength, 1)
+        imageCreateInfo.arrayLayers = UInt32(max(desc.arrayLength, 1))
         if imageCreateInfo.arrayLayers > 1 && imageCreateInfo.imageType == VK_IMAGE_TYPE_2D {
             imageCreateInfo.flags |= UInt32(VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT.rawValue)
         }
         imageCreateInfo.format = desc.pixelFormat.vkFormat()
         assert(imageCreateInfo.format != VK_FORMAT_UNDEFINED, "Unsupported format!")
 
-        imageCreateInfo.extent.width = desc.width
-        imageCreateInfo.extent.height = desc.height
-        imageCreateInfo.extent.depth = desc.depth
-        imageCreateInfo.mipLevels = desc.mipmapLevels
+        imageCreateInfo.extent.width = UInt32(desc.width)
+        imageCreateInfo.extent.height = UInt32(desc.height)
+        imageCreateInfo.extent.depth = UInt32(desc.depth)
+        imageCreateInfo.mipLevels = UInt32(desc.mipmapLevels)
 
         assert(desc.sampleCount == 1, "Multisample is not implemented.")
         imageCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT

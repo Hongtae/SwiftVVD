@@ -168,7 +168,7 @@ public class Font {
     private var glyphMap: [UnicodeScalar: GlyphData] = [:]
     private var charIndexMap: [UnicodeScalar: UInt32] = [:]
     private var textures: [GlyphTextureAtlas] = []
-    private var numGlyphsLoaded: UInt = 0
+    private var numGlyphsLoaded: Int = 0
 
     public init?(deviceContext: GraphicsDeviceContext, path: String) {
         
@@ -693,16 +693,17 @@ public class Font {
         }
         if createNewTexture {
             // create new texture.
-            let glyphWidth = UInt(ceil(self.glyphMaxWidth)) + UInt(hPadding)
-            let glyphHeight = UInt(ceil(self.glyphMaxHeight)) + UInt(vPadding)
-            let glyphsToLoad = UInt(face.pointee.num_glyphs) - self.numGlyphsLoaded
+            let glyphWidth = Int(ceil(self.glyphMaxWidth)) + hPadding
+            let glyphHeight = Int(ceil(self.glyphMaxHeight)) + vPadding
+            let glyphsToLoad = Int(face.pointee.num_glyphs) - self.numGlyphsLoaded
+            assert(glyphsToLoad > 0)
 
-            let desiredArea: UInt = glyphWidth * glyphHeight * glyphsToLoad
-            // let maxTextureSize:UInt = 4096
-            let maxTextureSize:UInt = 1024
-            let minTextureSize = { (minReq: UInt) -> UInt in
+            let desiredArea: Int = glyphWidth * glyphHeight * glyphsToLoad
+            // let maxTextureSize:Int = 4096
+            let maxTextureSize:Int = 1024
+            let minTextureSize = { (minReq: Int) -> Int in
                 assert(maxTextureSize > minReq)
-                var size: UInt = 32
+                var size = 32
                 while (size < maxTextureSize && size < minReq) {
                     size = size * 2
                 }
@@ -728,8 +729,8 @@ public class Font {
             let desc = TextureDescriptor(
                 textureType: .type2D,
                 pixelFormat: .r8Unorm,
-                width: UInt32(desiredWidth),
-                height: UInt32(desiredHeight),
+                width: desiredWidth,
+                height: desiredHeight,
                 depth: 1,
                 mipmapLevels: 1,
                 sampleCount: 1,
