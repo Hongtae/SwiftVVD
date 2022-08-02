@@ -28,6 +28,23 @@ public struct Triangle {
         return AABB(min: minimum, max: maximum)
     }
 
+    public func barycentricCoordinates(at p: Vector3) -> Vector3 {
+        let v0 = p1 - p0
+        let v1 = p2 - p0
+        let v2 = p - p0
+        let d00 = Vector3.dot(v0, v0)
+        let d01 = Vector3.dot(v0, v1)
+        let d11 = Vector3.dot(v1, v1)
+        let d20 = Vector3.dot(v2, v0)
+        let d21 = Vector3.dot(v2, v1)
+        let denom = d00 * d11 - d01 * d01
+        let invDenom = Scalar(1.0) / denom
+        let v = (d11 * d20 - d01 * d21) * invDenom
+        let w = (d00 * d21 - d01 * d20) * invDenom
+        let u = Scalar(1.0) - v - w
+        return Vector3(u, v, w)
+    }
+
     /// RayTestResult: ray intersection test result with t,u,v
     /// t: the distance from ray origin to the triangle plane
     ///   intersection point P(t) = rayOrigin + rayDir * t
