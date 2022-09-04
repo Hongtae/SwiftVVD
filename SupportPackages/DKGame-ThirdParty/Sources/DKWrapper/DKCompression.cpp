@@ -590,7 +590,7 @@ static DKCompressionResult DecodeLz4(DKStream* input, DKStream* output)
                         else
                         {
                             DKLogW("DKCompression Decode-Warning: Lz4 stream seeking is not available!\n");
-                            uint64_t r = 0;
+                            size_t r = 0;
                             while (r < offset)
                             {
                                 uint64_t t = DKSTREAM_READ(input, inputBuffer.buffer, std::min((offset - r), inputBuffer.bufferSize));
@@ -968,7 +968,7 @@ DKCompressionResult DKCompressionDecodeAutoDetect(DKStream* input, DKStream* out
         DKStream* source;
         uint8_t buffer[BufferLength];
         uint8_t* preloadedData;
-        uint64_t preloadedLength;
+        size_t preloadedLength;
 
         BufferedStreamContext(DKStream* s): source(s)
         {
@@ -985,7 +985,7 @@ DKCompressionResult DKCompressionDecodeAutoDetect(DKStream* input, DKStream* out
 
     DKStream bufferedInputStream = {};
     bufferedInputStream.userContext = reinterpret_cast<DKStreamContext>(&inputStreamContext);
-    bufferedInputStream.read = [](DKStreamContext c, void* p, size_t s)
+    bufferedInputStream.read = [](DKStreamContext c, void* p, size_t s) -> uint64_t
     {
         BufferedStreamContext* ctxt = reinterpret_cast<BufferedStreamContext*>(c);
         size_t totalRead = 0;

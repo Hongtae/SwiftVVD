@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import FreeType
+import FreeType_static
 
 private class FTLibrary {
     var library: FT_Library?
@@ -297,7 +297,7 @@ public class Font {
                 let charIndex = { (c: UnicodeScalar) -> UInt32 in 
                     var index = self.charIndexMap[c]
                     if index == nil {
-                        index = FT_Get_Char_Index(self.face, c.value)
+                        index = FT_Get_Char_Index(self.face, FT_ULong(c.value))
                         self.charIndexMap[c] = index!
                     }
                     return index!
@@ -439,9 +439,9 @@ public class Font {
             return data
         }
 
-        let index = FT_Get_Char_Index(face, c.value)
+        let index = FT_Get_Char_Index(face, FT_ULong(c.value))
         // loading font.
-        let loadFlags: FT_Int32 = _forceBitmap ? FT_LOAD_RENDER : FT_LOAD_DEFAULT
+        let loadFlags = _forceBitmap ? FT_Int32(FT_LOAD_RENDER) : FT_Int32(FT_LOAD_DEFAULT)
         if FT_Load_Glyph(face, index, loadFlags) != 0 {
             Log.err("Failed to load glyph for char=\(c)(0x\(String(format: "%x", c.value)))")
             return nil

@@ -17,7 +17,7 @@
 #include <stdlib.h>
 
 #ifdef __cplusplus
-#define DKLog(fmt, ...)       fprintf(stdout, fmt, __VA_ARGS__)
-#define DKLogE(fmt, ...)      fprintf(stderr, fmt, __VA_ARGS__) 
-#define DKLogW(fmt, ...)      fprintf(stderr, fmt, __VA_ARGS__) 
+#define DKLog(fmt, ...)       fprintf(stdout, fmt, ## __VA_ARGS__)
+#define DKLogE(fmt, ...)      fprintf(stderr, fmt, ## __VA_ARGS__)
+#define DKLogW(fmt, ...)      fprintf(stderr, fmt, ## __VA_ARGS__) 
 #endif /* __cplusplus */

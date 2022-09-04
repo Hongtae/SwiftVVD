@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import SPIRV_Cross
+import SPIRV_Cross_static
 
 public struct ShaderAttribute {
     public var name : String

@@ -11,8 +11,8 @@ let cxxSettings: [CXXSetting] = [
     .headerSearchPath("openal-soft"),
 
     .define("NOMINMAX", .when(platforms: [.windows])),
-    .define("RESTRICT", to: "__restrict", .when(platforms: [.windows])),
     .define("_CRT_SECURE_NO_WARNINGS", .when(platforms: [.windows])),
+    .define("RESTRICT", to: "__restrict"),
 ]
 
 let package = Package(
@@ -29,11 +29,11 @@ let package = Package(
             name: "OpenAL",
             dependencies: [
                 .target(name: "OpenAL_backend"),
-                .target(name: "OpenAL_backend_windows", condition:.when(platforms: [.windows])),
-                .target(name: "OpenAL_backend_coreaudio", condition:.when(platforms: [.macOS, .iOS, .tvOS])),
-                .target(name: "OpenAL_mixer_sse", condition:.when(platforms: [.windows])),
-                .target(name: "OpenAL_mixer_neon", condition:.when(platforms: [.iOS, .tvOS])),
-                ],
+//                .target(name: "OpenAL_backend_windows", condition: .when(platforms: [.windows])),
+                .target(name: "OpenAL_backend_coreaudio", condition: .when(platforms: [.macOS, .iOS, .tvOS])),
+//                .target(name: "OpenAL_mixer_sse", condition: .when(platforms: [.windows])),
+                .target(name: "OpenAL_mixer_neon", condition: .when(platforms: [.iOS, .tvOS])),
+            ],
             path: "Sources",
             exclude: [
                 "openal-soft/alc/backends",
@@ -68,7 +68,9 @@ let package = Package(
                 .linkedLibrary("Ole32", .when(platforms: [.windows])),
                 .linkedLibrary("User32", .when(platforms: [.windows])),
                 .linkedLibrary("Winmm", .when(platforms: [.windows])),
-                .linkedLibrary("swiftCore"), // swift_addNewDSOImage
+                .linkedLibrary("swiftCore", .when(platforms: [.windows])), // swift_addNewDSOImage
+
+                .linkedFramework("CoreFoundation", .when(platforms: [.macOS, .iOS])),
             ]),
         .target(
             name: "OpenAL_mixer_sse",
@@ -119,8 +121,11 @@ let package = Package(
                 "openal-soft/alc/backends/coreaudio.cpp",
             ],
             publicHeadersPath: "swift_module",
-            cxxSettings: cxxSettings)
-
+            cxxSettings: cxxSettings,
+            linkerSettings: [
+                .linkedFramework("CoreAudio"),
+                .linkedFramework("AudioToolbox"),
+            ])
     ],
     cLanguageStandard: .c11,
     cxxLanguageStandard: .cxx20

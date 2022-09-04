@@ -12,7 +12,7 @@
 
 *******************************************************************************/
 
-#include <string.h>
+#include <cstring>
 #include <algorithm>
 #include <vector>
 #include "../libpng/png.h"
@@ -215,8 +215,8 @@ inline char* CopyString(const char* text)
     {
         size_t len = strlen(text);
         char* mesg = (char*)DKMalloc(len+2);
-        if (mesg && strcpy_s(mesg, len+2, text) == 0)
-            return mesg;
+        if (mesg)
+            return std::strncpy(mesg, text, len+2);
         if (mesg)
             DKFree((void*)mesg);
     }
