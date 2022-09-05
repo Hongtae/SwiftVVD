@@ -41,9 +41,9 @@ public class MetalShaderModule: ShaderModule {
 
     public let functionNames: [String] // spirv names
     let functionNameMap: [String: String]   // spirv to msl table
-    let workgroupSize: MTLSize
+    var workgroupSize: MTLSize
 
-    let bindings: MetalStageResourceBindingMap
+    var bindings: MetalStageResourceBindingMap
 
 
     init(device: MetalGraphicsDevice, library: MTLLibrary, names: [NameConversion]) {

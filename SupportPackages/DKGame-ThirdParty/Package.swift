@@ -57,6 +57,12 @@ let package = Package(
                 "spirv_reflect.cpp"],
             publicHeadersPath: ".",
             cxxSettings: [
+                .define("SPIRV_CROSS_C_API_CPP", to: "1"),
+                .define("SPIRV_CROSS_C_API_GLSL", to: "1"),
+                .define("SPIRV_CROSS_C_API_HLSL", to: "1"),
+                .define("SPIRV_CROSS_C_API_MSL", to: "1"),
+                .define("SPIRV_CROSS_C_API_REFLECT", to: "1"),
+
                 // Temporarily changed the optimization flag due to an internal compiler error
                 .unsafeFlags(["-Oz"], .when(platforms: [.windows], configuration: .release))
             ]),

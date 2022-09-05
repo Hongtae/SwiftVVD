@@ -373,7 +373,7 @@ public class Shader: CustomStringConvertible {
 
     public private(set) var pushConstantLayouts: [ShaderPushConstantLayout]
     public private(set) var descriptors: [ShaderDescriptor]
-    public private(set) var threadgroupSize: (x: UInt32, y: UInt32, z: UInt32)
+    public private(set) var threadgroupSize: (x: Int, y: Int, z: Int)
 
     public var name: String
 
@@ -441,10 +441,10 @@ public class Shader: CustomStringConvertible {
 
             var compilerPtr: spvc_compiler? = nil
             result = spvc_context_create_compiler(context,
-                                                SPVC_BACKEND_NONE,
-                                                ir,
-                                                SPVC_CAPTURE_MODE_TAKE_OWNERSHIP,
-                                                &compilerPtr)
+                                                  SPVC_BACKEND_NONE,
+                                                  ir,
+                                                  SPVC_CAPTURE_MODE_TAKE_OWNERSHIP,
+                                                  &compilerPtr)
             if result != SPVC_SUCCESS { return false }
             let compiler = compilerPtr!
 
@@ -488,9 +488,9 @@ public class Shader: CustomStringConvertible {
                 Log.debug("ComputeShader.LocalSize.Y: \(localSizeY) (specialized: \(y.id), specializationID: \(y.constant_id))")
                 Log.debug("ComputeShader.LocalSize.Z: \(localSizeZ) (specialized: \(z.id), specializationID: \(z.constant_id))")
 
-                self.threadgroupSize.x = max(localSizeX, 1)
-                self.threadgroupSize.y = max(localSizeY, 1)
-                self.threadgroupSize.z = max(localSizeZ, 1)
+                self.threadgroupSize.x = Int(max(localSizeX, 1))
+                self.threadgroupSize.y = Int(max(localSizeY, 1))
+                self.threadgroupSize.z = Int(max(localSizeZ, 1))
             }
 
             // get resources
