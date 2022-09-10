@@ -30,5 +30,14 @@ public class MetalComputePipelineState: ComputePipelineState {
             pushConstantBufferSize: 0)
     }
 
+    init(device: MetalGraphicsDevice,
+         pipelineState: MTLComputePipelineState,
+         workgroupSize: MTLSize,
+         bindings: MetalStageResourceBindingMap) {
+        self.device = device
+        self.pipelineState = pipelineState
+        self.workgroupSize = workgroupSize
+        self.bindings = bindings
+    }
 }
 #endif //if ENABLE_METAL

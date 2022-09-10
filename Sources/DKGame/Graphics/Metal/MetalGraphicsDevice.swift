@@ -175,7 +175,7 @@ public class MetalGraphicsDevice: GraphicsDevice {
             // spirv_msl.hpp
             // iOS = 0,
             // macOS = 1
-#if os(macOS)
+#if os(macOS) || targetEnvironment(macCatalyst)
             spvc_compiler_options_set_uint(spvcCompilerOptions, SPVC_COMPILER_OPTION_MSL_PLATFORM, 1)
 #else
             spvc_compiler_options_set_uint(spvcCompilerOptions, SPVC_COMPILER_OPTION_MSL_PLATFORM, 0)
@@ -297,7 +297,65 @@ public class MetalGraphicsDevice: GraphicsDevice {
     }
 
     public func makeComputePipelineState(descriptor: ComputePipelineDescriptor, reflection: UnsafeMutablePointer<PipelineReflection>?) -> ComputePipelineState? {
-        return nil
+        if descriptor.computeFunction == nil {
+            return nil
+        }
+
+        assert(descriptor.computeFunction is MetalShaderFunction)
+        let computeFunction = descriptor.computeFunction as! MetalShaderFunction
+        assert(computeFunction.function.functionType == .kernel)
+
+        let desc = MTLComputePipelineDescriptor()
+        desc.computeFunction = computeFunction.function
+        var options: MTLPipelineOption = []
+        if reflection != nil {
+            options = [.argumentInfo, .bufferTypeInfo]
+        }
+
+        var pipelineReflection: MTLComputePipelineReflection? = nil
+        let pipelineState: MTLComputePipelineState
+        do {
+            pipelineState = try self.device.makeComputePipelineState(descriptor: desc,
+                                                                     options: options,
+                                                                     reflection: &pipelineReflection)
+        } catch {
+            Log.err("MTLDevice.makeComputePipelineState error: \(error)")
+            return nil
+        }
+
+        if let reflection = reflection, let pipelineReflection = pipelineReflection {
+            Log.debug("ComputePipelineReflection: \(pipelineReflection)")
+
+            var resources: [ShaderResource] = []
+            var pushConstants: [ShaderPushConstantLayout] = []
+
+            resources.reserveCapacity(pipelineReflection.arguments.count)
+            pushConstants.reserveCapacity(pipelineReflection.arguments.count)
+
+            let bindingMap = computeFunction.module.bindings
+
+            for arg in pipelineReflection.arguments {
+                if arg.type == .buffer, arg.index == bindingMap.pushConstantIndex {
+                    let layout: ShaderPushConstantLayout = .from(mtlArgument: arg,
+                                                                 offset: bindingMap.pushConstantOffset,
+                                                                 size: bindingMap.pushConstantSize,
+                                                                 stage: .compute)
+                    pushConstants.append(layout)
+                } else {
+                    let res: ShaderResource = .from(mtlArgument: arg,
+                                                    bindingMap: bindingMap.resourceBindings,
+                                                    stage: .compute)
+                    combineShaderResources(&resources, resource: res)
+                }
+            }
+            reflection.pointee.resources = resources
+            reflection.pointee.pushConstantLayouts = pushConstants
+        }
+
+        return MetalComputePipelineState(device: self,
+                                         pipelineState: pipelineState,
+                                         workgroupSize: computeFunction.module.workgroupSize,
+                                         bindings: computeFunction.module.bindings)
     }
 
     public func makeBuffer(length: Int, storageMode: StorageMode, cpuCacheMode: CPUCacheMode) -> Buffer? {
