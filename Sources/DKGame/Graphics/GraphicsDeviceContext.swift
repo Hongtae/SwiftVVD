@@ -37,7 +37,7 @@ public class GraphicsDeviceContext {
                 if queue.flags.contains(.render) {
                     return queue
                 }
-            }                        
+            }
         }
         return renderQueues.first
     }
@@ -94,7 +94,7 @@ public func makeGraphicsDeviceContext(api: GraphicsAPI = .auto) -> GraphicsDevic
 #endif
 
     if api == .vulkan || api == .auto {
-#if ENABLE_VULKAN        
+#if ENABLE_VULKAN
         if let instance = VulkanInstance(enableValidation: enableValidation) {
             if let device = instance.makeDevice() {
                 return GraphicsDeviceContext(device: device)
@@ -104,7 +104,9 @@ public func makeGraphicsDeviceContext(api: GraphicsAPI = .auto) -> GraphicsDevic
     }
     if api == .metal || api == .auto {
 #if ENABLE_METAL
-
+        if let device = MetalGraphicsDevice() {
+            return GraphicsDeviceContext(device: device)
+        }
 #endif        
     }
     return nil

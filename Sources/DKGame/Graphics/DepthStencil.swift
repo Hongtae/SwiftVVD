@@ -55,15 +55,15 @@ public struct DepthStencilDescriptor {
     public var depthCompareFunction: CompareFunction
     public var frontFaceStencil: StencilDescriptor
     public var backFaceStencil: StencilDescriptor
-    public var depthWriteEnabled: Bool
+    public var isDepthWriteEnabled: Bool
 
     public init(depthCompareFunction: CompareFunction = .always,
                 frontFaceStencil: StencilDescriptor = .init(),
                 backFaceStencil: StencilDescriptor = .init(),
-                depthWriteEnabled: Bool = false) {
+                isDepthWriteEnabled: Bool = false) {
         self.depthCompareFunction = depthCompareFunction
         self.frontFaceStencil = frontFaceStencil
         self.backFaceStencil = backFaceStencil
-        self.depthWriteEnabled = depthWriteEnabled
+        self.isDepthWriteEnabled = isDepthWriteEnabled
     }
 }

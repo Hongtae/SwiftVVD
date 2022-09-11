@@ -15,47 +15,47 @@ public class AudioSource {
         case paused
     }
 
-    public var pitch: Float {
+    public var pitch: Scalar {
         get { getSource(AL_PITCH, 1.0) }
         set { setSource(AL_PITCH, max(newValue, 0.0)) }
     }
 
-    public var gain: Float {
+    public var gain: Scalar {
         get { getSource(AL_GAIN, 1.0) }
         set { setSource(AL_GAIN, max(newValue, 0.0)) }
     }
 
-    public var maxGain: Float {
+    public var maxGain: Scalar {
         get { getSource(AL_MAX_GAIN, 1.0) }
         set { setSource(AL_MAX_GAIN, clamp(newValue, min: 0.0, max: 1.0)) }
     }
 
-    public var maxDistance: Float {
+    public var maxDistance: Scalar {
         get { getSource(AL_MAX_DISTANCE, .greatestFiniteMagnitude) }
         set { setSource(AL_MAX_DISTANCE, max(newValue, 0.0)) }
     }
 
-    public var rollOffFactor: Float {
+    public var rollOffFactor: Scalar {
         get { getSource(AL_ROLLOFF_FACTOR, 1.0) }
         set { setSource(AL_ROLLOFF_FACTOR, max(newValue, 0.0)) }
     }
 
-    public var coneOuterGain: Float {
+    public var coneOuterGain: Scalar {
         get { getSource(AL_CONE_OUTER_GAIN, 0.0) }
         set { setSource(AL_CONE_OUTER_GAIN, clamp(newValue, min: 0.0, max: 1.0)) }
     }
 
-    public var coneInnerAngle: Float {
+    public var coneInnerAngle: Scalar {
         get { degreeToRadian(getSource(AL_CONE_INNER_ANGLE, 360.0)) }
         set { setSource(AL_CONE_INNER_ANGLE, clamp(radianToDegree(newValue), min: 0.0, max: 360.0)) }
     }
 
-    public var coneOuterAngle: Float {
+    public var coneOuterAngle: Scalar {
         get { degreeToRadian(getSource(AL_CONE_OUTER_ANGLE, 360.0)) }
         set { setSource(AL_CONE_OUTER_ANGLE, clamp(radianToDegree(newValue), min: 0.0, max: 360.0)) }
     }
 
-    public var referenceDistance: Float {
+    public var referenceDistance: Scalar {
         get { getSource(AL_ROLLOFF_FACTOR, 1.0) }
         set { setSource(AL_ROLLOFF_FACTOR, max(newValue, 0.0)) }
     }
@@ -182,7 +182,7 @@ public class AudioSource {
         }
 
         if bufferProcessed > 0 {
-        	// Log.debug("AudioSource buffer dequeued. remains: \(buffers.count)")
+            // Log.debug("AudioSource buffer dequeued. remains: \(buffers.count)")
         }
     }
 
@@ -384,7 +384,7 @@ public class AudioSource {
         assert(buffers.isEmpty)
 
         var sourceID = self.sourceID
-    	alDeleteSources(1, &sourceID)
+        alDeleteSources(1, &sourceID)
 
         // check error.
         let err = alGetError()
@@ -393,24 +393,25 @@ public class AudioSource {
         }      
     }
 
-    private func getSource(_ param: ALenum, _ value: Float) -> Float {
-        var value = value
+    private func getSource(_ param: ALenum, _ value: Scalar) -> Scalar {
+        var value = ALfloat(value)
         alGetSourcef(sourceID, param, &value)
-        return value
+        return Scalar(value)
     }
 
     private func getSource(_ param: ALenum, _ vector: Vector3) -> Vector3 {
-        var vector = vector
-        alGetSource3f(sourceID, param, &vector.x, &vector.y, &vector.z)
-        return vector
+        var v = vector.float3
+        alGetSource3f(sourceID, param, &v.0, &v.1, &v.2)
+        return Vector3(v)
     }
 
-    private func setSource(_ param: ALenum, _ value: Float) {
-        alSourcef(sourceID, param, value)
+    private func setSource(_ param: ALenum, _ value: Scalar) {
+        alSourcef(sourceID, param, ALfloat(value))
     }
 
     private func setSource(_ param: ALenum, _ vector: Vector3) {
-        alSource3f(sourceID, param, vector.x, vector.y, vector.z)
+        let v = vector.float3
+        alSource3f(sourceID, param, v.0, v.1, v.2)
     }
 
     private func radianToDegree<T: FloatingPoint>(_ r: T) -> T {

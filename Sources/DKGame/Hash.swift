@@ -359,10 +359,10 @@ public struct SHA256 {
             W[x] = W[x-16] &+ s0 &+ W[x-7] &+ s1
         }
 
-		var s0, s1: UInt32
-		var maj: UInt32
-		var t1, t2: UInt32
-		var ch: UInt32
+        var s0, s1: UInt32
+        var maj: UInt32
+        var t1, t2: UInt32
+        var ch: UInt32
 
         for n in 0..<64 {
             s0 = rightRotate(A,2) ^ rightRotate(A,13) ^ rightRotate(A,22)

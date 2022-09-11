@@ -6,11 +6,11 @@
 //
 
 public struct RenderPipelineColorAttachmentDescriptor {
-    public var index: UInt32
+    public var index: Int
     public var pixelFormat: PixelFormat
     public var blendState: BlendState
 
-    public init(index: UInt32,
+    public init(index: Int,
                 pixelFormat: PixelFormat,
                 blendState: BlendState) {
         self.index = index
@@ -20,11 +20,11 @@ public struct RenderPipelineColorAttachmentDescriptor {
 }
 
 public enum PrimitiveType {
-	case point
-	case line
-	case lineStrip
-	case triangle
-	case triangleStrip
+    case point
+    case line
+    case lineStrip
+    case triangle
+    case triangleStrip
 }
 
 public enum IndexType {

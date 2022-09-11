@@ -120,8 +120,8 @@ public extension PixelFormat {
         case .rg11b10Float:     return VK_FORMAT_B10G11R11_UFLOAT_PACK32
         case .rgb9e5Float:      return VK_FORMAT_E5B9G9R9_UFLOAT_PACK32
 
-        case .rg32Uint:	        return VK_FORMAT_R32G32_UINT
-        case .rg32Sint:	        return VK_FORMAT_R32G32_SINT
+        case .rg32Uint:         return VK_FORMAT_R32G32_UINT
+        case .rg32Sint:         return VK_FORMAT_R32G32_SINT
         case .rg32Float:        return VK_FORMAT_R32G32_SFLOAT
 
         case .rgba16Unorm:      return VK_FORMAT_R16G16B16A16_UNORM

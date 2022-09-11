@@ -312,11 +312,10 @@ open class Frame {
                 screen.releaseAllMiceCaptured(by: self)
             }
             
-            for i in 0..<parent.subframes.count {
-                if parent.subframes[i] === self {
-                    parent.subframes.remove(at: i)
-                    break
-                }
+            if let index = parent.subframes.firstIndex(where: { $0 === self }) {
+                parent.subframes.remove(at: index)
+            } else {
+                assertionFailure()
             }
             parent.redraw()
             self.superframe = nil
@@ -479,8 +478,8 @@ open class Frame {
                     if self.renderTarget == nil {
                         // use screen's device (not from commandQueue.device)
                         if let device = screen.graphicsDeviceContext?.device {
-                            let width = UInt32(self.resolution.width.rounded())
-                            let height = UInt32(self.resolution.height.rounded())
+                            let width = Int(self.resolution.width.rounded())
+                            let height = Int(self.resolution.height.rounded())
 
                             assert(self.pixelFormat.isColorFormat())
 

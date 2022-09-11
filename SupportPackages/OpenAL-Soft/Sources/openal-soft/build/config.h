@@ -52,7 +52,6 @@
 #define SIZEOF_LONG_LONG	8
 #endif
 
-#define RESTRICT __restrict
 #define HAVE_POSIX_MEMALIGN
 /* #define HAVE_SSE */
 #define HAVE_COREAUDIO
@@ -65,7 +64,7 @@
 #define HAVE_STDINT_H
 #define HAVE_DLFCN_H
 #define HAVE_XMMINTRIN_H
-#define HAVE_CPUID_H
+/* #define HAVE_CPUID_H */
 #define HAVE_FLOAT_H
 #define HAVE_FENV_H
 #define HAVE_PTHREAD_SETSCHEDPARAM
@@ -86,7 +85,6 @@
 #define SIZEOF_LONG_LONG	8
 #endif
 
-#define RESTRICT __restrict
 #define HAVE_ARM_NEON_H
 #define HAVE_OPENSL
 #define HAVE_WAVE

@@ -14,8 +14,8 @@ public enum TextureType {
 }
 
 public struct TextureUsage: OptionSet {
-    public let rawValue: UInt32
-    public init(rawValue: UInt32) { self.rawValue = rawValue }
+    public let rawValue: UInt
+    public init(rawValue: UInt) { self.rawValue = rawValue }
 
     public static let unknown: TextureUsage = []
     public static let copySource        = TextureUsage(rawValue: 1)
@@ -45,22 +45,22 @@ public struct TextureDescriptor {
     public var textureType: TextureType
     public var pixelFormat: PixelFormat
 
-    public var width: UInt32
-    public var height: UInt32
-    public var depth: UInt32
-    public var mipmapLevels: UInt32
-    public var sampleCount: UInt32
-    public var arrayLength: UInt32
+    public var width: Int
+    public var height: Int
+    public var depth: Int
+    public var mipmapLevels: Int
+    public var sampleCount: Int
+    public var arrayLength: Int
     public var usage: TextureUsage
 
     public init(textureType: TextureType,
                 pixelFormat: PixelFormat,
-                width: UInt32,
-                height: UInt32,
-                depth: UInt32,
-                mipmapLevels: UInt32,
-                sampleCount: UInt32,
-                arrayLength: UInt32,
+                width: Int,
+                height: Int,
+                depth: Int,
+                mipmapLevels: Int,
+                sampleCount: Int,
+                arrayLength: Int,
                 usage: TextureUsage) {
         self.textureType = textureType
         self.pixelFormat = pixelFormat

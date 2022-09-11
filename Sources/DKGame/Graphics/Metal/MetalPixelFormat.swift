@@ -9,7 +9,7 @@
 import Foundation
 import Metal
 
-public extension PixelFormat {
+extension PixelFormat {
     static func from(mtlPixelFormat format: MTLPixelFormat) -> PixelFormat {
         switch (format)
         {

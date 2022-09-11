@@ -152,17 +152,17 @@ public struct Quaternion: Vector {
 
     public var matrix4: Matrix4 {
         var mat = Matrix4.identity
-	    mat.m11 = 1.0 - 2.0 * (y * y + z * z)
-	    mat.m12 = 2.0 * (x * y + z * w)
-	    mat.m13 = 2.0 * (x * z - y * w)
+        mat.m11 = 1.0 - 2.0 * (y * y + z * z)
+        mat.m12 = 2.0 * (x * y + z * w)
+        mat.m13 = 2.0 * (x * z - y * w)
 
-	    mat.m21 = 2.0 * (x * y - z * w)
-	    mat.m22 = 1.0 - 2.0 * (x * x + z * z)
-	    mat.m23 = 2.0 * (y * z + x * w)
+        mat.m21 = 2.0 * (x * y - z * w)
+        mat.m22 = 1.0 - 2.0 * (x * x + z * z)
+        mat.m23 = 2.0 * (y * z + x * w)
 
-	    mat.m31 = 2.0 * (x * z + y * w)
-	    mat.m32 = 2.0 * (y * z - x * w)
-	    mat.m33 = 1.0 - 2.0 * (x * x + y * y)
+        mat.m31 = 2.0 * (x * z + y * w)
+        mat.m32 = 2.0 * (y * z - x * w)
+        mat.m33 = 1.0 - 2.0 * (x * x + y * y)
         return mat
     }
 
@@ -191,10 +191,10 @@ public struct Quaternion: Vector {
     }
 
     public static func * (lhs: Quaternion, rhs: Quaternion) -> Quaternion {
-		let x = rhs.w * lhs.x + rhs.x * lhs.w + rhs.y * lhs.z - rhs.z * lhs.y
-		let y = rhs.w * lhs.y + rhs.y * lhs.w + rhs.z * lhs.x - rhs.x * lhs.z
-		let z = rhs.w * lhs.z + rhs.z * lhs.w + rhs.x * lhs.y - rhs.y * lhs.x
-		let w = rhs.w * lhs.w - rhs.x * lhs.x - rhs.y * lhs.y - rhs.z * lhs.z
+        let x = rhs.w * lhs.x + rhs.x * lhs.w + rhs.y * lhs.z - rhs.z * lhs.y
+        let y = rhs.w * lhs.y + rhs.y * lhs.w + rhs.z * lhs.x - rhs.x * lhs.z
+        let z = rhs.w * lhs.z + rhs.z * lhs.w + rhs.x * lhs.y - rhs.y * lhs.x
+        let w = rhs.w * lhs.w - rhs.x * lhs.x - rhs.y * lhs.y - rhs.z * lhs.z
         return Quaternion(x, y, z, w)
     }
 
@@ -279,9 +279,20 @@ public extension Vector3 {
         self.rotate(by: q)
     }
 
-    static func * (lhs: Vector3, rhs: Quaternion) -> Vector3 {
-        return lhs.transformed(by: rhs)
+    // static func * (lhs: Vector3, rhs: Quaternion) -> Vector3 {
+    //     return lhs.transformed(by: rhs)
+    // }
+
+    // static func *= (lhs: inout Vector3, rhs: Quaternion) { lhs = lhs * rhs }
+}
+
+extension Quaternion: VectorTransformer {
+    public static func != (lhs: Self, rhs: Self) -> Bool {
+        return !(lhs == rhs)
     }
 
-    static func *= (lhs: inout Vector3, rhs: Quaternion) { lhs = lhs * rhs }
+    public typealias Vector = Vector3
+    public static func * (_ lhs: Vector3, _ rhs: Self) -> Vector3 {
+        return lhs.transformed(by: rhs)
+    }
 }

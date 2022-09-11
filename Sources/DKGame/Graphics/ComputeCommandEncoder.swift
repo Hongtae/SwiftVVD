@@ -8,10 +8,10 @@
 import Foundation
 
 public protocol ComputeCommandEncoder: CommandEncoder {
-    func setResource(_: ShaderBindingSet, atIndex: UInt32)
+    func setResource(_: ShaderBindingSet, atIndex: Int)
     func setComputePipelineState(_: ComputePipelineState)
 
-    func pushConstant<D: DataProtocol>(stages: ShaderStageFlags, offset: UInt32, data: D)
+    func pushConstant<D: DataProtocol>(stages: ShaderStageFlags, offset: Int, data: D)
 
-    func dispatch(numGroupX: UInt32, numGroupY: UInt32, numGroupZ: UInt32)
+    func dispatch(numGroupX: Int, numGroupY: Int, numGroupZ: Int)
 }

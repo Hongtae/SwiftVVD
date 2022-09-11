@@ -14,19 +14,19 @@ public enum VisibilityResultMode {
 }
 
 public struct Viewport {
-    public var x: Float
-    public var y: Float
-    public var width: Float
-    public var height: Float
-    public var nearZ: Float
-    public var farZ: Float
+    public var x: Double
+    public var y: Double
+    public var width: Double
+    public var height: Double
+    public var nearZ: Double
+    public var farZ: Double
 
-    public init(x: Float,
-                y: Float,
-                width: Float,
-                height: Float,
-                nearZ: Float,
-                farZ: Float) {
+    public init(x: Double,
+                y: Double,
+                width: Double,
+                height: Double,
+                nearZ: Double,
+                farZ: Double) {
         self.x = x
         self.y = y
         self.width = width
@@ -37,14 +37,14 @@ public struct Viewport {
 }
 
 public protocol RenderCommandEncoder: CommandEncoder {
-    func setResource(_: ShaderBindingSet, atIndex: UInt32)
+    func setResource(_: ShaderBindingSet, atIndex: Int)
     func setViewport(_: Viewport)
     func setRenderPipelineState(_: RenderPipelineState)
-    func setVertexBuffer(_: Buffer, offset: UInt64, index: UInt32)
-    func setVertexBuffers(_: [Buffer], offsets: [UInt64], index: UInt32)
-    func setIndexBuffer(_: Buffer, offset: UInt64, type: IndexType)
-    
-    func pushConstant<D: DataProtocol>(stages: ShaderStageFlags, offset: UInt32, data: D)
+    func setVertexBuffer(_: Buffer, offset: Int, index: Int)
+    func setVertexBuffers(_: [Buffer], offsets: [Int], index: Int)
+    func setIndexBuffer(_: Buffer, offset: Int, type: IndexType)
+
+    func pushConstant<D: DataProtocol>(stages: ShaderStageFlags, offset: Int, data: D)
 
     func draw(numVertices: Int, numInstances: Int, baseVertex: Int, baseInstance: Int)
     func drawIndexed(numIndices: Int, numInstances: Int, indexOffset: Int, vertexOffset: Int, baseInstance: Int)

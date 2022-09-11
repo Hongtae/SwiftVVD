@@ -229,7 +229,7 @@ uint64_t DKAudioStreamFLACRead(DKAudioStream* stream, void* buffer, size_t size)
             }
         }
 
-        size_t numSamples = context->buffer.size();	
+        size_t numSamples = context->buffer.size();
         if (numSamples > 0)
         {
             size_t copiedSamples = 0;
@@ -251,7 +251,7 @@ uint64_t DKAudioStreamFLACRead(DKAudioStream* stream, void* buffer, size_t size)
                 {
                     reinterpret_cast<FLAC__int16*>(buffer)[copiedSamples] = static_cast<FLAC__int16>(p[copiedSamples]);
                     bytesCopied += 2;
-                }			
+                }
             }
             else if (context->bps == 24)
             {
@@ -261,12 +261,12 @@ uint64_t DKAudioStreamFLACRead(DKAudioStream* stream, void* buffer, size_t size)
                 {
                     // float has 23bits fraction (on IEEE754)
                     // which can have int24(23+1) without loss.
-                    float sig = static_cast<float>(p[copiedSamples]);		
-                    sig = (sig / float(1<<23)) * float(1<<15);				// int24 -> float -> int16.
+                    float sig = static_cast<float>(p[copiedSamples]);
+                    sig = (sig / float(1<<23)) * float(1<<15);      // int24 -> float -> int16.
                     FLAC__int16 sample = (FLAC__int16)std::clamp<int>( (sig+0.5), -32768, 32767);
                     reinterpret_cast<FLAC__int16*>(buffer)[copiedSamples] = sample;
                     bytesCopied += 2;
-                }				
+                }
             }
             else
             {
@@ -287,7 +287,7 @@ uint64_t DKAudioStreamFLACSeekRaw(DKAudioStream* stream, uint64_t pos)
     FLAC_Context* context = reinterpret_cast<FLAC_Context*>(stream->decoder);
     if (context->decoder)
     {
-        pos = (pos / context->channels) / (context->bps / 8);		// raw to pcm(sample)
+        pos = (pos / context->channels) / (context->bps / 8);   // raw to pcm(sample)
         pos = std::clamp(pos, 0ULL, context->totalSamples);
         if (FLAC__stream_decoder_seek_absolute(context->decoder, pos))
         {

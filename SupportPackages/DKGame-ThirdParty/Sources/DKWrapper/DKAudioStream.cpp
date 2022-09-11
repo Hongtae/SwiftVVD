@@ -61,7 +61,7 @@ void DKAudioStreamFLACDestroy(DKAudioStream* stream);
 void DKAudioStreamMP3Destroy(DKAudioStream* stream);
 void DKAudioStreamWaveDestroy(DKAudioStream* stream);
 
-#define AUDIO_FORMAT_HEADER_LENGTH		35
+#define AUDIO_FORMAT_HEADER_LENGTH      35
 
 extern "C" DKAudioStream* DKAudioStreamCreate(DKStream* stream)
 {

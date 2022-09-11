@@ -167,7 +167,7 @@ public struct Matrix3: Matrix {
     }
 
     public var determinant: Scalar {
-       	return m11 * m22 * m33 + m12 * m23 * m31 +
+           return m11 * m22 * m33 + m12 * m23 * m31 +
                m13 * m21 * m32 - m11 * m23 * m32 -
                m12 * m21 * m33 - m13 * m22 * m31
     }
@@ -262,6 +262,18 @@ public extension Matrix3 {
             self.row2.double3 = v.1
             self.row3.double3 = v.2
         }
+    }
+
+    init(_ m: Half3x3) {
+        self.init(row1: Vector3(m.0), row2: Vector3(m.1), row3: Vector3(m.2))
+    }
+
+    init(_ m: Float3x3) {
+        self.init(row1: Vector3(m.0), row2: Vector3(m.1), row3: Vector3(m.2))
+    }
+
+    init(_ m: Double3x3) {
+        self.init(row1: Vector3(m.0), row2: Vector3(m.1), row3: Vector3(m.2))
     }
 }
 

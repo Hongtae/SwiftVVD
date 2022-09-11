@@ -163,8 +163,8 @@ public class Material {
     public var shaderTemplate: [ShaderStage: ShaderTemplate] = [:]
 
     public struct ResourceIndex: Hashable {
-        let set: UInt32
-        let binding: UInt32
+        let set: Int
+        let binding: Int
     }
     public var resourceIndexNames: [ResourceIndex: String] = [:]
 
@@ -210,7 +210,7 @@ public class Material {
     }
 
     public struct ResourceBindingSet {
-        let index: UInt32
+        let index: Int
         let bindings: ShaderBindingSet
         let resources: [ResourceBinding]
     }

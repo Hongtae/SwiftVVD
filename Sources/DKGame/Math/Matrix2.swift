@@ -184,6 +184,18 @@ public extension Matrix2 {
             self.row2.double2 = v.1
         }
     }
+
+    init(_ m: Half2x2) {
+        self.init(row1: Vector2(m.0), row2: Vector2(m.1))
+    }
+
+    init(_ m: Float2x2) {
+        self.init(row1: Vector2(m.0), row2: Vector2(m.1))
+    }
+
+    init(_ m: Double2x2) {
+        self.init(row1: Vector2(m.0), row2: Vector2(m.1))
+    }
 }
 
 public extension Vector2 {

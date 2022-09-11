@@ -70,7 +70,7 @@ static DKCompressionResult EncodeDeflate(DKStream* input, DKStream* output, int 
     stream.zfree = Z_NULL;
     stream.opaque = Z_NULL;
 
-    int compressLevel = level;	// Z_DEFAULT_COMPRESSION is 6
+    int compressLevel = level;  // Z_DEFAULT_COMPRESSION is 6
     err = deflateInit(&stream, compressLevel);
     if (err == Z_OK)
     {
@@ -384,8 +384,8 @@ static DKCompressionResult EncodeLz4(DKStream* input, DKStream* output, int leve
 {
     LZ4F_preferences_t prefs = {};
     prefs.autoFlush = 1;
-    prefs.compressionLevel = level;	// 0 for LZ4 fast, 9 for LZ4HC
-    prefs.frameInfo.blockMode = LZ4F_blockLinked;	// for better compression ratio.
+    prefs.compressionLevel = level; // 0 for LZ4 fast, 9 for LZ4HC
+    prefs.frameInfo.blockMode = LZ4F_blockLinked; // for better compression ratio.
     prefs.frameInfo.contentChecksumFlag = LZ4F_contentChecksumEnabled; // to detect data corruption.
     prefs.frameInfo.blockSizeID = LZ4F_max4MB;
 
@@ -590,7 +590,7 @@ static DKCompressionResult DecodeLz4(DKStream* input, DKStream* output)
                         else
                         {
                             DKLogW("DKCompression Decode-Warning: Lz4 stream seeking is not available!\n");
-                            uint64_t r = 0;
+                            size_t r = 0;
                             while (r < offset)
                             {
                                 uint64_t t = DKSTREAM_READ(input, inputBuffer.buffer, std::min((offset - r), inputBuffer.bufferSize));
@@ -968,7 +968,7 @@ DKCompressionResult DKCompressionDecodeAutoDetect(DKStream* input, DKStream* out
         DKStream* source;
         uint8_t buffer[BufferLength];
         uint8_t* preloadedData;
-        uint64_t preloadedLength;
+        size_t preloadedLength;
 
         BufferedStreamContext(DKStream* s): source(s)
         {
@@ -985,7 +985,7 @@ DKCompressionResult DKCompressionDecodeAutoDetect(DKStream* input, DKStream* out
 
     DKStream bufferedInputStream = {};
     bufferedInputStream.userContext = reinterpret_cast<DKStreamContext>(&inputStreamContext);
-    bufferedInputStream.read = [](DKStreamContext c, void* p, size_t s)
+    bufferedInputStream.read = [](DKStreamContext c, void* p, size_t s) -> uint64_t
     {
         BufferedStreamContext* ctxt = reinterpret_cast<BufferedStreamContext*>(c);
         size_t totalRead = 0;

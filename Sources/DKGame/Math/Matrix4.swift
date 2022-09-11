@@ -225,7 +225,7 @@ public struct Matrix4: Matrix {
     }
 
     public var determinant: Scalar {
-    	return m14 * m23 * m32 * m41 - m13 * m24 * m32 * m41 -
+        return m14 * m23 * m32 * m41 - m13 * m24 * m32 * m41 -
                m14 * m22 * m33 * m41 + m12 * m24 * m33 * m41 +
                m13 * m22 * m34 * m41 - m12 * m23 * m34 * m41 -
                m14 * m23 * m31 * m42 + m13 * m24 * m31 * m42 +
@@ -349,6 +349,18 @@ public extension Matrix4 {
             self.row3.double4 = v.2
             self.row4.double4 = v.3
         }
+    }
+
+    init(_ m: Half4x4) {
+        self.init(row1: Vector4(m.0), row2: Vector4(m.1), row3: Vector4(m.2), row4: Vector4(m.3))
+    }
+
+    init(_ m: Float4x4) {
+        self.init(row1: Vector4(m.0), row2: Vector4(m.1), row3: Vector4(m.2), row4: Vector4(m.3))
+    }
+
+    init(_ m: Double4x4) {
+        self.init(row1: Vector4(m.0), row2: Vector4(m.1), row3: Vector4(m.2), row4: Vector4(m.3))
     }
 }
 

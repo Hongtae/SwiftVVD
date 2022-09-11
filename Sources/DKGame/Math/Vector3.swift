@@ -171,4 +171,22 @@ public extension Vector3 {
             self.z = Scalar(v.2)
         }
     }
+
+    init(_ v: Half3) {
+        self.x = Scalar(v.0)
+        self.y = Scalar(v.1)
+        self.z = Scalar(v.2)
+    }
+
+    init(_ v: Float3) {
+        self.x = Scalar(v.0)
+        self.y = Scalar(v.1)
+        self.z = Scalar(v.2)
+    }
+    
+    init(_ v: Double3) {
+        self.x = Scalar(v.0)
+        self.y = Scalar(v.1)
+        self.z = Scalar(v.2)
+    }
 }

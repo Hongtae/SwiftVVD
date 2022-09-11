@@ -9,7 +9,35 @@
 import Foundation
 import Metal
 
-public class MetalComputePipelineState {
+public class MetalComputePipelineState: ComputePipelineState {
+    public let device: GraphicsDevice
 
+    let pipelineState: MTLComputePipelineState
+    let bindings: MetalStageResourceBindingMap
+    let workgroupSize: MTLSize
+
+    init(device: MetalGraphicsDevice, pipelineState: MTLComputePipelineState, workgroupSize: MTLSize) {
+        self.device = device
+        self.pipelineState = pipelineState
+        self.workgroupSize = workgroupSize
+
+        self.bindings = MetalStageResourceBindingMap(
+            resourceBindings: [],
+            inputAttributeIndexOffset: 0,
+            pushConstantIndex: 0,
+            pushConstantOffset: 0,
+            pushConstantSize: 0,
+            pushConstantBufferSize: 0)
+    }
+
+    init(device: MetalGraphicsDevice,
+         pipelineState: MTLComputePipelineState,
+         workgroupSize: MTLSize,
+         bindings: MetalStageResourceBindingMap) {
+        self.device = device
+        self.pipelineState = pipelineState
+        self.workgroupSize = workgroupSize
+        self.bindings = bindings
+    }
 }
 #endif //if ENABLE_METAL

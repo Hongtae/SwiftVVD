@@ -58,7 +58,7 @@ public struct Vector4: Vector {
     }
 
     public static func dot(_ lhs: Vector4, _ rhs: Vector4) -> Scalar {
-    	return (lhs.x * rhs.x) + (lhs.y * rhs.y) + (lhs.z * rhs.z) + (lhs.w * rhs.w)
+        return (lhs.x * rhs.x) + (lhs.y * rhs.y) + (lhs.z * rhs.z) + (lhs.w * rhs.w)
     }
 
     public static func cross(_ v1: Vector4, _ v2: Vector4, _ v3: Vector4) -> Vector4 {
@@ -137,5 +137,26 @@ public extension Vector4 {
             self.z = Scalar(v.2)
             self.w = Scalar(v.3)
         }
+    }
+
+    init(_ v: Half4) {
+        self.x = Scalar(v.0)
+        self.y = Scalar(v.1)
+        self.z = Scalar(v.2)
+        self.w = Scalar(v.3)
+    }
+
+    init(_ v: Float4) {
+        self.x = Scalar(v.0)
+        self.y = Scalar(v.1)
+        self.z = Scalar(v.2)
+        self.w = Scalar(v.3)
+    }
+    
+    init(_ v: Double4) {
+        self.x = Scalar(v.0)
+        self.y = Scalar(v.1)
+        self.z = Scalar(v.2)
+        self.w = Scalar(v.3)
     }
 }

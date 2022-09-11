@@ -452,6 +452,7 @@ class AppKitView: NSView, NSTextInputClient, NSWindowDelegate {
     func windowDidBecomeKey(_ notification: Notification) {
         if notification.object as? NSWindow === self.window {
             self.activated = true
+            self.visible = true
             let currentEvent = NSApp.currentEvent!
             self.postWindowEvent(type: .activated)
             self.updateModifier(flags: currentEvent.modifierFlags)

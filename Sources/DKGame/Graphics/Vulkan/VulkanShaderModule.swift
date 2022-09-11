@@ -39,13 +39,17 @@ public class VulkanShaderModule: ShaderModule {
 
     public func makeFunction(name: String) -> ShaderFunction? {
         if self.functionNames.contains(name) {
-            return VulkanShaderFunction(module: self, name: name, specializationValues:[])
+            return VulkanShaderFunction(module: self, name: name, constantValues:[])
         }
         return nil
     }
 
-    public func makeFunction(name: String, specializedValues: [ShaderSpecialization]) -> ShaderFunction? {
+    public func makeFunction(name: String, constantValues: [ShaderFunctionConstantValue]) -> ShaderFunction? {
         // TODO: verify spir-v specialization constant
+
+        if self.functionNames.contains(name) {
+            return VulkanShaderFunction(module: self, name: name, constantValues:[])
+        }
         return nil
     }
 }

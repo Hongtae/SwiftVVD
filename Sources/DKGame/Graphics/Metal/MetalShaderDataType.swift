@@ -9,7 +9,7 @@
 import Foundation
 import Metal
 
-public extension ShaderDataType {
+extension ShaderDataType {
     static func from(mtlDataType dataType: MTLDataType) -> ShaderDataType {
         switch (dataType)
         {
@@ -155,17 +155,17 @@ public extension ShaderDataType {
         case .float4x4:     return .float4x4
 
         case .double:       fallthrough
-        case .double2:	    fallthrough
-        case .double3:	    fallthrough
-        case .double4:	    fallthrough
-        case .double2x2:	fallthrough
-        case .double3x2:	fallthrough
-        case .double4x2:	fallthrough
-        case .double2x3:	fallthrough
-        case .double3x3:	fallthrough
-        case .double4x3:	fallthrough
-        case .double2x4:	fallthrough
-        case .double3x4:	fallthrough
+        case .double2:      fallthrough
+        case .double3:      fallthrough
+        case .double4:      fallthrough
+        case .double2x2:    fallthrough
+        case .double3x2:    fallthrough
+        case .double4x2:    fallthrough
+        case .double2x3:    fallthrough
+        case .double3x3:    fallthrough
+        case .double4x3:    fallthrough
+        case .double2x4:    fallthrough
+        case .double3x4:    fallthrough
         case .double4x4:
             assertionFailure("Unsupported data type: double")
             fallthrough

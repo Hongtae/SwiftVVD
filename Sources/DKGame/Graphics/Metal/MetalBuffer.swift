@@ -25,7 +25,7 @@ public class MetalBuffer: Buffer {
     }
 
     public func flush() {
-#if os(macOS)
+#if os(macOS) || targetEnvironment(macCatalyst)
         if buffer.storageMode == .managed {
             buffer.didModifyRange(0..<buffer.length)
         }

@@ -188,7 +188,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
                 framebufferImageViews.append(rt.imageView)
 
                 var clearValue = VkClearValue()
-                clearValue.depthStencil.depth = self.renderPassDescriptor.depthStencilAttachment.clearDepth
+                clearValue.depthStencil.depth = Float(self.renderPassDescriptor.depthStencilAttachment.clearDepth)
                 clearValue.depthStencil.stencil = self.renderPassDescriptor.depthStencilAttachment.clearStencil
                 attachmentClearValues.append(clearValue)
 
@@ -216,7 +216,6 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
             renderPassCreateInfo.subpassCount = 1
             renderPassCreateInfo.pSubpasses = unsafePointerCopy(from: subpassDescription, holder: tempHolder)
 
-            let device = self.commandBuffer.device as! VulkanGraphicsDevice
             var err = vkCreateRenderPass(device.device, &renderPassCreateInfo, device.allocationCallbacks, &self.renderPass)
             if err != VK_SUCCESS {
                 Log.err("vkCreateRenderPass failed: \(err)")
@@ -303,6 +302,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
             return true
         }
     }
+
     private var encoder: Encoder?
     public let commandBuffer: CommandBuffer
 
@@ -355,7 +355,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
         }
     }
     
-    public func setResource(_ set: ShaderBindingSet, atIndex index: UInt32) {
+    public func setResource(_ set: ShaderBindingSet, atIndex index: Int) {
         assert(set is VulkanShaderBindingSet)
         var descriptorSet: VulkanDescriptorSet? = nil
         if let bindingSet = set as? VulkanShaderBindingSet {
@@ -374,7 +374,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
                     vkCmdBindDescriptorSets(commandBuffer,
                                             VK_PIPELINE_BIND_POINT_GRAPHICS,
                                             pipelineState.layout,
-                                            index,
+                                            UInt32(index),
                                             1,
                                             &ds,
                                             0,      // dynamic offsets
@@ -398,12 +398,12 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
     }
 
     public func setViewport(_ v: Viewport) {
-        var viewport = VkViewport(x: v.x,
-                                  y: v.y,
-                                  width: v.width,
-                                  height: v.height,
-                                  minDepth: v.nearZ,
-                                  maxDepth: v.farZ)
+        var viewport = VkViewport(x: Float(v.x),
+                                  y: Float(v.y),
+                                  width: Float(v.width),
+                                  height: Float(v.height),
+                                  minDepth: Float(v.nearZ),
+                                  maxDepth: Float(v.farZ))
         if flipViewportY {
             viewport.y = viewport.y + viewport.height // set origin to lower-left.
             viewport.height = -(viewport.height) // negative height.
@@ -414,11 +414,11 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
         self.encoder!.commands.append(command)
     }
 
-    public func setVertexBuffer(_ buffer: Buffer, offset: UInt64, index: UInt32) {
+    public func setVertexBuffer(_ buffer: Buffer, offset: Int, index: Int) {
         setVertexBuffers([buffer], offsets: [offset], index: index)
     }
 
-    public func setVertexBuffers(_ buffers: [Buffer], offsets: [UInt64], index: UInt32) {
+    public func setVertexBuffers(_ buffers: [Buffer], offsets: [Int], index: Int) {
         assert(buffers.count == offsets.count)
         let count = min(buffers.count, offsets.count)
         if count > 0 {
@@ -432,7 +432,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
                 if let bufferView = buffer as? VulkanBufferView {
                     assert(bufferView.buffer != nil)
                     bufferArray.append(bufferView.buffer!.buffer)
-                    offsetArray.append(offset)
+                    offsetArray.append(VkDeviceSize(offset))
 
                     self.encoder!.buffers.append(buffer)
                 } else {
@@ -444,13 +444,13 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
             assert(offsetArray.count == count)
 
             let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
-                vkCmdBindVertexBuffers(commandBuffer, index, UInt32(count), &bufferArray, &offsetArray)
+                vkCmdBindVertexBuffers(commandBuffer, UInt32(index), UInt32(count), &bufferArray, &offsetArray)
             }
             self.encoder!.commands.append(command)
         }
     }
 
-    public func setIndexBuffer(_ buffer: Buffer, offset: UInt64, type: IndexType) {
+    public func setIndexBuffer(_ buffer: Buffer, offset: Int, type: IndexType) {
         assert(buffer is VulkanBufferView)
         guard let bufferView = buffer as? VulkanBufferView else { return }
         assert(bufferView.buffer != nil)
@@ -462,13 +462,13 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
             case .uint32:   indexType = VK_INDEX_TYPE_UINT32
         }
         let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
-            vkCmdBindIndexBuffer(commandBuffer, buffer.buffer, offset, indexType)
+            vkCmdBindIndexBuffer(commandBuffer, buffer.buffer, VkDeviceSize(offset), indexType)
         }
         self.encoder!.buffers.append(bufferView)
         self.encoder!.commands.append(command)
     }
  
-    public func pushConstant<D: DataProtocol>(stages: ShaderStageFlags, offset: UInt32, data: D) {
+    public func pushConstant<D: DataProtocol>(stages: ShaderStageFlags, offset: Int, data: D) {
         let stageFlags = stages.vkFlags()
         if stageFlags != 0 && data.count > 0 {
             var buffer: [UInt8] = .init(data)
@@ -479,7 +479,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
                     vkCmdPushConstants(commandBuffer,
                                        pipelineState.layout,
                                        stageFlags,
-                                       offset,
+                                       UInt32(offset),
                                        UInt32(buffer.count),
                                        &buffer)
                 }

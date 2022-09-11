@@ -57,8 +57,8 @@ public struct Vector2: Vector {
         // Rotate
         // | cos  sin|
         // |-sin  cos|
-    	let cosR = cos(angle)
-    	let sinR = sin(angle)
+        let cosR = cos(angle)
+        let sinR = sin(angle)
         return Self(x * cosR - y * sinR, x * sinR + y * cosR)
     }
 
@@ -122,5 +122,20 @@ public extension Vector2 {
             self.x = Scalar(v.0)
             self.y = Scalar(v.1)
         }
+    }
+
+    init(_ v: Half2) {
+        self.x = Scalar(v.0)
+        self.y = Scalar(v.1)
+    }
+
+    init(_ v: Float2) {
+        self.x = Scalar(v.0)
+        self.y = Scalar(v.1)
+    }
+    
+    init(_ v: Double2) {
+        self.x = Scalar(v.0)
+        self.y = Scalar(v.1)
     }
 }

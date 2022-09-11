@@ -432,7 +432,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
                 }
             }
         }
-    	// find any queue that satisfies the condition.
+        // find any queue that satisfies the condition.
         for family in self.queueFamilies {
             if family.properties.queueFlags & queueFlags == queueFlags {
                 if let queue = family.makeCommandQueue(device: self) {
@@ -508,9 +508,9 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             layoutBindings.reserveCapacity(layout.bindings.count)
             for binding in layout.bindings {
                 var layoutBinding = VkDescriptorSetLayoutBinding()
-                layoutBinding.binding = binding.binding
+                layoutBinding.binding = UInt32(binding.binding)
                 layoutBinding.descriptorType = binding.type.vkType()
-                layoutBinding.descriptorCount = binding.arrayLength
+                layoutBinding.descriptorCount = UInt32(binding.arrayLength)
 
                 // input-attachment is for the fragment shader only! (framebuffer load operation)
                 if layoutBinding.descriptorType == VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT &&
@@ -618,7 +618,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         vertexBindingDescriptions.reserveCapacity(desc.vertexDescriptor.layouts.count)
         for layout in desc.vertexDescriptor.layouts {   // buffer layout
             var binding = VkVertexInputBindingDescription()
-            binding.binding = layout.bufferIndex
+            binding.binding = UInt32(layout.bufferIndex)
             binding.stride = UInt32(layout.stride)
             switch layout.step {
             case .vertex:
@@ -631,10 +631,10 @@ public class VulkanGraphicsDevice : GraphicsDevice {
 
         var vertexAttributeDescriptions: [VkVertexInputAttributeDescription] = []
         vertexAttributeDescriptions.reserveCapacity(desc.vertexDescriptor.attributes.count)
-    	for attrDesc in desc.vertexDescriptor.attributes {
+        for attrDesc in desc.vertexDescriptor.attributes {
             var attr = VkVertexInputAttributeDescription()
-            attr.location = attrDesc.location
-            attr.binding = attrDesc.bufferIndex
+            attr.location = UInt32(attrDesc.location)
+            attr.binding = UInt32(attrDesc.bufferIndex)
             attr.format = attrDesc.format.vkFormat()
             attr.offset = UInt32(attrDesc.offset)
             vertexAttributeDescriptions.append(attr)
@@ -658,7 +658,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         case .triangle:         inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
         case .triangleStrip:    inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP
         }
-    	pipelineCreateInfo.pInputAssemblyState = unsafePointerCopy(from: inputAssemblyState, holder: tempHolder)
+        pipelineCreateInfo.pInputAssemblyState = unsafePointerCopy(from: inputAssemblyState, holder: tempHolder)
 
         // setup viewport
         var viewportState = VkPipelineViewportStateCreateInfo()
@@ -747,7 +747,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             state.reference = 0 // use dynamic state (VK_DYNAMIC_STATE_STENCIL_REFERENCE)
         }
         depthStencilState.depthTestEnable = VkBool32(VK_TRUE)
-        depthStencilState.depthWriteEnable = VkBool32(desc.depthStencilDescriptor.depthWriteEnabled ? VK_TRUE:VK_FALSE)
+        depthStencilState.depthWriteEnable = VkBool32(desc.depthStencilDescriptor.isDepthWriteEnabled ? VK_TRUE:VK_FALSE)
         depthStencilState.depthCompareOp = compareOp(desc.depthStencilDescriptor.depthCompareFunction)
         depthStencilState.depthBoundsTestEnable = VkBool32(VK_FALSE)
         setStencilOpState(&depthStencilState.front, desc.depthStencilDescriptor.frontFaceStencil)
@@ -818,12 +818,12 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             case .sourceColor:              return VK_BLEND_FACTOR_SRC_COLOR
             case .oneMinusSourceColor:      return VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR
             case .sourceAlpha:              return VK_BLEND_FACTOR_SRC_ALPHA
-            case .oneMinusSourceAlpha:		return VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA
-            case .destinationColor:			return VK_BLEND_FACTOR_DST_COLOR
+            case .oneMinusSourceAlpha:      return VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA
+            case .destinationColor:         return VK_BLEND_FACTOR_DST_COLOR
             case .oneMinusDestinationColor: return VK_BLEND_FACTOR_ONE_MINUS_DST_COLOR
-            case .destinationAlpha:			return VK_BLEND_FACTOR_DST_ALPHA
+            case .destinationAlpha:         return VK_BLEND_FACTOR_DST_ALPHA
             case .oneMinusDestinationAlpha: return VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA
-            case .sourceAlphaSaturated:		return VK_BLEND_FACTOR_SRC_ALPHA_SATURATE
+            case .sourceAlphaSaturated:     return VK_BLEND_FACTOR_SRC_ALPHA_SATURATE
             case .blendColor:               return VK_BLEND_FACTOR_CONSTANT_COLOR
             case .oneMinusBlendColor:       return VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_COLOR
             case .blendAlpha:               return VK_BLEND_FACTOR_CONSTANT_ALPHA
@@ -831,7 +831,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             }
         }
 
-        var colorAttachmentRefCount: UInt32 = 0
+        var colorAttachmentRefCount = 0
         for attachment in desc.colorAttachments {
             assert(attachment.pixelFormat.isColorFormat())
             colorAttachmentRefCount = max(colorAttachmentRefCount, attachment.index + 1)
@@ -843,9 +843,8 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         subpassColorAttachmentRefs.append(contentsOf: 
             [VkAttachmentReference](repeating: VkAttachmentReference(attachment: VK_ATTACHMENT_UNUSED, layout: VK_IMAGE_LAYOUT_UNDEFINED),
                                     count: Int(colorAttachmentRefCount)))
-        for index in 0..<desc.colorAttachments.count {
-            let attachment = desc.colorAttachments[index]
 
+        for (index, attachment) in desc.colorAttachments.enumerated() {
             var attachmentDesc = VkAttachmentDescription()
             attachmentDesc.format = attachment.pixelFormat.vkFormat()
             attachmentDesc.samples = VK_SAMPLE_COUNT_1_BIT
@@ -866,7 +865,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             blendState.dstAlphaBlendFactor = blendFactor(attachment.blendState.destinationAlphaBlendFactor)
             blendState.alphaBlendOp = blendOperation(attachment.blendState.alphaBlendOperation)
 
-		    blendState.colorWriteMask = 0
+            blendState.colorWriteMask = 0
             if attachment.blendState.writeMask.contains(.red) {
                 blendState.colorWriteMask |= VkColorComponentFlags(VK_COLOR_COMPONENT_R_BIT.rawValue)
             }
@@ -916,11 +915,11 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         renderPassCreateInfo.subpassCount = 1
         renderPassCreateInfo.pSubpasses = unsafePointerCopy(from: subpassDesc, holder: tempHolder)
 
-	    result = vkCreateRenderPass(self.device, &renderPassCreateInfo, self.allocationCallbacks, &renderPass)
-    	if result != VK_SUCCESS {
-		    Log.err("vkCreateRenderPass failed: \(result)")
-    		return nil
-	    }
+        result = vkCreateRenderPass(self.device, &renderPassCreateInfo, self.allocationCallbacks, &renderPass)
+        if result != VK_SUCCESS {
+            Log.err("vkCreateRenderPass failed: \(result)")
+            return nil
+        }
         pipelineCreateInfo.renderPass = renderPass
 
         // color blending
@@ -930,12 +929,12 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         colorBlendState.pAttachments = unsafePointerCopy(collection: colorBlendAttachmentStates, holder: tempHolder)
         pipelineCreateInfo.pColorBlendState = unsafePointerCopy(from: colorBlendState, holder: tempHolder)
 
-    	result = vkCreateGraphicsPipelines(self.device, pipelineCache, 1, &pipelineCreateInfo, self.allocationCallbacks, &pipeline)
-	    if result != VK_SUCCESS {
-		    Log.err("vkCreateGraphicsPipelines failed: \(result)")
-    		return nil
+        result = vkCreateGraphicsPipelines(self.device, pipelineCache, 1, &pipelineCreateInfo, self.allocationCallbacks, &pipeline)
+        if result != VK_SUCCESS {
+            Log.err("vkCreateGraphicsPipelines failed: \(result)")
+            return nil
         }
-		
+        
         self.savePipelineCache()
 
         if let reflection = reflection {
@@ -960,10 +959,10 @@ public class VulkanGraphicsDevice : GraphicsDevice {
                             inputAttributes.append(attr)
                         }
                     }
-				}
+                }
             }
             resources.reserveCapacity(maxResourceCount)
-    		pushConstantLayouts.reserveCapacity(maxPushConstantLayoutCount)
+            pushConstantLayouts.reserveCapacity(maxPushConstantLayoutCount)
 
             for fn in shaderFunctions {
                 let fn = fn as! VulkanShaderFunction
@@ -973,8 +972,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
                     if res.enabled == false { continue }
 
                     var exist = false
-                    for i in 0..<resources.count {
-                        var res2 = resources[i]
+                    for (i, var res2) in resources.enumerated() {
                         if res.set == res2.set && res.binding == res2.binding {
                             assert(res.type == res2.type)
                             res2.stages.insert(ShaderStageFlags(stage:fn.stage))
@@ -991,8 +989,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
                 }
                 for layout in module.pushConstantLayouts {
                     var exist = false
-                    for i in 0..<pushConstantLayouts.count {
-                        var layout2 = pushConstantLayouts[i]
+                    for (i, var layout2) in pushConstantLayouts.enumerated() {
                         if layout.offset == layout2.offset && layout.size == layout2.size {
                             layout2.stages.insert(ShaderStageFlags(stage: fn.stage))
                             pushConstantLayouts[i] = layout2
@@ -1190,17 +1187,17 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             Log.err("VulkanGraphicsDevice.makeTexture(): Invalid texture type!")
             return nil
         }
-        imageCreateInfo.arrayLayers = max(desc.arrayLength, 1)
+        imageCreateInfo.arrayLayers = UInt32(max(desc.arrayLength, 1))
         if imageCreateInfo.arrayLayers > 1 && imageCreateInfo.imageType == VK_IMAGE_TYPE_2D {
             imageCreateInfo.flags |= UInt32(VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT.rawValue)
         }
         imageCreateInfo.format = desc.pixelFormat.vkFormat()
         assert(imageCreateInfo.format != VK_FORMAT_UNDEFINED, "Unsupported format!")
 
-        imageCreateInfo.extent.width = desc.width
-        imageCreateInfo.extent.height = desc.height
-        imageCreateInfo.extent.depth = desc.depth
-        imageCreateInfo.mipLevels = desc.mipmapLevels
+        imageCreateInfo.extent.width = UInt32(desc.width)
+        imageCreateInfo.extent.height = UInt32(desc.height)
+        imageCreateInfo.extent.depth = UInt32(desc.depth)
+        imageCreateInfo.mipLevels = UInt32(desc.mipmapLevels)
 
         assert(desc.sampleCount == 1, "Multisample is not implemented.")
         imageCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT
@@ -1557,7 +1554,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         pushConstantRanges.reserveCapacity(numPushConstantRanges)
 
         var maxDescriptorBindings = 0   // maximum number of descriptor
-        var maxDescriptorSets: UInt32 = 0       // maximum number of sets
+        var maxDescriptorSets = 0       // maximum number of sets
 
         for fn in functions {
             let f = fn as! VulkanShaderFunction
@@ -1567,8 +1564,8 @@ public class VulkanGraphicsDevice : GraphicsDevice {
                 if layout.size > 0 {
                     var range = VkPushConstantRange()
                     range.stageFlags = module.stage.vkFlags()
-                    range.offset = layout.offset
-                    range.size = layout.size
+                    range.offset = UInt32(layout.offset)
+                    range.size = UInt32(layout.size)
                     pushConstantRanges.append(range)
                 }
             }
@@ -1596,12 +1593,11 @@ public class VulkanGraphicsDevice : GraphicsDevice {
                     if desc.set == setIndex {
                         var newBinding = true
 
-                        for i in 0..<descriptorBindings.count {
-                            var b = descriptorBindings[i]
+                        for (i, var b) in descriptorBindings.enumerated() {
                             if b.binding == desc.binding {  // exist binding!! (conflict)
                                 newBinding = false
                                 if b.descriptorType == desc.type.vkType() {
-                                    b.descriptorCount = max(b.descriptorCount, desc.count)
+                                    b.descriptorCount = max(b.descriptorCount, UInt32(desc.count))
                                     b.stageFlags |= module.stage.vkFlags()
                                     descriptorBindings[i] = b // udpate.
                                 } else {
@@ -1612,9 +1608,9 @@ public class VulkanGraphicsDevice : GraphicsDevice {
                         }
                         if newBinding {
                             let binding = VkDescriptorSetLayoutBinding(
-                                binding: desc.binding,
+                                binding: UInt32(desc.binding),
                                 descriptorType: desc.type.vkType(),
-                                descriptorCount: desc.count,
+                                descriptorCount: UInt32(desc.count),
                                 stageFlags: layoutDefaultStageFlags | module.stage.vkFlags(), 
                                 pImmutableSamplers: nil  /* VkSampler* pImmutableSamplers */
                             )

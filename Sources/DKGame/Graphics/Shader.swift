@@ -6,11 +6,11 @@
 //
 
 import Foundation
-import SPIRV_Cross
+import SPIRV_Cross_static
 
 public struct ShaderAttribute {
     public var name : String
-    public var location : UInt32
+    public var location : Int
     public var type : ShaderDataType
     public var enabled : Bool
 }
@@ -27,9 +27,9 @@ public enum ShaderDescriptorType {
 }
 
 public struct ShaderDescriptor {
-    public var set : UInt32
-    public var binding : UInt32
-    public var count : UInt32 // array size
+    public var set : Int
+    public var binding : Int
+    public var count : Int // array size
     public var type : ShaderDescriptorType
 }
 
@@ -42,8 +42,8 @@ private func dataTypeFromSPVC(type: spvc_type) -> ShaderDataType {
 
     switch basetype {
     case SPVC_BASETYPE_UNKNOWN: return .unknown
-	case SPVC_BASETYPE_VOID:    return .none
-	case SPVC_BASETYPE_BOOLEAN:
+    case SPVC_BASETYPE_VOID:    return .none
+    case SPVC_BASETYPE_BOOLEAN:
         switch vecsize {
         case 1:     return .bool
         case 2:     return .bool2
@@ -51,7 +51,7 @@ private func dataTypeFromSPVC(type: spvc_type) -> ShaderDataType {
         case 4:     return .bool4
         default:    break
         }
-	case SPVC_BASETYPE_INT8:
+    case SPVC_BASETYPE_INT8:
         switch vecsize {
         case 1:     return .char
         case 2:     return .char2
@@ -59,7 +59,7 @@ private func dataTypeFromSPVC(type: spvc_type) -> ShaderDataType {
         case 4:     return .char4
         default:    break
         }
-	case SPVC_BASETYPE_UINT8:
+    case SPVC_BASETYPE_UINT8:
         switch vecsize {
         case 1:     return .uchar
         case 2:     return .uchar2
@@ -67,7 +67,7 @@ private func dataTypeFromSPVC(type: spvc_type) -> ShaderDataType {
         case 4:     return .uchar4
         default:    break
         }
-	case SPVC_BASETYPE_INT16:
+    case SPVC_BASETYPE_INT16:
         switch vecsize {
         case 1:     return .short
         case 2:     return .short2
@@ -75,7 +75,7 @@ private func dataTypeFromSPVC(type: spvc_type) -> ShaderDataType {
         case 4:     return .short4
         default:    break
         }
-	case SPVC_BASETYPE_UINT16:
+    case SPVC_BASETYPE_UINT16:
         switch vecsize {
         case 1:     return .ushort
         case 2:     return .ushort2
@@ -83,7 +83,7 @@ private func dataTypeFromSPVC(type: spvc_type) -> ShaderDataType {
         case 4:     return .ushort4
         default:    break
         }
-	case SPVC_BASETYPE_INT32:
+    case SPVC_BASETYPE_INT32:
         switch vecsize {
         case 1:     return .int
         case 2:     return .int2
@@ -91,7 +91,7 @@ private func dataTypeFromSPVC(type: spvc_type) -> ShaderDataType {
         case 4:     return .int4
         default:    break
         }
-	case SPVC_BASETYPE_UINT32:
+    case SPVC_BASETYPE_UINT32:
         switch vecsize {
         case 1:     return .uint
         case 2:     return .uint2
@@ -99,7 +99,7 @@ private func dataTypeFromSPVC(type: spvc_type) -> ShaderDataType {
         case 4:     return .uint4
         default:    break
         }
-	case SPVC_BASETYPE_INT64:
+    case SPVC_BASETYPE_INT64:
         switch vecsize {
         case 1:     return .long
         case 2:     return .long2
@@ -107,7 +107,7 @@ private func dataTypeFromSPVC(type: spvc_type) -> ShaderDataType {
         case 4:     return .long4
         default:    break
         }
-	case SPVC_BASETYPE_UINT64:
+    case SPVC_BASETYPE_UINT64:
         switch vecsize {
         case 1:     return .ulong
         case 2:     return .ulong2
@@ -115,7 +115,7 @@ private func dataTypeFromSPVC(type: spvc_type) -> ShaderDataType {
         case 4:     return .ulong4
         default:    break
         }
-	case SPVC_BASETYPE_FP16:
+    case SPVC_BASETYPE_FP16:
         switch (vecsize, columns) {
         case (1, _):    return .half
         case (2, 1):    return .half2
@@ -132,7 +132,7 @@ private func dataTypeFromSPVC(type: spvc_type) -> ShaderDataType {
         case (4, 4):    return .half4x4
         default:        break
         }
-	case SPVC_BASETYPE_FP32:
+    case SPVC_BASETYPE_FP32:
         switch (vecsize, columns) {
         case (1, _):    return .float
         case (2, 1):    return .float2
@@ -149,7 +149,7 @@ private func dataTypeFromSPVC(type: spvc_type) -> ShaderDataType {
         case (4, 4):    return .float4x4
         default:        break
         }
-	case SPVC_BASETYPE_FP64:
+    case SPVC_BASETYPE_FP64:
         switch (vecsize, columns) {
         case (1, _):    return .double
         case (2, 1):    return .double2
@@ -166,10 +166,10 @@ private func dataTypeFromSPVC(type: spvc_type) -> ShaderDataType {
         case (4, 4):    return .double4x4
         default:        break
         }
-	case SPVC_BASETYPE_STRUCT:          return .struct
-	case SPVC_BASETYPE_IMAGE,
-	     SPVC_BASETYPE_SAMPLED_IMAGE:   return .texture
-	case SPVC_BASETYPE_SAMPLER:         return .sampler
+    case SPVC_BASETYPE_STRUCT:          return .struct
+    case SPVC_BASETYPE_IMAGE,
+         SPVC_BASETYPE_SAMPLED_IMAGE:   return .texture
+    case SPVC_BASETYPE_SAMPLER:         return .sampler
     default:
         break
     }
@@ -216,7 +216,7 @@ private func descriptorFromSPVC(compiler: spvc_compiler,
     for i in 0..<spvc_type_get_num_array_dimensions(spvcType) {
         count = count * spvc_type_get_array_dimension(spvcType, i)
     }
-    return ShaderDescriptor(set: set, binding: binding, count: count, type: type)
+    return ShaderDescriptor(set: Int(set), binding: Int(binding), count: Int(count), type: type)
 }
 
 private func resourceStructMembersFromSPVC(compiler: spvc_compiler,
@@ -258,10 +258,10 @@ private func resourceStructMembersFromSPVC(compiler: spvc_compiler,
 
         members.append(ShaderResourceStructMember(dataType: dataType,
                                                   name: name,
-                                                  offset: offset,
-                                                  size: UInt32(size),
-                                                  count: count,
-                                                  stride: stride,
+                                                  offset: Int(offset),
+                                                  size: size,
+                                                  count: Int(count),
+                                                  stride: Int(stride),
                                                   members:structMembers))
     }
     return members
@@ -317,7 +317,7 @@ private func resourceFromSPVC(compiler: spvc_compiler,
         let result = spvc_compiler_get_declared_struct_size(compiler, spvctype, &size)
         if result != SPVC_SUCCESS { throw SPVCError.spvcResult(result) }
 
-        bufferTypeInfo = ShaderResourceBuffer(dataType: .struct, alignment: alignment, size: UInt32(size))
+        bufferTypeInfo = ShaderResourceBuffer(dataType: .struct, alignment: Int(alignment), size: size)
     default:
         assert(false, "Unsupported shader resource type")
     }
@@ -325,13 +325,14 @@ private func resourceFromSPVC(compiler: spvc_compiler,
     let basetype = spvc_compiler_get_type_handle(compiler, resource.base_type_id)
     let members: [ShaderResourceStructMember] = try resourceStructMembersFromSPVC(compiler: compiler, type: basetype!)
 
-    return ShaderResource(set: set,
-        binding: binding,
+    return ShaderResource(
+        set: Int(set),
+        binding: Int(binding),
         name: name,
         type: type,
         stages: ShaderStageFlags(stage: stage),
-        count: count,
-        stride: stride,
+        count: Int(count),
+        stride: Int(stride),
         enabled: enabled,
         access: access,
         bufferTypeInfo: bufferTypeInfo,
@@ -356,7 +357,7 @@ private func attributeFromSPVC(compiler: spvc_compiler,
     }
     
     return ShaderAttribute(name: name,
-                          location: location,
+                          location: Int(location),
                           type: type,
                           enabled: enabled)
 }
@@ -372,7 +373,7 @@ public class Shader: CustomStringConvertible {
 
     public private(set) var pushConstantLayouts: [ShaderPushConstantLayout]
     public private(set) var descriptors: [ShaderDescriptor]
-    public private(set) var threadgroupSize: (x: UInt32, y: UInt32, z: UInt32)
+    public private(set) var threadgroupSize: (x: Int, y: Int, z: Int)
 
     public var name: String
 
@@ -440,10 +441,10 @@ public class Shader: CustomStringConvertible {
 
             var compilerPtr: spvc_compiler? = nil
             result = spvc_context_create_compiler(context,
-                                                SPVC_BACKEND_NONE,
-                                                ir,
-                                                SPVC_CAPTURE_MODE_TAKE_OWNERSHIP,
-                                                &compilerPtr)
+                                                  SPVC_BACKEND_NONE,
+                                                  ir,
+                                                  SPVC_CAPTURE_MODE_TAKE_OWNERSHIP,
+                                                  &compilerPtr)
             if result != SPVC_SUCCESS { return false }
             let compiler = compilerPtr!
 
@@ -487,9 +488,9 @@ public class Shader: CustomStringConvertible {
                 Log.debug("ComputeShader.LocalSize.Y: \(localSizeY) (specialized: \(y.id), specializationID: \(y.constant_id))")
                 Log.debug("ComputeShader.LocalSize.Z: \(localSizeZ) (specialized: \(z.id), specializationID: \(z.constant_id))")
 
-                self.threadgroupSize.x = max(localSizeX, 1)
-                self.threadgroupSize.y = max(localSizeY, 1)
-                self.threadgroupSize.z = max(localSizeZ, 1)
+                self.threadgroupSize.x = Int(max(localSizeX, 1))
+                self.threadgroupSize.y = Int(max(localSizeY, 1))
+                self.threadgroupSize.z = Int(max(localSizeZ, 1))
             }
 
             // get resources
@@ -652,8 +653,8 @@ public class Shader: CustomStringConvertible {
                         let basetype = spvc_compiler_get_type_handle(compiler, ptr[i].base_type_id)
                         let members = try resourceStructMembersFromSPVC(compiler: compiler, type: basetype!)
                         let layout = ShaderPushConstantLayout(name: name,
-                                                            offset: UInt32(rangeBegin),
-                                                            size: UInt32(rangeEnd - rangeBegin),
+                                                            offset: rangeBegin,
+                                                            size: rangeEnd - rangeBegin,
                                                             stages: ShaderStageFlags(stage: self.stage),
                                                             members: members)
 
@@ -723,21 +724,18 @@ public class Shader: CustomStringConvertible {
     public var description: String {
         var str = "Shader(name: \"\(self.name)\"), stage: \(self.stage), \(self.spirvData?.count ?? 0) bytes."
         str += "\nShader<\(self.stage).SPIR-V>.inputAttributes: \(self.inputAttributes.count)"
-        for i in 0..<self.inputAttributes.count {
-            let attr = self.inputAttributes[i]
+        for (i, attr) in self.inputAttributes.enumerated() {
             str += "\n [in] ShaderAttribute[\(i)]: \"\(attr.name)\" (type: \(attr.type), location: \(attr.location))"
         }
         str += "\nShader<\(self.stage).SPIR-V>.outputAttributes: \(self.outputAttributes.count)"
-        for i in 0..<self.outputAttributes.count {
-            let attr = self.outputAttributes[i]
+        for (i, attr) in self.outputAttributes.enumerated() {
             str += "\n [out] ShaderAttribute[\(i)]: \"\(attr.name)\" (type: \(attr.type), location: \(attr.location))"
         }
         str += "\nShader<\(self.stage).SPIR-V>.resources: \(self.resources.count)"
         for res in self.resources {
             str += "\n" + res.description
         }
-        for i in 0..<self.pushConstantLayouts.count {
-            let layout = self.pushConstantLayouts[i]
+        for (i, layout) in self.pushConstantLayouts.enumerated() {
             str += "\npushConstant[\(i)] \"\(layout.name)\" (offset: \(layout.offset), size: \(layout.size), stages: \(layout.stages))"
             for mem in layout.members {
                 str += "\n" + describeShaderResourceStructMember(mem, indent: 1)

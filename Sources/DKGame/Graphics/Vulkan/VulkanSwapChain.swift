@@ -72,18 +72,18 @@ public class VulkanSwapChain: SwapChain {
             imageView.waitSemaphore = nil
             imageView.signalSemaphore = nil
         }
-    	self.imageViews.removeAll()
+        self.imageViews.removeAll()
 
         if let swapchain = self.swapchain {
-    		vkDestroySwapchainKHR(device.device, swapchain, device.allocationCallbacks)
+            vkDestroySwapchainKHR(device.device, swapchain, device.allocationCallbacks)
         }
         if let surface = self.surface {
-    		vkDestroySurfaceKHR(instance.instance, surface, device.allocationCallbacks)          
+            vkDestroySurfaceKHR(instance.instance, surface, device.allocationCallbacks)          
         }
-    	vkDestroySemaphore(device.device, self.frameReadySemaphore, device.allocationCallbacks)
+        vkDestroySemaphore(device.device, self.frameReadySemaphore, device.allocationCallbacks)
     }
 
-    public func setup() async -> Bool {
+    func setup() async -> Bool {
         let device = queue.device as! VulkanGraphicsDevice
         let instance = device.instance
         let physicalDevice = device.physicalDevice
@@ -144,7 +144,7 @@ public class VulkanSwapChain: SwapChain {
         }
 
         self.availableSurfaceFormats = .init(repeating: VkSurfaceFormatKHR(), count: Int(surfaceFormatCount))
-    	err = vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice.device, surface, &surfaceFormatCount, &availableSurfaceFormats)
+        err = vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice.device, surface, &surfaceFormatCount, &availableSurfaceFormats)
         if err != VK_SUCCESS {
             Log.err("vkGetPhysicalDeviceSurfaceFormatsKHR failed: \(err)")
             return false
@@ -170,7 +170,7 @@ public class VulkanSwapChain: SwapChain {
     }
 
     @discardableResult
-    public func update() async -> Bool {
+    func update() async -> Bool {
         let device = self.queue.device as! VulkanGraphicsDevice
         //let instance = device.instance
         let physicalDevice = device.physicalDevice
@@ -390,7 +390,7 @@ public class VulkanSwapChain: SwapChain {
         return true 
     }
 
-    public func setupFrame() async {
+    func setupFrame() async {
         let device = self.queue.device as! VulkanGraphicsDevice
 
         let resetSwapchain = synchronizedBy(locking: self.lock) { self.deviceReset }
@@ -413,11 +413,11 @@ public class VulkanSwapChain: SwapChain {
         let colorAttachment = RenderPassColorAttachmentDescriptor(
             renderTarget: self.imageViews[Int(self.frameIndex)],
             loadAction: .clear,
-	        storeAction: .store,
-    	    clearColor: Color(r: 0, g: 0, b: 0, a:0))
+            storeAction: .store,
+            clearColor: Color(r: 0, g: 0, b: 0, a:0))
 
-    	self.renderPassDescriptor.colorAttachments.removeAll()
-	    self.renderPassDescriptor.colorAttachments.append(colorAttachment)
+        self.renderPassDescriptor.colorAttachments.removeAll()
+        self.renderPassDescriptor.colorAttachments.append(colorAttachment)
     }
 
     public var pixelFormat: PixelFormat {
@@ -460,8 +460,8 @@ public class VulkanSwapChain: SwapChain {
         }
     }
 
-    public var maximumBufferCount: UInt {
-        synchronizedBy(locking: self.lock) { UInt(self.imageViews.count) }
+    public var maximumBufferCount: Int {
+        synchronizedBy(locking: self.lock) { self.imageViews.count }
     }
 
     public func currentRenderPassDescriptor() async -> RenderPassDescriptor {
@@ -491,7 +491,7 @@ public class VulkanSwapChain: SwapChain {
             return withUnsafePointer(to: self.frameIndex) {
                 presentInfo.pImageIndices = $0
 
-            	// Check if a wait semaphore has been specified to wait for before presenting the image
+                // Check if a wait semaphore has been specified to wait for before presenting the image
                 if waitSemaphores.count > 0 {
                     return waitSemaphores.withUnsafeBufferPointer {
                         presentInfo.pWaitSemaphores = $0.baseAddress
@@ -511,8 +511,8 @@ public class VulkanSwapChain: SwapChain {
             Log.err("vkQueuePresentKHR failed: \(err)")
         }
 
-    	renderPassDescriptor.colorAttachments.removeAll(keepingCapacity: true)
-	    return err == VK_SUCCESS
+        renderPassDescriptor.colorAttachments.removeAll(keepingCapacity: true)
+        return err == VK_SUCCESS
     }
 }
 

@@ -99,7 +99,7 @@ private let fsEllipseGLSL = """
     {
         vec2 outerRadiusSqInv; /* vec2(1/A^2, 1/B^2) where X^2 / A^2 + Y^2 / B^2 = 1 */
         vec2 innerRadiusSqInv;
-        vec2 center;	/* center of ellipse */
+        vec2 center; /* center of ellipse */
     } ellipse;
 
     layout (location=0) in vec2 position;
@@ -138,7 +138,7 @@ private let fsEllipseHoleGLSL = """
     {
         vec2 outerRadiusSqInv; /* vec2(1/A^2, 1/B^2) where X^2 / A^2 + Y^2 / B^2 = 1 */
         vec2 innerRadiusSqInv;
-        vec2 center;	/* center of ellipse */
+        vec2 center; /* center of ellipse */
     } ellipse;
 
     layout (location=0) in vec2 position;
@@ -186,7 +186,7 @@ private let fsTextureEllipseGLSL = """
     {
         vec2 outerRadiusSqInv; /* vec2(1/A^2, 1/B^2) where X^2 / A^2 + Y^2 / B^2 = 1 */
         vec2 innerRadiusSqInv;
-        vec2 center;	/* center of ellipse */
+        vec2 center; /* center of ellipse */
     } ellipse;
 
     layout (location=0) in vec2 position;
@@ -369,7 +369,7 @@ private class CanvasPipelineStates {
         ]
         pipelineDescriptor.depthStencilAttachmentPixelFormat = desc.depthFormat
         pipelineDescriptor.depthStencilDescriptor.depthCompareFunction = .always
-        pipelineDescriptor.depthStencilDescriptor.depthWriteEnabled = false
+        pipelineDescriptor.depthStencilDescriptor.isDepthWriteEnabled = false
         pipelineDescriptor.vertexDescriptor.attributes = [
             .init(format: .float2, offset: 0, bufferIndex: 0, location: 0 ),
             .init(format: .float2, offset: MemoryLayout<VertexData>.offset(of: \.texcoord)!, bufferIndex: 0, location: 1 ),
@@ -1229,14 +1229,14 @@ public class Canvas {
         let baselinePixelEnd = CGPoint(x: baselineEnd.x * scaleToScreen.width,
                                        y: baselineEnd.y * scaleToScreen.height)
         let scale = (baselinePixelEnd - baselinePixelBegin).magnitude
-        let baselinePixelDir = Vector2(baselinePixelEnd - baselinePixelBegin).normalized()
-        let angle = acosf(baselinePixelDir.x) * ((baselinePixelDir.y < 0) ? -1.0 : 1.0)
+        let baselinePixelDir = Vector2(baselinePixelEnd - baselinePixelBegin).normalized().float2
+        let angle = acosf(baselinePixelDir.0) * ((baselinePixelDir.1 < 0) ? -1.0 : 1.0)
 
         // calculate transform (matrix)
         var transform = AffineTransform2(x: 0, y: Scalar(-ascender))    // move pivot to baseline
         transform *= LinearTransform2()
-            .scaled(by: Scalar(scale / lineWidth))                  // scale
-            .rotated(by: angle)                             // rotate
+            .scaled(by: Scalar(scale / lineWidth))          // scale
+            .rotated(by: Scalar(angle))                     // rotate
             .scaled(x: Scalar(1.0 / viewportSize.width),
                     y: Scalar(1.0 / viewportSize.height))   // normalize (0~1)
             .scaled(by: Vector2(contentScale))              // apply contentScale

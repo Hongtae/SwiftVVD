@@ -125,7 +125,7 @@ public class AudioDevice {
             alcMakeContextCurrent(nil)
         }
         alcDestroyContext(context)
-		alcCloseDevice(device)
+        alcCloseDevice(device)
     }
 
     public func makeSource() -> AudioSource? {

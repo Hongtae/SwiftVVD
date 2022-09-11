@@ -23,7 +23,7 @@
 #include "DKAudioStream.h"
 #include "DKMalloc.h"
 
-#define SWAP_CHANNEL16(x, y)		{int16_t t = x; x = y ; y = t;}
+#define SWAP_CHANNEL16(x, y)        {int16_t t = x; x = y ; y = t;}
 
 namespace {
     struct VorbisStream
@@ -250,7 +250,7 @@ DKAudioStream* DKAudioStreamVorbisCreate(DKStream* stream)
     memset(vorbisStream, 0, sizeof(VorbisStream));
     vorbisStream->stream = stream;
 
-    ov_callbacks	ogg_callbacks;
+    ov_callbacks ogg_callbacks;
     ogg_callbacks.read_func = VorbisStreamRead;
     ogg_callbacks.seek_func = VorbisStreamSeek;
     ogg_callbacks.tell_func = VorbisStreamTell;

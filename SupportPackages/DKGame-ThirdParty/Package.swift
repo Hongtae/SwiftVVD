@@ -11,8 +11,8 @@ let package = Package(
             name: "DKGame-ThirdParty",
             targets: [
                 "DKWrapper",
-                "SPIRV_Cross",
-                "FreeType",
+                "SPIRV-Cross-static",
+                "FreeType-static",
                 ]),
     ],
     dependencies: [],
@@ -20,28 +20,29 @@ let package = Package(
         .target(
             name: "DKWrapper",
             dependencies: [
-                "libpng",
-                "jpeg",
-                "zlib",
-                "lz4",
-                "lzma",
-                "zstd",
-                "libogg",
-                "libvorbis",
-                "libFLAC",
+                "libpng-static",
+                "jpeg-static",
+                "zlib-static",
+                "lz4-static",
+                "lzma-static",
+                "zstd-static",
+                "libogg-static",
+                "libvorbis-static",
+                "libFLAC-static",
                 ],
             path: "Sources/DKWrapper",
             publicHeadersPath: ".",
             cSettings: [],
             cxxSettings: [
                 .headerSearchPath("../libogg/include"),
+                .define("_CRT_SECURE_NO_WARNINGS", .when(platforms: [.windows])),
                 .unsafeFlags([
                     "-Wno-module-import-in-extern-c",
                 ])
             ],
             linkerSettings: []),
         .target(
-            name: "SPIRV_Cross",
+            name: "SPIRV-Cross-static",
             path: "Sources/SPIRV-Cross",
             sources: [
                 "spirv_cfg.cpp",
@@ -57,12 +58,18 @@ let package = Package(
                 "spirv_reflect.cpp"],
             publicHeadersPath: ".",
             cxxSettings: [
+                .define("SPIRV_CROSS_C_API_CPP", to: "1"),
+                .define("SPIRV_CROSS_C_API_GLSL", to: "1"),
+                .define("SPIRV_CROSS_C_API_HLSL", to: "1"),
+                .define("SPIRV_CROSS_C_API_MSL", to: "1"),
+                .define("SPIRV_CROSS_C_API_REFLECT", to: "1"),
+
                 // Temporarily changed the optimization flag due to an internal compiler error
                 .unsafeFlags(["-Oz"], .when(platforms: [.windows], configuration: .release))
             ]),
         .target(
-            name: "FreeType",
-            dependencies: [.target(name: "zlib")],
+            name: "FreeType-static",
+            dependencies: [.target(name: "zlib-static")],
             path: "Sources/FreeType",
             sources: [
                 "src/autofit/autofit.c",
@@ -118,7 +125,7 @@ let package = Package(
                 ]),
             ]),
         .target(
-            name: "jpeg",
+            name: "jpeg-static",
             path: "Sources/jpeg",
             sources: [
                 "jaricom.c",
@@ -173,8 +180,8 @@ let package = Package(
                 .define("_CRT_SECURE_NO_WARNINGS", .when(platforms: [.windows])),
             ]),
         .target(
-            name: "libpng",
-            dependencies: [.target(name: "zlib")],
+            name: "libpng-static",
+            dependencies: [.target(name: "zlib-static")],
             path: "Sources/libpng",
             sources: [
                 "png.c",
@@ -191,7 +198,9 @@ let package = Package(
                 "pngwio.c",
                 "pngwrite.c",
                 "pngwtran.c",
-                "pngwutil.c"
+                "pngwutil.c",
+                "arm/arm_init.c",
+                "arm/filter_neon_intrinsics.c",
             ],
             publicHeadersPath: ".",
             cSettings: [
@@ -203,13 +212,13 @@ let package = Package(
                 ])
             ]),
         .target(
-            name: "libogg",
+            name: "libogg-static",
             path: "Sources/libogg",
             sources : ["src"],
             publicHeadersPath: "include"),
         .target(
-            name: "libvorbis",
-            dependencies: [.target(name: "libogg")],
+            name: "libvorbis-static",
+            dependencies: [.target(name: "libogg-static")],
             path: "Sources/libvorbis",
             sources: [
                 "src/analysis.c",
@@ -239,8 +248,8 @@ let package = Package(
                 .define("_CRT_SECURE_NO_WARNINGS", .when(platforms: [.windows])),
             ]),
         .target(
-            name: "libFLAC",
-            dependencies: [.target(name: "libogg")],
+            name: "libFLAC-static",
+            dependencies: [.target(name: "libogg-static")],
             path: "Sources/libFLAC",
             sources: ["src/libFLAC"],
             publicHeadersPath: ".",
@@ -257,7 +266,7 @@ let package = Package(
                 ])
             ]),
         .target(
-            name: "lz4",
+            name: "lz4-static",
             path: "Sources/lz4",
             sources: [
                 "lib/lz4.c",
@@ -266,7 +275,7 @@ let package = Package(
                 "lib/xxhash.c"],
             publicHeadersPath: "."),
         .target(
-            name: "lzma",
+            name: "lzma-static",
             path: "Sources/lzma",
             exclude: [],
             sources: [
@@ -316,7 +325,7 @@ let package = Package(
                 //.unsafeFlags(["-march=native"]),
             ]),
         .target(
-            name: "zlib",
+            name: "zlib-static",
             path: "Sources/zlib",
             sources: [
                 "adler32.c",
@@ -343,7 +352,7 @@ let package = Package(
                 ])
             ]),
         .target(
-            name: "zstd",
+            name: "zstd-static",
             path: "Sources/zstd",
             exclude: ["lib/common/xxhash.c"], // duplicated, use lz4 instead
             sources: [

@@ -6,21 +6,21 @@
 //
 
 public enum BlendFactor {
-	case zero
-	case one
-	case sourceColor
-	case oneMinusSourceColor
-	case sourceAlpha
-	case oneMinusSourceAlpha
-	case destinationColor
-	case oneMinusDestinationColor
-	case destinationAlpha
-	case oneMinusDestinationAlpha
-	case sourceAlphaSaturated
-	case blendColor
-	case oneMinusBlendColor
-	case blendAlpha
-	case oneMinusBlendAlpha
+    case zero
+    case one
+    case sourceColor
+    case oneMinusSourceColor
+    case sourceAlpha
+    case oneMinusSourceAlpha
+    case destinationColor
+    case oneMinusDestinationColor
+    case destinationAlpha
+    case oneMinusDestinationAlpha
+    case sourceAlphaSaturated
+    case blendColor
+    case oneMinusBlendColor
+    case blendAlpha
+    case oneMinusBlendAlpha
 }
 
 public enum BlendOperation {

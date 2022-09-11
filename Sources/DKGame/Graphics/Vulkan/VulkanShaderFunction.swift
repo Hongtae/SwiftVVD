@@ -20,36 +20,35 @@ public class VulkanShaderFunction: ShaderFunction {
     var specializationInfo: VkSpecializationInfo
     var specializationData: UnsafeMutableRawPointer?
 
-    public init(module: VulkanShaderModule, name: String, specializationValues: [ShaderSpecialization]) {
+    public init(module: VulkanShaderModule, name: String, constantValues: [ShaderFunctionConstantValue]) {
         self.module = module
         self.functionName = name
         self.specializationData = nil
         self.specializationInfo = VkSpecializationInfo()
         self.functionConstants = [:]
 
-        if specializationValues.isEmpty == false {
+        if constantValues.isEmpty == false {
             var size = 0
-            for sp in specializationValues {
+            for sp in constantValues {
                 size += Int(sp.size)
             }
 
             if size > 0 {
                 typealias MemLayout = MemoryLayout<VkSpecializationMapEntry>
-                let mapEntrySizeInBytes = MemLayout.stride * specializationValues.count
+                let mapEntrySizeInBytes = MemLayout.stride * constantValues.count
                 specializationData = .allocate(
                     byteCount: mapEntrySizeInBytes + size,
                     alignment: MemLayout.alignment)
-                let mapEntry = specializationData!.bindMemory(to: VkSpecializationMapEntry.self, capacity: specializationValues.count)
+                let mapEntry = specializationData!.bindMemory(to: VkSpecializationMapEntry.self, capacity: constantValues.count)
                 var data = specializationData!.advanced(by: mapEntrySizeInBytes)
 
-                self.specializationInfo.mapEntryCount = UInt32(specializationValues.count)
+                self.specializationInfo.mapEntryCount = UInt32(constantValues.count)
                 self.specializationInfo.pMapEntries = UnsafePointer(mapEntry)
                 self.specializationInfo.pData = UnsafeRawPointer(data)
 
                 var offset = 0
-                for i in 0..<specializationValues.count {
-                    let sp = specializationValues[i]
-                    mapEntry[i].constantID = sp.index
+                for (i, sp) in constantValues.enumerated() {
+                    mapEntry[i].constantID = UInt32(sp.index)
                     mapEntry[i].offset = UInt32(offset)
                     mapEntry[i].size = sp.size
 
@@ -61,7 +60,6 @@ public class VulkanShaderFunction: ShaderFunction {
                 }
             }
         }
-
     }
 
     deinit {

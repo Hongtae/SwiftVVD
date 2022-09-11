@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct UniformScaleTransform: Transform, Interpolatable {
+public struct UniformScaleTransform: VectorTransformer, Interpolatable {
     public typealias Vector = Vector3
 
     public var scale: Scalar

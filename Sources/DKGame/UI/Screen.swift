@@ -33,15 +33,6 @@ public class Screen {
 
                     if let window = await window {
 
-                        let swapChain = await commandQueue?.makeSwapChain(target: window)
-                        if swapChain == nil {
-                            Log.err("Failed to create swapChain!")
-                        }
-                        let scaleFactor = window.contentScaleFactor
-                        let contentBounds = window.contentBounds
-                        let activated = window.activated
-                        let visible = window.visible
-
                         window.addEventObserver(self) { [weak self](event: WindowEvent) in
                             if let self = self {
                                 Task { @ScreenActor in
@@ -71,6 +62,16 @@ public class Screen {
                         }
 
                         Task { @ScreenActor in
+
+                            let swapChain = await commandQueue?.makeSwapChain(target: window)
+                            if swapChain == nil {
+                                Log.err("Failed to create swapChain!")
+                            }
+                            let scaleFactor = await window.contentScaleFactor
+                            let contentBounds = await window.contentBounds
+                            let activated = await window.activated
+                            let visible = await window.visible
+
                             self.swapChain = swapChain
                             self.resolution = CGSize(width: contentBounds.width * scaleFactor,
                                                      height: contentBounds.height * scaleFactor)
@@ -516,6 +517,7 @@ public class Screen {
                 self.frame?.redraw()
             case .activated:
                 self.activated = true
+                self.visible = true
             case .inactivated:
                 self.activated = false
             case .update:

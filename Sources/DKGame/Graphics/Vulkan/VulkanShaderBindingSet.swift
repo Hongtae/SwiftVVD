@@ -42,14 +42,14 @@ public class VulkanShaderBindingSet: ShaderBindingSet {
         vkDestroyDescriptorSetLayout(device.device, descriptorSetLayout, device.allocationCallbacks)
     }
 
-    public func setBuffer(_ buffer: Buffer, offset: UInt64, length: UInt64, binding: UInt32) {
+    public func setBuffer(_ buffer: Buffer, offset: Int, length: Int, binding: Int) {
         self.setBufferArray([GPUBufferBindingInfo(buffer: buffer,
                                                   offset: offset,
                                                   length: length)],
                             binding:binding)
     }
 
-    public func setBufferArray(_ buffers: [GPUBufferBindingInfo], binding: UInt32) {
+    public func setBufferArray(_ buffers: [GPUBufferBindingInfo], binding: Int) {
         if var descriptorBinding = self.findDescriptorBinding(binding) {
             descriptorBinding.valueSet = false
             descriptorBinding.bufferInfos = []
@@ -101,8 +101,8 @@ public class VulkanShaderBindingSet: ShaderBindingSet {
                     if let buffer = buffer {
                         var bufferInfo = VkDescriptorBufferInfo()
                         bufferInfo.buffer = buffer.buffer
-                        bufferInfo.offset = buffers[i].offset
-                        bufferInfo.range = buffers[i].length
+                        bufferInfo.offset = VkDeviceSize(buffers[i].offset)
+                        bufferInfo.range = VkDeviceSize(buffers[i].length)
 
                         descriptorBinding.bufferInfos.append(bufferInfo)
                     }
@@ -129,10 +129,11 @@ public class VulkanShaderBindingSet: ShaderBindingSet {
     }
 
     // bind textures
-    public func setTexture(_ texture: Texture, binding: UInt32) {
+    public func setTexture(_ texture: Texture, binding: Int) {
         self.setTextureArray([texture], binding: binding)
     }
-    public func setTextureArray(_ textures: [Texture], binding: UInt32) {
+
+    public func setTextureArray(_ textures: [Texture], binding: Int) {
         if var descriptorBinding = self.findDescriptorBinding(binding) {
 
             descriptorBinding.bufferInfos = []
@@ -223,11 +224,11 @@ public class VulkanShaderBindingSet: ShaderBindingSet {
     }
 
     // bind samplers
-    public func setSamplerState(_ sampler: SamplerState, binding: UInt32) {
+    public func setSamplerState(_ sampler: SamplerState, binding: Int) {
         self.setSamplerStateArray([sampler], binding: binding)
     }
 
-    public func setSamplerStateArray(_ samplers: [SamplerState], binding: UInt32) {
+    public func setSamplerStateArray(_ samplers: [SamplerState], binding: Int) {
         if var descriptorBinding = self.findDescriptorBinding(binding) {
 
             descriptorBinding.bufferInfos = []
@@ -333,7 +334,7 @@ public class VulkanShaderBindingSet: ShaderBindingSet {
         return descriptorSet
     }
 
-    private func findDescriptorBinding(_ binding: UInt32) -> DescriptorBinding? {
+    private func findDescriptorBinding(_ binding: Int) -> DescriptorBinding? {
         for b in self.bindings {
             if b.layoutBinding.binding == binding {
                 return b
@@ -342,7 +343,7 @@ public class VulkanShaderBindingSet: ShaderBindingSet {
         return nil
     }
 
-    private func updateDescriptorBinding(_ desc: DescriptorBinding, binding: UInt32) {
+    private func updateDescriptorBinding(_ desc: DescriptorBinding, binding: Int) {
         for i in 0..<self.bindings.count {
             let b = self.bindings[i]            
             if b.layoutBinding.binding == binding {

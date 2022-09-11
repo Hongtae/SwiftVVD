@@ -22,23 +22,25 @@ public class AudioListener {
 
     public var position: Vector3 {
         get {
-            var v: Vector3 = .zero
-            alGetListener3f(AL_POSITION, &v.x, &v.y, &v.z)
-            return v
+            var v: Float3 = (0, 0, 0)
+            alGetListener3f(AL_POSITION, &v.0, &v.1, &v.2)
+            return Vector3(v)
         }
         set(v) {
-            alListener3f(AL_POSITION, v.x, v.y, v.z)
+            let v = v.float3
+            alListener3f(AL_POSITION, v.0, v.1, v.2)
         }
     }
 
     public var velocity: Vector3 {
         get {
-            var v: Vector3 = .zero
-            alGetListener3f(AL_VELOCITY, &v.x, &v.y, &v.z)
-            return v
+            var v: Float3 = (0, 0, 0)
+            alGetListener3f(AL_VELOCITY, &v.0, &v.1, &v.2)
+            return Vector3(v)
         }
         set(v) {
-            alListener3f(AL_VELOCITY, v.x, v.y, v.z)
+            let v = v.float3
+            alListener3f(AL_VELOCITY, v.0, v.1, v.2)
         }
     }
     
@@ -93,7 +95,8 @@ public class AudioListener {
     public func setOrientation(forward: Vector3, up: Vector3) {
         let f = forward.normalized()
         let u = up.normalized()
-        let v = [f.x, f.y, f.z, u.x, u.y, u.z]
+        let v = [ALfloat(f.x), ALfloat(f.y), ALfloat(f.z),
+                 ALfloat(u.x), ALfloat(u.y), ALfloat(u.z)]
         alListenerfv(AL_ORIENTATION, v)
     }
 
