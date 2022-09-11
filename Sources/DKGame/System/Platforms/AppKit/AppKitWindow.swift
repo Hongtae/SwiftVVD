@@ -107,6 +107,7 @@ public class AppKitWindow: Window {
                                     backing: backingStoreType,
                                     defer: true)
 
+        self.delegate = delegate
         self.view = AppKitView(frame: contentRect)
         self.view.proxyWindow = self
 

@@ -71,11 +71,11 @@ public enum VertexStepRate {
 public struct VertexBufferLayoutDescriptor {
     public var step: VertexStepRate
     public var stride: Int
-    public var bufferIndex: UInt32
+    public var bufferIndex: Int
 
     public init(step: VertexStepRate,
                 stride: Int,
-                bufferIndex: UInt32) {
+                bufferIndex: Int) {
         self.step = step
         self.stride = stride
         self.bufferIndex = bufferIndex
@@ -85,13 +85,13 @@ public struct VertexBufferLayoutDescriptor {
 public struct VertexAttributeDescriptor {
     public var format: VertexFormat
     public var offset: Int
-    public var bufferIndex: UInt32
-    public var location: UInt32
+    public var bufferIndex: Int
+    public var location: Int
 
     public init(format: VertexFormat,
                 offset: Int,
-                bufferIndex: UInt32,
-                location: UInt32) {
+                bufferIndex: Int,
+                location: Int) {
         self.format = format
         self.offset = offset
         self.bufferIndex = bufferIndex

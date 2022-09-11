@@ -104,7 +104,9 @@ public func makeGraphicsDeviceContext(api: GraphicsAPI = .auto) -> GraphicsDevic
     }
     if api == .metal || api == .auto {
 #if ENABLE_METAL
-
+        if let device = MetalGraphicsDevice() {
+            return GraphicsDeviceContext(device: device)
+        }
 #endif        
     }
     return nil

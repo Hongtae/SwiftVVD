@@ -747,7 +747,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             state.reference = 0 // use dynamic state (VK_DYNAMIC_STATE_STENCIL_REFERENCE)
         }
         depthStencilState.depthTestEnable = VkBool32(VK_TRUE)
-        depthStencilState.depthWriteEnable = VkBool32(desc.depthStencilDescriptor.depthWriteEnabled ? VK_TRUE:VK_FALSE)
+        depthStencilState.depthWriteEnable = VkBool32(desc.depthStencilDescriptor.isDepthWriteEnabled ? VK_TRUE:VK_FALSE)
         depthStencilState.depthCompareOp = compareOp(desc.depthStencilDescriptor.depthCompareFunction)
         depthStencilState.depthBoundsTestEnable = VkBool32(VK_FALSE)
         setStencilOpState(&depthStencilState.front, desc.depthStencilDescriptor.frontFaceStencil)

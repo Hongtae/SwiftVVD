@@ -369,7 +369,7 @@ private class CanvasPipelineStates {
         ]
         pipelineDescriptor.depthStencilAttachmentPixelFormat = desc.depthFormat
         pipelineDescriptor.depthStencilDescriptor.depthCompareFunction = .always
-        pipelineDescriptor.depthStencilDescriptor.depthWriteEnabled = false
+        pipelineDescriptor.depthStencilDescriptor.isDepthWriteEnabled = false
         pipelineDescriptor.vertexDescriptor.attributes = [
             .init(format: .float2, offset: 0, bufferIndex: 0, location: 0 ),
             .init(format: .float2, offset: MemoryLayout<VertexData>.offset(of: \.texcoord)!, bufferIndex: 0, location: 1 ),

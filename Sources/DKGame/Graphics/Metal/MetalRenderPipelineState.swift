@@ -15,15 +15,14 @@ public class MetalRenderPipelineState: RenderPipelineState {
     let pipelineState: MTLRenderPipelineState
     let depthStencilState: MTLDepthStencilState
 
-    let primitiveType: MTLPrimitiveType
-    let depthClipMode: MTLDepthClipMode
-    let triangleFillMode: MTLTriangleFillMode
-    let frontFacingWinding: MTLWinding
-    let cullMode: MTLCullMode
+    var primitiveType: MTLPrimitiveType
+    var depthClipMode: MTLDepthClipMode
+    var triangleFillMode: MTLTriangleFillMode
+    var frontFacingWinding: MTLWinding
+    var cullMode: MTLCullMode
 
-    let vertexBindings: MetalStageResourceBindingMap
-    let fragmentBindings: MetalStageResourceBindingMap
-
+    var vertexBindings: MetalStageResourceBindingMap
+    var fragmentBindings: MetalStageResourceBindingMap
 
     init(device: MetalGraphicsDevice, pipelineState: MTLRenderPipelineState, depthStencilState: MTLDepthStencilState) {
         self.device = device

@@ -19,6 +19,14 @@ public class MetalGraphicsDevice: GraphicsDevice {
         self.device = device
     }
 
+    init?() {
+        if let device = MTLCreateSystemDefaultDevice() {
+            self.device = device
+        } else {
+            return nil
+        }
+    }
+
     init?(name: String) {
         var device: MTLDevice? = nil
 
@@ -293,7 +301,344 @@ public class MetalGraphicsDevice: GraphicsDevice {
     }
 
     public func makeRenderPipelineState(descriptor: RenderPipelineDescriptor, reflection: UnsafeMutablePointer<PipelineReflection>?) -> RenderPipelineState? {
-        return nil
+        var vertexFunction: MetalShaderFunction? = nil
+        var fragmentFunction: MetalShaderFunction? = nil
+
+        if let fn = descriptor.vertexFunction {
+            assert(fn is MetalShaderFunction)
+            vertexFunction = fn as? MetalShaderFunction
+            assert(vertexFunction!.function.functionType == .vertex)
+        }
+        if let fn = descriptor.fragmentFunction {
+            assert(fn is MetalShaderFunction)
+            fragmentFunction = fn as? MetalShaderFunction
+            assert(fragmentFunction!.function.functionType == .fragment)
+        }
+
+        let compareFunction = { (fn: CompareFunction) -> MTLCompareFunction in
+            switch fn {
+            case .never:            return .never
+            case .less:             return .less
+            case .equal:            return .equal
+            case .lessEqual:        return .lessEqual
+            case .greater:          return .greater
+            case .notEqual:         return .notEqual
+            case .greaterEqual:     return .greaterEqual
+            case .always:           return .always
+            }
+        }
+        let stencilOperation = { (op: StencilOperation) -> MTLStencilOperation in
+            switch op {
+            case .keep:            return .keep
+            case .zero:            return .zero
+            case .replace:         return .replace
+            case .incrementClamp:  return .incrementClamp
+            case .decrementClamp:  return .decrementClamp
+            case .invert:          return .invert
+            case .incrementWrap:   return .incrementWrap
+            case .decrementWrap:   return .decrementWrap
+            }
+        }
+        let setStencilDescriptor = { (stencil: inout MTLStencilDescriptor, desc: StencilDescriptor) in
+            stencil.stencilFailureOperation = stencilOperation(desc.stencilFailureOperation)
+            stencil.depthFailureOperation = stencilOperation(desc.depthFailOperation)
+            stencil.depthStencilPassOperation = stencilOperation(desc.depthStencilPassOperation)
+            stencil.stencilCompareFunction = compareFunction(desc.stencilCompareFunction)
+            stencil.readMask = desc.readMask
+            stencil.writeMask = desc.writeMask
+        }
+
+        // Create MTLDepthStencilState object.
+        let depthStencilDescriptor = MTLDepthStencilDescriptor()
+        depthStencilDescriptor.depthCompareFunction = compareFunction(descriptor.depthStencilDescriptor.depthCompareFunction)
+        depthStencilDescriptor.isDepthWriteEnabled = descriptor.depthStencilDescriptor.isDepthWriteEnabled
+        setStencilDescriptor(&depthStencilDescriptor.frontFaceStencil, descriptor.depthStencilDescriptor.frontFaceStencil)
+        setStencilDescriptor(&depthStencilDescriptor.backFaceStencil, descriptor.depthStencilDescriptor.backFaceStencil)
+        guard let depthStencilState = self.device.makeDepthStencilState(descriptor: depthStencilDescriptor) else {
+            Log.err("MTLDevice.makeDepthStencilState(descriptor:) failed.")
+            return nil
+        }
+
+        // Create MTLRenderPipelineState object.
+        let desc = MTLRenderPipelineDescriptor()
+
+        var vertexAttributeOffset = 0
+
+        if let vertexFunction = vertexFunction {
+            desc.vertexFunction = vertexFunction.function
+            vertexAttributeOffset = vertexFunction.module.bindings.inputAttributeIndexOffset
+        }
+        if let fragmentFunction = fragmentFunction {
+            desc.fragmentFunction = fragmentFunction.function
+        }
+
+        let vertexFormat = { (f: VertexFormat) -> MTLVertexFormat in
+            switch f {
+            case .uchar2:                   return .uchar2
+            case .uchar3:                   return .uchar3
+            case .uchar4:                   return .uchar4
+            case .char2:                    return .char2
+            case .char3:                    return .char3
+            case .char4:                    return .char4
+            case .uchar2Normalized:         return .uchar2Normalized
+            case .uchar3Normalized:         return .uchar3Normalized
+            case .uchar4Normalized:         return .uchar4Normalized
+            case .char2Normalized:          return .char2Normalized
+            case .char3Normalized:          return .char3Normalized
+            case .char4Normalized:          return .char4Normalized
+            case .ushort2:                  return .ushort2
+            case .ushort3:                  return .ushort3
+            case .ushort4:                  return .ushort4
+            case .short2:                   return .short2
+            case .short3:                   return .short3
+            case .short4:                   return .short4
+            case .ushort2Normalized:        return .ushort2Normalized
+            case .ushort3Normalized:        return .ushort3Normalized
+            case .ushort4Normalized:        return .ushort4Normalized
+            case .short2Normalized:         return .short2Normalized
+            case .short3Normalized:         return .short3Normalized
+            case .short4Normalized:         return .short4Normalized
+            case .half2:                    return .half2
+            case .half3:                    return .half3
+            case .half4:                    return .half4
+            case .float:                    return .float
+            case .float2:                   return .float2
+            case .float3:                   return .float3
+            case .float4:                   return .float4
+            case .int:                      return .int
+            case .int2:                     return .int2
+            case .int3:                     return .int3
+            case .int4:                     return .int4
+            case .uint:                     return .uint
+            case .uint2:                    return .uint2
+            case .uint3:                    return .uint3
+            case .uint4:                    return .uint4
+            case .int1010102Normalized:     return .int1010102Normalized
+            case .uint1010102Normalized:    return .uint1010102Normalized
+            case .invalid:
+                return .invalid
+            }
+        }
+
+        let vertexStepFunction = { (step: VertexStepRate) -> MTLVertexStepFunction in
+            switch step {
+            case .vertex:                   return .perVertex
+            case .instance:                 return .perInstance
+            }
+        }
+
+        let blendFactor = { (f: BlendFactor) -> MTLBlendFactor in
+            switch f {
+            case .zero:                         return .zero
+            case .one:                          return .one
+            case .sourceColor:                  return .sourceColor
+            case .oneMinusSourceColor:          return .oneMinusSourceColor
+            case .sourceAlpha:                  return .sourceAlpha
+            case .oneMinusSourceAlpha:          return .oneMinusSourceAlpha
+            case .destinationColor:             return .destinationColor
+            case .oneMinusDestinationColor:     return .oneMinusDestinationColor
+            case .destinationAlpha:             return .destinationAlpha
+            case .oneMinusDestinationAlpha:     return .oneMinusDestinationAlpha
+            case .sourceAlphaSaturated:         return .sourceAlphaSaturated
+            case .blendColor:                   return .blendColor
+            case .oneMinusBlendColor:           return .oneMinusBlendColor
+            case .blendAlpha:                   return .blendAlpha
+            case .oneMinusBlendAlpha:           return .oneMinusBlendAlpha
+            }
+        }
+
+        let blendOperation = { (op: BlendOperation) -> MTLBlendOperation in
+            switch op {
+            case .add:                      return .add
+            case .subtract:                 return .subtract
+            case .reverseSubtract:          return .reverseSubtract
+            case .min:                      return .min
+            case .max:                      return .max
+            }
+        }
+
+        let colorWriteMask = { (mask: ColorWriteMask) -> MTLColorWriteMask in
+            var value: MTLColorWriteMask = []
+            if mask.contains(.red)      { value.insert(.red) }
+            if mask.contains(.green)    { value.insert(.green) }
+            if mask.contains(.blue)     { value.insert(.blue) }
+            if mask.contains(.alpha)    { value.insert(.alpha) }
+            return value
+        }
+
+        // setup color-attachments
+        for attachment in descriptor.colorAttachments {
+            let colorAttachmentDesc: MTLRenderPipelineColorAttachmentDescriptor = desc.colorAttachments[attachment.index]
+            colorAttachmentDesc.pixelFormat = attachment.pixelFormat.mtlPixelFormat()
+            colorAttachmentDesc.writeMask = colorWriteMask(attachment.blendState.writeMask)
+            colorAttachmentDesc.isBlendingEnabled = attachment.blendState.enabled
+            colorAttachmentDesc.alphaBlendOperation = blendOperation(attachment.blendState.alphaBlendOperation)
+            colorAttachmentDesc.rgbBlendOperation = blendOperation(attachment.blendState.rgbBlendOperation)
+            colorAttachmentDesc.sourceRGBBlendFactor = blendFactor(attachment.blendState.sourceRGBBlendFactor)
+            colorAttachmentDesc.sourceAlphaBlendFactor = blendFactor(attachment.blendState.sourceAlphaBlendFactor)
+            colorAttachmentDesc.destinationRGBBlendFactor = blendFactor(attachment.blendState.destinationRGBBlendFactor)
+            colorAttachmentDesc.destinationAlphaBlendFactor = blendFactor(attachment.blendState.destinationAlphaBlendFactor)
+        }
+
+        // setup depth attachment.
+        desc.depthAttachmentPixelFormat = .invalid
+        desc.stencilAttachmentPixelFormat = .invalid
+        if descriptor.depthStencilAttachmentPixelFormat.isDepthFormat() {
+            desc.depthAttachmentPixelFormat = descriptor.depthStencilAttachmentPixelFormat.mtlPixelFormat()
+        }
+        if descriptor.depthStencilAttachmentPixelFormat.isStencilFormat() {
+            desc.stencilAttachmentPixelFormat = descriptor.depthStencilAttachmentPixelFormat.mtlPixelFormat()
+        }
+
+        // setup vertex buffer and attributes.
+        if descriptor.vertexDescriptor.attributes.count > 0 || descriptor.vertexDescriptor.layouts.count > 0 {
+            let vertexDescriptor = MTLVertexDescriptor()
+            for attrDesc in descriptor.vertexDescriptor.attributes {
+                let attr: MTLVertexAttributeDescriptor = vertexDescriptor.attributes[attrDesc.location]
+                attr.format = vertexFormat(attrDesc.format)
+                attr.offset = attrDesc.offset
+                attr.bufferIndex = vertexAttributeOffset + attrDesc.bufferIndex
+            }
+            for layoutDesc in descriptor.vertexDescriptor.layouts {
+                let bufferIndex = vertexAttributeOffset + layoutDesc.bufferIndex
+                let layout: MTLVertexBufferLayoutDescriptor = vertexDescriptor.layouts[bufferIndex]
+                layout.stepFunction = vertexStepFunction(layoutDesc.step)
+                layout.stepRate = 1
+                layout.stride = layoutDesc.stride
+            }
+            desc.vertexDescriptor = vertexDescriptor
+        }
+
+        var pipelineReflection: MTLRenderPipelineReflection? = nil
+        let pipelineState: MTLRenderPipelineState
+        do {
+            if reflection != nil {
+                let options: MTLPipelineOption = [.argumentInfo, .bufferTypeInfo]
+                pipelineState = try self.device.makeRenderPipelineState(descriptor: desc,
+                                                                        options: options,
+                                                                        reflection: &pipelineReflection)
+            } else {
+                pipelineState = try self.device.makeRenderPipelineState(descriptor: desc)
+            }
+        } catch {
+            Log.err("MTLDevice.makeRenderPipelineState error: \(error)")
+            return nil
+        }
+
+        if let reflection = reflection, let pipelineReflection = pipelineReflection {
+            Log.debug("RenderPipelineReflection: \(pipelineReflection)")
+
+            var resources: [ShaderResource] = []
+            var inputAttrs: [ShaderAttribute] = []
+            var pushConstants: [ShaderPushConstantLayout] = []
+
+            if let vertexFunction = vertexFunction {
+                inputAttrs = vertexFunction.stageInputAttributes // copy all inputAttributes
+            }
+
+            let numVertexArguments = pipelineReflection.vertexArguments?.count ?? 0
+            let numFragmentArguments = pipelineReflection.fragmentArguments?.count ?? 0
+
+            inputAttrs.reserveCapacity(numVertexArguments)
+            resources.reserveCapacity(numVertexArguments + numFragmentArguments)
+
+            if let vertexArguments = pipelineReflection.vertexArguments {
+                let bindingMap = vertexFunction!.module.bindings
+
+                for arg in vertexArguments {
+                    if arg.isActive == false { continue }
+
+                    if arg.type == .buffer, arg.index >= bindingMap.inputAttributeIndexOffset {
+                        // This can be skipped.
+                        // We copied all inputAttrs from above.
+
+                        // The Metal pipeline-reflection provides single vertex-buffer information,
+                        // rather than separated vertex-stream component informations.
+                    } else if arg.type == .buffer, arg.index == bindingMap.pushConstantIndex {
+                        let layout: ShaderPushConstantLayout = .from(mtlArgument: arg,
+                                                                     offset: bindingMap.pushConstantOffset,
+                                                                     size: bindingMap.pushConstantSize,
+                                                                     stage: .vertex)
+                        pushConstants.append(layout)
+                    } else {
+                        let res: ShaderResource = .from(mtlArgument: arg,
+                                                        bindingMap: bindingMap.resourceBindings,
+                                                        stage: .vertex)
+                        combineShaderResources(&resources, resource: res)
+                    }
+                }
+            }
+            if let fragmentArguments = pipelineReflection.fragmentArguments {
+                let stageMask = ShaderStageFlags(stage: fragmentFunction!.stage)
+                let bindingMap = fragmentFunction!.module.bindings
+
+                for arg in fragmentArguments {
+                    if arg.isActive == false { continue }
+
+                    if arg.type == .buffer, arg.index == bindingMap.pushConstantIndex {
+                        let layout: ShaderPushConstantLayout = .from(mtlArgument: arg,
+                                                                     offset: bindingMap.pushConstantOffset,
+                                                                     size: bindingMap.pushConstantSize,
+                                                                     stage: .fragment)
+
+                        var exist = false
+                        for i in 0..<pushConstants.count {
+                            var layout2 = pushConstants[i]
+                            if layout2.offset == layout.offset, layout2.size == layout.size {
+                                layout2.stages.formUnion(stageMask)
+                                pushConstants[i] = layout2
+                                exist = true
+                            }
+                        }
+                        if exist == false {
+                            pushConstants.append(layout)
+                        }
+                    } else {
+                        let res: ShaderResource = .from(mtlArgument: arg,
+                                                        bindingMap: bindingMap.resourceBindings,
+                                                        stage: .fragment)
+                        combineShaderResources(&resources, resource: res)
+                    }
+                }
+            }
+
+            reflection.pointee.resources = resources
+            reflection.pointee.inputAttributes = inputAttrs
+            reflection.pointee.pushConstantLayouts = pushConstants
+        }
+
+        let state = MetalRenderPipelineState(device: self, pipelineState: pipelineState, depthStencilState: depthStencilState)
+        switch descriptor.primitiveTopology {
+        case .point:            state.primitiveType = .point
+        case .line:             state.primitiveType = .line
+        case .lineStrip:        state.primitiveType = .lineStrip
+        case .triangle:         state.primitiveType = .triangle
+        case .triangleStrip:    state.primitiveType = .triangleStrip
+        }
+        switch descriptor.depthClipMode {
+        case .clip:             state.depthClipMode = .clip
+        case .clamp:            state.depthClipMode = .clamp
+        }
+        switch descriptor.triangleFillMode {
+        case .fill:             state.triangleFillMode = .fill
+        case .lines:            state.triangleFillMode = .lines
+        }
+        switch descriptor.frontFace {
+        case .cw:               state.frontFacingWinding = .clockwise
+        case .ccw:              state.frontFacingWinding = .counterClockwise
+        }
+        switch descriptor.cullMode {
+        case .none:             state.cullMode = .none
+        case .front:            state.cullMode = .front
+        case .back:             state.cullMode = .back
+        }
+        if let vertexFunction = vertexFunction {
+            state.vertexBindings = vertexFunction.module.bindings
+        }
+        if let fragmentFunction = fragmentFunction {
+            state.fragmentBindings = fragmentFunction.module.bindings
+        }
+        return state
     }
 
     public func makeComputePipelineState(descriptor: ComputePipelineDescriptor, reflection: UnsafeMutablePointer<PipelineReflection>?) -> ComputePipelineState? {
