@@ -30,9 +30,9 @@ let package = Package(
             dependencies: [
                 .target(name: "OpenAL_backend"),
 //                .target(name: "OpenAL_backend_windows", condition: .when(platforms: [.windows])),
-                .target(name: "OpenAL_backend_coreaudio", condition: .when(platforms: [.macOS, .iOS, .tvOS])),
+                .target(name: "OpenAL_backend_coreaudio", condition: .when(platforms: [.macOS, .iOS, .macCatalyst, .tvOS, .watchOS])),
 //                .target(name: "OpenAL_mixer_sse", condition: .when(platforms: [.windows])),
-                .target(name: "OpenAL_mixer_neon", condition: .when(platforms: [.iOS, .tvOS])),
+                .target(name: "OpenAL_mixer_neon", condition: .when(platforms: [.macOS, .iOS, .macCatalyst, .tvOS, .watchOS])),
             ],
             path: "Sources",
             exclude: [
@@ -70,7 +70,7 @@ let package = Package(
                 .linkedLibrary("Winmm", .when(platforms: [.windows])),
                 .linkedLibrary("swiftCore", .when(platforms: [.windows])), // swift_addNewDSOImage
 
-                .linkedFramework("CoreFoundation", .when(platforms: [.macOS, .iOS])),
+                .linkedFramework("CoreFoundation", .when(platforms: [.macOS, .iOS, .macCatalyst, .tvOS, .watchOS])),
             ]),
         .target(
             name: "OpenAL_mixer_sse",

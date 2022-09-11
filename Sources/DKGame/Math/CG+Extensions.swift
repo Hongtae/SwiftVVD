@@ -239,6 +239,7 @@ public extension CGRect {
     }
 }
 
+#if os(macOS)
 public extension AffineTransform2 {
     init(_ t: AffineTransform) {
         self.init(linear: Matrix2(Scalar(t.m11), Scalar(t.m12),
@@ -254,3 +255,4 @@ public extension AffineTransform {
                   tX: CGFloat(t.translation.x), tY: CGFloat(t.translation.y))
     }
 }
+#endif

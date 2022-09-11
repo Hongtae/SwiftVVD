@@ -5,7 +5,7 @@ import PackageDescription
 
 let package = Package(
     name: "DKGame",
-    platforms: [.macOS(.v12), .iOS(.v15)],
+    platforms: [.macOS(.v12), .iOS(.v15), .macCatalyst(.v15)],
     products: [
         // Products define the executables and libraries a package produces, and make them visible to other packages.
         .library(
@@ -53,12 +53,12 @@ let package = Package(
             swiftSettings: [
                 // App & Window
                 .define("ENABLE_WIN32",     .when(platforms: [.windows])),
-                .define("ENABLE_UIKIT",     .when(platforms: [.iOS, .tvOS])),
+                .define("ENABLE_UIKIT",     .when(platforms: [.iOS, .macCatalyst, .tvOS, .watchOS])),
                 .define("ENABLE_APPKIT",    .when(platforms: [.macOS])),
                 .define("ENABLE_WAYLAND",   .when(platforms: [.linux])),
                 // Graphics Device
                 .define("ENABLE_VULKAN",    .when(platforms: [.windows, .linux, .android])),
-                .define("ENABLE_METAL",     .when(platforms: [.iOS, .macOS, .tvOS])),
+                .define("ENABLE_METAL",     .when(platforms: [.iOS, .macOS, .macCatalyst, .tvOS, .watchOS])),
 
                 // Vulkan platforms
                 .define("VK_USE_PLATFORM_WIN32_KHR",   .when(platforms:[.windows])),
