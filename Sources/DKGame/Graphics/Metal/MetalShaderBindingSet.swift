@@ -59,7 +59,7 @@ public class MetalShaderBindingSet: ShaderBindingSet {
 
             let startingIndex = 0
             let availableItems = min(textures.count, descriptor.arrayLength - startingIndex)
-            assert(buffers.count >= availableItems)
+            assert(textures.count >= availableItems)
 
             var textureArray = type(of: self.textures).Value()
             textureArray.reserveCapacity(availableItems)

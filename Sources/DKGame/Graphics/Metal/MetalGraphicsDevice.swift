@@ -112,22 +112,22 @@ public class MetalGraphicsDevice: GraphicsDevice {
                 }
             }
             // from spirv_cross_c.h
-            let SPVC_MSL_PUSH_CONSTANT_DESC_SET = ~(0)
-            let SPVC_MSL_PUSH_CONSTANT_BINDING = 0
+            let SPVC_MSL_PUSH_CONSTANT_DESC_SET = ~UInt32(0)
+            let SPVC_MSL_PUSH_CONSTANT_BINDING = UInt32(0)
 
             if shader.pushConstantLayouts.count > 0 {
                 assert(shader.pushConstantLayouts.count == 1, "There can be only one push constant block!")
 
                 // add push-constant
                 let b1 = spvc_msl_resource_binding(stage: stage,
-                                                   desc_set: UInt32(SPVC_MSL_PUSH_CONSTANT_DESC_SET),
-                                                   binding: UInt32(SPVC_MSL_PUSH_CONSTANT_BINDING),
+                                                   desc_set: SPVC_MSL_PUSH_CONSTANT_DESC_SET,
+                                                   binding: SPVC_MSL_PUSH_CONSTANT_BINDING,
                                                    msl_buffer: UInt32(numBuffers),
                                                    msl_texture: UInt32(numTextures),
                                                    msl_sampler: UInt32(numSamplers))
 
-                let b2 = MetalResourceBinding(set: SPVC_MSL_PUSH_CONSTANT_DESC_SET,
-                                              binding: SPVC_MSL_PUSH_CONSTANT_BINDING,
+                let b2 = MetalResourceBinding(set: Int(SPVC_MSL_PUSH_CONSTANT_DESC_SET),
+                                              binding: Int(SPVC_MSL_PUSH_CONSTANT_BINDING),
                                               bufferIndex: numBuffers,
                                               textureIndex: numTextures,
                                               samplerIndex: numSamplers,
@@ -247,7 +247,7 @@ public class MetalGraphicsDevice: GraphicsDevice {
 
                 var bindingMap = MetalStageResourceBindingMap(resourceBindings: [],
                                                               inputAttributeIndexOffset: 0,
-                                                              pushConstantIndex: SPVC_MSL_PUSH_CONSTANT_DESC_SET,
+                                                              pushConstantIndex: Int(SPVC_MSL_PUSH_CONSTANT_DESC_SET),
                                                               pushConstantOffset: 0,
                                                               pushConstantSize: 0,
                                                               pushConstantBufferSize: 0)

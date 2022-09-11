@@ -172,8 +172,8 @@ class MyApplicationDelegate: ApplicationDelegate {
         Task { @ScreenActor in
             self.screen?.window = self.window
             self.screen?.frame = self.frame
+            await self.window?.activate()
         }
-        self.window?.activate()
     }
 
     func finalize(application: Application) async {

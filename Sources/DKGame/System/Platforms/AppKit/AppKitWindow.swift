@@ -150,9 +150,11 @@ public class AppKitWindow: Window {
     public func activate() {
         if let window = self.view.window {
             window.makeKeyAndOrderFront(nil)
+            self.view.visible = true
+            self.view.activated = true
 
-            self.postWindowEvent(type: .shown)
-            self.postWindowEvent(type: .activated)
+//            self.postWindowEvent(type: .shown)
+//            self.postWindowEvent(type: .activated)
         }
     }
 

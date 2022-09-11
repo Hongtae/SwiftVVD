@@ -32,12 +32,16 @@ public class MetalShaderFunction: ShaderFunction {
                                    required: $0.required)
         }
 
-        self.stageInputAttributes = function.stageInputAttributes?.map {
-            ShaderAttribute(name: $0.name,
-                            location: $0.attributeIndex,
-                            type: .from(mtlDataType: $0.attributeType),
-                            enabled: $0.isActive)
-        } ?? []
+        let stageInputAttrs: [AnyObject] = function.stageInputAttributes ?? []
+        self.stageInputAttributes = stageInputAttrs.compactMap {
+            if let attr = $0 as? MTLAttribute {
+                return ShaderAttribute(name: attr.name,
+                                       location: attr.attributeIndex,
+                                       type: .from(mtlDataType: attr.attributeType),
+                                       enabled: attr.isActive)
+            }
+            return nil
+        }
 
         switch function.functionType {
         case .vertex:
