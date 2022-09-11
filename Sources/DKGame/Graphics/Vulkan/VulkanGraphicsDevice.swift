@@ -618,7 +618,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         vertexBindingDescriptions.reserveCapacity(desc.vertexDescriptor.layouts.count)
         for layout in desc.vertexDescriptor.layouts {   // buffer layout
             var binding = VkVertexInputBindingDescription()
-            binding.binding = layout.bufferIndex
+            binding.binding = UInt32(layout.bufferIndex)
             binding.stride = UInt32(layout.stride)
             switch layout.step {
             case .vertex:
@@ -633,8 +633,8 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         vertexAttributeDescriptions.reserveCapacity(desc.vertexDescriptor.attributes.count)
         for attrDesc in desc.vertexDescriptor.attributes {
             var attr = VkVertexInputAttributeDescription()
-            attr.location = attrDesc.location
-            attr.binding = attrDesc.bufferIndex
+            attr.location = UInt32(attrDesc.location)
+            attr.binding = UInt32(attrDesc.bufferIndex)
             attr.format = attrDesc.format.vkFormat()
             attr.offset = UInt32(attrDesc.offset)
             vertexAttributeDescriptions.append(attr)
@@ -831,7 +831,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             }
         }
 
-        var colorAttachmentRefCount: UInt32 = 0
+        var colorAttachmentRefCount = 0
         for attachment in desc.colorAttachments {
             assert(attachment.pixelFormat.isColorFormat())
             colorAttachmentRefCount = max(colorAttachmentRefCount, attachment.index + 1)

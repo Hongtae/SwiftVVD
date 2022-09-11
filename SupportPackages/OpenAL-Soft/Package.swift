@@ -29,9 +29,15 @@ let package = Package(
             name: "OpenAL",
             dependencies: [
                 .target(name: "OpenAL_backend"),
-//                .target(name: "OpenAL_backend_windows", condition: .when(platforms: [.windows])),
+
+                .target(name: "OpenAL_backend_windows", condition: .when(platforms: [.windows])),
+                .target(name: "OpenAL_backend_dsound", condition: .when(platforms: [.windows])),
                 .target(name: "OpenAL_backend_coreaudio", condition: .when(platforms: [.macOS, .iOS, .macCatalyst, .tvOS, .watchOS])),
-//                .target(name: "OpenAL_mixer_sse", condition: .when(platforms: [.windows])),
+                .target(name: "OpenAL_backend_alsa", condition: .when(platforms: [.linux, .android])),
+                .target(name: "OpenAL_backend_oss", condition: .when(platforms: [.linux, .android])),
+                .target(name: "OpenAL_backend_opensl", condition: .when(platforms: [.linux, .android])),
+
+                .target(name: "OpenAL_mixer_sse", condition: .when(platforms: [.windows])),
                 .target(name: "OpenAL_mixer_neon", condition: .when(platforms: [.macOS, .iOS, .macCatalyst, .tvOS, .watchOS])),
             ],
             path: "Sources",
@@ -106,13 +112,22 @@ let package = Package(
             name: "OpenAL_backend_windows",
             path: "Sources",
             sources: [
-                "openal-soft/alc/backends/dsound.cpp",
                 "openal-soft/alc/backends/winmm.cpp",
                 "openal-soft/alc/backends/wasapi.cpp"
             ],
             publicHeadersPath: "swift_module",
             cxxSettings: cxxSettings + [
                 .unsafeFlags(["-Oz"], .when(platforms: [.windows], configuration: .release)),
+            ]),
+        .target(
+            name: "OpenAL_backend_dsound",
+            path: "Sources",
+            sources: [
+                "openal-soft/alc/backends/dsound.cpp",
+            ],
+            publicHeadersPath: "swift_module",
+            cxxSettings: cxxSettings,
+            linkerSettings: [
             ]),
         .target(
             name: "OpenAL_backend_coreaudio",
@@ -125,7 +140,37 @@ let package = Package(
             linkerSettings: [
                 .linkedFramework("CoreAudio"),
                 .linkedFramework("AudioToolbox"),
-            ])
+            ]),
+        .target(
+            name: "OpenAL_backend_alsa",
+            path: "Sources",
+            sources: [
+                "openal-soft/alc/backends/alsa.cpp",
+            ],
+            publicHeadersPath: "swift_module",
+            cxxSettings: cxxSettings,
+            linkerSettings: [
+            ]),
+        .target(
+            name: "OpenAL_backend_oss",
+            path: "Sources",
+            sources: [
+                "openal-soft/alc/backends/oss.cpp",
+            ],
+            publicHeadersPath: "swift_module",
+            cxxSettings: cxxSettings,
+            linkerSettings: [
+            ]),
+        .target(
+            name: "OpenAL_backend_opensl",
+            path: "Sources",
+            sources: [
+                "openal-soft/alc/backends/opensl.cpp",
+            ],
+            publicHeadersPath: "swift_module",
+            cxxSettings: cxxSettings,
+            linkerSettings: [
+            ]),
     ],
     cLanguageStandard: .c11,
     cxxLanguageStandard: .cxx20

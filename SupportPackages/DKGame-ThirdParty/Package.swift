@@ -35,6 +35,7 @@ let package = Package(
             cSettings: [],
             cxxSettings: [
                 .headerSearchPath("../libogg/include"),
+                .define("_CRT_SECURE_NO_WARNINGS", .when(platforms: [.windows])),
                 .unsafeFlags([
                     "-Wno-module-import-in-extern-c",
                 ])

@@ -239,7 +239,8 @@ public extension CGRect {
     }
 }
 
-#if os(macOS)
+//#if !(os(iOS) || targetEnvironment(macCatalyst))
+#if os(macOS) || os(Linux) || os(Windows) || os(Android)
 public extension AffineTransform2 {
     init(_ t: AffineTransform) {
         self.init(linear: Matrix2(Scalar(t.m11), Scalar(t.m12),
