@@ -127,8 +127,7 @@ let package = Package(
             ],
             publicHeadersPath: "swift_module",
             cxxSettings: cxxSettings,
-            linkerSettings: [
-            ]),
+            linkerSettings: []),
         .target(
             name: "OpenAL_backend_coreaudio",
             path: "Sources",
@@ -136,7 +135,9 @@ let package = Package(
                 "openal-soft/alc/backends/coreaudio.cpp",
             ],
             publicHeadersPath: "swift_module",
-            cxxSettings: cxxSettings,
+            cxxSettings: cxxSettings + [
+                .unsafeFlags(["-Wno-deprecated-anon-enum-enum-conversion"]),
+            ],
             linkerSettings: [
                 .linkedFramework("CoreAudio"),
                 .linkedFramework("AudioToolbox"),
@@ -149,8 +150,7 @@ let package = Package(
             ],
             publicHeadersPath: "swift_module",
             cxxSettings: cxxSettings,
-            linkerSettings: [
-            ]),
+            linkerSettings: []),
         .target(
             name: "OpenAL_backend_oss",
             path: "Sources",
@@ -159,8 +159,7 @@ let package = Package(
             ],
             publicHeadersPath: "swift_module",
             cxxSettings: cxxSettings,
-            linkerSettings: [
-            ]),
+            linkerSettings: []),
         .target(
             name: "OpenAL_backend_opensl",
             path: "Sources",
@@ -169,8 +168,7 @@ let package = Package(
             ],
             publicHeadersPath: "swift_module",
             cxxSettings: cxxSettings,
-            linkerSettings: [
-            ]),
+            linkerSettings: []),
     ],
     cLanguageStandard: .c11,
     cxxLanguageStandard: .cxx20

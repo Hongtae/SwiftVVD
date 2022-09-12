@@ -188,29 +188,25 @@ class MyApplicationDelegate: ApplicationDelegate {
 func loadResourceData(name: String) -> Data? {
     let bundle = Bundle.main
     print("bundle.bundleURL: \(bundle.bundleURL)")
-    print("bundle.bundlePath: \(bundle.bundlePath)")
+    // print("bundle.bundlePath: \(bundle.bundlePath)")
     print("bundle.resourceURL: \(String(describing: bundle.resourceURL))")
-    print("bundle.executableURL: \(String(describing: bundle.executableURL))")
+    // print("bundle.executableURL: \(String(describing: bundle.executableURL))")
 
-    if let url = bundle.url(forResource: name, withExtension: nil) {
-        do {
-            return try Data(contentsOf: url, options: [])
-        } catch {
-            print("Error on loading data: \(error)")
-        }
-    }
-    if let url = bundle.url(forResource: name, withExtension: nil, subdirectory: "DKGame_TestApp1.resources") {
-        do {
-            return try Data(contentsOf: url, options: [])
-        } catch {
-            print("Error on loading data: \(error)")
-        }
-    }
-    if let url = bundle.url(forResource: name, withExtension: nil, subdirectory: "DKGame_TestApp1.bundle/Contents/Resources") {
-        do {
-            return try Data(contentsOf: url, options: [])
-        } catch {
-            print("Error on loading data: \(error)")
+    let subdirs: [String?] = [
+        nil,
+        "DKGame_TestApp1.resources",                    // path for windows bundle
+        "DKGame_TestApp1.bundle",                       // path for mac bundle
+        "DKGame_TestApp1.bundle/Contents/Resources",    // path for Xcode bundle
+    ]
+
+    for subdir in subdirs {
+        if let url = bundle.url(forResource: name, withExtension: nil, subdirectory: subdir) {
+            do {
+                print("Loading resource: \(url)")
+                return try Data(contentsOf: url, options: [])
+            } catch {
+                print("Error on loading data: \(error)")
+            }
         }
     }
 

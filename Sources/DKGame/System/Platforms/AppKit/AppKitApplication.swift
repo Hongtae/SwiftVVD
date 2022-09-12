@@ -14,7 +14,19 @@ public class AppKitApplication: Application {
 
     weak var delegate: ApplicationDelegate?
 
+    var running = false
+    var exitCode: Int = 0
+
     public func terminate(exitCode : Int) {
+        if self.running {
+            DispatchQueue.main.async {
+                let app = NSApplication.shared
+                NotificationCenter.default.post(name: NSApplication.willTerminateNotification,
+                                                object: app)
+                app.stop(nil)
+                self.exitCode = exitCode
+            }
+        }
     }
 
     public static func run(delegate: ApplicationDelegate?) -> Int {
@@ -22,20 +34,25 @@ public class AppKitApplication: Application {
 
         let app = AppKitApplication()
         app.delegate = delegate
+        app.running = true
+
         self.shared = app
 
-        Task {
+        Task { @MainActor in
             await delegate?.initialize(application: app)
+            NotificationCenter.default.post(name: NSApplication.willFinishLaunchingNotification,
+                                            object: NSApplication.shared)
         }
 
         NSApplication.shared.run()
+        app.running = false
 
-        Task {
+        Task { @MainActor in
             await delegate?.finalize(application: app)
         }
 
         self.shared = nil
-        return 0
+        return app.exitCode
     }
 }
 
