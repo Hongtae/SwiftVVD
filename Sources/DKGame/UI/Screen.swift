@@ -33,6 +33,29 @@ public class Screen {
 
                     if let window = await window {
 
+                        let swapChain = await commandQueue?.makeSwapChain(target: window)
+                        if swapChain == nil {
+                            Log.err("Failed to create swapChain!")
+                        }
+                        let scaleFactor = window.contentScaleFactor
+                        let contentBounds = window.contentBounds
+                        let activated = window.activated
+                        let visible = window.visible
+
+                        assert(contentBounds.width > 0.0 && contentBounds.height > 0.0)
+                        assert(scaleFactor > 0.0)
+
+                        Task { @ScreenActor in
+
+                            self.swapChain = swapChain
+                            self.resolution = contentBounds.size * scaleFactor
+                            self.windowContentScaleFactor = scaleFactor
+                            self.windowContentBounds = contentBounds
+                            self.activated = activated
+                            self.visible = visible
+                            self.frame?.updateResolution()
+                        }
+
                         window.addEventObserver(self) { [weak self](event: WindowEvent) in
                             if let self = self {
                                 Task { @ScreenActor in
@@ -59,27 +82,6 @@ public class Screen {
                                     }
                                 }
                             }
-                        }
-
-                        Task { @ScreenActor in
-
-                            let swapChain = await commandQueue?.makeSwapChain(target: window)
-                            if swapChain == nil {
-                                Log.err("Failed to create swapChain!")
-                            }
-                            let scaleFactor = await window.contentScaleFactor
-                            let contentBounds = await window.contentBounds
-                            let activated = await window.activated
-                            let visible = await window.visible
-
-                            self.swapChain = swapChain
-                            self.resolution = CGSize(width: contentBounds.width * scaleFactor,
-                                                     height: contentBounds.height * scaleFactor)
-                            self.windowContentScaleFactor = scaleFactor
-                            self.windowContentBounds = contentBounds
-                            self.activated = activated
-                            self.visible = visible
-                            self.frame?.updateResolution()
                         }
                     } else {
                         Task { @ScreenActor in
