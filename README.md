@@ -26,3 +26,12 @@ swift build
 swift run TestApp1
 ```
 
+
+> **Note**  
+> If you are using Swift 5.7 and the compiler crashes on Windows, try the following command.
+>
+> ```
+> swift build --disable-index-store
+> swift run --disable-index-store TestApp1
+> ```
+
