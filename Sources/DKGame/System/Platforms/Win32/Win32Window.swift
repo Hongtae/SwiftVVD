@@ -233,6 +233,8 @@ public class Win32Window : Window {
             return hWnd
         }
 
+        assert(Thread.isMainThread, "A window must be created on the main thread.")
+
         var dwStyle: DWORD = 0
         if style.contains(.title)           { dwStyle |= UInt32(WS_CAPTION) }
         if style.contains(.closeButton)     { dwStyle |= UInt32(WS_SYSMENU) }
