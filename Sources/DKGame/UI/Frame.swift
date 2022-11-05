@@ -51,6 +51,8 @@ open class Frame {
     public private(set) unowned var superframe: Frame? = nil
     public private(set) var subframes: [Frame] = []
     public private(set) var loaded = false
+    public var isLoaded: Bool { loaded }
+
     private var drawSurface = true
 
     public var numberOfDescendants: Int {
@@ -207,8 +209,8 @@ open class Frame {
     }
 
     @discardableResult
-    public func draw() async -> Bool {
-        return await self.drawHierarchy()
+    public func draw() -> Bool {
+        return self._drawHierarchy()
     }
 
     public func redraw() {
@@ -254,7 +256,7 @@ open class Frame {
         assert(resolution.height > .leastNormalMagnitude)
 
         if resized {
-            Task { await self.resolutionChanged(resolution, scaleFactor: self._contentScaleFactor) }
+            self.resolutionChanged(resolution, scaleFactor: self._contentScaleFactor)
             self.redraw()
         }
         subframes.forEach { $0.updateResolution() }
@@ -293,7 +295,7 @@ open class Frame {
             frame.superframe = self
             if self.loaded {
                 assert(self.screen != nil)
-                await frame.loadHierarchy(screen: self.screen!,
+                await frame._loadHierarchy(screen: self.screen!,
                                     resolution: self.resolution,
                                     scaleFactor: self._contentScaleFactor)
                 frame.updateResolution()
@@ -328,7 +330,7 @@ open class Frame {
     open var canHandleMouse: Bool { true }
     open var canHandleKeyboard: Bool { true }
 
-    public func processMouseEvent(_ event: MouseEvent, position: CGPoint, delta: CGPoint, exclusive: Bool) async -> Bool {
+    public func processMouseEvent(_ event: MouseEvent, position: CGPoint, delta: CGPoint, exclusive: Bool) -> Bool {
 
         // convert frame local-space to content-space
         let localPos = position.transformed(by: self.inverseContentTransform)
@@ -358,7 +360,7 @@ open class Frame {
                         let deltaInFrame = posInFrame - posInFrameOld
                         
                         // send event to frame whether it is able to process or not. (frame is visible-destionation)
-                        if await frame.processMouseEvent(event, position: posInFrame, delta: deltaInFrame, exclusive: false) {
+                        if frame.processMouseEvent(event, position: posInFrame, delta: deltaInFrame, exclusive: false) {
                             return true
                         }
                     }
@@ -367,14 +369,14 @@ open class Frame {
         }
         
         if self.canHandleMouse {
-            return await self.handleMouseEvent(event, position: localPos, delta: localDelta)
+            return self.handleMouseEvent(event, position: localPos, delta: localDelta)
         }
         return false
     }
 
-    public func processKeyboardEvent(_ event: KeyboardEvent) async -> Bool {
+    public func processKeyboardEvent(_ event: KeyboardEvent) -> Bool {
         if self.canHandleKeyboard {
-            return await handleKeyboardEvent(event)
+            return handleKeyboardEvent(event)
         }
         return false
     }
@@ -417,43 +419,43 @@ open class Frame {
     public func hasCapturedKeyboard(deviceID: Int) -> Bool { false }
     public func hasCapturedMouse(deviceID: Int) -> Bool { false }
 
-    open func loaded(screen: Screen) async {}
-    open func unload() async {}
-    open func update(tick: UInt64, delta: Double, date: Date) async {}
-    open func draw(canvas: Canvas) async { canvas.clear(color: .white) }
-    open func drawOverlay(canvas: Canvas) async {}
+    open func load(screen: Screen) {}
+    open func unload() {}
+    open func update(tick: UInt64, delta: Double, date: Date) {}
+    open func draw(canvas: Canvas) { canvas.clear(color: .white) }
+    open func drawOverlay(canvas: Canvas) {}
 
-    open func resolutionChanged(_ size: CGSize, scaleFactor: CGFloat) async {
+    open func resolutionChanged(_ size: CGSize, scaleFactor: CGFloat) {
         self.contentScale = CGSize(width: size.width / scaleFactor, height: size.height / scaleFactor)
     }
 
     open func hitTest(position pt: CGPoint) -> Bool { true }
     open func contentHitTest(position pt: CGPoint) -> Bool { true }
 
-    open func handleMouseEvent(_: MouseEvent, position: CGPoint, delta: CGPoint) async -> Bool { false }
-    open func handleKeyboardEvent(_: KeyboardEvent) async -> Bool { false }
-    open func handleMouseEnter(deviceID: Int, device: MouseEventDevice) async {}
-    open func handleMouseLeave(deviceID: Int, device: MouseEventDevice) async {}
-    open func handleMouseLost(deviceID: Int) async {}
-    open func handleKeyboardLost(deviceID: Int) async {}
+    open func handleMouseEvent(_: MouseEvent, position: CGPoint, delta: CGPoint) -> Bool { false }
+    open func handleKeyboardEvent(_: KeyboardEvent) -> Bool { false }
+    open func handleMouseEnter(deviceID: Int, device: MouseEventDevice) {}
+    open func handleMouseLeave(deviceID: Int, device: MouseEventDevice) {}
+    open func handleMouseLost(deviceID: Int) {}
+    open func handleKeyboardLost(deviceID: Int) {}
 
-    func updateHierarchy(tick: UInt64, delta: Double, date: Date) async {
+    func _updateHierarchy(tick: UInt64, delta: Double, date: Date) async {
         assert(self.loaded)
+            
+        self.update(tick: tick, delta: delta, date: date)
 
         await withTaskGroup(of: Void.self) {
             taskGroup in
-            taskGroup.addTask {
-                await self.update(tick: tick, delta: delta, date: date)
-            }
+            
             for frame in subframes {
                 taskGroup.addTask {
-                    await frame.updateHierarchy(tick: tick, delta: delta, date: date)
+                    await frame._updateHierarchy(tick: tick, delta: delta, date: date)
                 }
             }
         }
     }
 
-    func drawHierarchy() async -> Bool {
+    func _drawHierarchy() -> Bool {
         if self.loaded {
             assert(self.screen != nil)
             let screen = self.screen!
@@ -463,7 +465,7 @@ open class Frame {
                 if frame.hidden {
                     continue
                 }
-                if await frame.drawHierarchy() {
+                if frame._drawHierarchy() {
                     drawSelf = true
                 }
             }
@@ -472,7 +474,7 @@ open class Frame {
                 // create canvas.
                 var canvas: Canvas? = nil
                 if screen.frame === self {
-                    canvas = await screen.makeCanvas()
+                    canvas = screen.makeCanvas()
                     self.renderTarget = nil
                 } else {
                     if self.renderTarget == nil {
@@ -515,7 +517,7 @@ open class Frame {
                     canvas.contentTransform = self.contentTransform
 
                     // draw surface
-                    await self.draw(canvas: canvas)
+                    self.draw(canvas: canvas)
 
                     // draw subframes in reverse order
                     for i in (0..<subframes.count).reversed() {
@@ -534,7 +536,7 @@ open class Frame {
                         }
                     }
                     // draw overlay
-                    await self.drawOverlay(canvas: canvas)
+                    self.drawOverlay(canvas: canvas)
                     canvas.commit()
 
                     self.drawSurface = false
@@ -547,9 +549,9 @@ open class Frame {
         return false 
     }
 
-    func loadHierarchy(screen: Screen, resolution: CGSize, scaleFactor: CGFloat) async {
+    func _loadHierarchy(screen: Screen, resolution: CGSize, scaleFactor: CGFloat) async {
         if self.screen !== screen {
-            await self.unloadHierarchy()
+            await self._unloadHierarchy()
             assert(self.loaded == false)
 
             self.screen = screen
@@ -558,14 +560,14 @@ open class Frame {
                                      height: resolution.height.rounded())
             self._contentScaleFactor = scaleFactor
             self.loaded = true
-            await self.loaded(screen: screen)
-            await self.resolutionChanged(self.resolution, scaleFactor: scaleFactor)
+            self.load(screen: screen)
+            self.resolutionChanged(self.resolution, scaleFactor: scaleFactor)
             self.updateResolution()
 
             await withTaskGroup(of: Void.self) { taskGroup in
                 for frame in self.subframes {
                     taskGroup.addTask {
-                        await frame.loadHierarchy(screen: screen,
+                        await frame._loadHierarchy(screen: screen,
                             resolution: self.resolution,
                             scaleFactor: scaleFactor)
                     }
@@ -574,22 +576,20 @@ open class Frame {
         }
     }
 
-    func unloadHierarchy() async {
+    func _unloadHierarchy() async {
         await withTaskGroup(of: Void.self) { taskGroup in
             for frame in self.subframes {
                 taskGroup.addTask {
-                    await frame.unloadHierarchy()
+                    await frame._unloadHierarchy()
                 }
             }
             if self.loaded {
-                taskGroup.addTask{
-                    if let screen = await self.screen {
-                        await screen.leaveHoverFrame(self)
-                        await screen.releaseAllKeyboardsCaptured(by: self)
-                        await screen.releaseAllMiceCaptured(by: self)
-                    }
-                    await self.unload()
+                if let screen =  self.screen {
+                    screen.leaveHoverFrame(self)
+                    screen.releaseAllKeyboardsCaptured(by: self)
+                    screen.releaseAllMiceCaptured(by: self)
                 }
+                self.unload()
             }
         }
 

@@ -41,8 +41,7 @@ public class MetalSwapChain: SwapChain {
     public var commandQueue: CommandQueue { queue }
     public var maximumBufferCount: Int { self.layer.maximumDrawableCount }
 
-    @MainActor
-    public init?(queue: MetalCommandQueue, window: Window) async {
+    public init?(queue: MetalCommandQueue, window: Window) {
         self.window = window
         self.queue = queue
 
@@ -85,14 +84,14 @@ public class MetalSwapChain: SwapChain {
         }
     }
 
-    public func currentRenderPassDescriptor() async -> RenderPassDescriptor {
+    public func currentRenderPassDescriptor() -> RenderPassDescriptor {
         if self.drawable == nil {
-            await self.setupFrame()
+            self.setupFrame()
         }
         return renderPassDescriptor
     }
 
-    func setupFrame() async {
+    func setupFrame() {
         if self.drawable == nil {
             self.renderPassDescriptor.colorAttachments.removeAll()
             self.renderPassDescriptor.depthStencilAttachment.renderTarget = nil

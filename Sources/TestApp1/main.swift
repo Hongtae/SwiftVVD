@@ -40,7 +40,7 @@ class MyFrame: Frame {
 
     var baseline = [CGPoint(x: 80, y: 450), CGPoint(x: 620, y: 180)]
 
-    override func loaded(screen: Screen) async {
+    override func load(screen: Screen) {
         if let fontData = loadResourceData(name: "Resources/Roboto-Regular.ttf") {
             self.textFont = Font(deviceContext: screen.graphicsDeviceContext!, data: fontData)
             self.outlineFont = Font(deviceContext: screen.graphicsDeviceContext!, data: fontData)
@@ -60,13 +60,13 @@ class MyFrame: Frame {
         }
     }
 
-    override func update(tick: UInt64, delta: Double, date: Date) async {
+    override func update(tick: UInt64, delta: Double, date: Date) {
         t += delta
         tickDelta = delta
     }
 
-    override func resolutionChanged(_ size: CGSize, scaleFactor: CGFloat) async {
-        await super.resolutionChanged(size, scaleFactor: scaleFactor)
+    override func resolutionChanged(_ size: CGSize, scaleFactor: CGFloat) {
+        super.resolutionChanged(size, scaleFactor: scaleFactor)
 
         var dpi = self.dpi
         dpi.x = UInt32(CGFloat(dpi.x) * scaleFactor)
@@ -77,7 +77,7 @@ class MyFrame: Frame {
         self.fpsFont?.dpi = dpi
     }
 
-    override func draw(canvas: Canvas) async {
+    override func draw(canvas: Canvas) {
         let v = Scalar(sin(t) + 1.0) * 0.5
         canvas.clear(color: Color(0, 0, 0.6))
         canvas.drawEllipse(bounds: CGRect(x: 150, y: 50, width: 200, height: 200),
@@ -109,7 +109,7 @@ class MyFrame: Frame {
         }
     }
 
-    override func handleMouseEvent(_ event: MouseEvent, position: CGPoint, delta: CGPoint) async -> Bool {
+    override func handleMouseEvent(_ event: MouseEvent, position: CGPoint, delta: CGPoint) -> Bool {
         if event.type != .move {
             // Log.debug("\(#function): event: \(event), position: \(position), delta: \(delta)")
         }
@@ -128,24 +128,24 @@ class MyFrame: Frame {
         return true 
     }
 
-    override func handleKeyboardEvent(_ event: KeyboardEvent) async -> Bool {
+    override func handleKeyboardEvent(_ event: KeyboardEvent) -> Bool {
         Log.debug("\(#function): event: \(event)")
         return true
     }
     
-    override func handleMouseEnter(deviceID: Int, device: MouseEventDevice) async {
+    override func handleMouseEnter(deviceID: Int, device: MouseEventDevice) {
         Log.debug("\(#function): deviceID: \(deviceID), device: \(device)")
     }
 
-    override func handleMouseLeave(deviceID: Int, device: MouseEventDevice) async {
+    override func handleMouseLeave(deviceID: Int, device: MouseEventDevice) {
         Log.debug("\(#function): deviceID: \(deviceID), device: \(device)")
     }
 
-    override func handleMouseLost(deviceID: Int) async {
+    override func handleMouseLost(deviceID: Int) {
         Log.debug("\(#function): deviceID: \(deviceID)")
     }
 
-    override func handleKeyboardLost(deviceID: Int) async {
+    override func handleKeyboardLost(deviceID: Int) {
         Log.debug("\(#function): deviceID: \(deviceID)")
     }
 
@@ -158,8 +158,8 @@ class MyApplicationDelegate: ApplicationDelegate {
     var screen: Screen?
     var frame: Frame?
 
-    func initialize(application: Application) async {
-        print("app initialize")
+    func initialize(application: Application) {
+        Log.debug("app initialize, isMainThread: \(Thread.isMainThread)")
 
         self.windowDelegate = MyWindowDelegate()
         self.window = makeWindow(name: "TestApp1",
@@ -167,16 +167,16 @@ class MyApplicationDelegate: ApplicationDelegate {
                                  delegate: self.windowDelegate)
         self.window?.resolution = CGSize(width: 800, height: 600)
 
-        self.screen = await Screen()
-        self.frame = await MyFrame()
         Task { @ScreenActor in
+            self.screen = Screen()
+            self.frame = MyFrame()
             self.screen?.window = self.window
             self.screen?.frame = self.frame
-            await self.window?.activate()
+            self.window?.activate()
         }
     }
 
-    func finalize(application: Application) async {
+    func finalize(application: Application) {
         print("app finalize")
 
         self.screen = nil

@@ -15,81 +15,65 @@ import Foundation
 public class Screen {
     public var frame: Frame? {
         didSet {
-            Task {
-                if frame !== oldValue {
-                    self.keyboardCaptors.removeAll()
-                    self.mouseCaptors.removeAll()
-                    self.hoverFrames.removeAll()
-                }
+            if frame !== oldValue {
+                self.keyboardCaptors.removeAll()
+                self.mouseCaptors.removeAll()
+                self.hoverFrames.removeAll()
             }
         }
     }
 
     public var window: Window? {
         didSet {
-            Task { @MainActor in
-                if await window !== oldValue {
-                    oldValue?.removeEventObserver(self)
+            if window !== oldValue {
+                oldValue?.removeEventObserver(self)
 
-                    if let window = await window {
+                if let window = window {
+                    let swapChain = commandQueue?.makeSwapChain(target: window)
+                    if swapChain == nil {
+                        Log.err("Failed to create swapChain!")
+                    }
+                    let scaleFactor = window.contentScaleFactor
+                    let contentBounds = window.contentBounds
+                    let activated = window.activated
+                    let visible = window.visible
 
-                        let swapChain = await commandQueue?.makeSwapChain(target: window)
-                        if swapChain == nil {
-                            Log.err("Failed to create swapChain!")
-                        }
-                        let scaleFactor = window.contentScaleFactor
-                        let contentBounds = window.contentBounds
-                        let activated = window.activated
-                        let visible = window.visible
+                    assert(contentBounds.width > 0.0 && contentBounds.height > 0.0)
+                    assert(scaleFactor > 0.0)
 
-                        assert(contentBounds.width > 0.0 && contentBounds.height > 0.0)
-                        assert(scaleFactor > 0.0)
+                    self.swapChain = swapChain
+                    self.resolution = contentBounds.size * scaleFactor
+                    self.windowContentScaleFactor = scaleFactor
+                    self.windowContentBounds = contentBounds
+                    self.activated = activated
+                    self.visible = visible
+                    self.frame?.updateResolution()
 
-                        Task { @ScreenActor in
-
-                            self.swapChain = swapChain
-                            self.resolution = contentBounds.size * scaleFactor
-                            self.windowContentScaleFactor = scaleFactor
-                            self.windowContentBounds = contentBounds
-                            self.activated = activated
-                            self.visible = visible
-                            self.frame?.updateResolution()
-                        }
-
-                        window.addEventObserver(self) { [weak self](event: WindowEvent) in
-                            if let self = self {
-                                Task { @ScreenActor in
-                                    if self.window === event.window {
-                                        self.processWindowEvent(event)
-                                    }
-                                }
+                    window.addEventObserver(self) { [weak self](event: WindowEvent) in
+                        if let self = self {
+                            if self.window === event.window {
+                                self.processWindowEvent(event)
                             }
-                        }
-                        window.addEventObserver(self) { [weak self](event: KeyboardEvent) in
-                            if let self = self {
-                                Task { @ScreenActor in                      
-                                    if self.window === event.window {
-                                        self.processKeyboardEvent(event)
-                                    }
-                                }
-                            }
-                        }
-                        window.addEventObserver(self) { [weak self](event: MouseEvent) in
-                            if let self = self {
-                                Task { @ScreenActor in
-                                    if self.window === event.window {
-                                        self.processMouseEvent(event)
-                                    }
-                                }
-                            }
-                        }
-                    } else {
-                        Task { @ScreenActor in
-                            self.swapChain = nil
-                            self.activated = false
-                            self.visible = false
                         }
                     }
+                    window.addEventObserver(self) { [weak self](event: KeyboardEvent) in
+                        if let self = self {
+                            if self.window === event.window {
+                                self.processKeyboardEvent(event)
+                            }
+                        }
+                    }
+                    window.addEventObserver(self) { [weak self](event: MouseEvent) in
+                        if let self = self {
+                            if self.window === event.window {
+                                self.processMouseEvent(event)
+                            }
+                        }
+                    }
+                } else {
+                    self.swapChain = nil
+                    self.activated = false
+                    self.visible = false
                 }
             }
         }
@@ -156,19 +140,19 @@ public class Screen {
 
                 if let frame = frame, swapChain != nil {
                     if frame.loaded == false {
-                        await frame.loadHierarchy(screen: self,
+                        await frame._loadHierarchy(screen: self,
                             resolution: self.resolution,
                             scaleFactor: self.windowContentScaleFactor)
                     }
 
                     if suspended == false {
-                        await frame.updateHierarchy(tick: tick, delta: delta, date: date)
+                        await frame._updateHierarchy(tick: tick, delta: delta, date: date)
                     }
 
                     // draw!
                     if visible {
                         frame.redraw()
-                        if await frame.draw() {
+                        if frame._drawHierarchy() {
                             swapChain?.present()
                         }
                     }
@@ -179,7 +163,7 @@ public class Screen {
                 }
             }
             if let frame = frame {
-                await frame.unloadHierarchy()
+                await frame._unloadHierarchy()
             }
             Log.info("Screen render task has been terminated.")
         }
@@ -204,9 +188,9 @@ public class Screen {
         Log.debug("Screen destoryed.")
     }
 
-    public func makeCanvas() async -> Canvas? {
+    public func makeCanvas() -> Canvas? {
         if let swapChain = swapChain {
-            let rpd = await swapChain.currentRenderPassDescriptor()
+            let rpd = swapChain.currentRenderPassDescriptor()
             if let renderTarget = rpd.colorAttachments.first?.renderTarget {
                 let width = Int(renderTarget.width)
                 let height = Int(renderTarget.height)
@@ -233,7 +217,7 @@ public class Screen {
             if frame.canHandleKeyboard && frame.isDescendant(of: self.frame) {
                 self.keyboardCaptors[deviceID] = frame
                 if let captor = captor {
-                    Task { await captor.handleKeyboardLost(deviceID: deviceID) }
+                    captor.handleKeyboardLost(deviceID: deviceID)
                 }
                 return true
             }
@@ -241,7 +225,7 @@ public class Screen {
         }
         if let captor = captor {
             self.keyboardCaptors[deviceID] = nil
-            Task { await captor.handleKeyboardLost(deviceID: deviceID) }
+            captor.handleKeyboardLost(deviceID: deviceID)
         }
         return true
     }
@@ -249,7 +233,7 @@ public class Screen {
     public func releaseKeyboard(frame: Frame?, forDeviceID deviceID: Int) -> Bool {
         if let captor = self.keyboardCaptors[deviceID], captor === frame {
             self.keyboardCaptors[deviceID] = nil
-            Task { await captor.handleKeyboardLost(deviceID: deviceID) }
+            captor.handleKeyboardLost(deviceID: deviceID)
             return true
         }
         return false
@@ -269,7 +253,7 @@ public class Screen {
             if frame.canHandleMouse && frame.isDescendant(of: self.frame) {
                 self.mouseCaptors[deviceID] = frame
                 if let captor = captor {
-                    Task { await captor.handleMouseLost(deviceID: deviceID) }
+                    captor.handleMouseLost(deviceID: deviceID)
                 }
                 return true
             }
@@ -277,7 +261,7 @@ public class Screen {
         }
         if let captor = captor {
             self.mouseCaptors[deviceID] = nil
-            Task { await captor.handleMouseLost(deviceID: deviceID) }
+            captor.handleMouseLost(deviceID: deviceID)
         }
         return true
     }
@@ -285,7 +269,7 @@ public class Screen {
     public func releaseMouse(frame: Frame?, forDeviceID deviceID: Int) -> Bool {
         if let captor = self.mouseCaptors[deviceID], captor === frame {
             self.mouseCaptors[deviceID] = nil
-            Task { await captor.handleMouseLost(deviceID: deviceID) }
+            captor.handleMouseLost(deviceID: deviceID)
             return true
         }
         return false
@@ -305,7 +289,7 @@ public class Screen {
         }
         for deviceID in deviceIDs {
             self.keyboardCaptors[deviceID] = nil
-            Task { await frame.handleKeyboardLost(deviceID: deviceID) }
+            frame.handleKeyboardLost(deviceID: deviceID)
         }
     }
 
@@ -319,7 +303,7 @@ public class Screen {
         }
         for deviceID in deviceIDs {
             self.mouseCaptors[deviceID] = nil
-            Task { await frame.handleMouseLost(deviceID: deviceID) }
+            frame.handleMouseLost(deviceID: deviceID)
         }
     }        
 
@@ -329,7 +313,7 @@ public class Screen {
         }
         self.keyboardCaptors.removeAll()
         for c in captors {
-            Task { await c.frame.handleKeyboardLost(deviceID: c.deviceID) }
+            c.frame.handleKeyboardLost(deviceID: c.deviceID)
         }
     }
 
@@ -339,7 +323,7 @@ public class Screen {
         }
         self.mouseCaptors.removeAll()
         for c in captors {
-            Task { await c.frame.handleMouseLost(deviceID: c.deviceID) }
+            c.frame.handleMouseLost(deviceID: c.deviceID)
         }
     }
 
@@ -356,7 +340,7 @@ public class Screen {
             }
         }
         for d in devices {
-            Task { await frame.handleMouseLeave(deviceID: d.deviceID, device: d.device) }
+            frame.handleMouseLeave(deviceID: d.deviceID, device: d.device)
         }
     }
 
@@ -405,128 +389,119 @@ public class Screen {
     }
 
     public func processKeyboardEvent(_ event: KeyboardEvent) {
-        Task { @ScreenActor in
+        Log.debug("Screen.\(#function) event:\(event)")
 
-            Log.debug("Screen.\(#function) event:\(event)")
-
-            if let captor = self.keyboardCaptor(forDeviceID: event.deviceID) {
-                assert(captor.screen === self)
-                _ = await captor.processKeyboardEvent(event)
-            }
+        if let captor = self.keyboardCaptor(forDeviceID: event.deviceID) {
+            assert(captor.screen === self)
+            _ = captor.processKeyboardEvent(event)
         }
     }
 
     public func processMouseEvent(_ event: MouseEvent) {
-        Task { @ScreenActor in
-
-            if event.type != .move {
-                Log.debug("Screen.\(#function) event:\(event)")
-            }
-
-            if let frame = self.frame {
-                let res = Vector2(self.resolution * (1.0 / self.windowContentScaleFactor))
-                assert(res.x > 0.0 && res.y > 0.0)
-                let scale = Vector2(frame.contentScale)
-                assert(scale.x > 0.0 && scale.y > 0.0)
-
-                // rescale vector
-                let windowToRoot = AffineTransform2(linear: .init(scaleX: scale.x / res.x, scaleY: scale.y / res.y)).matrix3
-                var pos = event.location.transformed(by: windowToRoot)
-                var delta = event.delta.transformed(by: windowToRoot)
-
-                if event.type == .move {
-                    let hover: Frame?  = frame.findHoverFrame(at: pos)
-                    var leave: Frame? = nil
-                    if let fd = self.hoverFrames[event.deviceID] {
-                        assert(fd.device == event.device)
-                        leave = fd.frame
-                    }
-
-                    if hover !== leave {
-                        if let hover = hover {
-                            self.hoverFrames[event.deviceID] = (frame: hover, device: event.device)
-                        } else {
-                            self.hoverFrames[event.deviceID] = nil
-                        }
-
-                        if let leave = leave {
-                            assert(leave.screen === self)
-                            await leave.handleMouseLeave(deviceID: event.deviceID, device: event.device)
-                        }
-                        if let hover = hover {
-                            assert(hover.screen === self)
-                            await hover.handleMouseEnter(deviceID: event.deviceID, device: event.device)
-                        }
-                    }
-                }
-
-                if let captor = self.mouseCaptor(forDeviceID: event.deviceID) {
-                    assert(captor.isDescendant(of: frame))
-                    assert(captor.screen === self)
-
-                    if captor !== frame {
-                        let parent = captor.superframe!
-
-                        // convert content-space to local frame space
-                        var tm = frame.inverseContentTransform
-
-                        // convert coordinates to target's parent space
-                        tm = tm * parent.localFromRootTransform
-
-                        // normalize to local space
-                        tm = tm * captor.inverseTransform
-
-                        // quantize to contents
-                        let scale = Vector2(captor.contentScale)
-                        assert(scale.x > 0.0 && scale.y > 0.0)
-                        tm = tm * AffineTransform2(linear: .init(scaleX: scale.x, scaleY: scale.y)).matrix3
-
-                        // calculate delta
-                        let posInFrame = pos.transformed(by: tm)
-                        let posInFrameOld = (pos - delta).transformed(by: tm)
-
-                        pos = posInFrame
-                        delta = posInFrame - posInFrameOld
-                    }
-                    _ = await captor.processMouseEvent(event, position: pos, delta: delta, exclusive: true)
-                } else {
-                    if frame.bounds.contains(pos) {
-                        _ = await frame.processMouseEvent(event, position: pos, delta: delta, exclusive: false)
-                    }
-                }
-            }
+        if event.type != .move {
+            Log.debug("Screen.\(#function) event:\(event)")
         }
+
+        if let frame = self.frame {
+            let res = Vector2(self.resolution * (1.0 / self.windowContentScaleFactor))
+            assert(res.x > 0.0 && res.y > 0.0)
+            let scale = Vector2(frame.contentScale)
+            assert(scale.x > 0.0 && scale.y > 0.0)
+
+            // rescale vector
+            let windowToRoot = AffineTransform2(linear: .init(scaleX: scale.x / res.x, scaleY: scale.y / res.y)).matrix3
+            var pos = event.location.transformed(by: windowToRoot)
+            var delta = event.delta.transformed(by: windowToRoot)
+
+            if event.type == .move {
+                let hover: Frame?  = frame.findHoverFrame(at: pos)
+                var leave: Frame? = nil
+                if let fd = self.hoverFrames[event.deviceID] {
+                    assert(fd.device == event.device)
+                    leave = fd.frame
+                }
+
+                if hover !== leave {
+                    if let hover = hover {
+                        self.hoverFrames[event.deviceID] = (frame: hover, device: event.device)
+                    } else {
+                        self.hoverFrames[event.deviceID] = nil
+                    }
+
+                    if let leave = leave {
+                        assert(leave.screen === self)
+                        leave.handleMouseLeave(deviceID: event.deviceID, device: event.device)
+                    }
+                    if let hover = hover {
+                        assert(hover.screen === self)
+                        hover.handleMouseEnter(deviceID: event.deviceID, device: event.device)
+                    }
+                }
+            }
+
+            if let captor = self.mouseCaptor(forDeviceID: event.deviceID) {
+                assert(captor.isDescendant(of: frame))
+                assert(captor.screen === self)
+
+                if captor !== frame {
+                    let parent = captor.superframe!
+
+                    // convert content-space to local frame space
+                    var tm = frame.inverseContentTransform
+
+                    // convert coordinates to target's parent space
+                    tm = tm * parent.localFromRootTransform
+
+                    // normalize to local space
+                    tm = tm * captor.inverseTransform
+
+                    // quantize to contents
+                    let scale = Vector2(captor.contentScale)
+                    assert(scale.x > 0.0 && scale.y > 0.0)
+                    tm = tm * AffineTransform2(linear: .init(scaleX: scale.x, scaleY: scale.y)).matrix3
+
+                    // calculate delta
+                    let posInFrame = pos.transformed(by: tm)
+                    let posInFrameOld = (pos - delta).transformed(by: tm)
+
+                    pos = posInFrame
+                    delta = posInFrame - posInFrameOld
+                }
+                _ = captor.processMouseEvent(event, position: pos, delta: delta, exclusive: true)
+            } else {
+                if frame.bounds.contains(pos) {
+                    _ = frame.processMouseEvent(event, position: pos, delta: delta, exclusive: false)
+                }
+            }
+        }        
     }
 
     public func processWindowEvent(_ event: WindowEvent) {
-        Task { @ScreenActor in
+        Log.debug("Screen.\(#function) event:\(event)")
 
-            Log.debug("Screen.\(#function) event:\(event)")
-
-            switch event.type {
-            case .resized:
-                let scaleFactor = event.contentScaleFactor
-                let resolution = CGSize(width: event.contentBounds.width,
-                                        height: event.contentBounds.height) * scaleFactor
-                self.windowContentScaleFactor = scaleFactor
-                self.windowContentBounds = event.contentBounds
-                self.resolution = resolution
-                self.frame?.updateResolution()
-            case .hidden, .minimized:
-                self.visible = false
-            case .shown:
-                self.visible = true
-                self.frame?.redraw()
-            case .activated:
-                self.activated = true
-                self.visible = true
-            case .inactivated:
-                self.activated = false
-            case .update:
-                self.frame?.redraw()
-            default:
-                break
-            }
+        switch event.type {
+        case .resized:
+            let scaleFactor = event.contentScaleFactor
+            let resolution = CGSize(width: event.contentBounds.width,
+                                    height: event.contentBounds.height) * scaleFactor
+            self.windowContentScaleFactor = scaleFactor
+            self.windowContentBounds = event.contentBounds
+            self.resolution = resolution
+            self.frame?.updateResolution()
+        case .hidden, .minimized:
+            self.visible = false
+        case .shown:
+            self.visible = true
+            self.frame?.redraw()
+        case .activated:
+            self.activated = true
+            self.visible = true
+        case .inactivated:
+            self.activated = false
+        case .update:
+            self.frame?.redraw()
+        default:
+            break
         }
     }
 }

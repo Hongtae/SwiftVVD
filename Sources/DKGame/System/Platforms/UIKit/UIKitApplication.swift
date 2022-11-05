@@ -39,22 +39,20 @@ class AppLoader: NSObject, UIApplicationDelegate {
         willFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]?
     ) -> Bool {
         let app = UIKitApplication.shared as! UIKitApplication
-        Task { @MainActor in
-            if app.initialized == false {
-                await app.delegate?.initialize(application: app)
-                app.initialized = true
-            }
+
+        if app.initialized == false {
+            app.delegate?.initialize(application: app)
+            app.initialized = true
         }
         return true
     }
 
     func applicationWillTerminate(_ application: UIApplication) {
         let app = UIKitApplication.shared as! UIKitApplication
-        Task { @MainActor in
-            if app.initialized {
-                await app.delegate?.finalize(application: app)
-                app.initialized = false
-            }
+
+        if app.initialized {
+            app.delegate?.finalize(application: app)
+            app.initialized = false
         }
     }
 
@@ -79,15 +77,13 @@ public class UIKitApplication: Application {
     var initialized = false
 
     public func terminate(exitCode : Int) {
-        Task { @MainActor in
-            if self.initialized {
-                await self.delegate?.finalize(application: self)
-                self.initialized = false
-            }
+        if self.initialized {
+            self.delegate?.finalize(application: self)
+            self.initialized = false
+        }
 
-            DispatchQueue.main.async {
-                exit(0)
-            }
+        DispatchQueue.main.async {
+            exit(0)
         }
     }
 

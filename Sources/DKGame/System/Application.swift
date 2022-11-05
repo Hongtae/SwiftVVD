@@ -12,8 +12,8 @@ public protocol Application {
 }
 
 public protocol ApplicationDelegate: AnyObject {
-    @MainActor func initialize(application: Application) async
-    @MainActor func finalize(application: Application) async
+    func initialize(application: Application)
+    func finalize(application: Application)
 }
 
 public func sharedApplication() -> Application? {

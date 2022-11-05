@@ -10,8 +10,7 @@ import Foundation
 public protocol PlatformFactory {
     func sharedApplication() -> Application? 
     func runApplication(delegate: ApplicationDelegate?) -> Int
-    @MainActor
-    func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?) -> Window 
+    func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?) -> Window?
 }
 
 var numberOfThreadsToWaitBeforeExiting = AtomicNumber64(0)
@@ -57,8 +56,7 @@ public class Platform {
 #endif
     }
 
-    @MainActor
-    public class func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?) -> Window {
+    public class func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?) -> Window? {
         factory.makeWindow(name: name, style: style, delegate: delegate)
     }
     public class func runApplication(delegate: ApplicationDelegate?) -> Int {

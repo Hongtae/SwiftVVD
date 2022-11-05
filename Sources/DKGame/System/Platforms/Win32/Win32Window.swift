@@ -58,7 +58,7 @@ private let HWND_TOP:HWND? = nil
 private let HWND_TOPMOST:HWND = HWND(bitPattern: -1)!
 private let HWND_NOTOPMOST:HWND = HWND(bitPattern: -2)!
 
-@MainActor
+
 public class Win32Window : Window {
 
     private struct MouseButtonDownMask: OptionSet {

@@ -64,14 +64,14 @@ public class VulkanCommandQueue: CommandQueue {
         return nil 
     }
 
-    public func makeSwapChain(target: Window) async -> SwapChain? {
+    public func makeSwapChain(target: Window) -> SwapChain? {
         guard self.family.supportPresentation else {
             Log.err("Vulkan WSI not supported with this queue family. Try to use other queue family!")
             return nil
         }
-        if let swapchain = await VulkanSwapChain(queue: self, window: target) {
+        if let swapchain = VulkanSwapChain(queue: self, window: target) {
             //if await swapchain.setup() {  // <__ BUG???
-            let r = await swapchain.setup()
+            let r = swapchain.setup()
             if r {
                 return swapchain
             } else {

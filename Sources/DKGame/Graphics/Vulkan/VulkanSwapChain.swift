@@ -31,7 +31,7 @@ public class VulkanSwapChain: SwapChain {
 
     public var commandQueue: CommandQueue { queue }
 
-    public init?(queue: VulkanCommandQueue, window: Window) async {
+    public init?(queue: VulkanCommandQueue, window: Window) {
 
         let device = queue.device as! VulkanGraphicsDevice
         var semaphoreCreateInfo = VkSemaphoreCreateInfo()
@@ -51,7 +51,7 @@ public class VulkanSwapChain: SwapChain {
             colorAttachments: [],
             depthStencilAttachment: RenderPassDepthStencilAttachmentDescriptor())
 
-        await window.addEventObserver(self) { [weak self](event: WindowEvent) in
+        window.addEventObserver(self) { [weak self](event: WindowEvent) in
             if event.type == .resized {
                 if let self = self {
                     synchronizedBy(locking: self.lock) { self.deviceReset = true }
@@ -83,7 +83,7 @@ public class VulkanSwapChain: SwapChain {
         vkDestroySemaphore(device.device, self.frameReadySemaphore, device.allocationCallbacks)
     }
 
-    func setup() async -> Bool {
+    func setup() -> Bool {
         let device = queue.device as! VulkanGraphicsDevice
         let instance = device.instance
         let physicalDevice = device.physicalDevice
@@ -96,7 +96,7 @@ public class VulkanSwapChain: SwapChain {
         var surfaceCreateInfo = VkWin32SurfaceCreateInfoKHR()
         surfaceCreateInfo.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR
         surfaceCreateInfo.hinstance = GetModuleHandleW(nil)
-        surfaceCreateInfo.hwnd = await (self.window as! Win32Window).hWnd
+        surfaceCreateInfo.hwnd = (self.window as! Win32Window).hWnd
 
         err = instance.extensionProc.vkCreateWin32SurfaceKHR!(instance.instance, &surfaceCreateInfo, device.allocationCallbacks, &self.surface)
         if (err != VK_SUCCESS)
@@ -165,17 +165,18 @@ public class VulkanSwapChain: SwapChain {
 
         // create swapchain
         // return await self.update() // BUG?? It returns false even if self.update() returns true.
-        let r = await self.update()
-        return r
+        // let r = self.update()
+        // return r
+        return self.update()
     }
 
     @discardableResult
-    func update() async -> Bool {
+    func update() -> Bool {
         let device = self.queue.device as! VulkanGraphicsDevice
         //let instance = device.instance
         let physicalDevice = device.physicalDevice
 
-        let resolution = await self.window.resolution
+        let resolution = self.window.resolution
         var width = UInt32(resolution.width.rounded())
         var height = UInt32(resolution.height.rounded())
 
@@ -390,14 +391,14 @@ public class VulkanSwapChain: SwapChain {
         return true 
     }
 
-    func setupFrame() async {
+    func setupFrame() {
         let device = self.queue.device as! VulkanGraphicsDevice
 
         let resetSwapchain = synchronizedBy(locking: self.lock) { self.deviceReset }
         if resetSwapchain {
             vkDeviceWaitIdle(device.device)
             synchronizedBy(locking: self.lock) { self.deviceReset = false }
-            await self.update()
+            self.update()
         }
 
         let result = synchronizedBy(locking: self.lock) {
@@ -464,9 +465,9 @@ public class VulkanSwapChain: SwapChain {
         synchronizedBy(locking: self.lock) { self.imageViews.count }
     }
 
-    public func currentRenderPassDescriptor() async -> RenderPassDescriptor {
+    public func currentRenderPassDescriptor() -> RenderPassDescriptor {
         if self.renderPassDescriptor.colorAttachments.count == 0 {
-            await self.setupFrame()
+            self.setupFrame()
         }
         return self.renderPassDescriptor
     }

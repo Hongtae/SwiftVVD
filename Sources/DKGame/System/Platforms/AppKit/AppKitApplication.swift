@@ -38,18 +38,14 @@ public class AppKitApplication: Application {
 
         self.shared = app
 
-        Task { @MainActor in
-            await delegate?.initialize(application: app)
-            NotificationCenter.default.post(name: NSApplication.willFinishLaunchingNotification,
-                                            object: NSApplication.shared)
-        }
+        delegate?.initialize(application: app)
+        NotificationCenter.default.post(name: NSApplication.willFinishLaunchingNotification,
+                                        object: NSApplication.shared)
 
         NSApplication.shared.run()
         app.running = false
 
-        Task { @MainActor in
-            await delegate?.finalize(application: app)
-        }
+        delegate?.finalize(application: app)
 
         self.shared = nil
         return app.exitCode

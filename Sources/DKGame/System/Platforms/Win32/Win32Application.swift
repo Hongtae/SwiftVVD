@@ -112,7 +112,7 @@ public class Win32Application : Application {
             Log.warn("Windows DPI-Awareness not set, please check application manifest.")
         }
 
-        Task { await delegate?.initialize(application: app) }
+        delegate?.initialize(application: app)
 
         mainLoopMaxInterval = UINT(app.mainLoopMaximumInterval * 1000)
         mainLoopTimerId = SetTimer(nil, 0, mainLoopMaxInterval, mainLoopTimerProc)
@@ -145,7 +145,7 @@ public class Win32Application : Application {
             mainLoopTimerId = 0
         }
 
-        Task { await delegate?.finalize(application: app) }
+        delegate?.finalize(application: app)
 
         appFinalize()
 
