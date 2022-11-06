@@ -75,7 +75,7 @@ public class Win32Window : Window {
         static let button8 = MouseButtonDownMask(rawValue: 1 << 7)
     }
 
-    public private(set) var hWnd : HWND?
+    public private(set) var hWnd: HWND?
     public private(set) var style: WindowStyle
     public private(set) var contentBounds: CGRect = .null
     public private(set) var windowFrame: CGRect = .null
@@ -205,20 +205,24 @@ public class Win32Window : Window {
         }
         set (value) {
             if let hWnd = self.hWnd {
-                var w = Int32(value.width)
-                var h = Int32(value.height)
+                var w = max(Int32(value.width), 1)
+                var h = max(Int32(value.height), 1)
 
                 let style: DWORD = DWORD(GetWindowLongW(hWnd, GWL_STYLE))
                 let styleEx: DWORD = DWORD(GetWindowLongW(hWnd, GWL_EXSTYLE))
                 let menu: Bool = GetMenu(hWnd) != nil
 
-                var rc = RECT(left: 0, top: 0, right: LONG(max(w, 1)), bottom: LONG(max(h, 1)))
+                var rc = RECT(left: 0, top: 0, right: LONG(w), bottom: LONG(h))
                 if AdjustWindowRectEx(&rc, style, menu, styleEx) {
+
+                    let size: CGSize = CGSize(width: Int(w), height: Int(h))
+                    self.contentBounds.size = size * (1.0 / self.contentScaleFactor)
+
                     w = rc.right - rc.left
                     h = rc.bottom - rc.top
                     SetWindowPos(hWnd, HWND_TOP, 0, 0, w, h, UINT(SWP_NOMOVE | SWP_NOOWNERZORDER | SWP_NOACTIVATE))
                 }
-            }  
+            }
         }
     }
 
@@ -295,7 +299,7 @@ public class Win32Window : Window {
                                   y: Int(rc2.top),
                                   width: Int(rc2.right - rc2.left),
                                   height: Int(rc2.bottom - rc2.top))
-        
+
         SetWindowPos(hWnd, HWND_TOP, 0, 0, 0, 0, UINT(SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED))
         SetTimer(hWnd, updateKeyboardMouseTimerId, updateKeyboardMouseTimeInterval, nil)
         postWindowEvent(type: .created)
@@ -705,7 +709,6 @@ public class Win32Window : Window {
                                                   y: CGFloat(rcClient.top),
                                                   width: CGFloat(rcClient.right - rcClient.left) * invScale,
                                                   height: CGFloat(rcClient.bottom - rcClient.top) * invScale)
-
                     if resized {
                         window.postWindowEvent(type: .resized)
                     }
@@ -787,7 +790,6 @@ public class Win32Window : Window {
                                                   y: CGFloat(rcClient.top),
                                                   width: CGFloat(rcClient.right - rcClient.left) * invScale,
                                                   height: CGFloat(rcClient.bottom - rcClient.top) * invScale)
-
                     window.postWindowEvent(type: .resized)
                 }
                 return 0    

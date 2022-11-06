@@ -209,8 +209,8 @@ open class Frame {
     }
 
     @discardableResult
-    public func draw() -> Bool {
-        return self._drawHierarchy()
+    public func draw() async -> Bool {
+        return await self._drawHierarchy()
     }
 
     public func redraw() {
@@ -455,7 +455,7 @@ open class Frame {
         }
     }
 
-    func _drawHierarchy() -> Bool {
+    func _drawHierarchy() async -> Bool {
         if self.loaded {
             assert(self.screen != nil)
             let screen = self.screen!
@@ -465,7 +465,7 @@ open class Frame {
                 if frame.hidden {
                     continue
                 }
-                if frame._drawHierarchy() {
+                if await frame._drawHierarchy() {
                     drawSelf = true
                 }
             }
@@ -474,7 +474,7 @@ open class Frame {
                 // create canvas.
                 var canvas: Canvas? = nil
                 if screen.frame === self {
-                    canvas = screen.makeCanvas()
+                    canvas = await screen.makeCanvas()
                     self.renderTarget = nil
                 } else {
                     if self.renderTarget == nil {

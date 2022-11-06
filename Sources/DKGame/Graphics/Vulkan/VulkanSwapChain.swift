@@ -31,6 +31,7 @@ public class VulkanSwapChain: SwapChain {
 
     public var commandQueue: CommandQueue { queue }
 
+    @MainActor
     public init?(queue: VulkanCommandQueue, window: Window) {
 
         let device = queue.device as! VulkanGraphicsDevice
@@ -83,6 +84,7 @@ public class VulkanSwapChain: SwapChain {
         vkDestroySemaphore(device.device, self.frameReadySemaphore, device.allocationCallbacks)
     }
 
+    @MainActor
     func setup() -> Bool {
         let device = queue.device as! VulkanGraphicsDevice
         let instance = device.instance
@@ -164,12 +166,10 @@ public class VulkanSwapChain: SwapChain {
         self.surfaceFormat.colorSpace = availableSurfaceFormats[0].colorSpace
 
         // create swapchain
-        // return await self.update() // BUG?? It returns false even if self.update() returns true.
-        // let r = self.update()
-        // return r
         return self.update()
     }
 
+    @MainActor
     @discardableResult
     func update() -> Bool {
         let device = self.queue.device as! VulkanGraphicsDevice
@@ -391,14 +391,14 @@ public class VulkanSwapChain: SwapChain {
         return true 
     }
 
-    func setupFrame() {
+    func setupFrame() async {
         let device = self.queue.device as! VulkanGraphicsDevice
 
         let resetSwapchain = synchronizedBy(locking: self.lock) { self.deviceReset }
         if resetSwapchain {
             vkDeviceWaitIdle(device.device)
             synchronizedBy(locking: self.lock) { self.deviceReset = false }
-            self.update()
+            await self.update()
         }
 
         let result = synchronizedBy(locking: self.lock) {
@@ -465,9 +465,9 @@ public class VulkanSwapChain: SwapChain {
         synchronizedBy(locking: self.lock) { self.imageViews.count }
     }
 
-    public func currentRenderPassDescriptor() -> RenderPassDescriptor {
+    public func currentRenderPassDescriptor() async -> RenderPassDescriptor {
         if self.renderPassDescriptor.colorAttachments.count == 0 {
-            self.setupFrame()
+            await self.setupFrame()
         }
         return self.renderPassDescriptor
     }

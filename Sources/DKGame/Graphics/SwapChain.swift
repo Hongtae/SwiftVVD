@@ -9,7 +9,7 @@ public protocol SwapChain {
     var pixelFormat: PixelFormat { get set }
     var maximumBufferCount: Int { get }
 
-    func currentRenderPassDescriptor() -> RenderPassDescriptor
+    func currentRenderPassDescriptor() async -> RenderPassDescriptor
     func present(waitEvents: [Event]) -> Bool
 
     var commandQueue: CommandQueue { get }

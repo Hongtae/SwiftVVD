@@ -64,6 +64,7 @@ public class VulkanCommandQueue: CommandQueue {
         return nil 
     }
 
+    @MainActor
     public func makeSwapChain(target: Window) -> SwapChain? {
         guard self.family.supportPresentation else {
             Log.err("Vulkan WSI not supported with this queue family. Try to use other queue family!")

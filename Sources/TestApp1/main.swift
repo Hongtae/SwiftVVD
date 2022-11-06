@@ -168,7 +168,7 @@ class MyApplicationDelegate: ApplicationDelegate {
                                      delegate: self.windowDelegate)
             self.window?.resolution = CGSize(width: 800, height: 600)
 
-            Task { @ScreenActor in
+            await Task { @ScreenActor in
                 self.screen = Screen()
                 self.frame = MyFrame()
                 self.screen?.window = self.window
