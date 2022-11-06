@@ -161,18 +161,21 @@ class MyApplicationDelegate: ApplicationDelegate {
     func initialize(application: Application) {
         Log.debug("app initialize, isMainThread: \(Thread.isMainThread)")
 
-        self.windowDelegate = MyWindowDelegate()
-        self.window = makeWindow(name: "TestApp1",
-                                 style: [.genericWindow, .acceptFileDrop],
-                                 delegate: self.windowDelegate)
-        self.window?.resolution = CGSize(width: 800, height: 600)
+        Task { @MainActor in
+            self.windowDelegate = MyWindowDelegate()
+            self.window = makeWindow(name: "TestApp1",
+                                     style: [.genericWindow, .acceptFileDrop],
+                                     delegate: self.windowDelegate)
+            self.window?.resolution = CGSize(width: 800, height: 600)
 
-        Task { @ScreenActor in
-            self.screen = Screen()
-            self.frame = MyFrame()
-            self.screen?.window = self.window
-            self.screen?.frame = self.frame
-            self.window?.activate()
+            Task { @ScreenActor in
+                self.screen = Screen()
+                self.frame = MyFrame()
+                self.screen?.window = self.window
+                self.screen?.frame = self.frame
+
+                await self.window?.activate()
+            }
         }
     }
 

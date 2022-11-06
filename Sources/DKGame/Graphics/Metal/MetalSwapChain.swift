@@ -41,6 +41,7 @@ public class MetalSwapChain: SwapChain {
     public var commandQueue: CommandQueue { queue }
     public var maximumBufferCount: Int { self.layer.maximumDrawableCount }
 
+    @MainActor
     public init?(queue: MetalCommandQueue, window: Window) {
         self.window = window
         self.queue = queue

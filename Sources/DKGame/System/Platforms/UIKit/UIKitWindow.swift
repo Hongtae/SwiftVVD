@@ -9,6 +9,7 @@
 import Foundation
 import UIKit
 
+@MainActor
 public class UIKitWindow: Window {
     public var activated: Bool = false
     public var visible: Bool = false
@@ -81,7 +82,7 @@ public class UIKitWindow: Window {
 
     deinit {
         let window = self.window
-        window.windowScene = nil
+        Task { @MainActor in window.windowScene = nil }
         activeWindows.removeAll { $0 === window }
     }
 

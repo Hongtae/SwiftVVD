@@ -118,6 +118,7 @@ public struct WindowStyle: OptionSet {
     public static let acceptFileDrop    = WindowStyle(rawValue: 1 << 8) // enables file drag & drop
 }
 
+@MainActor
 public protocol Window: AnyObject {
 
     var activated: Bool { get }
@@ -168,6 +169,7 @@ extension Window {
     public func isTextInputEnabled(forDeviceID: Int) -> Bool { false }
 }
 
+@MainActor
 public func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?) -> Window? {
     Platform.makeWindow(name: name, style: style, delegate: delegate)
 }

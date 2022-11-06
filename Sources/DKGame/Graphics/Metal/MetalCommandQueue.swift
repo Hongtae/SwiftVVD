@@ -26,8 +26,9 @@ public class MetalCommandQueue: CommandQueue {
         return MetalCommandBuffer(queue: self)
     }
 
-    public func makeSwapChain(target: Window) async -> SwapChain? {
-        return await MetalSwapChain(queue: self, window: target)
+    @MainActor
+    public func makeSwapChain(target: Window) -> SwapChain? {
+        return MetalSwapChain(queue: self, window: target)
     }
 }
 #endif //if ENABLE_METAL

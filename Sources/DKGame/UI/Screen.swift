@@ -26,54 +26,72 @@ public class Screen {
     public var window: Window? {
         didSet {
             if window !== oldValue {
-                oldValue?.removeEventObserver(self)
+                let window = self.window
+                let commandQueue = self.commandQueue
 
-                if let window = window {
-                    let swapChain = commandQueue?.makeSwapChain(target: window)
-                    if swapChain == nil {
-                        Log.err("Failed to create swapChain!")
-                    }
-                    let scaleFactor = window.contentScaleFactor
-                    let contentBounds = window.contentBounds
-                    let activated = window.activated
-                    let visible = window.visible
+                Task { @MainActor in
+                    oldValue?.removeEventObserver(self)
 
-                    assert(contentBounds.width > 0.0 && contentBounds.height > 0.0)
-                    assert(scaleFactor > 0.0)
+                    if let window = window {
+                        let swapChain = commandQueue?.makeSwapChain(target: window)
+                        if swapChain == nil {
+                            Log.err("Failed to create swapChain!")
+                        }
 
-                    self.swapChain = swapChain
-                    self.resolution = contentBounds.size * scaleFactor
-                    self.windowContentScaleFactor = scaleFactor
-                    self.windowContentBounds = contentBounds
-                    self.activated = activated
-                    self.visible = visible
-                    self.frame?.updateResolution()
+                        let scaleFactor = window.contentScaleFactor
+                        let contentBounds = window.contentBounds
+                        let activated = window.activated
+                        let visible = window.visible
 
-                    window.addEventObserver(self) { [weak self](event: WindowEvent) in
-                        if let self = self {
-                            if self.window === event.window {
-                                self.processWindowEvent(event)
+                        assert(contentBounds.width > 0.0 && contentBounds.height > 0.0)
+                        assert(scaleFactor > 0.0)
+
+                        Task { @ScreenActor in
+                            self.swapChain = swapChain
+                            self.resolution = contentBounds.size * scaleFactor
+                            self.windowContentScaleFactor = scaleFactor
+                            self.windowContentBounds = contentBounds
+                            self.activated = activated
+                            self.visible = visible
+                            self.frame?.updateResolution()
+
+                            Task { @MainActor in
+                                window.addEventObserver(self) { [weak self](event: WindowEvent) in
+                                    if let self = self {
+                                        Task { @ScreenActor in
+                                            if self.window === event.window {
+                                                self.processWindowEvent(event)
+                                            }
+                                        }
+                                    }
+                                }
+                                window.addEventObserver(self) { [weak self](event: KeyboardEvent) in
+                                    if let self = self {
+                                        Task { @ScreenActor in
+                                            if self.window === event.window {
+                                                self.processKeyboardEvent(event)
+                                            }
+                                        }
+                                    }
+                                }
+                                window.addEventObserver(self) { [weak self](event: MouseEvent) in
+                                    if let self = self {
+                                        Task { @ScreenActor in
+                                            if self.window === event.window {
+                                                self.processMouseEvent(event)
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
-                    }
-                    window.addEventObserver(self) { [weak self](event: KeyboardEvent) in
-                        if let self = self {
-                            if self.window === event.window {
-                                self.processKeyboardEvent(event)
-                            }
+                    } else {
+                        Task { @ScreenActor in
+                            self.swapChain = nil
+                            self.activated = false
+                            self.visible = false
                         }
                     }
-                    window.addEventObserver(self) { [weak self](event: MouseEvent) in
-                        if let self = self {
-                            if self.window === event.window {
-                                self.processMouseEvent(event)
-                            }
-                        }
-                    }
-                } else {
-                    self.swapChain = nil
-                    self.activated = false
-                    self.visible = false
                 }
             }
         }

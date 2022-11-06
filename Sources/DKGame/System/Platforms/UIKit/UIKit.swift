@@ -17,6 +17,7 @@ public struct PlatformFactoryUIKit: PlatformFactory {
         return UIKitApplication.run(delegate: delegate)
     }
 
+    @MainActor
     public func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?) -> Window? {
         return UIKitWindow(name: name, style: style, delegate: delegate)
     }

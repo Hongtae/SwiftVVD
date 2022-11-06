@@ -16,6 +16,7 @@ class MainKeyWindow: NSWindow {
 
 private var hideCursorCount = 0
 
+@MainActor
 public class AppKitWindow: Window {
 
     public var activated: Bool { self.view.activated }
