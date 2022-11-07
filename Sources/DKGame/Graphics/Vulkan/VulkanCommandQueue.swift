@@ -71,9 +71,7 @@ public class VulkanCommandQueue: CommandQueue {
             return nil
         }
         if let swapchain = VulkanSwapChain(queue: self, window: target) {
-            //if await swapchain.setup() {  // <__ BUG???
-            let r = swapchain.setup()
-            if r {
+            if swapchain.setup() {
                 return swapchain
             } else {
                 Log.err("VulkanSwapChain.setup() failed.")

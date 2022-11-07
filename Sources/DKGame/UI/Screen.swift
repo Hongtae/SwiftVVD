@@ -170,8 +170,8 @@ public class Screen {
                     // draw!
                     if visible {
                         frame.redraw()
-                        if await frame._drawHierarchy() {
-                            swapChain?.present()
+                        if frame._drawHierarchy() {
+                            await swapChain?.present()
                         }
                     }
                 }
@@ -206,9 +206,9 @@ public class Screen {
         Log.debug("Screen destoryed.")
     }
 
-    public func makeCanvas() async -> Canvas? {
+    public func makeCanvas() -> Canvas? {
         if let swapChain = swapChain {
-            let rpd = await swapChain.currentRenderPassDescriptor()
+            let rpd = swapChain.currentRenderPassDescriptor()
             if let renderTarget = rpd.colorAttachments.first?.renderTarget {
                 let width = Int(renderTarget.width)
                 let height = Int(renderTarget.height)

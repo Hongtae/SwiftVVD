@@ -9,15 +9,15 @@ public protocol SwapChain {
     var pixelFormat: PixelFormat { get set }
     var maximumBufferCount: Int { get }
 
-    func currentRenderPassDescriptor() async -> RenderPassDescriptor
-    func present(waitEvents: [Event]) -> Bool
+    func currentRenderPassDescriptor() -> RenderPassDescriptor
+    func present(waitEvents: [Event]) async -> Bool
 
     var commandQueue: CommandQueue { get }
 }
 
 extension SwapChain {
     @discardableResult
-    public func present() -> Bool {
-        return present(waitEvents:[])
+    public func present() async -> Bool {
+        return await present(waitEvents:[])
     }
 }

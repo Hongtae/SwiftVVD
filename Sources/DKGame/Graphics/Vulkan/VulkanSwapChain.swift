@@ -166,12 +166,11 @@ public class VulkanSwapChain: SwapChain {
         self.surfaceFormat.colorSpace = availableSurfaceFormats[0].colorSpace
 
         // create swapchain
-        return self.update()
+        return self.updateDevice()
     }
 
     @MainActor
-    @discardableResult
-    func update() -> Bool {
+    func updateDevice() -> Bool {
         let device = self.queue.device as! VulkanGraphicsDevice
         //let instance = device.instance
         let physicalDevice = device.physicalDevice
@@ -391,15 +390,8 @@ public class VulkanSwapChain: SwapChain {
         return true 
     }
 
-    func setupFrame() async {
+    func setupFrame() {
         let device = self.queue.device as! VulkanGraphicsDevice
-
-        let resetSwapchain = synchronizedBy(locking: self.lock) { self.deviceReset }
-        if resetSwapchain {
-            vkDeviceWaitIdle(device.device)
-            synchronizedBy(locking: self.lock) { self.deviceReset = false }
-            await self.update()
-        }
 
         let result = synchronizedBy(locking: self.lock) {
             vkAcquireNextImageKHR(device.device, self.swapchain, UInt64.max, self.frameReadySemaphore, nil, &self.frameIndex)
@@ -465,15 +457,16 @@ public class VulkanSwapChain: SwapChain {
         synchronizedBy(locking: self.lock) { self.imageViews.count }
     }
 
-    public func currentRenderPassDescriptor() async -> RenderPassDescriptor {
+    public func currentRenderPassDescriptor() -> RenderPassDescriptor {
         if self.renderPassDescriptor.colorAttachments.count == 0 {
-            await self.setupFrame()
+            self.setupFrame()
         }
+        assert(self.renderPassDescriptor.colorAttachments.isEmpty == false)
         return self.renderPassDescriptor
     }
 
     @discardableResult
-    public func present(waitEvents: [Event]) -> Bool {
+    public func present(waitEvents: [Event]) async -> Bool {
         var waitSemaphores: [VkSemaphore?] = []
         waitSemaphores.reserveCapacity(waitEvents.count + 1)
 
@@ -513,6 +506,17 @@ public class VulkanSwapChain: SwapChain {
         }
 
         renderPassDescriptor.colorAttachments.removeAll(keepingCapacity: true)
+
+        // Check if a device reset is requested and update the device if necessary.
+        let resetSwapchain = synchronizedBy(locking: self.lock) { self.deviceReset }
+        if resetSwapchain {
+            let device = self.queue.device as! VulkanGraphicsDevice
+            vkDeviceWaitIdle(device.device)
+            synchronizedBy(locking: self.lock) { self.deviceReset = false }
+            if await self.updateDevice() == false {
+                Log.warn("VulkanSwapChain.updateDevice() failed.")
+            }
+        }
         return err == VK_SUCCESS
     }
 }
