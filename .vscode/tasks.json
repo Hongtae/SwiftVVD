@@ -1,0 +1,55 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"type": "swift",
+			"args": [
+				"build",
+				"-c", "debug",
+				"-Xswiftc", "-g",
+				"-Xswiftc", "-use-ld=lld",
+				"--disable-index-store",
+				"--product", "DKGame",
+			],
+			"cwd": "",
+			"problemMatcher": [
+				"$swiftc"
+			],
+			"group": "build",
+			"label": "swift: Build Debug DKGame",
+			"detail": "swift build --target TestApp1 -c debug -Xswiftc -g -Xswiftc -use-ld=lld --disable-index-store"
+		},
+		{
+			"type": "swift",
+			"args": [
+				"package",
+				"clean",
+			],
+			"cwd": "",
+			"problemMatcher": [
+				"$swiftc"
+			],
+			"group": "none",
+			"label": "swift: package clean",
+			"detail": "swift package clean"
+		},
+		{
+			"type": "swift",
+			"args": [
+				"run",
+				"-c", "debug",
+				"-Xswiftc", "-g",
+				"-Xswiftc", "-use-ld=lld",
+				"--disable-index-store",
+				"TestApp1"
+			],
+			"cwd": "",
+			"problemMatcher": [
+				"$swiftc"
+			],
+			"group": "test",
+			"label": "swift: Run Debug TestApp1",
+			"detail": "swift run TestApp1 -c debug -Xswiftc -g -Xswiftc -use-ld=lld --disable-index-store"
+		},
+	]
+}
