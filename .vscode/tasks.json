@@ -5,11 +5,11 @@
 			"type": "swift",
 			"args": [
 				"build",
-				"-c", "debug",
-				"-Xswiftc", "-g",
-				"-Xswiftc", "-use-ld=lld",
+				"-c",
+				"debug",
 				"--disable-index-store",
-				"--product", "DKGame",
+				"--product",
+				"DKGame",
 			],
 			"cwd": "",
 			"problemMatcher": [
@@ -37,9 +37,8 @@
 			"type": "swift",
 			"args": [
 				"run",
-				"-c", "debug",
-				"-Xswiftc", "-g",
-				"-Xswiftc", "-use-ld=lld",
+				"-c",
+				"debug",
 				"--disable-index-store",
 				"TestApp1"
 			],
