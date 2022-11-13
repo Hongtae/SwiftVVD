@@ -1,11 +1,11 @@
 //
-//  File: WindowGroup.swift
+//  File: Window.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
 //  Copyright (c) 2022 Hongtae Kim. All rights reserved.
 //
 
-struct WindowGroupViewContent<Content>: Scene where Content: View {
+struct WindowViewContent<Content>: Scene where Content: View {
 
     let content: Content
 
@@ -20,15 +20,15 @@ struct WindowGroupViewContent<Content>: Scene where Content: View {
     public var body: Never { nobody() }
 }
 
-public struct WindowGroup<Content>: Scene where Content: View {
+public struct Window<Content>: Scene where Content: View {
 
     public var body: some Scene {
         self.content
     }
 
-    public init(@ViewBuilder content: ()-> Content) {
+    public init(_ title: Text, id: String, @ViewBuilder content: () -> Content) {
         self.content = .init(content: content)
     }
 
-    let content: WindowGroupViewContent<Content>
+    let content: WindowViewContent<Content>
 }

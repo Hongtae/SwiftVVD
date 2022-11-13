@@ -9,7 +9,7 @@ import DKGame
 
 public protocol App {
     associatedtype Body: Scene
-    var body: Self.Body { get }
+    @SceneBuilder var body: Self.Body { get }
 
     init()
 }
