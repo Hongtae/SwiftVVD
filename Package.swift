@@ -23,8 +23,8 @@ let package = Package(
             name: "Vulkan",
             path: "SupportPackages/Vulkan"),
         .package(
-            name: "OpenAL",
-            path: "SupportPackages/OpenAL-Soft"),
+            url: "https://github.com/Hongtae/swift-openal-soft.git",
+            branch: "master"),
     ],
     targets: [
         // Targets are the basic building blocks of a package. A target can define a module or a test suite.
@@ -41,7 +41,7 @@ let package = Package(
                     condition: .when(platforms: [.windows, .linux, .android])),
                 .product(
                     name:"OpenAL",
-                    package: "OpenAL"),
+                    package: "swift-openal-soft"),
                 ],
             exclude: [],
             cSettings: [
