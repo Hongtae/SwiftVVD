@@ -1,0 +1,14 @@
+{
+  "pins" : [
+    {
+      "identity" : "swift-openal-soft",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Hongtae/swift-openal-soft.git",
+      "state" : {
+        "branch" : "master",
+        "revision" : "971e699f7657cd2a41a88693bd51bb299143a26b"
+      }
+    }
+  ],
+  "version" : 2
+}
