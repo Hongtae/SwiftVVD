@@ -10,5 +10,5 @@ public struct VStack<Content>: View where Content: View {
     public init(@ViewBuilder content: () -> Content) {
     }
 
-    public var body: Never { nobody() }
+    public var body: Never { neverBody() }
 }

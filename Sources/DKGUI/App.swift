@@ -18,6 +18,7 @@ class AppMain<A>: ApplicationDelegate where A: App {
     let app: A
 
     func initialize(application: Application) {
+        let scene = app.body
     }
 
     func finalize(application: Application) {

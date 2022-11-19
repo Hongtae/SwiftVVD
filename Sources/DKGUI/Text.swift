@@ -12,5 +12,5 @@ public struct Text: View {
     public init<S>(_ content: S) where S : StringProtocol {
     }
 
-    public var body: Never { nobody() }
+    public var body: Never { neverBody() }
 }

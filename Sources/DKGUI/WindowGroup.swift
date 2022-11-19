@@ -17,7 +17,7 @@ struct WindowGroupViewContent<Content>: Scene where Content: View {
         content
     }
 
-    public var body: Never { nobody() }
+    public var body: Never { neverBody() }
 }
 
 public struct WindowGroup<Content>: Scene where Content: View {

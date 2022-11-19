@@ -19,5 +19,5 @@ public struct Image: View {
     }
 
     public typealias Body = Never
-    public var body: Never { nobody() }
+    public var body: Never { neverBody() }
 }
