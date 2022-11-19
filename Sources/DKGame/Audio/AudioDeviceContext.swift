@@ -150,16 +150,13 @@ public class AudioDeviceContext {
         self.players.removeAll()
     }
 
-    public func makePlayer(stream: AudioStream) async -> AudioPlayer? {
+    public func makePlayer(stream: AudioStream) -> AudioPlayer? {
         if let source = device.makeSource() {
-            let t = Task { @AudioActor ()-> AudioPlayer in
-                let player = AudioPlayer(source: source, stream: stream)
-                synchronizedBy(locking: self.lock) {
-                    self.players.append(Player(player: player))
-                }
-                return player
+            let player = AudioPlayer(source: source, stream: stream)
+            synchronizedBy(locking: self.lock) {
+                self.players.append(Player(player: player))
             }
-            return await t.value
+            return player
         }
         return nil
     }

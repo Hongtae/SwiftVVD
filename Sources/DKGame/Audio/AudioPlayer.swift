@@ -27,7 +27,7 @@ public class AudioPlayer {
 
     public var retainedWhilePlaying = false
 
-    public init(source: AudioSource, stream: AudioStream) {
+    public nonisolated init(source: AudioSource, stream: AudioStream) {
         self.source = source
         self.stream = stream
     }
