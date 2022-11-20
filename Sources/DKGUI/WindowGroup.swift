@@ -5,7 +5,7 @@
 //  Copyright (c) 2022 Hongtae Kim. All rights reserved.
 //
 
-struct WindowGroupViewContent<Content>: Scene where Content: View {
+struct WindowGroupViewContent<Content>: PrimitiveScene where Content: View {
 
     let content: Content
 
@@ -17,7 +17,9 @@ struct WindowGroupViewContent<Content>: Scene where Content: View {
         content
     }
 
-    public var body: Never { neverBody() }
+    func makeSceneProxies() -> [SceneProxy] {
+        return []
+    }
 }
 
 public struct WindowGroup<Content>: Scene where Content: View {
