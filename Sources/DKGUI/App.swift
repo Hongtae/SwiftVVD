@@ -16,20 +16,18 @@ public protocol App {
 
 class AppMain<A>: ApplicationDelegate where A: App {
     let app: A
-    var scenes: [SceneProxy] = []
-    var windowProxies: [WindowProxy] = []
+    var scene: any SceneProxy
     var activeWindows: [Window] = []
 
     func initialize(application: Application) {
-        self.scenes = A.Body._makeSceneProxies(app.body)
-        self.windowProxies = self.scenes.flatMap { scene in
-            scene.makeWindowProxies()
-        }
-        for proxy in self.windowProxies {
-            if let window = proxy.makeWindow() {
-                self.activeWindows.append(window)
-                Task { @MainActor in window.activate() }
-                break
+        let windows = self.scene.windows
+        Task { @MainActor in
+            for windowProxy in windows {
+                if let window = windowProxy.window {
+                    self.activeWindows.append(window)
+                    window.activate()
+                    break
+                }
             }
         }
     }
@@ -39,6 +37,7 @@ class AppMain<A>: ApplicationDelegate where A: App {
 
     init() {
         self.app = A()
+        self.scene = _makeSceneProxy(self.app.body)
     }
 }
 

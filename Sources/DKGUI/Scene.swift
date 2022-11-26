@@ -5,7 +5,7 @@
 //  Copyright (c) 2022 Hongtae Kim. All rights reserved.
 //
 
-import DKGame
+import Foundation
 
 public protocol Scene {
     associatedtype Body: Scene
@@ -13,7 +13,7 @@ public protocol Scene {
 }
 
 protocol PrimitiveScene: Scene {
-    func makeSceneProxies() -> [SceneProxy]
+    func makeSceneProxy() -> any SceneProxy
 }
 
 extension PrimitiveScene {
@@ -21,72 +21,23 @@ extension PrimitiveScene {
 }
 
 struct _TupleScene<T>: PrimitiveScene {
-
     public var value: T
 
     public init(_ value: T) {
         self.value = value
     }
 
-    func makeSceneProxies() -> [SceneProxy] {
-        return Mirror(reflecting: value).children.flatMap { child in
-            if let scene = child as? any Scene {
-                return _TupleScene<T>._makeSceneProxies(scene)
-            }
-            return []
-        }
+    subscript<U>(keyPath: KeyPath<T, U>) -> U {
+        self.value[keyPath: keyPath]
     }
 
-    func makeWindowProxy() -> WindowProxy? { nil }
-}
-
-class WindowProxy: WindowDelegate {
-    var frame: Frame?
-    var screen: Screen?
-    var window: Window?
-    weak var scene: SceneProxy?
-
-    func makeWindow() -> Window? { nil }
-
-    init(frame: Frame? = nil, screen: Screen? = nil, window: Window? = nil, scene: SceneProxy? = nil) {
-        self.frame = frame
-        self.screen = screen
-        self.window = window
-        self.scene = scene
-    }
-}
-
-class SceneProxy {
-    let scene: any Scene
-    let children: [SceneProxy]
-
-    weak var parent: SceneProxy?
-    var windowProxy: WindowProxy?
-
-    init(scene: any Scene, children: [SceneProxy], parent: SceneProxy? = nil) {
-        self.scene = scene
-        self.children = children
-        self.parent = parent
-    }
-
-    func makeWindowProxies() -> [WindowProxy] {
-        var proxies: [WindowProxy] = []
-        if let proxy = windowProxy {
-            proxies.append(proxy)
+    func makeSceneProxy() -> any SceneProxy {
+        let mirror = Mirror(reflecting: value)
+        let children = mirror.children.map { child in
+            let scene = child as! (any Scene)
+            return _makeSceneProxy(scene)
         }
-        for child in children {
-            proxies.append(contentsOf: child.makeWindowProxies())
-        }
-        return proxies
-    }
-}
-
-extension Scene {
-    static func _makeSceneProxies(_ scene: any Scene) -> [SceneProxy] {
-        if let prim = scene as? (any PrimitiveScene) {
-            return prim.makeSceneProxies()
-        }
-        let children = _makeSceneProxies(scene.body)
-        return [SceneProxy(scene: scene, children: children)]
+        let proxy = SceneContext(scene: self, children: children)
+        return proxy
     }
 }
