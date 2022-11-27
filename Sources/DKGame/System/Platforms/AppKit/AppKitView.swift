@@ -477,7 +477,9 @@ class AppKitView: NSView, NSTextInputClient, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         if notification.object as? NSWindow === self.window {
-            self.postWindowEvent(type: .closed)
+            DispatchQueue.main.async {
+                self.postWindowEvent(type: .closed)
+            }
         }
     }
 
