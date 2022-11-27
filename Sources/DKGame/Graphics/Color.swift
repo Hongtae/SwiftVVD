@@ -63,8 +63,43 @@ public struct Color {
         self.init(r, g, b, a)
     }
 
-    public static let black: Color = .init(0.0, 0.0, 0.0, 1.0)
-    public static let white: Color = .init(1.0, 1.0, 1.0, 1.0)
+    init(hue: Scalar, saturation: Scalar, brightness: Scalar, opacity: Scalar = 1.0) {
+        let hue = hue.clamp(min: 0.0, max: 1.0)
+        let saturation = saturation.clamp(min: 0.0, max: 1.0)
+        let brightness = brightness.clamp(min: 0.0, max: 1.0)
+
+        let c = saturation * brightness
+        let h = Int(hue * 360) / 6
+        let x = ((h % 2) == 0) ? 0: c
+        let m = brightness - c
+
+        let r, g, b: Scalar
+        switch h {
+        case 1:     (r, g, b) = (x, c, 0)
+        case 2:     (r, g, b) = (0, c, x)
+        case 3:     (r, g, b) = (0, x, c)
+        case 4:     (r, g, b) = (x, 0, c)
+        case 5:     (r, g, b) = (c, 0, x)
+        default: // 0, 6
+            (r, g, b) = (c, x, 0)
+        }
+        self.init(r + m, g + m, b + m, opacity)
+    }
+
+    public static let black = Color(0.0, 0.0, 0.0)
+    public static let white = Color(1.0, 1.0, 1.0)
+    public static let blue = Color(0.0, 0.0, 1.0)
+    public static let brown = Color(0.6, 0.4, 0.2)
+    public static let cyan = Color(0.0, 1.0, 1.0)
+    public static let gray = Color(0.5, 0.5, 0.5)
+    public static let darkGray = Color(0.3, 0.3, 0.3)
+    public static let lightGray = Color(0.6, 0.6, 0.6)
+    public static let green = Color(0.0, 1.0, 0.0)
+    public static let magenta = Color(1.0, 0.0, 1.0)
+    public static let orange = Color(1.0, 0.5, 0.0)
+    public static let purple = Color(0.5, 0.0, 0.5)
+    public static let red = Color(1.0, 0.0, 0.0)
+    public static let yellow = Color(1.0, 1.0, 0.0)
 }
 
 public extension Color {

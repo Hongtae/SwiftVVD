@@ -7,7 +7,7 @@
 
 import DKGame
 
-class WindowGroupContext<Content>: WindowProxy, PrimitiveScene, WindowDelegate where Content: View {
+class WindowGroupContext<Content>: WindowProxy, PrimitiveScene, Scene, WindowDelegate where Content: View {
 
     var content: Content
     let contextType: Any.Type
@@ -15,6 +15,8 @@ class WindowGroupContext<Content>: WindowProxy, PrimitiveScene, WindowDelegate w
     let title: String
 
     var _window: Window?
+    var screen: Screen?
+    var frame: Frame?
 
     var view: Content { content }
 
@@ -30,6 +32,12 @@ class WindowGroupContext<Content>: WindowProxy, PrimitiveScene, WindowDelegate w
             self._window = makeWindow(name: self.title,
                                       style: [.genericWindow],
                                       delegate: self)
+            Task { @ScreenActor in
+                self.frame = ViewFrame()
+                self.screen = Screen()
+                self.screen?.frame = self.frame
+                self.screen?.window = await self.window
+            }
         }
         return self._window
     }

@@ -409,15 +409,43 @@ open class Frame {
         return nil
     }
 
-    public func captureKeyboard(deviceID: Int) -> Bool { false }
-    public func captureMouse(deviceID: Int) -> Bool { false }
-    public func releaseKeyboard(deviceID: Int) {}
-    public func releaseMouse(deviceID: Int) {}
-    public func releaseAllCapturedKeyboards() {}
-    public func releaseAllCapturedMice() {}
+    public func captureKeyboard(deviceID: Int) -> Bool {
+        if let screen = self.screen, self.canHandleKeyboard {
+            return screen.captureKeyboard(frame: self, forDeviceID: deviceID)
+        }
+        return false
+    }
 
-    public func hasCapturedKeyboard(deviceID: Int) -> Bool { false }
-    public func hasCapturedMouse(deviceID: Int) -> Bool { false }
+    public func captureMouse(deviceID: Int) -> Bool  {
+        if let screen = self.screen, self.canHandleMouse {
+            return screen.captureMouse(frame: self, forDeviceID: deviceID)
+        }
+        return false
+    }
+
+    public func releaseKeyboard(deviceID: Int) {
+        _ = self.screen?.releaseKeyboard(frame: self, forDeviceID: deviceID)
+    }
+
+    public func releaseMouse(deviceID: Int) {
+        _ = self.screen?.releaseMouse(frame: self, forDeviceID: deviceID)
+    }
+
+    public func releaseAllCapturedKeyboards() {
+        self.screen?.releaseAllKeyboardsCaptured(by: self)
+    }
+
+    public func releaseAllCapturedMice() {
+        self.screen?.releaseAllMiceCaptured(by: self)
+    }
+
+    public func hasCapturedKeyboard(deviceID: Int) -> Bool {
+        self.screen?.keyboardCaptor(forDeviceID: deviceID) === self
+    }
+
+    public func hasCapturedMouse(deviceID: Int) -> Bool {
+        self.screen?.mouseCaptor(forDeviceID: deviceID) === self
+    }
 
     open func load(screen: Screen) {}
     open func unload() {}

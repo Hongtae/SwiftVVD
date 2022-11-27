@@ -19,34 +19,34 @@ extension Never: Scene, View {
     public var body: Never { neverBody() }
 }
 
-public struct EmptyView: View {
-    public init() {}
+protocol PrimitiveView: View {
+}
+
+extension PrimitiveView {
     public var body: Never { neverBody() }
 }
 
-public struct AnyView: View {
+public struct EmptyView: View, PrimitiveView {
+}
 
+public struct AnyView: View, PrimitiveView {
     public init<V>(_ view: V) where V: View {
     }
 
     public init<V>(erasing view: V) where V: View {
     }
-
-    public var body: Never { neverBody() }
 }
 
-public struct TupleView<T>: View {
+public struct TupleView<T>: View, PrimitiveView {
 
     public var value: T
 
     public init(_ value: T) {
         self.value = value
     }
-
-    public var body: Never { neverBody() }
 }
 
-public struct _ConditionalContent<TrueContent, FalseContent>: View where TrueContent: View, FalseContent: View {
+public struct _ConditionalContent<TrueContent, FalseContent>: View, PrimitiveView where TrueContent: View, FalseContent: View {
     public enum Storage {
         case trueContent(TrueContent)
         case falseContent(FalseContent)
@@ -57,6 +57,4 @@ public struct _ConditionalContent<TrueContent, FalseContent>: View where TrueCon
     init(storage: Storage) {
         self.storage = storage
     }
-
-    public var body: Never { neverBody() }
 }

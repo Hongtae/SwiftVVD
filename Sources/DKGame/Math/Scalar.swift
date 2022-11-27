@@ -10,10 +10,17 @@ import Foundation
 public typealias Scalar = Float32
 //public typealias Scalar = CGFloat
 
+
+extension Comparable {
+    public func clamp(min: Self, max: Self) -> Self {
+        if self < min { return min }
+        if self > max { return max }
+        return self
+    }
+}
+
 public func clamp<T>(_ value: T, min: T, max: T) -> T where T: Comparable {
-    if value < min { return min }
-    if value > max { return max }
-    return value
+    value.clamp(min: min, max: max)
 }
 
 public typealias Half2 = (Float16, Float16)

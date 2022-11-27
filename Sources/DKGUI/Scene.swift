@@ -20,7 +20,7 @@ extension PrimitiveScene {
     public var body: Never { neverBody() }
 }
 
-struct _TupleScene<T>: PrimitiveScene {
+struct TupleScene<T>: PrimitiveScene, Scene {
     public var value: T
 
     public init(_ value: T) {
