@@ -12,8 +12,8 @@ protocol WindowProxy {
     var view: Content { get }
     var identifier: String { get }
     var contextType: Any.Type { get }
-
-    @MainActor var window: Window? { get }
+    var window: Window? { get }
+    @MainActor func makeWindow() -> Window?
 }
 
 protocol SceneProxy {

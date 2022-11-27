@@ -26,6 +26,8 @@ public class Screen {
     public var window: Window? {
         didSet {
             if window !== oldValue {
+                if window == nil { Log.debug("Screen.window is nil.") }
+
                 let window = self.window
                 let commandQueue = self.commandQueue
 
@@ -518,6 +520,8 @@ public class Screen {
             self.activated = false
         case .update:
             self.frame?.redraw()
+        case .closed:
+            self.window = nil
         default:
             break
         }

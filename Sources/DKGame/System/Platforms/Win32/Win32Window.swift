@@ -333,7 +333,7 @@ public class Win32Window : Window {
             Log.verbose("Window: \(self.name) destroyed")
 
             // post event!
-
+            self.postWindowEvent(type: .closed)
         }
         self.hWnd = nil
     }

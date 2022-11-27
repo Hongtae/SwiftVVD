@@ -14,7 +14,7 @@ class WindowGroupContext<Content>: WindowProxy, PrimitiveScene, Scene, WindowDel
     let identifier: String
     let title: String
 
-    var _window: Window?
+    var window: Window?
     var screen: Screen?
     var frame: Frame?
 
@@ -27,23 +27,42 @@ class WindowGroupContext<Content>: WindowProxy, PrimitiveScene, Scene, WindowDel
         self.title = title
     }
 
-    @MainActor var window: Window? {
-        if self._window == nil {
-            self._window = makeWindow(name: self.title,
-                                      style: [.genericWindow],
-                                      delegate: self)
+    @MainActor 
+    func makeWindow() -> Window? {
+        if self.window == nil {
+            self.window = DKGame.makeWindow(name: self.title,
+                                            style: [.genericWindow],
+                                            delegate: self)
+
+            self.window?.addEventObserver(self) {
+                [weak self](event: WindowEvent) in
+                if let self = self {
+                    self.onWindowEvent(event: event)
+                }
+            }
+
             Task { @ScreenActor in
                 self.frame = ViewFrame()
                 self.screen = Screen()
                 self.screen?.frame = self.frame
-                self.screen?.window = await self.window
+                self.screen?.window = self.window
             }
         }
-        return self._window
+        return self.window
     }
 
     func makeSceneProxy() -> any SceneProxy {
         SceneContext(scene: self, window: self)
+    }
+
+    @MainActor
+    func onWindowEvent(event: WindowEvent) {
+        if event.type == .closed {
+            self.window?.removeEventObserver(self)
+            self.window = nil
+            self.screen = nil
+            self.frame = nil
+        }
     }
 }
 

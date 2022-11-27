@@ -23,7 +23,7 @@ class AppMain<A>: ApplicationDelegate where A: App {
         let windows = self.scene.windows
         Task { @MainActor in
             for windowProxy in windows {
-                if let window = windowProxy.window {
+                if let window = windowProxy.makeWindow() {
                     self.activeWindows.append(window)
                     window.activate()
                     break
