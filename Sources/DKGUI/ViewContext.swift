@@ -7,43 +7,20 @@
 
 import DKGame
 
-struct ViewInputs {
-//    var states: [String: String] = [:]
-//    var stateObjects: [String: String] = [:]
-}
-
-struct ViewOutputs {
-//    var bindings: [String] = []
-}
-
-struct ViewListInputs {
-}
-
-struct ViewListOutputs {
-    var subviews: [any View] = []
-}
-
-extension View {
-    static func _makeView(view: GraphValue<Self>, inputs: ViewInputs) -> ViewOutputs {
-        ViewOutputs()
-    }
-    static func _makeViewList(view: GraphValue<Self>, inputs: ViewListInputs) -> ViewListOutputs {
-        ViewListOutputs()
-    }
-}
-
 protocol ViewProxy {
     associatedtype Content: View
     var view: Content { get }
+    var modifiers: [any ViewModifier] { get }
     var subviews: [any ViewProxy] { get }
     var frame: Frame? { get }
 }
 
 struct ViewContext<Content>: ViewProxy where Content: View {
     var view: Content
-    var graph: GraphValue<Content>
-    var inputs: ViewInputs
-    var outputs: ViewOutputs
+    var graph: _GraphValue<Content>
+    var inputs: _ViewInputs
+    var outputs: _ViewOutputs
+    var modifiers: [any ViewModifier]
     var subviews: [any ViewProxy]
     var frame: Frame? = nil
 }

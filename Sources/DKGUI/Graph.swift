@@ -5,26 +5,55 @@
 //  Copyright (c) 2022 Hongtae Kim. All rights reserved.
 //
 
-struct Graph {
+public struct _Graph {
+    public init() {
+
+    }
 }
 
-struct GraphInputs {
+public struct _GraphInputs {
+    public init() {
+
+    }
 }
 
-struct GraphValue<Value> {
-    var value: Value
+public struct _ViewInputs {
+    public init() {
 
-    init(value: Value) {
+    }
+}
+
+public struct _ViewListInputs {
+    public init() {
+
+    }
+}
+
+public struct _ViewOutputs {
+    public init() {
+
+    }
+}
+
+public struct _ViewListOutputs {
+    public init() {
+
+    }
+}
+
+public struct _GraphValue<Value>: Equatable {
+    public var value: Value
+
+    public init(value: Value) {
         self.value = value
     }
 
-    subscript<U>(keyPath: KeyPath<Value, U>) -> GraphValue<U> {
-        GraphValue<U>(value: value[keyPath: keyPath])
+    public subscript<U>(keyPath: KeyPath<Value, U>) -> _GraphValue<U> {
+        get {
+            fatalError()
+        }
     }
-}
-
-extension GraphValue: Equatable where Value: Equatable {
-    static func == (a: GraphValue<Value>, b: GraphValue<Value>) -> Bool where Value: Equatable {
-        return a.value == b.value
+    public static func == (a: _GraphValue<Value>, b: _GraphValue<Value>) -> Bool {
+        return true
     }
 }

@@ -6,6 +6,7 @@
 //
 
 import DKGame
+import Foundation
 
 public protocol App {
     associatedtype Body: Scene
@@ -14,25 +15,43 @@ public protocol App {
     init()
 }
 
+let DKGUIAppWindowClosedNotification = NSNotification.Name("DKGUIAppWindowClosedNotification")
+
 class AppMain<A>: ApplicationDelegate where A: App {
     let app: A
     var scene: any SceneProxy
-    var activeWindows: [Window] = []
+    var observer: NSObjectProtocol?
+    var terminateAfterLastWindowClosed = true
 
     func initialize(application: Application) {
         let windows = self.scene.windows
         Task { @MainActor in
             for windowProxy in windows {
                 if let window = windowProxy.makeWindow() {
-                    self.activeWindows.append(window)
                     window.activate()
                     break
+                }
+            }
+        }
+        self.observer = NotificationCenter.default.addObserver(forName: DKGUIAppWindowClosedNotification,
+                                                               object: nil,
+                                                               queue: nil) { _ in
+            let activeWindows: [Window] = self.scene.windows.compactMap { $0.window }
+            if activeWindows.isEmpty {
+                if self.terminateAfterLastWindowClosed {
+                    let app = sharedApplication()
+                    app!.terminate(exitCode: 0)
+                    print("window closed, request app exit!")
                 }
             }
         }
     }
 
     func finalize(application: Application) {
+        if let observer {
+            NotificationCenter.default.removeObserver(observer)
+            self.observer = nil
+        }
     }
 
     init() {

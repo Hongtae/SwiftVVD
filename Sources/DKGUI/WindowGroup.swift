@@ -6,6 +6,7 @@
 //
 
 import DKGame
+import Foundation
 
 class WindowGroupContext<Content>: WindowProxy, PrimitiveScene, Scene, WindowDelegate where Content: View {
 
@@ -62,6 +63,10 @@ class WindowGroupContext<Content>: WindowProxy, PrimitiveScene, Scene, WindowDel
             self.window = nil
             self.screen = nil
             self.frame = nil
+
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: DKGUIAppWindowClosedNotification, object: nil)
+            }
         }
     }
 }
