@@ -22,11 +22,13 @@ public class AudioDeviceContext {
     private var players: [Player] = []
     private let lock = NSLock()
 
+    private var task: Task<Void, Never>?
+
     public init(device: AudioDevice) {
         self.device = device
         self.listener = AudioListener(device: self.device)
 
-        Task.detached(priority: .background) { @AudioActor [weak self] in
+        self.task = .detached(priority: .background) { @AudioActor [weak self] in
             numberOfThreadsToWaitBeforeExiting.increment()
             defer { numberOfThreadsToWaitBeforeExiting.decrement() }
 
@@ -36,7 +38,7 @@ public class AudioDeviceContext {
 
             var retainedPlayers: [AudioPlayer] = []
 
-            while true {
+            mainLoop: while true {
                 guard let self = self else { break }
 
                 let players: [AudioPlayer] = synchronizedBy(locking: self.lock) {
@@ -136,7 +138,7 @@ public class AudioDeviceContext {
                 do {
                     try await Task.sleep(nanoseconds: 200_000_000) // 200ms
                 } catch {
-                    await Task.yield()
+                    break mainLoop
                 }
             }
             buffer.deallocate()
@@ -147,6 +149,7 @@ public class AudioDeviceContext {
     }
 
     deinit {
+        self.task?.cancel()
         self.players.removeAll()
     }
 

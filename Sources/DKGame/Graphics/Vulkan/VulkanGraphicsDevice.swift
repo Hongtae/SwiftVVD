@@ -48,6 +48,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         let lock: SpinLock = SpinLock()
     }
     private var descriptorPoolChainMaps: [DescriptorPoolChainMap] = .init(repeating: DescriptorPoolChainMap(), count: 7)
+    private var task: Task<Void, Never>?
 
     public init?(instance: VulkanInstance,
                  physicalDevice: VulkanPhysicalDeviceDescription,
@@ -216,7 +217,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
 
         self.loadPipelineCache()
 
-        Task.detached(priority: .background) { [weak self] in
+        self.task = .detached(priority: .background) { [weak self] in
             numberOfThreadsToWaitBeforeExiting.increment()
             defer { numberOfThreadsToWaitBeforeExiting.decrement() }
 
@@ -230,7 +231,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             let fenceWaitInterval = 0.01
             var timer = TickCounter()
 
-            while true {
+            mainLoop: while true {
                 guard let self = self else { break }
 
                 synchronizedBy(locking: self.fenceCompletionLock) {
@@ -291,6 +292,9 @@ public class VulkanGraphicsDevice : GraphicsDevice {
 
                     if err == VK_TIMEOUT {
                         while timer.elapsed < fenceWaitInterval {
+                            if Task.isCancelled {
+                                break mainLoop
+                            }
                             await Task.yield()
                         }
                     }
@@ -304,6 +308,8 @@ public class VulkanGraphicsDevice : GraphicsDevice {
     
     deinit {
         Log.debug("VulkanGraphicsDevice is being destroyed.")
+
+        self.task?.cancel()
 
         for maps in self.descriptorPoolChainMaps {
             maps.poolChainMap.forEach{

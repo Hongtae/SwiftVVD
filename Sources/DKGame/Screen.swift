@@ -120,6 +120,8 @@ public class Screen {
     private var mouseCaptors: [Int: Frame] = [:]    // mouse captors
     private var hoverFrames: [Int: (frame: Frame, device: MouseEventDevice)] = [:]  // mouse hover frames
 
+    private var task: Task<Void, Never>?
+
     public init(graphicsDeviceContext: GraphicsDeviceContext?,
                 audioDeviceContext: AudioDeviceContext?) {
 
@@ -129,7 +131,7 @@ public class Screen {
 
         Canvas.cachePipelineContext(self.graphicsDeviceContext!)
 
-        Task.detached(priority: .userInitiated) { @ScreenActor [weak self] in
+        self.task = .detached(priority: .userInitiated) { @ScreenActor [weak self] in
             numberOfThreadsToWaitBeforeExiting.increment()
             defer { numberOfThreadsToWaitBeforeExiting.decrement() }
 
@@ -179,6 +181,9 @@ public class Screen {
                 }
                 
                 while tickCounter.elapsed < frameInterval {
+                    if Task.isCancelled {
+                        break mainLoop
+                    }
                     await Task.yield()
                 }
             }
@@ -195,6 +200,8 @@ public class Screen {
     }
 
     deinit {
+        self.task?.cancel()
+
         self.keyboardCaptors.removeAll()
         self.mouseCaptors.removeAll()
 
