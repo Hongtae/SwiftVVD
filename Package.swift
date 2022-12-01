@@ -24,7 +24,7 @@ let package = Package(
             path: "SupportPackages/Vulkan"),
         .package(
             url: "https://github.com/Hongtae/swift-openal-soft.git",
-            branch: "master"),
+            branch: "main"),
     ],
     targets: [
         // Targets are the basic building blocks of a package. A target can define a module or a test suite.
