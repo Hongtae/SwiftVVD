@@ -23,14 +23,39 @@ public class AppKitApplication: Application {
                 let app = NSApplication.shared
                 NotificationCenter.default.post(name: NSApplication.willTerminateNotification,
                                                 object: app)
+
                 app.stop(nil)
                 self.exitCode = exitCode
+
+                let event = NSEvent.otherEvent(with: .applicationDefined,
+                                               location: .zero,
+                                               modifierFlags: [],
+                                               timestamp: ProcessInfo.processInfo.systemUptime,
+                                               windowNumber: 0,
+                                               context: nil,
+                                               subtype: 0, data1: 0, data2: 0)
+                app.postEvent(event!, atStart:false)
             }
         }
     }
 
     public static func run(delegate: ApplicationDelegate?) -> Int {
         assert(Thread.isMainThread)
+
+        let observers = [
+            NotificationCenter.default
+                .addObserver(forName: NSApplication.willFinishLaunchingNotification,
+                             object: nil,
+                             queue: nil) { notification in
+                                 Log.debug("Notification: \(notification)")
+                             },
+            NotificationCenter.default
+                .addObserver(forName: NSApplication.willTerminateNotification,
+                             object: nil,
+                             queue: nil) { notification in
+                                 Log.debug("Notification: \(notification)")
+                             }
+        ]
 
         let app = AppKitApplication()
         app.delegate = delegate
@@ -39,13 +64,13 @@ public class AppKitApplication: Application {
         self.shared = app
 
         delegate?.initialize(application: app)
-        NotificationCenter.default.post(name: NSApplication.willFinishLaunchingNotification,
-                                        object: NSApplication.shared)
 
         NSApplication.shared.run()
         app.running = false
 
         delegate?.finalize(application: app)
+
+        observers.forEach { NotificationCenter.default.removeObserver($0) }
 
         self.shared = nil
         return app.exitCode

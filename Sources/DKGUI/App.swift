@@ -41,7 +41,7 @@ class AppMain<A>: ApplicationDelegate where A: App {
                 if self.terminateAfterLastWindowClosed {
                     let app = sharedApplication()
                     app!.terminate(exitCode: 0)
-                    print("window closed, request app exit!")
+                    Log.debug("window closed, request app exit!")
                 }
             }
         }
