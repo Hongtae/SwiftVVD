@@ -205,7 +205,7 @@ open class Frame {
         return CGRect(origin: pixelToLocal(point: rect.origin), size: pixelToLocal(size: rect.size))
     }
 
-    public init() {
+    nonisolated public init() {
     }
 
     @discardableResult

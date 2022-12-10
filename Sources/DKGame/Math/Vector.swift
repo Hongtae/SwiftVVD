@@ -35,6 +35,8 @@ public protocol Vector {
 
     static func minimum(_:Self, _:Self) -> Self
     static func maximum(_:Self, _:Self) -> Self
+
+    static func interpolate(_:Self, _:Self, _:Scalar) -> Self
 }
 
 public extension Vector {
@@ -56,6 +58,14 @@ public extension Vector {
 
     mutating func normalize() {
         self = self.normalized()
+    }
+
+    static func lerp(_ lhs: Self, _ rhs: Self, _ t: Scalar) -> Self {
+        lhs * (1.0 - t) + rhs * t
+    }
+
+    static func interpolate(_ lhs: Self, _ rhs: Self, _ t: Scalar) -> Self {
+        lerp(lhs, rhs, t)
     }
 
     static func += (lhs: inout Self, rhs: Self) { lhs = lhs + rhs }

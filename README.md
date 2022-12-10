@@ -1,13 +1,13 @@
 # Swift-VV&D
 
-Game Engine for swift programming language.
+Cross-Platform Game Engine for swift programming language.
 
-- Cross-platform game engine
 - GPGPU Library with Vulkan / Metal / D3D12
-- Audio & Physics for game development
+- Game Physics & Audio
+- Declarative UI framework similar to SwiftUI
+- Tools and Utilities
 
 **Still in development, not recommended for product.**
-
 
 ---
 ### Things that require pre-installation
