@@ -12,15 +12,15 @@ public protocol Scene {
     var body: Self.Body { get }
 }
 
-protocol PrimitiveScene: Scene {
+protocol _PrimitiveScene: Scene {
     func makeSceneProxy() -> any SceneProxy
 }
 
-extension PrimitiveScene {
+extension _PrimitiveScene {
     public var body: Never { neverBody() }
 }
 
-struct TupleScene<T>: PrimitiveScene, Scene {
+struct TupleScene<T>: Scene, _PrimitiveScene {
     public var value: T
 
     public init(_ value: T) {

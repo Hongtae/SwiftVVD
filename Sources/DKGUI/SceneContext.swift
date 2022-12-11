@@ -60,7 +60,7 @@ struct SceneContext<Content>: SceneProxy where Content: Scene {
 }
 
 func _makeSceneProxy<Content>(_ scene: Content) -> any SceneProxy where Content: Scene {
-    if let prim = scene as? (any PrimitiveScene) {
+    if let prim = scene as? (any _PrimitiveScene) {
         return prim.makeSceneProxy()
     }
     let child = _makeSceneProxy(scene.body)

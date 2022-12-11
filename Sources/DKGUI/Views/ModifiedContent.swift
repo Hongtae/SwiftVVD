@@ -17,18 +17,19 @@ public struct ModifiedContent<Content, Modifier> {
     }
 }
 
-extension ModifiedContent : Equatable where Content : Equatable, Modifier : Equatable {
+extension ModifiedContent: Equatable where Content: Equatable, Modifier: Equatable {
     public static func == (a: ModifiedContent<Content, Modifier>, b: ModifiedContent<Content, Modifier>) -> Bool {
         return a.content == b.content && a.modifier == b.modifier
     }
 }
 
-extension ModifiedContent : View where Content : View, Modifier : ViewModifier {
-    public var body: ModifiedContent<Content, Modifier>.Body { neverBody() }
+extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
+    public var body: ModifiedContent<Content, Modifier>.Body {
+        neverBody()
+    }
 }
 
-extension ModifiedContent : ViewModifier where Content : ViewModifier, Modifier : ViewModifier {
-
+extension ModifiedContent: ViewModifier where Content: ViewModifier, Modifier: ViewModifier {
 }
 
 extension View {

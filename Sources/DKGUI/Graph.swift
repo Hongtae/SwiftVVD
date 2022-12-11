@@ -6,54 +6,47 @@
 //
 
 public struct _Graph {
-    public init() {
-
-    }
 }
 
 public struct _GraphInputs {
-    public init() {
-
-    }
 }
 
 public struct _ViewInputs {
-    public init() {
+    var modifiers: [any ViewModifier]
+}
 
+public struct _ViewOutputs {
+    var bindings: [String]
+    var modifiers: [any ViewModifier]
+//    var view: any ViewProxy
+
+    init() {
+        self.bindings = []
+        self.modifiers = []
     }
 }
 
 public struct _ViewListInputs {
-    public init() {
-
-    }
-}
-
-public struct _ViewOutputs {
-    public init() {
-
-    }
 }
 
 public struct _ViewListOutputs {
-    public init() {
-
-    }
 }
 
-public struct _GraphValue<Value>: Equatable {
+@dynamicMemberLookup
+public struct _GraphValue<Value> {
     public var value: Value
 
     public init(value: Value) {
         self.value = value
     }
 
-    public subscript<U>(keyPath: KeyPath<Value, U>) -> _GraphValue<U> {
-        get {
-            fatalError()
-        }
+    public subscript<U>(dynamicMember keyPath: KeyPath<Value, U>) -> _GraphValue<U> {
+        _GraphValue<U>(value: self.value[keyPath: keyPath])
     }
+}
+
+extension _GraphValue: Equatable where Value: Equatable {
     public static func == (a: _GraphValue<Value>, b: _GraphValue<Value>) -> Bool {
-        return true
+        return a.value == b.value
     }
 }

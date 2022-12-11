@@ -7,6 +7,7 @@
 
 public struct _ViewModifier_Content<Modifier> where Modifier: ViewModifier {
     public typealias Body = Never
+
     public static func _makeView(view: _GraphValue<_ViewModifier_Content<Modifier>>, inputs: _ViewInputs) -> _ViewOutputs {
         _ViewOutputs()
     }
@@ -20,7 +21,7 @@ extension _ViewModifier_Content: View {
 }
 
 public protocol ViewModifier {
-    associatedtype Body : View
+    associatedtype Body: View
     @ViewBuilder func body(content: Self.Content) -> Self.Body
     typealias Content = _ViewModifier_Content<Self>
 }
@@ -32,5 +33,15 @@ extension ViewModifier where Self.Body == Never {
 extension ViewModifier {
     public func concat<T>(_ modifier: T) -> ModifiedContent<Self, T> {
         ModifiedContent(content: self, modifier: modifier)
+    }
+}
+
+extension ViewModifier {
+    static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
+        _ViewOutputs()
+    }
+
+    static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
+        _ViewListOutputs()
     }
 }

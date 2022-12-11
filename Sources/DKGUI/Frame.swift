@@ -8,7 +8,7 @@
 import DKGame
 import Foundation
 
-class ViewFrame: Frame {
+class ViewFrame<Content> : Frame where Content : View {
 
     override func load(screen: Screen) {}
     override func unload() {}
@@ -16,4 +16,8 @@ class ViewFrame: Frame {
     override func draw(canvas: Canvas) { canvas.clear(color: .yellow) }
     override func drawOverlay(canvas: Canvas) {}
 
+    var view: Content
+    nonisolated init(_ content: Content) {
+        self.view = content
+    }
 }

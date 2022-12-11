@@ -15,15 +15,39 @@ public protocol App {
     init()
 }
 
-let DKGUIAppWindowClosedNotification = NSNotification.Name("DKGUIAppWindowClosedNotification")
+public protocol AppContext {
+    var graphicsDeviceContext: GraphicsDeviceContext? { get }
+    var audioDeviceContext: AudioDeviceContext? { get }
 
-class AppMain<A>: ApplicationDelegate where A: App {
+    func checkWindowActivities()
+}
+
+public var appContext: AppContext? = nil
+
+class AppMain<A>: ApplicationDelegate, AppContext where A: App {
+
+    var graphicsDeviceContext: GraphicsDeviceContext?
+    var audioDeviceContext: AudioDeviceContext?
+
     let app: A
     var scene: any SceneProxy
-    var observer: NSObjectProtocol?
     var terminateAfterLastWindowClosed = true
 
+    func checkWindowActivities() {
+        let activeWindows: [Window] = self.scene.windows.compactMap { $0.window }
+        if activeWindows.isEmpty {
+            if self.terminateAfterLastWindowClosed {
+                let app = sharedApplication()
+                app!.terminate(exitCode: 0)
+                Log.debug("window closed, request app exit!")
+            }
+        }
+    }
+
     func initialize(application: Application) {
+        self.graphicsDeviceContext = makeGraphicsDeviceContext()
+        self.audioDeviceContext = makeAudioDeviceContext()
+
         let windows = self.scene.windows
         Task { @MainActor in
             for windowProxy in windows {
@@ -33,25 +57,11 @@ class AppMain<A>: ApplicationDelegate where A: App {
                 }
             }
         }
-        self.observer = NotificationCenter.default.addObserver(forName: DKGUIAppWindowClosedNotification,
-                                                               object: nil,
-                                                               queue: nil) { _ in
-            let activeWindows: [Window] = self.scene.windows.compactMap { $0.window }
-            if activeWindows.isEmpty {
-                if self.terminateAfterLastWindowClosed {
-                    let app = sharedApplication()
-                    app!.terminate(exitCode: 0)
-                    Log.debug("window closed, request app exit!")
-                }
-            }
-        }
     }
 
     func finalize(application: Application) {
-        if let observer {
-            NotificationCenter.default.removeObserver(observer)
-            self.observer = nil
-        }
+        self.graphicsDeviceContext = nil
+        self.audioDeviceContext = nil
     }
 
     init() {
@@ -63,6 +73,7 @@ class AppMain<A>: ApplicationDelegate where A: App {
 extension App {
     public static func main() {
         let app = AppMain<Self>()
-        let _ = runApplication(delegate: app)
+        appContext = app
+        _ = runApplication(delegate: app)
     }
 }

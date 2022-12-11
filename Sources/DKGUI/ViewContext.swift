@@ -12,15 +12,23 @@ protocol ViewProxy {
     var view: Content { get }
     var modifiers: [any ViewModifier] { get }
     var subviews: [any ViewProxy] { get }
-    var frame: Frame? { get }
 }
 
 struct ViewContext<Content>: ViewProxy where Content: View {
     var view: Content
-    var graph: _GraphValue<Content>
-    var inputs: _ViewInputs
-    var outputs: _ViewOutputs
     var modifiers: [any ViewModifier]
     var subviews: [any ViewProxy]
-    var frame: Frame? = nil
+
+    init(view: Content, modifiers: [any ViewModifier], subviews: [any ViewProxy]) {
+        self.view = view
+        self.modifiers = modifiers
+        self.subviews = subviews
+    }
+}
+
+func _makeViewProxy<Content>(_ view: Content, inputs: _ViewInputs) -> any ViewProxy where Content: View {
+    if let prim = view as? (any _PrimitiveView) {
+        return prim.makeViewProxy(inputs: inputs)
+    }
+    return _makeViewProxy(view.body, inputs: inputs)
 }
