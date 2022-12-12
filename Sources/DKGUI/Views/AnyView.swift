@@ -6,10 +6,18 @@
 //
 
 public struct AnyView: View {
+    var view: any View
     public init<V>(_ view: V) where V: View {
+        self.view = view
     }
 
     public init<V>(erasing view: V) where V: View {
+        self.view = view
     }
-    public var body: Never { neverBody() }
+}
+
+extension AnyView: _PrimitiveView {
+    func makeViewProxy() -> any ViewProxy {
+        ViewContext(view: self)
+    }
 }

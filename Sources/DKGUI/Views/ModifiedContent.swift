@@ -6,8 +6,6 @@
 //
 
 public struct ModifiedContent<Content, Modifier> {
-    public typealias Body = Never
-
     public var content: Content
     public var modifier: Modifier
 
@@ -24,8 +22,11 @@ extension ModifiedContent: Equatable where Content: Equatable, Modifier: Equatab
 }
 
 extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
-    public var body: ModifiedContent<Content, Modifier>.Body {
-        neverBody()
+}
+
+extension ModifiedContent: _PrimitiveView where Content: View, Modifier: ViewModifier {
+    func makeViewProxy() -> any ViewProxy {
+        ViewContext(view: self)
     }
 }
 

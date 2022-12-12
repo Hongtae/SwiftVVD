@@ -154,8 +154,12 @@ public class AppKitWindow: Window {
             self.view.visible = true
             self.view.activated = true
 
-//            self.postWindowEvent(type: .shown)
-//            self.postWindowEvent(type: .activated)
+            if window.isKeyWindow == false {
+                if window.isVisible {
+                    // failed to become key window, but displayed.
+                    self.postWindowEvent(type: .shown)
+                }
+            }
         }
     }
 

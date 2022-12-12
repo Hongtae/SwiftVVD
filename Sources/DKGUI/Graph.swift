@@ -12,18 +12,9 @@ public struct _GraphInputs {
 }
 
 public struct _ViewInputs {
-    var modifiers: [any ViewModifier]
 }
 
 public struct _ViewOutputs {
-    var bindings: [String]
-    var modifiers: [any ViewModifier]
-//    var view: any ViewProxy
-
-    init() {
-        self.bindings = []
-        self.modifiers = []
-    }
 }
 
 public struct _ViewListInputs {

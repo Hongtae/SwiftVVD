@@ -6,9 +6,12 @@
 //
 
 public struct HStack<Content>: View where Content: View {
-
     public init(@ViewBuilder content: () -> Content) {
     }
+}
 
-    public var body: Never { neverBody() }
+extension HStack: _PrimitiveView {
+    func makeViewProxy() -> any ViewProxy {
+        ViewContext(view: self)
+    }
 }

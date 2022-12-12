@@ -8,9 +8,12 @@
 import Foundation
 
 public struct Text: View {
-
     public init<S>(_ content: S) where S : StringProtocol {
     }
+}
 
-    public var body: Never { neverBody() }
+extension Text: _PrimitiveView {
+    func makeViewProxy() -> any ViewProxy {
+        ViewContext(view: self)
+    }
 }

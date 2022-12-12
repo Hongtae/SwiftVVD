@@ -19,28 +19,101 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
     var view: Content
     var viewProxy: any ViewProxy
 
+    struct State {
+        var visible = false
+        var activated = false
+        var suspended = false
+        var contentScaleFactor: CGFloat = 1.0
+        var frame: CGRect = .zero
+        var bounds: CGRect = .zero
+    }
+    struct Configuration {
+        var activeFrameInterval = 1.0 / 60.0
+        var inactiveFrameInterval = 1.0 / 30.0
+    }
+    @MainActor var state = State()
+    @MainActor var config = Configuration()
+
+    private var task: Task<Void, Never>?
+
+    private var windowUpdateTask: Task<Void, Never> {
+        Task.detached(priority: .userInitiated) { [weak self] in
+            Log.info("Window upate task start.")
+            var tickCounter = TickCounter()
+
+            mainLoop: while true {
+                guard let self = self else { break }
+
+                let swapChain = self.swapChain!
+                let state = await self.state
+                let config = await self.config
+
+                let frameInterval = state.activated ? config.activeFrameInterval : config.inactiveFrameInterval
+
+//                let delta = tickCounter.reset()
+//                let tick = tickCounter.timestamp
+//                let date = Date(timeIntervalSinceNow: 0)
+
+                if state.visible {
+                    var renderPass = swapChain.currentRenderPassDescriptor()
+                    renderPass.colorAttachments[0].clearColor = .cyan
+
+                    if let commandBuffer = swapChain.commandQueue.makeCommandBuffer() {
+                        if let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPass) {
+                            encoder.endEncoding()
+                        }
+                        commandBuffer.commit()
+                    }
+
+                    await self.swapChain?.present()
+                }
+
+                while tickCounter.elapsed < frameInterval {
+                    if Task.isCancelled {
+                        break mainLoop
+                    }
+                    await Task.yield()
+                }
+
+            }
+        }
+    }
+
     init(content: Content, contextType: Any.Type, identifier: String, title: String) {
         self.contextType = contextType
         self.identifier = identifier
         self.title = title
         self.view = content
+        self.viewProxy = _makeViewProxy(self.view)
+    }
 
-        let viewInputs = _ViewInputs(modifiers: [])
-        let a = Content._makeView(view: _GraphValue(value: self.view), inputs: viewInputs)
-        self.viewProxy = _makeViewProxy(self.view, inputs: viewInputs)
+    deinit {
+        self.task?.cancel()
+        self.swapChain = nil
+        self.window = nil
     }
 
     @MainActor
     func makeWindow() -> Window? {
         if self.window == nil {
-            self.window = DKGame.makeWindow(name: self.title,
-                                            style: [.genericWindow],
-                                            delegate: self)
+            self.task?.cancel()
+            if let window = DKGame.makeWindow(name: self.title,
+                                              style: [.genericWindow],
+                                              delegate: self) {
 
-            self.window?.addEventObserver(self) {
-                [weak self](event: WindowEvent) in
-                if let self = self {
-                    self.onWindowEvent(event: event)
+                let graphicsDevice = appContext?.graphicsDeviceContext
+                if let swapChain = graphicsDevice?.renderQueue()?.makeSwapChain(target: window) {
+                    window.addEventObserver(self) {
+                        [weak self](event: WindowEvent) in
+                        if let self = self {
+                            self.onWindowEvent(event: event)
+                        }
+                    }
+                    self.window = window
+                    self.swapChain = swapChain
+                    self.task = self.windowUpdateTask
+                } else {
+                    Log.error("Failed to create swapChain.")
                 }
             }
         }
@@ -53,13 +126,37 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
 
     @MainActor
     func onWindowEvent(event: WindowEvent) {
-        if event.type == .closed {
+        switch event.type {
+        case .closed:
             self.window?.removeEventObserver(self)
             self.window = nil
 
             DispatchQueue.main.async {
                 appContext?.checkWindowActivities()
             }
+        case .created:
+            self.state.frame = event.windowFrame
+            self.state.bounds = event.contentBounds
+            self.state.contentScaleFactor = event.contentScaleFactor
+        case .hidden:
+            self.state.visible = false
+            self.state.activated = false
+        case .shown:
+            self.state.visible = true
+        case .activated:
+            self.state.visible = true
+            self.state.activated = true
+        case .inactivated:
+            self.state.activated = false
+        case .minimized:
+            self.state.activated = false
+            self.state.visible = false
+        case .moved, .resized:
+            self.state.frame = event.windowFrame
+            self.state.bounds = event.contentBounds
+            self.state.contentScaleFactor = event.contentScaleFactor
+        case .update:
+            break
         }
     }
 }

@@ -6,19 +6,10 @@
 //
 
 public struct EmptyView: View {
-    public typealias Body = Never
 }
 
-extension EmptyView {
-    public var body: Never { neverBody() }
-}
-
-extension EmptyView {
-    public static func _makeView(view: _GraphValue<EmptyView>, inputs: _ViewInputs) -> _ViewOutputs {
-        _ViewOutputs()
-    }
-
-    public static func _makeViewList(view: _GraphValue<EmptyView>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        _ViewListOutputs()
+extension EmptyView: _PrimitiveView {
+    func makeViewProxy() -> any ViewProxy {
+        ViewContext(view: self)
     }
 }

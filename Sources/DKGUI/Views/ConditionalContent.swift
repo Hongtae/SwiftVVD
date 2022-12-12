@@ -11,21 +11,15 @@ public struct _ConditionalContent<TrueContent, FalseContent>: View where TrueCon
         case falseContent(FalseContent)
     }
 
-    public typealias Body = Never
     public let storage: Storage
 
     init(storage: Storage) {
         self.storage = storage
     }
-
-    public var body: Never { neverBody() }
 }
 
-extension _ConditionalContent {
-    public static func _makeView(view: _GraphValue<_ConditionalContent<TrueContent, FalseContent>>, inputs: _ViewInputs) -> _ViewOutputs {
-        _ViewOutputs()
-    }
-    public static func _makeViewList(view: _GraphValue<_ConditionalContent<TrueContent, FalseContent>>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        _ViewListOutputs()
+extension _ConditionalContent: _PrimitiveView {
+    func makeViewProxy() -> any ViewProxy {
+        ViewContext(view: self)
     }
 }

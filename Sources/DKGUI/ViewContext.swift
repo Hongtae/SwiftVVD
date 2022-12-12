@@ -24,11 +24,16 @@ struct ViewContext<Content>: ViewProxy where Content: View {
         self.modifiers = modifiers
         self.subviews = subviews
     }
+    init(view: Content) {
+        self.view = view
+        self.modifiers = []
+        self.subviews = []
+    }
 }
 
-func _makeViewProxy<Content>(_ view: Content, inputs: _ViewInputs) -> any ViewProxy where Content: View {
+func _makeViewProxy<Content>(_ view: Content) -> any ViewProxy where Content: View {
     if let prim = view as? (any _PrimitiveView) {
-        return prim.makeViewProxy(inputs: inputs)
+        return prim.makeViewProxy()
     }
-    return _makeViewProxy(view.body, inputs: inputs)
+    return _makeViewProxy(view.body)
 }

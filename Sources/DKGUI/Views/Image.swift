@@ -8,7 +8,6 @@
 import Foundation
 
 public struct Image: View {
-
     public init() {
     }
 
@@ -17,7 +16,10 @@ public struct Image: View {
 
     public init(_ name: String, bundle: Bundle? = nil, label: Text) {
     }
+}
 
-    public typealias Body = Never
-    public var body: Never { neverBody() }
+extension Image: _PrimitiveView {
+    func makeViewProxy() -> any ViewProxy {
+        ViewContext(view: self)
+    }
 }

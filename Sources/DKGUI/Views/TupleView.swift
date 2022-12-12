@@ -15,13 +15,3 @@ public struct TupleView<T>: View {
 
     public var body: Never { neverBody() }
 }
-
-extension TupleView {
-    public static func _makeView(view: _GraphValue<TupleView<T>>, inputs: _ViewInputs) -> _ViewOutputs {
-        _ViewOutputs()
-    }
-
-    public static func _makeViewList(view: _GraphValue<TupleView<T>>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        _ViewListOutputs()
-    }
-}
