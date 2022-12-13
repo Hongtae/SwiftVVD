@@ -18,3 +18,9 @@ extension _PrimitiveView {
     public typealias Body = Never
     public var body: Never { neverBody() }
 }
+
+extension _PrimitiveView {
+    func makeViewProxy() -> any ViewProxy {
+        fatalError("Not implemented")
+    }
+}
