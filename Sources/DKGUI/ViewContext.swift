@@ -6,12 +6,20 @@
 //
 
 import DKGame
+import Foundation
 
 protocol ViewProxy {
     associatedtype Content: View
     var view: Content { get }
     var modifiers: [any ViewModifier] { get }
     var subviews: [any ViewProxy] { get }
+
+    func update(tick: UInt64, delta: Double, date: Date)
+}
+
+extension ViewProxy {
+    func update(tick: UInt64, delta: Double, date: Date) {
+    }
 }
 
 struct ViewContext<Content>: ViewProxy where Content: View {

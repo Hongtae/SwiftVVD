@@ -37,7 +37,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
     private var task: Task<Void, Never>?
 
     private func runWindowUpdateTask() -> Task<Void, Never> {
-        Task.detached(priority: .userInitiated) { [weak self] in
+        Task.detached(priority: .userInitiated) { @MainActor [weak self] in
             Log.info("Window upate task start.")
             var tickCounter = TickCounter()
 
@@ -46,14 +46,15 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                 if Task.isCancelled { break }
 
                 let swapChain = self.swapChain!
-                let state = await self.state
-                let config = await self.config
+                let (state, config) = { (self.state, self.config) }()
 
                 let frameInterval = state.activated ? config.activeFrameInterval : config.inactiveFrameInterval
 
                 let delta = tickCounter.reset()
                 let tick = tickCounter.timestamp
                 let date = Date(timeIntervalSinceNow: 0)
+
+                self.viewProxy.update(tick: tick, delta: delta, date: date)
 
                 if state.visible {
                     var renderPass = swapChain.currentRenderPassDescriptor()
@@ -108,9 +109,15 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                 if let swapChain = graphicsDevice?.renderQueue()?.makeSwapChain(target: window) {
                     window.addEventObserver(self) {
                         [weak self](event: WindowEvent) in
-                        if let self = self {
-                            self.onWindowEvent(event: event)
-                        }
+                        if let self = self { self.onWindowEvent(event: event) }
+                    }
+                    window.addEventObserver(self) {
+                        [weak self](event: KeyboardEvent) in
+                        if let self = self { self.onKeyboardEvent(event: event) }
+                    }
+                    window.addEventObserver(self) {
+                        [weak self](event: MouseEvent) in
+                        if let self = self { self.onMouseEvent(event: event) }
                     }
                     self.window = window
                     self.swapChain = swapChain
@@ -129,6 +136,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
 
     @MainActor
     func onWindowEvent(event: WindowEvent) {
+        Log.debug("WindowContext.onWindowEvent: \(event)")
         switch event.type {
         case .closed:
             self.task?.cancel()
@@ -164,6 +172,18 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
             self.state.contentScaleFactor = event.contentScaleFactor
         case .update:
             break
+        }
+    }
+
+    @MainActor
+    func onKeyboardEvent(event: KeyboardEvent) {
+        Log.debug("WindowContext.onKeyboardEvent: \(event)")
+    }
+
+    @MainActor
+    func onMouseEvent(event: MouseEvent) {
+        if event.type != .move {
+            Log.debug("WindowContext.onMouseEvent: \(event)")
         }
     }
 }
