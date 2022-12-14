@@ -14,8 +14,8 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
     let identifier: String
     let title: String
 
-    var swapChain: SwapChain?
-    var window: Window?
+    private(set) var swapChain: SwapChain?
+    private(set) var window: Window?
     var view: Content
     var viewProxy: any ViewProxy
 
@@ -36,7 +36,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
 
     private var task: Task<Void, Never>?
 
-    private var windowUpdateTask: Task<Void, Never> {
+    private func runWindowUpdateTask() -> Task<Void, Never> {
         Task.detached(priority: .userInitiated) { [weak self] in
             Log.info("Window upate task start.")
             var tickCounter = TickCounter()
@@ -44,15 +44,17 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
             mainLoop: while true {
                 guard let self = self else { break }
 
+                if Task.isCancelled { break }
+
                 let swapChain = self.swapChain!
                 let state = await self.state
                 let config = await self.config
 
                 let frameInterval = state.activated ? config.activeFrameInterval : config.inactiveFrameInterval
 
-//                let delta = tickCounter.reset()
-//                let tick = tickCounter.timestamp
-//                let date = Date(timeIntervalSinceNow: 0)
+                let delta = tickCounter.reset()
+                let tick = tickCounter.timestamp
+                let date = Date(timeIntervalSinceNow: 0)
 
                 if state.visible {
                     var renderPass = swapChain.currentRenderPassDescriptor()
@@ -74,7 +76,6 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                     }
                     await Task.yield()
                 }
-
             }
         }
     }
@@ -97,6 +98,9 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
     func makeWindow() -> Window? {
         if self.window == nil {
             self.task?.cancel()
+            self.task = nil
+            self.swapChain = nil
+
             if let window = DKGame.makeWindow(name: self.title,
                                               style: [.genericWindow],
                                               delegate: self) {
@@ -111,7 +115,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                     }
                     self.window = window
                     self.swapChain = swapChain
-                    self.task = self.windowUpdateTask
+                    self.task = self.runWindowUpdateTask()
                 } else {
                     Log.error("Failed to create swapChain.")
                 }
@@ -128,8 +132,12 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
     func onWindowEvent(event: WindowEvent) {
         switch event.type {
         case .closed:
+            self.task?.cancel()
             self.window?.removeEventObserver(self)
+
+            self.swapChain = nil
             self.window = nil
+            self.task = nil
 
             DispatchQueue.main.async {
                 appContext?.checkWindowActivities()

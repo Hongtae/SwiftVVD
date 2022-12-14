@@ -22,6 +22,12 @@ public protocol AppContext {
     func checkWindowActivities()
 }
 
+struct EmptyScene: Scene, _PrimitiveScene {
+    func makeSceneProxy() -> any SceneProxy {
+        SceneContext(scene: self, children: [])
+    }
+}
+
 public var appContext: AppContext? = nil
 
 class AppMain<A>: ApplicationDelegate, AppContext where A: App {
@@ -48,6 +54,8 @@ class AppMain<A>: ApplicationDelegate, AppContext where A: App {
         self.graphicsDeviceContext = makeGraphicsDeviceContext()
         self.audioDeviceContext = makeAudioDeviceContext()
 
+        self.scene = _makeSceneProxy(self.app.body)
+
         let windows = self.scene.windows
         Task { @MainActor in
             for windowProxy in windows {
@@ -60,13 +68,14 @@ class AppMain<A>: ApplicationDelegate, AppContext where A: App {
     }
 
     func finalize(application: Application) {
+        self.scene = EmptyScene().makeSceneProxy()
         self.graphicsDeviceContext = nil
         self.audioDeviceContext = nil
     }
 
     init() {
         self.app = A()
-        self.scene = _makeSceneProxy(self.app.body)
+        self.scene = EmptyScene().makeSceneProxy()
     }
 }
 
