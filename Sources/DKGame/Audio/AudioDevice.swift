@@ -90,7 +90,7 @@ public class AudioDevice {
             self.majorVersion = Int(majorVersion)
             self.minorVersion = Int(minorVersion)
 
-            print("OpenAL device: \(deviceName) Version: \(majorVersion).\(minorVersion).")
+            Log.info("OpenAL device: \(deviceName) Version: \(majorVersion).\(minorVersion).")
 
             // update format table
             formatTable[BitsChannels(bits: 4, channels: 1)] = alGetEnumValue("AL_FORMAT_MONO_IMA4")
