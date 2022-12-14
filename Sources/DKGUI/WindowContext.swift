@@ -43,7 +43,6 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
 
             mainLoop: while true {
                 guard let self = self else { break }
-
                 if Task.isCancelled { break }
 
                 let swapChain = self.swapChain!

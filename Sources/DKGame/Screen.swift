@@ -142,6 +142,7 @@ public class Screen {
 
             mainLoop: while true {
                 guard let self = self else { break }
+                if Task.isCancelled { break }
 
                 var swapChain: SwapChain? = nil
                 var visible = false

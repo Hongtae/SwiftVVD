@@ -233,6 +233,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
 
             mainLoop: while true {
                 guard let self = self else { break }
+                if Task.isCancelled { break }
 
                 synchronizedBy(locking: self.fenceCompletionLock) {
                     waitingFences.append(contentsOf: self.pendingFenceCallbacks)

@@ -40,6 +40,7 @@ public class AudioDeviceContext {
 
             mainLoop: while true {
                 guard let self = self else { break }
+                if Task.isCancelled { break }
 
                 let players: [AudioPlayer] = synchronizedBy(locking: self.lock) {
                     let r = self.players.compactMap{ $0.player }
