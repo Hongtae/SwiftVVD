@@ -319,7 +319,7 @@ let package = Package(
                 "C/XzEnc.c",
                 "C/XzIn.c"
                 ],
-            publicHeadersPath: "C",
+            publicHeadersPath: ".",
             cSettings: [
                 .define("_7ZIP_ST"),
                 //.unsafeFlags(["-march=native"]),

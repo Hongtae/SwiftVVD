@@ -14,6 +14,7 @@
 
 #include <vector>
 #include <algorithm>
+#include <string.h>
 #include "../libFLAC/include/FLAC/stream_decoder.h"
 
 #include "DKAudioStream.h"

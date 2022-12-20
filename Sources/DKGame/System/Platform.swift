@@ -54,6 +54,10 @@ public class Platform {
         PlatformFactoryUIKit()
 #elseif ENABLE_WIN32
         PlatformFactoryWin32()
+#elseif ENABLE_WAYLAND
+        PlatformFactoryWayland()
+#else
+        fatalError("Unknown platform")
 #endif
     }
 

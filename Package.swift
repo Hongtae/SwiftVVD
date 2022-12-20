@@ -100,5 +100,7 @@ let package = Package(
                 .copy("Resources")
             ],
             linkerSettings: []),
-    ]
+    ],
+    cLanguageStandard: .c11,
+    cxxLanguageStandard: .cxx20
 )

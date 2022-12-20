@@ -42,12 +42,12 @@ uint64_t DKTimerSystemTick()
     struct timespec ts;
     ts.tv_sec = 0;
     ts.tv_nsec = 0;
-    clock_gettime(CLOCK_MONOTONIC_HR, &ts);
-    return static_cast<Tick>(ts.tv_sec) * 1000000000ULL + ts.tv_nsec;
+    clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
+    return static_cast<uint64_t>(ts.tv_sec) * 1000000000ULL + ts.tv_nsec;
 #else
     timeval tm;
     gettimeofday(&tm, NULL);
-    return static_cast<Tick>(tm.tv_sec) * 1000000ULL + tm.tv_usec;
+    return static_cast<uint64_t>(tm.tv_sec) * 1000000ULL + tm.tv_usec;
 #endif
 }
 
