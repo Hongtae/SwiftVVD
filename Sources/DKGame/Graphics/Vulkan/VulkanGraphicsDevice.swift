@@ -190,11 +190,25 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         
         self.queueFamilies = queueCreateInfos.map {
             var supportPresentation = false
+#if VK_USE_PLATFORM_WIN32_KHR
+            supportPresentation = instance.extensionProc
+                .vkGetPhysicalDeviceWin32PresentationSupportKHR?(
+                    physicalDevice.device,
+                    $0.queueFamilyIndex) ?? VkBool32(VK_FALSE)
+                != VkBool32(VK_FALSE)
+#endif
 #if VK_USE_PLATFORM_ANDROID_KHR
             supportPresentation = true  // always true on Android
 #endif
-#if VK_USE_PLATFORM_WIN32_KHR
-            supportPresentation = instance.extensionProc.vkGetPhysicalDeviceWin32PresentationSupportKHR?(physicalDevice.device, $0.queueFamilyIndex) ?? VkBool32(VK_FALSE) != VkBool32(VK_FALSE)
+#if VK_USE_PLATFORM_WAYLAND_KHR
+            if let display = (WaylandApplication.shared as? WaylandApplication)?.display {
+                supportPresentation = instance.extensionProc
+                    .vkGetPhysicalDeviceWaylandPresentationSupportKHR?(
+                        physicalDevice.device,
+                        $0.queueFamilyIndex,
+                        display) ?? VkBool32(VK_FALSE)
+                    != VkBool32(VK_FALSE)
+            }
 #endif
             let queueFamilyIndex = $0.queueFamilyIndex
             let queueCount = $0.queueCount

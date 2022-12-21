@@ -119,6 +119,19 @@ public class VulkanSwapChain: SwapChain {
             return false
         }
 #endif
+#if VK_USE_PLATFORM_WAYLAND_KHR
+        var surfaceCreateInfo = VkWaylandSurfaceCreateInfoKHR()
+        surfaceCreateInfo.sType = VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR
+        surfaceCreateInfo.display = (self.window as! WaylandWindow).display
+        surfaceCreateInfo.surface = (self.window as! WaylandWindow).surface
+
+        err = instance.extensionProc.vkCreateWaylandSurfaceKHR!(instance.instance, &surfaceCreateInfo, device.allocationCallbacks, &self.surface)
+        if (err != VK_SUCCESS)
+        {
+            Log.err("vkCreateWaylandSurfaceKHR failed: \(err)")
+            return false
+        }
+#endif
 
         var surfaceSupported: VkBool32 = VkBool32(VK_FALSE)
         err = vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevice.device, queueFamilyIndex, surface, &surfaceSupported)

@@ -92,7 +92,7 @@ public class AppKitWindow: Window {
 
     public var delegate: WindowDelegate?
 
-    public required init(name: String, style: WindowStyle, delegate: WindowDelegate?) {
+    public required init?(name: String, style: WindowStyle, delegate: WindowDelegate?) {
         var styleMask: NSWindow.StyleMask = []
         let backingStoreType: NSWindow.BackingStoreType = .buffered
         let contentRect = NSMakeRect(0, 0, 640, 480)

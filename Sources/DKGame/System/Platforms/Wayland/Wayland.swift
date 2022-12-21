@@ -10,17 +10,17 @@
 public struct PlatformFactoryWayland: PlatformFactory {
 
     public func sharedApplication() -> Application? {
-        return nil
+        return WaylandApplication.shared
     }
 
     public func runApplication(delegate: ApplicationDelegate?) -> Int {
-        fatalError("Not implemented yet.")
+        return WaylandApplication.run(delegate: delegate)
     }
 
     @MainActor
     public func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?) -> Window? {
-        return nil
+        return WaylandWindow(name: name, style: style, delegate: delegate)
     }
 }
 
-#endif //if ENABLE_UIKIT
+#endif //if ENABLE_WAYLAND

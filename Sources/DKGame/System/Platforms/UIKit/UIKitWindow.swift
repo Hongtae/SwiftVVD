@@ -56,7 +56,7 @@ public class UIKitWindow: Window {
     var window: UIWindow
     var view: UIKitView
 
-    public required init(name: String, style: WindowStyle, delegate: WindowDelegate?) {
+    public required init?(name: String, style: WindowStyle, delegate: WindowDelegate?) {
 
         let viewController = UIKitViewController()
         self.view = viewController.view as! UIKitView

@@ -29,7 +29,11 @@ public struct VulkanInstanceExtensions {
     // var vkGetPhysicalDeviceSurfaceFormatsKHR: PFN_vkGetPhysicalDeviceSurfaceFormatsKHR?
     // var vkGetPhysicalDeviceSurfacePresentModesKHR: PFN_vkGetPhysicalDeviceSurfacePresentModesKHR?
 
-
+#if VK_USE_PLATFORM_WIN32_KHR
+    // VK_KHR_win32_surface
+    var vkCreateWin32SurfaceKHR: PFN_vkCreateWin32SurfaceKHR?
+    var vkGetPhysicalDeviceWin32PresentationSupportKHR: PFN_vkGetPhysicalDeviceWin32PresentationSupportKHR?
+#endif
 #if VK_USE_PLATFORM_WAYLAND_KHR
     // VK_KHR_wayland_surface
     var vkCreateWaylandSurfaceKHR: PFN_vkCreateWaylandSurfaceKHR?
@@ -38,11 +42,6 @@ public struct VulkanInstanceExtensions {
 #if VK_USE_PLATFORM_ANDROID_KHR
     // VK_KHR_android_surface
     var vkCreateAndroidSurfaceKHR: PFN_vkCreateAndroidSurfaceKHR?
-#endif
-#if VK_USE_PLATFORM_WIN32_KHR
-    // VK_KHR_win32_surface
-    var vkCreateWin32SurfaceKHR: PFN_vkCreateWin32SurfaceKHR?
-    var vkGetPhysicalDeviceWin32PresentationSupportKHR: PFN_vkGetPhysicalDeviceWin32PresentationSupportKHR?
 #endif
 
     mutating func load(instance: VkInstance) {
@@ -65,6 +64,11 @@ public struct VulkanInstanceExtensions {
         // self.vkGetPhysicalDeviceSurfaceFormatsKHR = loadInstanceProc(instance, "vkGetPhysicalDeviceSurfaceFormatsKHR", to: PFN_vkGetPhysicalDeviceSurfaceFormatsKHR.self)
         // self.vkGetPhysicalDeviceSurfacePresentModesKHR = loadInstanceProc(instance, "vkGetPhysicalDeviceSurfacePresentModesKHR", to: PFN_vkGetPhysicalDeviceSurfacePresentModesKHR.self)
 
+#if VK_USE_PLATFORM_WIN32_KHR
+        // VK_KHR_win32_surface
+        self.vkCreateWin32SurfaceKHR = loadInstanceProc(instance, "vkCreateWin32SurfaceKHR", to: PFN_vkCreateWin32SurfaceKHR.self)
+        self.vkGetPhysicalDeviceWin32PresentationSupportKHR = loadInstanceProc(instance, "vkGetPhysicalDeviceWin32PresentationSupportKHR", to: PFN_vkGetPhysicalDeviceWin32PresentationSupportKHR.self)
+#endif
 #if VK_USE_PLATFORM_WAYLAND_KHR
         // VK_KHR_wayland_surface
         self.vkCreateWaylandSurfaceKHR = loadInstanceProc(instance, "vkCreateWaylandSurfaceKHR", to: PFN_vkCreateWaylandSurfaceKHR.self)
@@ -74,11 +78,7 @@ public struct VulkanInstanceExtensions {
         // VK_KHR_android_surface
         self.vkCreateAndroidSurfaceKHR = loadInstanceProc(instance, "vkCreateAndroidSurfaceKHR", to: PFN_vkCreateAndroidSurfaceKHR.self)
 #endif
-#if VK_USE_PLATFORM_WIN32_KHR
-        // VK_KHR_win32_surface
-        self.vkCreateWin32SurfaceKHR = loadInstanceProc(instance, "vkCreateWin32SurfaceKHR", to: PFN_vkCreateWin32SurfaceKHR.self)
-        self.vkGetPhysicalDeviceWin32PresentationSupportKHR = loadInstanceProc(instance, "vkGetPhysicalDeviceWin32PresentationSupportKHR", to: PFN_vkGetPhysicalDeviceWin32PresentationSupportKHR.self)
-#endif
+
     }
     func loadInstanceProc<T>(_ instance: VkInstance, _ proc: String, to: T.Type) -> T? {
         if let pfn = vkGetInstanceProcAddr(instance, proc) {
