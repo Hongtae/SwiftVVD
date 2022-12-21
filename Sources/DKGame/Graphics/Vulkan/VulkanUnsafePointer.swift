@@ -36,8 +36,8 @@ func unsafePointerCopy(string str: String, holder: TemporaryBufferHolder) -> Uns
     let buffer = str.withCString { ptr -> UnsafePointer<CChar> in
         let length = str.utf8.count + 1
         let buffer: UnsafeMutablePointer<CChar> = .allocate(capacity: length)
-        strcpy_s(buffer, length, ptr)
-        //strncpy(buffer, ptr, length)
+        //strcpy_s(buffer, length, ptr)
+        strncpy(buffer, ptr, length)
         return UnsafePointer(buffer)
     }
     holder.buffers.append(buffer)

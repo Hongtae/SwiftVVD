@@ -6,17 +6,18 @@
 //
 
 #if ENABLE_WAYLAND
+import Foundation
 
 public class WaylandApplication: Application {
     public func terminate(exitCode : Int) {
 
     }
 
-    static func run(delegate: ApplicationDelegate?) -> Int {
+    public static func run(delegate: ApplicationDelegate?) -> Int {
         0
     }
     
-    static var shared: Application? = nil
+    public static var shared: Application? = nil
 }
 
 #endif //if ENABLE_UIKIT

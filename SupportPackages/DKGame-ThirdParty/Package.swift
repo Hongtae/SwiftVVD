@@ -246,6 +246,7 @@ let package = Package(
             publicHeadersPath: "include",
             cSettings: [
                 .define("_CRT_SECURE_NO_WARNINGS", .when(platforms: [.windows])),
+                .define("HAVE_CONFIG_H"),
             ]),
         .target(
             name: "libFLAC-static",

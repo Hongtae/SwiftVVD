@@ -6,6 +6,7 @@
 //
 
 #if ENABLE_WAYLAND
+import Foundation
 
 @MainActor
 public class WaylandWindow: Window {
@@ -23,7 +24,7 @@ public class WaylandWindow: Window {
 
     public var delegate: WindowDelegate?
 
-    public init(name: String, style: WindowStyle, delegate: WindowDelegate?) {
+    public required init(name: String, style: WindowStyle, delegate: WindowDelegate?) {
 
     }
 

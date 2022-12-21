@@ -10,7 +10,7 @@
  * JPEG software for special applications or support machine-dependent
  * optimizations.  Most users will not need to touch this file.
  */
-
+#pragma once
 
 /*
  * Define BITS_IN_JSAMPLE as either

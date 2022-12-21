@@ -70,10 +70,9 @@ let package = Package(
                 .linkedLibrary("Ole32",     .when(platforms: [.windows])),
                 .linkedLibrary("Imm32",     .when(platforms: [.windows])),
                 .linkedLibrary("Shcore",    .when(platforms: [.windows])),
-                .linkedLibrary("SupportPackages/Vulkan/lib/Win32/vulkan-1", .when(platforms: [.windows])),
-                // .unsafeFlags([
-                //     "-LSupportPackages/Vulkan/lib/Win32"
-                //     ], .when(platforms: [.windows]))
+
+                .linkedLibrary("SupportPackages/Vulkan/libs/Win32/x86_64/vulkan-1", .when(platforms: [.windows])),
+                .unsafeFlags(["-LSupportPackages/Vulkan/libs/Linux/x86_64", "-lvulkan"], .when(platforms: [.linux])),
             ]),
         .target(
             name: "DKGUI",

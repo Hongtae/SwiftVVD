@@ -150,7 +150,7 @@ namespace {
             ctxt->channels = metadata->data.stream_info.channels;
             ctxt->bps = metadata->data.stream_info.bits_per_sample;
 
-            DKLog("FLAC_Metadata total samples: %llu\n", ctxt->totalSamples);
+            DKLog("FLAC_Metadata total samples: %llu\n", (unsigned long long)ctxt->totalSamples);
             DKLog("FLAC_Metadata sample rate: %u Hz\n", ctxt->sampleRate);
             DKLog("FLAC_Metadata channels: %u\n", ctxt->channels);
             DKLog("FLAC_Metadata bits per sample: %u\n", ctxt->bps);
@@ -289,7 +289,7 @@ uint64_t DKAudioStreamFLACSeekRaw(DKAudioStream* stream, uint64_t pos)
     if (context->decoder)
     {
         pos = (pos / context->channels) / (context->bps / 8);   // raw to pcm(sample)
-        pos = std::clamp(pos, 0ULL, context->totalSamples);
+        pos = std::clamp<uint64_t>(pos, 0, context->totalSamples);
         if (FLAC__stream_decoder_seek_absolute(context->decoder, pos))
         {
             FLAC__stream_decoder_process_single(context->decoder);
@@ -311,7 +311,7 @@ uint64_t DKAudioStreamFLACSeekPcm(DKAudioStream* stream, uint64_t pos)
     FLAC_Context* context = reinterpret_cast<FLAC_Context*>(stream->decoder);
     if (context->decoder)
     {
-        pos = std::clamp(pos, 0ULL, context->totalSamples);
+        pos = std::clamp<uint64_t>(pos, 0, context->totalSamples);
         if (FLAC__stream_decoder_seek_absolute(context->decoder, pos))
         {
             FLAC__stream_decoder_process_single(context->decoder);
@@ -334,7 +334,7 @@ double DKAudioStreamFLACSeekTime(DKAudioStream* stream, double t)
     if (context->decoder)
     {
         FLAC__uint64 pos = t * context->sampleRate;
-        pos = std::clamp(pos, 0ULL, context->totalSamples);
+        pos = std::clamp<uint64_t>(pos, 0, context->totalSamples);
         if (FLAC__stream_decoder_seek_absolute(context->decoder, pos))
         {
             FLAC__stream_decoder_process_single(context->decoder);

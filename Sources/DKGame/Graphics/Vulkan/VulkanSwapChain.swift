@@ -268,7 +268,7 @@ public class VulkanSwapChain: SwapChain {
         swapchainCreateInfo.imageColorSpace = self.surfaceFormat.colorSpace
         swapchainCreateInfo.imageExtent = VkExtent2D(width: swapchainExtent.width, height: swapchainExtent.height)
         swapchainCreateInfo.imageUsage = UInt32(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT.rawValue)
-        swapchainCreateInfo.preTransform = VkSurfaceTransformFlagBitsKHR(Int32(preTransform))
+        swapchainCreateInfo.preTransform = VkSurfaceTransformFlagBitsKHR(preTransform)
         swapchainCreateInfo.imageArrayLayers = 1
         swapchainCreateInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE
         swapchainCreateInfo.queueFamilyIndexCount = 0
