@@ -9,13 +9,22 @@
 import Foundation
 import Wayland
 
+private let BTN_MOUSE		= 0x110
+private let BTN_LEFT		= 0x110
+private let BTN_RIGHT		= 0x111
+private let BTN_MIDDLE		= 0x112
+private let BTN_SIDE		= 0x113
+private let BTN_EXTRA		= 0x114
+private let BTN_FORWARD		= 0x115
+private let BTN_BACK		= 0x116
+private let BTN_TASK		= 0x117
 
 private var registryListener = wl_registry_listener(
     global: { data, registry, name, interface, version in
         let app = unsafeBitCast(data, to: AnyObject.self) as! WaylandApplication
 
         let interfaceName = String(utf8String: interface!)!
-        Log.debug("Waynald-Registry interface:\"\(interfaceName)\", version:\(version)")
+        Log.debug("wl_registry_listener.global (interface:\"\(interfaceName)\", version:\(version))")
 
         if strcmp(interface!, wl_compositor_interface.name) == 0 {
             let compositor = wl_registry_bind(registry, name, wl_compositor_interface_ptr, min(version, 4))
@@ -27,12 +36,13 @@ private var registryListener = wl_registry_listener(
             xdg_wm_base_add_listener(app.shell, &xdgWmBaseListener, data)
         }
         else if strcmp(interface!, wl_seat_interface.name) == 0 {
-            let seat = wl_registry_bind(registry, name, wl_seat_interface_ptr, min(version, 2))
+            let seat = wl_registry_bind(registry, name, wl_seat_interface_ptr, min(version, 5))
             app.seat = .init(seat)
             wl_seat_add_listener(app.seat, &seatListener, data)
         }
     },
     global_remove: { (data, registry, name) in
+        Log.debug("wl_registry_listener.global_remove (name: \(String(describing: name)))")
     }
 )
 
@@ -46,7 +56,7 @@ private var xdgWmBaseListener = xdg_wm_base_listener(
 private var seatListener = wl_seat_listener(
     capabilities: { data, seat, capabilities in
         let app = unsafeBitCast(data, to: AnyObject.self) as! WaylandApplication
-        Log.debug("Seat.Listener capabilities: \(capabilities)")
+        Log.debug("wl_seat_listener.capabilities: \(capabilities)")
 
         if capabilities & WL_SEAT_CAPABILITY_POINTER.rawValue != 0 {
             if app.pointer == nil {
@@ -73,72 +83,73 @@ private var seatListener = wl_seat_listener(
         }
     },
     name: { data, seat, name in
+        Log.debug("wl_seat_listener.name: \(String(describing: name))")
     }
 )
 
 private var pointerListener = wl_pointer_listener(
     enter: { data, pointer, serial, surface, x, y in
         let app = unsafeBitCast(data, to: AnyObject.self) as! WaylandApplication
-        Log.debug("Pointer.enter (serial:\(serial), x:\(x), y:\(y))")
+        app.pointerEnter(serial: serial, surface: surface, x: wl_fixed_to_double(x), y: wl_fixed_to_double(y))
     },
     leave: { data, pointer, serial, surface in
         let app = unsafeBitCast(data, to: AnyObject.self) as! WaylandApplication
-        Log.debug("Pointer.leave (serial:\(serial))")
+        app.pointerLeave(serial: serial, surface: surface)
     },
     motion: { data, pointer, time, x, y in
         let app = unsafeBitCast(data, to: AnyObject.self) as! WaylandApplication
-        Log.debug("Pointer.motion (x:\(x), y:\(y))")
+        app.pointerMotion(time: time, x: wl_fixed_to_double(x), y: wl_fixed_to_double(y))
     },
     button: { data, pointer, serial, time, button, state in
         let app = unsafeBitCast(data, to: AnyObject.self) as! WaylandApplication
-        Log.debug("Pointer.button (serial:\(serial), state:\(state))")
+        app.pointerButton(serial: serial, time: time, button: button, state: state)
     },
     axis: {data, pointer, time, axis, value in
         let app = unsafeBitCast(data, to: AnyObject.self) as! WaylandApplication
-        Log.debug("Pointer.axis (axis:\(axis), value:\(value))")
+        app.pointerAxis(time: time, axis: axis, value: wl_fixed_to_double(value))
     },
     frame: { data, pointer in
         let app = unsafeBitCast(data, to: AnyObject.self) as! WaylandApplication
-        Log.debug("Pointer.frame")
+        app.pointerFrame()
     },
-    axis_source: { data, pointer, axis_source in
+    axis_source: { data, pointer, source in
         let app = unsafeBitCast(data, to: AnyObject.self) as! WaylandApplication
-        Log.debug("Pointer.axis_source (axis_source:\(axis_source))")
+        app.pointerAxis(source: source)
     },
     axis_stop: { data, pointer, time, axis in
         let app = unsafeBitCast(data, to: AnyObject.self) as! WaylandApplication
-        Log.debug("Pointer.axis_top (axis:\(axis))")
+        app.pointerAxisStop(time: time, axis: axis)
     },
     axis_discrete: { data, pointer, axis, discrete in
         let app = unsafeBitCast(data, to: AnyObject.self) as! WaylandApplication
-        Log.debug("Pointer.axis_discrete (axis:\(axis), discrete:\(discrete))")
+        app.pointerAxis(axis, discrete: discrete)
     }
 )
 
 private var keyboardListener = wl_keyboard_listener(
     keymap: { data, keyboard, format, fd, size in
         let app = unsafeBitCast(data, to: AnyObject.self) as! WaylandApplication
-        Log.debug("Keyboard.keymap (format:\(format), fd:\(fd), size:\(size))")
+        Log.debug("wl_keyboard_listener.keymap (format:\(format), fd:\(fd), size:\(size))")
     },
     enter: { data, keyboard, serial, surface, keys in
         let app = unsafeBitCast(data, to: AnyObject.self) as! WaylandApplication
-        Log.debug("Keyboard.enter (serial:\(serial))")
+        Log.debug("wl_keyboard_listener.enter (serial:\(serial))")
     },
     leave: { data, keyboard, serial, surface in
         let app = unsafeBitCast(data, to: AnyObject.self) as! WaylandApplication
-        Log.debug("Keyboard.leave (serial:\(serial))")
+        Log.debug("wl_keyboard_listener.leave (serial:\(serial))")
     },
     key: { data, keyboard, serial, time, key, state in
         let app = unsafeBitCast(data, to: AnyObject.self) as! WaylandApplication
-        Log.debug("Keyboard.key (serial:\(serial), time:\(time), key:\(key), state:\(state))")
+        Log.debug("wl_keyboard_listener.key (serial:\(serial), time:\(time), key:\(key), state:\(state))")
     },
     modifiers: { data, keyboard, serial, depressed, latched, locked, group in
         let app = unsafeBitCast(data, to: AnyObject.self) as! WaylandApplication
-        Log.debug("Keyboard.modifiers (serial:\(serial), depressed:\(depressed), latched:\(latched), locked:\(locked), group:\(group))")
+        Log.debug("wl_keyboard_listener.modifiers (serial:\(serial), depressed:\(depressed), latched:\(latched), locked:\(locked), group:\(group))")
     },
     repeat_info: { data, keyboard, rate, delay in
         let app = unsafeBitCast(data, to: AnyObject.self) as! WaylandApplication
-        Log.debug("Keyboard.repeat_info (rate:\(rate), delay:\(delay))")
+        Log.debug("wl_keyboard_listener.repeat_info (rate:\(rate), delay:\(delay))")
     }
 )
 
@@ -168,13 +179,6 @@ public class WaylandApplication: Application {
         let display = app.display
         var result = 0
 
-        // while true {
-        //     Log.debug("wl_display_dispatch")
-        //     if wl_display_dispatch(display) < 0 {
-        //         break
-        //     }
-        // }
-
         while true {
             while wl_display_prepare_read(display) != 0 {
                 wl_display_dispatch_pending(display)
@@ -191,21 +195,9 @@ public class WaylandApplication: Application {
             let next = RunLoop.main.limitDate(forMode: .default)
             let s = next?.timeIntervalSinceNow ?? 1.0
             if s > 0.0 {
-                // sleep for s
+                sched_yield()
             }
         }
-
-
-        // Log.debug("LOG - \(#file):\(#line)")
-        // let fd = wl_display_get_fd(display)
-        // let src = DispatchSource.makeReadSource(fileDescriptor: fd, queue: DispatchQueue.main)
-        // src.setEventHandler(qos: .userInteractive) {
-        //     wl_display_flush(display)
-        //     wl_display_read_events(display)
-        //     wl_display_dispatch_pending(display)
-        //     Log.info("wl_display_dispatch_pending")
-        // }
-        // dispatchMain()
 
         delegate?.finalize(application: app)
         self.shared = nil        
@@ -221,7 +213,20 @@ public class WaylandApplication: Application {
     private struct WeakWindow {
         weak var window: WaylandWindow?
     }
-    private var windowList: [WeakWindow] = []
+    private var windowSurfaceMap: [OpaquePointer: WeakWindow] = [:]
+    func bindSurface(_ surface: OpaquePointer?, with window: WaylandWindow) {
+        if let surface = surface {
+            windowSurfaceMap[surface] = WeakWindow(window: window)
+        }
+    }
+    func window(forSurface surface: OpaquePointer?) -> WaylandWindow? {
+        if let surface = surface { return windowSurfaceMap[surface]?.window }
+        return nil
+    }
+    func updateSurfaces() {
+        let activeWindows = self.windowSurfaceMap.compactMapValues { $0.window }
+        self.windowSurfaceMap = activeWindows.mapValues { WeakWindow(window: $0) }
+    }
 
     private init?() {
         Log.info("Wayland version: \(WAYLAND_VERSION)")
@@ -238,7 +243,7 @@ public class WaylandApplication: Application {
         }
 
         wl_registry_add_listener(registry, &registryListener, unsafeBitCast(self as AnyObject, to: UnsafeMutableRawPointer.self))
-        wl_display_dispatch(display)
+        // wl_display_dispatch(display)
         wl_display_roundtrip(display)
 
         if self.compositor == nil || self.shell == nil {
@@ -266,6 +271,82 @@ public class WaylandApplication: Application {
         wl_compositor_destroy(compositor)
         wl_registry_destroy(registry)
         wl_display_disconnect(display)
+    }
+
+    var pointerTarget: WaylandWindow? = nil
+    var pointerLocation: CGPoint = .zero    // location in target surface
+
+    fileprivate func pointerEnter(serial: UInt32, surface: OpaquePointer?, x: Double, y: Double) {
+        pointerTarget = self.window(forSurface: surface)
+        //Log.debug("wl_pointer_listener.enter (serial:\(serial), x:\(x), y:\(y))")
+    }
+
+    fileprivate func pointerLeave(serial: UInt32, surface: OpaquePointer?) {
+        pointerTarget = nil
+        //Log.debug("wl_pointer_listener.leave (serial:\(serial))")
+    }
+
+    fileprivate func pointerMotion(time: UInt32, x: Double, y: Double) {
+        if let target = pointerTarget {
+            pointerLocation = CGPoint(x: x, y: y)
+            Task { @MainActor in
+                target.postMouseEvent(MouseEvent(type: .move,
+                                      window: target,
+                                      device: .genericMouse,
+                                      deviceID: 0,
+                                      buttonID: 0,
+                                      location: pointerLocation))
+            }
+        }
+        //Log.debug("wl_pointer_listener.motion (time:\(time), x:\(x), y:\(y))")
+    }
+
+    fileprivate func pointerButton(serial: UInt32, time: UInt32, button: UInt32, state: UInt32) {
+        if let target = pointerTarget {
+            let buttonID = Int(button) - BTN_MOUSE
+            let type: MouseEventType = state == 0 ? .buttonUp : .buttonDown
+            Task { @MainActor in
+                target.postMouseEvent(MouseEvent(type: type,
+                                                 window: target,
+                                                 device: .genericMouse,
+                                                 deviceID: 0,
+                                                 buttonID: buttonID,
+                                                 location: pointerLocation))
+            }
+        }
+        //Log.debug("wl_pointer_listener.button (serial:\(serial), time:\(time), button:\(button), state:\(state))")
+    }
+
+    fileprivate func pointerAxis(time: UInt32, axis: UInt32, value: Double) {
+        if let target = pointerTarget {
+            let delta = CGPoint(x: 0, y: value)
+            Task { @MainActor in
+                target.postMouseEvent(MouseEvent(type: .wheel,
+                                                 window: target,
+                                                 device: .genericMouse,
+                                                 deviceID: 0,
+                                                 buttonID: 2,
+                                                 location: pointerLocation,
+                                                 delta: delta))
+            }
+        }
+        //Log.debug("wl_pointer_listener.axis (time:\(time), axis:\(axis), value:\(value))")
+    }
+
+    fileprivate func pointerFrame() { // end of single-frame of event sequence.
+        // Log.debug("wl_pointer_listener.frame")
+    }
+
+    fileprivate func pointerAxis(source: UInt32) {
+        //Log.debug("wl_pointer_listener.axis_source (source:\(source))")
+    }
+
+    fileprivate func pointerAxisStop(time: UInt32, axis: UInt32) {
+        //Log.debug("wl_pointer_listener.axis_top (time:\(time), axis:\(axis))")
+    }
+
+    fileprivate func pointerAxis(_ axis: UInt32, discrete: Int32) {
+        //Log.debug("wl_pointer_listener.axis_discrete (axis:\(axis), discrete:\(discrete))")
     }
 }
 

@@ -16,8 +16,9 @@ var xdgSurfaceListener = xdg_surface_listener(
 
         Log.debug("xdg_surface_listener.configure (serial:\(serial))")
 
+        xdg_surface_ack_configure(surface, serial)
+
         Task { @MainActor in 
-            xdg_surface_ack_configure(surface, serial)
             window.xdgSurfaceConfigured = true
         }
     }
@@ -41,18 +42,32 @@ var xdgToplevelListener = xdg_toplevel_listener(
 @MainActor
 public class WaylandWindow: Window {
 
-    public var activated: Bool = false
-    public var visible: Bool = false
+    public private(set) var activated: Bool = false
+    public private(set) var visible: Bool = false
 
-    public var contentBounds: CGRect = CGRect(x: 0, y: 0, width: 800, height: 600)
-    public var windowFrame: CGRect = CGRect(x: 0, y: 0, width: 800, height: 600)
-    public var contentScaleFactor: CGFloat = 1.0
-    public var resolution: CGSize = CGSize(width: 800, height: 600)
+    public private(set) var contentBounds: CGRect = .null
+    public private(set) var windowFrame: CGRect = .null
+    public private(set) var contentScaleFactor: CGFloat = 1
+
+    public var resolution: CGSize {
+        get { _resolution }
+        set { _resolution = CGSize(width: max(newValue.width, 1), height: max(newValue.height, 1)) }
+    }
+    private var _resolution: CGSize {
+        didSet {
+            if oldValue != _resolution {
+                self.postWindowEvent(type: .resized)
+            }
+        }
+    }
 
     public var origin: CGPoint = .zero
-    public var contentSize: CGSize = CGSize(width: 800, height: 600)
+    public var contentSize: CGSize {
+        get { self.contentBounds.size }
+        set { self.resolution = newValue * self.contentScaleFactor }
+    }
 
-    public var delegate: WindowDelegate?
+    public private(set) var delegate: WindowDelegate?
 
     private(set) var display: OpaquePointer?
     private(set) var surface: OpaquePointer?
@@ -84,36 +99,59 @@ public class WaylandWindow: Window {
             return nil
         }
 
+        self.delegate = delegate
+        self._resolution = CGSize(width: 800, height: 600)
+        self.contentScaleFactor = 1.0
+        self.contentBounds = CGRect(origin: .zero, size: self._resolution * (1.0 / self.contentScaleFactor))
+        self.windowFrame = self.contentBounds
+
         let context = unsafeBitCast(self as AnyObject, to: UnsafeMutableRawPointer.self)
         xdg_surface_add_listener(self.xdgSurface, &xdgSurfaceListener, context)
 
-        self.xdgToplevel = xdg_surface_get_toplevel(xdgSurface)
+        self.xdgToplevel = xdg_surface_get_toplevel(self.xdgSurface)
         xdg_toplevel_add_listener(self.xdgToplevel, &xdgToplevelListener, context)
         xdg_toplevel_set_title(self.xdgToplevel, name)
-
         wl_surface_commit(self.surface)
+
+        Task { @MainActor in
+            app.bindSurface(self.surface, with: self)
+            self.postWindowEvent(type: .created) 
+        }
     }
 
     deinit {
+        Task { @MainActor in 
+            if let app = (WaylandApplication.shared as? WaylandApplication) {
+                app.updateSurfaces()
+            }
+        }
+
         xdg_toplevel_destroy(self.xdgToplevel)
         xdg_surface_destroy(self.xdgSurface)
         wl_surface_destroy(self.surface)
     }
 
     public func show() {
-
+        self.visible = true
+        Task { self.postWindowEvent(type: .shown) }
     }
 
     public func hide() {
-
+        self.activated = false
+        self.visible = false
+        Task { self.postWindowEvent(type: .hidden) }
     }
 
     public func activate() {
-
+        self.activated = true
+        self.visible = true
+        Task { self.postWindowEvent(type: .activated) }
     }
 
     public func minimize() {
-
+        self.activated = false
+        self.visible = false
+        Task { self.postWindowEvent(type: .minimized) }
     }
 
     public func showMouse(_: Bool, forDeviceID: Int) {
