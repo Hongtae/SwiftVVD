@@ -46,7 +46,6 @@ func appFinalize() {
 }
 
 public class Platform {
-
     public class var factory: PlatformFactory {
 #if ENABLE_APPKIT
         PlatformFactoryAppKit()
@@ -57,7 +56,8 @@ public class Platform {
 #elseif ENABLE_WAYLAND
         PlatformFactoryWayland()
 #else
-        fatalError("Unknown platform")
+#warning("Unknown platform, headless mode will be used")
+        PlatformFactoryHeadless()
 #endif
     }
 
