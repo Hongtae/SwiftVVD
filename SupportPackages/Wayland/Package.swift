@@ -12,8 +12,12 @@ let package = Package(
     targets: [
         .target(name: "Wayland",
             path: ".",
+            exclude: ["Sources/xdg-shell-protocol.c"],
             sources: ["Sources"],
-            publicHeadersPath: "Sources"
+            publicHeadersPath: "Sources",
+            cSettings: [
+                .define("ENABLE_WAYLAND", .when(platforms: [.linux]))
+            ]
         )
     ],
     cLanguageStandard: .c11
