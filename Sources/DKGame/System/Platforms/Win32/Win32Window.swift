@@ -130,7 +130,7 @@ public class Win32Window : Window {
         return atom
     }()
 
-    public required init(name: String, style: WindowStyle, delegate: WindowDelegate?) {
+    public required init?(name: String, style: WindowStyle, delegate: WindowDelegate?) {
 
         OleInitialize(nil)
 
@@ -142,6 +142,7 @@ public class Win32Window : Window {
 
         if self.create() == nil {
             Log.err("CreateWindow failed: \(win32ErrorString(GetLastError()))")
+            return nil
         }
     }
 

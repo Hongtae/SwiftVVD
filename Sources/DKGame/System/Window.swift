@@ -134,7 +134,7 @@ public protocol Window: AnyObject {
 
     var delegate: WindowDelegate? { get }
 
-    init(name: String, style: WindowStyle, delegate: WindowDelegate?)
+    init?(name: String, style: WindowStyle, delegate: WindowDelegate?)
 
     func show()
     func hide()

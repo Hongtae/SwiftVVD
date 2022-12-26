@@ -149,8 +149,8 @@ uint64_t DKAudioStreamWaveSeekRaw(DKAudioStream* stream, uint64_t pos)
         if (context->formatExt.format.blockAlign > 0)
             pos = pos - (pos % context->formatExt.format.blockAlign);
 
-        pos = DKSTREAM_SET_POSITION(context->stream, context->dataOffset + std::clamp(pos, 0ULL, context->dataSize));
-        return std::clamp(pos - context->dataOffset, 0ULL, context->dataSize);
+        pos = DKSTREAM_SET_POSITION(context->stream, context->dataOffset + std::clamp<uint64_t>(pos, 0, context->dataSize));
+        return std::clamp<uint64_t>(pos - context->dataOffset, 0, context->dataSize);
     }
     return 0;
 }

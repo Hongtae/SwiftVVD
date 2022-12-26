@@ -23,6 +23,9 @@ let package = Package(
             name: "Vulkan",
             path: "SupportPackages/Vulkan"),
         .package(
+            name: "Wayland",
+            path: "SupportPackages/Wayland"),
+        .package(
             url: "https://github.com/Hongtae/swift-openal-soft.git",
             branch: "main"),
     ],
@@ -39,6 +42,10 @@ let package = Package(
                     name: "Vulkan",
                     package: "Vulkan",
                     condition: .when(platforms: [.windows, .linux, .android])),
+                .product(
+                    name: "Wayland",
+                    package: "Wayland",
+                    condition: .when(platforms: [.linux])),
                 .product(
                     name:"OpenAL",
                     package: "swift-openal-soft"),
@@ -70,10 +77,14 @@ let package = Package(
                 .linkedLibrary("Ole32",     .when(platforms: [.windows])),
                 .linkedLibrary("Imm32",     .when(platforms: [.windows])),
                 .linkedLibrary("Shcore",    .when(platforms: [.windows])),
-                .linkedLibrary("SupportPackages/Vulkan/lib/Win32/vulkan-1", .when(platforms: [.windows])),
-                // .unsafeFlags([
-                //     "-LSupportPackages/Vulkan/lib/Win32"
-                //     ], .when(platforms: [.windows]))
+
+                .linkedLibrary("SupportPackages/Vulkan/libs/Win32/x86_64/vulkan-1", .when(platforms: [.windows])),
+
+                .unsafeFlags([
+                    "-LSupportPackages/Vulkan/libs/Linux/x86_64",
+                    "-lvulkan",
+                    "-lwayland-client"
+                ], .when(platforms: [.linux])),
             ]),
         .target(
             name: "DKGUI",
@@ -100,5 +111,7 @@ let package = Package(
                 .copy("Resources")
             ],
             linkerSettings: []),
-    ]
+    ],
+    cLanguageStandard: .c11,
+    cxxLanguageStandard: .cxx20
 )

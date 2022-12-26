@@ -160,21 +160,26 @@ class MyApplicationDelegate: ApplicationDelegate {
 
     func initialize(application: Application) {
         Log.debug("app initialize, isMainThread: \(Thread.isMainThread)")
-
+        
         Task { @MainActor in
             self.windowDelegate = MyWindowDelegate()
             self.window = makeWindow(name: "TestApp1",
                                      style: [.genericWindow, .acceptFileDrop],
                                      delegate: self.windowDelegate)
-            self.window?.resolution = CGSize(width: 800, height: 600)
+            if let window {
+                window.resolution = CGSize(width: 800, height: 600)              
 
-            Task { @ScreenActor in
-                self.screen = Screen()
-                self.frame = MyFrame()
-                self.screen?.window = self.window
-                self.screen?.frame = self.frame
+                Task { @ScreenActor in
+                    self.screen = Screen()
+                    self.frame = MyFrame()
+                    self.screen?.window = self.window
+                    self.screen?.frame = self.frame
 
-                await self.window?.activate()
+                    await self.window?.activate()
+                }
+            } else {
+                Log.error("ERROR: makeWindow failed.")
+                application.terminate(exitCode: 1234)
             }
         }
     }

@@ -119,6 +119,19 @@ public class VulkanSwapChain: SwapChain {
             return false
         }
 #endif
+#if VK_USE_PLATFORM_WAYLAND_KHR
+        var surfaceCreateInfo = VkWaylandSurfaceCreateInfoKHR()
+        surfaceCreateInfo.sType = VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR
+        surfaceCreateInfo.display = (self.window as! WaylandWindow).display
+        surfaceCreateInfo.surface = (self.window as! WaylandWindow).surface
+
+        err = instance.extensionProc.vkCreateWaylandSurfaceKHR!(instance.instance, &surfaceCreateInfo, device.allocationCallbacks, &self.surface)
+        if (err != VK_SUCCESS)
+        {
+            Log.err("vkCreateWaylandSurfaceKHR failed: \(err)")
+            return false
+        }
+#endif
 
         var surfaceSupported: VkBool32 = VkBool32(VK_FALSE)
         err = vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevice.device, queueFamilyIndex, surface, &surfaceSupported)
@@ -254,10 +267,10 @@ public class VulkanSwapChain: SwapChain {
         }
 
         // Find the transformation of the surface
-        var preTransform = VkSurfaceTransformFlagsKHR(surfaceCaps.currentTransform.rawValue)
+        var preTransform = VkSurfaceTransformFlagBitsKHR(surfaceCaps.currentTransform.rawValue)
         if surfaceCaps.supportedTransforms & UInt32(VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR.rawValue) != 0 {
             // We prefer a non-rotated transform
-            preTransform = VkSurfaceTransformFlagsKHR(VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR.rawValue)
+            preTransform = VkSurfaceTransformFlagBitsKHR(VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR.rawValue)
         }
 
         var swapchainCreateInfo = VkSwapchainCreateInfoKHR()
@@ -268,7 +281,7 @@ public class VulkanSwapChain: SwapChain {
         swapchainCreateInfo.imageColorSpace = self.surfaceFormat.colorSpace
         swapchainCreateInfo.imageExtent = VkExtent2D(width: swapchainExtent.width, height: swapchainExtent.height)
         swapchainCreateInfo.imageUsage = UInt32(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT.rawValue)
-        swapchainCreateInfo.preTransform = VkSurfaceTransformFlagBitsKHR(Int32(preTransform))
+        swapchainCreateInfo.preTransform = preTransform
         swapchainCreateInfo.imageArrayLayers = 1
         swapchainCreateInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE
         swapchainCreateInfo.queueFamilyIndexCount = 0

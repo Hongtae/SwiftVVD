@@ -246,6 +246,7 @@ let package = Package(
             publicHeadersPath: "include",
             cSettings: [
                 .define("_CRT_SECURE_NO_WARNINGS", .when(platforms: [.windows])),
+                .define("HAVE_CONFIG_H"),
             ]),
         .target(
             name: "libFLAC-static",
@@ -319,7 +320,7 @@ let package = Package(
                 "C/XzEnc.c",
                 "C/XzIn.c"
                 ],
-            publicHeadersPath: "C",
+            publicHeadersPath: ".",
             cSettings: [
                 .define("_7ZIP_ST"),
                 //.unsafeFlags(["-march=native"]),

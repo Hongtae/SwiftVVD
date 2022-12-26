@@ -46,14 +46,32 @@ func appFinalize() {
 }
 
 public class Platform {
+    public static var headlessMode: Bool = {
+        let key = "DKGAME_HEADLESS"
+        let value = ProcessInfo.processInfo.environment[key] ?? "0"
+        if let v = Int(value), v != 0 {
+            Log.info("HEADLESS-MODE: (\(key)=\(value))")
+            return true 
+        }
+        return false
+    }()
 
     public class var factory: PlatformFactory {
+        if headlessMode {
+            return PlatformFactoryHeadless()
+        }
+
 #if ENABLE_APPKIT
-        PlatformFactoryAppKit()
+        return PlatformFactoryAppKit()
 #elseif ENABLE_UIKIT
-        PlatformFactoryUIKit()
+        return PlatformFactoryUIKit()
 #elseif ENABLE_WIN32
-        PlatformFactoryWin32()
+        return PlatformFactoryWin32()
+#elseif ENABLE_WAYLAND
+        return PlatformFactoryWayland()
+#else
+#warning("Unknown platform, headless mode will be used")
+        return PlatformFactoryHeadless()
 #endif
     }
 
