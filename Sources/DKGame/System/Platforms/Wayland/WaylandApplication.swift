@@ -164,7 +164,7 @@ public class WaylandApplication: Application {
     fileprivate(set) var pointer: OpaquePointer?
     fileprivate(set) var keyboard: OpaquePointer?
 
-    private var terminateRequestedWithExitCode: Int? = nil
+    private var requestExitWithCode: Int? = nil
 
     public static func run(delegate: ApplicationDelegate?) -> Int {
         guard let app = WaylandApplication() else {
@@ -173,7 +173,6 @@ public class WaylandApplication: Application {
         }
 
         self.shared = app
-        app.terminateRequestedWithExitCode = nil
         delegate?.initialize(application: app)
 
         let display = app.display
@@ -187,7 +186,7 @@ public class WaylandApplication: Application {
             wl_display_read_events(display)
             wl_display_dispatch_pending(display)
 
-            if let code = app.terminateRequestedWithExitCode {
+            if let code = app.requestExitWithCode {
                 result = code
                 break
             }
@@ -195,7 +194,7 @@ public class WaylandApplication: Application {
             let next = RunLoop.main.limitDate(forMode: .default)
             let s = next?.timeIntervalSinceNow ?? 1.0
             if s > 0.0 {
-                sched_yield()
+                threadYield()
             }
         }
 
@@ -205,7 +204,7 @@ public class WaylandApplication: Application {
     }
 
     public func terminate(exitCode : Int) {
-        terminateRequestedWithExitCode = exitCode
+        Task { @MainActor in requestExitWithCode = exitCode }
     }
     
     public static var shared: Application? = nil
