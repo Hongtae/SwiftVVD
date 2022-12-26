@@ -19,9 +19,9 @@ Cross-Platform Game Engine for swift programming language.
 * macOS 12.0 (Monterey) or later
   * [Xcode 13 or later](https://developer.apple.com/xcode/)
 * Linux / WSL2
-  * Vulkan SDK [Tarball](https://vulkan.lunarg.com/doc/view/latest/linux/getting_started.html), [Ubuntu](https://vulkan.lunarg.com/doc/view/latest/linux/getting_started_ubuntu.html)
+  * [Vulkan SDK](https://vulkan.lunarg.com/doc/sdk/latest/linux/getting_started.html)
   * [Swift 5.7 or later](https://www.swift.org/getting-started/#installing-swift)
-  * [Wayland](https://www.swift.org/getting-started/#installing-swift)
+  * [Wayland (libwayland-dev)](https://wayland.freedesktop.org)
   
 ### Build & Run
 ```
