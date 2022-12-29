@@ -31,7 +31,7 @@ private var registryListener = wl_registry_listener(
             app.compositor = .init(compositor)
         }
         else if strcmp(interface!, xdg_wm_base_interface.name) == 0 {
-            let shell = wl_registry_bind(registry, name, xdg_wm_base_interface_ptr, min(version, 1))
+            let shell = wl_registry_bind(registry, name, xdg_wm_base_interface_ptr, min(version, 4))
             app.shell = .init(shell)
             xdg_wm_base_add_listener(app.shell, &xdgWmBaseListener, data)
         }
