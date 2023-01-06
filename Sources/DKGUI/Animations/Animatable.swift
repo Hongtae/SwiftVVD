@@ -22,3 +22,51 @@ extension Animatable where Self: VectorArithmetic {
 extension Animatable where Self.AnimatableData == EmptyAnimatableData {
     public var animatableData: EmptyAnimatableData { .init() }
 }
+
+public struct AnimatablePair<First, Second>: VectorArithmetic where First: VectorArithmetic, Second: VectorArithmetic {
+    public var first: First
+    public var second: Second
+
+    public init(_ first: First, _ second: Second) {
+        self.first = first
+        self.second = second
+    }
+
+    public static var zero: AnimatablePair<First, Second> {
+        AnimatablePair<First, Second>(.zero, .zero)
+    }
+
+    public static func += (lhs: inout AnimatablePair<First, Second>, rhs: AnimatablePair<First, Second>) {
+        lhs = lhs + rhs
+    }
+
+    public static func -= (lhs: inout AnimatablePair<First, Second>, rhs: AnimatablePair<First, Second>) {
+        lhs = lhs - rhs
+    }
+
+    public static func + (lhs: AnimatablePair<First, Second>, rhs: AnimatablePair<First, Second>) -> AnimatablePair<First, Second> {
+        return AnimatablePair<First, Second>(lhs.first + rhs.first, lhs.second + rhs.second)
+    }
+
+    public static func - (lhs: AnimatablePair<First, Second>, rhs: AnimatablePair<First, Second>) -> AnimatablePair<First, Second> {
+        return AnimatablePair<First, Second>(lhs.first - rhs.first, lhs.second - rhs.second)
+    }
+
+    public mutating func scale(by rhs: Double) {
+        self.first.scale(by: rhs)
+        self.second.scale(by: rhs)
+    }
+
+    public var magnitudeSquared: Double {
+        self.first.magnitudeSquared + self.second.magnitudeSquared
+    }
+}
+
+extension AnimatablePair: Equatable {
+    public static func == (a: AnimatablePair<First, Second>, b: AnimatablePair<First, Second>) -> Bool {
+        return a.first == b.first && a.second == b.second
+    }
+}
+
+extension AnimatablePair: Sendable where First: Sendable, Second: Sendable {
+}

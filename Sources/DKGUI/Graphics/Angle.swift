@@ -44,7 +44,7 @@ extension Double: VectorArithmetic {
     }
 
     public var magnitudeSquared: Double {
-        self
+        self * self
     }
 }
 

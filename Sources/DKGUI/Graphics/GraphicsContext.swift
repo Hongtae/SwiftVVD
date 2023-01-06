@@ -253,7 +253,7 @@ public struct GraphicsContext {
         fatalError()
     }
     public func stroke(_ path: Path, with shading: GraphicsContext.Shading, lineWidth: CGFloat = 1) {
-        fatalError()
+        stroke(path, with: shading, style: StrokeStyle(lineWidth: lineWidth))
     }
 
     public struct ResolvedImage {

@@ -13,7 +13,7 @@ public enum RoundedCornerStyle: Equatable, Hashable {
 }
 
 public struct FillStyle: Equatable, Sendable {
-    public var isEOFilled: Bool
+    public var isEOFilled: Bool // true: even-odd rule, false: non-zero winding number rule.
     public var isAntialiased: Bool
 
     public init(eoFill: Bool = false, antialiased: Bool = true) {

@@ -7,13 +7,6 @@
 
 import Foundation
 
-#if canImport(CoreGraphics)
-import CoreGraphics
-public typealias CGAffineTransform = CoreGraphics.CGAffineTransform
-#else
-public typealias CGAffineTransform = AffineTransform
-#endif
-
 /*-------
   a  b  0
   c  d  0
