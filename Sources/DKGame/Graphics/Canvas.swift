@@ -379,7 +379,7 @@ private class CanvasPipelineStates {
             .init(step: .vertex, stride: MemoryLayout<VertexData>.stride, bufferIndex: 0)
         ]
         pipelineDescriptor.primitiveTopology = .triangle
-        pipelineDescriptor.frontFace = .ccw
+        pipelineDescriptor.frontFace = .counterClockwise
         pipelineDescriptor.triangleFillMode = .fill
         pipelineDescriptor.depthClipMode = .clip
         pipelineDescriptor.cullMode = .none

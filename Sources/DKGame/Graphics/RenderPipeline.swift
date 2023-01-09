@@ -43,9 +43,9 @@ public enum CullMode {
     case back
 }
 
-public enum FrontFace {
-    case cw
-    case ccw
+public enum Winding {
+    case clockwise
+    case counterClockwise
 }
 
 public enum DepthClipMode {
@@ -66,7 +66,7 @@ public struct RenderPipelineDescriptor {
     public var triangleFillMode: TriangleFillMode
     public var depthClipMode: DepthClipMode
     public var cullMode: CullMode
-    public var frontFace: FrontFace
+    public var frontFace: Winding
     public var rasterizationEnabled: Bool
 
     public init(vertexFunction: ShaderFunction? = nil,
@@ -79,7 +79,7 @@ public struct RenderPipelineDescriptor {
                 triangleFillMode: TriangleFillMode = .fill,
                 depthClipMode: DepthClipMode = .clip,
                 cullMode: CullMode = .back,
-                frontFace: FrontFace = .ccw,
+                frontFace: Winding = .counterClockwise,
                 rasterizationEnabled: Bool = true) {
         self.vertexFunction = vertexFunction
         self.fragmentFunction = fragmentFunction

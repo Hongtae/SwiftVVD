@@ -624,8 +624,8 @@ public class MetalGraphicsDevice: GraphicsDevice {
         case .lines:            state.triangleFillMode = .lines
         }
         switch descriptor.frontFace {
-        case .cw:               state.frontFacingWinding = .clockwise
-        case .ccw:              state.frontFacingWinding = .counterClockwise
+        case .clockwise:        state.frontFacingWinding = .clockwise
+        case .counterClockwise: state.frontFacingWinding = .counterClockwise
         }
         switch descriptor.cullMode {
         case .none:             state.cullMode = .none

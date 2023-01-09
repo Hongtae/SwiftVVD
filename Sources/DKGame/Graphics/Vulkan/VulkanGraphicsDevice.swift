@@ -94,7 +94,9 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         requiredExtensions.append(VK_KHR_SWAPCHAIN_EXTENSION_NAME)
         requiredExtensions.append(VK_KHR_MAINTENANCE1_EXTENSION_NAME)
         requiredExtensions.append(VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME)
-        // requiredExtensions.append(VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME)
+        requiredExtensions.append(VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME)
+        requiredExtensions.append(VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME)
+        requiredExtensions.append(VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME)
 
         optionalExtensions.append(VK_KHR_MAINTENANCE2_EXTENSION_NAME)
         optionalExtensions.append(VK_KHR_MAINTENANCE3_EXTENSION_NAME)
@@ -131,10 +133,12 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             }, holder: tempHolder)
         }
 
-#if false
         // VK_EXT_extended_dynamic_state
-        
-        let extendedDynamicStateFeatures: [VkPhysicalDeviceExtendedDynamicStateFeaturesEXT] = []
+        let extendedDynamicStateFeatures: [VkPhysicalDeviceExtendedDynamicStateFeaturesEXT] = [
+            VkPhysicalDeviceExtendedDynamicStateFeaturesEXT(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT, nil, VK_DYNAMIC_STATE_CULL_MODE_EXT),
+            VkPhysicalDeviceExtendedDynamicStateFeaturesEXT(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT, nil, VK_DYNAMIC_STATE_FRONT_FACE_EXT),
+            VkPhysicalDeviceExtendedDynamicStateFeaturesEXT(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT, nil, VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY_EXT),
+        ]
         if extendedDynamicStateFeatures.count > 0 {
             let count = extendedDynamicStateFeatures.count
             let pointerCopy = unsafePointerCopy(extendedDynamicStateFeatures, holder: tempHolder)
@@ -155,7 +159,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
 
             deviceCreateInfo.pNext = UnsafeRawPointer(pointerCopy)
         }
-#endif
+
         var device: VkDevice? = nil
         let err = vkCreateDevice(physicalDevice.device, &deviceCreateInfo, instance.allocationCallbacks, &device)
         if err != VK_SUCCESS {
@@ -801,6 +805,13 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK,
             VK_DYNAMIC_STATE_STENCIL_WRITE_MASK,
             VK_DYNAMIC_STATE_STENCIL_REFERENCE,
+            // VK_EXT_extended_dynamic_state
+            VK_DYNAMIC_STATE_CULL_MODE,
+            VK_DYNAMIC_STATE_FRONT_FACE,
+            VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY,
+            // VK_EXT_extended_dynamic_state2
+            // VK_EXT_extended_dynamic_state3
+            VK_DYNAMIC_STATE_POLYGON_MODE_EXT,
         ]
         var dynamicState = VkPipelineDynamicStateCreateInfo()
         dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO

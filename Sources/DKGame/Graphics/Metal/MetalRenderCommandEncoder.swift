@@ -274,6 +274,51 @@ public class MetalRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
+    public func setCullMode(_ mode: CullMode) {
+        assert(self.encoder != nil)
+
+        let cullMode: MTLCullMode
+        switch mode {
+        case .none:     cullMode = .none
+        case .front:    cullMode = .front
+        case .back:     cullMode = .back
+        }
+
+        self.encoder?.commands.append {
+            (encoder: MTLRenderCommandEncoder, state: inout EncodingState) in
+            encoder.setCullMode(cullMode)
+        }
+    }
+
+    public func setFrontFacing(_ front: Winding) {
+        assert(self.encoder != nil)
+
+        let frontFacingWinding: MTLWinding
+        switch front {
+        case .clockwise:        frontFacingWinding = .clockwise
+        case .counterClockwise: frontFacingWinding = .counterClockwise
+        }
+        self.encoder?.commands.append {
+            (encoder: MTLRenderCommandEncoder, state: inout EncodingState) in
+            encoder.setFrontFacing(frontFacingWinding)
+        }
+    }
+
+    public func setTriangleFillMode(_ mode: TriangleFillMode) {
+        assert(self.encoder != nil)
+
+        let fillMode: MTLTriangleFillMode
+        switch mode {
+        case .fill:     fillMode = .fill
+        case .lines:    fillMode = .lines
+        }
+
+        self.encoder?.commands.append {
+            (encoder: MTLRenderCommandEncoder, state: inout EncodingState) in
+            encoder.setTriangleFillMode(fillMode)
+        }
+    }
+
     public func setBlendColor(red: Float, green: Float, blue: Float, alpha: Float) {
         assert(self.encoder != nil)
         self.encoder?.commands.append {
