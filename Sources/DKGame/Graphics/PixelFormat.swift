@@ -70,38 +70,43 @@ public enum PixelFormat {
     case rgba32Float
 
     // Depth
-    case depth32Float    
+    case depth16Unorm   // 16-bit normalized uint
+    case depth32Float   // 32-bit float
 
-    // Stencil (Uint)
-    case stencil8    
+    // Stencil
+    case stencil8       // 8 bit uint stencil
 
     // Depth Stencil
-    case depth32Float_stencil8 // 32-depth, 8-stencil, 24-unused.
+    case depth24Unorm_stencil8 // 24-bit normalized uint depth, 8-bit uint stencil
+    case depth32Float_stencil8 // 32-bit float depth, 8-bit uint stencil, 24-bit unused.
 }    
 
 public extension PixelFormat {
     func isColorFormat() -> Bool {
         switch (self) {
-            case .invalid, .depth32Float, .stencil8, .depth32Float_stencil8:
-                return false
-            default:
-                return true
+        case .invalid,
+             .depth16Unorm, .depth32Float, .stencil8,
+             .depth24Unorm_stencil8, .depth32Float_stencil8:
+            return false
+        default:
+            return true
         }
     }
     func isDepthFormat() -> Bool {
         switch (self) {
-            case .depth32Float, .depth32Float_stencil8:
-                return true
-            default:
-                return false
+        case .depth16Unorm, .depth32Float,
+             .depth24Unorm_stencil8, .depth32Float_stencil8:
+            return true
+        default:
+            return false
         }
     }
     func isStencilFormat() -> Bool {
         switch (self) {
-            case .stencil8, .depth32Float_stencil8:
-                return true
-            default:
-                return false
+        case .stencil8, .depth24Unorm_stencil8, .depth32Float_stencil8:
+            return true
+        default:
+            return false
         }
     }
     func bytesPerPixel() -> Int {
@@ -137,6 +142,8 @@ public extension PixelFormat {
             return 16
 
         // Depth
+        case .depth16Unorm:
+            return 2
         case .depth32Float:
             return 4
 
@@ -145,6 +152,8 @@ public extension PixelFormat {
             return 1
 
         // Depth Stencil
+        case .depth24Unorm_stencil8:
+            return 4
         case .depth32Float_stencil8: // 32-depth: 8-stencil: 24-unused.
             return 8
 

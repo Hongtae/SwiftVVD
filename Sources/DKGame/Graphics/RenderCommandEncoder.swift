@@ -44,6 +44,11 @@ public protocol RenderCommandEncoder: CommandEncoder {
     func setVertexBuffers(_: [Buffer], offsets: [Int], index: Int)
     func setIndexBuffer(_: Buffer, offset: Int, type: IndexType)
 
+    func setBlendColor(red: Float, green: Float, blue: Float, alpha: Float)
+    func setStencilReferenceValue(_: UInt32)
+    func setStencilReferenceValues(front: UInt32, back: UInt32)
+    func setDepthBias(_ depthBias: Float, slopeScale: Float, clamp: Float)
+
     func pushConstant<D: DataProtocol>(stages: ShaderStageFlags, offset: Int, data: D)
 
     func draw(numVertices: Int, numInstances: Int, baseVertex: Int, baseInstance: Int)

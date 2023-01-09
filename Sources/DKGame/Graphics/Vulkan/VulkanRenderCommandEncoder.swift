@@ -467,7 +467,37 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
         self.encoder!.buffers.append(bufferView)
         self.encoder!.commands.append(command)
     }
- 
+
+    public func setBlendColor(red: Float, green: Float, blue: Float, alpha: Float) {
+        let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
+            let blendConstants = (red, green, blue, alpha)
+            vkCmdSetBlendConstants(commandBuffer, &blendConstants)
+        }
+        self.encoder!.commands.append(command)
+    }
+
+    public func setStencilReferenceValue(_ value: UInt32) {
+        let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
+            vkCmdSetStencilReference(commandBuffer, VK_STENCIL_FACE_FRONT_AND_BACK, value)
+        }
+        self.encoder!.commands.append(command)
+    }
+
+    public func setStencilReferenceValues(front: UInt32, back: UInt32) {
+        let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
+            vkCmdSetStencilReference(commandBuffer, VK_STENCIL_FACE_FRONT_BIT, front)
+            vkCmdSetStencilReference(commandBuffer, VK_STENCIL_FACE_BACK_BIT, back)
+        }
+        self.encoder!.commands.append(command)
+    }
+
+    public func setDepthBias(_ depthBias: Float, slopeScale: Float, clamp: Float) {
+        let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
+            vkCmdSetDepthBias(commandBuffer, depthBias, clamp, slopeScale)
+        }
+        self.encoder!.commands.append(command)
+    }
+
     public func pushConstant<D: DataProtocol>(stages: ShaderStageFlags, offset: Int, data: D) {
         let stageFlags = stages.vkFlags()
         if stageFlags != 0 && data.count > 0 {

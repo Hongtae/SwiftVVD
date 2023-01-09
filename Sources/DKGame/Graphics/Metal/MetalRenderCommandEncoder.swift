@@ -274,6 +274,38 @@ public class MetalRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
+    public func setBlendColor(red: Float, green: Float, blue: Float, alpha: Float) {
+        assert(self.encoder != nil)
+        self.encoder?.commands.append {
+            (encoder: MTLRenderCommandEncoder, state: inout EncodingState) in
+            encoder.setBlendColor(red: red, green: green, blue: blue, alpha: alpha)
+        }
+    }
+
+    public func setStencilReferenceValue(_ value: UInt32) {
+        assert(self.encoder != nil)
+        self.encoder?.commands.append {
+            (encoder: MTLRenderCommandEncoder, state: inout EncodingState) in
+            encoder.setStencilReferenceValue(value)
+        }
+    }
+
+    public func setStencilReferenceValues(front: UInt32, back: UInt32) {
+        assert(self.encoder != nil)
+        self.encoder?.commands.append {
+            (encoder: MTLRenderCommandEncoder, state: inout EncodingState) in
+            encoder.setStencilReferenceValues(front: front, back: back)
+        }
+    }
+
+    public func setDepthBias(_ depthBias: Float, slopeScale: Float, clamp: Float) {
+        assert(self.encoder != nil)
+        self.encoder?.commands.append {
+            (encoder: MTLRenderCommandEncoder, state: inout EncodingState) in
+            encoder.setDepthBias(depthBias, slopeScale: slopeScale, clamp: clamp)
+        }
+    }
+
     public func pushConstant<D>(stages: ShaderStageFlags, offset: Int, data: D) where D : DataProtocol {
         assert(self.encoder != nil)
         let size = data.count

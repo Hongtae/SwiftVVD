@@ -67,9 +67,11 @@ public extension PixelFormat {
         case VK_FORMAT_R32G32B32A32_SINT:           return .rgba32Sint
         case VK_FORMAT_R32G32B32A32_SFLOAT:         return .rgba32Float
 
+        case VK_FORMAT_D16_UNORM:                   return .depth16Unorm
         case VK_FORMAT_D32_SFLOAT:                  return .depth32Float
         case VK_FORMAT_S8_UINT:                     return .stencil8
 
+        case VK_FORMAT_D24_UNORM_S8_UINT:           return .depth24Unorm_stencil8
         case VK_FORMAT_D32_SFLOAT_S8_UINT:          return .depth32Float_stencil8
         default:
             return .invalid
@@ -134,9 +136,11 @@ public extension PixelFormat {
         case .rgba32Sint:       return VK_FORMAT_R32G32B32A32_SINT
         case .rgba32Float:      return VK_FORMAT_R32G32B32A32_SFLOAT
 
+        case .depth16Unorm:     return VK_FORMAT_D16_UNORM
         case .depth32Float:     return VK_FORMAT_D32_SFLOAT
         case .stencil8:         return VK_FORMAT_S8_UINT
 
+        case .depth24Unorm_stencil8:    return VK_FORMAT_D24_UNORM_S8_UINT
         case .depth32Float_stencil8:    return VK_FORMAT_D32_SFLOAT_S8_UINT
 
         case .invalid:          return VK_FORMAT_UNDEFINED
