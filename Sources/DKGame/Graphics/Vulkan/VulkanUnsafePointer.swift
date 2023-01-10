@@ -2,7 +2,7 @@
 //  File: VulkanUnsafePointer.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
@@ -52,6 +52,26 @@ func unsafePointerCopy<C>(collection source: C, holder: TemporaryBufferHolder) -
     let ptr = UnsafePointer<C.Element>(buffer.baseAddress!)
     holder.buffers.append(ptr)
     return ptr
+}
+
+typealias VulkanNextChain = (sType: VkStructureType, pNext: UnsafeMutableRawPointer?)
+
+func enumerateNextChain(_ pNext: UnsafeMutableRawPointer?, callback: (VkStructureType, UnsafeRawPointer)->Void) {
+    var ptr: UnsafeMutablePointer<VulkanNextChain>? = pNext?.bindMemory(to: VulkanNextChain.self, capacity: 1)
+    while ptr != nil {
+        if let ptr { callback(ptr.pointee.sType, UnsafeRawPointer(ptr)) }
+        ptr = ptr?.pointee.pNext?.bindMemory(to: VulkanNextChain.self, capacity: 1)
+    }
+}
+
+func appendNextChain<T>(_ s: inout T, _ pNext: UnsafeRawPointer) {
+    withUnsafeMutablePointer(to: &s) {
+        var ptr = UnsafeMutableRawPointer($0).bindMemory(to: VulkanNextChain.self, capacity: 1)
+        while ptr.pointee.pNext != nil {
+            ptr = ptr.pointee.pNext!.bindMemory(to: VulkanNextChain.self, capacity: 1)
+        }
+        ptr.pointee.pNext = UnsafeMutableRawPointer(mutating: pNext)
+    }
 }
 
 #endif //if ENABLE_VULKAN

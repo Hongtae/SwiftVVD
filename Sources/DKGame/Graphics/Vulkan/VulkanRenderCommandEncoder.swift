@@ -2,7 +2,7 @@
 //  File: VulkanRenderCommandEncoder.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
@@ -450,24 +450,172 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func setIndexBuffer(_ buffer: Buffer, offset: Int, type: IndexType) {
-        assert(buffer is VulkanBufferView)
-        guard let bufferView = buffer as? VulkanBufferView else { return }
-        assert(bufferView.buffer != nil)
-        guard let buffer = bufferView.buffer else { return }
+    public func setDepthStencilState(_ depthStencilState: DepthStencilState?) {
+        if let depthStencilState = depthStencilState {
+            assert(depthStencilState is VulkanDepthStencilState)
+        }
 
-        var indexType: VkIndexType
-        switch (type) {
-            case .uint16:   indexType = VK_INDEX_TYPE_UINT16
-            case .uint32:   indexType = VK_INDEX_TYPE_UINT32
-        }
+        let frontFaceFlags = VkStencilFaceFlags(VK_STENCIL_FACE_FRONT_BIT.rawValue)
+        let backFaceFlags = VkStencilFaceFlags(VK_STENCIL_FACE_BACK_BIT.rawValue)
+
         let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
-            vkCmdBindIndexBuffer(commandBuffer, buffer.buffer, VkDeviceSize(offset), indexType)
+            if let depthStencilState = depthStencilState as? VulkanDepthStencilState {
+                vkCmdSetDepthTestEnable(commandBuffer, depthStencilState.depthTestEnable)
+                vkCmdSetStencilTestEnable(commandBuffer, depthStencilState.stencilTestEnable) 
+
+                vkCmdSetDepthCompareOp(commandBuffer, depthStencilState.depthCompareOp)
+                vkCmdSetDepthWriteEnable(commandBuffer, depthStencilState.depthWriteEnable)
+                vkCmdSetDepthBoundsTestEnable(commandBuffer, depthStencilState.depthBoundsTestEnable)
+
+                // front face stencil
+                vkCmdSetStencilCompareMask(commandBuffer,
+                                           frontFaceFlags,
+                                           depthStencilState.front.compareMask)
+                vkCmdSetStencilWriteMask(commandBuffer,
+                                         frontFaceFlags,
+                                         depthStencilState.front.writeMask)
+                vkCmdSetStencilOp(commandBuffer,
+                                  frontFaceFlags,
+                                  depthStencilState.front.failOp,
+                                  depthStencilState.front.passOp,
+                                  depthStencilState.front.depthFailOp,
+                                  depthStencilState.front.compareOp)
+                // back face stencil
+                vkCmdSetStencilCompareMask(commandBuffer,
+                                           backFaceFlags,
+                                           depthStencilState.back.compareMask)
+                vkCmdSetStencilWriteMask(commandBuffer,
+                                         backFaceFlags,
+                                         depthStencilState.back.writeMask)
+                vkCmdSetStencilOp(commandBuffer,
+                                  backFaceFlags,
+                                  depthStencilState.back.failOp,
+                                  depthStencilState.back.passOp,
+                                  depthStencilState.back.depthFailOp,
+                                  depthStencilState.back.compareOp)
+            } else {
+                vkCmdSetDepthTestEnable(commandBuffer, VK_FALSE)
+                vkCmdSetStencilTestEnable(commandBuffer, VK_FALSE)
+
+                vkCmdSetDepthCompareOp(commandBuffer, VK_COMPARE_OP_ALWAYS)
+                vkCmdSetDepthWriteEnable(commandBuffer, VK_FALSE)
+                vkCmdSetDepthBoundsTestEnable(commandBuffer, VK_FALSE)
+
+                // front face stencil
+                vkCmdSetStencilCompareMask(commandBuffer,
+                                           frontFaceFlags,
+                                           0xffffffff)
+                vkCmdSetStencilWriteMask(commandBuffer,
+                                         frontFaceFlags,
+                                         0xffffffff)
+                vkCmdSetStencilOp(commandBuffer,
+                                  frontFaceFlags,
+                                  VK_STENCIL_OP_KEEP,
+                                  VK_STENCIL_OP_KEEP,
+                                  VK_STENCIL_OP_KEEP,
+                                  VK_COMPARE_OP_ALWAYS)
+                // back face stencil
+                vkCmdSetStencilCompareMask(commandBuffer,
+                                           backFaceFlags,
+                                           0xffffffff)
+                vkCmdSetStencilWriteMask(commandBuffer,
+                                         backFaceFlags,
+                                         0xffffffff)
+                vkCmdSetStencilOp(commandBuffer,
+                                  backFaceFlags,
+                                  VK_STENCIL_OP_KEEP,
+                                  VK_STENCIL_OP_KEEP,
+                                  VK_STENCIL_OP_KEEP,
+                                  VK_COMPARE_OP_ALWAYS)
+            }
         }
-        self.encoder!.buffers.append(bufferView)
         self.encoder!.commands.append(command)
     }
- 
+
+    public func setDepthClipMode(_ mode: DepthClipMode) {
+
+        if mode == .clamp && self.encoder!.device.features.depthClamp == 0 {
+            Log.warn("\(#function): DepthClamp not supported for this hardware.")
+        }
+
+#if false
+        // VK_EXT_extended_dynamic_state3
+
+        let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
+            switch mode {
+            case .clip:
+                vkCmdSetDepthClampEnableEXT(commandBuffer, VK_FALSE)
+                vkCmdSetDepthClipEnableEXT(commandBuffer, VK_TRUE)
+            case .clamp:
+                vkCmdSetDepthClipEnableEXT(commandBuffer, VK_FALSE)
+                vkCmdSetDepthClampEnableEXT(commandBuffer, VK_TRUE)
+            }
+        }
+        self.encoder!.commands.append(command)
+#else
+        if (mode == .clamp) {
+            Log.err("\(#function) failed: VK_EXT_extended_dynamic_state3 is not supported.")
+        }
+#endif
+    }
+
+    public func setCullMode(_ mode: CullMode) {
+        let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
+            let flags: VkCullModeFlags
+            switch mode {
+            case .none:     flags = VkCullModeFlags(VK_CULL_MODE_NONE.rawValue)
+            case .front:    flags = VkCullModeFlags(VK_CULL_MODE_FRONT_BIT.rawValue)
+            case .back:     flags = VkCullModeFlags(VK_CULL_MODE_BACK_BIT.rawValue)
+            }
+            vkCmdSetCullMode(commandBuffer, flags)
+        }
+        self.encoder!.commands.append(command)
+    }
+
+    public func setFrontFacing(_ winding: Winding) {
+           let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
+            let frontFace: VkFrontFace
+            switch winding {
+            case .clockwise:        frontFace = VkFrontFace(VK_FRONT_FACE_CLOCKWISE.rawValue)
+            case .counterClockwise: frontFace = VkFrontFace(VK_FRONT_FACE_COUNTER_CLOCKWISE.rawValue)
+            }
+            vkCmdSetFrontFace(commandBuffer, frontFace)
+        }
+        self.encoder!.commands.append(command)     
+    }
+
+    public func setBlendColor(red: Float, green: Float, blue: Float, alpha: Float) {
+        let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
+            let blendConstants = (red, green, blue, alpha)
+            withUnsafeBytes(of: blendConstants) {
+                vkCmdSetBlendConstants(commandBuffer, $0.bindMemory(to: Float.self).baseAddress)
+            }
+        }
+        self.encoder!.commands.append(command)
+    }
+
+    public func setStencilReferenceValue(_ value: UInt32) {
+        let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
+            vkCmdSetStencilReference(commandBuffer, VkStencilFaceFlags(VK_STENCIL_FACE_FRONT_AND_BACK.rawValue), value)
+        }
+        self.encoder!.commands.append(command)
+    }
+
+    public func setStencilReferenceValues(front: UInt32, back: UInt32) {
+        let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
+            vkCmdSetStencilReference(commandBuffer, VkStencilFaceFlags(VK_STENCIL_FACE_FRONT_BIT.rawValue), front)
+            vkCmdSetStencilReference(commandBuffer, VkStencilFaceFlags(VK_STENCIL_FACE_BACK_BIT.rawValue), back)
+        }
+        self.encoder!.commands.append(command)
+    }
+
+    public func setDepthBias(_ depthBias: Float, slopeScale: Float, clamp: Float) {
+        let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
+            vkCmdSetDepthBias(commandBuffer, depthBias, clamp, slopeScale)
+        }
+        self.encoder!.commands.append(command)
+    }
+
     public func pushConstant<D: DataProtocol>(stages: ShaderStageFlags, offset: Int, data: D) {
         let stageFlags = stages.vkFlags()
         if stageFlags != 0 && data.count > 0 {
@@ -485,38 +633,52 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
                 }
             }
             self.encoder!.commands.append(command)
-        }       
+        }
     }
  
-    public func draw(numVertices: Int, numInstances: Int, baseVertex: Int, baseInstance: Int) {
-        if numVertices > 0 && numInstances > 0 {
-            assert(baseVertex >= 0)
+    public func draw(vertexStart: Int, vertexCount: Int, instanceCount: Int, baseInstance: Int) {
+        if vertexCount > 0 && instanceCount > 0 {
+            assert(vertexStart >= 0)
             assert(baseInstance >= 0)
             let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
                 vkCmdDraw(commandBuffer,
-                          UInt32(numVertices),
-                          UInt32(numInstances),
-                          UInt32(baseVertex),
+                          UInt32(vertexCount),
+                          UInt32(instanceCount),
+                          UInt32(vertexStart),
                           UInt32(baseInstance))
             }
             self.encoder!.commands.append(command)
         }
     }
 
-    public func drawIndexed(numIndices: Int, numInstances: Int, indexOffset: Int, vertexOffset: Int, baseInstance: Int) {
-        if numIndices > 0 && numInstances > 0 {
-            assert(indexOffset >= 0)
-            assert(vertexOffset >= 0)
-            assert(baseInstance >= 0)
+    public func drawIndexed(indexCount: Int, indexType: IndexType, indexBuffer: Buffer, indexBufferOffset: Int, instanceCount: Int, baseVertex: Int, baseInstance: Int) {
+        if indexCount > 0 && instanceCount > 0 {
+            assert(indexBufferOffset >= 0)
+            assert(baseVertex >= 0)
+            assert(baseInstance >= 0)      
+
+            assert(indexBuffer is VulkanBufferView)
+            guard let bufferView = indexBuffer as? VulkanBufferView else { return }
+            assert(bufferView.buffer != nil)
+            guard let buffer = bufferView.buffer else { return }
+
+            var type: VkIndexType
+            switch (indexType) {
+                case .uint16:   type = VK_INDEX_TYPE_UINT16
+                case .uint32:   type = VK_INDEX_TYPE_UINT32
+            }
+
             let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
+                vkCmdBindIndexBuffer(commandBuffer, buffer.buffer, VkDeviceSize(indexBufferOffset), type)
                 vkCmdDrawIndexed(commandBuffer,
-                                 UInt32(numIndices),
-                                 UInt32(numInstances),
-                                 UInt32(indexOffset),
-                                 Int32(vertexOffset),
+                                 UInt32(indexCount),
+                                 UInt32(instanceCount),
+                                 0,  // firstIndex = 0
+                                 Int32(baseVertex),
                                  UInt32(baseInstance))
             }
-            self.encoder!.commands.append(command)            
+            self.encoder!.buffers.append(bufferView)
+            self.encoder!.commands.append(command)
         }
     }
 }

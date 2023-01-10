@@ -56,6 +56,7 @@ extension PixelFormat {
         case .rgba32Uint:               return .rgba32Uint
         case .rgba32Sint:               return .rgba32Sint
         case .rgba32Float:              return .rgba32Float
+        case .depth16Unorm:             return .depth16Unorm
         case .depth32Float:             return .depth32Float
         case .stencil8:                 return .stencil8
         case .depth32Float_stencil8:    return .depth32Float_stencil8
@@ -110,6 +111,7 @@ extension PixelFormat {
         case .rgba32Uint:               return .rgba32Uint
         case .rgba32Sint:               return .rgba32Sint
         case .rgba32Float:              return .rgba32Float
+        case .depth16Unorm:             return .depth16Unorm
         case .depth32Float:             return .depth32Float
         case .stencil8:                 return .stencil8
         case .depth32Float_stencil8:    return .depth32Float_stencil8

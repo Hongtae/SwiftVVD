@@ -27,7 +27,7 @@ public class Mesh {
 
     public var primitiveType: PrimitiveType = .triangle
     public var cullMode: CullMode = .back
-    public var frontFace: FrontFace = .ccw
+    public var frontFace: Winding = .counterClockwise
 
     public var vertexStart: Int = 0
     public var vertexCount: Int = 0

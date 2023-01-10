@@ -2,7 +2,7 @@
 //  File: MetalRenderCommandEncoder.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_METAL
@@ -14,9 +14,6 @@ public class MetalRenderCommandEncoder: RenderCommandEncoder {
     struct EncodingState {
         let encoder: Encoder
         var pipelineState: MetalRenderPipelineState?
-        var indexBuffer: MetalBuffer?
-        var indexBufferOffset: Int = 0
-        var indexBufferType: MTLIndexType = .uint16
     }
 
     class Encoder: MetalCommandEncoder {
@@ -207,11 +204,7 @@ public class MetalRenderCommandEncoder: RenderCommandEncoder {
                 (encoder: MTLRenderCommandEncoder, state: inout EncodingState) in
 
                 encoder.setRenderPipelineState(pipelineState.pipelineState)
-                encoder.setDepthStencilState(pipelineState.depthStencilState)
-                encoder.setDepthClipMode(pipelineState.depthClipMode)
                 encoder.setTriangleFillMode(pipelineState.triangleFillMode)
-                encoder.setFrontFacing(pipelineState.frontFacingWinding)
-                encoder.setCullMode(pipelineState.cullMode)
                 state.pipelineState = pipelineState
             }
         }
@@ -253,24 +246,95 @@ public class MetalRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func setIndexBuffer(_ buffer: Buffer, offset: Int, type: IndexType) {
+    public func setDepthStencilState(_ state: DepthStencilState?) {
         assert(self.encoder != nil)
-        assert(buffer is MetalBuffer)
 
-        if let buffer = buffer as? MetalBuffer, let encoder = self.encoder {
-            let indexType: MTLIndexType
-            switch type {
-            case .uint16:   indexType = .uint16
-            case .uint32:   indexType = .uint32
-            }
+        var depthStencilState: MTLDepthStencilState? = nil
+        if let state {
+            assert(state is MetalDepthStencilState)
+            depthStencilState = (state as! MetalDepthStencilState).depthStencilState
+        }
 
-            encoder.commands.append {
-                (encoder: MTLRenderCommandEncoder, state: inout EncodingState) in
+        self.encoder?.commands.append {
+            (encoder: MTLRenderCommandEncoder, state: inout EncodingState) in
+            encoder.setDepthStencilState(depthStencilState)
+        }
+    }
 
-                state.indexBuffer = buffer
-                state.indexBufferOffset = offset
-                state.indexBufferType = indexType
-            }
+    public func setDepthClipMode(_ mode: DepthClipMode) {
+        assert(self.encoder != nil)
+
+        let depthClipMode: MTLDepthClipMode
+        switch mode {
+        case .clip:     depthClipMode = .clip
+        case .clamp:    depthClipMode = .clamp
+        }
+
+        self.encoder?.commands.append {
+            (encoder: MTLRenderCommandEncoder, state: inout EncodingState) in
+            encoder.setDepthClipMode(depthClipMode)
+        }
+    }
+
+    public func setCullMode(_ mode: CullMode) {
+        assert(self.encoder != nil)
+
+        let cullMode: MTLCullMode
+        switch mode {
+        case .none:     cullMode = .none
+        case .front:    cullMode = .front
+        case .back:     cullMode = .back
+        }
+
+        self.encoder?.commands.append {
+            (encoder: MTLRenderCommandEncoder, state: inout EncodingState) in
+            encoder.setCullMode(cullMode)
+        }
+    }
+
+    public func setFrontFacing(_ front: Winding) {
+        assert(self.encoder != nil)
+
+        let frontFacingWinding: MTLWinding
+        switch front {
+        case .clockwise:        frontFacingWinding = .clockwise
+        case .counterClockwise: frontFacingWinding = .counterClockwise
+        }
+        self.encoder?.commands.append {
+            (encoder: MTLRenderCommandEncoder, state: inout EncodingState) in
+            encoder.setFrontFacing(frontFacingWinding)
+        }
+    }
+
+    public func setBlendColor(red: Float, green: Float, blue: Float, alpha: Float) {
+        assert(self.encoder != nil)
+        self.encoder?.commands.append {
+            (encoder: MTLRenderCommandEncoder, state: inout EncodingState) in
+            encoder.setBlendColor(red: red, green: green, blue: blue, alpha: alpha)
+        }
+    }
+
+    public func setStencilReferenceValue(_ value: UInt32) {
+        assert(self.encoder != nil)
+        self.encoder?.commands.append {
+            (encoder: MTLRenderCommandEncoder, state: inout EncodingState) in
+            encoder.setStencilReferenceValue(value)
+        }
+    }
+
+    public func setStencilReferenceValues(front: UInt32, back: UInt32) {
+        assert(self.encoder != nil)
+        self.encoder?.commands.append {
+            (encoder: MTLRenderCommandEncoder, state: inout EncodingState) in
+            encoder.setStencilReferenceValues(front: front, back: back)
+        }
+    }
+
+    public func setDepthBias(_ depthBias: Float, slopeScale: Float, clamp: Float) {
+        assert(self.encoder != nil)
+        self.encoder?.commands.append {
+            (encoder: MTLRenderCommandEncoder, state: inout EncodingState) in
+            encoder.setDepthBias(depthBias, slopeScale: slopeScale, clamp: clamp)
         }
     }
 
@@ -321,7 +385,7 @@ public class MetalRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func draw(numVertices: Int, numInstances: Int, baseVertex: Int, baseInstance: Int) {
+    public func draw(vertexStart: Int, vertexCount: Int, instanceCount: Int, baseInstance: Int) {
         assert(self.encoder != nil)
 
         self.encoder?.commands.append {
@@ -329,36 +393,44 @@ public class MetalRenderCommandEncoder: RenderCommandEncoder {
 
             if let pipelineState = state.pipelineState {
                 encoder.drawPrimitives(type: pipelineState.primitiveType,
-                                       vertexStart: 0,
-                                       vertexCount: numVertices,
-                                       instanceCount: numInstances,
+                                       vertexStart: vertexStart,
+                                       vertexCount: vertexCount,
+                                       instanceCount: instanceCount,
                                        baseInstance: baseInstance)
             }
         }
     }
 
-    public func drawIndexed(numIndices: Int, numInstances: Int, indexOffset: Int, vertexOffset: Int, baseInstance: Int) {
+    public func drawIndexed(indexCount: Int, indexType: IndexType, indexBuffer: Buffer, indexBufferOffset: Int, instanceCount: Int, baseVertex: Int, baseInstance: Int) {
         assert(self.encoder != nil)
+        assert(indexBuffer is MetalBuffer)
+
+        let buffer = indexBuffer as! MetalBuffer
+        let indexBufferType: MTLIndexType
+        switch indexType {
+        case .uint16:   indexBufferType = .uint16
+        case .uint32:   indexBufferType = .uint32
+        }
 
         self.encoder?.commands.append {
             (encoder: MTLRenderCommandEncoder, state: inout EncodingState) in
 
-            if let pipelineState = state.pipelineState, let indexBuffer = state.indexBuffer {
-                if vertexOffset == 0 && baseInstance == 0 {
+            if let pipelineState = state.pipelineState {
+                if baseVertex == 0 && baseInstance == 0 {
                     encoder.drawIndexedPrimitives(type: pipelineState.primitiveType,
-                                                  indexCount: numIndices,
-                                                  indexType: state.indexBufferType,
-                                                  indexBuffer: indexBuffer.buffer,
-                                                  indexBufferOffset: indexOffset,
-                                                  instanceCount: numInstances)
+                                                  indexCount: indexCount,
+                                                  indexType: indexBufferType,
+                                                  indexBuffer: buffer.buffer,
+                                                  indexBufferOffset: indexBufferOffset,
+                                                  instanceCount: instanceCount)
                 } else {
                     encoder.drawIndexedPrimitives(type: pipelineState.primitiveType,
-                                                  indexCount: numInstances,
-                                                  indexType: state.indexBufferType,
-                                                  indexBuffer: indexBuffer.buffer,
-                                                  indexBufferOffset: indexOffset,
-                                                  instanceCount: numInstances,
-                                                  baseVertex: vertexOffset,
+                                                  indexCount: indexCount,
+                                                  indexType: indexBufferType,
+                                                  indexBuffer: buffer.buffer,
+                                                  indexBufferOffset: indexBufferOffset,
+                                                  instanceCount: instanceCount,
+                                                  baseVertex: baseVertex,
                                                   baseInstance: baseInstance)
                 }
             }
