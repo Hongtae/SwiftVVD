@@ -2,7 +2,7 @@
 //  File: RenderCommandEncoder.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -40,9 +40,12 @@ public protocol RenderCommandEncoder: CommandEncoder {
     func setResource(_: ShaderBindingSet, atIndex: Int)
     func setViewport(_: Viewport)
     func setRenderPipelineState(_: RenderPipelineState)
+
     func setVertexBuffer(_: Buffer, offset: Int, index: Int)
     func setVertexBuffers(_: [Buffer], offsets: [Int], index: Int)
 
+    func setDepthStencilState(_: DepthStencilState?)
+    func setDepthClipMode(_: DepthClipMode)
     func setCullMode(_: CullMode)
     func setFrontFacing(_: Winding)
 

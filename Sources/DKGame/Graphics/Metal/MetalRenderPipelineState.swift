@@ -2,7 +2,7 @@
 //  File: MetalRenderPipelineState.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_METAL
@@ -13,27 +13,19 @@ public class MetalRenderPipelineState: RenderPipelineState {
     public let device: GraphicsDevice
 
     let pipelineState: MTLRenderPipelineState
-    let depthStencilState: MTLDepthStencilState
 
     var primitiveType: MTLPrimitiveType
-    var depthClipMode: MTLDepthClipMode
     var triangleFillMode: MTLTriangleFillMode
-    var frontFacingWinding: MTLWinding
-    var cullMode: MTLCullMode
 
     var vertexBindings: MetalStageResourceBindingMap
     var fragmentBindings: MetalStageResourceBindingMap
 
-    init(device: MetalGraphicsDevice, pipelineState: MTLRenderPipelineState, depthStencilState: MTLDepthStencilState) {
+    init(device: MetalGraphicsDevice, pipelineState: MTLRenderPipelineState) {
         self.device = device
         self.pipelineState = pipelineState
-        self.depthStencilState = depthStencilState
 
         self.primitiveType = .triangle
-        self.depthClipMode = .clip
         self.triangleFillMode = .fill
-        self.frontFacingWinding = .counterClockwise
-        self.cullMode = .none
 
         self.vertexBindings = MetalStageResourceBindingMap(
             resourceBindings: [],
@@ -42,6 +34,7 @@ public class MetalRenderPipelineState: RenderPipelineState {
             pushConstantOffset: 0,
             pushConstantSize: 0,
             pushConstantBufferSize: 0)
+
         self.fragmentBindings = MetalStageResourceBindingMap(
             resourceBindings: [],
             inputAttributeIndexOffset: 0,

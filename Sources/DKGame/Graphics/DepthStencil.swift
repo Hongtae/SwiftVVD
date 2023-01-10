@@ -2,7 +2,7 @@
 //  File: DepthStencil.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 public enum CompareFunction {
@@ -66,4 +66,8 @@ public struct DepthStencilDescriptor {
         self.backFaceStencil = backFaceStencil
         self.isDepthWriteEnabled = isDepthWriteEnabled
     }
+}
+
+public protocol DepthStencilState {
+    var device: GraphicsDevice { get }
 }

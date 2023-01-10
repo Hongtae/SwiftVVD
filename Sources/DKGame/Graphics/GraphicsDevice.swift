@@ -2,7 +2,7 @@
 //  File: GraphicsDevice.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 public enum CPUCacheMode: UInt {
@@ -30,6 +30,8 @@ public protocol GraphicsDevice {
 
     func makeComputePipelineState(descriptor: ComputePipelineDescriptor, reflection: UnsafeMutablePointer<PipelineReflection>?) -> ComputePipelineState?
     func makeComputePipelineState(descriptor: ComputePipelineDescriptor) -> ComputePipelineState?
+
+    func makeDepthStencilState(descriptor: DepthStencilDescriptor) -> DepthStencilState?
 
     func makeBuffer(length: Int, storageMode: StorageMode, cpuCacheMode: CPUCacheMode) -> Buffer?
     func makeTexture(descriptor: TextureDescriptor) -> Texture?

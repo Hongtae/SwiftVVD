@@ -2,7 +2,7 @@
 //  File: RenderPipeline.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 public struct RenderPipelineColorAttachmentDescriptor {
@@ -59,12 +59,10 @@ public struct RenderPipelineDescriptor {
     public var vertexDescriptor: VertexDescriptor
     public var colorAttachments: [RenderPipelineColorAttachmentDescriptor]
     public var depthStencilAttachmentPixelFormat: PixelFormat
-    public var depthStencilDescriptor: DepthStencilDescriptor
 
     public var primitiveTopology: PrimitiveType
 
     public var triangleFillMode: TriangleFillMode
-    public var depthClipMode: DepthClipMode
     public var rasterizationEnabled: Bool
 
     public init(vertexFunction: ShaderFunction? = nil,
@@ -72,20 +70,16 @@ public struct RenderPipelineDescriptor {
                 vertexDescriptor: VertexDescriptor = .init(),
                 colorAttachments: [RenderPipelineColorAttachmentDescriptor] = [],
                 depthStencilAttachmentPixelFormat: PixelFormat = .invalid,
-                depthStencilDescriptor: DepthStencilDescriptor = .init(),
                 primitiveTopology: PrimitiveType = .point,
                 triangleFillMode: TriangleFillMode = .fill,
-                depthClipMode: DepthClipMode = .clip,
                 rasterizationEnabled: Bool = true) {
         self.vertexFunction = vertexFunction
         self.fragmentFunction = fragmentFunction
         self.vertexDescriptor = vertexDescriptor
         self.colorAttachments = colorAttachments
         self.depthStencilAttachmentPixelFormat = depthStencilAttachmentPixelFormat
-        self.depthStencilDescriptor = depthStencilDescriptor
         self.primitiveTopology = primitiveTopology
         self.triangleFillMode = triangleFillMode
-        self.depthClipMode = depthClipMode
         self.rasterizationEnabled = rasterizationEnabled
     }
 }

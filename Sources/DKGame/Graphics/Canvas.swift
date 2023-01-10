@@ -2,7 +2,7 @@
 //  File: Canvas.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -345,21 +345,31 @@ private struct VertexData {
     var color: Float4
 }
 
+private struct PipelineState {
+    let renderPipelineState: RenderPipelineState
+    let depthStencilState: DepthStencilState?
+}
+
 private class CanvasPipelineStates {
     let vertexFunction: ShaderFunction
     let fragmentFunctions: [ShaderFunction]
 
-    var pipelineStates: [CanvasPipelineDescriptor: RenderPipelineState] = [:]
+    var pipelineStates: [CanvasPipelineDescriptor: PipelineState] = [:]
     let device: GraphicsDevice
 
     let defaultBindingSet: ShaderBindingSet
     let defaultSampler: SamplerState
 
-    func state(for desc: CanvasPipelineDescriptor) -> RenderPipelineState? {
+    func state(for desc: CanvasPipelineDescriptor) -> PipelineState? {
         Self.lock.lock()
         defer { Self.lock.unlock() }
 
         if let state = pipelineStates[desc] { return state }
+
+        var depthStencilDescriptor = DepthStencilDescriptor()
+        depthStencilDescriptor.depthCompareFunction = .always
+        depthStencilDescriptor.isDepthWriteEnabled = false
+        let depthStencilState = device.makeDepthStencilState(descriptor: depthStencilDescriptor)
 
         var pipelineDescriptor = RenderPipelineDescriptor()
         pipelineDescriptor.vertexFunction = vertexFunction
@@ -368,8 +378,6 @@ private class CanvasPipelineStates {
             .init(index: 0, pixelFormat: desc.colorFormat, blendState: desc.blendState())
         ]
         pipelineDescriptor.depthStencilAttachmentPixelFormat = desc.depthFormat
-        pipelineDescriptor.depthStencilDescriptor.depthCompareFunction = .always
-        pipelineDescriptor.depthStencilDescriptor.isDepthWriteEnabled = false
         pipelineDescriptor.vertexDescriptor.attributes = [
             .init(format: .float2, offset: 0, bufferIndex: 0, location: 0 ),
             .init(format: .float2, offset: MemoryLayout<VertexData>.offset(of: \.texcoord)!, bufferIndex: 0, location: 1 ),
@@ -380,12 +388,11 @@ private class CanvasPipelineStates {
         ]
         pipelineDescriptor.primitiveTopology = .triangle
         pipelineDescriptor.triangleFillMode = .fill
-        pipelineDescriptor.depthClipMode = .clip
         pipelineDescriptor.rasterizationEnabled = true
 
         if let state = device.makeRenderPipelineState(descriptor: pipelineDescriptor) {
-            pipelineStates[desc] = state
-            return state
+            pipelineStates[desc] = PipelineState(renderPipelineState: state, depthStencilState: depthStencilState)
+            return pipelineStates[desc]
         }
         return nil
     }
@@ -1370,7 +1377,10 @@ public class Canvas {
             return
         }
 
-        encoder.setRenderPipelineState(pso)
+        encoder.setRenderPipelineState(pso.renderPipelineState)
+        encoder.setDepthStencilState(pso.depthStencilState)
+        encoder.setDepthClipMode(.clip)
+
         if textureRequired {
             pipelineStates.defaultBindingSet.setTexture(texture!, binding: 0)
             pipelineStates.defaultBindingSet.setSamplerState(pipelineStates.defaultSampler, binding: 0)

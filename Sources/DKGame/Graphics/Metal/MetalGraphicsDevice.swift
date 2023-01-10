@@ -2,7 +2,7 @@
 //  File: MetalGraphicsDevice.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_METAL
@@ -315,50 +315,6 @@ public class MetalGraphicsDevice: GraphicsDevice {
             assert(fragmentFunction!.function.functionType == .fragment)
         }
 
-        let compareFunction = { (fn: CompareFunction) -> MTLCompareFunction in
-            switch fn {
-            case .never:            return .never
-            case .less:             return .less
-            case .equal:            return .equal
-            case .lessEqual:        return .lessEqual
-            case .greater:          return .greater
-            case .notEqual:         return .notEqual
-            case .greaterEqual:     return .greaterEqual
-            case .always:           return .always
-            }
-        }
-        let stencilOperation = { (op: StencilOperation) -> MTLStencilOperation in
-            switch op {
-            case .keep:            return .keep
-            case .zero:            return .zero
-            case .replace:         return .replace
-            case .incrementClamp:  return .incrementClamp
-            case .decrementClamp:  return .decrementClamp
-            case .invert:          return .invert
-            case .incrementWrap:   return .incrementWrap
-            case .decrementWrap:   return .decrementWrap
-            }
-        }
-        let setStencilDescriptor = { (stencil: inout MTLStencilDescriptor, desc: StencilDescriptor) in
-            stencil.stencilFailureOperation = stencilOperation(desc.stencilFailureOperation)
-            stencil.depthFailureOperation = stencilOperation(desc.depthFailOperation)
-            stencil.depthStencilPassOperation = stencilOperation(desc.depthStencilPassOperation)
-            stencil.stencilCompareFunction = compareFunction(desc.stencilCompareFunction)
-            stencil.readMask = desc.readMask
-            stencil.writeMask = desc.writeMask
-        }
-
-        // Create MTLDepthStencilState object.
-        let depthStencilDescriptor = MTLDepthStencilDescriptor()
-        depthStencilDescriptor.depthCompareFunction = compareFunction(descriptor.depthStencilDescriptor.depthCompareFunction)
-        depthStencilDescriptor.isDepthWriteEnabled = descriptor.depthStencilDescriptor.isDepthWriteEnabled
-        setStencilDescriptor(&depthStencilDescriptor.frontFaceStencil, descriptor.depthStencilDescriptor.frontFaceStencil)
-        setStencilDescriptor(&depthStencilDescriptor.backFaceStencil, descriptor.depthStencilDescriptor.backFaceStencil)
-        guard let depthStencilState = self.device.makeDepthStencilState(descriptor: depthStencilDescriptor) else {
-            Log.err("MTLDevice.makeDepthStencilState(descriptor:) failed.")
-            return nil
-        }
-
         // Create MTLRenderPipelineState object.
         let desc = MTLRenderPipelineDescriptor()
 
@@ -607,7 +563,7 @@ public class MetalGraphicsDevice: GraphicsDevice {
             reflection.pointee.pushConstantLayouts = pushConstants
         }
 
-        let state = MetalRenderPipelineState(device: self, pipelineState: pipelineState, depthStencilState: depthStencilState)
+        let state = MetalRenderPipelineState(device: self, pipelineState: pipelineState)
         switch descriptor.primitiveTopology {
         case .point:            state.primitiveType = .point
         case .line:             state.primitiveType = .line
@@ -615,22 +571,9 @@ public class MetalGraphicsDevice: GraphicsDevice {
         case .triangle:         state.primitiveType = .triangle
         case .triangleStrip:    state.primitiveType = .triangleStrip
         }
-        switch descriptor.depthClipMode {
-        case .clip:             state.depthClipMode = .clip
-        case .clamp:            state.depthClipMode = .clamp
-        }
         switch descriptor.triangleFillMode {
         case .fill:             state.triangleFillMode = .fill
         case .lines:            state.triangleFillMode = .lines
-        }
-        switch descriptor.frontFace {
-        case .clockwise:        state.frontFacingWinding = .clockwise
-        case .counterClockwise: state.frontFacingWinding = .counterClockwise
-        }
-        switch descriptor.cullMode {
-        case .none:             state.cullMode = .none
-        case .front:            state.cullMode = .front
-        case .back:             state.cullMode = .back
         }
         if let vertexFunction = vertexFunction {
             state.vertexBindings = vertexFunction.module.bindings
@@ -701,6 +644,55 @@ public class MetalGraphicsDevice: GraphicsDevice {
                                          pipelineState: pipelineState,
                                          workgroupSize: computeFunction.module.workgroupSize,
                                          bindings: computeFunction.module.bindings)
+    }
+
+    public func makeDepthStencilState(descriptor: DepthStencilDescriptor) -> DepthStencilState? {
+        let compareFunction = { (fn: CompareFunction) -> MTLCompareFunction in
+            switch fn {
+            case .never:            return .never
+            case .less:             return .less
+            case .equal:            return .equal
+            case .lessEqual:        return .lessEqual
+            case .greater:          return .greater
+            case .notEqual:         return .notEqual
+            case .greaterEqual:     return .greaterEqual
+            case .always:           return .always
+            }
+        }
+        let stencilOperation = { (op: StencilOperation) -> MTLStencilOperation in
+            switch op {
+            case .keep:            return .keep
+            case .zero:            return .zero
+            case .replace:         return .replace
+            case .incrementClamp:  return .incrementClamp
+            case .decrementClamp:  return .decrementClamp
+            case .invert:          return .invert
+            case .incrementWrap:   return .incrementWrap
+            case .decrementWrap:   return .decrementWrap
+            }
+        }
+        let setStencilDescriptor = { (stencil: inout MTLStencilDescriptor, desc: StencilDescriptor) in
+            stencil.stencilFailureOperation = stencilOperation(desc.stencilFailureOperation)
+            stencil.depthFailureOperation = stencilOperation(desc.depthFailOperation)
+            stencil.depthStencilPassOperation = stencilOperation(desc.depthStencilPassOperation)
+            stencil.stencilCompareFunction = compareFunction(desc.stencilCompareFunction)
+            stencil.readMask = desc.readMask
+            stencil.writeMask = desc.writeMask
+        }
+
+        // Create MTLDepthStencilState object.
+        let depthStencilDescriptor = MTLDepthStencilDescriptor()
+        depthStencilDescriptor.depthCompareFunction = compareFunction(descriptor.depthCompareFunction)
+        depthStencilDescriptor.isDepthWriteEnabled = descriptor.isDepthWriteEnabled
+        setStencilDescriptor(&depthStencilDescriptor.frontFaceStencil, descriptor.frontFaceStencil)
+        setStencilDescriptor(&depthStencilDescriptor.backFaceStencil, descriptor.backFaceStencil)
+
+        if let depthStencilState = self.device.makeDepthStencilState(descriptor: depthStencilDescriptor) {
+            return MetalDepthStencilState(device: self,
+                                          depthStencilState: depthStencilState)
+        }
+        Log.err("MTLDevice.makeDepthStencilState(descriptor:) failed.")
+        return nil
     }
 
     public func makeBuffer(length: Int, storageMode: StorageMode, cpuCacheMode: CPUCacheMode) -> Buffer? {
