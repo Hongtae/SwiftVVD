@@ -304,21 +304,6 @@ public class MetalRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func setTriangleFillMode(_ mode: TriangleFillMode) {
-        assert(self.encoder != nil)
-
-        let fillMode: MTLTriangleFillMode
-        switch mode {
-        case .fill:     fillMode = .fill
-        case .lines:    fillMode = .lines
-        }
-
-        self.encoder?.commands.append {
-            (encoder: MTLRenderCommandEncoder, state: inout EncodingState) in
-            encoder.setTriangleFillMode(fillMode)
-        }
-    }
-
     public func setBlendColor(red: Float, green: Float, blue: Float, alpha: Float) {
         assert(self.encoder != nil)
         self.encoder?.commands.append {

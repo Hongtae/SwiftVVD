@@ -65,8 +65,6 @@ public struct RenderPipelineDescriptor {
 
     public var triangleFillMode: TriangleFillMode
     public var depthClipMode: DepthClipMode
-    public var cullMode: CullMode
-    public var frontFace: Winding
     public var rasterizationEnabled: Bool
 
     public init(vertexFunction: ShaderFunction? = nil,
@@ -78,8 +76,6 @@ public struct RenderPipelineDescriptor {
                 primitiveTopology: PrimitiveType = .point,
                 triangleFillMode: TriangleFillMode = .fill,
                 depthClipMode: DepthClipMode = .clip,
-                cullMode: CullMode = .back,
-                frontFace: Winding = .counterClockwise,
                 rasterizationEnabled: Bool = true) {
         self.vertexFunction = vertexFunction
         self.fragmentFunction = fragmentFunction
@@ -90,8 +86,6 @@ public struct RenderPipelineDescriptor {
         self.primitiveTopology = primitiveTopology
         self.triangleFillMode = triangleFillMode
         self.depthClipMode = depthClipMode
-        self.cullMode = cullMode
-        self.frontFace = frontFace
         self.rasterizationEnabled = rasterizationEnabled
     }
 }

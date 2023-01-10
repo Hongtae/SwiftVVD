@@ -42,11 +42,9 @@ public protocol RenderCommandEncoder: CommandEncoder {
     func setRenderPipelineState(_: RenderPipelineState)
     func setVertexBuffer(_: Buffer, offset: Int, index: Int)
     func setVertexBuffers(_: [Buffer], offsets: [Int], index: Int)
-    func setIndexBuffer(_: Buffer, offset: Int, type: IndexType)
 
     func setCullMode(_: CullMode)
     func setFrontFacing(_: Winding)
-    func setTriangleFillMode(_: TriangleFillMode)
 
     func setBlendColor(red: Float, green: Float, blue: Float, alpha: Float)
     func setStencilReferenceValue(_: UInt32)
@@ -55,14 +53,6 @@ public protocol RenderCommandEncoder: CommandEncoder {
 
     func pushConstant<D: DataProtocol>(stages: ShaderStageFlags, offset: Int, data: D)
 
-//    func drawPrimitives(type: PrimitiveType, vertexStart: Int, vertexCount: Int, instanceCount: Int, baseInstance: Int)
-//    func drawPrimitives(type: PrimitiveType, vertexStart: Int, vertexCount: Int, instanceCount: Int)
-//    func drawPrimitives(type: PrimitiveType, vertexStart: Int, vertexCount: Int)
-//
-//    func drawIndexedPrimitives(type: PrimitiveType, indexCount: Int, indexType: IndexType, indexBuffer: Buffer, indexBufferOffset: Int, instanceCount: Int, baseVertex: Int, baseInstance: Int)
-//    func drawIndexedPrimitives(type: PrimitiveType, indexCount: Int, indexType: IndexType, indexBuffer: Buffer, indexBufferOffset: Int, instanceCount: Int)
-//    func drawIndexedPrimitives(type: PrimitiveType, indexCount: Int, indexType: IndexType, indexBuffer: Buffer, indexBufferOffset: Int)
-
-    func draw(numVertices: Int, numInstances: Int, baseVertex: Int, baseInstance: Int)
-    func drawIndexed(numIndices: Int, numInstances: Int, indexOffset: Int, vertexOffset: Int, baseInstance: Int)
+    func draw(vertexStart: Int, vertexCount: Int, instanceCount: Int, baseInstance: Int)
+    func drawIndexed(indexCount: Int, indexType: IndexType, indexBuffer: Buffer, indexBufferOffset: Int, instanceCount: Int, baseVertex: Int, baseInstance: Int)
 }

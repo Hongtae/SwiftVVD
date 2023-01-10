@@ -2,7 +2,7 @@
 //  File: VulkanInstance.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
@@ -136,7 +136,7 @@ public class VulkanInstance {
         appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0)
         appInfo.pEngineName = engineName
         appInfo.engineVersion = VK_MAKE_VERSION(2, 0, 0)
-        appInfo.apiVersion = VK_MAKE_VERSION(1, 2, 0) // Vulkan-1.2
+        appInfo.apiVersion = VK_MAKE_VERSION(1, 3, 0) // Vulkan-1.3
 
         var instanceVersion : UInt32 = 0
         var err: VkResult = VK_SUCCESS

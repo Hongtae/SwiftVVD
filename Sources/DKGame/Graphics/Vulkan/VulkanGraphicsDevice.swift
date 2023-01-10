@@ -2,7 +2,7 @@
 //  File: VulkanGraphicsDevice.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
@@ -85,6 +85,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             initializedCount = count
         }
         if queueCreateInfos.count == 0 {
+            Log.error("Error: No queues in PhysicalDevice")
             return nil
         }
 
@@ -96,7 +97,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         requiredExtensions.append(VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME)
         requiredExtensions.append(VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME)
         requiredExtensions.append(VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME)
-        requiredExtensions.append(VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME)
+        // requiredExtensions.append(VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME)
 
         optionalExtensions.append(VK_KHR_MAINTENANCE2_EXTENSION_NAME)
         optionalExtensions.append(VK_KHR_MAINTENANCE3_EXTENSION_NAME)
@@ -133,31 +134,28 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             }, holder: tempHolder)
         }
 
-        // VK_EXT_extended_dynamic_state
-        let extendedDynamicStateFeatures: [VkPhysicalDeviceExtendedDynamicStateFeaturesEXT] = [
-            VkPhysicalDeviceExtendedDynamicStateFeaturesEXT(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT, nil, VK_DYNAMIC_STATE_CULL_MODE_EXT),
-            VkPhysicalDeviceExtendedDynamicStateFeaturesEXT(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT, nil, VK_DYNAMIC_STATE_FRONT_FACE_EXT),
-            VkPhysicalDeviceExtendedDynamicStateFeaturesEXT(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT, nil, VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY_EXT),
-        ]
-        if extendedDynamicStateFeatures.count > 0 {
-            let count = extendedDynamicStateFeatures.count
-            let pointerCopy = unsafePointerCopy(extendedDynamicStateFeatures, holder: tempHolder)
-            let mutablePointer = UnsafeMutablePointer(mutating: pointerCopy)
-
-            // make linked list with pNext chain
-            //let stride = MemoryLayout<VkPhysicalDeviceExtendedDynamicStateFeaturesEXT>.stride
-            for index in 0..<(count - 1) {
-                mutablePointer.advanced(by: index).pointee.pNext = UnsafeRawPointer(pointerCopy.advanced(by: index+1))
-            }
-            if true {
-                for index in 0 ..< count {
-                    let ptr = pointerCopy.advanced(by: index)
-                    let ss = String(format: "self:%p, pNext:%p", OpaquePointer(ptr), OpaquePointer(ptr.pointee.pNext) ?? 0)
-                    Log.debug("VkPhysicalDeviceExtendedDynamicStateFeaturesEXT[\(index)] \(ss)")
-                }
-            }
-
-            deviceCreateInfo.pNext = UnsafeRawPointer(pointerCopy)
+        if deviceExtensions.contains(VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME) {
+            // VK_EXT_extended_dynamic_state
+            var features = VkPhysicalDeviceExtendedDynamicStateFeaturesEXT()
+            features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT
+            features.extendedDynamicState = VK_TRUE
+            appendNextChain(&deviceCreateInfo, unsafePointerCopy(from: features, holder: tempHolder))
+        }
+        if deviceExtensions.contains(VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME) {
+            // VK_EXT_extended_dynamic_state
+            var features = VkPhysicalDeviceExtendedDynamicState2FeaturesEXT()
+            features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_2_FEATURES_EXT
+            features.extendedDynamicState2 = VK_TRUE
+            appendNextChain(&deviceCreateInfo, unsafePointerCopy(from: features, holder: tempHolder))
+        }
+        if deviceExtensions.contains(VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME) {
+            // VK_EXT_extended_dynamic_state
+            var features = VkPhysicalDeviceExtendedDynamicState3FeaturesEXT()
+            features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_3_FEATURES_EXT
+            features.extendedDynamicState3DepthClampEnable = VK_TRUE
+            features.extendedDynamicState3PolygonMode = VK_TRUE
+            features.extendedDynamicState3DepthClipEnable = VK_TRUE
+            appendNextChain(&deviceCreateInfo, unsafePointerCopy(from: features, holder: tempHolder))
         }
 
         var device: VkDevice? = nil
@@ -704,16 +702,8 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             }
         }
 
-        switch desc.cullMode {
-        case .none:  rasterizationState.cullMode = VkCullModeFlags(VK_CULL_MODE_NONE.rawValue)
-        case .front: rasterizationState.cullMode = VkCullModeFlags(VK_CULL_MODE_FRONT_BIT.rawValue)
-        case .back:  rasterizationState.cullMode = VkCullModeFlags(VK_CULL_MODE_BACK_BIT.rawValue)
-        }
-
-        switch desc.frontFace {
-        case .cw:   rasterizationState.frontFace = VK_FRONT_FACE_CLOCKWISE
-        case .ccw:  rasterizationState.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE
-        }
+        rasterizationState.cullMode = VkCullModeFlags(VK_CULL_MODE_NONE.rawValue)
+        rasterizationState.frontFace = VK_FRONT_FACE_CLOCKWISE
 
         rasterizationState.depthClampEnable = VkBool32(VK_FALSE)
         if desc.depthClipMode == .clamp {
@@ -805,13 +795,14 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK,
             VK_DYNAMIC_STATE_STENCIL_WRITE_MASK,
             VK_DYNAMIC_STATE_STENCIL_REFERENCE,
+
             // VK_EXT_extended_dynamic_state
             VK_DYNAMIC_STATE_CULL_MODE,
             VK_DYNAMIC_STATE_FRONT_FACE,
-            VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY,
-            // VK_EXT_extended_dynamic_state2
+            // VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY, //required: VkPhysicalDeviceExtendedDynamicState3PropertiesEXT.dynamicPrimitiveTopologyUnrestricted
+
             // VK_EXT_extended_dynamic_state3
-            VK_DYNAMIC_STATE_POLYGON_MODE_EXT,
+            // VK_DYNAMIC_STATE_POLYGON_MODE_EXT,
         ]
         var dynamicState = VkPipelineDynamicStateCreateInfo()
         dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO
