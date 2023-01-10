@@ -196,8 +196,8 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             supportPresentation = instance.extensionProc
                 .vkGetPhysicalDeviceWin32PresentationSupportKHR?(
                     physicalDevice.device,
-                    $0.queueFamilyIndex) ?? VkBool32(VK_FALSE)
-                != VkBool32(VK_FALSE)
+                    $0.queueFamilyIndex) ?? VK_FALSE
+                != VK_FALSE
 #endif
 #if VK_USE_PLATFORM_ANDROID_KHR
             supportPresentation = true  // always true on Android
@@ -208,8 +208,8 @@ public class VulkanGraphicsDevice : GraphicsDevice {
                     .vkGetPhysicalDeviceWaylandPresentationSupportKHR?(
                         physicalDevice.device,
                         $0.queueFamilyIndex,
-                        display) ?? VkBool32(VK_FALSE)
-                    != VkBool32(VK_FALSE)
+                        display) ?? VK_FALSE
+                    != VK_FALSE
             }
 #endif
             let queueFamilyIndex = $0.queueFamilyIndex
@@ -261,7 +261,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
                     fences.reserveCapacity(waitingFences.count)
                     waitingFences.forEach { fences.append($0.fence) }
 
-                    err = vkWaitForFences(self.device, UInt32(fences.count), fences, VkBool32(VK_FALSE), 0)
+                    err = vkWaitForFences(self.device, UInt32(fences.count), fences, VK_FALSE, 0)
                     fences.removeAll(keepingCapacity: true)
 
                     if err == VK_SUCCESS {
@@ -705,16 +705,9 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         rasterizationState.cullMode = VkCullModeFlags(VK_CULL_MODE_NONE.rawValue)
         rasterizationState.frontFace = VK_FRONT_FACE_CLOCKWISE
 
-        rasterizationState.depthClampEnable = VkBool32(VK_FALSE)
-        if desc.depthClipMode == .clamp {
-            if self.features.depthClamp != 0 {
-                rasterizationState.depthClampEnable = VkBool32(VK_TRUE)
-            } else {
-                Log.warn("VulkanGraphicsDevice.\(#function): DepthClamp not supported for this hardware.")
-            }
-        }
-        rasterizationState.rasterizerDiscardEnable = VkBool32(desc.rasterizationEnabled ? VK_FALSE : VK_TRUE)
-        rasterizationState.depthBiasEnable = VkBool32(VK_FALSE)
+        rasterizationState.depthClampEnable = VK_FALSE
+        rasterizationState.rasterizerDiscardEnable = desc.rasterizationEnabled ? VK_FALSE : VK_TRUE
+        rasterizationState.depthBiasEnable = VK_FALSE
         rasterizationState.lineWidth = 1.0
         pipelineCreateInfo.pRasterizationState = unsafePointerCopy(from: rasterizationState, holder: tempHolder)
 
@@ -728,60 +721,25 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         // setup depth-stencil
         var depthStencilState = VkPipelineDepthStencilStateCreateInfo()
         depthStencilState.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO
-        let compareOp = { (fn: CompareFunction) -> VkCompareOp in
-            switch fn {
-            case .never:            return VK_COMPARE_OP_NEVER
-            case .less:             return VK_COMPARE_OP_LESS
-            case .equal:            return VK_COMPARE_OP_EQUAL
-            case .lessEqual:        return VK_COMPARE_OP_LESS_OR_EQUAL
-            case .greater:          return VK_COMPARE_OP_GREATER
-            case .notEqual:         return VK_COMPARE_OP_NOT_EQUAL
-            case .greaterEqual:     return VK_COMPARE_OP_GREATER_OR_EQUAL
-            case .always:           return VK_COMPARE_OP_ALWAYS
-            }
-        }
-        let stencilOp = { (op: StencilOperation) -> VkStencilOp in
-            switch op {
-            case .keep:             return VK_STENCIL_OP_KEEP
-            case .zero:             return VK_STENCIL_OP_ZERO
-            case .replace:          return VK_STENCIL_OP_REPLACE
-            case .incrementClamp:   return VK_STENCIL_OP_INCREMENT_AND_CLAMP
-            case .decrementClamp:   return VK_STENCIL_OP_DECREMENT_AND_CLAMP
-            case .invert:           return VK_STENCIL_OP_INVERT
-            case .incrementWrap:    return VK_STENCIL_OP_INCREMENT_AND_WRAP
-            case .decrementWrap:    return VK_STENCIL_OP_DECREMENT_AND_WRAP
-            }
-        }
-        let setStencilOpState = { (state: inout VkStencilOpState, stencil: StencilDescriptor) in
-            state.failOp = stencilOp(stencil.stencilFailureOperation)
-            state.passOp = stencilOp(stencil.depthStencilPassOperation)
-            state.depthFailOp = stencilOp(stencil.depthFailOperation)
-            state.compareOp = compareOp(stencil.stencilCompareFunction)
-            state.compareMask = stencil.readMask
-            state.writeMask = stencil.writeMask
-            state.reference = 0 // use dynamic state (VK_DYNAMIC_STATE_STENCIL_REFERENCE)
-        }
-        depthStencilState.depthTestEnable = VkBool32(VK_TRUE)
-        depthStencilState.depthWriteEnable = VkBool32(desc.depthStencilDescriptor.isDepthWriteEnabled ? VK_TRUE:VK_FALSE)
-        depthStencilState.depthCompareOp = compareOp(desc.depthStencilDescriptor.depthCompareFunction)
-        depthStencilState.depthBoundsTestEnable = VkBool32(VK_FALSE)
-        setStencilOpState(&depthStencilState.front, desc.depthStencilDescriptor.frontFaceStencil)
-        setStencilOpState(&depthStencilState.back, desc.depthStencilDescriptor.backFaceStencil)
-        depthStencilState.stencilTestEnable = VkBool32(VK_TRUE)
-
-        if depthStencilState.front.failOp == VK_STENCIL_OP_KEEP &&
-           depthStencilState.front.passOp == VK_STENCIL_OP_KEEP &&
-           depthStencilState.front.depthFailOp == VK_STENCIL_OP_KEEP &&
-           depthStencilState.back.failOp == VK_STENCIL_OP_KEEP &&
-           depthStencilState.back.passOp == VK_STENCIL_OP_KEEP &&
-           depthStencilState.back.depthFailOp == VK_STENCIL_OP_KEEP {
-            depthStencilState.stencilTestEnable = VkBool32(VK_FALSE)
-        }
-        if depthStencilState.depthWriteEnable == VK_FALSE &&
-           depthStencilState.depthCompareOp == VK_COMPARE_OP_ALWAYS {
-            depthStencilState.depthTestEnable = VkBool32(VK_FALSE)
-        }
-
+        depthStencilState.depthTestEnable = VK_FALSE
+        depthStencilState.depthWriteEnable = VK_FALSE
+        depthStencilState.depthCompareOp = VK_COMPARE_OP_ALWAYS
+        depthStencilState.depthBoundsTestEnable = VK_FALSE
+        depthStencilState.front = VkStencilOpState(failOp: VK_STENCIL_OP_KEEP,
+                                                   passOp: VK_STENCIL_OP_KEEP,
+                                                   depthFailOp: VK_STENCIL_OP_KEEP,
+                                                   compareOp: VK_COMPARE_OP_ALWAYS,
+                                                   compareMask: 0xffffffff,
+                                                   writeMask: 0xffffffff,
+                                                   reference: 0)
+        depthStencilState.back = VkStencilOpState(failOp: VK_STENCIL_OP_KEEP,
+                                                   passOp: VK_STENCIL_OP_KEEP,
+                                                   depthFailOp: VK_STENCIL_OP_KEEP,
+                                                   compareOp: VK_COMPARE_OP_ALWAYS,
+                                                   compareMask: 0xffffffff,
+                                                   writeMask: 0xffffffff,
+                                                   reference: 0)
+        depthStencilState.stencilTestEnable = VK_FALSE
         pipelineCreateInfo.pDepthStencilState = unsafePointerCopy(from: depthStencilState, holder: tempHolder)
 
         // dynamic states
@@ -796,6 +754,14 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             VK_DYNAMIC_STATE_STENCIL_WRITE_MASK,
             VK_DYNAMIC_STATE_STENCIL_REFERENCE,
 
+            // Provided by VK_VERSION_1_3
+            VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE,
+            VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE,
+            VK_DYNAMIC_STATE_DEPTH_COMPARE_OP,
+            VK_DYNAMIC_STATE_DEPTH_BOUNDS_TEST_ENABLE,
+            VK_DYNAMIC_STATE_STENCIL_TEST_ENABLE,
+            VK_DYNAMIC_STATE_STENCIL_OP,
+
             // VK_EXT_extended_dynamic_state
             VK_DYNAMIC_STATE_CULL_MODE,
             VK_DYNAMIC_STATE_FRONT_FACE,
@@ -803,6 +769,8 @@ public class VulkanGraphicsDevice : GraphicsDevice {
 
             // VK_EXT_extended_dynamic_state3
             // VK_DYNAMIC_STATE_POLYGON_MODE_EXT,
+            // VK_DYNAMIC_STATE_DEPTH_CLAMP_ENABLE_EXT
+            // VK_DYNAMIC_STATE_DEPTH_CLIP_ENABLE_EXT
         ]
         var dynamicState = VkPipelineDynamicStateCreateInfo()
         dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO
@@ -880,7 +848,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             attachmentDescriptions.append(attachmentDesc)
 
             var blendState = VkPipelineColorBlendAttachmentState()
-            blendState.blendEnable = VkBool32(attachment.blendState.enabled ? VK_TRUE:VK_FALSE)
+            blendState.blendEnable = attachment.blendState.enabled ? VK_TRUE : VK_FALSE
             blendState.srcColorBlendFactor = blendFactor(attachment.blendState.sourceRGBBlendFactor)
             blendState.dstColorBlendFactor = blendFactor(attachment.blendState.destinationRGBBlendFactor)
             blendState.colorBlendOp = blendOperation(attachment.blendState.rgbBlendOperation)
@@ -1114,6 +1082,67 @@ public class VulkanGraphicsDevice : GraphicsDevice {
 
         pipelineState = VulkanComputePipelineState(device: self, pipeline: pipeline!, layout: pipelineLayout!)
         return pipelineState
+    }
+
+    public func makeDepthStencilState(descriptor desc: DepthStencilDescriptor) -> DepthStencilState? {
+
+        let compareOp = { (fn: CompareFunction) -> VkCompareOp in
+            switch fn {
+            case .never:            return VK_COMPARE_OP_NEVER
+            case .less:             return VK_COMPARE_OP_LESS
+            case .equal:            return VK_COMPARE_OP_EQUAL
+            case .lessEqual:        return VK_COMPARE_OP_LESS_OR_EQUAL
+            case .greater:          return VK_COMPARE_OP_GREATER
+            case .notEqual:         return VK_COMPARE_OP_NOT_EQUAL
+            case .greaterEqual:     return VK_COMPARE_OP_GREATER_OR_EQUAL
+            case .always:           return VK_COMPARE_OP_ALWAYS
+            }
+        }
+        let stencilOp = { (op: StencilOperation) -> VkStencilOp in
+            switch op {
+            case .keep:             return VK_STENCIL_OP_KEEP
+            case .zero:             return VK_STENCIL_OP_ZERO
+            case .replace:          return VK_STENCIL_OP_REPLACE
+            case .incrementClamp:   return VK_STENCIL_OP_INCREMENT_AND_CLAMP
+            case .decrementClamp:   return VK_STENCIL_OP_DECREMENT_AND_CLAMP
+            case .invert:           return VK_STENCIL_OP_INVERT
+            case .incrementWrap:    return VK_STENCIL_OP_INCREMENT_AND_WRAP
+            case .decrementWrap:    return VK_STENCIL_OP_DECREMENT_AND_WRAP
+            }
+        }
+        let stencilOpState = { (stencil: StencilDescriptor) -> VkStencilOpState in
+            return VkStencilOpState(
+                failOp: stencilOp(stencil.stencilFailureOperation),
+                passOp: stencilOp(stencil.depthStencilPassOperation),
+                depthFailOp: stencilOp(stencil.depthFailOperation),
+                compareOp: compareOp(stencil.stencilCompareFunction),
+                compareMask: stencil.readMask,
+                writeMask: stencil.writeMask,
+                reference: 0) // use dynamic state (VK_DYNAMIC_STATE_STENCIL_REFERENCE)
+        }
+
+        let depthStencilState = VulkanDepthStencilState(device: self)
+        depthStencilState.depthTestEnable = VK_TRUE
+        depthStencilState.depthWriteEnable = desc.isDepthWriteEnabled ? VK_TRUE : VK_FALSE
+        depthStencilState.depthCompareOp = compareOp(desc.depthCompareFunction)
+        depthStencilState.depthBoundsTestEnable = VK_FALSE
+        depthStencilState.front = stencilOpState(desc.frontFaceStencil)
+        depthStencilState.back  = stencilOpState(desc.backFaceStencil)
+        depthStencilState.stencilTestEnable = VK_TRUE
+
+        if depthStencilState.front.failOp == VK_STENCIL_OP_KEEP &&
+           depthStencilState.front.passOp == VK_STENCIL_OP_KEEP &&
+           depthStencilState.front.depthFailOp == VK_STENCIL_OP_KEEP &&
+           depthStencilState.back.failOp == VK_STENCIL_OP_KEEP &&
+           depthStencilState.back.passOp == VK_STENCIL_OP_KEEP &&
+           depthStencilState.back.depthFailOp == VK_STENCIL_OP_KEEP {
+            depthStencilState.stencilTestEnable = VK_FALSE
+        }
+        if depthStencilState.depthWriteEnable == VK_FALSE &&
+           depthStencilState.depthCompareOp == VK_COMPARE_OP_ALWAYS {
+            depthStencilState.depthTestEnable = VK_FALSE
+        }
+        return depthStencilState
     }
 
     public func makeBuffer(length: Int, storageMode: StorageMode, cpuCacheMode: CPUCacheMode) -> Buffer? {
@@ -1352,6 +1381,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         }
         return nil
     }
+
     public func makeSamplerState(descriptor desc: SamplerDescriptor) -> SamplerState? {
         let filter = { (f: SamplerMinMagFilter) -> VkFilter in
             switch f {

@@ -2,7 +2,7 @@
 //  File: VulkanRenderCommandEncoder.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
@@ -448,6 +448,115 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
             }
             self.encoder!.commands.append(command)
         }
+    }
+
+    public func setDepthStencilState(_ depthStencilState: DepthStencilState?) {
+        if let depthStencilState = depthStencilState {
+            assert(depthStencilState is VulkanDepthStencilState)
+        }
+
+        let frontFaceFlags = VkStencilFaceFlags(VK_STENCIL_FACE_FRONT_BIT.rawValue)
+        let backFaceFlags = VkStencilFaceFlags(VK_STENCIL_FACE_BACK_BIT.rawValue)
+
+        let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
+            if let depthStencilState = depthStencilState as? VulkanDepthStencilState {
+                vkCmdSetDepthTestEnable(commandBuffer, depthStencilState.depthTestEnable)
+                vkCmdSetStencilTestEnable(commandBuffer, depthStencilState.stencilTestEnable) 
+
+                vkCmdSetDepthCompareOp(commandBuffer, depthStencilState.depthCompareOp)
+                vkCmdSetDepthWriteEnable(commandBuffer, depthStencilState.depthWriteEnable)
+                vkCmdSetDepthBoundsTestEnable(commandBuffer, depthStencilState.depthBoundsTestEnable)
+
+                // front face stencil
+                vkCmdSetStencilCompareMask(commandBuffer,
+                                           frontFaceFlags,
+                                           depthStencilState.front.compareMask)
+                vkCmdSetStencilWriteMask(commandBuffer,
+                                         frontFaceFlags,
+                                         depthStencilState.front.writeMask)
+                vkCmdSetStencilOp(commandBuffer,
+                                  frontFaceFlags,
+                                  depthStencilState.front.failOp,
+                                  depthStencilState.front.passOp,
+                                  depthStencilState.front.depthFailOp,
+                                  depthStencilState.front.compareOp)
+                // back face stencil
+                vkCmdSetStencilCompareMask(commandBuffer,
+                                           backFaceFlags,
+                                           depthStencilState.back.compareMask)
+                vkCmdSetStencilWriteMask(commandBuffer,
+                                         backFaceFlags,
+                                         depthStencilState.back.writeMask)
+                vkCmdSetStencilOp(commandBuffer,
+                                  backFaceFlags,
+                                  depthStencilState.back.failOp,
+                                  depthStencilState.back.passOp,
+                                  depthStencilState.back.depthFailOp,
+                                  depthStencilState.back.compareOp)
+            } else {
+                vkCmdSetDepthTestEnable(commandBuffer, VK_FALSE)
+                vkCmdSetStencilTestEnable(commandBuffer, VK_FALSE)
+
+                vkCmdSetDepthCompareOp(commandBuffer, VK_COMPARE_OP_ALWAYS)
+                vkCmdSetDepthWriteEnable(commandBuffer, VK_FALSE)
+                vkCmdSetDepthBoundsTestEnable(commandBuffer, VK_FALSE)
+
+                // front face stencil
+                vkCmdSetStencilCompareMask(commandBuffer,
+                                           frontFaceFlags,
+                                           0xffffffff)
+                vkCmdSetStencilWriteMask(commandBuffer,
+                                         frontFaceFlags,
+                                         0xffffffff)
+                vkCmdSetStencilOp(commandBuffer,
+                                  frontFaceFlags,
+                                  VK_STENCIL_OP_KEEP,
+                                  VK_STENCIL_OP_KEEP,
+                                  VK_STENCIL_OP_KEEP,
+                                  VK_COMPARE_OP_ALWAYS)
+                // back face stencil
+                vkCmdSetStencilCompareMask(commandBuffer,
+                                           backFaceFlags,
+                                           0xffffffff)
+                vkCmdSetStencilWriteMask(commandBuffer,
+                                         backFaceFlags,
+                                         0xffffffff)
+                vkCmdSetStencilOp(commandBuffer,
+                                  backFaceFlags,
+                                  VK_STENCIL_OP_KEEP,
+                                  VK_STENCIL_OP_KEEP,
+                                  VK_STENCIL_OP_KEEP,
+                                  VK_COMPARE_OP_ALWAYS)
+            }
+        }
+        self.encoder!.commands.append(command)
+    }
+
+    public func setDepthClipMode(_ mode: DepthClipMode) {
+
+        if mode == .clamp && self.encoder!.device.features.depthClamp == 0 {
+            Log.warn("\(#function): DepthClamp not supported for this hardware.")
+        }
+
+#if false
+        // VK_EXT_extended_dynamic_state3
+
+        let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
+            switch mode {
+            case .clip:
+                vkCmdSetDepthClampEnableEXT(commandBuffer, VK_FALSE)
+                vkCmdSetDepthClipEnableEXT(commandBuffer, VK_TRUE)
+            case .clamp:
+                vkCmdSetDepthClipEnableEXT(commandBuffer, VK_FALSE)
+                vkCmdSetDepthClampEnableEXT(commandBuffer, VK_TRUE)
+            }
+        }
+        self.encoder!.commands.append(command)
+#else
+        if (mode == .clamp) {
+            Log.err("\(#function) failed: VK_EXT_extended_dynamic_state3 is not supported.")
+        }
+#endif
     }
 
     public func setCullMode(_ mode: CullMode) {
