@@ -464,7 +464,10 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
                 depthStencilState.bind(commandBuffer: commandBuffer)
             } else {
                 if state.depthStencilState != nil {
-                    VulkanDepthStencilState.resetToDefault(commandBuffer: commandBuffer)
+                    // reset to default
+                    vkCmdSetDepthTestEnable(commandBuffer, VK_FALSE)
+                    vkCmdSetStencilTestEnable(commandBuffer, VK_FALSE)
+                    vkCmdSetDepthBoundsTestEnable(commandBuffer, VK_FALSE)
                 }
             }
             state.depthStencilState = depthStencilState

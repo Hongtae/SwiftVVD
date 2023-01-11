@@ -725,6 +725,8 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         depthStencilState.depthWriteEnable = VK_FALSE
         depthStencilState.depthCompareOp = VK_COMPARE_OP_ALWAYS
         depthStencilState.depthBoundsTestEnable = VK_FALSE
+        depthStencilState.minDepthBounds = 0.0
+        depthStencilState.maxDepthBounds = 1.0
         depthStencilState.front = VkStencilOpState(failOp: VK_STENCIL_OP_KEEP,
                                                    passOp: VK_STENCIL_OP_KEEP,
                                                    depthFailOp: VK_STENCIL_OP_KEEP,
@@ -1129,6 +1131,8 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         depthStencilState.front = stencilOpState(desc.frontFaceStencil)
         depthStencilState.back  = stencilOpState(desc.backFaceStencil)
         depthStencilState.stencilTestEnable = VK_TRUE
+        depthStencilState.minDepthBounds = 0.0
+        depthStencilState.maxDepthBounds = 1.0
 
         if depthStencilState.front.failOp == VK_STENCIL_OP_KEEP &&
            depthStencilState.front.passOp == VK_STENCIL_OP_KEEP &&
