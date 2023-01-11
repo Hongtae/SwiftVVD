@@ -15,6 +15,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
 
     struct EncodingState {
         var pipelineState: VulkanRenderPipelineState? = nil
+        var depthStencilState: VulkanDepthStencilState? = nil
         var imageLayouts: VulkanDescriptorSet.ImageLayoutMap = [:]
         var imageViewLayouts: VulkanDescriptorSet.ImageViewLayoutMap = [:]
     }
@@ -391,6 +392,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
             let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
                 vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.pipeline)
                 state.pipelineState = pipeline
+                state.depthStencilState?.bind(commandBuffer: commandBuffer)
             }
             self.encoder!.commands.append(command)
             self.encoder!.pipelineStateObjects.append(pipeline)
@@ -450,84 +452,22 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func setDepthStencilState(_ depthStencilState: DepthStencilState?) {
-        if let depthStencilState = depthStencilState {
-            assert(depthStencilState is VulkanDepthStencilState)
+    public func setDepthStencilState(_ state: DepthStencilState?) {
+        var depthStencilState: VulkanDepthStencilState? = nil
+        if let state = state {
+            assert(state is VulkanDepthStencilState)
+            depthStencilState = state as? VulkanDepthStencilState
         }
 
-        let frontFaceFlags = VkStencilFaceFlags(VK_STENCIL_FACE_FRONT_BIT.rawValue)
-        let backFaceFlags = VkStencilFaceFlags(VK_STENCIL_FACE_BACK_BIT.rawValue)
-
         let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
-            if let depthStencilState = depthStencilState as? VulkanDepthStencilState {
-                vkCmdSetDepthTestEnable(commandBuffer, depthStencilState.depthTestEnable)
-                vkCmdSetStencilTestEnable(commandBuffer, depthStencilState.stencilTestEnable) 
-
-                vkCmdSetDepthCompareOp(commandBuffer, depthStencilState.depthCompareOp)
-                vkCmdSetDepthWriteEnable(commandBuffer, depthStencilState.depthWriteEnable)
-                vkCmdSetDepthBoundsTestEnable(commandBuffer, depthStencilState.depthBoundsTestEnable)
-
-                // front face stencil
-                vkCmdSetStencilCompareMask(commandBuffer,
-                                           frontFaceFlags,
-                                           depthStencilState.front.compareMask)
-                vkCmdSetStencilWriteMask(commandBuffer,
-                                         frontFaceFlags,
-                                         depthStencilState.front.writeMask)
-                vkCmdSetStencilOp(commandBuffer,
-                                  frontFaceFlags,
-                                  depthStencilState.front.failOp,
-                                  depthStencilState.front.passOp,
-                                  depthStencilState.front.depthFailOp,
-                                  depthStencilState.front.compareOp)
-                // back face stencil
-                vkCmdSetStencilCompareMask(commandBuffer,
-                                           backFaceFlags,
-                                           depthStencilState.back.compareMask)
-                vkCmdSetStencilWriteMask(commandBuffer,
-                                         backFaceFlags,
-                                         depthStencilState.back.writeMask)
-                vkCmdSetStencilOp(commandBuffer,
-                                  backFaceFlags,
-                                  depthStencilState.back.failOp,
-                                  depthStencilState.back.passOp,
-                                  depthStencilState.back.depthFailOp,
-                                  depthStencilState.back.compareOp)
+            if let depthStencilState = depthStencilState {
+                depthStencilState.bind(commandBuffer: commandBuffer)
             } else {
-                vkCmdSetDepthTestEnable(commandBuffer, VK_FALSE)
-                vkCmdSetStencilTestEnable(commandBuffer, VK_FALSE)
-
-                vkCmdSetDepthCompareOp(commandBuffer, VK_COMPARE_OP_ALWAYS)
-                vkCmdSetDepthWriteEnable(commandBuffer, VK_FALSE)
-                vkCmdSetDepthBoundsTestEnable(commandBuffer, VK_FALSE)
-
-                // front face stencil
-                vkCmdSetStencilCompareMask(commandBuffer,
-                                           frontFaceFlags,
-                                           0xffffffff)
-                vkCmdSetStencilWriteMask(commandBuffer,
-                                         frontFaceFlags,
-                                         0xffffffff)
-                vkCmdSetStencilOp(commandBuffer,
-                                  frontFaceFlags,
-                                  VK_STENCIL_OP_KEEP,
-                                  VK_STENCIL_OP_KEEP,
-                                  VK_STENCIL_OP_KEEP,
-                                  VK_COMPARE_OP_ALWAYS)
-                // back face stencil
-                vkCmdSetStencilCompareMask(commandBuffer,
-                                           backFaceFlags,
-                                           0xffffffff)
-                vkCmdSetStencilWriteMask(commandBuffer,
-                                         backFaceFlags,
-                                         0xffffffff)
-                vkCmdSetStencilOp(commandBuffer,
-                                  backFaceFlags,
-                                  VK_STENCIL_OP_KEEP,
-                                  VK_STENCIL_OP_KEEP,
-                                  VK_STENCIL_OP_KEEP,
-                                  VK_COMPARE_OP_ALWAYS)
+                if state.depthStencilState != nil {
+                    VulkanDepthStencilState.resetToDefault(commandBuffer: commandBuffer)
+                }
             }
+            state.depthStencilState = depthStencilState
         }
         self.encoder!.commands.append(command)
     }
