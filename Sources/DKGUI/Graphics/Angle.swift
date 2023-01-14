@@ -2,7 +2,7 @@
 //  File: Angle.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 public struct Angle: Sendable {
@@ -57,4 +57,17 @@ extension Angle: Animatable {
     }
 
     public static var zero: Angle { .init(radians: 0) }
+}
+
+public enum Axis: Int8, CaseIterable  {
+    case horizontal
+    case vertical
+
+    public struct Set: OptionSet {
+        public let rawValue: Int8
+        public init(rawValue: Int8) { self.rawValue = rawValue }
+
+        public static let horizontal = Set(rawValue: 1)
+        public static let vertical = Set(rawValue: 2)
+    }
 }

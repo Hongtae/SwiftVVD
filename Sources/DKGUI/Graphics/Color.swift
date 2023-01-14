@@ -34,22 +34,25 @@ public struct Color {
 }
 
 extension Color {
-    public static let red = Color()
-    public static let orange = Color()
-    public static let yellow = Color()
-    public static let green = Color()
-    public static let mint = Color()
-    public static let teal = Color()
-    public static let cyan = Color()
-    public static let blue = Color()
-    public static let indigo = Color()
-    public static let purple = Color()
-    public static let pink = Color()
-    public static let brown = Color()
-    public static let white = Color()
-    public static let gray = Color()
-    public static let black = Color()
-    public static let clear = Color()
-    public static let primary = Color()
-    public static let secondary = Color()
+    public static let red = Color(red: 1, green: 0.231373, blue: 0.188235)
+    public static let orange = Color(red: 1, green: 0.584314, blue: 0)
+    public static let yellow = Color(red: 1, green: 0.8, blue: 0)
+    public static let green = Color(red: 0.156863, green: 0.803922, blue: 0.254902)
+    public static let mint = Color(red: 0, green: 0.780392, blue: 0.745098)
+    public static let teal = Color(red: 0.34902, green: 0.678431, blue: 0.768627)
+    public static let cyan = Color(red: 0.333333, green: 0.745098, blue: 0.941176)
+    public static let blue = Color(red: 0, green: 0.478431, blue: 1)
+    public static let indigo = Color(red: 0.345098, green: 0.337255, blue: 0.839216)
+    public static let purple = Color(red: 0.686275, green: 0.321569, blue: 0.870588)
+    public static let pink = Color(red: 1, green: 0.176471, blue: 0.333333)
+    public static let brown = Color(red: 0.635294, green: 0.517647, blue: 0.368627)
+    public static let white = Color(red: 1, green: 1, blue: 1)
+    public static let gray = Color(red: 0.556863, green: 0.556863, blue: 0.576471)
+    public static let black = Color(red: 0, green: 0, blue: 0)
+    public static let clear = Color(red: 0, green: 0, blue: 0, opacity: 0)
+    public static let primary = Color(red: 0, green: 0, blue: 0, opacity: 0.847059)
+    public static let secondary = Color(red: 0, green: 0, blue: 0, opacity: 0.498039)
+}
+
+extension Color: ShapeStyle {
 }

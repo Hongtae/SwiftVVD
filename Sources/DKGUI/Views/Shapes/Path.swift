@@ -2,7 +2,7 @@
 //  File: Path.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -38,15 +38,40 @@ public struct Path: Equatable, LosslessStringConvertible {
     public init?(_ string: String) {
     }
 
-    public var description: String { "Path" }
-    public var isEmpty: Bool { fatalError() }
-    public var boundingRect: CGRect { fatalError() }
+    public var description: String {
+        var desc: [String] = []
+        self.forEach { element in
+            switch element {
+            case .move(let to):
+                desc.append("\(to.x) \(to.y) m")
+            case .line(let to):
+                desc.append("\(to.x) \(to.y) l")
+            case .quadCurve(let to, let c):
+                desc.append("\(to.x) \(to.y) \(c.x) \(c.y) q")
+            case .curve(let to, let c1, let c2):
+                desc.append("\(to.x) \(to.y) \(c1.x) \(c1.y) \(c2.x) \(c2.y) c")
+            case .closeSubpath:
+                desc.append("h")
+            }
+        }
+        return desc.joined(separator: " ")
+    }
+
+    public var isEmpty: Bool { self.subpaths.isEmpty }
+
+    public var boundingRect: CGRect {
+        var bounds: CGRect = .null
+        subpaths.forEach {
+            bounds = bounds.union($0.bounds)
+        }
+        return bounds
+    }
 
     public func contains(_ p: CGPoint, eoFill: Bool = false) -> Bool {
         fatalError()
     }
 
-    public enum Element : Equatable, Sendable {
+    public enum Element: Equatable, Sendable {
         case move(to: CGPoint)
         case line(to: CGPoint)
         case quadCurve(to: CGPoint, control: CGPoint)
@@ -58,8 +83,18 @@ public struct Path: Equatable, LosslessStringConvertible {
         }
     }
 
+    struct Subpath: Equatable {
+        var elements: [Element] = []
+        var bounds: CGRect = .null
+    }
+    var subpaths: [Subpath] = []
+
     public func forEach(_ body: (Path.Element) -> Void) {
-        fatalError()
+        self.subpaths.forEach { subpath in
+            subpath.elements.forEach {
+                body($0)
+            }
+        }
     }
 
     public func strokedPath(_ style: StrokeStyle) -> Path {
@@ -67,10 +102,6 @@ public struct Path: Equatable, LosslessStringConvertible {
     }
 
     public func trimmedPath(from: CGFloat, to: CGFloat) -> Path {
-        fatalError()
-    }
-
-    public static func == (a: Path, b: Path) -> Bool {
         fatalError()
     }
 }
