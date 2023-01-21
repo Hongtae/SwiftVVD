@@ -2,10 +2,8 @@
 //  File: TransformUnit.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
-
-import Foundation
 
 public struct TransformUnit: VectorTransformer, Interpolatable {
     public typealias Vector = Vector3
@@ -53,7 +51,7 @@ public struct TransformUnit: VectorTransformer, Interpolatable {
         self.init(scale: Vector3(1, 1, 1), rotation: .identity, translation: .zero)
     }
 
-    public static func interpolate(_ t1: Self, _ t2: Self, t: Scalar) -> Self {
+    public static func interpolate(_ t1: Self, _ t2: Self, t: any BinaryFloatingPoint) -> Self {
         let s = t1.scale + ((t2.scale - t1.scale) * t)
         let r = Quaternion.slerp(t1.rotation, t2.rotation, t: t)
         let t = t1.translation + ((t2.translation - t1.translation) * t)

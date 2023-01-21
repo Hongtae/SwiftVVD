@@ -2,12 +2,12 @@
 //  File: Vector.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
-import Foundation
-
 public protocol Vector {
+    associatedtype Scalar: BinaryFloatingPoint
+    
     var length: Scalar { get }
     var lengthSquared: Scalar { get }
 
@@ -20,23 +20,23 @@ public protocol Vector {
 
     static prefix func - (_: Self) -> Self
  
-    static func + (_:Self, _:Self) -> Self
-    static func - (_:Self, _:Self) -> Self
-    static func * (_:Self, _:Self) -> Self
-    static func * (_:Self, _:Scalar) -> Self
+    static func + (_: Self, _: Self) -> Self
+    static func - (_: Self, _: Self) -> Self
+    static func * (_: Self, _: Self) -> Self
+    static func * (_: Self, _: any BinaryFloatingPoint) -> Self
  
-    static func += (_:inout Self, _:Self)
-    static func -= (_:inout Self, _:Self)
-    static func *= (_:inout Self, _:Self)
-    static func *= (_:inout Self, _:Scalar)
+    static func += (_: inout Self, _: Self)
+    static func -= (_: inout Self, _: Self)
+    static func *= (_: inout Self, _: Self)
+    static func *= (_: inout Self, _: any BinaryFloatingPoint)
 
-    static func == (_:Self, _:Self) -> Bool
-    static func != (_:Self, _:Self) -> Bool
+    static func == (_: Self, _: Self) -> Bool
+    static func != (_: Self, _: Self) -> Bool
 
-    static func minimum(_:Self, _:Self) -> Self
-    static func maximum(_:Self, _:Self) -> Self
+    static func minimum(_: Self, _: Self) -> Self
+    static func maximum(_: Self, _: Self) -> Self
 
-    static func interpolate(_:Self, _:Self, _:Scalar) -> Self
+    static func interpolate(_: Self, _: Self, _: any BinaryFloatingPoint) -> Self
 }
 
 public extension Vector {
@@ -60,17 +60,18 @@ public extension Vector {
         self = self.normalized()
     }
 
-    static func lerp(_ lhs: Self, _ rhs: Self, _ t: Scalar) -> Self {
-        lhs * (1.0 - t) + rhs * t
+    static func lerp(_ lhs: Self, _ rhs: Self, _ t: any BinaryFloatingPoint) -> Self {
+        let t = Scalar(t)
+        return lhs * (1.0 - t) + rhs * t
     }
 
-    static func interpolate(_ lhs: Self, _ rhs: Self, _ t: Scalar) -> Self {
+    static func interpolate(_ lhs: Self, _ rhs: Self, _ t: any BinaryFloatingPoint) -> Self {
         lerp(lhs, rhs, t)
     }
 
     static func += (lhs: inout Self, rhs: Self) { lhs = lhs + rhs }
     static func -= (lhs: inout Self, rhs: Self) { lhs = lhs - rhs }
     static func *= (lhs: inout Self, rhs: Self) { lhs = lhs * rhs }
-    static func *= (lhs: inout Self, rhs: Scalar) { lhs = lhs * rhs }
+    static func *= (lhs: inout Self, rhs: any BinaryFloatingPoint) { lhs = lhs * rhs }
     static func != (lhs: Self, rhs: Self) -> Bool { return !(lhs == rhs) }
 }

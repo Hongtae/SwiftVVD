@@ -2,7 +2,7 @@
 //  File: Vector4.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -46,14 +46,20 @@ public struct Vector4: Vector {
         self = .zero
     }
 
-    public init(_ x: Scalar, _ y: Scalar, _ z: Scalar, _ w: Scalar) {
-        self.x = x
-        self.y = y
-        self.z = z
-        self.w = w
+    public init(_ x: any BinaryFloatingPoint,
+                _ y: any BinaryFloatingPoint,
+                _ z: any BinaryFloatingPoint,
+                _ w: any BinaryFloatingPoint) {
+        self.x = Scalar(x)
+        self.y = Scalar(y)
+        self.z = Scalar(z)
+        self.w = Scalar(w)
     }
 
-    public init(x: Scalar, y: Scalar, z: Scalar, w: Scalar) {
+    public init(x: any BinaryFloatingPoint,
+                y: any BinaryFloatingPoint,
+                z: any BinaryFloatingPoint,
+                w: any BinaryFloatingPoint) {
         self.init(x, y, z, w)
     }
 
@@ -85,8 +91,9 @@ public struct Vector4: Vector {
         return Self(lhs.x - rhs.x, lhs.y - rhs.y, lhs.z - rhs.z, lhs.w - rhs.w)
     }
 
-    public static func * (lhs: Self, rhs: Scalar) -> Self {
-        return Self(lhs.x * rhs, lhs.y * rhs, lhs.z * rhs, lhs.w * rhs)
+    public static func * (lhs: Self, rhs: any BinaryFloatingPoint) -> Self {
+        let r = Scalar(rhs)
+        return Self(lhs.x * r, lhs.y * r, lhs.z * r, lhs.w * r)
     }
 
     public static func * (lhs: Self, rhs: Self) -> Self {

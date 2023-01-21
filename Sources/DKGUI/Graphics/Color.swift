@@ -2,8 +2,22 @@
 //  File: Color.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
+
+import DKGame
+
+struct AnyColorBox {
+    let color: DKGame.Color
+
+    init(red: Double, green: Double, blue: Double, opacity: Double) {
+        self.color = .init(red, green, blue, opacity)
+    }
+
+    init(red: UInt8, green: UInt8, blue: UInt8, opacity: UInt8) {
+        self.color = .init(rgba8: (r: red, g: green, b: blue, a: opacity))
+    }
+}
 
 public struct Color {
     public enum RGBColorSpace: Equatable, Hashable {
@@ -12,8 +26,12 @@ public struct Color {
         case displayP3
     }
 
+    let colorSpace: RGBColorSpace
+    let provider: AnyColorBox
+
     public init(_ colorSpace: Color.RGBColorSpace = .sRGB, red: Double, green: Double, blue: Double, opacity: Double = 1) {
-        fatalError()
+        self.colorSpace = colorSpace
+        self.provider = AnyColorBox(red: red, green: green, blue: blue, opacity: opacity)
     }
 
     public init(_ colorSpace: Color.RGBColorSpace = .sRGB, white: Double, opacity: Double = 1) {
@@ -55,4 +73,9 @@ extension Color {
 }
 
 extension Color: ShapeStyle {
+}
+
+extension Color: View {
+    public typealias Body = Never
+    public var body: Never { neverBody() }
 }

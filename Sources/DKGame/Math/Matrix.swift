@@ -2,7 +2,7 @@
 //  File: Matrix.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 public protocol Matrix {
@@ -21,28 +21,30 @@ public protocol Matrix {
 
     static var identity: Self { get }
 
-    static func == (_:Self, _:Self) -> Bool
-    static func != (_:Self, _:Self) -> Bool
+    static func == (_: Self, _: Self) -> Bool
+    static func != (_: Self, _: Self) -> Bool
 
-    static func + (_:Self, _:Self) -> Self
-    static func - (_:Self, _:Self) -> Self
-    static func * (_:Self, _:Self) -> Self
-    static func * (_:Self, _:Scalar) -> Self
+    static func + (_: Self, _: Self) -> Self
+    static func - (_: Self, _: Self) -> Self
+    static func * (_: Self, _: Self) -> Self
+    static func * (_: Self, _: any BinaryFloatingPoint) -> Self
 
-    static func += (_:inout Self, _:Self)
-    static func -= (_:inout Self, _:Self)
-    static func *= (_:inout Self, _:Self)
-    static func *= (_:inout Self, _:Scalar)
+    static func += (_: inout Self, _: Self)
+    static func -= (_: inout Self, _: Self)
+    static func *= (_: inout Self, _: Self)
+    static func *= (_: inout Self, _: any BinaryFloatingPoint)
 }
 
 public extension Matrix {
     mutating func invert()      { self = self.inverted() ?? self }
     mutating func transpose()   { self = self.transposed() }
 
-    static func != (_ lhs:Self, _ rhs:Self) -> Bool { return !(lhs == rhs) }
+    static func != (_ lhs: Self, _ rhs: Self) -> Bool { return !(lhs == rhs) }
     
-    static func += (_ lhs:inout Self, _ rhs:Self)       { lhs = lhs + rhs }
-    static func -= (_ lhs:inout Self, _ rhs:Self)       { lhs = lhs - rhs }
-    static func *= (_ lhs:inout Self, _ rhs:Self)       { lhs = lhs * rhs }
-    static func *= (_ lhs:inout Self, _ rhs:Scalar)     { lhs = lhs * rhs }
+    static func += (_ lhs: inout Self, _ rhs: Self)       { lhs = lhs + rhs }
+    static func -= (_ lhs: inout Self, _ rhs: Self)       { lhs = lhs - rhs }
+    static func *= (_ lhs: inout Self, _ rhs: Self)       { lhs = lhs * rhs }
+    static func *= (_ lhs: inout Self, _ rhs: any BinaryFloatingPoint) {
+        lhs = lhs * rhs
+    }
 }

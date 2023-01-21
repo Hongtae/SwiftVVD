@@ -2,7 +2,7 @@
 //  File: View.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 public protocol View {
@@ -11,7 +11,7 @@ public protocol View {
 }
 
 protocol _PrimitiveView {
-    func makeViewProxy() -> any ViewProxy
+    func makeViewProxy(modifiers: [any ViewModifier]) -> any ViewProxy
 }
 
 extension _PrimitiveView {
@@ -20,7 +20,7 @@ extension _PrimitiveView {
 }
 
 extension _PrimitiveView {
-    func makeViewProxy() -> any ViewProxy {
+    func makeViewProxy(modifiers: [any ViewModifier]) -> any ViewProxy {
         fatalError("Not implemented")
     }
 }

@@ -2,7 +2,7 @@
 //  File: AffineTransform2.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -57,7 +57,7 @@ public struct AffineTransform2: VectorTransformer {
         self.translation = origin
     }
 
-    public init(x: Scalar, y: Scalar) {
+    public init(x: any BinaryFloatingPoint, y: any BinaryFloatingPoint) {
         self.matrix2 = .identity
         self.translation = .init(x, y)
     }
@@ -89,11 +89,13 @@ public struct AffineTransform2: VectorTransformer {
         self = self.translated(by: offset)
     }
 
-    public func translated(x: Scalar, y: Scalar) -> Self {
+    public func translated(x: any BinaryFloatingPoint,
+                           y: any BinaryFloatingPoint) -> Self {
         return self.translated(by: Vector2(x, y))
     }
 
-    public mutating func translate(x: Scalar, y: Scalar) {
+    public mutating func translate(x: any BinaryFloatingPoint,
+                                   y: any BinaryFloatingPoint) {
         self = self.translated(x: x, y: y)
     }
 

@@ -2,10 +2,8 @@
 //  File: Matrix2.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
-
-import Foundation
 
 public struct Matrix2: Matrix {
     public var m11, m12: Scalar
@@ -97,14 +95,20 @@ public struct Matrix2: Matrix {
         self = .identity
     }
 
-    public init(_ m11: Scalar, _ m12: Scalar, _ m21: Scalar, _ m22: Scalar) {
-        self.m11 = m11
-        self.m12 = m12
-        self.m21 = m21
-        self.m22 = m22
+    public init(_ m11: any BinaryFloatingPoint,
+                _ m12: any BinaryFloatingPoint,
+                _ m21: any BinaryFloatingPoint,
+                _ m22: any BinaryFloatingPoint) {
+        self.m11 = Scalar(m11)
+        self.m12 = Scalar(m12)
+        self.m21 = Scalar(m21)
+        self.m22 = Scalar(m22)
     }
 
-    public init(m11: Scalar, m12: Scalar, m21: Scalar, m22: Scalar) {
+    public init(m11: any BinaryFloatingPoint,
+                m12: any BinaryFloatingPoint,
+                m21: any BinaryFloatingPoint,
+                m22: any BinaryFloatingPoint) {
         self.init(m11, m12, m21, m22)
     }
 
@@ -135,19 +139,19 @@ public struct Matrix2: Matrix {
         return Matrix2(row1: self.column1, row2: self.column2)
     }
 
-    public static func == (_ lhs:Self, _ rhs:Self) -> Bool {
+    public static func == (_ lhs: Self, _ rhs: Self) -> Bool {
         return lhs.row1 == rhs.row1 && lhs.row2 == rhs.row2
     }
 
-    public static func + (_ lhs:Self, _ rhs:Self) -> Self {
+    public static func + (_ lhs: Self, _ rhs: Self) -> Self {
         return Matrix2(row1: lhs.row1 + rhs.row1, row2: lhs.row2 + rhs.row2)
     }
 
-    public static func - (_ lhs:Self, _ rhs:Self) -> Self {
+    public static func - (_ lhs: Self, _ rhs: Self) -> Self {
         return Matrix2(row1: lhs.row1 - rhs.row1, row2: lhs.row2 - rhs.row2)
     }
 
-    public static func * (_ lhs:Self, _ rhs:Self) -> Self {
+    public static func * (_ lhs: Self, _ rhs: Self) -> Self {
         let row1 = lhs.row1,    row2 = lhs.row2
         let col1 = rhs.column1, col2 = rhs.column2
 
@@ -155,7 +159,7 @@ public struct Matrix2: Matrix {
                        Vector2.dot(row2, col1), Vector2.dot(row2, col2))
     }
 
-    public static func * (_ lhs:Self, _ rhs:Scalar) -> Self {
+    public static func * (_ lhs:Self, _ rhs: any BinaryFloatingPoint) -> Self {
         return Matrix2(row1: lhs.row1 * rhs, row2: lhs.row2 * rhs)
     }
 }

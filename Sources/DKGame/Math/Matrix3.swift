@@ -2,10 +2,8 @@
 //  File: Matrix3.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
-
-import Foundation
 
 public struct Matrix3: Matrix {
     public var m11, m12, m13: Scalar
@@ -134,23 +132,35 @@ public struct Matrix3: Matrix {
         self = .identity
     }
 
-    public init(_ m11: Scalar, _ m12: Scalar, _ m13: Scalar,
-                _ m21: Scalar, _ m22: Scalar, _ m23: Scalar,
-                _ m31: Scalar, _ m32: Scalar, _ m33: Scalar) {
-        self.m11 = m11
-        self.m12 = m12
-        self.m13 = m13
-        self.m21 = m21
-        self.m22 = m22
-        self.m23 = m23
-        self.m31 = m31
-        self.m32 = m32
-        self.m33 = m33
+    public init(_ m11: any BinaryFloatingPoint,
+                _ m12: any BinaryFloatingPoint,
+                _ m13: any BinaryFloatingPoint,
+                _ m21: any BinaryFloatingPoint,
+                _ m22: any BinaryFloatingPoint,
+                _ m23: any BinaryFloatingPoint,
+                _ m31: any BinaryFloatingPoint,
+                _ m32: any BinaryFloatingPoint,
+                _ m33: any BinaryFloatingPoint) {
+        self.m11 = Scalar(m11)
+        self.m12 = Scalar(m12)
+        self.m13 = Scalar(m13)
+        self.m21 = Scalar(m21)
+        self.m22 = Scalar(m22)
+        self.m23 = Scalar(m23)
+        self.m31 = Scalar(m31)
+        self.m32 = Scalar(m32)
+        self.m33 = Scalar(m33)
     }
 
-    public init(m11: Scalar, m12: Scalar, m13: Scalar,
-                m21: Scalar, m22: Scalar, m23: Scalar,
-                m31: Scalar, m32: Scalar, m33: Scalar) {
+    public init(m11: any BinaryFloatingPoint,
+                m12: any BinaryFloatingPoint,
+                m13: any BinaryFloatingPoint,
+                m21: any BinaryFloatingPoint,
+                m22: any BinaryFloatingPoint,
+                m23: any BinaryFloatingPoint,
+                m31: any BinaryFloatingPoint,
+                m32: any BinaryFloatingPoint,
+                m33: any BinaryFloatingPoint) {
         self.init(m11, m12, m13, m21, m22, m23, m31, m32, m33)
     }
 
@@ -231,7 +241,7 @@ public struct Matrix3: Matrix {
                        dot(row3, col1), dot(row3, col2), dot(row3, col3))
     }
 
-    public static func * (lhs: Self, rhs: Scalar) -> Self {
+    public static func * (lhs: Self, rhs: any BinaryFloatingPoint) -> Self {
         return Matrix3(row1: lhs.row1 * rhs, row2: lhs.row2 * rhs, row3: lhs.row3 * rhs)
     }
 }

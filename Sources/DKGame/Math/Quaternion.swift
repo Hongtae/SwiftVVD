@@ -2,7 +2,7 @@
 //  File: Quaternion.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -46,22 +46,22 @@ public struct Quaternion: Vector {
         self = .identity
     }
 
-    public init(_ x: Scalar, _ y: Scalar, _ z: Scalar, _ w: Scalar) {
-        self.x = x
-        self.y = y
-        self.z = z
-        self.w = w
+    public init<T>(_ x: T, _ y: T, _ z: T, _ w: T) where T: BinaryFloatingPoint {
+        self.x = Scalar(x)
+        self.y = Scalar(y)
+        self.z = Scalar(z)
+        self.w = Scalar(w)
     }
 
-    public init(x: Scalar, y: Scalar, z: Scalar, w: Scalar) {
+    public init<T>(x: T, y: T, z: T, w: T) where T: BinaryFloatingPoint {
         self.init(x, y, z, w)
     }
 
-    public init(angle: Scalar, axis: Vector3) {
+    public init<T>(angle: T, axis: Vector3) where T: BinaryFloatingPoint {
         self.init(0, 0, 0, 1)
         if axis.length > 0.0 {
             let u = axis.normalized()
-            let a = angle * 0.5
+            let a = Scalar(angle * 0.5)
             let sinR = sin(a)
 
             self.x = sinR * u.x
@@ -71,10 +71,10 @@ public struct Quaternion: Vector {
         }
     }
 
-    public init(pitch: Scalar, yaw: Scalar, roll: Scalar) {
-        let p = pitch * 0.5
-        let y = yaw * 0.5
-        let r = roll * 0.5
+    public init<T>(pitch: T, yaw: T, roll: T) where T: BinaryFloatingPoint {
+        let p = Scalar(pitch) * 0.5
+        let y = Scalar(yaw) * 0.5
+        let r = Scalar(roll) * 0.5
 
         let sinP = sin(p)
         let cosP = cos(p)
@@ -91,13 +91,13 @@ public struct Quaternion: Vector {
         self.normalize()
     }
 
-    public init(from: Vector3, to: Vector3, t: Scalar) {
+    public init<T>(from: Vector3, to: Vector3, t: T) where T: BinaryFloatingPoint {
         self.init(0, 0, 0, 1)
         let len1 = from.length
         let len2 = to.length
         if len1 > 0.0 && len2 > 0.0 {
             let axis = Vector3.cross(from, to)
-            let angle = acos(Vector3.dot(from.normalized(), to.normalized())) * t
+            let angle = acos(Vector3.dot(from.normalized(), to.normalized())) * Scalar(t)
 
             self.init(angle: angle, axis: axis)
         }
@@ -186,8 +186,9 @@ public struct Quaternion: Vector {
         return Self(rhs.x - rhs.x, lhs.y - rhs.y, lhs.z - rhs.z, lhs.w - rhs.w)
     }
 
-    public static func * (lhs: Self, rhs: Scalar) -> Self {
-        return Self(lhs.x * rhs, lhs.y * rhs, lhs.z * rhs, lhs.w * rhs)
+    public static func * (lhs: Self, rhs: any BinaryFloatingPoint) -> Self {
+        let r = Scalar(rhs)
+        return Self(lhs.x * r, lhs.y * r, lhs.z * r, lhs.w * r)
     }
 
     public static func * (lhs: Quaternion, rhs: Quaternion) -> Quaternion {
@@ -198,7 +199,7 @@ public struct Quaternion: Vector {
         return Quaternion(x, y, z, w)
     }
 
-    public static func slerp(_ q1: Quaternion, _ q2: Quaternion, t: Scalar) -> Quaternion {
+    public static func slerp<T>(_ q1: Quaternion, _ q2: Quaternion, t: T) -> Quaternion where T: BinaryFloatingPoint {
         var cosHalfTheta = Self.dot(q1, q2)
         let flip = cosHalfTheta < 0.0
         if flip { cosHalfTheta = -cosHalfTheta }
@@ -208,17 +209,18 @@ public struct Quaternion: Vector {
         let halfTheta = acos(cosHalfTheta)
         let oneOverSinHalfTheta = 1.0 / sin(halfTheta)
 
-        let t2 = 1.0 - t
+        let t1 = Scalar(t)
+        let t2 = 1.0 - t1
 
         let ratio1 = sin(halfTheta * t2) * oneOverSinHalfTheta
-        var ratio2 = sin(halfTheta * t) * oneOverSinHalfTheta
+        var ratio2 = sin(halfTheta * t1) * oneOverSinHalfTheta
 
         if flip { ratio2 = -ratio2 }
 
         return q1 * ratio1 + q2 * ratio2
     }
 
-    public static func interpolate(_ q1: Quaternion, _ q2: Quaternion, _ t: Scalar) -> Quaternion {
+    public static func interpolate<T>(_ q1: Quaternion, _ q2: Quaternion, _ t: T) -> Quaternion where T: BinaryFloatingPoint {
         return slerp(q1, q2, t: t)
     }
 
@@ -249,12 +251,12 @@ public struct Quaternion: Vector {
 }
 
 public extension Vector3 {
-    func rotated(angle: Scalar, axis: Vector3) -> Vector3 {
+    func rotated<T>(angle: T, axis: Vector3) -> Vector3 where T: BinaryFloatingPoint {
         if angle.isZero { return self }
         return self.rotated(by: Quaternion(angle: angle, axis: axis))
     }
 
-    mutating func rotate(angle: Scalar, axis: Vector3) {
+    mutating func rotate<T>(angle: T, axis: Vector3) where T: BinaryFloatingPoint {
         self = self.rotated(angle: angle, axis: axis)
     }
 

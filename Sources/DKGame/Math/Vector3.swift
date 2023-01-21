@@ -2,7 +2,7 @@
 //  File: Vector3.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -43,13 +43,17 @@ public struct Vector3: Vector {
         self = .zero
     }
 
-    public init(_ x: Scalar, _ y: Scalar, _ z: Scalar) {
-        self.x = x
-        self.y = y
-        self.z = z
+    public init(_ x: any BinaryFloatingPoint,
+                _ y: any BinaryFloatingPoint,
+                _ z: any BinaryFloatingPoint) {
+        self.x = Scalar(x)
+        self.y = Scalar(y)
+        self.z = Scalar(z)
     }
 
-    public init(x: Scalar, y: Scalar, z: Scalar) {
+    public init(x: any BinaryFloatingPoint,
+                y: any BinaryFloatingPoint,
+                z: any BinaryFloatingPoint) {
         self.init(x, y, z)
     }
 
@@ -63,45 +67,48 @@ public struct Vector3: Vector {
                        z: v1.x * v2.y - v1.y * v2.x)
     }
 
-    public func rotated(x radian: Scalar) -> Vector3 {
+    public func rotated(x radian: any BinaryFloatingPoint) -> Vector3 {
         if radian.isZero  { return self }
-        let c = cos(radian)
-        let s = sin(radian)
+        let r = Scalar(radian)
+        let c = cos(r)
+        let s = sin(r)
         
         let y = self.y * c - self.z * s
         let z = self.y * s + self.z * c
         return Vector3(self.x, y, z)
     }
 
-    public func rotated(y radian: Scalar) -> Vector3 {
+    public func rotated(y radian: any BinaryFloatingPoint) -> Vector3 {
         if radian.isZero { return self }
-        let c = cos(radian)
-        let s = sin(-radian)
+        let r = Scalar(radian)
+        let c = cos(r)
+        let s = sin(-r)
 
         let x = self.x * c - self.z * s
         let z = self.x * s + self.z * c
         return Vector3(x, self.y, z)
     }
 
-    public func rotated(z radian: Scalar) -> Vector3 {
+    public func rotated(z radian: any BinaryFloatingPoint) -> Vector3 {
         if radian.isZero { return self }
-        let c = cos(radian)
-        let s = sin(radian)
+        let r = Scalar(radian)
+        let c = cos(r)
+        let s = sin(r)
 
         let x = self.x * c - self.y * s
         let y = self.x * s + self.y * c
         return Vector3(x, y, self.z)
     }
 
-    public mutating func rotate(x radian: Scalar) {
+    public mutating func rotate(x radian: any BinaryFloatingPoint) {
         self = self.rotated(x: radian)
     }
 
-    public mutating func rotate(y radian: Scalar) {
+    public mutating func rotate(y radian: any BinaryFloatingPoint) {
         self = self.rotated(y: radian)
     }
 
-    public mutating func rotate(z radian: Scalar) {
+    public mutating func rotate(z radian: any BinaryFloatingPoint) {
         self = self.rotated(z: radian)
     }
 
@@ -121,8 +128,9 @@ public struct Vector3: Vector {
         return Self(lhs.x - rhs.x, lhs.y - rhs.y, lhs.z - rhs.z)
     }
 
-    public static func * (lhs: Self, rhs: Scalar) -> Self {
-        return Self(lhs.x * rhs, lhs.y * rhs, lhs.z * rhs)
+    public static func * (lhs: Self, rhs: any BinaryFloatingPoint) -> Self {
+        let r = Scalar(rhs)
+        return Self(lhs.x * r, lhs.y * r, lhs.z * r)
     }
 
     public static func * (lhs: Self, rhs: Self) -> Self {

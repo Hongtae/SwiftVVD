@@ -2,7 +2,7 @@
 //  File: Canvas.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -13,7 +13,7 @@ public enum ColorRenderingMode: Equatable, Hashable {
     case extendedLinear
 }
 
-public struct Canvas<Symbols> where Symbols: View {
+public struct Canvas<Symbols>: View where Symbols: View {
     public var symbols: Symbols
     public var renderer: (inout GraphicsContext, CGSize) -> Void
     public var isOpaque: Bool
@@ -25,7 +25,11 @@ public struct Canvas<Symbols> where Symbols: View {
                 rendersAsynchronously: Bool = false,
                 renderer: @escaping (inout GraphicsContext, CGSize) -> Void,
                 @ViewBuilder symbols: () -> Symbols) {
-        fatalError()
+        self.symbols = symbols()
+        self.renderer = renderer
+        self.isOpaque = opaque
+        self.colorMode = colorMode
+        self.rendersAsynchronously = rendersAsynchronously
     }
 
     public typealias Body = Never
@@ -36,9 +40,33 @@ extension Canvas where Symbols == EmptyView {
                 colorMode: ColorRenderingMode = .nonLinear,
                 rendersAsynchronously: Bool = false,
                 renderer: @escaping (inout GraphicsContext, CGSize) -> Void) {
-        fatalError()
+        self.symbols = Symbols()
+        self.renderer = renderer
+        self.isOpaque = opaque
+        self.colorMode = colorMode
+        self.rendersAsynchronously = rendersAsynchronously
     }
 }
 
-extension Canvas : View, _PrimitiveView {
+struct CanvasContext<Content>: ViewProxy where Content: View {
+    var view: Content
+
+    var modifiers: [any ViewModifier]
+    var subviews: [any ViewProxy]
+
+    init(view: Content, modifiers: [any ViewModifier]) {
+        self.view = view
+        self.modifiers = modifiers
+        self.subviews = []
+    }
+
+    func draw() {
+        //print("Canvas.draw")
+    }
+}
+
+extension Canvas: _PrimitiveView {
+    func makeViewProxy(modifiers: [any ViewModifier]) -> any ViewProxy {
+        CanvasContext(view: self, modifiers: modifiers)
+    }
 }

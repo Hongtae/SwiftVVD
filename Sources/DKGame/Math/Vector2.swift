@@ -2,7 +2,7 @@
 //  File: Vector2.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -40,12 +40,12 @@ public struct Vector2: Vector {
         self = .zero
     }
 
-    public init(_ x: Scalar, _ y: Scalar) {
-        self.x = x
-        self.y = y
+    public init(_ x: any BinaryFloatingPoint, _ y: any BinaryFloatingPoint) {
+        self.x = Scalar(x)
+        self.y = Scalar(y)
     }
 
-    public init(x: Scalar, y: Scalar) {
+    public init(x: any BinaryFloatingPoint, y: any BinaryFloatingPoint) {
         self.init(x, y)
     }
 
@@ -53,16 +53,17 @@ public struct Vector2: Vector {
         return v1.x * v2.x + v1.y * v2.y
     }
 
-    public func rotated(by angle: Scalar) -> Self {
+    public func rotated(by angle: any BinaryFloatingPoint) -> Self {
         // Rotate
         // | cos  sin|
         // |-sin  cos|
-        let cosR = cos(angle)
-        let sinR = sin(angle)
+        let a = Scalar(angle)
+        let cosR = cos(a)
+        let sinR = sin(a)
         return Self(x * cosR - y * sinR, x * sinR + y * cosR)
     }
 
-    public mutating func rotate(by angle: Scalar) {
+    public mutating func rotate(by angle: any BinaryFloatingPoint) {
         self = self.rotated(by: angle)
     }
 
@@ -82,8 +83,9 @@ public struct Vector2: Vector {
         return Self(lhs.x - rhs.x, lhs.y - rhs.y)
     }
 
-    public static func * (lhs: Self, rhs: Scalar) -> Self {
-        return Self(lhs.x * rhs, lhs.y * rhs)
+    public static func * (lhs: Self, rhs: any BinaryFloatingPoint) -> Self {
+        let r = Scalar(rhs)
+        return Self(lhs.x * r, lhs.y * r)
     }
 
     public static func * (lhs: Self, rhs: Self) -> Self {

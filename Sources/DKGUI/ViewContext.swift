@@ -2,7 +2,7 @@
 //  File: ViewContext.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 import DKGame
@@ -15,10 +15,16 @@ protocol ViewProxy {
     var subviews: [any ViewProxy] { get }
 
     func update(tick: UInt64, delta: Double, date: Date)
+    func draw()
+    func drawOverlay()
 }
 
 extension ViewProxy {
     func update(tick: UInt64, delta: Double, date: Date) {
+    }
+    func draw() {
+    }
+    func drawOverlay() {
     }
 }
 
@@ -39,9 +45,10 @@ struct ViewContext<Content>: ViewProxy where Content: View {
     }
 }
 
-func _makeViewProxy<Content>(_ view: Content) -> any ViewProxy where Content: View {
+func _makeViewProxy<Content>(_ view: Content,
+                             modifiers: [any ViewModifier]) -> any ViewProxy where Content: View {
     if let prim = view as? (any _PrimitiveView) {
-        return prim.makeViewProxy()
+        return prim.makeViewProxy(modifiers: modifiers)
     }
-    return _makeViewProxy(view.body)
+    return _makeViewProxy(view.body, modifiers: modifiers)
 }

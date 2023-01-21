@@ -2,7 +2,7 @@
 //  File: LinearTransform3.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -44,7 +44,7 @@ public struct LinearTransform3: VectorTransformer {
         self.matrix3 = m
     }
  
-    public init(scaleX: Scalar, scaleY: Scalar, scaleZ: Scalar) {
+    public init<T>(scaleX: T, scaleY: T, scaleZ: T) where T: BinaryFloatingPoint {
         self.matrix3 = .init(scaleX, 0.0, 0.0,
                              0.0, scaleY, 0.0,
                              0.0, 0.0, scaleZ)
@@ -112,22 +112,23 @@ public struct LinearTransform3: VectorTransformer {
         self.transform(by: q)
     }
 
-    public func rotated(angle: Scalar, axis: Vector3) -> Self {
+    public func rotated<T>(angle: T, axis: Vector3) -> Self where T: BinaryFloatingPoint {
         if angle != 0 {
             return self.rotated(by: Quaternion(angle: angle, axis: axis)) 
         }
         return self
     }
 
-    public mutating func rotate(angle: Scalar, axis: Vector3) {
+    public mutating func rotate<T>(angle: T, axis: Vector3) where T: BinaryFloatingPoint {
         if angle != 0 { self.rotate(by: Quaternion(angle: angle, axis: axis)) }
     }
 
-    public mutating func rotateX(_ r: Scalar) {
+    public mutating func rotateX<T>(_ r: T) where T: BinaryFloatingPoint {
         // X - Axis:
         // |1  0    0   |
         // |0  cos  sin |
         // |0 -sin  cos |
+        let r = Scalar(r)
         let cosR = cos(r)
         let sinR = sin(r)
         let m = Matrix3(1.0, 0.0, 0.0,
@@ -136,11 +137,12 @@ public struct LinearTransform3: VectorTransformer {
         self.matrix3 *= m
     }
 
-    public mutating func rotateY(_ r: Scalar) {
+    public mutating func rotateY<T>(_ r: T) where T: BinaryFloatingPoint {
         // Y - Axis:
         // |cos  0 -sin |
         // |0    1  0   |
         // |sin  0  cos |
+        let r = Scalar(r)
         let cosR = cos(r)
         let sinR = sin(r)
         let m = Matrix3(cosR, 0.0, -sinR,
@@ -149,11 +151,12 @@ public struct LinearTransform3: VectorTransformer {
         self.matrix3 *= m
     }
 
-    public mutating func rotateZ(_ r: Scalar) {
+    public mutating func rotateZ<T>(_ r: T) where T: BinaryFloatingPoint {
         // Z - Axis:
         // |cos  sin 0  |
         // |-sin cos 0  |
         // |0    0   1  |
+        let r = Scalar(r)
         let cosR = cos(r)
         let sinR = sin(r)
         let m = Matrix3(cosR, sinR, 0.0,
@@ -166,11 +169,11 @@ public struct LinearTransform3: VectorTransformer {
         self.scale(x: v.x, y: v.y, z: v.z)
     }
 
-    public mutating func scale(uniform s: Scalar) {
+    public mutating func scale<T>(uniform s: T) where T: BinaryFloatingPoint {
         self.scale(x: s, y: s, z: s)
     }
 
-    public mutating func scale(x: Scalar, y: Scalar, z: Scalar) {
+    public mutating func scale<T>(x: T, y: T, z: T) where T: BinaryFloatingPoint {
         // | X 0 0 |
         // | 0 Y 0 |
         // | 0 0 Z |

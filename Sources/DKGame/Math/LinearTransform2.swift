@@ -2,7 +2,7 @@
 //  File: LinearTransform2.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -27,7 +27,8 @@ public struct LinearTransform2: VectorTransformer {
         self = self.rotated(by: rotation)
     }
 
-    public init(scaleX: Scalar, scaleY: Scalar) {
+    public init(scaleX: any BinaryFloatingPoint,
+                scaleY: any BinaryFloatingPoint) {
         self.matrix2 = .init(scaleX, 0.0, 0.0, scaleY)
     }
 
@@ -35,40 +36,43 @@ public struct LinearTransform2: VectorTransformer {
         self.matrix2 = .init(row1: axisX, row2: axisY)
     }
 
-    public func rotated(by angle: Scalar) -> Self {
+    public func rotated(by angle: any BinaryFloatingPoint) -> Self {
         // Rotate
         // | cos  sin|
         // |-sin  cos|
-        let cosR = cos(angle)
-        let sinR = sin(angle)
+        let a = Scalar(angle)
+        let cosR = cos(a)
+        let sinR = sin(a)
 
         let matrix = Matrix2(cosR, sinR, -sinR, cosR)
         return Self(self.matrix2 * matrix)
     }
 
-    public mutating func rotate(by angle: Scalar) {
+    public mutating func rotate(by angle: any BinaryFloatingPoint) {
         self = self.rotated(by: angle)
     }
 
-    public func scaled(x: Scalar, y: Scalar) -> Self {
+    public func scaled(x: any BinaryFloatingPoint,
+                       y: any BinaryFloatingPoint) -> Self {
         // Scale
         // |X  0|
         // |0  Y|
         var matrix = self.matrix2
-        matrix.column1 *= x
-        matrix.column2 *= y
+        matrix.column1 *= Scalar(x)
+        matrix.column2 *= Scalar(y)
         return Self(matrix)
     }
 
-    public mutating func scale(x: Scalar, y: Scalar) {
+    public mutating func scale(x: any BinaryFloatingPoint,
+                               y: any BinaryFloatingPoint) {
         self = self.scaled(x: x, y: y)
     }
 
-    public func scaled(by s: Scalar) -> Self {
+    public func scaled(by s: any BinaryFloatingPoint) -> Self {
         return self.scaled(x: s, y: s)
     }
 
-    public mutating func scale(by s: Scalar) {
+    public mutating func scale(by s: any BinaryFloatingPoint) {
         self = self.scaled(by: s)
     }
 
@@ -80,18 +84,18 @@ public struct LinearTransform2: VectorTransformer {
         self = self.scaled(by: v)
     }
 
-    public func squeezed(by s: Scalar) -> Self {
+    public func squeezed(by s: any BinaryFloatingPoint) -> Self {
         // Squeeze
         // |S  0  |
         // |0  1/S|
-        let s2 = 1.0 / s
+        let s2 = 1.0 / Scalar(s)
         var matrix = self.matrix2
         matrix.column1 *= s
         matrix.column2 *= s2
         return Self(matrix)
     }
 
-    public mutating func squeeze(by s: Scalar) {
+    public mutating func squeeze(by s: any BinaryFloatingPoint) {
         self = self.squeezed(by: s)
     }
 
@@ -121,7 +125,7 @@ public struct LinearTransform2: VectorTransformer {
         self = self.horizontalFlipped()
     }
 
-    public func verticalSheared(by s: Scalar) -> Self {
+    public func verticalSheared(by s: any BinaryFloatingPoint) -> Self {
         // Vertical Shear
         // |1  0|
         // |S  1|
@@ -130,11 +134,11 @@ public struct LinearTransform2: VectorTransformer {
         return Self(matrix)
     }
 
-    public mutating func verticalShear(by s: Scalar) {
+    public mutating func verticalShear(by s: any BinaryFloatingPoint) {
         self = self.verticalSheared(by: s)
     }
 
-    public func horizontalSheared(by s: Scalar) -> Self {
+    public func horizontalSheared(by s: any BinaryFloatingPoint) -> Self {
         // Horizontal Shear
         // |1  S|
         // |0  1|
@@ -143,7 +147,7 @@ public struct LinearTransform2: VectorTransformer {
         return Self(matrix)
     }
 
-    public mutating func horizontalShear(by s: Scalar) {
+    public mutating func horizontalShear(by s: any BinaryFloatingPoint) {
         self = self.horizontalSheared(by: s)
     }
 

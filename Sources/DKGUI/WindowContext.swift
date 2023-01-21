@@ -2,7 +2,7 @@
 //  File: WindowContext.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 import DKGame
@@ -45,7 +45,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                 guard let self = self else { break }
                 if Task.isCancelled { break }
 
-                let swapChain = self.swapChain!
+                let swapChain = self.swapChain
                 let (state, config) = { (self.state, self.config) }()
 
                 let frameInterval = state.activated ? config.activeFrameInterval : config.inactiveFrameInterval
@@ -54,20 +54,25 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                 let tick = tickCounter.timestamp
                 let date = Date(timeIntervalSinceNow: 0)
 
-                self.viewProxy.update(tick: tick, delta: delta, date: date)
+                let view = self.viewProxy
+                view.update(tick: tick, delta: delta, date: date)
 
                 if state.visible {
-                    var renderPass = swapChain.currentRenderPassDescriptor()
-                    renderPass.colorAttachments[0].clearColor = .cyan
+                    view.draw()
 
-                    if let commandBuffer = swapChain.commandQueue.makeCommandBuffer() {
-                        if let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPass) {
-                            encoder.endEncoding()
+                    if let swapChain {
+                        var renderPass = swapChain.currentRenderPassDescriptor()
+                        renderPass.colorAttachments[0].clearColor = .cyan
+
+                        if let commandBuffer = swapChain.commandQueue.makeCommandBuffer() {
+                            if let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPass) {
+                                encoder.endEncoding()
+                            }
+                            commandBuffer.commit()
                         }
-                        commandBuffer.commit()
-                    }
 
-                    await self.swapChain?.present()
+                        await swapChain.present()
+                    }
                 }
 
                 while tickCounter.elapsed < frameInterval {
@@ -85,7 +90,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
         self.identifier = identifier
         self.title = title
         self.view = content
-        self.viewProxy = _makeViewProxy(self.view)
+        self.viewProxy = _makeViewProxy(self.view, modifiers: [])
     }
 
     deinit {

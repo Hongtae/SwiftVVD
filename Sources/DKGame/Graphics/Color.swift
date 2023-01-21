@@ -2,7 +2,7 @@
 //  File: Color.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 public struct Color {
@@ -52,21 +52,38 @@ public struct Color {
         }
     }
 
-    public init(_ r: Scalar, _ g: Scalar, _ b: Scalar, _ a: Scalar = 1.0) {
-        self.r = r
-        self.g = g
-        self.b = b
-        self.a = a
+    public init(_ r: any BinaryFloatingPoint,
+                _ g: any BinaryFloatingPoint,
+                _ b: any BinaryFloatingPoint,
+                _ a: any BinaryFloatingPoint = 1) {
+        self.r = Scalar(r)
+        self.g = Scalar(g)
+        self.b = Scalar(b)
+        self.a = Scalar(a)
     }
 
-    public init(r: Scalar, g: Scalar, b: Scalar, a: Scalar = 1.0) {
+    public init(r: any BinaryFloatingPoint,
+                g: any BinaryFloatingPoint,
+                b: any BinaryFloatingPoint,
+                a: any BinaryFloatingPoint = 1) {
         self.init(r, g, b, a)
     }
 
-    init(hue: Scalar, saturation: Scalar, brightness: Scalar, opacity: Scalar = 1.0) {
-        let hue = hue.clamp(min: 0.0, max: 1.0)
-        let saturation = saturation.clamp(min: 0.0, max: 1.0)
-        let brightness = brightness.clamp(min: 0.0, max: 1.0)
+    public init(argb8: ARGB8) {
+        self.argb8 = argb8
+    }
+
+    public init(rgba8: RGBA8) {
+        self.rgba8 = rgba8
+    }
+
+    public init(hue: any BinaryFloatingPoint,
+                saturation: any BinaryFloatingPoint,
+                brightness: any BinaryFloatingPoint,
+                opacity: any BinaryFloatingPoint = 1) {
+        let hue = Scalar(hue).clamp(min: 0.0, max: 1.0)
+        let saturation = Scalar(saturation).clamp(min: 0.0, max: 1.0)
+        let brightness = Scalar(brightness).clamp(min: 0.0, max: 1.0)
 
         let c = saturation * brightness
         let h = Int(hue * 360) / 6

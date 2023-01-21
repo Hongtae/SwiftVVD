@@ -2,10 +2,8 @@
 //  File: Transform.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
-
-import Foundation
 
 public struct Transform: VectorTransformer, Interpolatable {
     public typealias Vector = Vector3
@@ -44,12 +42,12 @@ public struct Transform: VectorTransformer, Interpolatable {
         self = self.inverted()
     }
 
-    public static func interpolate(_ t1: Self, _ t2: Self, t: Scalar) -> Self {
+    public static func interpolate(_ t1: Self, _ t2: Self, t: any BinaryFloatingPoint) -> Self {
         return Self(orientation: Quaternion.slerp(t1.orientation, t2.orientation, t:t),
                     position: t1.position + ((t2.position - t1.position) * t))
     }
 
-    public static func == (lhs:Self, rhs:Self) -> Bool {
+    public static func == (lhs: Self, rhs: Self) -> Bool {
         return lhs.orientation == rhs.orientation &&
                lhs.position == rhs.position
     }

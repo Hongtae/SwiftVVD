@@ -2,10 +2,12 @@
 //  File: ModifiedContent.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 public struct ModifiedContent<Content, Modifier> {
+    public typealias Body = Never
+
     public var content: Content
     public var modifier: Modifier
 
@@ -22,11 +24,14 @@ extension ModifiedContent: Equatable where Content: Equatable, Modifier: Equatab
 }
 
 extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
+    public var body: Never { neverBody() }
 }
 
 extension ModifiedContent: _PrimitiveView where Content: View, Modifier: ViewModifier {
-    func makeViewProxy() -> any ViewProxy {
-        ViewContext(view: self)
+    func makeViewProxy(modifiers: [any ViewModifier]) -> any ViewProxy {
+        var modifiers = modifiers
+        modifiers.append(self.modifier)
+        return _makeViewProxy(self.content, modifiers: modifiers)
     }
 }
 
