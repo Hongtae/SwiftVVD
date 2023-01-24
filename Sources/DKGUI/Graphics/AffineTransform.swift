@@ -2,10 +2,11 @@
 //  File: AffineTransform.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
+import DKGame
 
 /*-------
   a  b  0
@@ -117,5 +118,43 @@ public struct AffineTransform: Equatable, Sendable {
 
     public func translatedBy(x tx: CGFloat, y ty: CGFloat) -> Self {
         self.concatenating(.init(translationX: tx, y: ty))
+    }
+}
+
+extension AffineTransform {
+    public var matrix3: Matrix3 {
+        Matrix3(a, b, 0.0, c, d, 0.0, tx, ty, 1.0)
+    }
+}
+
+extension CGPoint {
+    public func applying(_ t: AffineTransform) -> CGPoint {
+        let x = self.x * t.a + self.y * t.c + t.tx
+        let y = self.x * t.b + self.y * t.d + t.ty
+        return CGPoint(x: x, y: y)
+    }
+}
+
+extension CGSize {
+    public func applying(_ t: AffineTransform) -> CGSize {
+        let w = self.width * t.a + self.height * t.c
+        let h = self.width * t.b + self.height * t.d
+        return CGSize(width: w, height: h)
+    }
+}
+
+extension CGRect {
+    public func applying(_ t: AffineTransform) -> CGRect {
+        let pts = [
+            CGPoint(x: self.minX, y: self.minY).applying(t),
+            CGPoint(x: self.minX, y: self.maxY).applying(t),
+            CGPoint(x: self.maxX, y: self.minY).applying(t),
+            CGPoint(x: self.maxX, y: self.maxX).applying(t),
+        ]
+        let minX = pts.min { a, b in a.x < b.x }!.x
+        let maxX = pts.max { a, b in a.x < b.x }!.x
+        let minY = pts.min { a, b in a.y < b.y }!.y
+        let maxY = pts.max { a, b in a.y < b.y }!.y
+        return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
     }
 }

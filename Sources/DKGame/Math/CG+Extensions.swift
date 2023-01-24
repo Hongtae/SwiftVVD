@@ -2,7 +2,7 @@
 //  File: CG+Extensions.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -41,8 +41,8 @@ public extension CGPoint {
     }
 
     func transformed(by m: Matrix3) -> Self {
-        let x = self.x * CGFloat(m.m11) + self.y * CGFloat(m.m21)
-        let y = self.x * CGFloat(m.m12) + self.y * CGFloat(m.m22)
+        let x = self.x * CGFloat(m.m11) + self.y * CGFloat(m.m21) + CGFloat(m.m31)
+        let y = self.x * CGFloat(m.m12) + self.y * CGFloat(m.m22) + CGFloat(m.m32)
         var w = self.x * CGFloat(m.m13) + self.y * CGFloat(m.m23) + CGFloat(m.m33)
         assert(abs(w) != 0.0)
         w = 1.0 / w

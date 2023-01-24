@@ -57,15 +57,9 @@ public struct Path: Equatable, LosslessStringConvertible {
         return desc.joined(separator: " ")
     }
 
-    public var isEmpty: Bool { self.subpaths.isEmpty }
+    public var isEmpty: Bool { self.elements.isEmpty }
 
-    public var boundingRect: CGRect {
-        var bounds: CGRect = .null
-        subpaths.forEach {
-            bounds = bounds.union($0.bounds)
-        }
-        return bounds
-    }
+    public var boundingRect: CGRect { bounds }
 
     public func contains(_ p: CGPoint, eoFill: Bool = false) -> Bool {
         fatalError()
@@ -77,24 +71,12 @@ public struct Path: Equatable, LosslessStringConvertible {
         case quadCurve(to: CGPoint, control: CGPoint)
         case curve(to: CGPoint, control1: CGPoint, control2: CGPoint)
         case closeSubpath
-
-        public static func == (a: Path.Element, b: Path.Element) -> Bool {
-            false
-        }
     }
-
-    struct Subpath: Equatable {
-        var elements: [Element] = []
-        var bounds: CGRect = .null
-    }
-    var subpaths: [Subpath] = []
+    var elements: [Element] = []
+    var bounds: CGRect = .null
 
     public func forEach(_ body: (Path.Element) -> Void) {
-        self.subpaths.forEach { subpath in
-            subpath.elements.forEach {
-                body($0)
-            }
-        }
+        self.elements.forEach(body)
     }
 
     public func strokedPath(_ style: StrokeStyle) -> Path {
@@ -126,10 +108,13 @@ extension Path: _PrimitiveView {
 
 extension Path {
     public mutating func move(to p: CGPoint) {
-        fatalError()
+        if case .move(_) = self.elements.last {
+            self.elements.removeLast()
+        }
+        self.elements.append(.move(to: p))
     }
     public mutating func addLine(to p: CGPoint) {
-        fatalError()
+        self.elements.append(.line(to: p))
     }
     public mutating func addQuadCurve(to p: CGPoint, control cp: CGPoint) {
         fatalError()
@@ -138,10 +123,20 @@ extension Path {
         fatalError()
     }
     public mutating func closeSubpath() {
-        fatalError()
+        self.elements.append(.closeSubpath)
     }
     public mutating func addRect(_ rect: CGRect, transform: CGAffineTransform = .identity) {
-        fatalError()
+        let pt = [
+            CGPoint(x: rect.minX, y: rect.minY).applying(transform),
+            CGPoint(x: rect.maxX, y: rect.minY).applying(transform),
+            CGPoint(x: rect.maxX, y: rect.maxY).applying(transform),
+            CGPoint(x: rect.minX, y: rect.maxY).applying(transform),
+        ]
+        self.move(to: pt[0])
+        self.addLine(to: pt[1])
+        self.addLine(to: pt[2])
+        self.addLine(to: pt[3])
+        self.closeSubpath()
     }
     public mutating func addRoundedRect(in rect: CGRect, cornerSize: CGSize, style: RoundedCornerStyle = .circular, transform: CGAffineTransform = .identity) {
         fatalError()
@@ -150,10 +145,14 @@ extension Path {
         fatalError()
     }
     public mutating func addRects(_ rects: [CGRect], transform: CGAffineTransform = .identity) {
-        fatalError()
+        for rect in rects {
+            self.addRect(rect, transform: transform)
+        }
     }
     public mutating func addLines(_ lines: [CGPoint]) {
-        fatalError()
+        for line in lines {
+            self.addLine(to: line)
+        }
     }
     public mutating func addRelativeArc(center: CGPoint, radius: CGFloat, startAngle: Angle, delta: Angle, transform: CGAffineTransform = .identity) {
         fatalError()
@@ -172,9 +171,31 @@ extension Path {
         fatalError()
     }
     public func applying(_ transform: CGAffineTransform) -> Path {
-        fatalError()
+        var path = Path()
+        path.elements.reserveCapacity(self.elements.count)
+
+        self.elements.forEach {
+            switch $0 {
+            case .move(let to):
+                path.elements.append(.move(to: to.applying(transform)))
+            case .line(let to):
+                path.elements.append(.line(to: to.applying(transform)))
+            case .quadCurve(let to, let c):
+                path.elements.append(.quadCurve(to: to.applying(transform),
+                                                control: c.applying(transform)))
+            case .curve(let to, let c1, let c2):
+                path.elements.append(.curve(to: to.applying(transform),
+                                            control1: c1.applying(transform),
+                                            control2: c2.applying(transform)))
+            case .closeSubpath:
+                path.elements.append(.closeSubpath)
+            }
+        }
+        //FIXME: update bounds!
+        return path
     }
+
     public func offsetBy(dx: CGFloat, dy: CGFloat) -> Path {
-        fatalError()
+        self.applying(CGAffineTransform(translationX: dx, y: dy))
     }
 }

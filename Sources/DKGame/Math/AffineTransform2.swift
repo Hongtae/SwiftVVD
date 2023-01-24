@@ -137,8 +137,7 @@ public struct AffineTransform2: VectorTransformer {
     }
 
     public static func * (lhs: Vector2, rhs: Self) -> Vector2 {
-        let v = Vector3(lhs.x, lhs.y, 1.0).transformed(by: rhs.matrix3)
-        return Vector2(v.x, v.y) * (1.0 / v.z)
+        return lhs.transformed(by: rhs.matrix2) + rhs.translation
     }
 
     public static func *= (lhs: inout Vector2, rhs: Self) {

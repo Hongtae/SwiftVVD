@@ -48,19 +48,25 @@ extension Canvas where Symbols == EmptyView {
     }
 }
 
-struct CanvasContext<Content>: ViewProxy where Content: View {
+struct CanvasContext<Symbols>: ViewProxy where Symbols: View {
+    typealias Content = Canvas<Symbols>
     var view: Content
 
     var modifiers: [any ViewModifier]
     var subviews: [any ViewProxy]
 
+    var size: CGSize
+
     init(view: Content, modifiers: [any ViewModifier]) {
         self.view = view
         self.modifiers = modifiers
         self.subviews = []
+        self.size = .zero
     }
 
     func draw() {
+        var gc = GraphicsContext(opacity: 1.0, blendMode: .normal, transform: .identity)
+        self.view.renderer(&gc, self.size)
         //print("Canvas.draw")
     }
 }
