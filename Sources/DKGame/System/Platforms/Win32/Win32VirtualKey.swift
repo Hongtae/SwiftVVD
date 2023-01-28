@@ -8,7 +8,7 @@
 #if ENABLE_WIN32
 public extension VirtualKey {
     static func from(win32VK key: Int) -> VirtualKey {
-        switch (key) {
+        switch key {
         case 0x03:  return .f15             // VK_F15 (ctrl+break)
         case 0x08:  return .backspace       // VK_BACK
         case 0x09:  return .tab             // VK_TAB

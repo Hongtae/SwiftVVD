@@ -2,7 +2,7 @@
 //  File: VulkanImage.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
@@ -174,19 +174,18 @@ public class VulkanImage {
     public var arrayLength: Int { Int(self.arrayLayers) }
 
     public var type: TextureType {
-        switch (self.imageType) {
+        switch self.imageType {
             case VK_IMAGE_TYPE_1D:  return .type1D
             case VK_IMAGE_TYPE_2D:  return .type2D
             case VK_IMAGE_TYPE_3D:  return .type3D
-            default:
-                return .unknown
+            default:                return .unknown
         }
     }
     public var pixelFormat: PixelFormat { .from(vkFormat: self.format) }
 
     public static func commonAccessMask(forLayout layout: VkImageLayout) -> VkAccessFlags {
         var accessMask: VkAccessFlags = 0
-        switch (layout) {
+        switch layout {
         case VK_IMAGE_LAYOUT_UNDEFINED:
             accessMask = 0
         case VK_IMAGE_LAYOUT_GENERAL:

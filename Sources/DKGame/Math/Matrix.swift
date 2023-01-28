@@ -5,7 +5,7 @@
 //  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
-public protocol Matrix {
+public protocol Matrix: Hashable {
     associatedtype Vector
 
     mutating func invert()

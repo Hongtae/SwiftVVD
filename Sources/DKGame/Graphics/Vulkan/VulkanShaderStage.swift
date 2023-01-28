@@ -2,7 +2,7 @@
 //  File: VulkanShaderStage.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
@@ -30,7 +30,7 @@ extension ShaderStage {
     }
     public func vkFlagBits() -> VkShaderStageFlagBits
     {
-        switch (self) {
+        switch self {
         case .vertex:
             return VK_SHADER_STAGE_VERTEX_BIT
         case .tessellationControl:

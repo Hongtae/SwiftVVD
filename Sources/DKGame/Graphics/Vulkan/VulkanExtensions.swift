@@ -2,7 +2,7 @@
 //  File: VulkanExtensions.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
@@ -104,7 +104,7 @@ public struct VulkanDeviceExtensions {
 extension VkResult: CustomStringConvertible {
     public var description: String {
         let enumStr = { (value: VkResult) -> String in
-            switch (value) {
+            switch value {
             case VK_SUCCESS:
                 return "VK_SUCCESS"
             case VK_NOT_READY:

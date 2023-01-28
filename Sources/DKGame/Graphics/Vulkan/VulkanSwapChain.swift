@@ -2,7 +2,7 @@
 //  File: VulkanSwapChain.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
@@ -308,8 +308,7 @@ public class VulkanSwapChain: SwapChain {
         }
 
         let presentModeString = { (mode: VkPresentModeKHR) -> String in
-            switch (mode)
-            {
+            switch mode {
             case VK_PRESENT_MODE_IMMEDIATE_KHR: return "VK_PRESENT_MODE_IMMEDIATE_KHR"
             case VK_PRESENT_MODE_MAILBOX_KHR:   return "VK_PRESENT_MODE_MAILBOX_KHR"
             case VK_PRESENT_MODE_FIFO_KHR:      return "VK_PRESENT_MODE_FIFO_KHR"

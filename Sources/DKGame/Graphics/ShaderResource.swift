@@ -2,7 +2,7 @@
 //  File: ShaderResource.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 public enum ShaderDataType {
@@ -103,8 +103,7 @@ public enum ShaderDataType {
 
 public extension ShaderDataType {
     func size() -> Int {
-        switch (self)
-        {
+        switch self {
         case .bool:         return MemoryLayout<Bool>.stride
         case .bool2:        return MemoryLayout<Bool>.stride * 2
         case .bool3:        return MemoryLayout<Bool>.stride * 3

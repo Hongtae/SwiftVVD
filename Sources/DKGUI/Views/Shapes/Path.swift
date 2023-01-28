@@ -26,6 +26,7 @@ public struct Path: Equatable, LosslessStringConvertible {
     public init() {
     }
     public init(_ rect: CGRect) {
+        self.addRect(rect)
     }
     public init(roundedRect rect: CGRect, cornerSize: CGSize, style: RoundedCornerStyle = .circular) {
     }
@@ -34,6 +35,7 @@ public struct Path: Equatable, LosslessStringConvertible {
     public init(ellipseIn rect: CGRect) {
     }
     public init(_ callback: (inout Path) -> ()) {
+        callback(&self)
     }
     public init?(_ string: String) {
     }

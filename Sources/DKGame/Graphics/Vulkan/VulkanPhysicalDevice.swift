@@ -146,7 +146,7 @@ public class VulkanPhysicalDeviceDescription: CustomStringConvertible {
         }
 
         self.devicePriority = 0
-        switch (properties.properties.deviceType) {
+        switch properties.properties.deviceType {
         case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:
             self.devicePriority += 1
             fallthrough
@@ -204,8 +204,7 @@ public class VulkanPhysicalDeviceDescription: CustomStringConvertible {
 
         var deviceType = "Unknown"
 
-        switch (self.properties.deviceType)
-        {
+        switch self.properties.deviceType {
         case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:
             deviceType = "INTEGRATED_GPU"
         case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:
@@ -219,9 +218,9 @@ public class VulkanPhysicalDeviceDescription: CustomStringConvertible {
         }
 
         let apiVersion = String(format: "%d.%d.%d",
-                    VK_VERSION_MAJOR(self.properties.apiVersion),
-                    VK_VERSION_MINOR(self.properties.apiVersion),
-                    VK_VERSION_PATCH(self.properties.apiVersion))
+                                VK_VERSION_MAJOR(self.properties.apiVersion),
+                                VK_VERSION_MINOR(self.properties.apiVersion),
+                                VK_VERSION_PATCH(self.properties.apiVersion))
 
         var desc = "VulkanPhysicalDevice(name: \"\(self.name)\", identifier:\(self.registryID), type:\(deviceType), API:\(apiVersion), QueueFamilies:\(self.queueFamilies.count), NumExtensions:\(self.extensions.count))"
         for (index, qf) in self.queueFamilies.enumerated() {

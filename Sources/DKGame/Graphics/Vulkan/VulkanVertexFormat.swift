@@ -2,7 +2,7 @@
 //  File: VulkanVertexFormat.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
@@ -10,7 +10,7 @@ import Vulkan
 
 public extension VertexFormat {
     func vkFormat() -> VkFormat {
-        switch (self) {
+        switch self {
         case .uchar2:               return VK_FORMAT_R8G8_UINT
         case .uchar3:               return VK_FORMAT_R8G8B8_UINT
         case .uchar4:               return VK_FORMAT_R8G8B8A8_UINT

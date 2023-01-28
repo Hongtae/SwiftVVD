@@ -2,7 +2,7 @@
 //  File: VulkanShaderDescriptorType.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
@@ -10,7 +10,7 @@ import Vulkan
 
 public extension ShaderDescriptorType {
     func vkType() -> VkDescriptorType {
-        switch (self) {
+        switch self {
         case .uniformBuffer:
             return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
         case .storageBuffer:

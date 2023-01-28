@@ -110,25 +110,31 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                                               style: [.genericWindow],
                                               delegate: self) {
 
-                let graphicsDevice = appContext?.graphicsDeviceContext
-                if let swapChain = graphicsDevice?.renderQueue()?.makeSwapChain(target: window) {
-                    window.addEventObserver(self) {
-                        [weak self](event: WindowEvent) in
-                        if let self = self { self.onWindowEvent(event: event) }
+                if let graphicsDevice = appContext?.graphicsDeviceContext {
+                    if GraphicsPipelineStates.cacheContext(graphicsDevice) == false {
+                        Log.error("Failed to cache GraphicsPipelineStates")
                     }
-                    window.addEventObserver(self) {
-                        [weak self](event: KeyboardEvent) in
-                        if let self = self { self.onKeyboardEvent(event: event) }
+                    if let swapChain = graphicsDevice.renderQueue()?.makeSwapChain(target: window) {
+                        window.addEventObserver(self) {
+                            [weak self](event: WindowEvent) in
+                            if let self = self { self.onWindowEvent(event: event) }
+                        }
+                        window.addEventObserver(self) {
+                            [weak self](event: KeyboardEvent) in
+                            if let self = self { self.onKeyboardEvent(event: event) }
+                        }
+                        window.addEventObserver(self) {
+                            [weak self](event: MouseEvent) in
+                            if let self = self { self.onMouseEvent(event: event) }
+                        }
+                        self.window = window
+                        self.swapChain = swapChain
+                        self.task = self.runWindowUpdateTask()
+                    } else {
+                        Log.error("Failed to create swapChain.")
                     }
-                    window.addEventObserver(self) {
-                        [weak self](event: MouseEvent) in
-                        if let self = self { self.onMouseEvent(event: event) }
-                    }
-                    self.window = window
-                    self.swapChain = swapChain
-                    self.task = self.runWindowUpdateTask()
                 } else {
-                    Log.error("Failed to create swapChain.")
+                    Log.error("GraphicsDeviceContext is nil")
                 }
             }
         }

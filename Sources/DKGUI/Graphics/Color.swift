@@ -5,49 +5,123 @@
 //  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
-import DKGame
+protocol ColorBox: Hashable {
+    var red: Double     { get set }
+    var green: Double   { get set }
+    var blue: Double    { get set }
+    var alpha: Double   { get set }
 
-struct AnyColorBox {
-    let color: DKGame.Color
+    func copy() -> Self
+}
 
-    init(red: Double, green: Double, blue: Double, opacity: Double) {
-        self.color = .init(red, green, blue, opacity)
-    }
+struct LinearColor: ColorBox {
+    var red: Double
+    var green: Double
+    var blue: Double
+    var alpha: Double
 
-    init(red: UInt8, green: UInt8, blue: UInt8, opacity: UInt8) {
-        self.color = .init(rgba8: (r: red, g: green, b: blue, a: opacity))
+    func copy() -> Self {
+        Self(red: red, green: green, blue: blue, alpha: alpha)
     }
 }
 
-public struct Color {
+class AnyColorBox: ColorBox {
+    static func == (lhs: AnyColorBox, rhs: AnyColorBox) -> Bool {
+        return type(of: lhs.colorBox) == type(of: rhs.colorBox) &&
+        lhs.colorBox.red == rhs.colorBox.red &&
+        lhs.colorBox.green == rhs.colorBox.green &&
+        lhs.colorBox.blue == rhs.colorBox.blue &&
+        lhs.colorBox.alpha == rhs.colorBox.alpha
+    }
+    
+    func hash(into: inout Hasher) {
+        self.colorBox.hash(into: &into)
+    }
+
+    var colorBox: any ColorBox
+
+    required init(_ colorBox: any ColorBox) {
+        self.colorBox = colorBox
+    }
+
+    var red: Double {
+        get { colorBox.red }
+        set(r) { colorBox.red = r }
+    }
+    var green: Double {
+        get { colorBox.green }
+        set(g) { colorBox.green = g }
+    }
+    var blue: Double {
+        get { colorBox.blue }
+        set(b) { colorBox.blue = b }
+    }
+    var alpha: Double {
+        get { colorBox.alpha }
+        set(a) { colorBox.alpha = a}
+    }
+
+    func copy() -> Self {
+        Self(self.colorBox.copy())
+    }
+}
+
+public struct Color: Hashable {
     public enum RGBColorSpace: Equatable, Hashable {
         case sRGB
         case sRGBLinear
         case displayP3
     }
 
-    let colorSpace: RGBColorSpace
     let provider: AnyColorBox
 
-    public init(_ colorSpace: Color.RGBColorSpace = .sRGB, red: Double, green: Double, blue: Double, opacity: Double = 1) {
-        self.colorSpace = colorSpace
-        self.provider = AnyColorBox(red: red, green: green, blue: blue, opacity: opacity)
+    public init(_ colorSpace: RGBColorSpace = .sRGB, red: Double, green: Double, blue: Double, opacity: Double = 1) {
+        let colorBox = LinearColor(red: red, green: green, blue: blue, alpha: opacity)
+        self.provider = AnyColorBox(colorBox)
     }
 
-    public init(_ colorSpace: Color.RGBColorSpace = .sRGB, white: Double, opacity: Double = 1) {
-        fatalError()
+    public init(_ colorSpace: RGBColorSpace = .sRGB, white: Double, opacity: Double = 1) {
+        let colorBox = LinearColor(red: white, green: white, blue: white, alpha: opacity)
+        self.provider = AnyColorBox(colorBox)
     }
 
     public init(hue: Double, saturation: Double, brightness: Double, opacity: Double = 1) {
-        fatalError()
+        let hue = hue.clamp(min: 0.0, max: 1.0)
+        let saturation = saturation.clamp(min: 0.0, max: 1.0)
+        let brightness = brightness.clamp(min: 0.0, max: 1.0)
+
+        let c = saturation * brightness
+        let h = Int(hue * 360) / 6
+        let x = ((h % 2) == 0) ? 0: c
+        let m = brightness - c
+
+        let r, g, b: Double
+        switch h {
+        case 1:     (r, g, b) = (x, c, 0)
+        case 2:     (r, g, b) = (0, c, x)
+        case 3:     (r, g, b) = (0, x, c)
+        case 4:     (r, g, b) = (x, 0, c)
+        case 5:     (r, g, b) = (c, 0, x)
+        default: // 0, 6
+            (r, g, b) = (c, x, 0)
+        }
+
+        let red = r + m
+        let green = g + m
+        let blue = b + m
+
+        let colorBox = LinearColor(red: red, green: green, blue: blue, alpha: opacity)
+        self.provider = AnyColorBox(colorBox)
     }
 
     public func opacity(_ opacity: Double) -> Color {
-        fatalError()
+        let provider = self.provider.copy()
+        provider.alpha = opacity
+        return .init(provider)
     }
 
-    public init() {
-        fatalError()
+    init(_ provider: AnyColorBox) {
+        self.provider = provider
     }
 }
 

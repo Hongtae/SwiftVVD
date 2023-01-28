@@ -646,7 +646,7 @@ public class Win32Window : Window {
         }
 
         if let window = window, window.hWnd == hWnd {
-            switch (uMsg){
+            switch uMsg {
             case UINT(WM_ACTIVATE):
                 if wParam == WA_ACTIVE || wParam == WA_CLICKACTIVE {
                     if window.activated == false {
@@ -1103,8 +1103,7 @@ public class Win32Window : Window {
             case UINT(WM_COMMAND):
                 break
             case UINT(WM_SYSCOMMAND):
-                switch (wParam)
-                {
+                switch wParam {
                 case WPARAM(SC_CONTEXTHELP), // help menu
                      WPARAM(SC_KEYMENU),     // alt-key
                      WPARAM(SC_HOTKEY):                  // hotkey

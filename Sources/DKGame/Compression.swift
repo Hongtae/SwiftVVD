@@ -2,7 +2,7 @@
 //  File: Compression.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -40,7 +40,7 @@ public enum CompressionResult {
 
 private extension CompressionResult {
     static func from(_ r:DKCompressionResult) -> CompressionResult {
-        switch (r) {
+        switch r {
         case DKCompressionResult_Success:           return .success
         case DKCompressionResult_UnknownError:      return .unknownError
         case DKCompressionResult_OutOfMemory:       return .outOfMemory

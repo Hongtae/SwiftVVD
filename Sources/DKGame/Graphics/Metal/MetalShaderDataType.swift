@@ -2,7 +2,7 @@
 //  File: MetalShaderDataType.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_METAL
@@ -11,8 +11,7 @@ import Metal
 
 extension ShaderDataType {
     static func from(mtlDataType dataType: MTLDataType) -> ShaderDataType {
-        switch (dataType)
-        {
+        switch dataType {
         case .`struct`:     return .`struct`
         case .texture:      return .texture
         case .sampler:      return .sampler
@@ -85,8 +84,7 @@ extension ShaderDataType {
     }
 
     func mtlDataType() -> MTLDataType {
-        switch (self)
-        {
+        switch self {
         case .`struct`:     return .`struct`
         case .texture:      return .texture
         case .sampler:      return .sampler

@@ -606,7 +606,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
             guard let buffer = bufferView.buffer else { return }
 
             var type: VkIndexType
-            switch (indexType) {
+            switch indexType {
                 case .uint16:   type = VK_INDEX_TYPE_UINT16
                 case .uint32:   type = VK_INDEX_TYPE_UINT32
             }

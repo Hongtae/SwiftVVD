@@ -2,7 +2,7 @@
 //  File: GraphicsContext.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -202,13 +202,14 @@ public struct GraphicsContext {
             fatalError()
         }
         public static func color(_ color: Color) -> GraphicsContext.Shading {
-            fatalError()
+            return .init()
+            //fatalError()
         }
         public static func color(_ colorSpace: Color.RGBColorSpace = .sRGB, red: Double, green: Double, blue: Double, opacity: Double = 1) -> GraphicsContext.Shading {
-            fatalError()
+            return color(Color(colorSpace, red: red, green: green, blue: blue, opacity: opacity))
         }
         public static func color(_ colorSpace: Color.RGBColorSpace = .sRGB, white: Double, opacity: Double = 1) -> GraphicsContext.Shading {
-            fatalError()
+            return color(Color(colorSpace, white: white, opacity: opacity))
         }
         public static func style<S>(_ style: S) -> GraphicsContext.Shading where S : ShapeStyle {
             fatalError()
@@ -244,13 +245,14 @@ public struct GraphicsContext {
         fatalError()
     }
     public func drawLayer(content: (inout GraphicsContext) throws -> Void) rethrows {
-        fatalError()
+        var context = self
+        try content(&context)
     }
     public func fill(_ path: Path, with shading: GraphicsContext.Shading, style: FillStyle = FillStyle()) {
-        fatalError()
+
     }
     public func stroke(_ path: Path, with shading: GraphicsContext.Shading, style: StrokeStyle) {
-        fatalError()
+
     }
     public func stroke(_ path: Path, with shading: GraphicsContext.Shading, lineWidth: CGFloat = 1) {
         stroke(path, with: shading, style: StrokeStyle(lineWidth: lineWidth))

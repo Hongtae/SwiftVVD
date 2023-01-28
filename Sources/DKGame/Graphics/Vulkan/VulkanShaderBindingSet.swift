@@ -2,7 +2,7 @@
 //  File: VulkanShaderBindingSet.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
@@ -76,7 +76,7 @@ public class VulkanShaderBindingSet: ShaderBindingSet {
             assert(descriptorBinding.bufferInfos.isEmpty)
             assert(descriptorBinding.texelBufferViews.isEmpty)
 
-            switch (descriptor.descriptorType) {
+            switch descriptor.descriptorType {
             case VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER,
                  VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER:
                 // bufferView (pTexelBufferView)
@@ -165,7 +165,7 @@ public class VulkanShaderBindingSet: ShaderBindingSet {
 
             let getImageLayout = { (type: VkDescriptorType, pixelFormat: PixelFormat) -> VkImageLayout in
                 var imageLayout: VkImageLayout = VK_IMAGE_LAYOUT_UNDEFINED
-                switch (type) {
+                switch type {
                 case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                      VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
                     imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
@@ -179,7 +179,7 @@ public class VulkanShaderBindingSet: ShaderBindingSet {
                 return imageLayout
             }
 
-            switch (descriptor.descriptorType) {
+            switch descriptor.descriptorType {
                 // pImageInfo
             case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                  VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
@@ -258,7 +258,7 @@ public class VulkanShaderBindingSet: ShaderBindingSet {
             write.dstArrayElement = UInt32(startingIndex)
             write.descriptorCount = UInt32(availableItems)
 
-            switch (descriptor.descriptorType) {
+            switch descriptor.descriptorType {
             case VK_DESCRIPTOR_TYPE_SAMPLER,
                  VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
                 descriptorBinding.samplers.reserveCapacity(availableItems)

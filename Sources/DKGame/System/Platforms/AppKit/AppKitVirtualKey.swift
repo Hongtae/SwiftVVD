@@ -8,8 +8,7 @@
 #if ENABLE_APPKIT
 public extension VirtualKey {
     static func from(code: UInt16) -> VirtualKey {
-        switch (code)
-        {
+        switch code {
         case 0x00:  return .a               // a
         case 0x01:  return .s               // s
         case 0x02:  return .d               // d

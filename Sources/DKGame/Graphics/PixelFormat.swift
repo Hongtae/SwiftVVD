@@ -2,7 +2,7 @@
 //  File: PixelFormat.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 public enum PixelFormat {
@@ -83,7 +83,7 @@ public enum PixelFormat {
 
 public extension PixelFormat {
     func isColorFormat() -> Bool {
-        switch (self) {
+        switch self {
         case .invalid,
              .depth16Unorm, .depth32Float, .stencil8,
              .depth24Unorm_stencil8, .depth32Float_stencil8:
@@ -93,7 +93,7 @@ public extension PixelFormat {
         }
     }
     func isDepthFormat() -> Bool {
-        switch (self) {
+        switch self {
         case .depth16Unorm, .depth32Float,
              .depth24Unorm_stencil8, .depth32Float_stencil8:
             return true
@@ -102,7 +102,7 @@ public extension PixelFormat {
         }
     }
     func isStencilFormat() -> Bool {
-        switch (self) {
+        switch self {
         case .stencil8, .depth24Unorm_stencil8, .depth32Float_stencil8:
             return true
         default:
@@ -110,7 +110,7 @@ public extension PixelFormat {
         }
     }
     func bytesPerPixel() -> Int {
-        switch (self) {
+        switch self {
         // 8 bit formats
         case .r8Unorm, .r8Snorm, .r8Uint, .r8Sint:
             return 1

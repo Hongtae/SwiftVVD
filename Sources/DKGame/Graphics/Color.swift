@@ -5,7 +5,7 @@
 //  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
-public struct Color {
+public struct Color: Hashable {
     public var r : Scalar = 0.0
     public var g : Scalar = 0.0
     public var b : Scalar = 0.0

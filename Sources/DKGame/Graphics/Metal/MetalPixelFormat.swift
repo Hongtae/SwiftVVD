@@ -2,7 +2,7 @@
 //  File: MetalPixelFormat.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_METAL
@@ -11,8 +11,7 @@ import Metal
 
 extension PixelFormat {
     static func from(mtlPixelFormat format: MTLPixelFormat) -> PixelFormat {
-        switch (format)
-        {
+        switch format {
         case .r8Unorm:                  return .r8Unorm
         case .r8Snorm:                  return .r8Snorm
         case .r8Uint:                   return .r8Uint
@@ -66,8 +65,7 @@ extension PixelFormat {
     }
 
     func mtlPixelFormat() -> MTLPixelFormat {
-        switch (self)
-        {
+        switch self {
         case .r8Unorm:                  return .r8Unorm
         case .r8Snorm:                  return .r8Snorm
         case .r8Uint:                   return .r8Uint

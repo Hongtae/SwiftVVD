@@ -503,7 +503,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             return nil
         }
 
-        switch (shader.stage) {
+        switch shader.stage {
         case .vertex, .fragment, .compute:  break
         default:
             Log.warn("Unsupported shader type!")
@@ -1391,7 +1391,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             switch f {
             case .nearest:      return VK_FILTER_NEAREST
             case .linear:       return VK_FILTER_LINEAR
-                }
+            }
         }
         let mipmapMode = { (f: SamplerMipFilter) -> VkSamplerMipmapMode in
             switch f {
