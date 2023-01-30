@@ -2,7 +2,7 @@
 //  File: Environment.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 
@@ -50,6 +50,12 @@ public struct EnvironmentValues: CustomStringConvertible {
             return value
         case .keyPath(let keyPath):
             return EnvironmentValues()[keyPath: keyPath]
+        }
+    }
+
+    mutating func resolve(_ values: EnvironmentValues) {
+        if case .keyPath(let keyPath) = content {
+            content = .value(values[keyPath: keyPath])
         }
     }
 }

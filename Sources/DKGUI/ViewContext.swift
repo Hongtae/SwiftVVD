@@ -13,6 +13,7 @@ protocol ViewProxy {
     var view: Content { get }
     var modifiers: [any ViewModifier] { get }
     var subviews: [any ViewProxy] { get }
+    var environmentValues: EnvironmentValues { get }
 
     func update(tick: UInt64, delta: Double, date: Date)
     func draw()
@@ -32,23 +33,34 @@ struct ViewContext<Content>: ViewProxy where Content: View {
     var view: Content
     var modifiers: [any ViewModifier]
     var subviews: [any ViewProxy]
+    var environmentValues: EnvironmentValues
 
-    init(view: Content, modifiers: [any ViewModifier], subviews: [any ViewProxy]) {
+    init(view: Content, modifiers: [any ViewModifier], parent: any ViewProxy) {
         self.view = view
         self.modifiers = modifiers
-        self.subviews = subviews
+        var environmentValues = parent.environmentValues
+        modifiers.forEach { modifier in
+            if let env = modifier as? _EnvironmentModifier {
+                environmentValues = env.resolveEnvironmentValues(environmentValues)
+            }
+        }
+        self.environmentValues = environmentValues
+        self.subviews = []
     }
-    init(view: Content) {
+
+    init(view: Content, parent: any ViewProxy) {
         self.view = view
         self.modifiers = []
         self.subviews = []
+        self.environmentValues = parent.environmentValues
     }
 }
 
 func _makeViewProxy<Content>(_ view: Content,
-                             modifiers: [any ViewModifier]) -> any ViewProxy where Content: View {
+                             modifiers: [any ViewModifier],
+                             parent: any ViewProxy) -> any ViewProxy where Content: View {
     if let prim = view as? (any _PrimitiveView) {
-        return prim.makeViewProxy(modifiers: modifiers)
+        return prim.makeViewProxy(modifiers: modifiers, parent: parent)
     }
-    return _makeViewProxy(view.body, modifiers: modifiers)
+    return _makeViewProxy(view.body, modifiers: modifiers, parent: parent)
 }
