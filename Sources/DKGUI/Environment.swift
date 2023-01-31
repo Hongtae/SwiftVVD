@@ -109,14 +109,13 @@ extension EnvironmentValues {
         forEachField(of: Content.self) { charPtr, offset, type in
             if type.self is _EnvironmentResolve.Type {
                 let name = String(cString: charPtr)
-                Log.debug("field: \(name) type: \(type.self)")
+                Log.debug("field: \(name) type: \(type)")
 
                 withUnsafeMutableBytes(of: &view) {
-                    let ptr = $0.baseAddress!
-                        .advanced(by: offset)
-                        .bindMemory(to: _EnvironmentResolve.self,
-                                    capacity: 1)
-                    ptr.pointee.resolve(self)
+                    let ptr = $0.baseAddress!.advanced(by: offset)
+                    // must not be bound to protocol (wrong size)
+//                    let envPtr = ptr.assumingMemoryBound(to: _EnvironmentResolve.self)
+//                    envPtr.pointee.resolve(self)
                 }
             }
             return true
