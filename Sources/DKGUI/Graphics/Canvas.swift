@@ -53,23 +53,15 @@ struct CanvasContext<Symbols>: ViewProxy where Symbols: View {
     var view: Content
 
     var modifiers: [any ViewModifier]
-    var subviews: [any ViewProxy]
     var environmentValues: EnvironmentValues
 
     var size: CGSize
 
-    init(view: Content, modifiers: [any ViewModifier], parent: any ViewProxy) {
-        self.view = view
+    init(view: Content, modifiers: [any ViewModifier], environmentValues: EnvironmentValues) {
         self.modifiers = modifiers
-        self.subviews = []
+        self.environmentValues = environmentValues.resolve(modifiers: modifiers)
+        self.view = self.environmentValues.resolve(view)
         self.size = .zero
-        var environmentValues = parent.environmentValues
-        modifiers.forEach {
-            if let env = $0 as? _EnvironmentModifier {
-                environmentValues = env.resolveEnvironmentValues(environmentValues)
-            }
-        }
-        self.environmentValues = environmentValues
     }
 
     func draw() {
@@ -80,7 +72,7 @@ struct CanvasContext<Symbols>: ViewProxy where Symbols: View {
 }
 
 extension Canvas: _PrimitiveView {
-    func makeViewProxy(modifiers: [any ViewModifier], parent: any ViewProxy) -> any ViewProxy {
-        CanvasContext(view: self, modifiers: modifiers, parent: parent)
+    func makeViewProxy(modifiers: [any ViewModifier], environmentValues: EnvironmentValues) -> any ViewProxy {
+        CanvasContext(view: self, modifiers: modifiers, environmentValues: environmentValues)
     }
 }

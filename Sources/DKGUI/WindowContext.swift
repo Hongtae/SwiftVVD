@@ -86,22 +86,13 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
         }
     }
 
-    struct RootViewProxy: ViewProxy {
-        typealias Content = Never
-        var view: Never { neverBody() }
-        var modifiers: [any ViewModifier] = []
-        var subviews: [any ViewProxy] = []
-        var environmentValues: EnvironmentValues
-    }
-
     init(content: Content, contextType: Any.Type, identifier: String, title: String) {
         self.contextType = contextType
         self.identifier = identifier
         self.title = title
         self.view = content
         self.environmentValues = .init()
-        let rootProxy = RootViewProxy(environmentValues: self.environmentValues)
-        self.viewProxy = _makeViewProxy(self.view, modifiers: [], parent: rootProxy)
+        self.viewProxy = _makeViewProxy(self.view, modifiers: [], environmentValues: self.environmentValues)
     }
 
     deinit {

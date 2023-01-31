@@ -28,10 +28,10 @@ extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
 }
 
 extension ModifiedContent: _PrimitiveView where Content: View, Modifier: ViewModifier {
-    func makeViewProxy(modifiers: [any ViewModifier], parent: any ViewProxy) -> any ViewProxy {
+    func makeViewProxy(modifiers: [any ViewModifier], environmentValues: EnvironmentValues) -> any ViewProxy {
         var modifiers = modifiers
         modifiers.append(self.modifier)
-        return _makeViewProxy(self.content, modifiers: modifiers, parent: parent)
+        return _makeViewProxy(self.content, modifiers: modifiers, environmentValues: environmentValues)
     }
 }
 

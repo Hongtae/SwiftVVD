@@ -13,7 +13,7 @@ public struct Text: View {
 }
 
 extension Text: _PrimitiveView {
-    func makeViewProxy(modifiers: [any ViewModifier], parent: any ViewProxy) -> any ViewProxy {
-        ViewContext(view: self, parent: parent)
+    func makeViewProxy(modifiers: [any ViewModifier], environmentValues: EnvironmentValues) -> any ViewProxy {
+        ViewContext(view: self, modifiers: modifiers, environmentValues: environmentValues)
     }
 }

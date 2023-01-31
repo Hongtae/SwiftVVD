@@ -11,7 +11,7 @@ public protocol View {
 }
 
 protocol _PrimitiveView {
-    func makeViewProxy(modifiers: [any ViewModifier], parent: any ViewProxy) -> any ViewProxy
+    func makeViewProxy(modifiers: [any ViewModifier], environmentValues: EnvironmentValues) -> any ViewProxy
 }
 
 extension _PrimitiveView {
@@ -20,7 +20,7 @@ extension _PrimitiveView {
 }
 
 extension _PrimitiveView {
-    func makeViewProxy(modifiers: [any ViewModifier], parent: any ViewProxy) -> any ViewProxy {
+    func makeViewProxy(modifiers: [any ViewModifier], environmentValues: EnvironmentValues) -> any ViewProxy {
         fatalError("Not implemented")
     }
 }
