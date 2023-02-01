@@ -40,6 +40,9 @@ struct ViewContext<Content>: ViewProxy where Content: View {
         self.modifiers = modifiers
         self.subview = _makeViewProxy(self.view.body, modifiers: self.modifiers, environmentValues: self.environmentValues)
     }
+    func draw() {
+        subview.draw()
+    }
 }
 
 func _makeViewProxy<Content>(_ view: Content,

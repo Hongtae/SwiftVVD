@@ -18,7 +18,7 @@ private func _getChildMetadata(_: Any.Type, index: Int, fieldMetadata: UnsafeMut
 private func _getChildOffset(_: Any.Type, index: Int) -> Int
 
 @discardableResult
-private func forEachField(of type: Any.Type, body: (UnsafePointer<CChar>, Int, Any.Type) -> Bool) -> Bool {
+private func _forEachField(of type: Any.Type, body: (UnsafePointer<CChar>, Int, Any.Type) -> Bool) -> Bool {
     let numChildren = _getRecursiveChildCount(type)
     for i in 0..<numChildren {
         let offset = _getChildOffset(type, index: i)
@@ -63,7 +63,8 @@ public struct EnvironmentValues: CustomStringConvertible {
 }
 
 protocol _EnvironmentResolve {
-    mutating func resolve(_: EnvironmentValues)
+    func resolve(_: EnvironmentValues) -> Self
+    func _write(_: UnsafeMutableRawPointer)
 }
 
 @propertyWrapper public struct Environment<Value>: DynamicProperty, _EnvironmentResolve {
@@ -72,10 +73,6 @@ protocol _EnvironmentResolve {
         case value(Value)
     }
     var content: Content
-
-    public init(_ keyPath: KeyPath<EnvironmentValues, Value>) {
-        content = .keyPath(keyPath)
-    }
 
     public var wrappedValue: Value {
         switch content {
@@ -86,10 +83,24 @@ protocol _EnvironmentResolve {
         }
     }
 
-    mutating func resolve(_ values: EnvironmentValues) {
+    public init(_ keyPath: KeyPath<EnvironmentValues, Value>) {
+        content = .keyPath(keyPath)
+    }
+
+    private init(_ value: Value) {
+        content = .value(value)
+    }
+
+    func resolve(_ values: EnvironmentValues) -> Self {
         if case .keyPath(let keyPath) = content {
-            content = .value(values[keyPath: keyPath])
+            return Self(values[keyPath: keyPath])
         }
+        return self
+    }
+
+    func _write(_ ptr: UnsafeMutableRawPointer) {
+        let env = ptr.assumingMemoryBound(to: Environment<Value>.self)
+        env.pointee = self
     }
 }
 
@@ -106,16 +117,24 @@ extension EnvironmentValues {
 
     func resolve<Content>(_ view: Content) -> Content where Content: View {
         var view = view
-        forEachField(of: Content.self) { charPtr, offset, type in
+        var resolvedEnvironments: [String: _EnvironmentResolve] = [:]
+
+        for (label, value) in Mirror(reflecting: view).children {
+            if let label, let value = value as? _EnvironmentResolve {
+                resolvedEnvironments[label] = value.resolve(self)
+            }
+        }
+        _forEachField(of: Content.self) { charPtr, offset, type in
             if type.self is _EnvironmentResolve.Type {
                 let name = String(cString: charPtr)
-                Log.debug("field: \(name) type: \(type)")
-
-                withUnsafeMutableBytes(of: &view) {
-                    let ptr = $0.baseAddress!.advanced(by: offset)
-                    // must not be bound to protocol (wrong size)
-//                    let envPtr = ptr.assumingMemoryBound(to: _EnvironmentResolve.self)
-//                    envPtr.pointee.resolve(self)
+                //Log.debug("Update environment: \(Content.self).\(name) (type: \(type))")
+                if let env = resolvedEnvironments[name] {
+                    withUnsafeMutableBytes(of: &view) {
+                        let ptr = $0.baseAddress!.advanced(by: offset)
+                        env._write(ptr)
+                    }
+                } else {
+                    Log.warn("Unable to update environment: \(Content.self).\(name) (type: \(type))")
                 }
             }
             return true

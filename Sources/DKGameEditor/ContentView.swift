@@ -13,16 +13,14 @@ extension EnvironmentValues {
 }
 
 struct ContentView: View {
-    @Environment(\.testValue) var testValue
+    @Environment(\.testValue) private var testValue
     init() {
-        let x = testValue
-        print("x: \(String(describing: x))")
+        print("\(#function): _testValue: \(String(describing: self._testValue))")
     }
     var body: some View {
         Canvas { context, size in
 
-            let x = testValue
-            print("x: \(String(describing: x))")
+            print("\(#function): _testValue: \(String(describing: self._testValue))")
 
             var path = Path()
             path.move(to: CGPoint(x: 10, y: 50))

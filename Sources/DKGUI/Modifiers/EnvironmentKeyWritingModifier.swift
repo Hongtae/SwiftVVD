@@ -9,6 +9,11 @@ protocol _EnvironmentValuesResolve {
     func resolve(_ values: EnvironmentValues) -> EnvironmentValues
 }
 
+protocol EnvironmentalModifier: ViewModifier where Self.Body == Never {
+    associatedtype ResolvedModifier: ViewModifier
+    func resolve(in: EnvironmentValues) -> Self.ResolvedModifier
+}
+
 struct _EnvironmentKeyWritingModifier<Value>: ViewModifier, _EnvironmentValuesResolve {
     typealias Body = Never
 
