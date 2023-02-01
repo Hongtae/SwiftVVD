@@ -66,8 +66,12 @@ public struct EnvironmentValues: CustomStringConvertible {
     public var description: String { String(describing: values) }
 }
 
+protocol _EnvironmentValuesResolve {
+    func _resolve(_: EnvironmentValues) -> EnvironmentValues
+}
+
 protocol _EnvironmentResolve {
-    func resolve(_: EnvironmentValues) -> Self
+    func _resolve(_: EnvironmentValues) -> Self
     func _write(_: UnsafeMutableRawPointer)
 }
 
@@ -95,7 +99,7 @@ protocol _EnvironmentResolve {
         content = .value(value)
     }
 
-    func resolve(_ values: EnvironmentValues) -> Self {
+    func _resolve(_ values: EnvironmentValues) -> Self {
         if case .keyPath(let keyPath) = content {
             return Self(values[keyPath: keyPath])
         }
@@ -109,23 +113,23 @@ protocol _EnvironmentResolve {
 }
 
 extension EnvironmentValues {
-    func resolve(modifiers: [any ViewModifier]) -> EnvironmentValues {
+    func _resolve(modifiers: [any ViewModifier]) -> EnvironmentValues {
         var environmentValues = self
         modifiers.forEach { modifier in
             if let env = modifier as? _EnvironmentValuesResolve {
-                environmentValues = env.resolve(environmentValues)
+                environmentValues = env._resolve(environmentValues)
             }
         }
         return environmentValues
     }
 
-    func resolve<Content>(_ view: Content) -> Content where Content: View {
+    func _resolve<Content>(_ view: Content) -> Content where Content: View {
         var view = view
         var resolvedEnvironments: [String: _EnvironmentResolve] = [:]
 
         for (label, value) in Mirror(reflecting: view).children {
             if let label, let value = value as? _EnvironmentResolve {
-                resolvedEnvironments[label] = value.resolve(self)
+                resolvedEnvironments[label] = value._resolve(self)
             }
         }
         _forEachField(of: Content.self) { charPtr, offset, fieldType in

@@ -35,8 +35,8 @@ struct ViewContext<Content>: ViewProxy where Content: View {
     var environmentValues: EnvironmentValues
 
     init(view: Content, modifiers: [any ViewModifier], environmentValues: EnvironmentValues) {
-        self.environmentValues = environmentValues.resolve(modifiers: modifiers)
-        self.view = self.environmentValues.resolve(view)
+        self.environmentValues = environmentValues._resolve(modifiers: modifiers)
+        self.view = self.environmentValues._resolve(view)
         self.modifiers = modifiers
         self.subview = _makeViewProxy(self.view.body, modifiers: self.modifiers, environmentValues: self.environmentValues)
     }

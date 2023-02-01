@@ -7,6 +7,5 @@
 
 public struct EmptyModifier: ViewModifier {
     public typealias Body = Never
-
-    public static let identity: EmptyModifier = .init()
+    public static let identity = EmptyModifier()
 }

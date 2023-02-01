@@ -2,12 +2,12 @@
 //  File: ProjectionTransform.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
 
-public struct ProjectionTransform: Equatable, Sendable{
+public struct ProjectionTransform: Equatable, Sendable {
     public var m11: CGFloat
     public var m12: CGFloat
     public var m13: CGFloat
@@ -40,15 +40,67 @@ public struct ProjectionTransform: Equatable, Sendable{
         return m31 != 0.0 || m32 != 0.0
     }
 
+    public var determinant: CGFloat {
+        m11 * m22 * m33 + m12 * m23 * m31 +
+        m13 * m21 * m32 - m11 * m23 * m32 -
+        m12 * m21 * m33 - m13 * m22 * m31
+    }
+
     public mutating func invert() -> Bool {
-        fatalError()
+        let d = self.determinant
+        if d.isZero {
+            return false
+        }
+        let inv = 1.0 / d
+        let m11 = (self.m22 * self.m33 - self.m23 * self.m32) * inv
+        let m12 = (self.m13 * self.m32 - self.m12 * self.m33) * inv
+        let m13 = (self.m12 * self.m23 - self.m13 * self.m22) * inv
+        let m21 = (self.m23 * self.m31 - self.m21 * self.m33) * inv
+        let m22 = (self.m11 * self.m33 - self.m13 * self.m31) * inv
+        let m23 = (self.m13 * self.m21 - self.m11 * self.m23) * inv
+        let m31 = (self.m21 * self.m32 - self.m22 * self.m31) * inv
+        let m32 = (self.m12 * self.m31 - self.m11 * self.m32) * inv
+        let m33 = (self.m11 * self.m22 - self.m12 * self.m21) * inv
+
+        self.m11 = m11
+        self.m12 = m12
+        self.m13 = m13
+        self.m21 = m21
+        self.m22 = m22
+        self.m23 = m23
+        self.m31 = m31
+        self.m32 = m32
+        self.m33 = m33
+        return true
     }
 
     public func inverted() -> ProjectionTransform {
-        fatalError()
+        var matrix = self
+        _ = matrix.invert()
+        return matrix
     }
 
     public func concatenating(_ rhs: ProjectionTransform) -> ProjectionTransform {
-        fatalError()
+        let row1 = (self.m11, self.m12, self.m13)
+        let row2 = (self.m21, self.m22, self.m23)
+        let row3 = (self.m31, self.m32, self.m33)
+        let col1 = (rhs.m11, rhs.m21, rhs.m31)
+        let col2 = (rhs.m12, rhs.m22, rhs.m32)
+        let col3 = (rhs.m13, rhs.m23, rhs.m33)
+        let dot = {(lhs: (CGFloat, CGFloat, CGFloat),
+                    rhs: (CGFloat, CGFloat, CGFloat)) -> CGFloat in
+            lhs.0 * rhs.0 + lhs.1 * rhs.1 + lhs.2 * rhs.2
+        }
+        var mat = ProjectionTransform()
+        mat.m11 = dot(row1, col1)
+        mat.m12 = dot(row1, col2)
+        mat.m13 = dot(row1, col3)
+        mat.m21 = dot(row2, col1)
+        mat.m22 = dot(row2, col2)
+        mat.m23 = dot(row2, col3)
+        mat.m31 = dot(row3, col1)
+        mat.m32 = dot(row3, col2)
+        mat.m33 = dot(row3, col3)
+        return mat
     }
 }

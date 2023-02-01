@@ -59,8 +59,8 @@ struct CanvasContext<Symbols>: ViewProxy where Symbols: View {
 
     init(view: Content, modifiers: [any ViewModifier], environmentValues: EnvironmentValues) {
         self.modifiers = modifiers
-        self.environmentValues = environmentValues.resolve(modifiers: modifiers)
-        self.view = self.environmentValues.resolve(view)
+        self.environmentValues = environmentValues._resolve(modifiers: modifiers)
+        self.view = self.environmentValues._resolve(view)
         self.size = .zero
     }
 
