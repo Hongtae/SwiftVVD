@@ -8,6 +8,9 @@
 import SwiftShims
 import DKGame
 
+// The original reflection code can be found here:
+// https://github.com/apple/swift/blob/main/stdlib/public/core/ReflectionMirror.swift
+
 @_silgen_name("swift_reflectionMirror_recursiveCount")
 private func _getRecursiveChildCount(_: Any.Type) -> Int
 
@@ -17,6 +20,7 @@ private func _getChildMetadata(_: Any.Type, index: Int, fieldMetadata: UnsafeMut
 @_silgen_name("swift_reflectionMirror_recursiveChildOffset")
 private func _getChildOffset(_: Any.Type, index: Int) -> Int
 
+// Note: I modified some code that I don't think is necessary. (removed _MetadataKind)
 @discardableResult
 private func _forEachField(of type: Any.Type, body: (UnsafePointer<CChar>, Int, Any.Type) -> Bool) -> Bool {
     let numChildren = _getRecursiveChildCount(type)
