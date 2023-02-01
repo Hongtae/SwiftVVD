@@ -5,7 +5,16 @@
 //  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
-struct _EnvironmentKeyWritingModifier<Value>: ViewModifier {
+protocol _EnvironmentValuesResolve {
+    func resolve(_ values: EnvironmentValues) -> EnvironmentValues
+}
+
+protocol EnvironmentalModifier: ViewModifier where Self.Body == Never {
+    associatedtype ResolvedModifier: ViewModifier
+    func resolve(in: EnvironmentValues) -> Self.ResolvedModifier
+}
+
+struct _EnvironmentKeyWritingModifier<Value>: ViewModifier, _EnvironmentValuesResolve {
     typealias Body = Never
 
     var keyPath: WritableKeyPath<EnvironmentValues, Value>
@@ -13,6 +22,12 @@ struct _EnvironmentKeyWritingModifier<Value>: ViewModifier {
     init(keyPath: WritableKeyPath<EnvironmentValues, Value>, value: Value) {
         self.keyPath = keyPath
         self.value = value
+    }
+
+    func resolve(_ values: EnvironmentValues) -> EnvironmentValues {
+        var values = values
+        values[keyPath: self.keyPath] = value
+        return values
     }
 }
 

@@ -2,8 +2,37 @@
 //  File: Environment.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
+
+import SwiftShims
+import DKGame
+
+@_silgen_name("swift_reflectionMirror_recursiveCount")
+private func _getRecursiveChildCount(_: Any.Type) -> Int
+
+@_silgen_name("swift_reflectionMirror_recursiveChildMetadata")
+private func _getChildMetadata(_: Any.Type, index: Int, fieldMetadata: UnsafeMutablePointer<_FieldReflectionMetadata>) -> Any.Type
+
+@_silgen_name("swift_reflectionMirror_recursiveChildOffset")
+private func _getChildOffset(_: Any.Type, index: Int) -> Int
+
+@discardableResult
+private func _forEachField(of type: Any.Type, body: (UnsafePointer<CChar>, Int, Any.Type) -> Bool) -> Bool {
+    let numChildren = _getRecursiveChildCount(type)
+    for i in 0..<numChildren {
+        let offset = _getChildOffset(type, index: i)
+
+        var field = _FieldReflectionMetadata()
+        let childType = _getChildMetadata(type, index: i, fieldMetadata: &field)
+        defer { field.freeFunc?(field.name) }
+
+        if !body(field.name!, offset, childType) {
+            return false
+        }
+    }
+    return true
+}
 
 
 public protocol EnvironmentKey {
@@ -33,16 +62,17 @@ public struct EnvironmentValues: CustomStringConvertible {
     public var description: String { String(describing: values) }
 }
 
-@propertyWrapper public struct Environment<Value>: DynamicProperty {
+protocol _EnvironmentResolve {
+    func resolve(_: EnvironmentValues) -> Self
+    func _write(_: UnsafeMutableRawPointer)
+}
+
+@propertyWrapper public struct Environment<Value>: DynamicProperty, _EnvironmentResolve {
     enum Content {
         case keyPath(KeyPath<EnvironmentValues, Value>)
         case value(Value)
     }
     var content: Content
-
-    public init(_ keyPath: KeyPath<EnvironmentValues, Value>) {
-        content = .keyPath(keyPath)
-    }
 
     public var wrappedValue: Value {
         switch content {
@@ -51,5 +81,64 @@ public struct EnvironmentValues: CustomStringConvertible {
         case .keyPath(let keyPath):
             return EnvironmentValues()[keyPath: keyPath]
         }
+    }
+
+    public init(_ keyPath: KeyPath<EnvironmentValues, Value>) {
+        content = .keyPath(keyPath)
+    }
+
+    private init(_ value: Value) {
+        content = .value(value)
+    }
+
+    func resolve(_ values: EnvironmentValues) -> Self {
+        if case .keyPath(let keyPath) = content {
+            return Self(values[keyPath: keyPath])
+        }
+        return self
+    }
+
+    func _write(_ ptr: UnsafeMutableRawPointer) {
+        let env = ptr.assumingMemoryBound(to: Environment<Value>.self)
+        env.pointee = self
+    }
+}
+
+extension EnvironmentValues {
+    func resolve(modifiers: [any ViewModifier]) -> EnvironmentValues {
+        var environmentValues = self
+        modifiers.forEach { modifier in
+            if let env = modifier as? _EnvironmentValuesResolve {
+                environmentValues = env.resolve(environmentValues)
+            }
+        }
+        return environmentValues
+    }
+
+    func resolve<Content>(_ view: Content) -> Content where Content: View {
+        var view = view
+        var resolvedEnvironments: [String: _EnvironmentResolve] = [:]
+
+        for (label, value) in Mirror(reflecting: view).children {
+            if let label, let value = value as? _EnvironmentResolve {
+                resolvedEnvironments[label] = value.resolve(self)
+            }
+        }
+        _forEachField(of: Content.self) { charPtr, offset, type in
+            if type.self is _EnvironmentResolve.Type {
+                let name = String(cString: charPtr)
+                //Log.debug("Update environment: \(Content.self).\(name) (type: \(type))")
+                if let env = resolvedEnvironments[name] {
+                    withUnsafeMutableBytes(of: &view) {
+                        let ptr = $0.baseAddress!.advanced(by: offset)
+                        env._write(ptr)
+                    }
+                } else {
+                    Log.warn("Unable to update environment: \(Content.self).\(name) (type: \(type))")
+                }
+            }
+            return true
+        }
+        return view
     }
 }

@@ -2,7 +2,7 @@
 //  File: VStack.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 public struct VStack<Content>: View where Content: View {
@@ -13,7 +13,7 @@ public struct VStack<Content>: View where Content: View {
 }
 
 extension VStack: _PrimitiveView {
-    func makeViewProxy() -> any ViewProxy {
-        ViewContext(view: self)
+    func makeViewProxy(modifiers: [any ViewModifier], environmentValues: EnvironmentValues) -> any ViewProxy {
+        ViewContext(view: self, modifiers: modifiers, environmentValues: environmentValues)
     }
 }

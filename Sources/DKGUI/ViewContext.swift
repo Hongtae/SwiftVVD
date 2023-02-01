@@ -12,7 +12,7 @@ protocol ViewProxy {
     associatedtype Content: View
     var view: Content { get }
     var modifiers: [any ViewModifier] { get }
-    var subviews: [any ViewProxy] { get }
+    var environmentValues: EnvironmentValues { get }
 
     func update(tick: UInt64, delta: Double, date: Date)
     func draw()
@@ -30,25 +30,26 @@ extension ViewProxy {
 
 struct ViewContext<Content>: ViewProxy where Content: View {
     var view: Content
+    var subview: any ViewProxy
     var modifiers: [any ViewModifier]
-    var subviews: [any ViewProxy]
+    var environmentValues: EnvironmentValues
 
-    init(view: Content, modifiers: [any ViewModifier], subviews: [any ViewProxy]) {
-        self.view = view
+    init(view: Content, modifiers: [any ViewModifier], environmentValues: EnvironmentValues) {
+        self.environmentValues = environmentValues.resolve(modifiers: modifiers)
+        self.view = self.environmentValues.resolve(view)
         self.modifiers = modifiers
-        self.subviews = subviews
+        self.subview = _makeViewProxy(self.view.body, modifiers: self.modifiers, environmentValues: self.environmentValues)
     }
-    init(view: Content) {
-        self.view = view
-        self.modifiers = []
-        self.subviews = []
+    func draw() {
+        subview.draw()
     }
 }
 
 func _makeViewProxy<Content>(_ view: Content,
-                             modifiers: [any ViewModifier]) -> any ViewProxy where Content: View {
+                             modifiers: [any ViewModifier],
+                             environmentValues: EnvironmentValues) -> any ViewProxy where Content: View {
     if let prim = view as? (any _PrimitiveView) {
-        return prim.makeViewProxy(modifiers: modifiers)
+        return prim.makeViewProxy(modifiers: modifiers, environmentValues: environmentValues)
     }
-    return _makeViewProxy(view.body, modifiers: modifiers)
+    return ViewContext(view: view, modifiers: modifiers, environmentValues: environmentValues)
 }

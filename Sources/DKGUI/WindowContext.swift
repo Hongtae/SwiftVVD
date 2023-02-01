@@ -18,6 +18,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
     private(set) var window: Window?
     var view: Content
     var viewProxy: any ViewProxy
+    var environmentValues: EnvironmentValues
 
     struct State {
         var visible = false
@@ -90,7 +91,8 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
         self.identifier = identifier
         self.title = title
         self.view = content
-        self.viewProxy = _makeViewProxy(self.view, modifiers: [])
+        self.environmentValues = .init()
+        self.viewProxy = _makeViewProxy(self.view, modifiers: [], environmentValues: self.environmentValues)
     }
 
     deinit {
