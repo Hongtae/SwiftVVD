@@ -128,17 +128,18 @@ extension EnvironmentValues {
                 resolvedEnvironments[label] = value.resolve(self)
             }
         }
-        _forEachField(of: Content.self) { charPtr, offset, type in
-            if type.self is _EnvironmentResolve.Type {
+        _forEachField(of: Content.self) { charPtr, offset, fieldType in
+            if fieldType.self is _EnvironmentResolve.Type {
                 let name = String(cString: charPtr)
-                //Log.debug("Update environment: \(Content.self).\(name) (type: \(type))")
+                // Log.debug("Update environment: \(Content.self).\(name) (type: \(fieldType), offset: \(offset))")
                 if let env = resolvedEnvironments[name] {
+                    assert(type(of: env) == fieldType, "object type mismatch!")
                     withUnsafeMutableBytes(of: &view) {
                         let ptr = $0.baseAddress!.advanced(by: offset)
                         env._write(ptr)
                     }
                 } else {
-                    Log.warn("Unable to update environment: \(Content.self).\(name) (type: \(type))")
+                    Log.warn("Unable to update environment: \(Content.self).\(name) (type: \(fieldType))")
                 }
             }
             return true
