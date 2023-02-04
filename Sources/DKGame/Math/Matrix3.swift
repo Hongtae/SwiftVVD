@@ -128,8 +128,8 @@ public struct Matrix3: Matrix {
                                          0.0, 1.0, 0.0,
                                          0.0, 0.0, 1.0)
 
-    public init() {
-        self = .identity
+    public init(_ matrix: Self = .identity) {
+        self = matrix
     }
 
     public init(_ m11: any BinaryFloatingPoint,

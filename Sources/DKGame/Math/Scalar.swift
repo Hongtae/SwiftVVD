@@ -23,6 +23,10 @@ public func clamp<T>(_ value: T, min: T, max: T) -> T where T: Comparable {
     value.clamp(min: min, max: max)
 }
 
+public func lerp<T>(_ a: T, _ b: T, _ t: T) -> T where T: FloatingPoint {
+    a * (1 - t) + b * t
+}
+
 public typealias Half2 = (Float16, Float16)
 public typealias Float2 = (Float32, Float32)
 public typealias Double2 = (Float64, Float64)

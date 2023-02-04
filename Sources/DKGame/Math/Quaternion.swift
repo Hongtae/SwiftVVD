@@ -42,8 +42,8 @@ public struct Quaternion: Vector {
     public static let zero = Quaternion(0.0, 0.0, 0.0, 0.0)
     public static let identity = Quaternion(0.0, 0.0, 0.0, 1.0)
 
-    public init() {
-        self = .identity
+    public init(_ quat: Self = .identity) {
+        self = quat
     }
 
     public init<T>(_ x: T, _ y: T, _ z: T, _ w: T) where T: BinaryFloatingPoint {

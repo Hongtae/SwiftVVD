@@ -39,8 +39,8 @@ public struct Vector3: Vector {
         }
     }
 
-    public init() {
-        self = .zero
+    public init(_ vector: Self = .zero) {
+        self = vector
     }
 
     public init(_ x: any BinaryFloatingPoint,

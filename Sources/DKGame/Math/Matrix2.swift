@@ -91,8 +91,8 @@ public struct Matrix2: Matrix {
 
     public static let identity = Matrix2(1.0, 0.0, 0.0, 1.0)
 
-    public init() {
-        self = .identity
+    public init(_ matrix: Self = .identity) {
+        self = matrix
     }
 
     public init(_ m11: any BinaryFloatingPoint,

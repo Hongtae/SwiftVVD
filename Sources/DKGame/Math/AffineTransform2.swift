@@ -32,9 +32,9 @@ public struct AffineTransform2: VectorTransformer {
 
     public static let identity: Self = .init(origin: .zero)
 
-    public init() {
-        self.matrix2 = .identity
-        self.translation = .zero
+    public init(_ t: Self = .identity) {
+        self.matrix2 = t.matrix2
+        self.translation = t.translation
     }
 
     public init(origin: Vector2) {

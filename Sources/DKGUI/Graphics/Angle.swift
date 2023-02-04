@@ -24,17 +24,9 @@ public struct Angle: Sendable {
     }
 }
 
-extension Angle: Hashable, Comparable {
+extension Angle: Comparable {
     public static func < (lhs: Angle, rhs: Angle) -> Bool {
         lhs.radians < rhs.radians
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(self.radians)
-    }
-
-    public static func == (a: Angle, b: Angle) -> Bool {
-        a.radians == b.radians
     }
 }
 

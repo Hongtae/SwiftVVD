@@ -32,8 +32,8 @@ public struct LinearTransform3: VectorTransformer {
                 Vector3(matrix3.m31, matrix3.m32, matrix3.m33).length)
     }
 
-    public init() {
-        self.matrix3 = .identity
+    public init(_ t: Self = .identity) {
+        self.matrix3 = t.matrix3
     }
 
     public init(_ q: Quaternion) {

@@ -35,9 +35,9 @@ public struct AffineTransform3: VectorTransformer {
 
     public static let identity: Self = .init(origin: .zero)
 
-    public init() {
-        self.matrix3 = .identity
-        self.translation = .zero
+    public init(_ t: Self = .identity) {
+        self.matrix3 = t.matrix3
+        self.translation = t.translation
     }
 
     public init(origin: Vector3) {

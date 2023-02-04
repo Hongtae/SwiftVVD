@@ -14,8 +14,8 @@ public struct LinearTransform2: VectorTransformer {
 
     public static let identity: Self = .init(Matrix2.identity)
 
-    public init() {
-        self.matrix2 = .identity
+    public init(_ t: Self = .identity) {
+        self.matrix2 = t.matrix2
     }
 
     public init(_ matrix: Matrix2) {

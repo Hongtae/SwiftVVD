@@ -86,13 +86,19 @@ public extension CGSize {
         self.init(width: CGFloat(v.x), height: CGFloat(v.y))
     }
 
+    init(_ p: CGPoint) {
+        self.init(width: p.x, height: p.y)
+    }
+
     static func * (lhs: Self, rhs: CGFloat) -> Self {
         return Self(width: lhs.width * rhs, height: lhs.height * rhs)
     }
 
     static func *= (lhs: inout Self, rhs: CGFloat) {
         lhs = lhs * rhs
-    } 
+    }
+
+    var cgPoint: CGPoint { CGPoint(x: width, y: height) }
 }
 
 public extension CGRect {
