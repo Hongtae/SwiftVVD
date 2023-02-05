@@ -18,9 +18,9 @@ public struct WindowGroup<Content>: Scene where Content: View {
 
     public var body: some Scene {
         WindowContext<Content>(content: self.content,
-                             contextType: self.contextType,
-                             identifier: self.identifier,
-                             title: self.title)
+                               contextType: self.contextType,
+                               identifier: self.identifier,
+                               title: self.title)
     }
 
     public init(@ViewBuilder content: ()-> Content) {

@@ -7,12 +7,13 @@
 
 import DKGame
 
-protocol WindowProxy {
+protocol WindowProxy: AnyObject {
     associatedtype Content: View
     var view: Content { get }
     var identifier: String { get }
     var contextType: Any.Type { get }
     var window: Window? { get }
+    var swapChain: SwapChain? { get }
     @MainActor func makeWindow() -> Window?
 }
 

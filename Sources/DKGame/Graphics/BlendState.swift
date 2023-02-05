@@ -2,7 +2,7 @@
 //  File: BlendState.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 public enum BlendFactor {
@@ -42,7 +42,7 @@ public struct ColorWriteMask: OptionSet, Hashable {
     public static let all      = ColorWriteMask(rawValue: 0xf)
 }
 
-public struct BlendState {
+public struct BlendState: Hashable {
     public var enabled : Bool
 
     public var sourceRGBBlendFactor : BlendFactor

@@ -9,46 +9,43 @@ import Foundation
 
 public struct GraphicsContext {
 
-    public struct BlendMode : RawRepresentable, Equatable, Sendable {
+    public struct BlendMode: RawRepresentable, Equatable, Sendable {
         public let rawValue: Int32
         public init(rawValue: Int32) { self.rawValue = rawValue }
 
-        public static var normal: GraphicsContext.BlendMode             { .init(rawValue: 0) }
-        public static var multiply: GraphicsContext.BlendMode           { .init(rawValue: 1) }
-        public static var screen: GraphicsContext.BlendMode             { .init(rawValue: 2) }
-        public static var overlay: GraphicsContext.BlendMode            { .init(rawValue: 3) }
-        public static var darken: GraphicsContext.BlendMode             { .init(rawValue: 4) }
-        public static var lighten: GraphicsContext.BlendMode            { .init(rawValue: 5) }
-        public static var colorDodge: GraphicsContext.BlendMode         { .init(rawValue: 6) }
-        public static var colorBurn: GraphicsContext.BlendMode          { .init(rawValue: 7) }
-        public static var softLight: GraphicsContext.BlendMode          { .init(rawValue: 8) }
-        public static var hardLight: GraphicsContext.BlendMode          { .init(rawValue: 9) }
-        public static var difference: GraphicsContext.BlendMode         { .init(rawValue: 10) }
-        public static var exclusion: GraphicsContext.BlendMode          { .init(rawValue: 11) }
-        public static var hue: GraphicsContext.BlendMode                { .init(rawValue: 12) }
-        public static var saturation: GraphicsContext.BlendMode         { .init(rawValue: 13) }
-        public static var color: GraphicsContext.BlendMode              { .init(rawValue: 14) }
-        public static var luminosity: GraphicsContext.BlendMode         { .init(rawValue: 15) }
-        public static var clear: GraphicsContext.BlendMode              { .init(rawValue: 16) }
-        public static var copy: GraphicsContext.BlendMode               { .init(rawValue: 17) }
-        public static var sourceIn: GraphicsContext.BlendMode           { .init(rawValue: 18) }
-        public static var sourceOut: GraphicsContext.BlendMode          { .init(rawValue: 19) }
-        public static var sourceAtop: GraphicsContext.BlendMode         { .init(rawValue: 20) }
-        public static var destinationOver: GraphicsContext.BlendMode    { .init(rawValue: 21) }
-        public static var destinationIn: GraphicsContext.BlendMode      { .init(rawValue: 22) }
-        public static var destinationOut: GraphicsContext.BlendMode     { .init(rawValue: 23) }
-        public static var destinationAtop: GraphicsContext.BlendMode    { .init(rawValue: 24) }
-        public static var xor: GraphicsContext.BlendMode                { .init(rawValue: 25) }
-        public static var plusDarker: GraphicsContext.BlendMode         { .init(rawValue: 26) }
-        public static var plusLighter: GraphicsContext.BlendMode        { .init(rawValue: 27) }
-
-        public typealias RawValue = Int32
+        public static var normal            = BlendMode(rawValue: 0)
+        public static var multiply          = BlendMode(rawValue: 1)
+        public static var screen            = BlendMode(rawValue: 2)
+        public static var overlay           = BlendMode(rawValue: 3)
+        public static var darken            = BlendMode(rawValue: 4)
+        public static var lighten           = BlendMode(rawValue: 5)
+        public static var colorDodge        = BlendMode(rawValue: 6)
+        public static var colorBurn         = BlendMode(rawValue: 7)
+        public static var softLight         = BlendMode(rawValue: 8)
+        public static var hardLight         = BlendMode(rawValue: 9)
+        public static var difference        = BlendMode(rawValue: 10)
+        public static var exclusion         = BlendMode(rawValue: 11)
+        public static var hue               = BlendMode(rawValue: 12)
+        public static var saturation        = BlendMode(rawValue: 13)
+        public static var color             = BlendMode(rawValue: 14)
+        public static var luminosity        = BlendMode(rawValue: 15)
+        public static var clear             = BlendMode(rawValue: 16)
+        public static var copy              = BlendMode(rawValue: 17)
+        public static var sourceIn          = BlendMode(rawValue: 18)
+        public static var sourceOut         = BlendMode(rawValue: 19)
+        public static var sourceAtop        = BlendMode(rawValue: 20)
+        public static var destinationOver   = BlendMode(rawValue: 21)
+        public static var destinationIn     = BlendMode(rawValue: 22)
+        public static var destinationOut    = BlendMode(rawValue: 23)
+        public static var destinationAtop   = BlendMode(rawValue: 24)
+        public static var xor               = BlendMode(rawValue: 25)
+        public static var plusDarker        = BlendMode(rawValue: 26)
+        public static var plusLighter       = BlendMode(rawValue: 27)
     }
 
     public var opacity: Double
-    public var blendMode: GraphicsContext.BlendMode
-    public var environment: EnvironmentValues { EnvironmentValues() }
-
+    public var blendMode: BlendMode
+    public var environment: EnvironmentValues
     public var transform: CGAffineTransform
 
     public mutating func scaleBy(x: CGFloat, y: CGFloat) {
@@ -67,33 +64,29 @@ public struct GraphicsContext {
         self.transform = self.transform.concatenating(matrix)
     }
 
-    public struct ClipOptions : OptionSet, Sendable {
+    public struct ClipOptions: OptionSet, Sendable {
         public let rawValue: UInt32
         public init(rawValue: UInt32) { self.rawValue = rawValue }
 
-        public static var inverse: GraphicsContext.ClipOptions { .init(rawValue: 1) }
-
-        public typealias ArrayLiteralElement = GraphicsContext.ClipOptions
-        public typealias Element = GraphicsContext.ClipOptions
-        public typealias RawValue = UInt32
+        public static var inverse = ClipOptions(rawValue: 1)
     }
 
     public var clipBoundingRect: CGRect { .zero }
 
     public mutating func clip(to path: Path,
                               style: FillStyle = FillStyle(),
-                              options: GraphicsContext.ClipOptions = ClipOptions()) {
+                              options: ClipOptions = ClipOptions()) {
         fatalError()
     }
 
     public mutating func clipToLayer(opacity: Double = 1,
-                                     options: GraphicsContext.ClipOptions = ClipOptions(),
+                                     options: ClipOptions = ClipOptions(),
                                      content: (inout GraphicsContext) throws -> Void) rethrows {
         fatalError()
     }
 
     public struct Filter {
-        public static func projectionTransform(_ matrix: ProjectionTransform) -> GraphicsContext.Filter {
+        public static func projectionTransform(_ matrix: ProjectionTransform) -> Filter {
             fatalError()
         }
 
@@ -101,129 +94,116 @@ public struct GraphicsContext {
                                   radius: CGFloat,
                                   x: CGFloat = 0,
                                   y: CGFloat = 0,
-                                  blendMode: GraphicsContext.BlendMode = .normal,
-                                  options: GraphicsContext.ShadowOptions = ShadowOptions()) -> GraphicsContext.Filter {
+                                  blendMode: BlendMode = .normal,
+                                  options: ShadowOptions = ShadowOptions()) -> Filter {
             fatalError()
         }
 
-        public static func colorMultiply(_ color: Color) -> GraphicsContext.Filter {
+        public static func colorMultiply(_ color: Color) -> Filter {
             fatalError()
         }
 
-        public static func colorMatrix(_ matrix: ColorMatrix) -> GraphicsContext.Filter {
+        public static func colorMatrix(_ matrix: ColorMatrix) -> Filter {
             fatalError()
         }
 
-        public static func hueRotation(_ angle: Angle) -> GraphicsContext.Filter {
+        public static func hueRotation(_ angle: Angle) -> Filter {
             fatalError()
         }
 
-        public static func saturation(_ amount: Double) -> GraphicsContext.Filter {
+        public static func saturation(_ amount: Double) -> Filter {
             fatalError()
         }
 
-        public static func brightness(_ amount: Double) -> GraphicsContext.Filter {
+        public static func brightness(_ amount: Double) -> Filter {
             fatalError()
         }
 
-        public static func contrast(_ amount: Double) -> GraphicsContext.Filter {
+        public static func contrast(_ amount: Double) -> Filter {
             fatalError()
         }
 
-        public static func colorInvert(_ amount: Double = 1) -> GraphicsContext.Filter {
+        public static func colorInvert(_ amount: Double = 1) -> Filter {
             fatalError()
         }
 
-        public static func grayscale(_ amount: Double) -> GraphicsContext.Filter {
+        public static func grayscale(_ amount: Double) -> Filter {
             fatalError()
         }
 
-        public static var luminanceToAlpha: GraphicsContext.Filter { .init() }
+        public static var luminanceToAlpha: Filter { .init() }
 
         public static func blur(radius: CGFloat,
-                                options: GraphicsContext.BlurOptions = BlurOptions()) -> GraphicsContext.Filter {
+                                options: BlurOptions = BlurOptions()) -> Filter {
             fatalError()
         }
 
         public static func alphaThreshold(min: Double,
                                           max: Double = 1,
-                                          color: Color = Color.black) -> GraphicsContext.Filter {
+                                          color: Color = Color.black) -> Filter {
             fatalError()
         }
     }
 
-    public struct ShadowOptions : OptionSet, Sendable {
+    public struct ShadowOptions: OptionSet, Sendable {
         public let rawValue: UInt32
         public init(rawValue: UInt32) { self.rawValue = rawValue }
 
-        public static var shadowAbove: GraphicsContext.ShadowOptions    { .init(rawValue: 1) }
-        public static var shadowOnly: GraphicsContext.ShadowOptions     { .init(rawValue: 2) }
-        public static var invertsAlpha: GraphicsContext.ShadowOptions   { .init(rawValue: 4) }
-        public static var disablesGroup: GraphicsContext.ShadowOptions  { .init(rawValue: 8) }
-
-        public typealias ArrayLiteralElement = GraphicsContext.ShadowOptions
-        public typealias Element = GraphicsContext.ShadowOptions
-        public typealias RawValue = UInt32
+        public static var shadowAbove   = ShadowOptions(rawValue: 1)
+        public static var shadowOnly    = ShadowOptions(rawValue: 2)
+        public static var invertsAlpha  = ShadowOptions(rawValue: 4)
+        public static var disablesGroup = ShadowOptions(rawValue: 8)
     }
 
-    public struct BlurOptions : OptionSet, Sendable {
+    public struct BlurOptions: OptionSet, Sendable {
         public let rawValue: UInt32
         public init(rawValue: UInt32) { self.rawValue = rawValue }
 
-        public static var opaque: GraphicsContext.BlurOptions           { .init(rawValue: 1) }
-        public static var dithersResult: GraphicsContext.BlurOptions    { .init(rawValue: 2) }
-
-        public typealias ArrayLiteralElement = GraphicsContext.BlurOptions
-        public typealias Element = GraphicsContext.BlurOptions
-        public typealias RawValue = UInt32
+        public static var opaque        = BlurOptions(rawValue: 1)
+        public static var dithersResult = BlurOptions(rawValue: 2)
     }
 
-    public struct FilterOptions : OptionSet, Sendable {
+    public struct FilterOptions: OptionSet, Sendable {
         public let rawValue: UInt32
         public init(rawValue: UInt32) { self.rawValue = rawValue }
 
-        public static var linearColor: GraphicsContext.FilterOptions { .init(rawValue: 1) }
-
-        public typealias ArrayLiteralElement = GraphicsContext.FilterOptions
-        public typealias Element = GraphicsContext.FilterOptions
-        public typealias RawValue = UInt32
+        public static var linearColor = FilterOptions(rawValue: 1)
     }
 
-    public mutating func addFilter(_ filter: GraphicsContext.Filter,
-                                   options: GraphicsContext.FilterOptions = FilterOptions()) {
+    public mutating func addFilter(_ filter: Filter,
+                                   options: FilterOptions = FilterOptions()) {
         fatalError()
     }
 
     public struct Shading {
-        public static var backdrop: GraphicsContext.Shading     { fatalError() }
-        public static var foreground: GraphicsContext.Shading   { fatalError() }
+        public static var backdrop: Shading     { fatalError() }
+        public static var foreground: Shading   { fatalError() }
 
-        public static func palette(_ array: [GraphicsContext.Shading]) -> GraphicsContext.Shading {
+        public static func palette(_ array: [Shading]) -> Shading {
             fatalError()
         }
-        public static func color(_ color: Color) -> GraphicsContext.Shading {
+        public static func color(_ color: Color) -> Shading {
             return .init()
-            //fatalError()
         }
-        public static func color(_ colorSpace: Color.RGBColorSpace = .sRGB, red: Double, green: Double, blue: Double, opacity: Double = 1) -> GraphicsContext.Shading {
+        public static func color(_ colorSpace: Color.RGBColorSpace = .sRGB, red: Double, green: Double, blue: Double, opacity: Double = 1) -> Shading {
             return color(Color(colorSpace, red: red, green: green, blue: blue, opacity: opacity))
         }
-        public static func color(_ colorSpace: Color.RGBColorSpace = .sRGB, white: Double, opacity: Double = 1) -> GraphicsContext.Shading {
+        public static func color(_ colorSpace: Color.RGBColorSpace = .sRGB, white: Double, opacity: Double = 1) -> Shading {
             return color(Color(colorSpace, white: white, opacity: opacity))
         }
-        public static func style<S>(_ style: S) -> GraphicsContext.Shading where S : ShapeStyle {
+        public static func style<S>(_ style: S) -> Shading where S: ShapeStyle {
             fatalError()
         }
-        public static func linearGradient(_ gradient: Gradient, startPoint: CGPoint, endPoint: CGPoint, options: GraphicsContext.GradientOptions = GradientOptions()) -> GraphicsContext.Shading {
+        public static func linearGradient(_ gradient: Gradient, startPoint: CGPoint, endPoint: CGPoint, options: GradientOptions = GradientOptions()) -> Shading {
             fatalError()
         }
-        public static func radialGradient(_ gradient: Gradient, center: CGPoint, startRadius: CGFloat, endRadius: CGFloat, options: GraphicsContext.GradientOptions = GradientOptions()) -> GraphicsContext.Shading {
+        public static func radialGradient(_ gradient: Gradient, center: CGPoint, startRadius: CGFloat, endRadius: CGFloat, options: GradientOptions = GradientOptions()) -> Shading {
             fatalError()
         }
-        public static func conicGradient(_ gradient: Gradient, center: CGPoint, angle: Angle = Angle(), options: GraphicsContext.GradientOptions = GradientOptions()) -> GraphicsContext.Shading {
+        public static func conicGradient(_ gradient: Gradient, center: CGPoint, angle: Angle = Angle(), options: GradientOptions = GradientOptions()) -> Shading {
             fatalError()
         }
-        public static func tiledImage(_ image: Image, origin: CGPoint = .zero, sourceRect: CGRect = CGRect(x: 0, y: 0, width: 1, height: 1), scale: CGFloat = 1) -> GraphicsContext.Shading {
+        public static func tiledImage(_ image: Image, origin: CGPoint = .zero, sourceRect: CGRect = CGRect(x: 0, y: 0, width: 1, height: 1), scale: CGFloat = 1) -> Shading {
             fatalError()
         }
     }
@@ -232,45 +212,41 @@ public struct GraphicsContext {
         public let rawValue: UInt32
         public init(rawValue: UInt32) { self.rawValue = rawValue }
 
-        public static var `repeat`: GraphicsContext.GradientOptions     { .init(rawValue: 1) }
-        public static var mirror: GraphicsContext.GradientOptions       { .init(rawValue: 2) }
-        public static var linearColor: GraphicsContext.GradientOptions  { .init(rawValue: 4) }
-
-        public typealias ArrayLiteralElement = GraphicsContext.GradientOptions
-        public typealias Element = GraphicsContext.GradientOptions
-        public typealias RawValue = UInt32
+        public static var `repeat`      = GradientOptions(rawValue: 1)
+        public static var mirror        = GradientOptions(rawValue: 2)
+        public static var linearColor   = GradientOptions(rawValue: 4)
     }
 
-    public func resolve(_ shading: GraphicsContext.Shading) -> GraphicsContext.Shading {
+    public func resolve(_ shading: Shading) -> Shading {
         fatalError()
     }
     public func drawLayer(content: (inout GraphicsContext) throws -> Void) rethrows {
         var context = self
         try content(&context)
     }
-    public func fill(_ path: Path, with shading: GraphicsContext.Shading, style: FillStyle = FillStyle()) {
+    public func fill(_ path: Path, with shading: Shading, style: FillStyle = FillStyle()) {
 
     }
-    public func stroke(_ path: Path, with shading: GraphicsContext.Shading, style: StrokeStyle) {
+    public func stroke(_ path: Path, with shading: Shading, style: StrokeStyle) {
 
     }
-    public func stroke(_ path: Path, with shading: GraphicsContext.Shading, lineWidth: CGFloat = 1) {
+    public func stroke(_ path: Path, with shading: Shading, lineWidth: CGFloat = 1) {
         stroke(path, with: shading, style: StrokeStyle(lineWidth: lineWidth))
     }
 
     public struct ResolvedImage {
-        public var size: CGSize { fatalError() }
+        public var size: CGSize { .zero }
         public let baseline: CGFloat
-        public var shading: GraphicsContext.Shading?
+        public var shading: Shading?
     }
 
-    public func resolve(_ image: Image) -> GraphicsContext.ResolvedImage {
+    public func resolve(_ image: Image) -> ResolvedImage {
         fatalError()
     }
-    public func draw(_ image: GraphicsContext.ResolvedImage, in rect: CGRect, style: FillStyle = FillStyle()) {
+    public func draw(_ image: ResolvedImage, in rect: CGRect, style: FillStyle = FillStyle()) {
         fatalError()
     }
-    public func draw(_ image: GraphicsContext.ResolvedImage, at point: CGPoint, anchor: UnitPoint = .center) {
+    public func draw(_ image: ResolvedImage, at point: CGPoint, anchor: UnitPoint = .center) {
         fatalError()
     }
     public func draw(_ image: Image, in rect: CGRect, style: FillStyle = FillStyle()) {
@@ -281,19 +257,19 @@ public struct GraphicsContext {
     }
 
     public struct ResolvedText {
-        public var shading: GraphicsContext.Shading
+        public var shading: Shading
         public func measure(in size: CGSize) -> CGSize { .zero }
         public func firstBaseline(in size: CGSize) -> CGFloat { .zero }
         public func lastBaseline(in size: CGSize) -> CGFloat { .zero }
     }
 
-    public func resolve(_ text: Text) -> GraphicsContext.ResolvedText {
+    public func resolve(_ text: Text) -> ResolvedText {
         fatalError()
     }
-    public func draw(_ text: GraphicsContext.ResolvedText, in rect: CGRect) {
+    public func draw(_ text: ResolvedText, in rect: CGRect) {
         fatalError()
     }
-    public func draw(_ text: GraphicsContext.ResolvedText, at point: CGPoint, anchor: UnitPoint = .center) {
+    public func draw(_ text: ResolvedText, at point: CGPoint, anchor: UnitPoint = .center) {
         fatalError()
     }
     public func draw(_ text: Text, in rect: CGRect) {
@@ -307,14 +283,14 @@ public struct GraphicsContext {
         public var size: CGSize { .zero }
     }
 
-    public func resolveSymbol<ID>(id: ID) -> GraphicsContext.ResolvedSymbol? where ID : Hashable {
+    public func resolveSymbol<ID>(id: ID) -> ResolvedSymbol? where ID: Hashable {
         fatalError()
     }
 
-    public func draw(_ symbol: GraphicsContext.ResolvedSymbol, in rect: CGRect) {
+    public func draw(_ symbol: ResolvedSymbol, in rect: CGRect) {
         fatalError()
     }
-    public func draw(_ symbol: GraphicsContext.ResolvedSymbol, at point: CGPoint, anchor: UnitPoint = .center) {
+    public func draw(_ symbol: ResolvedSymbol, at point: CGPoint, anchor: UnitPoint = .center) {
         fatalError()
     }
 }

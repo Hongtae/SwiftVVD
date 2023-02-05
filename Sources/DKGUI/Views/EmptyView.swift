@@ -9,7 +9,12 @@ public struct EmptyView: View {
 }
 
 extension EmptyView: _PrimitiveView {
-    func makeViewProxy(modifiers: [any ViewModifier], environmentValues: EnvironmentValues) -> any ViewProxy {
-        ViewContext(view: self, modifiers: modifiers, environmentValues: environmentValues)
+    func makeViewProxy(modifiers: [any ViewModifier],
+                       environmentValues: EnvironmentValues,
+                       sharedContext: SharedContext) -> any ViewProxy {
+        ViewContext(view: self,
+                    modifiers: modifiers,
+                    environmentValues: environmentValues,
+                    sharedContext: sharedContext)
     }
 }

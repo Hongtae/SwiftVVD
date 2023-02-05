@@ -54,25 +54,38 @@ struct CanvasContext<Symbols>: ViewProxy where Symbols: View {
 
     var modifiers: [any ViewModifier]
     var environmentValues: EnvironmentValues
-
+    var sharedContext: SharedContext
     var size: CGSize
 
-    init(view: Content, modifiers: [any ViewModifier], environmentValues: EnvironmentValues) {
+    init(view: Content,
+         modifiers: [any ViewModifier],
+         environmentValues: EnvironmentValues,
+         sharedContext: SharedContext) {
         self.modifiers = modifiers
         self.environmentValues = environmentValues._resolve(modifiers: modifiers)
         self.view = self.environmentValues._resolve(view)
+        self.sharedContext = sharedContext
         self.size = .zero
     }
 
     func draw() {
-        var gc = GraphicsContext(opacity: 1.0, blendMode: .normal, transform: .identity)
-        self.view.renderer(&gc, self.size)
-        //print("Canvas.draw")
+        if let queue = self.sharedContext.commandQueue {
+            var gc = GraphicsContext(opacity: 1.0,
+                                     blendMode: .normal,
+                                     environment: self.environmentValues,
+                                     transform: .identity)
+            self.view.renderer(&gc, self.size)
+        }
     }
 }
 
 extension Canvas: _PrimitiveView {
-    func makeViewProxy(modifiers: [any ViewModifier], environmentValues: EnvironmentValues) -> any ViewProxy {
-        CanvasContext(view: self, modifiers: modifiers, environmentValues: environmentValues)
+    func makeViewProxy(modifiers: [any ViewModifier],
+                       environmentValues: EnvironmentValues,
+                       sharedContext: SharedContext) -> any ViewProxy {
+        CanvasContext(view: self,
+                      modifiers: modifiers,
+                      environmentValues: environmentValues,
+                      sharedContext: sharedContext)
     }
 }

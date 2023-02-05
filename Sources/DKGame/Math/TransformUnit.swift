@@ -47,8 +47,10 @@ public struct TransformUnit: VectorTransformer, Interpolatable {
         self.translation = translation
     }
 
-    public init() {
-        self.init(scale: Vector3(1, 1, 1), rotation: .identity, translation: .zero)
+    public init(_ t: Self = .identity) {
+        self.scale = t.scale
+        self.rotation = t.rotation
+        self.translation = t.translation
     }
 
     public static func interpolate(_ t1: Self, _ t2: Self, t: any BinaryFloatingPoint) -> Self {

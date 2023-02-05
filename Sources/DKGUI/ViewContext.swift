@@ -8,11 +8,24 @@
 import DKGame
 import Foundation
 
+class SharedContext {
+    var appContext: AppContext
+    var window: Window?
+    var commandQueue: CommandQueue?
+
+    var data: [String: Any] = [:]
+
+    init(appContext: AppContext) {
+        self.appContext = appContext
+    }
+}
+
 protocol ViewProxy {
     associatedtype Content: View
     var view: Content { get }
     var modifiers: [any ViewModifier] { get }
     var environmentValues: EnvironmentValues { get }
+    var sharedContext: SharedContext { get }
 
     func update(tick: UInt64, delta: Double, date: Date)
     func draw()
@@ -33,12 +46,17 @@ struct ViewContext<Content>: ViewProxy where Content: View {
     var subview: any ViewProxy
     var modifiers: [any ViewModifier]
     var environmentValues: EnvironmentValues
+    var sharedContext: SharedContext
 
-    init(view: Content, modifiers: [any ViewModifier], environmentValues: EnvironmentValues) {
+    init(view: Content, modifiers: [any ViewModifier], environmentValues: EnvironmentValues, sharedContext: SharedContext) {
         self.environmentValues = environmentValues._resolve(modifiers: modifiers)
         self.view = self.environmentValues._resolve(view)
         self.modifiers = modifiers
-        self.subview = _makeViewProxy(self.view.body, modifiers: self.modifiers, environmentValues: self.environmentValues)
+        self.sharedContext = sharedContext
+        self.subview = _makeViewProxy(self.view.body,
+                                      modifiers: self.modifiers,
+                                      environmentValues: self.environmentValues,
+                                      sharedContext: sharedContext)
     }
     func draw() {
         subview.draw()
@@ -47,9 +65,15 @@ struct ViewContext<Content>: ViewProxy where Content: View {
 
 func _makeViewProxy<Content>(_ view: Content,
                              modifiers: [any ViewModifier],
-                             environmentValues: EnvironmentValues) -> any ViewProxy where Content: View {
+                             environmentValues: EnvironmentValues,
+                             sharedContext: SharedContext) -> any ViewProxy where Content: View {
     if let prim = view as? (any _PrimitiveView) {
-        return prim.makeViewProxy(modifiers: modifiers, environmentValues: environmentValues)
+        return prim.makeViewProxy(modifiers: modifiers,
+                                  environmentValues: environmentValues,
+                                  sharedContext: sharedContext)
     }
-    return ViewContext(view: view, modifiers: modifiers, environmentValues: environmentValues)
+    return ViewContext(view: view,
+                       modifiers: modifiers,
+                       environmentValues: environmentValues,
+                       sharedContext: sharedContext)
 }

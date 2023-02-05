@@ -15,7 +15,7 @@ public protocol App {
     init()
 }
 
-public protocol AppContext {
+protocol AppContext {
     var graphicsDeviceContext: GraphicsDeviceContext? { get }
     var audioDeviceContext: AudioDeviceContext? { get }
 
@@ -28,7 +28,7 @@ struct EmptyScene: Scene, _PrimitiveScene {
     }
 }
 
-public var appContext: AppContext? = nil
+var appContext: AppContext? = nil
 
 class AppMain<A>: ApplicationDelegate, AppContext where A: App {
 

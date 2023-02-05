@@ -19,6 +19,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
     var view: Content
     var viewProxy: any ViewProxy
     var environmentValues: EnvironmentValues
+    var sharedContext: SharedContext
 
     struct State {
         var visible = false
@@ -91,8 +92,12 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
         self.identifier = identifier
         self.title = title
         self.view = content
-        self.environmentValues = .init()
-        self.viewProxy = _makeViewProxy(self.view, modifiers: [], environmentValues: self.environmentValues)
+        self.environmentValues = EnvironmentValues()
+        self.sharedContext = SharedContext(appContext: appContext!)
+        self.viewProxy = _makeViewProxy(self.view,
+                                        modifiers: [],
+                                        environmentValues: self.environmentValues,
+                                        sharedContext: self.sharedContext)
     }
 
     deinit {
@@ -131,6 +136,8 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                         }
                         self.window = window
                         self.swapChain = swapChain
+                        self.sharedContext.window = self.window
+                        self.sharedContext.commandQueue = swapChain.commandQueue
                         self.task = self.runWindowUpdateTask()
                     } else {
                         Log.error("Failed to create swapChain.")
@@ -152,6 +159,9 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
         Log.debug("WindowContext.onWindowEvent: \(event)")
         switch event.type {
         case .closed:
+            self.sharedContext.window = nil
+            self.sharedContext.commandQueue = nil
+
             self.task?.cancel()
             self.window?.removeEventObserver(self)
 
