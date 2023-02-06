@@ -84,12 +84,23 @@ public struct Vector2: Vector {
     }
 
     public static func * (lhs: Self, rhs: any BinaryFloatingPoint) -> Self {
-        let r = Scalar(rhs)
-        return Self(lhs.x * r, lhs.y * r)
+        return Self(lhs.x * Scalar(rhs), lhs.y * Scalar(rhs))
+    }
+
+    public static func * (lhs: any BinaryFloatingPoint, rhs: Self) -> Self {
+        return Self(Scalar(lhs) * rhs.x, Scalar(lhs) * rhs.y)
     }
 
     public static func * (lhs: Self, rhs: Self) -> Self {
         return Self(lhs.x * rhs.x, lhs.y * rhs.y)
+    }
+
+    public static func / (lhs: Self, rhs: Self) -> Self {
+        return Self(lhs.x / rhs.x, lhs.y / rhs.y)
+    }
+
+    public static func / (lhs: any BinaryFloatingPoint, rhs: Self) -> Self {
+        return Self(Scalar(lhs) / rhs.x, Scalar(lhs) / rhs.y)
     }
 
     public static func minimum(_ lhs: Self, _ rhs: Self) -> Self {

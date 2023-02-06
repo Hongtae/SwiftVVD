@@ -244,6 +244,12 @@ public struct Matrix3: Matrix {
     public static func * (lhs: Self, rhs: any BinaryFloatingPoint) -> Self {
         return Matrix3(row1: lhs.row1 * rhs, row2: lhs.row2 * rhs, row3: lhs.row3 * rhs)
     }
+
+    public static func / (lhs: any BinaryFloatingPoint, rhs: Self) -> Self {
+        return Matrix3(row1: Scalar(lhs) / rhs.row1,
+                       row2: Scalar(lhs) / rhs.row2,
+                       row3: Scalar(lhs) / rhs.row3)
+    }
 }
 
 public extension Matrix3 {

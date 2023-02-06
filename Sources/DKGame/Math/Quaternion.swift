@@ -187,8 +187,11 @@ public struct Quaternion: Vector {
     }
 
     public static func * (lhs: Self, rhs: any BinaryFloatingPoint) -> Self {
-        let r = Scalar(rhs)
-        return Self(lhs.x * r, lhs.y * r, lhs.z * r, lhs.w * r)
+        return Self(lhs.x * Scalar(rhs), lhs.y * Scalar(rhs), lhs.z * Scalar(rhs), lhs.w * Scalar(rhs))
+    }
+
+    public static func * (lhs: any BinaryFloatingPoint, rhs: Self) -> Self {
+        return Self(Scalar(lhs) * rhs.x, Scalar(lhs) * rhs.y, Scalar(lhs) * rhs.z, Scalar(lhs) * rhs.w)
     }
 
     public static func * (lhs: Quaternion, rhs: Quaternion) -> Quaternion {
@@ -197,6 +200,14 @@ public struct Quaternion: Vector {
         let z = rhs.w * lhs.z + rhs.z * lhs.w + rhs.x * lhs.y - rhs.y * lhs.x
         let w = rhs.w * lhs.w - rhs.x * lhs.x - rhs.y * lhs.y - rhs.z * lhs.z
         return Quaternion(x, y, z, w)
+    }
+
+    public static func / (lhs: Self, rhs: Self) -> Self {
+        return Self(lhs.x / rhs.x, lhs.y / rhs.y, lhs.z / rhs.z, lhs.w / rhs.w)
+    }
+
+    public static func / (lhs: any BinaryFloatingPoint, rhs: Self) -> Self {
+        return Self(Scalar(lhs) / rhs.x, Scalar(lhs) / rhs.y, Scalar(lhs) / rhs.z, Scalar(lhs) / rhs.w)
     }
 
     public static func slerp<T>(_ q1: Quaternion, _ q2: Quaternion, t: T) -> Quaternion where T: BinaryFloatingPoint {

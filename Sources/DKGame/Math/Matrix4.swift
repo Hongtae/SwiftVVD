@@ -340,6 +340,13 @@ public struct Matrix4: Matrix {
                        row3: lhs.row3 * rhs,
                        row4: lhs.row4 * rhs)
     }
+
+    public static func / (lhs: any BinaryFloatingPoint, rhs: Self) -> Self {
+        return Matrix4(row1: Scalar(lhs) / rhs.row1,
+                       row2: Scalar(lhs) / rhs.row2,
+                       row3: Scalar(lhs) / rhs.row3,
+                       row4: Scalar(lhs) / rhs.row4)
+    }
 }
 
 public extension Matrix4 {

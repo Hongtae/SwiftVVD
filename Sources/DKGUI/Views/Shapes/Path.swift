@@ -23,31 +23,379 @@ public struct FillStyle: Equatable, Sendable {
     }
 }
 
-public struct Path: Equatable, LosslessStringConvertible {
+public struct Path: Equatable {
     public init() {
     }
 
-    public init(_ rect: CGRect) {
-        self.addRect(rect)
+    public var isEmpty: Bool { self.elements.isEmpty }
+
+    public func contains(_ p: CGPoint, eoFill: Bool = false) -> Bool {
+        fatalError()
     }
 
-    public init(roundedRect rect: CGRect, cornerSize: CGSize, style: RoundedCornerStyle = .circular) {
-        self.addRoundedRect(in: rect, cornerSize: cornerSize, style: style)
+    public enum Element: Equatable, Sendable {
+        case move(to: CGPoint)
+        case line(to: CGPoint)
+        case quadCurve(to: CGPoint, control: CGPoint)
+        case curve(to: CGPoint, control1: CGPoint, control2: CGPoint)
+        case closeSubpath
+    }
+    private var elements: [Element] = []
+
+    // smallest rectangle completely enclosing all points in the path,
+    // including control points for Bézier and quadratic curves.
+    private var boundingBox: CGRect = .null
+
+    // smallest rectangle completely enclosing all points in the path
+    // but not including control points for Bézier and quadratic curves.
+    private var boundingBoxOfPath: CGRect = .null
+
+    public var boundingRect: CGRect { boundingBox }
+
+    public private(set) var initialPoint: CGPoint? = nil
+    public private(set) var currentPoint: CGPoint? = nil
+
+    public func forEach(_ body: (Path.Element) -> Void) {
+        self.elements.forEach(body)
     }
 
-    public init(roundedRect rect: CGRect, cornerRadius: CGFloat, style: RoundedCornerStyle = .circular) {
-        self.addRoundedRect(in: rect, cornerSize: CGSize(width: cornerRadius, height: cornerRadius), style: style)
+    private var _strokeStyle: StrokeStyle? = nil
+
+    public func strokedPath(_ style: StrokeStyle) -> Path {
+        var path = self
+        path._strokeStyle = style
+        return path
     }
 
-    public init(ellipseIn rect: CGRect) {
-        self.addEllipse(in: rect)
+    public func trimmedPath(from: CGFloat, to: CGFloat) -> Path {
+        let from = clamp(from, min: 0, max: 1)
+        let to = clamp(to, min: 0, max: 1)
+
+        let quadraticBezierSubdivision = 2
+        let cubicBezierSubdivision = 3
+
+        var path = Path()
+        if to > from {
+            // calculate total length
+            var length: Double = 0
+
+            var startPoint: CGPoint? = nil
+            var currentPoint: CGPoint? = nil
+            self.elements.forEach {
+                switch $0 {
+                case .move(let to):
+                    startPoint = to
+                    currentPoint = to
+                case .line(let p1):
+                    if let p0 = currentPoint {
+                        length += (p1 - p0).magnitude
+                        currentPoint = p1
+                    }
+                case .quadCurve(let p2, let p1):
+                    if let p0 = currentPoint {
+                        let curve = QuadraticBezier(p0: p0, p1: p1, p2: p2)
+                        length += curve.approximateLength(subdivide: quadraticBezierSubdivision)
+                        currentPoint = p2
+                    }
+                case .curve(let p3, let p1, let p2):
+                    if let p0 = currentPoint {
+                        let curve = CubicBezier(p0: p0, p1: p1, p2: p2, p3: p3)
+                        length += curve.approximateLength(subdivide: cubicBezierSubdivision)
+                        currentPoint = p3
+                    }
+                case .closeSubpath:
+                    currentPoint = startPoint
+                }
+            }
+
+            let start = length * from
+            let end = length * to
+
+            startPoint = nil
+            currentPoint = nil
+            var progress: Double = 0
+
+            let pathElementFraction = {
+                (d: Double, progress: Double) -> (t0: Double, t1: Double) in
+
+                var t0: Double = 0
+                var t1: Double = 1
+                if start <= progress { t0 = 0 }
+                else { t0 = (start - progress) / d }
+                if end >= progress + d { t1 = 1 }
+                else { t1 = (progress + d - end) / d }
+                return (t0, t1)
+            }
+
+            elementLoop: for c in self.elements {
+                switch c {
+                case .move(let to):
+                    startPoint = to
+                    currentPoint = to
+                    if progress >= start {
+                        path.move(to: to)
+                    }
+                case .line(let p1):
+                    if let p0 = currentPoint {
+                        currentPoint = p1
+                        let d = (p1 - p0).magnitude
+                        if start >= progress + d {
+                            progress += d
+                            continue
+                        }
+
+                        let (t0, t1) = pathElementFraction(d, progress)
+                        if t0 > 0 {
+                            path.move(to: lerp(p0, p1, t0))
+                        }
+                        if t1 < 1 {
+                            path.addLine(to: lerp(p0, p1, t1))
+                            break elementLoop
+                        } else {
+                            path.addLine(to: p1)
+                        }
+                        progress += (t1 - t0) * d
+                    }
+                case .quadCurve(let p2, let p1):
+                    if let p0 = currentPoint {
+                        currentPoint = p2
+                        var curve = QuadraticBezier(p0: p0, p1: p1, p2: p2)
+                        var d = curve.approximateLength(subdivide: quadraticBezierSubdivision)
+                        if start >= progress + d {
+                            progress += d
+                            continue
+                        }
+
+                        var (t0, t1) = pathElementFraction(d, progress)
+                        if t0 > 0 {
+                            path.move(to: curve.interpolate(t0))
+                            curve = curve.split(t0).1
+                            // rescale curve length
+                            let tmp = (t1 - t0) * d
+                            d = d - d * t0
+                            t1 = tmp / d
+                            t0 = 0
+                        }
+                        if t1 < 1 {
+                            curve = curve.split(t1).0
+                            path.addQuadCurve(to: curve.p2, control: curve.p1)
+                            break elementLoop
+                        } else {
+                            path.addQuadCurve(to: curve.p2, control: curve.p1)
+                        }
+                        progress += (t1 - t0) * d
+                    }
+                case .curve(let p3, let p1, let p2):
+                    if let p0 = currentPoint {
+                        currentPoint = p3
+                        var curve = CubicBezier(p0: p0, p1: p1, p2: p2, p3: p3)
+                        var d = curve.approximateLength(subdivide: cubicBezierSubdivision)
+                        if start >= progress + d {
+                            progress += d
+                            continue
+                        }
+
+                        var (t0, t1) = pathElementFraction(d, progress)
+                        if t0 > 0 {
+                            path.move(to: curve.interpolate(t0))
+                            curve = curve.split(t0).1
+                            // rescale curve length
+                            let tmp = (t1 - t0) * d
+                            d = d - d * t0
+                            t1 = tmp / d
+                            t0 = 0
+                        }
+                        if t1 < 1 {
+                            curve = curve.split(t1).0
+                            path.addCurve(to: curve.p3, control1: curve.p1, control2: curve.p2)
+                            break elementLoop
+                        } else {
+                            path.addCurve(to: curve.p3, control1: curve.p1, control2: curve.p2)
+                        }
+                        progress += (t1 - t0) * d
+                    }
+                case .closeSubpath:
+                    currentPoint = startPoint
+                    if progress > start {
+                        path.closeSubpath()
+                    }
+                }
+            }
+        }
+        path._strokeStyle = self._strokeStyle
+        return path
+    }
+}
+
+extension Path: Shape {
+    public func path(in frame: CGRect) -> Path {
+        let frame = frame.standardized
+        if frame.isNull == false && frame.width > 0 && frame.height > 0 {
+            let bbox = self.boundingBoxOfPath.standardized
+            if bbox.isNull == false && bbox.width > 0 && bbox.height > 0 {
+                let scaleX = frame.width / bbox.width
+                let scaleY = frame.height / bbox.height
+
+                var transform = CGAffineTransform(scaleX: scaleX, y: scaleY)
+                transform = transform.translatedBy(x: frame.origin.x, y: frame.origin.y)
+
+                return self.applying(transform)
+            }
+        }
+        return Path()
     }
 
-    public init(_ callback: (inout Path) -> ()) {
-        callback(&self)
+    public typealias AnimatableData = EmptyAnimatableData
+
+    public var animatableData: EmptyAnimatableData {
+        get { EmptyAnimatableData() }
+        set { fatalError() }
     }
 
+//    public typealias Body
+}
+
+private let _r: Double = 0.552285 // cubic bezier control point ratio for circle
+
+extension Path {
+    public mutating func move(to p: CGPoint) {
+        if case .move(_) = self.elements.last {
+            self.elements.removeLast()
+        }
+        self.elements.append(.move(to: p))
+        self.initialPoint = p
+        self.currentPoint = p
+    }
+
+    public mutating func addLine(to p1: CGPoint) {
+        self.elements.append(.line(to: p1))
+
+        if let p0 = self.initialPoint {
+            self.currentPoint = p1
+            self._extendBounds(by: p0)
+            self._extendBounds(by: p1)
+            self._extendPathBounds(by: p0)
+            self._extendPathBounds(by: p1)
+        }
+    }
+
+    public mutating func addQuadCurve(to p2: CGPoint, control p1: CGPoint) {
+        self.elements.append(.quadCurve(to: p2, control: p1))
+
+        if let p0 = self.initialPoint {
+            self.currentPoint = p2
+            self._extendBounds(by: p0)
+            self._extendBounds(by: p1)
+            self._extendBounds(by: p2)
+            self._extendPathBounds(by: QuadraticBezier(p0: p0, p1: p1, p2: p2).boundingBox)
+        }
+    }
+
+    public mutating func addCurve(to p3: CGPoint, control1 p1: CGPoint, control2 p2: CGPoint) {
+        self.elements.append(.curve(to: p3, control1: p1, control2: p2))
+
+        if let p0 = self.initialPoint {
+            self.currentPoint = p3
+            self._extendBounds(by: p0)
+            self._extendBounds(by: p1)
+            self._extendBounds(by: p2)
+            self._extendBounds(by: p3)
+            self._extendPathBounds(by: CubicBezier(p0: p0, p1: p1, p2: p2, p3: p3).boundingBox)
+        }
+    }
+
+    public mutating func closeSubpath() {
+        if let last = self.elements.last, last != .closeSubpath {
+            self.elements.append(.closeSubpath)
+        }
+        self.currentPoint = self.initialPoint
+    }
+
+    private mutating func _extendBounds(by pt: CGPoint) {
+        if self.boundingBox.isNull {
+            self.boundingBox = CGRect(x: pt.x, y: pt.y, width: 0, height: 0)
+        } else {
+            let minX = min(self.boundingBox.minX, pt.x)
+            let maxX = max(self.boundingBox.maxX, pt.x)
+            let minY = min(self.boundingBox.minY, pt.y)
+            let maxY = max(self.boundingBox.maxY, pt.y)
+            self.boundingBox = CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+        }
+    }
+
+    private mutating func _extendPathBounds(by pt: CGPoint) {
+        if self.boundingBox.isNull {
+            self.boundingBox = CGRect(x: pt.x, y: pt.y, width: 0, height: 0)
+        } else {
+            let minX = min(self.boundingBox.minX, pt.x)
+            let maxX = max(self.boundingBox.maxX, pt.x)
+            let minY = min(self.boundingBox.minY, pt.y)
+            let maxY = max(self.boundingBox.maxY, pt.y)
+            self.boundingBox = CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+        }
+    }
+
+    private mutating func _extendPathBounds(by rect: CGRect) {
+        self.boundingBoxOfPath = self.boundingBoxOfPath.union(rect)
+    }
+}
+
+extension Path: LosslessStringConvertible {
     public init?(_ string: String) {
+        let commands = string.components(separatedBy: .whitespacesAndNewlines)
+        var floats: [Double] = []
+        for str in commands {
+            if str == "m" {
+                if floats.count == 2 {
+                    self.move(to: CGPoint(x: floats[0], y: floats[1]))
+                    floats.removeAll(keepingCapacity: true)
+                } else {
+                    Log.err("Insufficient arguments to command.")
+                    return nil
+                }
+            } else if str == "l" {
+                if floats.count == 2 {
+                    self.addLine(to: CGPoint(x: floats[0], y: floats[1]))
+                    floats.removeAll(keepingCapacity: true)
+                } else {
+                    Log.err("Insufficient arguments to command.")
+                    return nil
+                }
+            } else if str == "q" {
+                if floats.count == 4 {
+                    self.addQuadCurve(to: CGPoint(x: floats[0], y: floats[1]),
+                                      control: CGPoint(x: floats[2], y: floats[3]))
+                    floats.removeAll(keepingCapacity: true)
+                } else {
+                    Log.err("Insufficient arguments to command.")
+                    return nil
+                }
+            } else if str == "c" {
+                if floats.count == 6 {
+                    self.addCurve(to: CGPoint(x: floats[0], y: floats[1]),
+                                  control1: CGPoint(x: floats[2], y: floats[3]),
+                                  control2: CGPoint(x: floats[4], y: floats[5]))
+                    floats.removeAll(keepingCapacity: true)
+                } else {
+                    Log.err("Insufficient arguments to command.")
+                    return nil
+                }
+            } else if str == "h" {
+                if floats.count == 0 {
+                    self.closeSubpath()
+                } else {
+                    Log.err("There are unknown arguments to this command.")
+                    return nil
+                }
+            } else {
+                if let d = Double(str) {
+                    floats.append(d)
+                } else {
+                    Log.err("Unable to parse as numeric: \(str)")
+                    return nil
+                }
+            }
+        }
     }
 
     public var description: String {
@@ -68,90 +416,27 @@ public struct Path: Equatable, LosslessStringConvertible {
         }
         return desc.joined(separator: " ")
     }
-
-    public var isEmpty: Bool { self.elements.isEmpty }
-
-    public var boundingRect: CGRect { bounds }
-
-    public func contains(_ p: CGPoint, eoFill: Bool = false) -> Bool {
-        fatalError()
-    }
-
-    public enum Element: Equatable, Sendable {
-        case move(to: CGPoint)
-        case line(to: CGPoint)
-        case quadCurve(to: CGPoint, control: CGPoint)
-        case curve(to: CGPoint, control1: CGPoint, control2: CGPoint)
-        case closeSubpath
-    }
-    private var elements: [Element] = []
-    private var bounds: CGRect = .null
-
-    public func forEach(_ body: (Path.Element) -> Void) {
-        self.elements.forEach(body)
-    }
-
-    public func strokedPath(_ style: StrokeStyle) -> Path {
-        fatalError()
-    }
-
-    public func trimmedPath(from: CGFloat, to: CGFloat) -> Path {
-        fatalError()
-    }
 }
-
-extension Path: Shape {
-    public func path(in _: CGRect) -> Path {
-        fatalError()
-    }
-
-    public typealias AnimatableData = EmptyAnimatableData
-
-    public var animatableData: EmptyAnimatableData {
-        get { EmptyAnimatableData() }
-        set { fatalError() }
-    }
-
-//    public typealias Body
-}
-
-extension Path: _PrimitiveView {
-}
-
-private let _r: Double = 0.552285 // cubic bezier control point ratio for circle
 
 extension Path {
-    public mutating func move(to p: CGPoint) {
-        if case .move(_) = self.elements.last {
-            self.elements.removeLast()
-            self._updateBounds()
-        }
-        self.elements.append(.move(to: p))
-        self._extendBounds(by: p)
+    public init(_ rect: CGRect) {
+        self.addRect(rect)
     }
 
-    public mutating func addLine(to p: CGPoint) {
-        self.elements.append(.line(to: p))
-        self._extendBounds(by: p)
+    public init(roundedRect rect: CGRect, cornerSize: CGSize, style: RoundedCornerStyle = .circular) {
+        self.addRoundedRect(in: rect, cornerSize: cornerSize, style: style)
     }
 
-    public mutating func addQuadCurve(to p: CGPoint, control cp: CGPoint) {
-        self.elements.append(.quadCurve(to: p, control: cp))
-        self._extendBounds(by: p)
-        self._extendBounds(by: cp)
+    public init(roundedRect rect: CGRect, cornerRadius: CGFloat, style: RoundedCornerStyle = .circular) {
+        self.addRoundedRect(in: rect, cornerSize: CGSize(width: cornerRadius, height: cornerRadius), style: style)
     }
 
-    public mutating func addCurve(to p: CGPoint, control1 cp1: CGPoint, control2 cp2: CGPoint) {
-        self.elements.append(.curve(to: p, control1: cp1, control2: cp2))
-        self._extendBounds(by: p)
-        self._extendBounds(by: cp1)
-        self._extendBounds(by: cp2)
+    public init(ellipseIn rect: CGRect) {
+        self.addEllipse(in: rect)
     }
 
-    public mutating func closeSubpath() {
-        if let last = self.elements.last, last != .closeSubpath {
-            self.elements.append(.closeSubpath)
-        }
+    public init(_ callback: (inout Path) -> ()) {
+        callback(&self)
     }
 
     public mutating func addRect(_ rect: CGRect, transform: CGAffineTransform = .identity) {
@@ -414,31 +699,24 @@ extension Path {
     }
 
     public mutating func addPath(_ path: Path, transform: CGAffineTransform = .identity) {
-        let path = path.applying(transform)
-        self.elements.append(contentsOf: path.elements)
-        self._updateBounds()
-    }
-
-    public var currentPoint: CGPoint? {
-        var start: CGPoint? = nil
-        var current: CGPoint? = nil
-
-        self.elements.forEach {
+        self.elements.reserveCapacity(self.elements.count + path.elements.count)
+        path.elements.forEach {
             switch $0 {
             case .move(let to):
-                start = to
-                current = to
-            case .line(let to), .quadCurve(let to, _), .curve(let to, _, _):
-                if current != nil {
-                    current = to
-                } else {
-                    Log.error("no current point.")
-                }
+                self.move(to: to.applying(transform))
+            case .line(let to):
+                self.addLine(to: to.applying(transform))
+            case .quadCurve(let to, let cp):
+                self.addQuadCurve(to: to.applying(transform),
+                                  control: cp.applying(transform))
+            case .curve(let to, let cp1, let cp2):
+                self.addCurve(to: to.applying(transform),
+                              control1: cp1.applying(transform),
+                              control2: cp2.applying(transform))
             case .closeSubpath:
-                current = start
+                self.closeSubpath()
             }
         }
-        return current
     }
 
     public func applying(_ transform: CGAffineTransform) -> Path {
@@ -447,77 +725,15 @@ extension Path {
         }
 
         var path = Path()
-        path.elements.reserveCapacity(self.elements.count)
-        self.elements.forEach {
-            switch $0 {
-            case .move(let to):
-                path.elements.append(.move(to: to.applying(transform)))
-            case .line(let to):
-                path.elements.append(.line(to: to.applying(transform)))
-            case .quadCurve(let to, let c):
-                path.elements.append(.quadCurve(to: to.applying(transform),
-                                                control: c.applying(transform)))
-            case .curve(let to, let c1, let c2):
-                path.elements.append(.curve(to: to.applying(transform),
-                                            control1: c1.applying(transform),
-                                            control2: c2.applying(transform)))
-            case .closeSubpath:
-                path.elements.append(.closeSubpath)
-            }
-        }
-        path._updateBounds()
+        path.addPath(self, transform: transform)
+        path._strokeStyle = self._strokeStyle
         return path
     }
 
     public func offsetBy(dx: CGFloat, dy: CGFloat) -> Path {
         self.applying(CGAffineTransform(translationX: dx, y: dy))
     }
+}
 
-    private mutating func _extendBounds(by pt: CGPoint) {
-        if self.bounds.isNull {
-            self.bounds = CGRect(x: pt.x, y: pt.y, width: 0, height: 0)
-        } else {
-            let minX = min(self.bounds.minX, pt.x)
-            let maxX = max(self.bounds.maxX, pt.x)
-            let minY = min(self.bounds.minY, pt.y)
-            let maxY = max(self.bounds.maxY, pt.y)
-            self.bounds = CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
-        }
-    }
-
-    private mutating func _updateBounds() {
-        if self.elements.isEmpty {
-            self.bounds = .null
-            return
-        }
-        var minX: CGFloat = .greatestFiniteMagnitude
-        var maxX: CGFloat = -(.greatestFiniteMagnitude)
-        var minY: CGFloat = .greatestFiniteMagnitude
-        var maxY: CGFloat = -(.greatestFiniteMagnitude)
-
-        let update = { (_ pt: CGPoint) in
-            minX = .minimum(minX, pt.x)
-            minY = .minimum(minY, pt.y)
-            maxX = .maximum(maxX, pt.x)
-            maxY = .maximum(maxY, pt.y)
-        }
-        self.elements.forEach {
-            switch $0 {
-            case .move(let to):
-                update(to)
-            case .line(let to):
-                update(to)
-            case .quadCurve(let to, let c):
-                update(to)
-                update(c)
-            case .curve(let to, let c1, let c2):
-                update(to)
-                update(c1)
-                update(c2)
-            case .closeSubpath:
-                break
-            }
-        }
-        self.bounds = CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
-    }
+extension Path: _PrimitiveView {
 }

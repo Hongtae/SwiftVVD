@@ -183,11 +183,6 @@ class GraphicsPipelineStates {
         case ignore         // don't read stencil
     }
     
-    func stencilReferenceValue(for s: DepthStencil) -> UInt32 {
-        if case .evenOdd = s { return 1 }
-        return 0
-    }
-
     struct Vertex {
         let position: Vector2
         let texcoord: Vector2
@@ -254,7 +249,6 @@ class GraphicsPipelineStates {
         }
         pipelineDescriptor.primitiveTopology = .triangle
         pipelineDescriptor.triangleFillMode = .fill
-        pipelineDescriptor.rasterizationEnabled = pipelineDescriptor.fragmentFunction != nil
 
         if let state = device.makeRenderPipelineState(descriptor: pipelineDescriptor) {
             pipelineStates[rs] = state
@@ -277,12 +271,14 @@ class GraphicsPipelineStates {
         case .generateWindingNumber:
             descriptor.frontFaceStencil.depthStencilPassOperation = .incrementWrap
             descriptor.backFaceStencil.depthStencilPassOperation = .decrementWrap
-        case .nonZero:   // filled using the non-zero rule
+        case .nonZero:
+            // filled using the non-zero rule. (reference stencil value: 0)
             descriptor.frontFaceStencil.stencilCompareFunction = .notEqual
             descriptor.backFaceStencil.stencilCompareFunction = .notEqual
-        case .evenOdd:   // even-odd winding rule
-            descriptor.frontFaceStencil.stencilCompareFunction = .equal
-            descriptor.backFaceStencil.stencilCompareFunction = .equal
+        case .evenOdd:
+            // even-odd winding rule. (reference stencil value: 0)
+            descriptor.frontFaceStencil.stencilCompareFunction = .notEqual
+            descriptor.backFaceStencil.stencilCompareFunction = .notEqual
             descriptor.frontFaceStencil.readMask = 1
             descriptor.backFaceStencil.readMask = 1
         case .ignore:

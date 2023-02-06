@@ -28,23 +28,33 @@ public protocol Matrix: Hashable {
     static func - (_: Self, _: Self) -> Self
     static func * (_: Self, _: Self) -> Self
     static func * (_: Self, _: any BinaryFloatingPoint) -> Self
+    static func / (_: any BinaryFloatingPoint, _: Self) -> Self
+    static func / (_: Self, _: any BinaryFloatingPoint) -> Self
 
     static func += (_: inout Self, _: Self)
     static func -= (_: inout Self, _: Self)
     static func *= (_: inout Self, _: Self)
     static func *= (_: inout Self, _: any BinaryFloatingPoint)
+    static func /= (_: inout Self, _: any BinaryFloatingPoint)
 }
 
 public extension Matrix {
     mutating func invert()      { self = self.inverted() ?? self }
     mutating func transpose()   { self = self.transposed() }
 
-    static func != (_ lhs: Self, _ rhs: Self) -> Bool { return !(lhs == rhs) }
-    
-    static func += (_ lhs: inout Self, _ rhs: Self)       { lhs = lhs + rhs }
-    static func -= (_ lhs: inout Self, _ rhs: Self)       { lhs = lhs - rhs }
-    static func *= (_ lhs: inout Self, _ rhs: Self)       { lhs = lhs * rhs }
-    static func *= (_ lhs: inout Self, _ rhs: any BinaryFloatingPoint) {
+    static func != (lhs: Self, rhs: Self) -> Bool { return !(lhs == rhs) }
+
+    static func / (lhs: Self, rhs: any BinaryFloatingPoint) -> Self {
+        lhs * (Scalar(1) / Scalar(rhs))
+    }
+
+    static func += (lhs: inout Self, rhs: Self)       { lhs = lhs + rhs }
+    static func -= (lhs: inout Self, rhs: Self)       { lhs = lhs - rhs }
+    static func *= (lhs: inout Self, rhs: Self)       { lhs = lhs * rhs }
+    static func *= (lhs: inout Self, rhs: any BinaryFloatingPoint) {
         lhs = lhs * rhs
+    }
+    static func /= (lhs: inout Self, rhs: any BinaryFloatingPoint) {
+        lhs = lhs / rhs
     }
 }

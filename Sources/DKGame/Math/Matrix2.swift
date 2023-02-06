@@ -139,19 +139,19 @@ public struct Matrix2: Matrix {
         return Matrix2(row1: self.column1, row2: self.column2)
     }
 
-    public static func == (_ lhs: Self, _ rhs: Self) -> Bool {
+    public static func == (lhs: Self, rhs: Self) -> Bool {
         return lhs.row1 == rhs.row1 && lhs.row2 == rhs.row2
     }
 
-    public static func + (_ lhs: Self, _ rhs: Self) -> Self {
+    public static func + (lhs: Self, rhs: Self) -> Self {
         return Matrix2(row1: lhs.row1 + rhs.row1, row2: lhs.row2 + rhs.row2)
     }
 
-    public static func - (_ lhs: Self, _ rhs: Self) -> Self {
+    public static func - (lhs: Self, rhs: Self) -> Self {
         return Matrix2(row1: lhs.row1 - rhs.row1, row2: lhs.row2 - rhs.row2)
     }
 
-    public static func * (_ lhs: Self, _ rhs: Self) -> Self {
+    public static func * (lhs: Self, rhs: Self) -> Self {
         let row1 = lhs.row1,    row2 = lhs.row2
         let col1 = rhs.column1, col2 = rhs.column2
 
@@ -159,8 +159,12 @@ public struct Matrix2: Matrix {
                        Vector2.dot(row2, col1), Vector2.dot(row2, col2))
     }
 
-    public static func * (_ lhs:Self, _ rhs: any BinaryFloatingPoint) -> Self {
+    public static func * (lhs:Self, rhs: any BinaryFloatingPoint) -> Self {
         return Matrix2(row1: lhs.row1 * rhs, row2: lhs.row2 * rhs)
+    }
+
+    public static func / (lhs: any BinaryFloatingPoint, rhs: Self) -> Self {
+        return Matrix2(row1: Scalar(lhs) / rhs.row1, row2: Scalar(lhs) / rhs.row2)
     }
 }
 

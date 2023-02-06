@@ -64,6 +64,10 @@ public extension CGPoint {
         lhs = lhs + rhs
     }
 
+    static prefix func - (lhs: Self) -> Self {
+        return Self(x: -lhs.x, y: -lhs.y)
+    }
+
     static func - (lhs: Self, rhs: Self) -> Self {
         return Self(x: lhs.x - rhs.x, y: lhs.y - rhs.y)
     }
@@ -76,9 +80,49 @@ public extension CGPoint {
         return Self(x: lhs.x * rhs, y: lhs.y * rhs)
     }
 
+    static func * (lhs: CGFloat, rhs: Self) -> Self {
+        return Self(x: lhs * rhs.x, y: lhs * rhs.y)
+    }
+
     static func *= (lhs: inout Self, rhs: CGFloat) {
         lhs = lhs * rhs
-    }   
+    }
+
+    static func * (lhs: Self, rhs: Self) -> Self {
+        return Self(x: lhs.x * rhs.x, y: lhs.y * rhs.y)
+    }
+
+    static func *= (lhs: inout Self, rhs: Self) {
+        lhs = lhs * rhs
+    }
+
+    static func / (lhs: Self, rhs: Self) -> Self {
+        return Self(x: lhs.x / rhs.x, y: lhs.y / rhs.y)
+    }
+
+    static func / (lhs: CGFloat, rhs: Self) -> Self {
+        return Self(x: lhs / rhs.x, y: lhs / rhs.y)
+    }
+
+    static func / (lhs: Self, rhs: CGFloat) -> Self {
+        return Self(x: lhs.x / rhs, y: lhs.y / rhs)
+    }
+
+    static func /= (lhs: inout Self, rhs: Self) {
+        lhs = lhs / rhs
+    }
+
+    static func /= (lhs: inout Self, rhs: CGFloat) {
+        lhs = lhs / rhs
+    }
+
+    static func minimum(_ lhs: Self, _ rhs: Self) -> Self {
+        return Self(x: min(lhs.x, rhs.x), y: min(lhs.y, rhs.y))
+    }
+
+    static func maximum(_ lhs: Self, _ rhs: Self) -> Self {
+        return Self(x: max(lhs.x, rhs.x), y: max(lhs.y, rhs.y))
+    }
 }
 
 public extension CGSize {
@@ -96,6 +140,46 @@ public extension CGSize {
 
     static func *= (lhs: inout Self, rhs: CGFloat) {
         lhs = lhs * rhs
+    }
+
+    static func * (lhs: Self, rhs: Self) -> Self {
+        return Self(width: lhs.width * rhs.width, height: lhs.height * rhs.height)
+    }
+
+    static func * (lhs: CGFloat, rhs: Self) -> Self {
+        return Self(width: lhs * rhs.width, height: lhs * rhs.height)
+    }
+
+    static func *= (lhs: inout Self, rhs: Self) {
+        lhs = lhs * rhs
+    }
+
+    static func / (lhs: Self, rhs: Self) -> Self {
+        return Self(width: lhs.width / rhs.width, height: lhs.height / rhs.height)
+    }
+
+    static func / (lhs: CGFloat, rhs: Self) -> Self {
+        return Self(width: lhs / rhs.width, height: lhs / rhs.height)
+    }
+
+    static func / (lhs: Self, rhs: CGFloat) -> Self {
+        return Self(width: lhs.width / rhs, height: lhs.height / rhs)
+    }
+
+    static func /= (lhs: inout Self, rhs: Self) {
+        lhs = lhs / rhs
+    }
+
+    static func /= (lhs: inout Self, rhs: CGFloat) {
+        lhs = lhs / rhs
+    }
+
+    static func minimum(_ lhs: Self, _ rhs: Self) -> Self {
+        return Self(width: min(lhs.width, rhs.width), height: min(lhs.height, rhs.height))
+    }
+
+    static func maximum(_ lhs: Self, _ rhs: Self) -> Self {
+        return Self(width: max(lhs.width, rhs.width), height: max(lhs.height, rhs.height))
     }
 
     var cgPoint: CGPoint { CGPoint(x: width, y: height) }
