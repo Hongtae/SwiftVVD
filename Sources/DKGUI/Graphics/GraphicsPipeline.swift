@@ -8,6 +8,8 @@
 import Foundation
 import DKGame
 
+
+// glslc {input-file} -o {output-file} -Os --target-env=vulkan1.3
 private let vsStencilGLSL = """
     /* vertex shader for writing stencil only */
     #version 450
@@ -20,6 +22,11 @@ private let vsStencilGLSL = """
     """
 
 private let vsStencilSpvCEB64 = """
+    XQAAAAR4AgAAAAAAAAABgJdesntsONN+HGcuNYYB2HaeuzqB/1JEjzTMhsjJ47cvV+jDp5\
+    wmI6dY7v+CjHUnSZSByNZ1Fsvw6oKTEP6ntLqjDTOV81fDIOfUM7gZIajT4DC7D1knh4og\
+    uymzewwBXQtEig5UNZ30zr2Q06FKGV/UGL7kfXtcGmiN3uoXRKKkRyQhSuUKAgkP+DaEdq\
+    1K5QkEzWZdAhajbWmWeYc7FopuJlgZX34yDCmYdjU3uw668eOYxNG6+GY1Ub2jL2TeTnTA0\
+    mpLzlmE9f35ILERvvTZ5CqORtiFgD2xGeioWInO3XgtB2hcWX1ZQpbHFHPP77eF4IIA
     """
 
 private let vsGLSL = """
@@ -150,10 +157,12 @@ private func encodeSPIRVData(from url: URL?) -> String? {
     if let url {
         do {
             let data = try Data(contentsOf: url, options: [])
+            let length = data.count
+            Log.debug("URL:\(url) loaded \(length) bytes.")
             let inputStream = InputStream(data: data)
             let outputStream = OutputStream.toMemory()
 
-            let compressionResult = compress(input: inputStream, output: outputStream)
+            let compressionResult = compress(input: inputStream, inputBytes: length, output: outputStream, method: .best)
             if compressionResult == .success {
                 let compressedData = outputStream.property(forKey: .dataWrittenToMemoryStreamKey) as! Data
                 return compressedData.base64EncodedString()
