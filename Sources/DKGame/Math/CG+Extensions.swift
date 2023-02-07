@@ -56,6 +56,10 @@ public extension CGPoint {
     var magnitudeSquared: CGFloat   { self.x * self.x + self.y * self.y }
     var magnitude: CGFloat          { self.magnitudeSquared.squareRoot() }
 
+    static func lerp(_ a: Self, _ b: Self, _ t: CGFloat) -> CGPoint {
+        a * (1.0 - t) + b * t
+    }
+
     static func + (lhs: Self, rhs: Self) -> Self {
         return Self(x: lhs.x + rhs.x, y: lhs.y + rhs.y)
     }
@@ -124,6 +128,11 @@ public extension CGPoint {
         return Self(x: max(lhs.x, rhs.x), y: max(lhs.y, rhs.y))
     }
 }
+
+public func lerp(_ a: CGPoint, _ b: CGPoint, _ t: CGFloat) -> CGPoint {
+    a * (1.0 - t) + b * t
+}
+
 
 public extension CGSize {
     init(_ v: Vector2) {

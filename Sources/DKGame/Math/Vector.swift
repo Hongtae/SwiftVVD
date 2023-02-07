@@ -86,3 +86,7 @@ public extension Vector {
 
     static func != (lhs: Self, rhs: Self) -> Bool { return !(lhs == rhs) }
 }
+
+public func lerp<V>(_ lhs: V, _ rhs: V, _ t: any BinaryFloatingPoint) -> V where V: Vector {
+    return V.lerp(lhs, rhs, t)
+}

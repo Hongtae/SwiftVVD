@@ -8,16 +8,12 @@
 import Foundation
 import DKGame
 
-func lerp(_ a: CGPoint, _ b: CGPoint, _ t: Double) -> CGPoint {
-    a * (1.0 - t) + b * t
-}
-
 struct QuadraticBezier {
     let p0: CGPoint     // start point
     let p1: CGPoint     // control point
     let p2: CGPoint     // end point
 
-    func split(_ t: Double) -> (Self, Self) {
+    func split(_ t: CGFloat) -> (Self, Self) {
         let ab = lerp(p0, p1, t)
         let bc = lerp(p1, p2, t)
         let p = lerp(ab, bc, t)
@@ -50,7 +46,7 @@ struct QuadraticBezier {
         return (a + b + c)
     }
 
-    func approximateLength(subdivide: Int = 0) -> Double {
+    func approximateLength(subdivide: Int = 0) -> CGFloat {
         var sumOfPointSegments = 0.0
         self.subdivide(subdivide).forEach {
             sumOfPointSegments += $0.lengthOfPointSegments
@@ -146,7 +142,7 @@ struct CubicBezier {
         return (a + b + c + d)
     }
 
-    func approximateLength(subdivide: Int = 0) -> Double {
+    func approximateLength(subdivide: Int = 0) -> CGFloat {
         var sumOfPointSegments = 0.0
         self.subdivide(subdivide).forEach {
             sumOfPointSegments += $0.lengthOfPointSegments

@@ -686,7 +686,7 @@ extension Path {
         let center = (tan1 + tan2).normalized() * distanceToCircleCenter + pivot
         let startPoint = tan1 * distanceToStart + pivot
         //let endPoint = tan2 * distanceToStart + pivot
-        var delta = (Double.pi - r) * 2.0
+        var delta = (.pi - r) * 2.0
         if clockwise {
             delta = -delta
         }
