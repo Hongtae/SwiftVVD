@@ -72,6 +72,17 @@ struct QuadraticBezier {
         return (p0 * u2) + (p1 * u * t * 2) + (p2 * t2)
     }
 
+    func tangent(_ t: CGFloat) -> CGPoint {
+        // B'(t) = 2*(1-t)(p1-p0) + 2*(p2-p1)*t
+        let u = 1.0 - t
+        return ((p1 - p0) * u + (p2 - p1) * t) * 2
+    }
+
+    func tangent(_ t: CGPoint) -> CGPoint {
+        let u = CGPoint(x: 1.0 - t.x, y: 1.0 - t.y)
+        return ((p1 - p0) * u + (p2 - p1) * t) * 2
+    }
+
     var boundingBox: CGRect {
         var bbMin = CGPoint.minimum(p0, p2)
         var bbMax = CGPoint.minimum(p0, p2)
@@ -159,6 +170,21 @@ struct CubicBezier {
         let u2 = u * u
         let u3 = u2 * u
         return (p0 * u3) + (p1 * t * u2 * 3) + (p2 * t2 * u * 3) + (p3 * t3)
+    }
+
+    func tangent(_ t: CGFloat) -> CGPoint {
+        // dP(t) / dt =  -3(1-t)^2 * P0 + 3(1-t)^2 * P1 - 6t(1-t) * P1 - 3t^2 * P2 + 6t(1-t) * P2 + 3t^2 * P3 
+        let t2 = t * t
+        let u = 1.0 - t
+        let u2 = u * u
+        return (p0 * u2 * -3) + (p1 * u2 * 3) - (p1 * u * t * 6) - (p2 * t2 * 3) + (p2 * u * t * 6) + (p3 * u2 * 3)
+    }
+
+    func tangent(_ t: CGPoint) -> CGPoint {
+        let t2 = t * t
+        let u = CGPoint(x: 1.0 - t.x, y: 1.0 - t.y)
+        let u2 = u * u
+        return (p0 * u2 * -3) + (p1 * u2 * 3) - (p1 * u * t * 6) - (p2 * t2 * 3) + (p2 * u * t * 6) + (p3 * u2 * 3)
     }
 
     var boundingBox: CGRect {
