@@ -56,21 +56,42 @@ private extension CompressionResult {
     }
 }
 
-public func compress(input: InputStream,
+public func compress(input: InputStream, inputBytes: Int,
                      output: OutputStream,
                      method: CompressionMethod = .automatic) -> CompressionResult {
 
-    var inStream = DKStream()
-    inStream.userContext = unsafeBitCast(input as AnyObject, to: DKStreamContext.self)
-    inStream.read = { ctxt, data, size in
-        let input = unsafeBitCast(ctxt, to: AnyObject.self) as! InputStream
-        return UInt64(input.read(data!.assumingMemoryBound(to: UInt8.self), maxLength: size))
+    class InputContext {
+        let input: InputStream
+        let inputBytes: Int
+        var position: Int = 0
+        init(input: InputStream, inputBytes: Int) {
+            self.input = input
+            self.inputBytes = inputBytes
+        }
     }
+    let inputContext = InputContext(input: input, inputBytes: inputBytes)
+
+    var inStream = DKStream()
+    inStream.userContext = unsafeBitCast(inputContext as AnyObject, to: DKStreamContext.self)
+    inStream.read = { ctxt, data, size in
+        let input = unsafeBitCast(ctxt, to: AnyObject.self) as! InputContext
+        let read = input.input.read(data!.assumingMemoryBound(to: UInt8.self), maxLength: size)
+        if read < 0 { return ~UInt64(0) }
+        input.position += read
+        return UInt64(read)
+    }
+    inStream.remainLength = { ctxt in 
+        let input = unsafeBitCast(ctxt, to: AnyObject.self) as! InputContext
+        return UInt64(input.inputBytes - input.position)
+    }
+
     var outStream = DKStream()
     outStream.userContext = unsafeBitCast(output as AnyObject, to: DKStreamContext.self)
-    inStream.write = { ctxt, data, size in
+    outStream.write = { ctxt, data, size in
         let output = unsafeBitCast(ctxt, to: AnyObject.self) as! OutputStream
-        return UInt64(output.write(data!.assumingMemoryBound(to: UInt8.self), maxLength: size))
+        let written = output.write(data!.assumingMemoryBound(to: UInt8.self), maxLength: size)
+        if written < 0 { return ~UInt64(0) }
+        return UInt64(written)
     }
 
     var level = method.level
@@ -109,6 +130,7 @@ public func decompress(input: InputStream,
         if read < 0 { return ~UInt64(0) }
         return UInt64(read)
     }
+    
     var outStream = DKStream()
     outStream.userContext = unsafeBitCast(output as AnyObject, to: DKStreamContext.self)
     outStream.write = { ctxt, data, size in

@@ -945,9 +945,7 @@ DKCompressionResult DKCompressionDecode(DKCompressionAlgorithm a, DKStream* inpu
     case DKCompressionAlgorithm_Zstd:
         return DecodeZstd(input, output);
     case DKCompressionAlgorithm_Lz4:
-        if (input->getPosition && input->setPosition)
-            return DecodeLz4(input, output);
-        return DKCompressionResult_InputStreamError;
+        return DecodeLz4(input, output);
     case DKCompressionAlgorithm_Lzma:
         return DecodeLzma(input, output);
     }
