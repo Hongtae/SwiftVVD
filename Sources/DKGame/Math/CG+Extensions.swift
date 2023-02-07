@@ -30,6 +30,33 @@ public extension CGPoint {
         self.init(x: CGFloat(v.x), y: CGFloat(v.y))
     }
 
+    init(_ p: CGPoint) {
+        self = p
+    }
+
+    static func dot(_ v1: Self, _ v2: Self) -> CGFloat {
+        return v1.x * v2.x + v1.y * v2.y
+    }
+
+    func normalized()->Self {
+        let lengthSq = self.magnitudeSquared
+        if lengthSq.isZero == false {
+            return self * (1.0 / lengthSq.squareRoot())
+        }
+        return self
+    }
+
+    mutating func normalize() {
+        self = self.normalized()
+    }
+
+    var magnitudeSquared: CGFloat   { Self.dot(self, self) }
+    var magnitude: CGFloat          { self.magnitudeSquared.squareRoot() }
+
+    static func lerp(_ a: Self, _ b: Self, _ t: CGFloat) -> CGPoint {
+        a * (1.0 - t) + b * t
+    }
+
     func transformed(by m: Matrix2) -> Self {
         let x = self.x * CGFloat(m.m11) + self.y * CGFloat(m.m21)
         let y = self.x * CGFloat(m.m12) + self.y * CGFloat(m.m22)
@@ -51,13 +78,6 @@ public extension CGPoint {
 
     mutating func transform(by: Matrix3) {
         self = self.transformed(by: by)
-    }
-
-    var magnitudeSquared: CGFloat   { self.x * self.x + self.y * self.y }
-    var magnitude: CGFloat          { self.magnitudeSquared.squareRoot() }
-
-    static func lerp(_ a: Self, _ b: Self, _ t: CGFloat) -> CGPoint {
-        a * (1.0 - t) + b * t
     }
 
     static func + (lhs: Self, rhs: Self) -> Self {
@@ -109,7 +129,8 @@ public extension CGPoint {
     }
 
     static func / (lhs: Self, rhs: CGFloat) -> Self {
-        return Self(x: lhs.x / rhs, y: lhs.y / rhs)
+        let inv = 1.0 / rhs
+        return lhs * inv
     }
 
     static func /= (lhs: inout Self, rhs: Self) {
@@ -133,7 +154,6 @@ public func lerp(_ a: CGPoint, _ b: CGPoint, _ t: CGFloat) -> CGPoint {
     a * (1.0 - t) + b * t
 }
 
-
 public extension CGSize {
     init(_ v: Vector2) {
         self.init(width: CGFloat(v.x), height: CGFloat(v.y))
@@ -141,6 +161,10 @@ public extension CGSize {
 
     init(_ p: CGPoint) {
         self.init(width: p.x, height: p.y)
+    }
+
+    init(_ s: CGSize) {
+        self = s
     }
 
     static func * (lhs: Self, rhs: CGFloat) -> Self {
@@ -195,6 +219,46 @@ public extension CGSize {
 }
 
 public extension CGRect {
+    init(_ rect: CGRect) {
+        self = rect.standardized
+    }
+
+    mutating func expand(by point: CGPoint, _ points: CGPoint...) {
+        if self.isInfinite == false {
+            var minimum = point
+            var maximum = point
+            points.forEach {
+                minimum = .minimum(minimum, $0)
+                maximum = .maximum(maximum, $0)
+            }
+            if self.isNull {
+                self = CGRect(origin: minimum, size: CGSize(maximum - minimum))
+            } else {
+                let minX = min(minimum.x, self.minX)
+                let minY = min(minimum.y, self.minY)
+                let maxX = max(maximum.x, self.maxX)
+                let maxY = max(maximum.y, self.maxY)
+                self = CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+            }
+        }
+    }
+
+    mutating func expand(by rect: CGRect, _ rest: CGRect...) {
+        var rc = self.union(rect)
+        rest.forEach { rc = rc.union($0) }
+        self = rc
+    }
+
+    static func boundingRect(_ point: CGPoint, _ points: CGPoint...) -> CGRect {
+        var minimum = point
+        var maximum = point
+        points.forEach {
+            minimum = .minimum(minimum, $0)
+            maximum = .maximum(maximum, $0)
+        }
+        return CGRect(origin: minimum, size: CGSize(maximum - minimum))
+    }
+
     func intersectsLine(_ pt1: CGPoint, _ pt2: CGPoint) -> Bool {
         if self.isEmpty { return false }
         if self.isInfinite { return true }

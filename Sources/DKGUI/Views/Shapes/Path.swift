@@ -272,10 +272,8 @@ extension Path {
 
         if let p0 = self.initialPoint {
             self.currentPoint = p1
-            self._extendBounds(by: p0)
-            self._extendBounds(by: p1)
-            self._extendPathBounds(by: p0)
-            self._extendPathBounds(by: p1)
+            self.boundingBox.expand(by: p0, p1)
+            self.boundingBoxOfPath.expand(by: p0, p1)
         }
     }
 
@@ -284,10 +282,8 @@ extension Path {
 
         if let p0 = self.initialPoint {
             self.currentPoint = p2
-            self._extendBounds(by: p0)
-            self._extendBounds(by: p1)
-            self._extendBounds(by: p2)
-            self._extendPathBounds(by: QuadraticBezier(p0: p0, p1: p1, p2: p2).boundingBox)
+            self.boundingBox.expand(by: p0, p1, p2)
+            self.boundingBoxOfPath.expand(by: QuadraticBezier(p0: p0, p1: p1, p2: p2).boundingBox)
         }
     }
 
@@ -296,11 +292,8 @@ extension Path {
 
         if let p0 = self.initialPoint {
             self.currentPoint = p3
-            self._extendBounds(by: p0)
-            self._extendBounds(by: p1)
-            self._extendBounds(by: p2)
-            self._extendBounds(by: p3)
-            self._extendPathBounds(by: CubicBezier(p0: p0, p1: p1, p2: p2, p3: p3).boundingBox)
+            self.boundingBox.expand(by: p0, p1, p2, p3)
+            self.boundingBoxOfPath.expand(by: CubicBezier(p0: p0, p1: p1, p2: p2, p3: p3).boundingBox)
         }
     }
 
@@ -661,17 +654,15 @@ extension Path {
     public mutating func addArc(tangent1End p1: CGPoint, tangent2End p2: CGPoint, radius: CGFloat, transform: CGAffineTransform = .identity) {
         if radius < .ulpOfOne { return }
 
-        let current = Vector2(currentPoint ?? .zero)
+        let current = currentPoint ?? .zero
 
         // tangent-vector1 = -p1
         // tangent-vector2 = p2 - (p1 + pivot)
 
-        let p1 = Vector2(p1)
-        let p2 = Vector2(p2)
         let pivot = current + p1
-        let tan1 = Vector2(-p1).normalized()
-        let tan2 = Vector2(p2 - pivot).normalized()
-        let d = Vector2.dot(tan1, tan2) // cos of two vectors
+        let tan1 = (-p1).normalized()
+        let tan2 = (p2 - pivot).normalized()
+        let d = CGPoint.dot(tan1, tan2) // cos of two vectors
 
         if d == 0.0 { return }
         if d == .pi * 2 { return }
@@ -690,9 +681,9 @@ extension Path {
         if clockwise {
             delta = -delta
         }
-        let startAngle = acos(Vector2.dot(Vector2(1, 0), (startPoint - center).normalized()))
+        let startAngle = acos(CGPoint.dot(CGPoint(x: 1, y: 0), (startPoint - center).normalized()))
 
-        self.addRelativeArc(center: CGPoint(center),
+        self.addRelativeArc(center: center,
                             radius: radius,
                             startAngle: .radians(startAngle),
                             delta: .radians(delta))

@@ -92,7 +92,7 @@ struct QuadraticBezier {
             bbMin = .minimum(bbMin, q)
             bbMax = .maximum(bbMax, q)
         }
-        return CGRect(x: bbMin.x, y: bbMin.y, width: bbMax.x - bbMax.x, height: bbMax.y - bbMin.y)
+        return .boundingRect(bbMin, bbMax)
     }
 }
 
@@ -233,5 +233,81 @@ struct CubicBezier {
             }
         }
         return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+    }
+
+    func intersectLineSegment(_ begin: CGPoint, _ end: CGPoint) -> [CGFloat] {
+        let sign: (CGFloat)->CGFloat = { $0 > 0 ? 1 : ($0 < 0 ? -1 : 0) }
+        let cubicRoots = {
+            (a: CGFloat, b: CGFloat, c: CGFloat, d: CGFloat) -> [CGFloat] in
+
+            let invA = 1.0 / a
+            let A = b * invA
+            let B = c * invA
+            let C = d * invA
+
+            let Q = (3 * B - (A * A)) / 9
+            let R = (9 * A * B - 27 * C - 2 * (A * A * A)) / 54
+            let D = (Q * Q * Q) + (R * R) // polynomial discriminant
+
+            var t: [CGFloat] = [-1, -1, -1]
+            if D >= 0 {
+                // complex or duplicate roots
+                let S = sign(R + sqrt(D)) * pow((R + sqrt(D)).magnitude, 1.0/3)
+                let T = sign(R - sqrt(D)) * pow((R - sqrt(D)).magnitude, 1.0/3)
+
+                t[0] = -A/3 + (S + T)   // real root
+
+                let im = (sqrt(3) * (S - T)/2).magnitude // complex part of root pair
+                if im == .zero {
+                    t[1] = -A/3 - (S + T)/2     // real part of complex root
+                    t[2] = -A/3 - (S + T)/2     // real part of complex root
+                }
+            } else {
+                // distinct real roots
+                let th = acos(R / sqrt(-(Q * Q * Q)))
+                t[0] = 2 * sqrt(-Q) * cos(th/3) - A/3
+                t[1] = 2 * sqrt(-Q) * cos((th + 2 * .pi)/3) - A/3
+                t[2] = 2 * sqrt(-Q) * cos((th + 4 * .pi)/3) - A/3
+            }
+            return t.filter { $0 >= 0 && $0 <= 1 }
+        }
+
+        let bezierCoeffs = {
+            (p0: CGPoint, p1: CGPoint, p2: CGPoint, p3: CGPoint)
+            -> (CGPoint, CGPoint, CGPoint, CGPoint) in
+
+            let a = -p0 + 3 * p1 - 3 * p2 + p3
+            let b = 3 * p0 - 6 * p1 + 3 * p2
+            let c = -3 * p0 + 3 * p1
+            let d = p0
+            return (a, b, c, d)
+        }
+
+        let A = end.y - begin.y     // A = y2 - y1
+        let B = begin.x - end.x     // B = x1 - x2
+        let C = begin.x * (begin.y - end.y) + begin.y * (end.x - begin.x)   // C = x1 * (y1 - y2) + y1 * (x2 - x1)
+
+        let (b0, b1, b2, b3) = bezierCoeffs(p0, p1, p2, p3)
+        let P0 = A * b0.x + B * b0.y        // t^3
+        let P1 = A * b1.x + B * b1.y        // t^2
+        let P2 = A * b2.x + B * b2.y        // t
+        let P3 = A * b3.x + B * b3.y + C    // 1
+
+        return cubicRoots(P0, P1, P2, P3).filter { t in
+            let t2 = t * t
+            let t3 = t2 * t
+
+            // pt: intersection point with infinite line
+            let pt = b0 * t3 + b1 * t2 + b2 * t + b3
+
+            // line segment bound check.
+            let s: CGFloat
+            if end.x - begin.x != 0 { // not vertical line
+                s = (pt.x - begin.x) / (end.x - begin.x)
+            } else {
+                s = (pt.y - begin.y) / (end.y - begin.y)
+            }
+            return s >= 0 && s <= 1
+        }
     }
 }

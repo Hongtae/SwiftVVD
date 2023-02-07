@@ -10,7 +10,6 @@ import Foundation
 //public typealias Scalar = Float32
 public typealias Scalar = Float64
 
-
 extension Comparable {
     public func clamp(min: Self, max: Self) -> Self {
         if self < min { return min }
