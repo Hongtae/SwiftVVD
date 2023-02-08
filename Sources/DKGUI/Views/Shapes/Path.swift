@@ -30,7 +30,89 @@ public struct Path: Equatable {
     public var isEmpty: Bool { self.elements.isEmpty }
 
     public func contains(_ p: CGPoint, eoFill: Bool = false) -> Bool {
-        fatalError()
+        var winding: Int = 0
+
+        let lineCheck = { (p0: CGPoint, p1: CGPoint) in
+            if min(p0.y, p1.y) <= p.y && max(p0.y, p1.y) > p.y {
+                let a = (p1.y - p1.y) / (p0.x - p0.x)
+                let b = p1.y - a * p1.x
+                let x = (p.y - b) / a
+                if x <= p.x {
+                    if a > 0 {
+                        winding += 1
+                    } else if a < 0 {
+                        winding -= 1
+                    }
+                }
+            }
+        }
+
+        let quadraticBezierCheck = { (p0: CGPoint, p1: CGPoint, p2: CGPoint) in
+            let bbox = CGRect.boundingRect(p0, p1, p2)
+            if bbox.minX <= p.x && bbox.minY <= p.y && bbox.maxY > p.y {
+                let curve = QuadraticBezier(p0: p0, p1: p1, p2: p2)
+                curve.intersectLineSegment(CGPoint(x: bbox.minX, y: p.y), p).forEach { t in
+                    if t < 1 && curve.interpolate(t).x <= p.x {
+                        let tangent = curve.tangent(t).y
+                        if tangent > 0 {
+                            winding += 1
+                        } else if tangent < 0 {
+                            winding -= 1
+                        }
+                    }
+                }
+            }
+        }
+
+        let cubicBezierCheck = { (p0: CGPoint, p1: CGPoint, p2: CGPoint, p3: CGPoint) in
+            let bbox = CGRect.boundingRect(p0, p1, p2)
+            if bbox.minX <= p.x && bbox.minY <= p.y && bbox.maxY > p.y {
+                let curve = CubicBezier(p0: p0, p1: p1, p2: p2, p3: p3)
+                curve.intersectLineSegment(CGPoint(x: bbox.minX, y: p.y), p).forEach { t in
+                    if t < 1 && curve.interpolate(t).x <= p.x {
+                        let tangent = curve.tangent(t).y
+                        if tangent > 0 {
+                            winding += 1
+                        } else if tangent < 0 {
+                            winding -= 1
+                        }
+                    }
+                }
+            }
+        }
+
+        var startPoint: CGPoint? = nil
+        var currentPoint: CGPoint? = nil
+        self.elements.forEach {
+            switch $0 {
+            case .move(let to):
+                startPoint = to
+                currentPoint = to
+            case .line(let p1):
+                if let p0 = currentPoint {
+                    lineCheck(p0, p1)
+                    currentPoint = p1
+                }
+            case .quadCurve(let p2, let p1):
+                if let p0 = currentPoint {
+                    quadraticBezierCheck(p0, p1, p2)
+                    currentPoint = p2
+                }
+            case .curve(let p3, let p1, let p2):
+                if let p0 = currentPoint {
+                    cubicBezierCheck(p0, p1, p2, p3)
+                    currentPoint = p3
+                }
+            case .closeSubpath:
+                if let p0 = currentPoint, let p1 = startPoint {
+                    lineCheck(p0, p1)
+                }
+                currentPoint = startPoint
+            }
+        }
+
+        if eoFill { return winding % 2 != 0 }
+        return winding != 0 // non zero fill
     }
 
     public enum Element: Equatable, Sendable {
@@ -457,31 +539,31 @@ extension Path {
         let cy = clamp(cornerSize.height, min: 0, max: (maxY - midY))
 
         let pt: [CGPoint] = [
-            CGPoint(x: maxX, y: midY).applying(transform),      // right-middle
-            CGPoint(x: maxX, y: maxY - cy).applying(transform), // right-bottom
+            CGPoint(x: maxX, y: midY).applying(transform),
+            CGPoint(x: maxX, y: maxY - cy).applying(transform),
 
             CGPoint(x: maxX, y: lerp(maxY - cy, maxY, _r)).applying(transform),
             CGPoint(x: lerp(maxX - cx, maxX, _r), y: maxY).applying(transform),
 
-            CGPoint(x: maxX - cx, y: maxY).applying(transform), // bottom-right
-            CGPoint(x: minX + cx, y: maxY).applying(transform), // bottom-left
+            CGPoint(x: maxX - cx, y: maxY).applying(transform),
+            CGPoint(x: minX + cx, y: maxY).applying(transform),
 
             CGPoint(x: lerp(minX + cx, minX, _r), y: maxY).applying(transform),
             CGPoint(x: minX, y: lerp(maxY - cy, maxY, _r)).applying(transform),
 
-            CGPoint(x: minX, y: maxY - cy).applying(transform), // left-bottom
-            CGPoint(x: minX, y: minY + cy).applying(transform), // left-upper
+            CGPoint(x: minX, y: maxY - cy).applying(transform),
+            CGPoint(x: minX, y: minY + cy).applying(transform),
 
             CGPoint(x: minX, y: lerp(minY + cy, minY, _r)).applying(transform),
             CGPoint(x: lerp(minX + cx, minX, _r), y: minY).applying(transform),
 
-            CGPoint(x: minX + cx, y: minY).applying(transform), // top-left
-            CGPoint(x: maxX - cx, y: minY).applying(transform), // top-right
+            CGPoint(x: minX + cx, y: minY).applying(transform),
+            CGPoint(x: maxX - cx, y: minY).applying(transform),
 
             CGPoint(x: lerp(maxX - cx, maxX, _r), y: minY).applying(transform),
             CGPoint(x: maxX, y: lerp(minY + cy, minY, _r)).applying(transform),
 
-            CGPoint(x: maxX, y: minY + cy).applying(transform), // right-upper
+            CGPoint(x: maxX, y: minY + cy).applying(transform),
         ]
         self.move(to: pt[0])
         self.addLine(to: pt[1])
@@ -503,19 +585,19 @@ extension Path {
         let minY = rect.minY
         let maxY = rect.maxY
         let pt = [
-            CGPoint(x: maxX, y: midY).applying(transform),  // right
+            CGPoint(x: maxX, y: midY).applying(transform),
             CGPoint(x: maxX, y: lerp(midY, maxY, _r)).applying(transform),
             CGPoint(x: lerp(midX, maxX, _r), y: maxY).applying(transform),
 
-            CGPoint(x: midX, y: maxY).applying(transform),  // bottom
+            CGPoint(x: midX, y: maxY).applying(transform),
             CGPoint(x: lerp(midX, minX, _r), y: maxY).applying(transform),
             CGPoint(x: minX, y: lerp(midY, maxY, _r)).applying(transform),
 
-            CGPoint(x: minX, y: midY).applying(transform),  // left
+            CGPoint(x: minX, y: midY).applying(transform),
             CGPoint(x: minX, y: lerp(midY, minY, _r)).applying(transform),
             CGPoint(x: lerp(midX, minX, _r), y: minY).applying(transform),
 
-            CGPoint(x: midX, y: minY).applying(transform),  // top
+            CGPoint(x: midX, y: minY).applying(transform),
             CGPoint(x: lerp(midX, maxX, _r), y: minY).applying(transform),
             CGPoint(x: maxX, y: lerp(midY, minY, _r)).applying(transform),
         ]
