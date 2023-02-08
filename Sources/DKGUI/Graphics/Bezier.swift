@@ -94,6 +94,39 @@ struct QuadraticBezier {
         }
         return .boundingRect(bbMin, bbMax)
     }
+
+    func intersectLineSegment(_ begin: CGPoint, _ end: CGPoint) -> [CGFloat] {
+        let Q = end.y * (p0.x - 2 * p1.x + p2.x) - begin.y * (p0.x - 2 * p1.x + p2.x)
+        let S = begin.x * (p0.y - 2 * p1.y + p2.y) - end.x * (p0.y - 2 * p1.y + p2.y)
+        let R = end.y * 2 * (p1.x - p0.x) - begin.y * 2 * (p1.x - p0.x)
+        let T = begin.x * 2 * (p1.y - p0.y) - end.x * 2 * (p1.y - p0.y)
+
+        let A = S + Q
+        let B = R + T
+        let C = (end.y - begin.y) * p0.x + (begin.x + end.x) * p0.y + begin.x * (begin.y - end.y) + begin.y * (end.x - begin.x)
+
+        let B2_4AC = sqrt( B * B - (4 * A * C))
+        let InvA2 = 1.0 / (2 * A)
+        let t1 = (-B + B2_4AC) * InvA2
+        let t2 = (-B - B2_4AC) * InvA2
+
+        return [t1, t2].filter { t in
+            if (t >= 0 && t <= 1) {
+                // pt: intersection point with infinite line
+                let pt = self.interpolate(t)
+
+                // line segment bound check.
+                let s: CGFloat
+                if end.x - begin.x != 0 { // not vertical line
+                    s = (pt.x - begin.x) / (end.x - begin.x)
+                } else {
+                    s = (pt.y - begin.y) / (end.y - begin.y)
+                }
+                return s >= 0 && s <= 1
+            }
+            return false
+        }.sorted()
+    }
 }
 
 struct CubicBezier {
@@ -236,7 +269,7 @@ struct CubicBezier {
     }
 
     func intersectLineSegment(_ begin: CGPoint, _ end: CGPoint) -> [CGFloat] {
-        let sign: (CGFloat)->CGFloat = { $0 > 0 ? 1 : ($0 < 0 ? -1 : 0) }
+        let sign: (CGFloat)->CGFloat = { $0 < 0.0 ? -1 : 1 }
         let cubicRoots = {
             (a: CGFloat, b: CGFloat, c: CGFloat, d: CGFloat) -> [CGFloat] in
 
@@ -249,25 +282,29 @@ struct CubicBezier {
             let R = (9 * A * B - 27 * C - 2 * (A * A * A)) / 54
             let D = (Q * Q * Q) + (R * R) // polynomial discriminant
 
+            let A3 = A/3
+
             var t: [CGFloat] = [-1, -1, -1]
             if D >= 0 {
                 // complex or duplicate roots
-                let S = sign(R + sqrt(D)) * pow((R + sqrt(D)).magnitude, 1.0/3)
-                let T = sign(R - sqrt(D)) * pow((R - sqrt(D)).magnitude, 1.0/3)
+                let sqrt_D = sqrt(D)
+                let S = sign(R + sqrt_D) * pow((R + sqrt_D).magnitude, 1.0/3)
+                let T = sign(R - sqrt_D) * pow((R - sqrt_D).magnitude, 1.0/3)
 
-                t[0] = -A/3 + (S + T)   // real root
+                t[0] = -A3 + (S + T)   // real root
 
                 let im = (sqrt(3) * (S - T)/2).magnitude // complex part of root pair
                 if im == .zero {
-                    t[1] = -A/3 - (S + T)/2     // real part of complex root
-                    t[2] = -A/3 - (S + T)/2     // real part of complex root
+                    t[1] = -A3 - (S + T)/2     // real part of complex root
+                    t[2] = -A3 - (S + T)/2     // real part of complex root
                 }
             } else {
                 // distinct real roots
                 let th = acos(R / sqrt(-(Q * Q * Q)))
-                t[0] = 2 * sqrt(-Q) * cos(th/3) - A/3
-                t[1] = 2 * sqrt(-Q) * cos((th + 2 * .pi)/3) - A/3
-                t[2] = 2 * sqrt(-Q) * cos((th + 4 * .pi)/3) - A/3
+                let sqrt_mQ = sqrt(-Q)
+                t[0] = 2 * sqrt_mQ * cos(th/3) - A3
+                t[1] = 2 * sqrt_mQ * cos((th + 2 * .pi)/3) - A3
+                t[2] = 2 * sqrt_mQ * cos((th + 4 * .pi)/3) - A3
             }
             return t.filter { $0 >= 0 && $0 <= 1 }
         }
@@ -308,6 +345,6 @@ struct CubicBezier {
                 s = (pt.y - begin.y) / (end.y - begin.y)
             }
             return s >= 0 && s <= 1
-        }
+        }.sorted()
     }
 }
