@@ -5,7 +5,7 @@
 //  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
-public struct UniformScaleTransform: VectorTransformer, Interpolatable {
+public struct UniformScaleTransform: VectorTransformer, Interpolatable, Hashable {
     public typealias Vector = Vector3
 
     public var scale: Scalar

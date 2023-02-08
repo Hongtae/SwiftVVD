@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct Vector3: Vector {
+public struct Vector3: Vector, Hashable {
 
     public var x : Scalar
     public var y : Scalar

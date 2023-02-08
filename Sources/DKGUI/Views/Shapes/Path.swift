@@ -309,34 +309,6 @@ public struct Path: Equatable {
     }
 }
 
-extension Path: Shape {
-    public func path(in frame: CGRect) -> Path {
-        let frame = frame.standardized
-        if frame.isNull == false && frame.width > 0 && frame.height > 0 {
-            let bbox = self.boundingBoxOfPath.standardized
-            if bbox.isNull == false && bbox.width > 0 && bbox.height > 0 {
-                let scaleX = frame.width / bbox.width
-                let scaleY = frame.height / bbox.height
-
-                var transform = CGAffineTransform(scaleX: scaleX, y: scaleY)
-                transform = transform.translatedBy(x: frame.origin.x, y: frame.origin.y)
-
-                return self.applying(transform)
-            }
-        }
-        return Path()
-    }
-
-    public typealias AnimatableData = EmptyAnimatableData
-
-    public var animatableData: EmptyAnimatableData {
-        get { EmptyAnimatableData() }
-        set { fatalError() }
-    }
-
-//    public typealias Body
-}
-
 private let _r: Double = 0.552285 // cubic bezier control point ratio for circle
 
 extension Path {
@@ -412,84 +384,6 @@ extension Path {
 
     private mutating func _extendPathBounds(by rect: CGRect) {
         self.boundingBoxOfPath = self.boundingBoxOfPath.union(rect)
-    }
-}
-
-extension Path: LosslessStringConvertible {
-    public init?(_ string: String) {
-        let commands = string.components(separatedBy: .whitespacesAndNewlines)
-        var floats: [Double] = []
-        for str in commands {
-            if str == "m" {
-                if floats.count == 2 {
-                    self.move(to: CGPoint(x: floats[0], y: floats[1]))
-                    floats.removeAll(keepingCapacity: true)
-                } else {
-                    Log.err("Insufficient arguments to command.")
-                    return nil
-                }
-            } else if str == "l" {
-                if floats.count == 2 {
-                    self.addLine(to: CGPoint(x: floats[0], y: floats[1]))
-                    floats.removeAll(keepingCapacity: true)
-                } else {
-                    Log.err("Insufficient arguments to command.")
-                    return nil
-                }
-            } else if str == "q" {
-                if floats.count == 4 {
-                    self.addQuadCurve(to: CGPoint(x: floats[0], y: floats[1]),
-                                      control: CGPoint(x: floats[2], y: floats[3]))
-                    floats.removeAll(keepingCapacity: true)
-                } else {
-                    Log.err("Insufficient arguments to command.")
-                    return nil
-                }
-            } else if str == "c" {
-                if floats.count == 6 {
-                    self.addCurve(to: CGPoint(x: floats[0], y: floats[1]),
-                                  control1: CGPoint(x: floats[2], y: floats[3]),
-                                  control2: CGPoint(x: floats[4], y: floats[5]))
-                    floats.removeAll(keepingCapacity: true)
-                } else {
-                    Log.err("Insufficient arguments to command.")
-                    return nil
-                }
-            } else if str == "h" {
-                if floats.count == 0 {
-                    self.closeSubpath()
-                } else {
-                    Log.err("There are unknown arguments to this command.")
-                    return nil
-                }
-            } else {
-                if let d = Double(str) {
-                    floats.append(d)
-                } else {
-                    Log.err("Unable to parse as numeric: \(str)")
-                    return nil
-                }
-            }
-        }
-    }
-
-    public var description: String {
-        var desc: [String] = []
-        self.forEach { element in
-            switch element {
-            case .move(let to):
-                desc.append("\(to.x) \(to.y) m")
-            case .line(let to):
-                desc.append("\(to.x) \(to.y) l")
-            case .quadCurve(let to, let c):
-                desc.append("\(c.x) \(c.y) \(to.x) \(to.y) q")
-            case .curve(let to, let c1, let c2):
-                desc.append("\(c1.x) \(c1.y) \(c2.x) \(c2.y) \(to.x) \(to.y) c")
-            case .closeSubpath:
-                desc.append("h")
-            }
-        }
-        return desc.joined(separator: " ")
     }
 }
 
@@ -808,5 +702,110 @@ extension Path {
     }
 }
 
-extension Path: _PrimitiveView {
+extension Path: LosslessStringConvertible {
+    public init?(_ string: String) {
+        let commands = string.components(separatedBy: .whitespacesAndNewlines)
+        var floats: [Double] = []
+        for str in commands {
+            if str == "m" {
+                if floats.count == 2 {
+                    self.move(to: CGPoint(x: floats[0], y: floats[1]))
+                    floats.removeAll(keepingCapacity: true)
+                } else {
+                    Log.err("Insufficient arguments to command.")
+                    return nil
+                }
+            } else if str == "l" {
+                if floats.count == 2 {
+                    self.addLine(to: CGPoint(x: floats[0], y: floats[1]))
+                    floats.removeAll(keepingCapacity: true)
+                } else {
+                    Log.err("Insufficient arguments to command.")
+                    return nil
+                }
+            } else if str == "q" {
+                if floats.count == 4 {
+                    self.addQuadCurve(to: CGPoint(x: floats[0], y: floats[1]),
+                                      control: CGPoint(x: floats[2], y: floats[3]))
+                    floats.removeAll(keepingCapacity: true)
+                } else {
+                    Log.err("Insufficient arguments to command.")
+                    return nil
+                }
+            } else if str == "c" {
+                if floats.count == 6 {
+                    self.addCurve(to: CGPoint(x: floats[0], y: floats[1]),
+                                  control1: CGPoint(x: floats[2], y: floats[3]),
+                                  control2: CGPoint(x: floats[4], y: floats[5]))
+                    floats.removeAll(keepingCapacity: true)
+                } else {
+                    Log.err("Insufficient arguments to command.")
+                    return nil
+                }
+            } else if str == "h" {
+                if floats.count == 0 {
+                    self.closeSubpath()
+                } else {
+                    Log.err("There are unknown arguments to this command.")
+                    return nil
+                }
+            } else {
+                if let d = Double(str) {
+                    floats.append(d)
+                } else {
+                    Log.err("Unable to parse as numeric: \(str)")
+                    return nil
+                }
+            }
+        }
+    }
+
+    public var description: String {
+        var desc: [String] = []
+        self.forEach { element in
+            switch element {
+            case .move(let to):
+                desc.append("\(to.x) \(to.y) m")
+            case .line(let to):
+                desc.append("\(to.x) \(to.y) l")
+            case .quadCurve(let to, let c):
+                desc.append("\(c.x) \(c.y) \(to.x) \(to.y) q")
+            case .curve(let to, let c1, let c2):
+                desc.append("\(c1.x) \(c1.y) \(c2.x) \(c2.y) \(to.x) \(to.y) c")
+            case .closeSubpath:
+                desc.append("h")
+            }
+        }
+        return desc.joined(separator: " ")
+    }
+}
+
+extension Path: Shape {
+    public func path(in frame: CGRect) -> Path {
+        let frame = frame.standardized
+        if frame.isNull == false && frame.width > 0 && frame.height > 0 {
+            let bbox = self.boundingBoxOfPath.standardized
+            if bbox.isNull == false && bbox.width > 0 && bbox.height > 0 {
+                let scaleX = frame.width / bbox.width
+                let scaleY = frame.height / bbox.height
+
+                var transform = CGAffineTransform(scaleX: scaleX, y: scaleY)
+                transform = transform.translatedBy(x: frame.origin.x, y: frame.origin.y)
+
+                return self.applying(transform)
+            }
+        }
+        return Path()
+    }
+
+    public typealias AnimatableData = EmptyAnimatableData
+
+    public var animatableData: EmptyAnimatableData {
+        get { EmptyAnimatableData() }
+        set { fatalError() }
+    }
+
+    public var body: _ShapeView<Self, ForegroundStyle> {
+        .init(shape: self, style: ForegroundStyle())
+    }
 }

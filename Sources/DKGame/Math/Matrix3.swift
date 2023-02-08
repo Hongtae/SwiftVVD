@@ -5,7 +5,7 @@
 //  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
-public struct Matrix3: Matrix {
+public struct Matrix3: Matrix, Hashable {
     public var m11, m12, m13: Scalar
     public var m21, m22, m23: Scalar
     public var m31, m32, m33: Scalar

@@ -5,7 +5,7 @@
 //  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
-public protocol Vector: Hashable {
+public protocol Vector: Equatable {
     associatedtype Scalar: BinaryFloatingPoint
     
     var length: Scalar { get }

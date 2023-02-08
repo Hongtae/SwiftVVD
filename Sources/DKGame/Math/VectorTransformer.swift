@@ -7,7 +7,7 @@
 
 import Foundation
 
-public protocol VectorTransformer: Hashable {
+public protocol VectorTransformer: Equatable {
     associatedtype Vector
 
     static var identity: Self { get }

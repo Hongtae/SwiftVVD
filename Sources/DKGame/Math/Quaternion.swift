@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct Quaternion: Vector {
+public struct Quaternion: Vector, Hashable {
     public var x: Scalar
     public var y: Scalar
     public var z: Scalar
