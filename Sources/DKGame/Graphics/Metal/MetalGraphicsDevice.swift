@@ -733,6 +733,10 @@ public class MetalGraphicsDevice: GraphicsDevice {
             Log.err("MetalGraphicsDevice.makeTexture error: Invalid pixel format!")
             return nil
         }
+        if descriptor.width < 1 || descriptor.height < 1 || descriptor.depth < 1 {
+            Log.error("Texture dimensions (width, height, depth) value must be greater than or equal to 1.")
+            return nil
+        }
 
         let desc = MTLTextureDescriptor()
         switch descriptor.textureType {

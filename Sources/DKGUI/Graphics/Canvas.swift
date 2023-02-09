@@ -69,11 +69,16 @@ struct CanvasContext<Symbols>: ViewProxy where Symbols: View {
     }
 
     func draw() {
-        if let queue = self.sharedContext.commandQueue {
-            var gc = GraphicsContext(opacity: 1.0,
-                                     blendMode: .normal,
-                                     environment: self.environmentValues,
-                                     transform: .identity)
+        let queue = self.sharedContext.commandQueue
+        let backBuffer = self.sharedContext.backBuffer
+        let stencilBuffer = self.sharedContext.stencilBuffer
+        let maskRenderTarget = self.sharedContext.maskRenderTarget
+        if let queue, let backBuffer, let stencilBuffer, let maskRenderTarget {
+            var gc = GraphicsContext(environment: self.environmentValues,
+                                     commandQueue: queue,
+                                     backBuffer: backBuffer,
+                                     stencilBuffer: stencilBuffer,
+                                     maskRenderTarget: maskRenderTarget)
             self.view.renderer(&gc, self.size)
         }
     }

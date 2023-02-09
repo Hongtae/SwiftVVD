@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import DKGame
 
 public struct GraphicsContext {
 
@@ -47,6 +48,31 @@ public struct GraphicsContext {
     public var blendMode: BlendMode
     public var environment: EnvironmentValues
     public var transform: CGAffineTransform
+
+    // graphics command queue
+    private let commandQueue: CommandQueue
+    // render targets
+    private let backBuffer: Texture
+    private let stencilBuffer: Texture
+    private let maskRenderTarget: Texture
+
+    init(opacity: Double = 1.0,
+         blendMode: BlendMode = .normal,
+         environment: EnvironmentValues,
+         transform: CGAffineTransform = .identity,
+         commandQueue: CommandQueue,
+         backBuffer: Texture,
+         stencilBuffer: Texture,
+         maskRenderTarget: Texture) {
+        self.opacity = opacity
+        self.blendMode = blendMode
+        self.environment = environment
+        self.transform = transform
+        self.commandQueue = commandQueue
+        self.backBuffer = backBuffer
+        self.stencilBuffer = stencilBuffer
+        self.maskRenderTarget = maskRenderTarget
+    }
 
     public mutating func scaleBy(x: CGFloat, y: CGFloat) {
         self.transform = self.transform.scaledBy(x: x, y: y)

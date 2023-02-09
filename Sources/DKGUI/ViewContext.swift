@@ -13,6 +13,10 @@ class SharedContext {
     var window: Window?
     var commandQueue: CommandQueue?
 
+    var backBuffer: Texture?
+    var stencilBuffer: Texture?
+    var maskRenderTarget: Texture?
+
     var data: [String: Any] = [:]
 
     init(appContext: AppContext) {

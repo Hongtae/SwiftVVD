@@ -59,22 +59,46 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                 let view = self.viewProxy
                 view.update(tick: tick, delta: delta, date: date)
 
-                if state.visible {
-                    view.draw()
+                if state.visible, let swapChain {
+                    var renderPass = swapChain.currentRenderPassDescriptor()
+                    renderPass.colorAttachments[0].clearColor = .cyan
 
-                    if let swapChain {
-                        var renderPass = swapChain.currentRenderPassDescriptor()
-                        renderPass.colorAttachments[0].clearColor = .cyan
-
-                        if let commandBuffer = swapChain.commandQueue.makeCommandBuffer() {
-                            if let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPass) {
-                                encoder.endEncoding()
-                            }
-                            commandBuffer.commit()
+                    if let commandBuffer = swapChain.commandQueue.makeCommandBuffer() {
+                        if let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPass) {
+                            encoder.endEncoding()
                         }
-
-                        await swapChain.present()
+                        commandBuffer.commit()
                     }
+
+                    let device = swapChain.commandQueue.device
+                    let backBuffer = renderPass.colorAttachments[0].renderTarget!
+                    var maskRenderTarget = self.sharedContext.maskRenderTarget
+                    var stencilBuffer = self.sharedContext.stencilBuffer
+                    if let maskRenderTarget, maskRenderTarget.width == backBuffer.width && maskRenderTarget.height == backBuffer.height {
+                    } else {
+                        let desc = TextureDescriptor(textureType: .type2D,
+                                                     pixelFormat: .r8Unorm,
+                                                     width: backBuffer.width,
+                                                     height: backBuffer.height,
+                                                     usage: [.renderTarget, .sampled])
+                        maskRenderTarget = device.makeTexture(descriptor: desc)
+                    }
+                    if let stencilBuffer, stencilBuffer.width == backBuffer.width && stencilBuffer.height == backBuffer.height {
+                    } else {
+                        let desc = TextureDescriptor(textureType: .type2D,
+                                                     pixelFormat: .stencil8,
+                                                     width: backBuffer.width,
+                                                     height: backBuffer.height,
+                                                     usage: [.renderTarget, .sampled])
+                        stencilBuffer = device.makeTexture(descriptor: desc)
+                    }
+
+                    self.sharedContext.backBuffer = backBuffer
+                    self.sharedContext.maskRenderTarget = maskRenderTarget
+                    self.sharedContext.stencilBuffer = stencilBuffer
+
+                    view.draw()
+                    await swapChain.present()
                 }
 
                 while tickCounter.elapsed < frameInterval {

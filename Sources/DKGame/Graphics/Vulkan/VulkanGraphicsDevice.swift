@@ -1243,6 +1243,12 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             Log.err("VulkanGraphicsDevice.makeTexture(): Invalid texture type!")
             return nil
         }
+
+        if desc.width < 1 || desc.height < 1 || desc.depth < 1 {
+            Log.err("Texture dimensions (width, height, depth) value must be greater than or equal to 1.")
+            return nil
+        }
+
         imageCreateInfo.arrayLayers = UInt32(max(desc.arrayLength, 1))
         if imageCreateInfo.arrayLayers > 1 && imageCreateInfo.imageType == VK_IMAGE_TYPE_2D {
             imageCreateInfo.flags |= UInt32(VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT.rawValue)
