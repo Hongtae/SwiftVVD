@@ -309,7 +309,11 @@ public struct Path: Equatable {
     }
 }
 
-private let _r: Double = 0.552285 // cubic bezier control point ratio for circle
+// Creating a circle with a cubic Bezier curve
+// The cubic bezier curve must be a circular sector of 1/4 of a circle. (pi/2)
+// https://stackoverflow.com/a/27863181
+// (4/3)*tan(pi/8) = 4*(sqrt(2)-1)/3 = 0.552284749830793
+private let _r: Double = 0.552284749830793
 
 extension Path {
     public mutating func move(to p: CGPoint) {
