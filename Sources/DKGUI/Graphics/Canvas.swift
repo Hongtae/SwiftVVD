@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import DKGame
 
 public enum ColorRenderingMode: Equatable, Hashable {
     case nonLinear
@@ -55,7 +56,9 @@ struct CanvasContext<Symbols>: ViewProxy where Symbols: View {
     var modifiers: [any ViewModifier]
     var environmentValues: EnvironmentValues
     var sharedContext: SharedContext
-    var size: CGSize
+    var layoutOffset: CGPoint
+    var layoutSize: CGSize
+    var contentScaleFactor: CGFloat
 
     init(view: Content,
          modifiers: [any ViewModifier],
@@ -65,21 +68,43 @@ struct CanvasContext<Symbols>: ViewProxy where Symbols: View {
         self.environmentValues = environmentValues._resolve(modifiers: modifiers)
         self.view = self.environmentValues._resolve(view)
         self.sharedContext = sharedContext
-        self.size = .zero
+        self.layoutOffset = .zero
+        self.layoutSize = .zero
+        self.contentScaleFactor = 1
+    }
+
+    mutating func layout(offset: CGPoint, size: CGSize, scaleFactor: CGFloat) {
+        self.layoutOffset = offset
+        self.layoutSize = size
+        self.contentScaleFactor = scaleFactor
     }
 
     func draw() {
-        let queue = self.sharedContext.commandQueue
-        let backBuffer = self.sharedContext.backBuffer
-        let stencilBuffer = self.sharedContext.stencilBuffer
-        let maskRenderTarget = self.sharedContext.maskRenderTarget
-        if let queue, let backBuffer, let stencilBuffer, let maskRenderTarget {
-            var gc = GraphicsContext(environment: self.environmentValues,
-                                     commandQueue: queue,
-                                     backBuffer: backBuffer,
-                                     stencilBuffer: stencilBuffer,
-                                     maskRenderTarget: maskRenderTarget)
-            self.view.renderer(&gc, self.size)
+        guard let queue = self.sharedContext.commandQueue else {
+            Log.err("Invalid command queue")
+            return
+        }
+        guard let backBuffer = self.sharedContext.backBuffer else {
+            Log.err("Invalid back buffer")
+            return
+        }
+        guard let stencilBuffer = self.sharedContext.stencilBuffer else {
+            Log.err("Invalid depth stencil buffer")
+            return
+        }
+
+        if self.layoutSize.width > 0 && self.layoutSize.height > 0 {
+            if let commandBuffer = queue.makeCommandBuffer() {
+                var gc = GraphicsContext(environment: self.environmentValues,
+                                         viewOffset: self.layoutOffset,
+                                         viewSize: self.layoutSize,
+                                         viewScaleFactor: self.contentScaleFactor,
+                                         commandBuffer: commandBuffer,
+                                         backBuffer: backBuffer,
+                                         stencilBuffer: stencilBuffer)
+                self.view.renderer(&gc, self.layoutSize)
+                commandBuffer.commit()
+            }
         }
     }
 }

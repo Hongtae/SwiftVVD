@@ -178,27 +178,24 @@ private func encodeSPIRVData(from url: URL?) -> String? {
     return nil
 }
 
-class GraphicsPipelineStates {
+private class GraphicsPipelineStates {
     enum Shader {
         case stencil        // fill stencil, no fragment function
         case color          // vertex color
         case image          // texture with tint color
         case alphaTexture   // for glyph (single channel texture)
+        //case resolveMask    // merge two masks (a8, r8) to render target (r8)
     }
     enum DepthStencil {
         case generateWindingNumber
         case nonZero        // filled using the non-zero rule
-        case evenOdd        // even-odd winding rule
+        case even           // even-odd winding rule
+        case zero           // zero stencil (inverse of non-zero rule)
+        case odd            // odd winding (inverse of even-odd rule)
         case ignore         // don't read stencil
     }
-    
-    struct Vertex {
-        let position: Vector2
-        let texcoord: Vector2
-        let color: DKGame.Color
-    }
 
-    private struct _VertexData {
+    struct Vertex {
         var position: Float2
         var texcoord: Float2
         var color: Float4
@@ -216,8 +213,8 @@ class GraphicsPipelineStates {
 
     struct RenderState: Hashable {
         let shader: Shader
-        let colorFormat: PixelFormat = .invalid
-        let depthFormat: PixelFormat = .invalid
+        let colorFormat: PixelFormat
+        let depthFormat: PixelFormat
         let blendState: BlendState
     }
 
@@ -249,11 +246,11 @@ class GraphicsPipelineStates {
         } else {
             pipelineDescriptor.vertexDescriptor.attributes = [
                 .init(format: .float2, offset: 0, bufferIndex: 0, location: 0 ),
-                .init(format: .float2, offset: MemoryLayout<_VertexData>.offset(of: \.texcoord)!, bufferIndex: 0, location: 1 ),
-                .init(format: .float4, offset: MemoryLayout<_VertexData>.offset(of: \.color)!, bufferIndex: 0, location: 2 ),
+                .init(format: .float2, offset: MemoryLayout<Vertex>.offset(of: \.texcoord)!, bufferIndex: 0, location: 1 ),
+                .init(format: .float4, offset: MemoryLayout<Vertex>.offset(of: \.color)!, bufferIndex: 0, location: 2 ),
             ]
             pipelineDescriptor.vertexDescriptor.layouts = [
-                .init(step: .vertex, stride: MemoryLayout<_VertexData>.stride, bufferIndex: 0)
+                .init(step: .vertex, stride: MemoryLayout<Vertex>.stride, bufferIndex: 0)
             ]
         }
         pipelineDescriptor.primitiveTopology = .triangle
@@ -284,10 +281,20 @@ class GraphicsPipelineStates {
             // filled using the non-zero rule. (reference stencil value: 0)
             descriptor.frontFaceStencil.stencilCompareFunction = .notEqual
             descriptor.backFaceStencil.stencilCompareFunction = .notEqual
-        case .evenOdd:
+        case .even:
             // even-odd winding rule. (reference stencil value: 0)
             descriptor.frontFaceStencil.stencilCompareFunction = .notEqual
             descriptor.backFaceStencil.stencilCompareFunction = .notEqual
+            descriptor.frontFaceStencil.readMask = 1
+            descriptor.backFaceStencil.readMask = 1
+        case .zero:
+            // inverse of non-zero rule
+            descriptor.frontFaceStencil.stencilCompareFunction = .equal
+            descriptor.backFaceStencil.stencilCompareFunction = .equal
+        case .odd:
+            // inverse of even-odd rule
+            descriptor.frontFaceStencil.stencilCompareFunction = .equal
+            descriptor.backFaceStencil.stencilCompareFunction = .equal
             descriptor.frontFaceStencil.readMask = 1
             descriptor.backFaceStencil.readMask = 1
         case .ignore:
@@ -392,11 +399,309 @@ class GraphicsPipelineStates {
         return instance
     }
 
-    static func cacheContext(_ deviceContext: GraphicsDeviceContext) -> Bool {
+    func makeBuffer<T>(_ data: [T]) -> Buffer? {
+        if data.isEmpty { return nil }
+
+        let length = MemoryLayout<T>.stride * data.count
+        if let buffer = device.makeBuffer(length: length,
+                                          storageMode: .shared,
+                                          cpuCacheMode: .writeCombined) {
+            if let ptr = buffer.contents() {
+                data.withUnsafeBytes {
+                    assert($0.count == length)
+                    ptr.copyMemory(from: $0.baseAddress!, byteCount: $0.count)
+                }
+                buffer.flush()
+                return buffer
+            }
+        }
+        return nil
+    }
+}
+
+
+extension GraphicsContext {
+    @discardableResult
+    static func cachePipelineContext(_ deviceContext: GraphicsDeviceContext) -> Bool {
         if let state = GraphicsPipelineStates.sharedInstance(device: deviceContext.device) {
-            deviceContext.cachedDeviceResources["DKGUI.\(Self.self)"] = state
+            deviceContext.cachedDeviceResources["DKGUI.GraphicsPipelineStates"] = state
             return true
         }
         return false
     }
+
+    public func drawLayer(content: (inout GraphicsContext) throws -> Void) rethrows {
+        let device = self.commandBuffer.device
+        let width = self.backBuffer.width
+        let height = self.backBuffer.height
+
+        let backBuffer = device.makeTexture(
+            descriptor: TextureDescriptor(textureType: .type2D,
+                                          pixelFormat: .rgba8Unorm,
+                                          width: width,
+                                          height: height,
+                                          usage: [.renderTarget, .sampled]))
+        let stencilBuffer = device.makeTexture(
+            descriptor: TextureDescriptor(textureType: .type2D,
+                                          pixelFormat: .stencil8,
+                                          width: width,
+                                          height: height,
+                                          usage: [.renderTarget, .sampled]))
+
+        if let backBuffer, let stencilBuffer {
+            var context = self
+            context.backBuffer = backBuffer
+            context.stencilBuffer = stencilBuffer
+            do {
+                try content(&context)
+                // TODO: draw context.backBuffer to self
+
+            } catch {
+                Log.error("Error!")
+            }
+        }
+    }
+
+    private func _fillStencil(_ path: Path, draw: (_: RenderCommandEncoder) -> Bool) {
+        if path.isEmpty { return }
+
+        struct PolygonElement {
+            var vertices: [CGPoint] = []
+        }
+        var polygons: [PolygonElement] = []
+        if true {
+            var startPoint: CGPoint? = nil
+            var currentPoint: CGPoint? = nil
+            var polygon = PolygonElement()
+            path.forEach { element in
+                // make polygon array from path
+                switch element {
+                case .move(let to):
+                    startPoint = to
+                    currentPoint = to
+                case .line(let p1):
+                    if let p0 = currentPoint {
+                        if polygon.vertices.last != p0 { polygon.vertices.append(p0) }
+                        polygon.vertices.append(p1)
+                    }
+                    currentPoint = p1
+                case .quadCurve(let p2, let p1):
+                    if let p0 = currentPoint {
+                        if polygon.vertices.last != p0 { polygon.vertices.append(p0) }
+                        let curve = QuadraticBezier(p0: p0, p1: p1, p2: p2)
+                        let length = curve.approximateLength()
+                        if length > .ulpOfOne {
+                            let step = 1.0 / curve.approximateLength()
+                            var t = step
+                            while t < 1.0 {
+                                t += step
+                                let pt = curve.interpolate(t)
+                                polygon.vertices.append(pt)
+                            }
+                            polygon.vertices.append(p2)
+                        }
+                    }
+                    currentPoint = p2
+                case .curve(let p3, let p1, let p2):
+                    if let p0 = currentPoint {
+                        if polygon.vertices.last != p0 { polygon.vertices.append(p0) }
+                        let curve = CubicBezier(p0: p0, p1: p1, p2: p2, p3: p3)
+                        let length = curve.approximateLength()
+                        if length > .ulpOfOne {
+                            let step = 1.0 / curve.approximateLength()
+                            var t = step
+                            while t < 1.0 {
+                                t += step
+                                let pt = curve.interpolate(t)
+                                polygon.vertices.append(pt)
+                            }
+                            polygon.vertices.append(p2)
+                        }
+                    }
+                    currentPoint = p3
+                case .closeSubpath:
+                    if polygon.vertices.count > 0 {
+                        polygons.append(polygon)
+                        polygon = PolygonElement()
+                    }
+                    currentPoint = startPoint
+                }
+            }
+        }
+
+        let transform = self.transform.concatenating(self.viewTransform)
+        var numVertices = 0
+        polygons.forEach {
+            numVertices += $0.vertices.count + 1
+        }
+        var vertexData: [Float2] = []
+        vertexData.reserveCapacity(numVertices)
+
+        var indexData: [UInt32] = []
+        indexData.reserveCapacity(numVertices * 3)
+
+        polygons.forEach { element in
+            // make vertex, index data.
+            if element.vertices.count < 2 { return }
+
+            let baseIndex = UInt32(vertexData.count)
+            var center: Vector2 = .zero
+            element.vertices.forEach { pt in
+                let v = Vector2(pt.applying(transform))
+                vertexData.append(v.float2)
+                center += v
+            }
+            center = center / Scalar(element.vertices.count)
+            let pivotIndex = UInt32(vertexData.count)
+            vertexData.append(center.float2)
+            for i in 1..<pivotIndex {
+                indexData.append(baseIndex + i - 1)
+                indexData.append(baseIndex + i)
+                indexData.append(pivotIndex)
+            }
+            indexData.append(pivotIndex - 1)
+            indexData.append(baseIndex)
+            indexData.append(pivotIndex)
+        }
+        if vertexData.count < 3 { return }
+        if indexData.count < 3 { return }
+
+        let device = self.commandBuffer.device
+        guard let pipeline = GraphicsPipelineStates.sharedInstance(device: device) else {
+            Log.err("GraphicsContext.fill() error: pipeline failed.")
+            return
+        }
+
+        guard let vertexBuffer = pipeline.makeBuffer(vertexData) else {
+            Log.err("GraphicsContext.fill() error: pipeline.makeBuffer failed.")
+            return
+        }
+        guard let indexBuffer = pipeline.makeBuffer(indexData) else {
+            Log.err("GraphicsContext.fill() error: pipeline.makeBuffer failed.")
+            return
+        }
+
+        // pipeline states for generate polgon winding numbers
+        guard let pipelineState = pipeline.renderState(
+            .init(shader: .stencil,
+                  colorFormat: backBuffer.pixelFormat,
+                  depthFormat: stencilBuffer.pixelFormat,
+                  blendState: .defaultOpaque)) else {
+            Log.err("GraphicsContext.fill() error: pipeline.renderState failed.")
+            return
+        }
+        guard let depthState = pipeline.depthStencilState(.generateWindingNumber) else {
+            Log.err("GraphicsContext.fill() error: pipeline.depthStencilState failed.")
+            return
+        }
+
+        let renderPass = RenderPassDescriptor(
+            colorAttachments: [
+                RenderPassColorAttachmentDescriptor(
+                    renderTarget: backBuffer,
+                    loadAction: .load,
+                    storeAction: .store)
+            ],
+            depthStencilAttachment:
+                RenderPassDepthStencilAttachmentDescriptor(
+                    renderTarget: stencilBuffer,
+                    loadAction: .clear,
+                    storeAction: .dontCare,
+                    clearStencil: 0))
+
+        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPass) else {
+            Log.err("GraphicsContext.fill() error: makeRenderCommandEncoder failed.")
+            return
+        }
+
+        // pass1: Generate polygon winding numbers to stencil buffer
+        encoder.setRenderPipelineState(pipelineState)
+        encoder.setDepthStencilState(depthState)
+
+        encoder.setCullMode(.none)
+        encoder.setFrontFacing(.clockwise)
+        encoder.setStencilReferenceValue(0)
+        encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
+        encoder.drawIndexed(indexCount: indexData.count,
+                            indexType: .uint32,
+                            indexBuffer: indexBuffer,
+                            indexBufferOffset: 0,
+                            instanceCount: 1,
+                            baseVertex: 0,
+                            baseInstance: 0)
+
+        // pass2: draw only pixels that pass the stencil test
+        if draw(encoder) {
+            encoder.endEncoding()
+        } else {
+            Log.err("GraphicsContext.fill() error: draw callback failed.")
+        }
+    }
+
+    public func fill(_ path: Path, with shading: Shading, style: FillStyle = FillStyle()) {
+        self._fillStencil(path) { encoder in
+            let device = self.commandBuffer.device
+            guard let pipeline = GraphicsPipelineStates.sharedInstance(device: device) else {
+                Log.err("GraphicsContext.fill() error: pipeline failed.")
+                return false
+            }
+
+            // pipeline states for polygon fill
+            guard let pipelineState = pipeline.renderState(.init(shader: .color,
+                                                                colorFormat: backBuffer.pixelFormat,
+                                                                depthFormat: stencilBuffer.pixelFormat,
+                                                                blendState: .defaultAlpha)) else {
+                Log.err("GraphicsContext.fill() error: pipeline.renderState failed.")
+                return false
+            }
+            let depthState: DepthStencilState?
+            if style.isEOFilled {
+                depthState = pipeline.depthStencilState(.even)
+            } else {
+                depthState = pipeline.depthStencilState(.nonZero)
+            }
+            guard let depthState else {
+                Log.err("GraphicsContext.fill() error: pipeline.depthStencilState failed.")
+                return false
+            }
+
+            let texcoord = Vector2(0, 0).float2
+            let color = DKGame.Color.red.float4
+            let rectVertices: [GraphicsPipelineStates.Vertex] = [
+                .init(position: Vector2(-1, -1).float2, texcoord: texcoord, color: color),
+                .init(position: Vector2(-1, 1).float2, texcoord: texcoord, color: color),
+                .init(position: Vector2(1, -1).float2, texcoord: texcoord, color: color),
+
+                .init(position: Vector2(1, -1).float2, texcoord: texcoord, color: color),
+                .init(position: Vector2(-1, 1).float2, texcoord: texcoord, color: color),
+                .init(position: Vector2(1, 1).float2, texcoord: texcoord, color: color),
+            ]
+
+            guard let vertexBuffer = pipeline.makeBuffer(rectVertices) else {
+                Log.err("GraphicsContext.fill() error: pipeline.makeBuffer() failed.")
+                return false
+            }
+            encoder.setCullMode(.none)
+            encoder.setFrontFacing(.clockwise)
+            encoder.setStencilReferenceValue(0)
+            encoder.setRenderPipelineState(pipelineState)
+            encoder.setDepthStencilState(depthState)
+            encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
+            encoder.draw(vertexStart: 0,
+                         vertexCount: rectVertices.count,
+                         instanceCount: 1,
+                         baseInstance: 0)
+            return true
+        }
+    }
+
+    public func stroke(_ path: Path, with shading: Shading, style: StrokeStyle) {
+        if path.isEmpty { return }
+    }
+
+    public func stroke(_ path: Path, with shading: Shading, lineWidth: CGFloat = 1) {
+        stroke(path, with: shading, style: StrokeStyle(lineWidth: lineWidth))
+    }
+
+    
 }

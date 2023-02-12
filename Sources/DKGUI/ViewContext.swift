@@ -15,7 +15,6 @@ class SharedContext {
 
     var backBuffer: Texture?
     var stencilBuffer: Texture?
-    var maskRenderTarget: Texture?
 
     var data: [String: Any] = [:]
 
@@ -30,7 +29,11 @@ protocol ViewProxy {
     var modifiers: [any ViewModifier] { get }
     var environmentValues: EnvironmentValues { get }
     var sharedContext: SharedContext { get }
+    var layoutOffset: CGPoint { get }
+    var layoutSize: CGSize { get }
+    var contentScaleFactor: CGFloat { get }
 
+    mutating func layout(offset: CGPoint, size: CGSize, scaleFactor: CGFloat)
     func update(tick: UInt64, delta: Double, date: Date)
     func draw()
     func drawOverlay()
@@ -51,6 +54,9 @@ struct ViewContext<Content>: ViewProxy where Content: View {
     var modifiers: [any ViewModifier]
     var environmentValues: EnvironmentValues
     var sharedContext: SharedContext
+    var layoutOffset: CGPoint = .zero
+    var layoutSize: CGSize = .zero
+    var contentScaleFactor: CGFloat = 1
 
     init(view: Content, modifiers: [any ViewModifier], environmentValues: EnvironmentValues, sharedContext: SharedContext) {
         self.environmentValues = environmentValues._resolve(modifiers: modifiers)
@@ -62,8 +68,18 @@ struct ViewContext<Content>: ViewProxy where Content: View {
                                       environmentValues: self.environmentValues,
                                       sharedContext: sharedContext)
     }
+
     func draw() {
         subview.draw()
+    }
+
+    mutating func layout(offset: CGPoint, size: CGSize, scaleFactor: CGFloat) {
+        self.layoutOffset = offset
+        self.layoutSize = size
+        self.contentScaleFactor = scaleFactor
+        self.subview.layout(offset: self.layoutOffset,
+                            size: self.layoutSize,
+                            scaleFactor: self.contentScaleFactor)
     }
 }
 

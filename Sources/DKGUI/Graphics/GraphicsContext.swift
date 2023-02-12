@@ -49,29 +49,45 @@ public struct GraphicsContext {
     public var environment: EnvironmentValues
     public var transform: CGAffineTransform
 
-    // graphics command queue
-    private let commandQueue: CommandQueue
+    let viewTransform: CGAffineTransform
+    let commandBuffer: CommandBuffer
     // render targets
-    private let backBuffer: Texture
-    private let stencilBuffer: Texture
-    private let maskRenderTarget: Texture
+    var backBuffer: Texture
+    var stencilBuffer: Texture
 
     init(opacity: Double = 1.0,
          blendMode: BlendMode = .normal,
          environment: EnvironmentValues,
          transform: CGAffineTransform = .identity,
-         commandQueue: CommandQueue,
+         viewOffset: CGPoint,
+         viewSize: CGSize,
+         viewScaleFactor: CGFloat,
+         commandBuffer: CommandBuffer,
          backBuffer: Texture,
-         stencilBuffer: Texture,
-         maskRenderTarget: Texture) {
+         stencilBuffer: Texture) {
         self.opacity = opacity
         self.blendMode = blendMode
         self.environment = environment
         self.transform = transform
-        self.commandQueue = commandQueue
+        self.commandBuffer = commandBuffer
         self.backBuffer = backBuffer
         self.stencilBuffer = stencilBuffer
-        self.maskRenderTarget = maskRenderTarget
+
+        let dim = { (tex: Texture) in (tex.width, tex.height, tex.depth) }
+        assert(dim(backBuffer) == dim(stencilBuffer))
+
+        let scale = CGSize.maximum(viewSize, CGSize(width: 1, height: 1))
+        let offset = CGAffineTransform(translationX: viewOffset.x, y: viewOffset.y)
+        let normalize = CGAffineTransform(scaleX: 1.0 / scale.width, y: 1.0 / scale.height)
+
+        // transform to screen viewport space.
+        let clipSpace = CGAffineTransform(scaleX: 2.0, y: -2.0)
+            .concatenating(CGAffineTransform(translationX: -1.0, y: 1.0))
+
+        self.viewTransform = CGAffineTransform.identity
+            .concatenating(offset)
+            .concatenating(normalize)
+            .concatenating(clipSpace)
     }
 
     public mutating func scaleBy(x: CGFloat, y: CGFloat) {
@@ -245,19 +261,6 @@ public struct GraphicsContext {
 
     public func resolve(_ shading: Shading) -> Shading {
         fatalError()
-    }
-    public func drawLayer(content: (inout GraphicsContext) throws -> Void) rethrows {
-        var context = self
-        try content(&context)
-    }
-    public func fill(_ path: Path, with shading: Shading, style: FillStyle = FillStyle()) {
-
-    }
-    public func stroke(_ path: Path, with shading: Shading, style: StrokeStyle) {
-
-    }
-    public func stroke(_ path: Path, with shading: Shading, lineWidth: CGFloat = 1) {
-        stroke(path, with: shading, style: StrokeStyle(lineWidth: lineWidth))
     }
 
     public struct ResolvedImage {

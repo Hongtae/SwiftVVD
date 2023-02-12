@@ -8,8 +8,8 @@
 import DKGame
 
 protocol WindowProxy: AnyObject {
-    associatedtype Content: View
-    var view: Content { get }
+//    associatedtype Content: View
+//    var view: Content { get }
     var identifier: String { get }
     var contextType: Any.Type { get }
     var window: Window? { get }

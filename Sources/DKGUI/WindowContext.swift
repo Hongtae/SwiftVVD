@@ -16,7 +16,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
 
     private(set) var swapChain: SwapChain?
     private(set) var window: Window?
-    var view: Content
+
     var viewProxy: any ViewProxy
     var environmentValues: EnvironmentValues
     var sharedContext: SharedContext
@@ -43,6 +43,10 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
             Log.info("Window upate task start.")
             var tickCounter = TickCounter()
 
+            var contentBounds: CGRect = .null
+            var contentScaleFactor: CGFloat = 1
+            guard var view = self?.viewProxy else { return }
+
             mainLoop: while true {
                 guard let self = self else { break }
                 if Task.isCancelled { break }
@@ -56,33 +60,22 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                 let tick = tickCounter.timestamp
                 let date = Date(timeIntervalSinceNow: 0)
 
-                let view = self.viewProxy
+                if state.bounds != contentBounds || state.contentScaleFactor != contentScaleFactor {
+                    view.layout(offset: state.bounds.origin,
+                                size: state.bounds.size,
+                                scaleFactor: state.contentScaleFactor)
+                    contentBounds = state.bounds
+                    contentScaleFactor = state.contentScaleFactor
+                }
                 view.update(tick: tick, delta: delta, date: date)
 
                 if state.visible, let swapChain {
                     var renderPass = swapChain.currentRenderPassDescriptor()
-                    renderPass.colorAttachments[0].clearColor = .cyan
-
-                    if let commandBuffer = swapChain.commandQueue.makeCommandBuffer() {
-                        if let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPass) {
-                            encoder.endEncoding()
-                        }
-                        commandBuffer.commit()
-                    }
 
                     let device = swapChain.commandQueue.device
                     let backBuffer = renderPass.colorAttachments[0].renderTarget!
-                    var maskRenderTarget = self.sharedContext.maskRenderTarget
                     var stencilBuffer = self.sharedContext.stencilBuffer
-                    if let maskRenderTarget, maskRenderTarget.width == backBuffer.width && maskRenderTarget.height == backBuffer.height {
-                    } else {
-                        let desc = TextureDescriptor(textureType: .type2D,
-                                                     pixelFormat: .r8Unorm,
-                                                     width: backBuffer.width,
-                                                     height: backBuffer.height,
-                                                     usage: [.renderTarget, .sampled])
-                        maskRenderTarget = device.makeTexture(descriptor: desc)
-                    }
+
                     if let stencilBuffer, stencilBuffer.width == backBuffer.width && stencilBuffer.height == backBuffer.height {
                     } else {
                         let desc = TextureDescriptor(textureType: .type2D,
@@ -94,8 +87,16 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                     }
 
                     self.sharedContext.backBuffer = backBuffer
-                    self.sharedContext.maskRenderTarget = maskRenderTarget
                     self.sharedContext.stencilBuffer = stencilBuffer
+
+                    renderPass.colorAttachments[0].clearColor = .cyan
+                    if let commandBuffer = swapChain.commandQueue.makeCommandBuffer() {
+                        // clear back buffer
+                        if let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPass) {
+                            encoder.endEncoding()
+                        }
+                        commandBuffer.commit()
+                    }
 
                     view.draw()
                     await swapChain.present()
@@ -115,10 +116,10 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
         self.contextType = contextType
         self.identifier = identifier
         self.title = title
-        self.view = content
+
         self.environmentValues = EnvironmentValues()
         self.sharedContext = SharedContext(appContext: appContext!)
-        self.viewProxy = _makeViewProxy(self.view,
+        self.viewProxy = _makeViewProxy(content,
                                         modifiers: [],
                                         environmentValues: self.environmentValues,
                                         sharedContext: self.sharedContext)
@@ -142,10 +143,17 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                                               delegate: self) {
 
                 if let graphicsDevice = appContext?.graphicsDeviceContext {
-                    if GraphicsPipelineStates.cacheContext(graphicsDevice) == false {
+                    if GraphicsContext.cachePipelineContext(graphicsDevice) == false {
                         Log.error("Failed to cache GraphicsPipelineStates")
                     }
                     if let swapChain = graphicsDevice.renderQueue()?.makeSwapChain(target: window) {
+                        self.state.frame = window.windowFrame
+                        self.state.bounds = window.contentBounds
+                        self.state.contentScaleFactor = window.contentScaleFactor
+                        self.state.visible = window.visible
+                        self.state.activated = window.activated
+                        self.window = window
+
                         window.addEventObserver(self) {
                             [weak self](event: WindowEvent) in
                             if let self = self { self.onWindowEvent(event: event) }
@@ -158,7 +166,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                             [weak self](event: MouseEvent) in
                             if let self = self { self.onMouseEvent(event: event) }
                         }
-                        self.window = window
+
                         self.swapChain = swapChain
                         self.sharedContext.window = self.window
                         self.sharedContext.commandQueue = swapChain.commandQueue
@@ -180,6 +188,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
 
     @MainActor
     func onWindowEvent(event: WindowEvent) {
+        if event.window !== self.window { return }
         Log.debug("WindowContext.onWindowEvent: \(event)")
         switch event.type {
         case .closed:
@@ -224,11 +233,13 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
 
     @MainActor
     func onKeyboardEvent(event: KeyboardEvent) {
+        if event.window !== self.window { return }
         Log.debug("WindowContext.onKeyboardEvent: \(event)")
     }
 
     @MainActor
     func onMouseEvent(event: MouseEvent) {
+        if event.window !== self.window { return }
         if event.type != .move {
             Log.debug("WindowContext.onMouseEvent: \(event)")
         }

@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import DKGame
 
 #if canImport(CoreGraphics)
 import CoreGraphics
@@ -13,6 +14,12 @@ import CoreGraphics
 public typealias CGAffineTransform = CoreGraphics.CGAffineTransform
 public typealias CGLineCap = CoreGraphics.CGLineCap
 public typealias CGLineJoin = CoreGraphics.CGLineJoin
+
+extension CGAffineTransform {
+    public var matrix3: Matrix3 {
+        Matrix3(a, b, 0.0, c, d, 0.0, tx, ty, 1.0)
+    }
+}
 
 #else
 public typealias CGAffineTransform = AffineTransform
