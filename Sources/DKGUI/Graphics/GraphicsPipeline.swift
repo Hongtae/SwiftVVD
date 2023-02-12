@@ -434,24 +434,18 @@ extension GraphicsContext {
         let device = self.commandBuffer.device
         let width = self.backBuffer.width
         let height = self.backBuffer.height
+        let pixelFormat = self.backBuffer.pixelFormat
 
         let backBuffer = device.makeTexture(
             descriptor: TextureDescriptor(textureType: .type2D,
-                                          pixelFormat: .rgba8Unorm,
-                                          width: width,
-                                          height: height,
-                                          usage: [.renderTarget, .sampled]))
-        let stencilBuffer = device.makeTexture(
-            descriptor: TextureDescriptor(textureType: .type2D,
-                                          pixelFormat: .stencil8,
+                                          pixelFormat: pixelFormat,
                                           width: width,
                                           height: height,
                                           usage: [.renderTarget, .sampled]))
 
-        if let backBuffer, let stencilBuffer {
+        if let backBuffer {
             var context = self
             context.backBuffer = backBuffer
-            context.stencilBuffer = stencilBuffer
             do {
                 try content(&context)
                 // TODO: draw context.backBuffer to self

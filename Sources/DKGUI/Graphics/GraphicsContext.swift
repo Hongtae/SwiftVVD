@@ -53,7 +53,7 @@ public struct GraphicsContext {
     let commandBuffer: CommandBuffer
     // render targets
     var backBuffer: Texture
-    var stencilBuffer: Texture
+    let stencilBuffer: Texture
 
     init(opacity: Double = 1.0,
          blendMode: BlendMode = .normal,
