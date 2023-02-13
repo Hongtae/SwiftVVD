@@ -1134,9 +1134,11 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         depthStencilState.minDepthBounds = 0.0
         depthStencilState.maxDepthBounds = 1.0
 
-        if depthStencilState.front.failOp == VK_STENCIL_OP_KEEP &&
+        if depthStencilState.front.compareOp == VK_COMPARE_OP_ALWAYS &&
+           depthStencilState.front.failOp == VK_STENCIL_OP_KEEP &&
            depthStencilState.front.passOp == VK_STENCIL_OP_KEEP &&
            depthStencilState.front.depthFailOp == VK_STENCIL_OP_KEEP &&
+           depthStencilState.back.compareOp == VK_COMPARE_OP_ALWAYS &&
            depthStencilState.back.failOp == VK_STENCIL_OP_KEEP &&
            depthStencilState.back.passOp == VK_STENCIL_OP_KEEP &&
            depthStencilState.back.depthFailOp == VK_STENCIL_OP_KEEP {

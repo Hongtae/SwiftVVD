@@ -271,7 +271,8 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
             renderPassBeginInfo.framebuffer = self.framebuffer
             vkCmdBeginRenderPass(commandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE)
 
-            // setup viewport
+            // setup dynamic states to default.
+            // VK_DYNAMIC_STATE_VIEWPORT
             var viewport = VkViewport(x: 0.0,
                                       y: 0.0,
                                       width: Float(frameWidth),
@@ -284,10 +285,32 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
             }
             vkCmdSetViewport(commandBuffer, 0, 1, &viewport)
 
-            // setup scissor
+            // VK_DYNAMIC_STATE_SCISSOR
             var scissorRect = VkRect2D(offset: VkOffset2D(x: 0, y: 0),
                                        extent: VkExtent2D(width: UInt32(frameWidth), height: UInt32(frameHeight)))
             vkCmdSetScissor(commandBuffer, 0, 1, &scissorRect)
+
+            // VK_DYNAMIC_STATE_LINE_WIDTH
+            // vkCmdSetLineWidth(commandBuffer, 1.0)
+
+            // VK_DYNAMIC_STATE_DEPTH_BIAS
+            // note: VkPipelineRasterizationStateCreateInfo.depthBiasEnable must be enabled.
+            // vkCmdSetDepthBias(commandBuffer, 0, 0, 0)
+
+            // VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE
+            vkCmdSetDepthTestEnable(commandBuffer, VK_FALSE)
+
+            // VK_DYNAMIC_STATE_STENCIL_TEST_ENABLE
+            vkCmdSetStencilTestEnable(commandBuffer, VK_FALSE)
+
+            // VK_DYNAMIC_STATE_DEPTH_BOUNDS_TEST_ENABLE
+            vkCmdSetDepthBoundsTestEnable(commandBuffer, VK_FALSE)
+
+            // VK_DYNAMIC_STATE_CULL_MODE
+            // vkCmdSetCullMode(commandBuffer, VkCullModeFlags(VK_CULL_MODE_NONE.rawValue))
+
+            // VK_DYNAMIC_STATE_FRONT_FACE
+            // vkCmdSetFrontFace(commandBuffer, VK_FRONT_FACE_CLOCKWISE)
 
             // recording commands
             for cmd in self.commands {
@@ -392,7 +415,6 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
             let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
                 vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.pipeline)
                 state.pipelineState = pipeline
-                state.depthStencilState?.bind(commandBuffer: commandBuffer)
             }
             self.encoder!.commands.append(command)
             self.encoder!.pipelineStateObjects.append(pipeline)
