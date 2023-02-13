@@ -50,21 +50,31 @@ public struct GraphicsContext {
     public var transform: CGAffineTransform
 
     let viewTransform: CGAffineTransform
+    let bounds: CGRect
+    let scaleFactor: CGFloat
     let commandBuffer: CommandBuffer
     // render targets
-    var backBuffer: Texture
+    let backBuffer: Texture
     let stencilBuffer: Texture
+    var maskTexture: Texture
 
-    init(opacity: Double = 1.0,
+    init?(opacity: Double = 1.0,
          blendMode: BlendMode = .normal,
          environment: EnvironmentValues,
          transform: CGAffineTransform = .identity,
-         viewOffset: CGPoint,
-         viewSize: CGSize,
-         viewScaleFactor: CGFloat,
+         bounds: CGRect,
+         scaleFactor: CGFloat,
          commandBuffer: CommandBuffer,
          backBuffer: Texture,
          stencilBuffer: Texture) {
+
+        let queue = commandBuffer.commandQueue
+        guard let maskTexture = GraphicsPipelineStates.sharedInstance(commandQueue: queue)?.defaultMaskTexture
+        else {
+            Log.err("GraphicsPipelineStates error")
+            return nil
+        }
+
         self.opacity = opacity
         self.blendMode = blendMode
         self.environment = environment
@@ -72,12 +82,17 @@ public struct GraphicsContext {
         self.commandBuffer = commandBuffer
         self.backBuffer = backBuffer
         self.stencilBuffer = stencilBuffer
+        self.maskTexture = maskTexture
+
+        self.bounds = bounds.standardized
+        self.scaleFactor = scaleFactor
 
         let dim = { (tex: Texture) in (tex.width, tex.height, tex.depth) }
         assert(dim(backBuffer) == dim(stencilBuffer))
 
-        let scale = CGSize.maximum(viewSize, CGSize(width: 1, height: 1))
-        let offset = CGAffineTransform(translationX: viewOffset.x, y: viewOffset.y)
+        let origin = bounds.origin
+        let scale = CGSize.maximum(bounds.size, CGSize(width: 1, height: 1))
+        let offset = CGAffineTransform(translationX: origin.x, y: origin.y)
         let normalize = CGAffineTransform(scaleX: 1.0 / scale.width, y: 1.0 / scale.height)
 
         // transform to screen viewport space.
@@ -88,6 +103,33 @@ public struct GraphicsContext {
             .concatenating(offset)
             .concatenating(normalize)
             .concatenating(clipSpace)
+    }
+
+    func makeLayerContext() -> Self? {
+                let device = self.commandBuffer.device
+        let width = self.backBuffer.width
+        let height = self.backBuffer.height
+        let pixelFormat = self.backBuffer.pixelFormat
+
+        if let backBuffer = device.makeTexture(
+            descriptor: TextureDescriptor(textureType: .type2D,
+                                          pixelFormat: pixelFormat,
+                                          width: width,
+                                          height: height,
+                                          usage: [.renderTarget, .sampled])) {
+
+            let bounds = CGRect(origin: .zero, size: self.bounds.size)
+            return GraphicsContext(opacity: self.opacity,
+                                          blendMode: self.blendMode,
+                                          environment: self.environment,
+                                          transform: self.transform,
+                                          bounds: bounds,
+                                          scaleFactor: self.scaleFactor,
+                                          commandBuffer: self.commandBuffer,
+                                          backBuffer: backBuffer,
+                                          stencilBuffer: self.stencilBuffer)
+        }
+        return nil
     }
 
     public mutating func scaleBy(x: CGFloat, y: CGFloat) {

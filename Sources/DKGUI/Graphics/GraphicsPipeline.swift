@@ -9,7 +9,7 @@ import Foundation
 import DKGame
 
 
-// glslc {input-file} -o {output-file} -Os --target-env=vulkan1.3
+// glslc {input-file} -o {output-file} -Os --target-env=vulkan1.2
 private let vsStencilGLSL = """
     /* vertex shader for writing stencil only */
     #version 450
@@ -22,11 +22,11 @@ private let vsStencilGLSL = """
     """
 
 private let vsStencilSpvCEB64 = """
-    XQAAAAR4AgAAAAAAAAABgJdesntsONN+HGcuNYYB2HaeuzqB/1JEjzTMhsjJ47cvV+jDp5\
-    wmI6dY7v+CjHUnSZSByNZ1Fsvw6oKTEP6ntLqjDTOV81fDIOfUM7gZIajT4DC7D1knh4og\
-    uymzewwBXQtEig5UNZ30zr2Q06FKGV/UGL7kfXtcGmiN3uoXRKKkRyQhSuUKAgkP+DaEdq\
-    1K5QkEzWZdAhajbWmWeYc7FopuJlgZX34yDCmYdjU3uw668eOYxNG6+GY1Ub2jL2TeTnTA0\
-    mpLzlmE9f35ILERvvTZ5CqORtiFgD2xGeioWInO3XgtB2hcWX1ZQpbHFHPP77eF4IIA
+    XQAAAAR4AgAAAAAAAAABgJdesnC95qjyNRPxiVbqegigYKDoCIXwQXVuG9QUdX/sz/g0ud\
+    Z1k9NMG4TOnzFTBQWL0mum/q1NErbUd7wshLipDIuwIE/3pJbxD0oPiyriJ9ME6rvrrNEK\
+    3yiko9ulTcWJOlMz9ZO+aUyf3WUw/WQ5tqoIyvbK6Ne+GivV5pvo2dX2+hzkJ9cH082r1K\
+    Wbh3D8SghnyRA3ymyR2ju+b8hXKAXIqk9toUqXZI5wODcc03rWbnT1lW5YHGytgQVvc5ZV\
+    sUFn5EsZY3P+3s+h8PF5h+sh8EXya8RNGWYxbs9yCpBLutJ7cccwXimZP3DwVCNDJlg=
     """
 
 private let vsGLSL = """
@@ -37,104 +37,209 @@ private let vsGLSL = """
     layout (location=1) in vec2 texcoord;
     layout (location=2) in vec4 color;
 
-    layout (location=0) out vec2 outPosition;
-    layout (location=1) out vec2 outTexcoord;
+    layout (location=0) out vec2 outMaskUV;
+    layout (location=1) out vec2 outTexUV;
     layout (location=2) out vec4 outColor;
 
     void main() {
-        outPosition = position;
-        outTexcoord = texcoord;
+        outMaskUV = (position + vec2(1, -1)) * vec2(0.5, -0.5);
+        outTexUV = texcoord;
         outColor = color;
         gl_Position = vec4(position, 0, 1);
     }
     """
 
 private let vsSpvCEB64 = """
-    XQAAAASwBAAAAAAAAAABgJdesntsONM6MGcxLKsQZjMqZyK9s+I5F9rVJqCzj9BrRuMFcP\
-    pPjJTufO2GnekV4S/IzcItw0iVP+X5oQW6csvuo5GS2Ihrgt9U/0k7XYsDg2hWLwWyNRd2\
-    i5M7LA80mBfTGUL9qSH5IFJp2HmzlKr7mK0KjEZMHymQ2d17sbqWysevCH7QwIrKiTJ6X6\
-    7R3nygYevfIGd9/G1/mYy9LVUDz8qDF5yRF1XvNLB2eRYmsICZnTd8UzfX6FkcWANoWXkm\
-    8lJzw7/smwtoZ0shMDC+fR5ikvCX052fx7xhfmsNbuFO6YHWvgq/Mj+UA3LCin/xaDjXR2\
-    19dyOxOJlxm67UUTY2NJuf8NA6EK7djXgF1hRy2FRcwVTgmX8iY8VnvCXs+Q4ITlnxTBjR\
-    aKUUDxfL2Jb9nN2WefrCzIjnYM/PRYF/aCv7qXfdLT56ToL+MPguij1J7zOPSJiPi//03P\
-    JkFAwhjUgkApaaAwscDAVqDQ/YpX876Q5J1FDKuHkIc1XbdTpf8lygzFQmW+4b38wA
+    XQAAAAQQBAAAAAAAAAABgJdesnC95qjyNRPy1HqTc7gPRthELV8YDfBHNWmt93l0V6ZSk2\
+    s6fW41iQ5gA3M3dIKJKHQBbfk2ux785iNMcOzvSUxGzMdCYrZ1qT/LVH9/z/oSnRpnkLix\
+    kQ15KbbSYTuAEEVwxpGQ1QXokFQsHl4pd0qLCZzOvH/xzezIiNwnzG7nAUdPeQJzwRYZjp\
+    P0LHfRAgDbn30FRqT3HB3Y+TQUYnc1k/pMSnSQgBmp13QHXYLyZRt+E6aTrGLqg7jtsgDA\
+    wxsnlA3WyMhcnHuq9FyVQysA/CoLBDy0r7XobWVvQJ2BJxOFhvT3U5IlU/miEMC5+npsUU\
+    2DCnXXCer6hDoJXnbNHI+avpFcdDBbB+P8/jLtp+qNMVmYmrUCjvhM+EiGZ15ms7yCzAk2\
+    41WIbZH6Q4iCPH0E3YsiAexGTRNjAeFh9tAsAA==
     """
 
 private let fsGLSL = """
     /* fragment-shader: vertex color */
     #version 450
 
-    layout (location=0) in vec2 position;
-    layout (location=1) in vec2 texcoord;
+    layout (push_constant) uniform Constants {
+        float linear;
+        float constant;
+    } pc;
+
+    layout (binding=0) uniform sampler2D maskImage;
+
+    layout (location=0) in vec2 maskUV;
+    layout (location=1) in vec2 texUV;
     layout (location=2) in vec4 color;
 
     layout (location=0) out vec4 outFragColor;
 
     void main(void) {
+        if ((texture(maskImage, maskUV).r * pc.linear + pc.constant) <= 0)
+            discard;
         outFragColor = color;
     }
     """
 
 private let fsSpvCEB64 = """
-    XQAAAAQMAgAAAAAAAAABgJdesntsONM6MGcrJRJFH8eaWFhPhF/JgkVaMKDLBIehEkszc0\
-    5hwuLCi2c2uZq7XW/7AY0KbL2Rwo/dGk5XbL0h8jqJ+yz0XcClGDo6FfdY3mTBUeJufqjr\
-    3Lkng6/V1JJBTLD+nnardxsTuWH+d3kqBsEOvJvHvaVvd+3ubsYeulURrEldB0aem8ZuH4\
-    ooN+cYIQNr5N/zMd3m2O7cPoMu2fZGV9swxtT3y+umjWnu2em3LxwYLtSFak8FfL5JUx14\
-    v+OoioDBuElhe+DpDeo/UDLsl5HSSjUdWAeWXFGcRgA=
+    XQAAAASkAwAAAAAAAAABgJdesnC95qjyNRPy5lq/c7gPRthELV8YDfBHNWmt93l0V6ZSk2\
+    s6fW41iQ5gA3M3buNwyxVG6G3M7mn8NCxy4BegXw4XPfTOdfur0UFQsfE/do9CBAfT6FYp\
+    ApdJDQy6pn4MTcQYrmVd7H7HN/8lPGZfYn/6mGRGwnvbkrLE7f7xFnIget4Mv96x7OlOMk\
+    mdJjmq6dIgodCJyZq7Ir3V1b3Axq+zsAqxLa4Yh7XgEOhK4qlC4LiMFYl+ILXRX4zAyvQg\
+    9kj1QTbp44H9jYG2XEc7I04mehrlhkQsLBfIUc/dIJjTsBgbmHU1z76Fb8TxTpbFlbjdyQ\
+    VOGQMbcYYBDcKDQvFTREO7gtQLxvP323aVr2E+bQF3Vvbx884pYjIrjtX7vdriPoLtXJ6t\
+    LWX24bHCo4XQeJWZm6O4+dtmKnvJ+CEjb3H6PuK1AA==
     """
 
 private let fsTextureGLSL = """
     /* fragment-shader: vertex color, uniform texture */
     #version 450
 
-    layout (binding=0) uniform sampler2D image;
+    layout (push_constant) uniform Constants {
+        float linear;
+        float constant;
+    } pc;
 
-    layout (location=0) in vec2 position;
-    layout (location=1) in vec2 texcoord;
+    layout (binding=0) uniform sampler2D maskImage;
+    layout (binding=1) uniform sampler2D image;
+
+    layout (location=0) in vec2 maskUV;
+    layout (location=1) in vec2 texUV;
     layout (location=2) in vec4 color;
 
     layout (location=0) out vec4 outFragColor;
 
     void main() {
-        outFragColor = texture(image, texcoord) * color;
+        if ((texture(maskImage, maskUV).r * pc.linear + pc.constant) <= 0)
+            discard;
+        outFragColor = texture(image, texUV) * color;
     }
     """
 
 private let fsTextureSpvCEB64 = """
-    XQAAAATUAgAAAAAAAAABgJdesntsONM6MGctmKIB2HaeuzmgkxfX256KE1HOZIhrusCJ00\
-    Nn8k7Pi3d42hliNd0QudCMu4Bu1dAmK7j4zRV2qYZl5l8PfDaM/mz2/HgrqvHwcD7o5Eli\
-    3bGZ9xrelsWEyh6qGbUpnDohd44jZu9o/zr5ARxpz2vf4dN7QWpcWAq55iqfP/J8AlWOfV\
-    kGj7T1eUc2PTgf+YHYzY0iA+z6RLnuO6xN0PAKlU1+YizwCgEyOQBziBKKn3TdyE3n1YhA\
-    vl5+QSCCH1dDw00JUPw1MpYo5i8gMBYBWOgtTBfv8egGietEE/LzjZVup9AMgiqPl2WMif\
-    ooq/JVNDsy1RTy3hGj5UMrgWOqYseDd+b6yUjCdu3Fb0avP7HF9ZkeaUYA
+    XQAAAAREBAAAAAAAAAABgJdesnC95qjyNRPzT/n7FEkN1hUbMQvIcJ3CE67M6dB2Y23RAR\
+    9k2oVNOJaKtw9bEF24BbVkuOzAzXM/dJ3t1cc+fA2Rdpx4UOhzQXEsTjwj49uC58ZLPrwX\
+    Zpigx+lHz8nMq6dt3xsj+qwseIjaSRNYHJTFWwArkOZ4bxzfpZOHa7yo5MlfpqytNco1fC\
+    Y63iNrih9H7ByUP8Edj2hD7sl+92cJPbgz3ZYotqMc/U+TjxjOtHBYIvdCktOYZWk1aSeu\
+    ttNC+KQ8/3BNEjLWtwksM0KvSJFCIKCxyTyQUYdshVfeLR2gLEU+ORPzxXLL+DBSvlS2Cl\
+    4YuhWa1hWlQY2V7VVGhXODEdky1HXDimhsJYwlFABzBEI728dZGukgB34KB5PkAM1bWh33\
+    jEtnTarJ+WzZtJRq/fEmdnttrK47OoA1fkLBM8vfZKyV2NLJ2hcy3Rh8rSPvviL1b60ltu\
+    ysvKUy4xprew1EAA==
     """
 
 private let fsAlphaTextureGLSL = """
     /* fragment-shader: vertex color, uniform texture alpha (r8) */
     #version 450
 
-    layout (binding=0) uniform sampler2D image;
+    layout (push_constant) uniform Constants {
+        float linear;
+        float constant;
+    } pc;
 
-    layout (location=0) in vec2 position;
-    layout (location=1) in vec2 texcoord;
+    layout (binding=0) uniform sampler2D maskImage;
+    layout (binding=1) uniform sampler2D image;
+
+    layout (location=0) in vec2 maskUV;
+    layout (location=1) in vec2 texUV;
     layout (location=2) in vec4 color;
 
     layout (location=0) out vec4 outFragColor;
 
     void main(void) {
-        outFragColor = vec4(color.rgb, texture(image, texcoord).r * color.a);
+        if ((texture(maskImage, maskUV).r * pc.linear + pc.constant) <= 0)
+            discard;
+        outFragColor = vec4(color.rgb, texture(image, texUV).r * color.a);
     }
     """
 
 private let fsAlphaTextureSpvCEB64 = """
-    XQAAAASUAwAAAAAAAAABgJdesntsONM6MGcxcoMSBeaqbZCSM/1LXfg6AGNgofxumxOEb8\
-    b615/PtnqMfm/XWlm6+YN+BmCRldMPqKzeHyGTCvtXjSGTE/R59f4ITWJxQxQ2jpntrZGM\
-    +h2a2cA1ClEKyd6JekmlZv1J2/H56RGAYWG91/hL5cHNzd1V85upoxe2/2bUWjbCtzvULQ\
-    nY3L6Nxy7SJx2le0r6QBFVnrTnu5xrChvOHTmN6r+Jnt12HzXZ2bNgFrS8SEFA30Sbv/Bm\
-    9hv2EHOEMwczX2+Crjq9tL0Fiuzouw1TolIEJ/bXUMJTpN1PBHTTus7hBxkOmGkwC/GIeL\
-    J/l+Bq187SedQRz9zWyKfo1UgnMo2LOtuc/V50ujE14A5R5sau6RNxh40RSF67eBahuEC5\
-    TWYNZckWtKxwY0icr0gZ5LKhJsWwNspes4qNS9cXn/IMfuvMZO4A
+    XQAAAAQEBQAAAAAAAAABgJdesnC95qjyNRP0DqSHSDMt2CDmdjcMiDoyZhb2n2T8l4pQf6\
+    WN+e258rgjKEZeAhdTyJLzOfxsZ6OXHPSV2iIhV3tLxKZJuR+7ZB0KbciAQpZ2oatSGf7/\
+    uqe0N1cPEdYK+7Qo1PmhkfVf/y1xjk/F7kvHejNsPrNTvXRHoklVbVr2fih27M3fbySNlb\
+    DsXl7judQDjyAeE45px+nZ3JRxrYX4IYjzovv2nLrKfeV4w4lIT1p5XZrr8qYY8AOjXwDT\
+    ij3e05GnmRGCRw7s8A7hptgHwD8YwNkP588mnYPVsPiQXCnJhDhGXbygX44zDn0BqgYcSg\
+    VsKixPuzWN2gCtjCPOZVwyEjCcnBabCdKNP7URFpbLxpqn/+M+ZrOR8fhywSYkTsJNDrSp\
+    y7k9fzf/ks3BLpVAn92FdgmiskewgYedENIZFYVaNkJX7myhWxK6sJP8UxxYLWUhtmd2fR\
+    2SN7H/akbAUHPpASwVbkRDd+70HK4qxkQ32DrhRSwDJiqvDrd62KBZlL0NQeBUx0aRvKdo\
+    bPul
     """
+
+private let fsResolveMaskGLSL = """
+    /* fragment-shader: vertex color, uniform texture */
+    #version 450
+
+    layout (push_constant) uniform Constants {
+        float linear;
+        float constant;
+    } pc;
+
+    layout (binding=0) uniform sampler2D maskImage;
+    layout (binding=1) uniform sampler2D image;
+
+    layout (location=0) in vec2 maskUV;
+    layout (location=1) in vec2 texUV;
+    layout (location=2) in vec4 color;
+
+    layout (location=0) out vec4 outFragColor;
+
+    void main() {
+        if ((texture(maskImage, maskUV).r * pc.linear + pc.constant) <= 0)
+            discard;
+        vec4 frag = texture(image, texUV) * color;
+        outFragColor = frag.aaaa;
+    }
+    """
+
+private let fsResolveMaskSpvCEB64 = """
+    XQAAAARoBAAAAAAAAAABgJdesnC95qjyNRPzlU37FEkN1hUbMQvIcJ3CE67M6dB2Y23RAR\
+    9k2oVNOJaKtw9bEF24BbVkuOzAzXM/dJ3t1cdSX7VBDeIDa9Bzm9V36LqNgXYFa1unRxUa\
+    YllXRpNM5dJg53AawHFulwGoqEYQlmjmJ1lEhKcq5DHV9KXGsEe22GlgkJLFldK0Ze6ja2\
+    sJOBtL2K8jYJ5nHrH542x8ZKubjWb+qmyzqT4HQDkiMVyiztA5hPw5WeS1ObBOlqfqSkH6\
+    wnsqXftBkbhvAkX642k48yDKd2vyArYORPwobvAXQ0Sax3HjafF9dVMqcypHnl1CUG835E\
+    GEuAQ/rOkMxnPDnQc8/MiODDY8I8jPCprkixL0MnpnSTLm3X7+nIstccxju76YlNUhUo5Q\
+    ZslSywO2XhNK6DAyk+9G9zwFkhMdQ7iPKHta7bcAue7KbVlghuZQIA8Sdcn+b7+AnwwpG+\
+    1wt0eEAnq5ry86OA==
+    """
+
+private let fsResolveMaskInverseGLSL = """
+    /* fragment-shader: vertex color, uniform texture */
+    #version 450
+
+    layout (push_constant) uniform Constants {
+        float linear;
+        float constant;
+    } pc;
+
+    layout (binding=0) uniform sampler2D maskImage;
+    layout (binding=1) uniform sampler2D image;
+
+    layout (location=0) in vec2 maskUV;
+    layout (location=1) in vec2 texUV;
+    layout (location=2) in vec4 color;
+
+    layout (location=0) out vec4 outFragColor;
+
+    void main() {
+        if ((texture(maskImage, maskUV).r * pc.linear + pc.constant) <= 0)
+            discard;
+        vec4 frag = texture(image, texUV) * color;
+        outFragColor = 1 - frag.aaaa;
+    }
+    """
+
+private let fsResolveMaskInverseSpvCEB64 = """
+    XQAAAASoBAAAAAAAAAABgJdesnC95qjyNRPz2qO/SDMt2CDmdjcMiDoyZhb2n2T8l4pQf6\
+    WN+e258rgjKEZeAhdTyJLzOfxsZ6OXHPSV2iI1PurjK2KHD13Efp/5gmhEozfvaThJ58Xv\
+    iQDpkWCCdGO5a4b/Ur1O9ngaK27dyi7pR9CdNlf0LItB0o7AmLjcAyDwW8oJ2+ISu59S2q\
+    WyV/6FG5VikuGWmEP8GvedZc3qllxMHxTqyqZdjQ/tEIAVS507hIt21XOoE06eyA/ULQM/\
+    ghzrR1VbcJj+s5fgOFHGVBOvPLWoieMAAmEBuo9YGaFajZnizqzHT/54+niAVrzx/Sp/Cq\
+    f5lKmN748grGPFjXlMkgWBrbIn5GwAkXX7oe2r52emG3/OnDFP5nzkj3J2diYNX7prXqTW\
+    FAV+5bPInSt8D6P5ZymqOUNkYwmHftZGZc8JST3uIV01uA8mPUbuCEgt/punvt2RHUm8lR\
+    3IquaYJSvfWC6d+brckAzbHyKk9w1iLl4i9A8YN3CcM5g723Fk
+    """
+    
 
 private func decodeShader(device: GraphicsDevice, encodedText: String) -> ShaderFunction? {
     if let data = Data(base64Encoded: encodedText, options: .ignoreUnknownCharacters) {
@@ -178,7 +283,12 @@ private func encodeSPIRVData(from url: URL?) -> String? {
     return nil
 }
 
-private class GraphicsPipelineStates {
+private struct PushConstant {
+    var linear: Float32 = 1.0
+    var constant: Float32 = 0.0
+}
+
+class GraphicsPipelineStates {
     enum Shader {
         case stencil        // fill stencil, no fragment function
         case color          // vertex color
@@ -206,10 +316,13 @@ private class GraphicsPipelineStates {
         let fragmentFunction: ShaderFunction?
     }
 
-    private let device: GraphicsDevice
-    private let shaderFunctions: [Shader: ShaderFunctions]
-    private let defaultBindingSet: ShaderBindingSet
-    private let defaultSampler: SamplerState
+    let device: GraphicsDevice
+    let shaderFunctions: [Shader: ShaderFunctions]
+
+    let defaultBindingSet1: ShaderBindingSet    // 1 texture (mask)
+    let defaultBindingSet2: ShaderBindingSet    // 2 textures (mask, diffuse)
+    let defaultSampler: SamplerState
+    let defaultMaskTexture: Texture // 2x2 r8
 
     struct RenderState: Hashable {
         let shader: Shader
@@ -310,12 +423,16 @@ private class GraphicsPipelineStates {
 
     private init(device: GraphicsDevice,
                  shaderFunctions: [Shader: ShaderFunctions],
-                 defaultBindingSet: ShaderBindingSet,
-                 defaultSampler: SamplerState) {
+                 defaultBindingSet1: ShaderBindingSet,
+                 defaultBindingSet2: ShaderBindingSet,
+                 defaultSampler: SamplerState,
+                 defaultMaskTexture: Texture) {
         self.device = device
         self.shaderFunctions = shaderFunctions
-        self.defaultBindingSet = defaultBindingSet
+        self.defaultBindingSet1 = defaultBindingSet1
+        self.defaultBindingSet2 = defaultBindingSet2
         self.defaultSampler = defaultSampler
+        self.defaultMaskTexture = defaultMaskTexture
         self.pipelineStates = [:]
         self.depthStencilStates = [:]
     }
@@ -323,7 +440,7 @@ private class GraphicsPipelineStates {
     private static let lock = NSLock()
     private static weak var sharedInstance: GraphicsPipelineStates? = nil
 
-    static func sharedInstance(device: GraphicsDevice) -> GraphicsPipelineStates? {
+    static func sharedInstance(commandQueue: CommandQueue) -> GraphicsPipelineStates? {
         if let instance = sharedInstance {
             return instance
         }
@@ -333,6 +450,7 @@ private class GraphicsPipelineStates {
         var instance = sharedInstance
         if instance != nil { return instance }
 
+        let device = commandQueue.device
         repeat {
             let loadShader = { (name: String, content: String) -> ShaderFunction? in
                 let fn = decodeShader(device: device, encodedText: content)
@@ -342,54 +460,96 @@ private class GraphicsPipelineStates {
                 return fn
             }
 
-            let vsStencilFunction = loadShader("vs-stencil", vsStencilSpvCEB64)
-            if vsStencilFunction == nil { break }
+            guard let vsStencilFunction = loadShader("vs-stencil", vsStencilSpvCEB64)
+            else { break }
 
-            let vertexFunction = loadShader("vs-default", vsSpvCEB64)
-            if vertexFunction == nil { break }
+            guard let vertexFunction = loadShader("vs-default", vsSpvCEB64)
+            else { break }
 
-            let fragColorFunction = loadShader("fs-defalut", fsSpvCEB64)
-            if fragColorFunction == nil { break }
+            guard let fragColorFunction = loadShader("fs-defalut", fsSpvCEB64)
+            else { break }
 
-            let fragTextureFunction = loadShader("fs-texture", fsTextureSpvCEB64)
-            if fragTextureFunction == nil { break }
+            guard let fragTextureFunction = loadShader("fs-texture", fsTextureSpvCEB64)
+            else { break }
 
-            let fragAlphaTextureFunction = loadShader("fs-alpha-texture", fsAlphaTextureSpvCEB64)
-            if fragAlphaTextureFunction == nil { break }
+            guard let fragAlphaTextureFunction = loadShader("fs-alpha-texture", fsAlphaTextureSpvCEB64)
+            else { break }
 
             var shaderFunctions: [Shader: ShaderFunctions] = [:]
             shaderFunctions[.stencil] = ShaderFunctions(
-                vertexFunction: vsStencilFunction!, fragmentFunction: nil)
+                vertexFunction: vsStencilFunction, fragmentFunction: nil)
             shaderFunctions[.color] = ShaderFunctions(
-                vertexFunction: vertexFunction!, fragmentFunction: fragColorFunction)
+                vertexFunction: vertexFunction, fragmentFunction: fragColorFunction)
             shaderFunctions[.image] = ShaderFunctions(
-                vertexFunction: vertexFunction!, fragmentFunction: fragTextureFunction)
+                vertexFunction: vertexFunction, fragmentFunction: fragTextureFunction)
             shaderFunctions[.alphaTexture] = ShaderFunctions(
-                vertexFunction: vertexFunction!, fragmentFunction: fragAlphaTextureFunction)
+                vertexFunction: vertexFunction, fragmentFunction: fragAlphaTextureFunction)
 
-            let bindingLayout = ShaderBindingSetLayout(
+            let bindingLayout1 = ShaderBindingSetLayout(
                 bindings: [
-                    .init(binding: 0, type: .textureSampler, arrayLength: 1)
+                    .init(binding: 0, type: .textureSampler, arrayLength: 1),
                 ])
 
-            let defaultBindingSet = device.makeShaderBindingSet(layout: bindingLayout)
-            if defaultBindingSet == nil {
+            let bindingLayout2 = ShaderBindingSetLayout(
+                bindings: [
+                    .init(binding: 0, type: .textureSampler, arrayLength: 1),
+                    .init(binding: 1, type: .textureSampler, arrayLength: 1),
+                ])
+
+            guard let defaultBindingSet1 = device.makeShaderBindingSet(layout: bindingLayout1)
+            else {
+                Log.err("\(Self.self).\(#function): makeShaderBindingSet failed.")
+                break
+            }
+            guard let defaultBindingSet2 = device.makeShaderBindingSet(layout: bindingLayout2)
+            else {
                 Log.err("\(Self.self).\(#function): makeShaderBindingSet failed.")
                 break
             }
 
             let samplerDesc = SamplerDescriptor()
-            let defaultSampler = device.makeSamplerState(descriptor: samplerDesc)
-            if defaultSampler == nil {
+            guard let defaultSampler = device.makeSamplerState(descriptor: samplerDesc)
+            else {
                 Log.err("\(Self.self).\(#function): makeSampler failed.")
                 break
             }
 
+            guard let defaultMaskTexture = device.makeTexture(
+                descriptor: TextureDescriptor(textureType: .type2D,
+                                              pixelFormat: .r8Unorm,
+                                              width: 2,
+                                              height: 2,
+                                              usage: [.renderTarget, .sampled]))
+            else {
+                Log.err("\(Self.self).\(#function): makeSampler failed.")
+                break
+            }
+
+            guard let commandBuffer = commandQueue.makeCommandBuffer() else {
+                Log.err("\(Self.self).\(#function): makeCommandBuffer failed.")
+                break
+            }
+            guard let encoder = commandBuffer.makeRenderCommandEncoder(
+                    descriptor: RenderPassDescriptor(colorAttachments: [
+                            RenderPassColorAttachmentDescriptor(
+                                renderTarget: defaultMaskTexture,
+                                loadAction: .clear,
+                                storeAction: .store,
+                                clearColor: .white)
+                        ])) else {
+                Log.err("\(Self.self).\(#function): makeRenderCommandEncoder failed.")
+                break          
+            }
+            encoder.endEncoding()
+            commandBuffer.commit()
+
             instance = GraphicsPipelineStates(
                 device: device,
                 shaderFunctions: shaderFunctions,
-                defaultBindingSet: defaultBindingSet!,
-                defaultSampler: defaultSampler!)
+                defaultBindingSet1: defaultBindingSet1,
+                defaultBindingSet2: defaultBindingSet2,
+                defaultSampler: defaultSampler,
+                defaultMaskTexture: defaultMaskTexture)
 
             // make weak-ref
             Self.sharedInstance = instance
@@ -423,37 +583,32 @@ private class GraphicsPipelineStates {
 extension GraphicsContext {
     @discardableResult
     static func cachePipelineContext(_ deviceContext: GraphicsDeviceContext) -> Bool {
-        if let state = GraphicsPipelineStates.sharedInstance(device: deviceContext.device) {
-            deviceContext.cachedDeviceResources["DKGUI.GraphicsPipelineStates"] = state
-            return true
+        if let queue = deviceContext.renderQueue() {
+            if let state = GraphicsPipelineStates.sharedInstance(commandQueue: queue) {
+                deviceContext.cachedDeviceResources["DKGUI.GraphicsPipelineStates"] = state
+                return true
+            }
         }
         return false
     }
 
     public func drawLayer(content: (inout GraphicsContext) throws -> Void) rethrows {
-        let device = self.commandBuffer.device
-        let width = self.backBuffer.width
-        let height = self.backBuffer.height
-        let pixelFormat = self.backBuffer.pixelFormat
-
-        let backBuffer = device.makeTexture(
-            descriptor: TextureDescriptor(textureType: .type2D,
-                                          pixelFormat: pixelFormat,
-                                          width: width,
-                                          height: height,
-                                          usage: [.renderTarget, .sampled]))
-
-        if let backBuffer {
-            var context = self
-            context.backBuffer = backBuffer
+        if var context = self.makeLayerContext() {
             do {
                 try content(&context)
-                // TODO: draw context.backBuffer to self
-
+                self._draw(texture: context.backBuffer, in: self.bounds)
             } catch {
-                Log.error("Error!")
+                Log.error("Error: \(error)")
             }
         }
+    }
+
+    private func _draw(texture: Texture, in: CGRect, tintColor: DKGame.Color = .white) {
+
+    }
+
+    private func _resolveMaskTexture(_ texture1: Texture, _ texture2: Texture) -> Texture? {
+        return nil
     }
 
     private func _fillStencil(_ path: Path, draw: (_: RenderCommandEncoder) -> Bool) {
@@ -560,8 +715,8 @@ extension GraphicsContext {
         if vertexData.count < 3 { return }
         if indexData.count < 3 { return }
 
-        let device = self.commandBuffer.device
-        guard let pipeline = GraphicsPipelineStates.sharedInstance(device: device) else {
+        let queue = self.commandBuffer.commandQueue
+        guard let pipeline = GraphicsPipelineStates.sharedInstance(commandQueue: queue) else {
             Log.err("GraphicsContext.fill() error: pipeline failed.")
             return
         }
@@ -634,8 +789,8 @@ extension GraphicsContext {
 
     public func fill(_ path: Path, with shading: Shading, style: FillStyle = FillStyle()) {
         self._fillStencil(path) { encoder in
-            let device = self.commandBuffer.device
-            guard let pipeline = GraphicsPipelineStates.sharedInstance(device: device) else {
+            let queue = self.commandBuffer.commandQueue
+            guard let pipeline = GraphicsPipelineStates.sharedInstance(commandQueue: queue) else {
                 Log.err("GraphicsContext.fill() error: pipeline failed.")
                 return false
             }
@@ -675,12 +830,26 @@ extension GraphicsContext {
                 Log.err("GraphicsContext.fill() error: pipeline.makeBuffer() failed.")
                 return false
             }
+
+            encoder.setRenderPipelineState(pipelineState)
+            encoder.setDepthStencilState(depthState)
+
+            pipeline.defaultBindingSet1.setTexture(self.maskTexture, binding: 0)
+            pipeline.defaultBindingSet1.setSamplerState(pipeline.defaultSampler, binding: 0)
+            encoder.setResource(pipeline.defaultBindingSet1, atIndex: 0)
+
             encoder.setCullMode(.none)
             encoder.setFrontFacing(.clockwise)
             encoder.setStencilReferenceValue(0)
-            encoder.setRenderPipelineState(pipelineState)
-            encoder.setDepthStencilState(depthState)
             encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
+
+            let pc = PushConstant(linear: 1.0, constant: 0.0)
+            withUnsafeBytes(of: pc) {
+                encoder.pushConstant(stages: .fragment,
+                                     offset: 0,
+                                     data: $0)
+            }
+
             encoder.draw(vertexStart: 0,
                          vertexCount: rectVertices.count,
                          instanceCount: 1,
@@ -696,6 +865,4 @@ extension GraphicsContext {
     public func stroke(_ path: Path, with shading: Shading, lineWidth: CGFloat = 1) {
         stroke(path, with: shading, style: StrokeStyle(lineWidth: lineWidth))
     }
-
-    
 }

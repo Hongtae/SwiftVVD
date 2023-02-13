@@ -95,15 +95,16 @@ struct CanvasContext<Symbols>: ViewProxy where Symbols: View {
 
         if self.layoutSize.width > 0 && self.layoutSize.height > 0 {
             if let commandBuffer = queue.makeCommandBuffer() {
-                var gc = GraphicsContext(environment: self.environmentValues,
-                                         viewOffset: self.layoutOffset,
-                                         viewSize: self.layoutSize,
-                                         viewScaleFactor: self.contentScaleFactor,
-                                         commandBuffer: commandBuffer,
-                                         backBuffer: backBuffer,
-                                         stencilBuffer: stencilBuffer)
-                self.view.renderer(&gc, self.layoutSize)
-                commandBuffer.commit()
+                let bounds = CGRect(origin: self.layoutOffset, size: self.layoutSize)
+                if var gc = GraphicsContext(environment: self.environmentValues,
+                                            bounds: bounds,
+                                            scaleFactor: self.contentScaleFactor,
+                                            commandBuffer: commandBuffer,
+                                            backBuffer: backBuffer,
+                                            stencilBuffer: stencilBuffer) {
+                    self.view.renderer(&gc, self.layoutSize)
+                    commandBuffer.commit()
+                }               
             }
         }
     }
