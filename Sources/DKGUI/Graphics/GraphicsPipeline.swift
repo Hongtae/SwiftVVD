@@ -203,7 +203,7 @@ private let fsResolveMaskSpvCEB64 = """
     1wt0eEAnq5ry86OA==
     """
 
-private let fsResolveMaskInverseGLSL = """
+private let fsResolveInverseMaskGLSL = """
     /* fragment-shader: vertex color, uniform texture */
     #version 450
 
@@ -229,7 +229,7 @@ private let fsResolveMaskInverseGLSL = """
     }
     """
 
-private let fsResolveMaskInverseSpvCEB64 = """
+private let fsResolveInverseMaskSpvCEB64 = """
     XQAAAASoBAAAAAAAAAABgJdesnC95qjyNRPz2qO/SDMt2CDmdjcMiDoyZhb2n2T8l4pQf6\
     WN+e258rgjKEZeAhdTyJLzOfxsZ6OXHPSV2iI1PurjK2KHD13Efp/5gmhEozfvaThJ58Xv\
     iQDpkWCCdGO5a4b/Ur1O9ngaK27dyi7pR9CdNlf0LItB0o7AmLjcAyDwW8oJ2+ISu59S2q\
@@ -283,33 +283,37 @@ private func encodeSPIRVData(from url: URL?) -> String? {
     return nil
 }
 
-private struct PushConstant {
+
+private enum _Shader {
+    case stencil        // fill stencil, no fragment function
+    case color          // vertex color
+    case image          // texture with tint color
+    case alphaTexture   // for glyph (single channel texture)
+    case resolveMask    // merge two masks (a8, r8) to render target (r8)
+    case resolveInverseMask
+}
+
+private enum _Stencil {
+    case generateWindingNumber
+    case nonZero        // filled using the non-zero rule
+    case even           // even-odd winding rule
+    case zero           // zero stencil (inverse of non-zero rule)
+    case odd            // odd winding (inverse of even-odd rule)
+    case ignore         // don't read stencil
+}
+
+private struct _Vertex {
+    var position: Float2
+    var texcoord: Float2
+    var color: Float4
+}
+
+private struct _PushConstant {
     var linear: Float32 = 1.0
     var constant: Float32 = 0.0
 }
 
 class GraphicsPipelineStates {
-    enum Shader {
-        case stencil        // fill stencil, no fragment function
-        case color          // vertex color
-        case image          // texture with tint color
-        case alphaTexture   // for glyph (single channel texture)
-        //case resolveMask    // merge two masks (a8, r8) to render target (r8)
-    }
-    enum DepthStencil {
-        case generateWindingNumber
-        case nonZero        // filled using the non-zero rule
-        case even           // even-odd winding rule
-        case zero           // zero stencil (inverse of non-zero rule)
-        case odd            // odd winding (inverse of even-odd rule)
-        case ignore         // don't read stencil
-    }
-
-    struct Vertex {
-        var position: Float2
-        var texcoord: Float2
-        var color: Float4
-    }
 
     struct ShaderFunctions {
         let vertexFunction: ShaderFunction
@@ -317,24 +321,24 @@ class GraphicsPipelineStates {
     }
 
     let device: GraphicsDevice
-    let shaderFunctions: [Shader: ShaderFunctions]
+    private let shaderFunctions: [_Shader: ShaderFunctions]
 
     let defaultBindingSet1: ShaderBindingSet    // 1 texture (mask)
     let defaultBindingSet2: ShaderBindingSet    // 2 textures (mask, diffuse)
     let defaultSampler: SamplerState
     let defaultMaskTexture: Texture // 2x2 r8
 
-    struct RenderState: Hashable {
-        let shader: Shader
+    fileprivate struct RenderState: Hashable {
+        let shader: _Shader
         let colorFormat: PixelFormat
         let depthFormat: PixelFormat
         let blendState: BlendState
     }
 
-    var pipelineStates: [RenderState: RenderPipelineState] = [:]
-    var depthStencilStates: [DepthStencil: DepthStencilState] = [:]
+    private var pipelineStates: [RenderState: RenderPipelineState] = [:]
+    private var depthStencilStates: [_Stencil: DepthStencilState] = [:]
 
-    func renderState(_ rs: RenderState) -> RenderPipelineState? {
+    fileprivate func renderState(_ rs: RenderState) -> RenderPipelineState? {
         Self.lock.lock()
         defer { Self.lock.unlock() }
 
@@ -359,11 +363,11 @@ class GraphicsPipelineStates {
         } else {
             pipelineDescriptor.vertexDescriptor.attributes = [
                 .init(format: .float2, offset: 0, bufferIndex: 0, location: 0 ),
-                .init(format: .float2, offset: MemoryLayout<Vertex>.offset(of: \.texcoord)!, bufferIndex: 0, location: 1 ),
-                .init(format: .float4, offset: MemoryLayout<Vertex>.offset(of: \.color)!, bufferIndex: 0, location: 2 ),
+                .init(format: .float2, offset: MemoryLayout<_Vertex>.offset(of: \.texcoord)!, bufferIndex: 0, location: 1 ),
+                .init(format: .float4, offset: MemoryLayout<_Vertex>.offset(of: \.color)!, bufferIndex: 0, location: 2 ),
             ]
             pipelineDescriptor.vertexDescriptor.layouts = [
-                .init(step: .vertex, stride: MemoryLayout<Vertex>.stride, bufferIndex: 0)
+                .init(step: .vertex, stride: MemoryLayout<_Vertex>.stride, bufferIndex: 0)
             ]
         }
         pipelineDescriptor.primitiveTopology = .triangle
@@ -376,7 +380,7 @@ class GraphicsPipelineStates {
         return nil
     }
 
-    func depthStencilState(_ ds: DepthStencil) -> DepthStencilState? {
+    fileprivate func depthStencilState(_ ds: _Stencil) -> DepthStencilState? {
         Self.lock.lock()
         defer { Self.lock.unlock() }
 
@@ -422,7 +426,7 @@ class GraphicsPipelineStates {
     }
 
     private init(device: GraphicsDevice,
-                 shaderFunctions: [Shader: ShaderFunctions],
+                 shaderFunctions: [_Shader: ShaderFunctions],
                  defaultBindingSet1: ShaderBindingSet,
                  defaultBindingSet2: ShaderBindingSet,
                  defaultSampler: SamplerState,
@@ -475,7 +479,13 @@ class GraphicsPipelineStates {
             guard let fragAlphaTextureFunction = loadShader("fs-alpha-texture", fsAlphaTextureSpvCEB64)
             else { break }
 
-            var shaderFunctions: [Shader: ShaderFunctions] = [:]
+            guard let fsResolveMaskFunction = loadShader("fs-resolve-mask", fsResolveMaskSpvCEB64)
+            else { break }
+
+            guard let fsResolveInverseMaskFunction = loadShader("fs-resolve-inverse-mask", fsResolveInverseMaskSpvCEB64)
+            else { break }
+
+            var shaderFunctions: [_Shader: ShaderFunctions] = [:]
             shaderFunctions[.stencil] = ShaderFunctions(
                 vertexFunction: vsStencilFunction, fragmentFunction: nil)
             shaderFunctions[.color] = ShaderFunctions(
@@ -484,16 +494,20 @@ class GraphicsPipelineStates {
                 vertexFunction: vertexFunction, fragmentFunction: fragTextureFunction)
             shaderFunctions[.alphaTexture] = ShaderFunctions(
                 vertexFunction: vertexFunction, fragmentFunction: fragAlphaTextureFunction)
+            shaderFunctions[.resolveMask] = ShaderFunctions(
+                vertexFunction: vertexFunction, fragmentFunction: fsResolveMaskFunction)
+            shaderFunctions[.resolveInverseMask] = ShaderFunctions(
+                vertexFunction: vertexFunction, fragmentFunction: fsResolveInverseMaskFunction)
 
             let bindingLayout1 = ShaderBindingSetLayout(
                 bindings: [
-                    .init(binding: 0, type: .textureSampler, arrayLength: 1),
+                    ShaderBinding(binding: 0, type: .textureSampler, arrayLength: 1),
                 ])
 
             let bindingLayout2 = ShaderBindingSetLayout(
                 bindings: [
-                    .init(binding: 0, type: .textureSampler, arrayLength: 1),
-                    .init(binding: 1, type: .textureSampler, arrayLength: 1),
+                    ShaderBinding(binding: 0, type: .textureSampler, arrayLength: 1),
+                    ShaderBinding(binding: 1, type: .textureSampler, arrayLength: 1),
                 ])
 
             guard let defaultBindingSet1 = device.makeShaderBindingSet(layout: bindingLayout1)
@@ -513,15 +527,37 @@ class GraphicsPipelineStates {
                 Log.err("\(Self.self).\(#function): makeSampler failed.")
                 break
             }
-
+            
             guard let defaultMaskTexture = device.makeTexture(
                 descriptor: TextureDescriptor(textureType: .type2D,
                                               pixelFormat: .r8Unorm,
                                               width: 2,
                                               height: 2,
-                                              usage: [.renderTarget, .sampled]))
+                                              usage: [.copyDestination, .sampled]))
             else {
                 Log.err("\(Self.self).\(#function): makeSampler failed.")
+                break
+            }
+
+            let texWidth = defaultMaskTexture.width
+            let texHeight = defaultMaskTexture.height
+            let bufferLength = texWidth * texHeight
+            guard let stgBuffer = device.makeBuffer(length: bufferLength,
+                                                    storageMode: .shared,
+                                                    cpuCacheMode: .writeCombined)
+            else {
+                Log.err("\(Self.self).\(#function): makeBuffer failed.")
+                break
+            }
+            if let ptr = stgBuffer.contents() {
+                let pixelData = [UInt8](repeating: 1, count: bufferLength)
+                pixelData.withUnsafeBytes {
+                    assert($0.count == bufferLength)
+                    ptr.copyMemory(from: $0.baseAddress!, byteCount: $0.count)
+                }
+                stgBuffer.flush()
+            } else {
+                Log.err("\(Self.self).\(#function): buffer.contents() failed.")
                 break
             }
 
@@ -529,17 +565,16 @@ class GraphicsPipelineStates {
                 Log.err("\(Self.self).\(#function): makeCommandBuffer failed.")
                 break
             }
-            guard let encoder = commandBuffer.makeRenderCommandEncoder(
-                    descriptor: RenderPassDescriptor(colorAttachments: [
-                            RenderPassColorAttachmentDescriptor(
-                                renderTarget: defaultMaskTexture,
-                                loadAction: .clear,
-                                storeAction: .store,
-                                clearColor: .white)
-                        ])) else {
-                Log.err("\(Self.self).\(#function): makeRenderCommandEncoder failed.")
+            guard let encoder = commandBuffer.makeCopyCommandEncoder() else {
+                Log.err("\(Self.self).\(#function): makeCopyCommandEncoder failed.")
                 break          
             }
+            encoder.copy(from: stgBuffer,
+                         sourceOffset: BufferImageOrigin(offset: 0, imageWidth: texWidth, imageHeight: texHeight),
+                         to: defaultMaskTexture,
+                         destinationOffset: TextureOrigin(layer: 0, level: 0, x: 0, y: 0, z: 0),
+                         size: TextureSize(width: texWidth, height: texHeight, depth: 1))
+
             encoder.endEncoding()
             commandBuffer.commit()
 
@@ -816,7 +851,7 @@ extension GraphicsContext {
 
             let texcoord = Vector2(0, 0).float2
             let color = DKGame.Color.red.float4
-            let rectVertices: [GraphicsPipelineStates.Vertex] = [
+            let rectVertices: [_Vertex] = [
                 .init(position: Vector2(-1, -1).float2, texcoord: texcoord, color: color),
                 .init(position: Vector2(-1, 1).float2, texcoord: texcoord, color: color),
                 .init(position: Vector2(1, -1).float2, texcoord: texcoord, color: color),
@@ -843,7 +878,7 @@ extension GraphicsContext {
             encoder.setStencilReferenceValue(0)
             encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
 
-            let pc = PushConstant(linear: 1.0, constant: 0.0)
+            let pc = _PushConstant(linear: 1.0, constant: 0.0)
             withUnsafeBytes(of: pc) {
                 encoder.pushConstant(stages: .fragment,
                                      offset: 0,
