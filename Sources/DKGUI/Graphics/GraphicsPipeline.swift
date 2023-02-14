@@ -64,8 +64,12 @@ private let fsGLSL = """
     #version 450
 
     layout (push_constant) uniform Constants {
-        float linear;
-        float constant;
+        float maskLinear;
+        float maskConstant;
+        float colorMatrixR[5];
+        float colorMatrixG[5];
+        float colorMatrixB[5];
+        float colorMatrixA[5];
     } pc;
 
     layout (binding=0) uniform sampler2D maskImage;
@@ -77,20 +81,34 @@ private let fsGLSL = """
     layout (location=0) out vec4 outFragColor;
 
     void main(void) {
-        if ((texture(maskImage, maskUV).r * pc.linear + pc.constant) <= 0)
+        if ((texture(maskImage, maskUV).r * pc.maskLinear + pc.maskConstant) <= 0)
             discard;
-        outFragColor = color;
+        vec4 cmR = vec4(pc.colorMatrixR[0], pc.colorMatrixR[1], pc.colorMatrixR[2], pc.colorMatrixR[3]);
+        vec4 cmG = vec4(pc.colorMatrixG[0], pc.colorMatrixG[1], pc.colorMatrixG[2], pc.colorMatrixG[3]);
+        vec4 cmB = vec4(pc.colorMatrixB[0], pc.colorMatrixB[1], pc.colorMatrixB[2], pc.colorMatrixB[3]);
+        vec4 cmA = vec4(pc.colorMatrixA[0], pc.colorMatrixA[1], pc.colorMatrixA[2], pc.colorMatrixA[3]);
+
+        float r = dot(color, cmR) + pc.colorMatrixR[4];
+        float g = dot(color, cmG) + pc.colorMatrixG[4];
+        float b = dot(color, cmB) + pc.colorMatrixB[4];
+        float a = dot(color, cmA) + pc.colorMatrixA[4];
+        outFragColor = vec4(r, g, b, a);
     }
     """
 
 private let fsSpvCEB64 = """
-    XQAAAASkAwAAAAAAAAABgJdesnC95qjyNRPy5lq/c7gPRthELV8YDfBHNWmt93l0V6ZSk2\
-    s6fW41iQ5gA3M3buNwyxVG6G3M7mn8NCxy4BegXw4XPfTOdfur0UFQsfE/do9CBAfT6FYp\
-    ApdJDQy6pn4MTcQYrmVd7H7HN/8lPGZfYn/6mGRGwnvbkrLE7f7xFnIget4Mv96x7OlOMk\
-    mdJjmq6dIgodCJyZq7Ir3V1b3Axq+zsAqxLa4Yh7XgEOhK4qlC4LiMFYl+ILXRX4zAyvQg\
-    9kj1QTbp44H9jYG2XEc7I04mehrlhkQsLBfIUc/dIJjTsBgbmHU1z76Fb8TxTpbFlbjdyQ\
-    VOGQMbcYYBDcKDQvFTREO7gtQLxvP323aVr2E+bQF3Vvbx884pYjIrjtX7vdriPoLtXJ6t\
-    LWX24bHCo4XQeJWZm6O4+dtmKnvJ+CEjb3H6PuK1AA==
+    XQAAAAQwCQAAAAAAAAABgJdesnC95qjyNRP3b3W1wTM2BjHpoMwr6OqAkVzhyMYm25asbk\
+    ckiEeMA4h9Gch5k9Liip1euGYLpx+XrZf81Fer63rg9Uo2ePP7TCWzYwudvprwuoN+z4Bq\
+    jv6COKye8CMrSguozbHc1g/nneOnP0DUgz2G9XwxikXvHdrQQ0LBA4dEDwXSf/jC0cy1ma\
+    R4CH3EDDqzZJ4AlnY6zii8cUAjwyqmjG3GfC9pIU/YtPzHIp7FY773jcHOdkEWiOI9Tz37\
+    9bZunMPRCFn8onhSPaQ3Y1cOKq6WQyZStF6DKy+FgQzMuh8scg2zWlTRS5rl2c+znZEadD\
+    zGuRl0MAIoKgHfQd8cc+bgQ0DswxNrUZZR+rkIH7sntGrN5+pbe3dyGXLMRf7j5yewylvo\
+    FEbYSU21Ur+xvJfT3akNzAd6TeN2USBwKX8TodyE3QDE/+L0rz5opl/i8ZyPASJKpl9mez\
+    loFY1VADWLlv3Vp2RXlIZjn/HGd0X798DGlHXWgRdaObSTG++k/977FPByDUmVEduiiXsJ\
+    UZlz0RA/7pNACoz+qO5rTpfUun/pSCQ62/qYpQIUz1klFfuh2GkbAB9GwMwuHJ3wS42B4+\
+    HjIz9iN7jb4oXCe1FXoTTmOqIwPv039/uocoCdV2GvsepSxAjiT0+njK3eAA5oNsjTvcHT\
+    YetBeWIHoM+vX/ffmQiZUeJcNV4ccfC6ya+ylxlKFeRd7LZGH91h/S4b9OQ84UDRaY+ZTg\
+    A=
     """
 
 private let fsTextureGLSL = """
@@ -98,8 +116,12 @@ private let fsTextureGLSL = """
     #version 450
 
     layout (push_constant) uniform Constants {
-        float linear;
-        float constant;
+        float maskLinear;
+        float maskConstant;
+        float colorMatrixR[5];
+        float colorMatrixG[5];
+        float colorMatrixB[5];
+        float colorMatrixA[5];
     } pc;
 
     layout (binding=0) uniform sampler2D maskImage;
@@ -112,21 +134,34 @@ private let fsTextureGLSL = """
     layout (location=0) out vec4 outFragColor;
 
     void main() {
-        if ((texture(maskImage, maskUV).r * pc.linear + pc.constant) <= 0)
+        if ((texture(maskImage, maskUV).r * pc.maskLinear + pc.maskConstant) <= 0)
             discard;
-        outFragColor = texture(image, texUV) * color;
+        vec4 fragColor = texture(image, texUV) * color;
+        vec4 cmR = vec4(pc.colorMatrixR[0], pc.colorMatrixR[1], pc.colorMatrixR[2], pc.colorMatrixR[3]);
+        vec4 cmG = vec4(pc.colorMatrixG[0], pc.colorMatrixG[1], pc.colorMatrixG[2], pc.colorMatrixG[3]);
+        vec4 cmB = vec4(pc.colorMatrixB[0], pc.colorMatrixB[1], pc.colorMatrixB[2], pc.colorMatrixB[3]);
+        vec4 cmA = vec4(pc.colorMatrixA[0], pc.colorMatrixA[1], pc.colorMatrixA[2], pc.colorMatrixA[3]);
+        float r = dot(fragColor, cmR) + pc.colorMatrixR[4];
+        float g = dot(fragColor, cmG) + pc.colorMatrixG[4];
+        float b = dot(fragColor, cmB) + pc.colorMatrixB[4];
+        float a = dot(fragColor, cmA) + pc.colorMatrixA[4];
+        outFragColor = vec4(r, g, b, a);
     }
     """
 
 private let fsTextureSpvCEB64 = """
-    XQAAAAREBAAAAAAAAAABgJdesnC95qjyNRPzT/n7FEkN1hUbMQvIcJ3CE67M6dB2Y23RAR\
-    9k2oVNOJaKtw9bEF24BbVkuOzAzXM/dJ3t1cc+fA2Rdpx4UOhzQXEsTjwj49uC58ZLPrwX\
-    Zpigx+lHz8nMq6dt3xsj+qwseIjaSRNYHJTFWwArkOZ4bxzfpZOHa7yo5MlfpqytNco1fC\
-    Y63iNrih9H7ByUP8Edj2hD7sl+92cJPbgz3ZYotqMc/U+TjxjOtHBYIvdCktOYZWk1aSeu\
-    ttNC+KQ8/3BNEjLWtwksM0KvSJFCIKCxyTyQUYdshVfeLR2gLEU+ORPzxXLL+DBSvlS2Cl\
-    4YuhWa1hWlQY2V7VVGhXODEdky1HXDimhsJYwlFABzBEI728dZGukgB34KB5PkAM1bWh33\
-    jEtnTarJ+WzZtJRq/fEmdnttrK47OoA1fkLBM8vfZKyV2NLJ2hcy3Rh8rSPvviL1b60ltu\
-    ysvKUy4xprew1EAA==
+    XQAAAATQCQAAAAAAAAABgJdesnC95qjyNRP3v8W1wTM2BjHpoMwr6OqAkVzhyMYm25asbk\
+    ckiEeMA4h9Gch5lXZ1/1xg8Mg+JKYBQqOqMgfbtxEa9gpBfcUzoORjKvVe0HwhWRcFAILe\
+    bxgqnQQbHWwJ6m1n0W/C0a9EuscdOmzfl9rVso0qROBmPhXAzTJqd9B+ecKGATaer6OeRp\
+    OjEhzADyUPtYRoP/SJkf3RfpJTFGf+gBY1UCZNBUhOP+33vN7KRJQRHRctxTLpRj0GKmEQ\
+    L8WHm+HZah/am1C/twkpnoA9rGC9qCKdaRlZOAk8xYbZu4g3PLs17krFfVyzpD6TpGxuRK\
+    OZ8Us/2GiMb5hyebAXINqTplsrTC6EzCb+uR04Xz32p02dRLZEzt0ef19DXKgGNcW20S4l\
+    CfajHhNM3AXyIl+hEiAR+bs/aJGIOSf24z1DOsXwtqauD6Lbg1un9SQjw41XHbnRVg4hVH\
+    FTxZwHLZyHweQOaOdeXFF2RCpHbJyv1MxzFJl2ilTmi951rNZS/Epp4nKxzQNy7IoDyume\
+    Yz+rtXkvzcGCW7OxRJArkS0/L1meD6A7dp7Lhj0OB9bpup/lG+chEpgLVRrcgfD8eyXeL/\
+    rE9iUlnOA+xkC6fT+hUnzFpe8PxdIS6hS326FwyK57K5qu5LMmbaKeOz9L4rySgfg+Wmkh\
+    7CibvsoX4XR9WGSpMLZTN5sqhlepHquzk5ONgJj5/N11tQHFFcaK/A5TCFgOTSMIKpaGeJ\
+    oR8JLikmlTSHXsSsvYkMH6Q2Ph9bt7e4RW/BnpzGkA
     """
 
 private let fsAlphaTextureGLSL = """
@@ -134,8 +169,12 @@ private let fsAlphaTextureGLSL = """
     #version 450
 
     layout (push_constant) uniform Constants {
-        float linear;
-        float constant;
+        float maskLinear;
+        float maskConstant;
+        float colorMatrixR[5];
+        float colorMatrixG[5];
+        float colorMatrixB[5];
+        float colorMatrixA[5];
     } pc;
 
     layout (binding=0) uniform sampler2D maskImage;
@@ -148,22 +187,35 @@ private let fsAlphaTextureGLSL = """
     layout (location=0) out vec4 outFragColor;
 
     void main(void) {
-        if ((texture(maskImage, maskUV).r * pc.linear + pc.constant) <= 0)
+        if ((texture(maskImage, maskUV).r * pc.maskLinear + pc.maskConstant) <= 0)
             discard;
-        outFragColor = vec4(color.rgb, texture(image, texUV).r * color.a);
+        vec4 fragColor = vec4(color.rgb, texture(image, texUV).r * color.a);
+        vec4 cmR = vec4(pc.colorMatrixR[0], pc.colorMatrixR[1], pc.colorMatrixR[2], pc.colorMatrixR[3]);
+        vec4 cmG = vec4(pc.colorMatrixG[0], pc.colorMatrixG[1], pc.colorMatrixG[2], pc.colorMatrixG[3]);
+        vec4 cmB = vec4(pc.colorMatrixB[0], pc.colorMatrixB[1], pc.colorMatrixB[2], pc.colorMatrixB[3]);
+        vec4 cmA = vec4(pc.colorMatrixA[0], pc.colorMatrixA[1], pc.colorMatrixA[2], pc.colorMatrixA[3]);
+        float r = dot(fragColor, cmR) + pc.colorMatrixR[4];
+        float g = dot(fragColor, cmG) + pc.colorMatrixG[4];
+        float b = dot(fragColor, cmB) + pc.colorMatrixB[4];
+        float a = dot(fragColor, cmA) + pc.colorMatrixA[4];
+        outFragColor = vec4(r, g, b, a);        
     }
     """
 
 private let fsAlphaTextureSpvCEB64 = """
-    XQAAAAQEBQAAAAAAAAABgJdesnC95qjyNRP0DqSHSDMt2CDmdjcMiDoyZhb2n2T8l4pQf6\
-    WN+e258rgjKEZeAhdTyJLzOfxsZ6OXHPSV2iIhV3tLxKZJuR+7ZB0KbciAQpZ2oatSGf7/\
-    uqe0N1cPEdYK+7Qo1PmhkfVf/y1xjk/F7kvHejNsPrNTvXRHoklVbVr2fih27M3fbySNlb\
-    DsXl7judQDjyAeE45px+nZ3JRxrYX4IYjzovv2nLrKfeV4w4lIT1p5XZrr8qYY8AOjXwDT\
-    ij3e05GnmRGCRw7s8A7hptgHwD8YwNkP588mnYPVsPiQXCnJhDhGXbygX44zDn0BqgYcSg\
-    VsKixPuzWN2gCtjCPOZVwyEjCcnBabCdKNP7URFpbLxpqn/+M+ZrOR8fhywSYkTsJNDrSp\
-    y7k9fzf/ks3BLpVAn92FdgmiskewgYedENIZFYVaNkJX7myhWxK6sJP8UxxYLWUhtmd2fR\
-    2SN7H/akbAUHPpASwVbkRDd+70HK4qxkQ32DrhRSwDJiqvDrd62KBZlL0NQeBUx0aRvKdo\
-    bPul
+    XQAAAASACgAAAAAAAAABgJdesnC95qjyNRP4LjR13ShGBjHpoMwr6OqAkVzhyMYm25asbk\
+    ckiEeMA4h9Gch5lXZ1/1xg8Mg+JKYBQqOqMXLvaDa2VapCJlXKQRvkfsh+6rBb9AFK7tUY\
+    Ai1iuBSo9Ajzu0M6+kTurMvtSygHZpcS6ybs4HaeTonW+8EkgeSoWp0KEICMv0LJ2G2r3m\
+    OElTJ5sSl6V22G5M1+u+nqxzdxVwHc4YLK7BCfItj8pYPg3CUNVSpfD99MPPOgmS/d+8g4\
+    unXefV6xrGUAPoI0I9xmU/wSqz2lUvVMvP0PWooBrMbKkWAONR5nAhdH6CDb1ZuGwkMW1s\
+    eAkaSxmKT3hi0Wk4SEiEDy3Ugp2CCyeTo0t5Z7i9HEtqY34FpD4MhgOzLev53j3MgCe+so\
+    K2Dh8wkECOUQx6EqD+RvWl9Vd8MSUOyyC7uZ2YIkOfqD4y/J8VMhs3RXDr0vlQdxCnaYe8\
+    XFdlCEbDaW/70ifFI2qhTU8dfWiNSAc+Pya2mc1SZOJ49W8aER8c6uda5MyLMesM5ZQD1t\
+    h97tYfkMMpbpf7Bv07ng+wXlOwGtAGXS+MiEciLVLrZ3WVeyxKbxBrsWINRYvGAHPDAJLH\
+    P+ft80UnseiFASNR1kZRlbwkg/hNy5BFqZHpAGkRs8xxaSnmGRSSntYsXchaP6eni1z2MW\
+    2jkSMfHmXVkFP1Y8zGrQq8MS3UFDRYeSeOkcJ/PSU7rA2kJYzyCTt6BZVWyC3N9o/qHLIN\
+    Ohthd32UBa1NR++qTANMBvXKnfUWFqkumRjze30mhlRdWZeXPuy4kdF3dh6eJ45hdDjQPp\
+    ApjhSqpMhdAaaK84IBOFlQA=
     """
 
 private let fsResolveMaskGLSL = """
@@ -171,8 +223,12 @@ private let fsResolveMaskGLSL = """
     #version 450
 
     layout (push_constant) uniform Constants {
-        float linear;
-        float constant;
+        float maskLinear;
+        float maskConstant;
+        float colorMatrixR[5];
+        float colorMatrixG[5];
+        float colorMatrixB[5];
+        float colorMatrixA[5];
     } pc;
 
     layout (binding=0) uniform sampler2D maskImage;
@@ -185,61 +241,30 @@ private let fsResolveMaskGLSL = """
     layout (location=0) out vec4 outFragColor;
 
     void main() {
-        if ((texture(maskImage, maskUV).r * pc.linear + pc.constant) <= 0)
+        if ((texture(maskImage, maskUV).r * pc.maskLinear + pc.maskConstant) <= 0)
             discard;
-        vec4 frag = texture(image, texUV) * color;
-        outFragColor = frag.aaaa;
+
+        vec4 fragColor = texture(image, texUV) * color;
+        vec4 cmA = vec4(pc.colorMatrixA[0], pc.colorMatrixA[1], pc.colorMatrixA[2], pc.colorMatrixA[3]);
+        float a = dot(fragColor, cmA) + pc.colorMatrixA[4];
+        /* output target should be r8unorm */
+        outFragColor = vec4(a, a, a, a);
     }
     """
 
 private let fsResolveMaskSpvCEB64 = """
-    XQAAAARoBAAAAAAAAAABgJdesnC95qjyNRPzlU37FEkN1hUbMQvIcJ3CE67M6dB2Y23RAR\
-    9k2oVNOJaKtw9bEF24BbVkuOzAzXM/dJ3t1cdSX7VBDeIDa9Bzm9V36LqNgXYFa1unRxUa\
-    YllXRpNM5dJg53AawHFulwGoqEYQlmjmJ1lEhKcq5DHV9KXGsEe22GlgkJLFldK0Ze6ja2\
-    sJOBtL2K8jYJ5nHrH542x8ZKubjWb+qmyzqT4HQDkiMVyiztA5hPw5WeS1ObBOlqfqSkH6\
-    wnsqXftBkbhvAkX642k48yDKd2vyArYORPwobvAXQ0Sax3HjafF9dVMqcypHnl1CUG835E\
-    GEuAQ/rOkMxnPDnQc8/MiODDY8I8jPCprkixL0MnpnSTLm3X7+nIstccxju76YlNUhUo5Q\
-    ZslSywO2XhNK6DAyk+9G9zwFkhMdQ7iPKHta7bcAue7KbVlghuZQIA8Sdcn+b7+AnwwpG+\
-    1wt0eEAnq5ry86OA==
+    XQAAAAQEBgAAAAAAAAABgJdesnC95qjyNRP1TqkuUYBtYiFNRo5NmeAko5dxbKw6cfMUDv\
+    m077Y8SFv99HGiKQgiCpqph1AP2+nGsMDjlco1L4uZXOVIpxqur90t6Hv0XWK+2+TQVq4p\
+    VYetcae9cIzKya/aZZI8+awRrzXSaOxNfmvMrdjT48hm21MhvLZwTR1nY25jPg2RrVXL1r\
+    bCwkCd8PdIrl8q3+ToxDf9slX7dryiKkojIfgpzaSe6rH7nhxKgHg3MN73fk0TLntycEaH\
+    xpNU2Wx8sD9M7wW2HYrU773qveIlmyigmCdOzsCfHO5HeugrD5QdlOpw7idSzq8AIs2YLR\
+    fCwoGkifOJlKaTLe1T7+DNTkeeCw1N9Bsce21iAxGTWEybgElOpeCsyZ6nP+gZ9Z/7b8i1\
+    PuIemGepaWhiTRdCr5r4N9tLr5AfVasFbMwQmWwkPeqYH/a49Rm0dWqGDTYDbj8oTdQn4h\
+    G/vfLqzohxUePf/pkPyQ42NhVTy5e+D3HPOnub2WA5ieRAt3nufgLzoePA1L65AMihj6rQ\
+    omGyUrm2cDB1RIleDfkR5/DN0MQEb9E1o36eLloSiEMK1a9wQua90bglTgXqWzhcr3k/dj\
+    rHs+mbDOkq/i4=
     """
 
-private let fsResolveInverseMaskGLSL = """
-    /* fragment-shader: vertex color, uniform texture */
-    #version 450
-
-    layout (push_constant) uniform Constants {
-        float linear;
-        float constant;
-    } pc;
-
-    layout (binding=0) uniform sampler2D maskImage;
-    layout (binding=1) uniform sampler2D image;
-
-    layout (location=0) in vec2 maskUV;
-    layout (location=1) in vec2 texUV;
-    layout (location=2) in vec4 color;
-
-    layout (location=0) out vec4 outFragColor;
-
-    void main() {
-        if ((texture(maskImage, maskUV).r * pc.linear + pc.constant) <= 0)
-            discard;
-        vec4 frag = texture(image, texUV) * color;
-        outFragColor = 1 - frag.aaaa;
-    }
-    """
-
-private let fsResolveInverseMaskSpvCEB64 = """
-    XQAAAASoBAAAAAAAAAABgJdesnC95qjyNRPz2qO/SDMt2CDmdjcMiDoyZhb2n2T8l4pQf6\
-    WN+e258rgjKEZeAhdTyJLzOfxsZ6OXHPSV2iI1PurjK2KHD13Efp/5gmhEozfvaThJ58Xv\
-    iQDpkWCCdGO5a4b/Ur1O9ngaK27dyi7pR9CdNlf0LItB0o7AmLjcAyDwW8oJ2+ISu59S2q\
-    WyV/6FG5VikuGWmEP8GvedZc3qllxMHxTqyqZdjQ/tEIAVS507hIt21XOoE06eyA/ULQM/\
-    ghzrR1VbcJj+s5fgOFHGVBOvPLWoieMAAmEBuo9YGaFajZnizqzHT/54+niAVrzx/Sp/Cq\
-    f5lKmN748grGPFjXlMkgWBrbIn5GwAkXX7oe2r52emG3/OnDFP5nzkj3J2diYNX7prXqTW\
-    FAV+5bPInSt8D6P5ZymqOUNkYwmHftZGZc8JST3uIV01uA8mPUbuCEgt/punvt2RHUm8lR\
-    3IquaYJSvfWC6d+brckAzbHyKk9w1iLl4i9A8YN3CcM5g723Fk
-    """
-    
 
 private func decodeShader(device: GraphicsDevice, encodedText: String) -> ShaderFunction? {
     if let data = Data(base64Encoded: encodedText, options: .ignoreUnknownCharacters) {
@@ -290,7 +315,6 @@ private enum _Shader {
     case image          // texture with tint color
     case alphaTexture   // for glyph (single channel texture)
     case resolveMask    // merge two masks (a8, r8) to render target (r8)
-    case resolveInverseMask
 }
 
 private enum _Stencil {
@@ -309,8 +333,9 @@ private struct _Vertex {
 }
 
 private struct _PushConstant {
-    var linear: Float32 = 1.0
-    var constant: Float32 = 0.0
+    var maskLinear: Float32 = 1.0
+    var maskConstant: Float32 = 0.0
+    var colorMatrix: ColorMatrix = .init()
 }
 
 class GraphicsPipelineStates {
@@ -470,34 +495,29 @@ class GraphicsPipelineStates {
             guard let vertexFunction = loadShader("vs-default", vsSpvCEB64)
             else { break }
 
-            guard let fragColorFunction = loadShader("fs-defalut", fsSpvCEB64)
+            guard let fsFunction = loadShader("fs-defalut", fsSpvCEB64)
             else { break }
 
-            guard let fragTextureFunction = loadShader("fs-texture", fsTextureSpvCEB64)
+            guard let fsTextureFunction = loadShader("fs-texture", fsTextureSpvCEB64)
             else { break }
 
-            guard let fragAlphaTextureFunction = loadShader("fs-alpha-texture", fsAlphaTextureSpvCEB64)
+            guard let fsAlphaTextureFunction = loadShader("fs-alpha-texture", fsAlphaTextureSpvCEB64)
             else { break }
 
             guard let fsResolveMaskFunction = loadShader("fs-resolve-mask", fsResolveMaskSpvCEB64)
-            else { break }
-
-            guard let fsResolveInverseMaskFunction = loadShader("fs-resolve-inverse-mask", fsResolveInverseMaskSpvCEB64)
             else { break }
 
             var shaderFunctions: [_Shader: ShaderFunctions] = [:]
             shaderFunctions[.stencil] = ShaderFunctions(
                 vertexFunction: vsStencilFunction, fragmentFunction: nil)
             shaderFunctions[.color] = ShaderFunctions(
-                vertexFunction: vertexFunction, fragmentFunction: fragColorFunction)
+                vertexFunction: vertexFunction, fragmentFunction: fsFunction)
             shaderFunctions[.image] = ShaderFunctions(
-                vertexFunction: vertexFunction, fragmentFunction: fragTextureFunction)
+                vertexFunction: vertexFunction, fragmentFunction: fsTextureFunction)
             shaderFunctions[.alphaTexture] = ShaderFunctions(
-                vertexFunction: vertexFunction, fragmentFunction: fragAlphaTextureFunction)
+                vertexFunction: vertexFunction, fragmentFunction: fsAlphaTextureFunction)
             shaderFunctions[.resolveMask] = ShaderFunctions(
                 vertexFunction: vertexFunction, fragmentFunction: fsResolveMaskFunction)
-            shaderFunctions[.resolveInverseMask] = ShaderFunctions(
-                vertexFunction: vertexFunction, fragmentFunction: fsResolveInverseMaskFunction)
 
             let bindingLayout1 = ShaderBindingSetLayout(
                 bindings: [
@@ -878,7 +898,7 @@ extension GraphicsContext {
             encoder.setStencilReferenceValue(0)
             encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
 
-            let pc = _PushConstant(linear: 1.0, constant: 0.0)
+            let pc = _PushConstant()
             withUnsafeBytes(of: pc) {
                 encoder.pushConstant(stages: .fragment,
                                      offset: 0,
