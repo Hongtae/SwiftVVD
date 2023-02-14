@@ -274,6 +274,7 @@ private func decodeShader(device: GraphicsDevice, encodedText: String) -> Shader
         if decompress(input: inputStream, output: outputStream) == .success {
             let decodedData = outputStream.property(forKey: .dataWrittenToMemoryStreamKey) as! Data
             if let shader = Shader(data: decodedData), shader.validate() {
+                Log.debug("GraphicsPipeline Shader loaded: \(shader)")
                 if let module = device.makeShaderModule(from: shader) {
                     return module.makeFunction(name: module.functionNames.first ?? "")
                 }
@@ -398,7 +399,10 @@ class GraphicsPipelineStates {
         pipelineDescriptor.primitiveTopology = .triangle
         pipelineDescriptor.triangleFillMode = .fill
 
-        if let state = device.makeRenderPipelineState(descriptor: pipelineDescriptor) {
+        var reflection = PipelineReflection()
+        if let state = device.makeRenderPipelineState(descriptor: pipelineDescriptor,
+                                                      reflection: &reflection) {
+            Log.debug("PipelineState (_Shader.\(rs.shader)) Reflection: \(reflection)")
             pipelineStates[rs] = state
             return pipelineStates[rs]
         }
@@ -587,7 +591,7 @@ class GraphicsPipelineStates {
             }
             guard let encoder = commandBuffer.makeCopyCommandEncoder() else {
                 Log.err("\(Self.self).\(#function): makeCopyCommandEncoder failed.")
-                break          
+                break
             }
             encoder.copy(from: stgBuffer,
                          sourceOffset: BufferImageOrigin(offset: 0, imageWidth: texWidth, imageHeight: texHeight),
@@ -685,13 +689,17 @@ extension GraphicsContext {
                     currentPoint = to
                 case .line(let p1):
                     if let p0 = currentPoint {
-                        if polygon.vertices.last != p0 { polygon.vertices.append(p0) }
+                        if polygon.vertices.last != p0 {
+                            polygon.vertices.append(p0)
+                        }
                         polygon.vertices.append(p1)
                     }
                     currentPoint = p1
                 case .quadCurve(let p2, let p1):
                     if let p0 = currentPoint {
-                        if polygon.vertices.last != p0 { polygon.vertices.append(p0) }
+                        if polygon.vertices.last != p0 {
+                            polygon.vertices.append(p0)
+                        }
                         let curve = QuadraticBezier(p0: p0, p1: p1, p2: p2)
                         let length = curve.approximateLength()
                         if length > .ulpOfOne {
@@ -708,7 +716,9 @@ extension GraphicsContext {
                     currentPoint = p2
                 case .curve(let p3, let p1, let p2):
                     if let p0 = currentPoint {
-                        if polygon.vertices.last != p0 { polygon.vertices.append(p0) }
+                        if polygon.vertices.last != p0 {
+                            polygon.vertices.append(p0)
+                        }
                         let curve = CubicBezier(p0: p0, p1: p1, p2: p2, p3: p3)
                         let length = curve.approximateLength()
                         if length > .ulpOfOne {
@@ -772,16 +782,15 @@ extension GraphicsContext {
 
         let queue = self.commandBuffer.commandQueue
         guard let pipeline = GraphicsPipelineStates.sharedInstance(commandQueue: queue) else {
-            Log.err("GraphicsContext.fill() error: pipeline failed.")
+            Log.err("GraphicsContext error: pipeline failed.")
             return
         }
-
         guard let vertexBuffer = pipeline.makeBuffer(vertexData) else {
-            Log.err("GraphicsContext.fill() error: pipeline.makeBuffer failed.")
+            Log.err("GraphicsContext error: pipeline.makeBuffer failed.")
             return
         }
         guard let indexBuffer = pipeline.makeBuffer(indexData) else {
-            Log.err("GraphicsContext.fill() error: pipeline.makeBuffer failed.")
+            Log.err("GraphicsContext error: pipeline.makeBuffer failed.")
             return
         }
 
@@ -791,11 +800,11 @@ extension GraphicsContext {
                   colorFormat: backBuffer.pixelFormat,
                   depthFormat: stencilBuffer.pixelFormat,
                   blendState: .defaultOpaque)) else {
-            Log.err("GraphicsContext.fill() error: pipeline.renderState failed.")
+            Log.err("GraphicsContext error: pipeline.renderState failed.")
             return
         }
         guard let depthState = pipeline.depthStencilState(.generateWindingNumber) else {
-            Log.err("GraphicsContext.fill() error: pipeline.depthStencilState failed.")
+            Log.err("GraphicsContext error: pipeline.depthStencilState failed.")
             return
         }
 
@@ -814,7 +823,7 @@ extension GraphicsContext {
                     clearStencil: 0))
 
         guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPass) else {
-            Log.err("GraphicsContext.fill() error: makeRenderCommandEncoder failed.")
+            Log.err("GraphicsContext error: makeRenderCommandEncoder failed.")
             return
         }
 
@@ -838,7 +847,7 @@ extension GraphicsContext {
         if draw(encoder) {
             encoder.endEncoding()
         } else {
-            Log.err("GraphicsContext.fill() error: draw callback failed.")
+            Log.err("GraphicsContext error: draw callback failed.")
         }
     }
 
@@ -846,16 +855,17 @@ extension GraphicsContext {
         self._fillStencil(path) { encoder in
             let queue = self.commandBuffer.commandQueue
             guard let pipeline = GraphicsPipelineStates.sharedInstance(commandQueue: queue) else {
-                Log.err("GraphicsContext.fill() error: pipeline failed.")
+                Log.err("GraphicsContext error: pipeline failed.")
                 return false
             }
 
             // pipeline states for polygon fill
-            guard let pipelineState = pipeline.renderState(.init(shader: .color,
-                                                                colorFormat: backBuffer.pixelFormat,
-                                                                depthFormat: stencilBuffer.pixelFormat,
-                                                                blendState: .defaultAlpha)) else {
-                Log.err("GraphicsContext.fill() error: pipeline.renderState failed.")
+            guard let pipelineState = pipeline.renderState(
+                .init(shader: .color,
+                      colorFormat: backBuffer.pixelFormat,
+                      depthFormat: stencilBuffer.pixelFormat,
+                      blendState: .defaultAlpha)) else {
+                Log.err("GraphicsContext error: pipeline.renderState failed.")
                 return false
             }
             let depthState: DepthStencilState?
@@ -865,7 +875,7 @@ extension GraphicsContext {
                 depthState = pipeline.depthStencilState(.nonZero)
             }
             guard let depthState else {
-                Log.err("GraphicsContext.fill() error: pipeline.depthStencilState failed.")
+                Log.err("GraphicsContext error: pipeline.depthStencilState failed.")
                 return false
             }
 
@@ -882,7 +892,7 @@ extension GraphicsContext {
             ]
 
             guard let vertexBuffer = pipeline.makeBuffer(rectVertices) else {
-                Log.err("GraphicsContext.fill() error: pipeline.makeBuffer() failed.")
+                Log.err("GraphicsContext error: pipeline.makeBuffer() failed.")
                 return false
             }
 
@@ -900,9 +910,7 @@ extension GraphicsContext {
 
             let pc = _PushConstant()
             withUnsafeBytes(of: pc) {
-                encoder.pushConstant(stages: .fragment,
-                                     offset: 0,
-                                     data: $0)
+                encoder.pushConstant(stages: .fragment, offset: 0, data: $0)
             }
 
             encoder.draw(vertexStart: 0,

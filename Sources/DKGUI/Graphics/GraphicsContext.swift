@@ -69,7 +69,8 @@ public struct GraphicsContext {
          stencilBuffer: Texture) {
 
         let queue = commandBuffer.commandQueue
-        guard let maskTexture = GraphicsPipelineStates.sharedInstance(commandQueue: queue)?.defaultMaskTexture
+        guard let maskTexture = GraphicsPipelineStates.sharedInstance(
+            commandQueue: queue)?.defaultMaskTexture
         else {
             Log.err("GraphicsPipelineStates error")
             return nil
@@ -106,7 +107,7 @@ public struct GraphicsContext {
     }
 
     func makeLayerContext() -> Self? {
-                let device = self.commandBuffer.device
+        let device = self.commandBuffer.device
         let width = self.backBuffer.width
         let height = self.backBuffer.height
         let pixelFormat = self.backBuffer.pixelFormat
@@ -120,14 +121,14 @@ public struct GraphicsContext {
 
             let bounds = CGRect(origin: .zero, size: self.bounds.size)
             return GraphicsContext(opacity: self.opacity,
-                                          blendMode: self.blendMode,
-                                          environment: self.environment,
-                                          transform: self.transform,
-                                          bounds: bounds,
-                                          scaleFactor: self.scaleFactor,
-                                          commandBuffer: self.commandBuffer,
-                                          backBuffer: backBuffer,
-                                          stencilBuffer: self.stencilBuffer)
+                                   blendMode: self.blendMode,
+                                   environment: self.environment,
+                                   transform: self.transform,
+                                   bounds: bounds,
+                                   scaleFactor: self.scaleFactor,
+                                   commandBuffer: self.commandBuffer,
+                                   backBuffer: backBuffer,
+                                   stencilBuffer: self.stencilBuffer)
         }
         return nil
     }
