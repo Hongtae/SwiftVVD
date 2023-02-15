@@ -126,11 +126,11 @@ public struct Path: Equatable {
 
     // smallest rectangle completely enclosing all points in the path,
     // including control points for Bézier and quadratic curves.
-    private var boundingBox: CGRect = .null
-
+    var boundingBox: CGRect = .null
+    
     // smallest rectangle completely enclosing all points in the path
     // but not including control points for Bézier and quadratic curves.
-    private var boundingBoxOfPath: CGRect = .null
+    var boundingBoxOfPath: CGRect = .null
 
     public var boundingRect: CGRect { boundingBox }
 

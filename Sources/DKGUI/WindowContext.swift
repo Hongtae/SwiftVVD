@@ -76,13 +76,17 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                     let backBuffer = renderPass.colorAttachments[0].renderTarget!
                     var stencilBuffer = self.sharedContext.stencilBuffer
 
-                    if let stencilBuffer, stencilBuffer.width == backBuffer.width && stencilBuffer.height == backBuffer.height {
+                    let dim = { (tex: Texture) in (tex.width, tex.height, tex.depth) }
+
+                    if let stencilBuffer, dim(stencilBuffer) == dim(backBuffer) {
+                        // reuse the stencil buffer.
                     } else {
+                        // create a new stencil buffer.
                         let desc = TextureDescriptor(textureType: .type2D,
                                                      pixelFormat: .stencil8,
                                                      width: backBuffer.width,
                                                      height: backBuffer.height,
-                                                     usage: [.renderTarget, .sampled])
+                                                     usage: [.renderTarget])
                         stencilBuffer = device.makeTexture(descriptor: desc)
                     }
 

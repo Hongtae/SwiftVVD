@@ -41,6 +41,10 @@ public protocol Texture: AnyObject {
     var device: GraphicsDevice { get }
 }
 
+extension Texture {
+    public var dimensions: (Int, Int, Int) { (self.width, self.height, self.depth) }
+}
+
 public struct TextureDescriptor {
     public var textureType: TextureType
     public var pixelFormat: PixelFormat

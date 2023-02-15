@@ -32,7 +32,7 @@ public struct RenderPassColorAttachmentDescriptor: RenderPassAttachmentDescripto
     public init(renderTarget: Texture? = nil,
                 loadAction: RenderPassAttachmentLoadAction = .dontCare,
                 storeAction: RenderPassAttachmentStoreAction = .dontCare,
-                clearColor: Color = .black) {
+                clearColor: Color = .clear) {
         self.renderTarget = renderTarget
         self.loadAction = loadAction
         self.storeAction = storeAction

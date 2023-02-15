@@ -50,23 +50,80 @@ public struct GraphicsContext {
     public var transform: CGAffineTransform
 
     let viewTransform: CGAffineTransform
-    let bounds: CGRect
-    let scaleFactor: CGFloat
+    let contentBounds: CGRect
     let commandBuffer: CommandBuffer
-    // render targets
     let backBuffer: Texture
     let stencilBuffer: Texture
     var maskTexture: Texture
 
+    var resolution: CGSize {
+        CGSize(width: self.backBuffer.width, height: self.backBuffer.height)
+    }
+
     init?(opacity: Double = 1.0,
-         blendMode: BlendMode = .normal,
-         environment: EnvironmentValues,
-         transform: CGAffineTransform = .identity,
-         bounds: CGRect,
-         scaleFactor: CGFloat,
-         commandBuffer: CommandBuffer,
-         backBuffer: Texture,
-         stencilBuffer: Texture) {
+          blendMode: BlendMode = .normal,
+          environment: EnvironmentValues,
+          transform: CGAffineTransform = .identity,
+          contentBounds: CGRect,
+          resolution: CGSize,
+          commandBuffer: CommandBuffer,
+          backBuffer: Texture? = nil,
+          stencilBuffer: Texture? = nil) {
+
+        self.opacity = opacity
+        self.blendMode = blendMode
+        self.environment = environment
+        self.transform = transform
+        self.commandBuffer = commandBuffer
+        self.contentBounds = contentBounds.standardized
+
+        let device = commandBuffer.device
+
+        if let backBuffer = backBuffer {
+            self.backBuffer = backBuffer
+        } else {
+            let width = Int(max(resolution.width.rounded(), 1))
+            let height = Int(max(resolution.height.rounded(), 1))
+
+            guard let backBuffer = device.makeTexture(
+                descriptor: TextureDescriptor(textureType: .type2D,
+                                              pixelFormat: .rgba8Unorm,
+                                              width: width,
+                                              height: height,
+                                              usage: [.renderTarget, .sampled])) else {
+                Log.err("GraphicsContext error: makeTexture failed.")
+                return nil
+            }
+            if let encoder = commandBuffer.makeRenderCommandEncoder(
+                descriptor: RenderPassDescriptor(colorAttachments: [
+                    RenderPassColorAttachmentDescriptor(renderTarget: backBuffer,
+                                                        loadAction: .clear,
+                                                        storeAction: .store)])) {
+                encoder.endEncoding()
+            } else {
+                Log.err("GraphicsContext warning: makeRenderCommandEncoder failed.")
+            }
+            self.backBuffer = backBuffer
+        }
+
+        if let stencilBuffer, stencilBuffer.dimensions == self.backBuffer.dimensions {
+            self.stencilBuffer = stencilBuffer
+        } else {
+            let width = self.backBuffer.width
+            let height = self.backBuffer.height
+            if let stencilBuffer = device.makeTexture(
+                descriptor: TextureDescriptor(textureType: .type2D,
+                                              pixelFormat: .stencil8,
+                                              width: width,
+                                              height: height,
+                                              usage: [.renderTarget])) {
+                self.stencilBuffer = stencilBuffer
+            } else {
+                Log.err("GraphicsContext error: makeTexture failed.")
+                return nil
+            }
+        }
+        assert(self.backBuffer.dimensions == self.stencilBuffer.dimensions)
 
         let queue = commandBuffer.commandQueue
         guard let maskTexture = GraphicsPipelineStates.sharedInstance(
@@ -75,24 +132,10 @@ public struct GraphicsContext {
             Log.err("GraphicsPipelineStates error")
             return nil
         }
-
-        self.opacity = opacity
-        self.blendMode = blendMode
-        self.environment = environment
-        self.transform = transform
-        self.commandBuffer = commandBuffer
-        self.backBuffer = backBuffer
-        self.stencilBuffer = stencilBuffer
         self.maskTexture = maskTexture
 
-        self.bounds = bounds.standardized
-        self.scaleFactor = scaleFactor
-
-        let dim = { (tex: Texture) in (tex.width, tex.height, tex.depth) }
-        assert(dim(backBuffer) == dim(stencilBuffer))
-
-        let origin = bounds.origin
-        let scale = CGSize.maximum(bounds.size, CGSize(width: 1, height: 1))
+        let origin = self.contentBounds.origin
+        let scale = self.contentBounds.size
         let offset = CGAffineTransform(translationX: origin.x, y: origin.y)
         let normalize = CGAffineTransform(scaleX: 1.0 / scale.width, y: 1.0 / scale.height)
 
@@ -107,30 +150,16 @@ public struct GraphicsContext {
     }
 
     func makeLayerContext() -> Self? {
-        let device = self.commandBuffer.device
-        let width = self.backBuffer.width
-        let height = self.backBuffer.height
-        let pixelFormat = self.backBuffer.pixelFormat
-
-        if let backBuffer = device.makeTexture(
-            descriptor: TextureDescriptor(textureType: .type2D,
-                                          pixelFormat: pixelFormat,
-                                          width: width,
-                                          height: height,
-                                          usage: [.renderTarget, .sampled])) {
-
-            let bounds = CGRect(origin: .zero, size: self.bounds.size)
-            return GraphicsContext(opacity: self.opacity,
-                                   blendMode: self.blendMode,
-                                   environment: self.environment,
-                                   transform: self.transform,
-                                   bounds: bounds,
-                                   scaleFactor: self.scaleFactor,
-                                   commandBuffer: self.commandBuffer,
-                                   backBuffer: backBuffer,
-                                   stencilBuffer: self.stencilBuffer)
-        }
-        return nil
+        let bounds = CGRect(origin: .zero, size: self.contentBounds.size)
+        return GraphicsContext(opacity: 1.0,
+                               blendMode: .normal,
+                               environment: self.environment,
+                               transform: .identity,
+                               contentBounds: bounds,
+                               resolution: self.resolution,
+                               commandBuffer: self.commandBuffer,
+                               backBuffer: nil,
+                               stencilBuffer: self.stencilBuffer)
     }
 
     public mutating func scaleBy(x: CGFloat, y: CGFloat) {
@@ -156,19 +185,7 @@ public struct GraphicsContext {
         public static var inverse = ClipOptions(rawValue: 1)
     }
 
-    public var clipBoundingRect: CGRect { .zero }
-
-    public mutating func clip(to path: Path,
-                              style: FillStyle = FillStyle(),
-                              options: ClipOptions = ClipOptions()) {
-        fatalError()
-    }
-
-    public mutating func clipToLayer(opacity: Double = 1,
-                                     options: ClipOptions = ClipOptions(),
-                                     content: (inout GraphicsContext) throws -> Void) rethrows {
-        fatalError()
-    }
+    public var clipBoundingRect: CGRect = .zero
 
     public struct Filter {
         public static func projectionTransform(_ matrix: ProjectionTransform) -> Filter {

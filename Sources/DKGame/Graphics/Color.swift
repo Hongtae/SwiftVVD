@@ -117,6 +117,7 @@ public struct Color: Hashable {
     public static let purple = Color(0.5, 0.0, 0.5)
     public static let red = Color(1.0, 0.0, 0.0)
     public static let yellow = Color(1.0, 1.0, 0.0)
+    public static let clear = Color(0, 0, 0, 0)
 }
 
 public extension Color {

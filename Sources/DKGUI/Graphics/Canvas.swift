@@ -96,9 +96,10 @@ struct CanvasContext<Symbols>: ViewProxy where Symbols: View {
         if self.layoutSize.width > 0 && self.layoutSize.height > 0 {
             if let commandBuffer = queue.makeCommandBuffer() {
                 let bounds = CGRect(origin: self.layoutOffset, size: self.layoutSize)
+                let resolution = CGSize(width: backBuffer.width, height: backBuffer.height)
                 if var gc = GraphicsContext(environment: self.environmentValues,
-                                            bounds: bounds,
-                                            scaleFactor: self.contentScaleFactor,
+                                            contentBounds: bounds,
+                                            resolution: resolution,
                                             commandBuffer: commandBuffer,
                                             backBuffer: backBuffer,
                                             stencilBuffer: stencilBuffer) {
