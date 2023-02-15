@@ -79,11 +79,13 @@ public struct GraphicsContext {
 
         let device = commandBuffer.device
 
+        let width = Int(max(resolution.width.rounded(), 1))
+        let height = Int(max(resolution.height.rounded(), 1))
+
         if let backBuffer = backBuffer {
+            assert(backBuffer.dimensions == (width, height, 1))
             self.backBuffer = backBuffer
         } else {
-            let width = Int(max(resolution.width.rounded(), 1))
-            let height = Int(max(resolution.height.rounded(), 1))
 
             guard let backBuffer = device.makeTexture(
                 descriptor: TextureDescriptor(textureType: .type2D,
@@ -106,7 +108,8 @@ public struct GraphicsContext {
             self.backBuffer = backBuffer
         }
 
-        if let stencilBuffer, stencilBuffer.dimensions == self.backBuffer.dimensions {
+        if let stencilBuffer {
+            assert(stencilBuffer.dimensions == (width, height, 1))
             self.stencilBuffer = stencilBuffer
         } else {
             let width = self.backBuffer.width
