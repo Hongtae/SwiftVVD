@@ -655,8 +655,8 @@ extension GraphicsContext {
         if var context = self.makeLayerContext() {
             do {
                 try content(&context)
-                let offset = -self.contentBounds.origin
-                let scale = self.contentBounds.size
+                let offset = -context.contentBounds.origin
+                let scale = context.contentBounds.size
                 self._draw(texture: context.backBuffer,
                            in: CGRect(origin: offset, size: scale),
                            color: .white)
@@ -668,12 +668,27 @@ extension GraphicsContext {
         }
     }
 
-    func _draw(texture: Texture, in: CGRect, color: DKGame.Color) {
+    func drawRegionLayer(_ frame: CGRect, content: (inout GraphicsContext) throws -> Void) rethrows {
+        if var context = self.makeRegionLayerContext(frame) {
+            do {
+                try content(&context)
+                self._draw(texture: context.backBuffer,
+                           in: frame,
+                           color: .white)
+            } catch {
+                Log.err("GraphicsContext error: \(error)")
+            }
+        } else {
+            Log.error("GraphicsContext error: failed to create new context.")
+        }
+    }
 
+    func _draw(texture: Texture, in: CGRect, color: DKGame.Color) {
+        fatalError("Not implemented")
     }
 
     func _resolveMaskTexture(_ texture1: Texture, _ texture2: Texture, opacity: Double, inverse: Bool) -> Texture? {
-        return nil
+        fatalError("Not implemented")
     }
 
     @discardableResult

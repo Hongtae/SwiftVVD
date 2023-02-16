@@ -153,16 +153,39 @@ public struct GraphicsContext {
     }
 
     func makeLayerContext() -> Self? {
-        let bounds = CGRect(origin: .zero, size: self.contentBounds.size)
+        return GraphicsContext(opacity: 1.0,
+                               blendMode: .normal,
+                               environment: self.environment,
+                               transform: .identity,
+                               contentBounds: self.contentBounds,
+                               resolution: self.resolution,
+                               commandBuffer: self.commandBuffer,
+                               backBuffer: nil,
+                               stencilBuffer: self.stencilBuffer)
+    }
+
+    func makeRegionLayerContext(_ frame: CGRect) -> Self? {
+        let frame = frame.standardized
+        let bounds = CGRect(origin: .zero, size: frame.size)
+
+        let resolution = self.resolution
+        let width = resolution.width * (frame.width / self.contentBounds.width)
+        let height = resolution.height * (frame.height / self.contentBounds.height)
+
+        var stencil: Texture? = nil
+        if width.rounded() == resolution.width.rounded() &&
+           height.rounded() == resolution.height.rounded() {
+            stencil = self.stencilBuffer
+        }
         return GraphicsContext(opacity: 1.0,
                                blendMode: .normal,
                                environment: self.environment,
                                transform: .identity,
                                contentBounds: bounds,
-                               resolution: self.resolution,
+                               resolution: CGSize(width: width, height: height),
                                commandBuffer: self.commandBuffer,
                                backBuffer: nil,
-                               stencilBuffer: self.stencilBuffer)
+                               stencilBuffer: stencil)
     }
 
     public mutating func scaleBy(x: CGFloat, y: CGFloat) {
