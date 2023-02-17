@@ -79,60 +79,10 @@ struct CanvasContext<Symbols>: ViewProxy where Symbols: View {
         self.contentScaleFactor = scaleFactor
     }
 
-    func draw() {
-        guard let queue = self.sharedContext.commandQueue else {
-            Log.err("Invalid command queue")
-            return
-        }
-        guard let backBuffer = self.sharedContext.backBuffer else {
-            Log.err("Invalid back buffer")
-            return
-        }
-        guard let stencilBuffer = self.sharedContext.stencilBuffer else {
-            Log.err("Invalid depth stencil buffer")
-            return
-        }
-
-        let clipsToBounds = false
-
+    func draw(frame: CGRect, context: GraphicsContext) {
         if self.layoutSize.width > 0 && self.layoutSize.height > 0 {
-            if let commandBuffer = queue.makeCommandBuffer() {
-
-                let resolution = CGSize(width: backBuffer.width, height: backBuffer.height)
-                let maxScale = resolution / self.contentScaleFactor
-                var sceneBounds = CGRect(origin: .zero, size: maxScale)
-                if clipsToBounds {
-                    if var gc = GraphicsContext(environment: self.environmentValues,
-                                                contentBounds: sceneBounds,
-                                                resolution: resolution,
-                                                commandBuffer: commandBuffer,
-                                                backBuffer: backBuffer,
-                                                stencilBuffer: stencilBuffer) {
-
-                        let viewBounds = CGRect(origin: self.layoutOffset, size: self.layoutSize)
-                        if sceneBounds == viewBounds {
-                            // share context with scene
-                            self.view.renderer(&gc, self.layoutSize)
-                        } else {
-                            // make new layer context for this view
-                            gc.drawRegionLayer(viewBounds) { gc in
-                                self.view.renderer(&gc, self.layoutSize)
-                            }
-                        }
-                        commandBuffer.commit()
-                    }
-                } else {
-                    let bounds = CGRect(origin: self.layoutOffset, size: maxScale)
-                    if var gc = GraphicsContext(environment: self.environmentValues,
-                                                contentBounds: bounds,
-                                                resolution: resolution,
-                                                commandBuffer: commandBuffer,
-                                                backBuffer: backBuffer,
-                                                stencilBuffer: stencilBuffer) {
-                        self.view.renderer(&gc, self.layoutSize)
-                        commandBuffer.commit()
-                    }
-                }        
+            context.drawLayer(in: frame) { context, size in
+                self.view.renderer(&context, size)
             }
         }
     }

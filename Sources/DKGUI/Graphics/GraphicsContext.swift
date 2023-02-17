@@ -46,11 +46,28 @@ public struct GraphicsContext {
 
     public var opacity: Double
     public var blendMode: BlendMode
-    public var environment: EnvironmentValues
+    public internal(set) var environment: EnvironmentValues
     public var transform: CGAffineTransform
 
-    let viewTransform: CGAffineTransform
-    let contentBounds: CGRect
+    var viewTransform: CGAffineTransform
+    var contentOffset: CGPoint {
+        didSet {
+            let origin = self.contentOffset
+            let scale = self.contentScale
+            let offset = CGAffineTransform(translationX: origin.x, y: origin.y)
+            let normalize = CGAffineTransform(scaleX: 1.0 / scale.width, y: 1.0 / scale.height)
+
+            // transform to screen viewport space.
+            let clipSpace = CGAffineTransform(scaleX: 2.0, y: -2.0)
+                .concatenating(CGAffineTransform(translationX: -1.0, y: 1.0))
+
+            self.viewTransform = CGAffineTransform.identity
+                .concatenating(offset)
+                .concatenating(normalize)
+                .concatenating(clipSpace)
+        }
+    }
+    let contentScale: CGSize
     let commandBuffer: CommandBuffer
     let backBuffer: Texture
     let stencilBuffer: Texture
@@ -60,27 +77,27 @@ public struct GraphicsContext {
         CGSize(width: self.backBuffer.width, height: self.backBuffer.height)
     }
 
-    init?(opacity: Double = 1.0,
-          blendMode: BlendMode = .normal,
-          environment: EnvironmentValues,
+    init?(environment: EnvironmentValues,
+          contentOffset: CGPoint,
+          contentScale: CGSize,
           transform: CGAffineTransform = .identity,
-          contentBounds: CGRect,
           resolution: CGSize,
           commandBuffer: CommandBuffer,
           backBuffer: Texture? = nil,
           stencilBuffer: Texture? = nil) {
 
-        self.opacity = opacity
-        self.blendMode = blendMode
-        self.environment = environment
+        self.opacity = 1
+        self.blendMode = .normal
         self.transform = transform
+        self.environment = environment
         self.commandBuffer = commandBuffer
-        self.contentBounds = contentBounds.standardized
+        self.contentScale = .maximum(contentScale, CGSize(width: 1, height: 1))
 
         let device = commandBuffer.device
 
-        let width = Int(max(resolution.width.rounded(), 1))
-        let height = Int(max(resolution.height.rounded(), 1))
+        let width = Int(resolution.width.rounded())
+        let height = Int(resolution.height.rounded())
+        assert(width > 0 && height > 0)
 
         if let backBuffer = backBuffer {
             assert(backBuffer.dimensions == (width, height, 1))
@@ -137,51 +154,42 @@ public struct GraphicsContext {
         }
         self.maskTexture = maskTexture
 
-        let origin = self.contentBounds.origin
-        let scale = self.contentBounds.size
-        let offset = CGAffineTransform(translationX: origin.x, y: origin.y)
-        let normalize = CGAffineTransform(scaleX: 1.0 / scale.width, y: 1.0 / scale.height)
+        self.contentOffset = .zero
+        self.viewTransform = .identity
 
-        // transform to screen viewport space.
-        let clipSpace = CGAffineTransform(scaleX: 2.0, y: -2.0)
-            .concatenating(CGAffineTransform(translationX: -1.0, y: 1.0))
-
-        self.viewTransform = CGAffineTransform.identity
-            .concatenating(offset)
-            .concatenating(normalize)
-            .concatenating(clipSpace)
+        defer {
+            // contentOffset.didSet will be called.
+            self.contentOffset = contentOffset
+        }
     }
 
     func makeLayerContext() -> Self? {
-        return GraphicsContext(opacity: 1.0,
-                               blendMode: .normal,
-                               environment: self.environment,
-                               transform: .identity,
-                               contentBounds: self.contentBounds,
+        return GraphicsContext(environment: self.environment,
+                               contentOffset: self.contentOffset,
+                               contentScale: self.contentScale,
+                               transform: self.transform,
                                resolution: self.resolution,
                                commandBuffer: self.commandBuffer,
-                               backBuffer: nil,
+                               backBuffer: nil, /* to make new buffer */
                                stencilBuffer: self.stencilBuffer)
     }
 
     func makeRegionLayerContext(_ frame: CGRect) -> Self? {
         let frame = frame.standardized
-        let bounds = CGRect(origin: .zero, size: frame.size)
 
         let resolution = self.resolution
-        let width = resolution.width * (frame.width / self.contentBounds.width)
-        let height = resolution.height * (frame.height / self.contentBounds.height)
+        let width = resolution.width * (frame.width / self.contentScale.width)
+        let height = resolution.height * (frame.height / self.contentScale.height)
 
         var stencil: Texture? = nil
         if width.rounded() == resolution.width.rounded() &&
            height.rounded() == resolution.height.rounded() {
             stencil = self.stencilBuffer
         }
-        return GraphicsContext(opacity: 1.0,
-                               blendMode: .normal,
-                               environment: self.environment,
-                               transform: .identity,
-                               contentBounds: bounds,
+        return GraphicsContext(environment: self.environment,
+                               contentOffset: .zero,
+                               contentScale: frame.size,
+                               transform: self.transform,
                                resolution: CGSize(width: width, height: height),
                                commandBuffer: self.commandBuffer,
                                backBuffer: nil,

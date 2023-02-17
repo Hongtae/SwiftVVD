@@ -655,10 +655,17 @@ extension GraphicsContext {
         if var context = self.makeLayerContext() {
             do {
                 try content(&context)
-                let offset = -context.contentBounds.origin
-                let scale = context.contentBounds.size
-                self._draw(texture: context.backBuffer,
+                let offset = -context.contentOffset
+                let scale = context.contentScale
+                let texture = context.backBuffer
+                self._draw(texture: texture,
                            in: CGRect(origin: offset, size: scale),
+                           transform: .identity,
+                           textureFrame: CGRect(x: 0, y: 0,
+                                                width: texture.width,
+                                                height: texture.height),
+                           textureTransform: .identity,
+                           blendMode: context.blendMode,
                            color: .white)
             } catch {
                 Log.err("GraphicsContext error: \(error)")
@@ -668,12 +675,19 @@ extension GraphicsContext {
         }
     }
 
-    func drawRegionLayer(_ frame: CGRect, content: (inout GraphicsContext) throws -> Void) rethrows {
+    func drawLayer(in frame: CGRect, content: (inout GraphicsContext, CGSize) throws -> Void) rethrows {
         if var context = self.makeRegionLayerContext(frame) {
             do {
-                try content(&context)
-                self._draw(texture: context.backBuffer,
+                try content(&context, context.contentScale)
+                let texture = context.backBuffer
+                self._draw(texture: texture,
                            in: frame,
+                           transform: .identity,
+                           textureFrame: CGRect(x: 0, y: 0,
+                                                width: texture.width,
+                                                height: texture.height),
+                           textureTransform: .identity,
+                           blendMode: context.blendMode,
                            color: .white)
             } catch {
                 Log.err("GraphicsContext error: \(error)")
@@ -683,8 +697,88 @@ extension GraphicsContext {
         }
     }
 
-    func _draw(texture: Texture, in: CGRect, color: DKGame.Color) {
-        fatalError("Not implemented")
+    func _draw(texture: Texture,
+               in: CGRect,
+               transform: CGAffineTransform,
+               textureFrame: CGRect,
+               textureTransform: CGAffineTransform,
+               blendMode: BlendMode,
+               color: DKGame.Color) {
+        let queue = self.commandBuffer.commandQueue
+        guard let pipeline = GraphicsPipelineStates.sharedInstance(commandQueue: queue) else {
+            Log.err("GraphicsContext error: pipeline failed.")
+            return
+        }
+        guard let pipelineState = pipeline.renderState(
+            .init(shader: .image,
+                  colorFormat: backBuffer.pixelFormat,
+                  depthFormat: .invalid,
+                  blendState: .defaultAlpha)) else {
+            Log.err("GraphicsContext error: pipeline.renderState failed.")
+            return
+        }
+        guard let depthState = pipeline.depthStencilState(.ignore) else {
+            Log.err("GraphicsContext error: pipeline.depthStencilState failed.")
+            return
+        }
+
+        let makeVertex = { x, y, u, v in
+            _Vertex(position: Vector2(x, y).applying(transform).float2,
+                    texcoord: Vector2(u, v).applying(textureTransform).float2,
+                    color: color.float4)
+        }
+        let uvMinX = textureFrame.minX / CGFloat(texture.width)
+        let uvMaxX = textureFrame.maxX / CGFloat(texture.width)
+        let uvMinY = textureFrame.minY / CGFloat(texture.height)
+        let uvMaxY = textureFrame.maxY / CGFloat(texture.height)
+
+        let rectVertices: [_Vertex] = [
+            makeVertex(-1, -1, uvMinX, uvMaxY),
+            makeVertex(-1,  1, uvMinX, uvMinY),
+            makeVertex( 1, -1, uvMaxX, uvMaxY),
+            makeVertex( 1, -1, uvMaxX, uvMaxY),
+            makeVertex(-1,  1, uvMinX, uvMinY),
+            makeVertex( 1,  1, uvMaxX, uvMinY)
+        ]
+        guard let vertexBuffer = pipeline.makeBuffer(rectVertices) else {
+            Log.err("GraphicsContext error: pipeline.makeBuffer() failed.")
+            return
+        }
+
+        let renderPass = RenderPassDescriptor(
+            colorAttachments: [
+                RenderPassColorAttachmentDescriptor(
+                    renderTarget: backBuffer,
+                    loadAction: .load,
+                    storeAction: .store)
+            ])
+        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPass) else {
+            Log.err("GraphicsContext error: makeRenderCommandEncoder failed.")
+            return
+        }
+
+        pipeline.defaultBindingSet2.setTexture(self.maskTexture, binding: 0)
+        pipeline.defaultBindingSet2.setTexture(texture, binding: 1)
+        pipeline.defaultBindingSet2.setSamplerState(pipeline.defaultSampler, binding: 0)
+        pipeline.defaultBindingSet2.setSamplerState(pipeline.defaultSampler, binding: 1)
+
+        encoder.setRenderPipelineState(pipelineState)
+        encoder.setDepthStencilState(depthState)
+        encoder.setResource(pipeline.defaultBindingSet2, atIndex: 0)
+        encoder.setCullMode(.none)
+        encoder.setFrontFacing(.clockwise)
+        encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
+
+        let pc = _PushConstant()
+        withUnsafeBytes(of: pc) {
+            encoder.pushConstant(stages: .fragment, offset: 0, data: $0)
+        }
+
+        encoder.draw(vertexStart: 0,
+                     vertexCount: rectVertices.count,
+                     instanceCount: 1,
+                     baseInstance: 0)
+        encoder.endEncoding()
     }
 
     func _resolveMaskTexture(_ texture1: Texture, _ texture2: Texture, opacity: Double, inverse: Bool) -> Texture? {

@@ -99,9 +99,9 @@ public class MetalRenderCommandEncoder: RenderCommandEncoder {
                         if binding.type == .buffer {
                             if let bufferOffsets = buffers[binding.binding] {
                                 if bufferOffsets.count > 0 {
-                                    let buffers: [MTLBuffer] = bufferOffsets.map { $0.buffer.buffer }
+                                    let buffers: [MTLBuffer?] = bufferOffsets.map { $0.buffer.buffer }
                                     let offsets: [Int] = bufferOffsets.map { $0.offset }
-
+                                    let index = binding.bufferIndex
                                     encoder.setVertexBuffers(buffers,
                                                              offsets: offsets,
                                                              range: index..<(index + bufferOffsets.count))
@@ -111,8 +111,8 @@ public class MetalRenderCommandEncoder: RenderCommandEncoder {
                         if binding.type == .texture || binding.type == .textureSampler {
                             if let textures = textures[binding.binding] {
                                 if textures.count > 0 {
-                                    let textures: [MTLTexture] = textures.map { $0.texture }
-
+                                    let textures: [MTLTexture?] = textures.map { $0.texture }
+                                    let index = binding.textureIndex
                                     encoder.setVertexTextures(textures,
                                                               range: index..<(index + textures.count))
                                 }
@@ -121,8 +121,8 @@ public class MetalRenderCommandEncoder: RenderCommandEncoder {
                         if binding.type == .sampler || binding.type == .textureSampler {
                             if let samplers = samplers[binding.binding] {
                                 if samplers.count > 0 {
-                                    let samplers: [MTLSamplerState] = samplers.map { $0.sampler }
-
+                                    let samplers: [MTLSamplerState?] = samplers.map { $0.sampler }
+                                    let index = binding.samplerIndex
                                     encoder.setVertexSamplerStates(samplers,
                                                                    range: index..<(index + samplers.count))
                                 }
@@ -136,9 +136,9 @@ public class MetalRenderCommandEncoder: RenderCommandEncoder {
                         if binding.type == .buffer {
                             if let bufferOffsets = buffers[binding.binding] {
                                 if bufferOffsets.count > 0 {
-                                    let buffers: [MTLBuffer] = bufferOffsets.map { $0.buffer.buffer }
+                                    let buffers: [MTLBuffer?] = bufferOffsets.map { $0.buffer.buffer }
                                     let offsets: [Int] = bufferOffsets.map { $0.offset }
-
+                                    let index = binding.bufferIndex
                                     encoder.setFragmentBuffers(buffers,
                                                                offsets: offsets,
                                                                range: index..<(index + bufferOffsets.count))
@@ -148,8 +148,8 @@ public class MetalRenderCommandEncoder: RenderCommandEncoder {
                         if binding.type == .texture || binding.type == .textureSampler {
                             if let textures = textures[binding.binding] {
                                 if textures.count > 0 {
-                                    let textures: [MTLTexture] = textures.map { $0.texture }
-
+                                    let textures: [MTLTexture?] = textures.map { $0.texture }
+                                    let index = binding.textureIndex
                                     encoder.setFragmentTextures(textures,
                                                                 range: index..<(index + textures.count))
                                 }
@@ -158,8 +158,8 @@ public class MetalRenderCommandEncoder: RenderCommandEncoder {
                         if binding.type == .sampler || binding.type == .textureSampler {
                             if let samplers = samplers[binding.binding] {
                                 if samplers.count > 0 {
-                                    let samplers: [MTLSamplerState] = samplers.map { $0.sampler }
-
+                                    let samplers: [MTLSamplerState?] = samplers.map { $0.sampler }
+                                    let index = binding.samplerIndex
                                     encoder.setFragmentSamplerStates(samplers,
                                                                      range: index..<(index + samplers.count))
                                 }

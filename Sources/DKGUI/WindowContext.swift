@@ -45,6 +45,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
 
             var contentBounds: CGRect = .null
             var contentScaleFactor: CGFloat = 1
+            var stencilBuffer: Texture? = nil
             guard var view = self?.viewProxy else { return }
 
             mainLoop: while true {
@@ -74,7 +75,6 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
 
                     let device = swapChain.commandQueue.device
                     let backBuffer = renderPass.colorAttachments[0].renderTarget!
-                    var stencilBuffer = self.sharedContext.stencilBuffer
 
                     let dim = { (tex: Texture) in (tex.width, tex.height, tex.depth) }
 
@@ -90,20 +90,27 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                         stencilBuffer = device.makeTexture(descriptor: desc)
                     }
 
-                    self.sharedContext.backBuffer = backBuffer
-                    self.sharedContext.stencilBuffer = stencilBuffer
-
                     renderPass.colorAttachments[0].clearColor = .cyan
                     if let commandBuffer = swapChain.commandQueue.makeCommandBuffer() {
                         // clear back buffer
                         if let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPass) {
                             encoder.endEncoding()
                         }
-                        commandBuffer.commit()
-                    }
 
-                    view.draw()
-                    await swapChain.present()
+                        if let context = GraphicsContext(environment: view.environmentValues,
+                                                      contentOffset: contentBounds.origin,
+                                                      contentScale: contentBounds.size,
+                                                      resolution: CGSize(width: backBuffer.width,
+                                                                         height: backBuffer.height),
+                                                      commandBuffer: commandBuffer,
+                                                      backBuffer: backBuffer,
+                                                      stencilBuffer: stencilBuffer) {
+                            view.draw(frame: contentBounds, context: context)
+                        }
+
+                        commandBuffer.commit()
+                        await swapChain.present()
+                    }
                 }
 
                 while tickCounter.elapsed < frameInterval {
@@ -151,8 +158,8 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                         Log.error("Failed to cache GraphicsPipelineStates")
                     }
                     if let swapChain = graphicsDevice.renderQueue()?.makeSwapChain(target: window) {
-                        self.state.frame = window.windowFrame
-                        self.state.bounds = window.contentBounds
+                        self.state.frame = window.windowFrame.standardized
+                        self.state.bounds = window.contentBounds.standardized
                         self.state.contentScaleFactor = window.contentScaleFactor
                         self.state.visible = window.visible
                         self.state.activated = window.activated
@@ -210,8 +217,8 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                 appContext?.checkWindowActivities()
             }
         case .created:
-            self.state.frame = event.windowFrame
-            self.state.bounds = event.contentBounds
+            self.state.frame = event.windowFrame.standardized
+            self.state.bounds = event.contentBounds.standardized
             self.state.contentScaleFactor = event.contentScaleFactor
         case .hidden:
             self.state.visible = false
@@ -227,8 +234,8 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
             self.state.activated = false
             self.state.visible = false
         case .moved, .resized:
-            self.state.frame = event.windowFrame
-            self.state.bounds = event.contentBounds
+            self.state.frame = event.windowFrame.standardized
+            self.state.bounds = event.contentBounds.standardized
             self.state.contentScaleFactor = event.contentScaleFactor
         case .update:
             break

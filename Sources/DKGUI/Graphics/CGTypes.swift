@@ -42,3 +42,11 @@ extension CGFloat: VectorArithmetic {
     public mutating func scale(by rhs: Double) { self = self * rhs }
     public var magnitudeSquared: Double { self * self }
 }
+
+extension Vector2 {
+    public func applying(_ t: CGAffineTransform) -> Vector2 {
+        let x = self.x * t.a + self.y * t.c + t.tx
+        let y = self.x * t.b + self.y * t.d + t.ty
+        return Vector2(x: x, y: y)
+    }
+}

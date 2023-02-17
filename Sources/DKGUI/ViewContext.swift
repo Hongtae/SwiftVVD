@@ -10,11 +10,9 @@ import Foundation
 
 class SharedContext {
     var appContext: AppContext
-    var window: Window?
-    var commandQueue: CommandQueue?
 
-    var backBuffer: Texture?
-    var stencilBuffer: Texture?
+    var window: Window?
+    var commandQueue: CommandQueue? // render queue for window swap-chain
 
     var data: [String: Any] = [:]
 
@@ -35,16 +33,14 @@ protocol ViewProxy {
 
     mutating func layout(offset: CGPoint, size: CGSize, scaleFactor: CGFloat)
     func update(tick: UInt64, delta: Double, date: Date)
-    func draw()
-    func drawOverlay()
+    func draw(frame: CGRect, context: GraphicsContext)
 }
 
 extension ViewProxy {
     func update(tick: UInt64, delta: Double, date: Date) {
     }
-    func draw() {
-    }
-    func drawOverlay() {
+    func draw(frame: CGRect, context: GraphicsContext) {
+        // Log.err("Existential types must implement the draw() method themselves.")
     }
 }
 
@@ -58,7 +54,10 @@ struct ViewContext<Content>: ViewProxy where Content: View {
     var layoutSize: CGSize = .zero
     var contentScaleFactor: CGFloat = 1
 
-    init(view: Content, modifiers: [any ViewModifier], environmentValues: EnvironmentValues, sharedContext: SharedContext) {
+    init(view: Content,
+         modifiers: [any ViewModifier],
+         environmentValues: EnvironmentValues,
+         sharedContext: SharedContext) {
         self.environmentValues = environmentValues._resolve(modifiers: modifiers)
         self.view = self.environmentValues._resolve(view)
         self.modifiers = modifiers
@@ -69,8 +68,25 @@ struct ViewContext<Content>: ViewProxy where Content: View {
                                       sharedContext: sharedContext)
     }
 
-    func draw() {
-        subview.draw()
+    func drawBackground(frame: CGRect, context: GraphicsContext) {
+    }
+
+    func drawOverlay(frame: CGRect, context: GraphicsContext) {
+    }
+
+    func draw(frame: CGRect, context: GraphicsContext) {
+        self.drawBackground(frame: frame, context: context)
+
+        let drawSubview = true
+        if drawSubview {
+            let subviewFrame = CGRect(origin: subview.layoutOffset, size: subview.layoutSize)
+                .offsetBy(dx: frame.minX, dy: frame.minY)
+            var subviewContext = context
+            subviewContext.environment = subview.environmentValues
+            subviewContext.contentOffset += subview.layoutOffset
+            subview.draw(frame: subviewFrame, context: subviewContext)
+        }
+        self.drawOverlay(frame: frame, context: context)
     }
 
     mutating func layout(offset: CGPoint, size: CGSize, scaleFactor: CGFloat) {
