@@ -31,22 +31,22 @@ public struct AffineTransform: Equatable, Sendable {
         self.ty = 0.0
     }
 
-    public init(a: Double, b: Double, c: Double, d: Double, tx: Double, ty: Double) {
-        self.a = CGFloat(a)
-        self.b = CGFloat(b)
-        self.c = CGFloat(c)
-        self.d = CGFloat(d)
-        self.tx = CGFloat(tx)
-        self.ty = CGFloat(ty)
+    public init(a: CGFloat, b: CGFloat, c: CGFloat, d: CGFloat, tx: CGFloat, ty: CGFloat) {
+        self.a = a
+        self.b = b
+        self.c = c
+        self.d = d
+        self.tx = tx
+        self.ty = ty
     }
 
-    public init(a: Float, b: Float, c: Float, d: Float, tx: Float, ty: Float) {
-        self.a = CGFloat(a)
-        self.b = CGFloat(b)
-        self.c = CGFloat(c)
-        self.d = CGFloat(d)
-        self.tx = CGFloat(tx)
-        self.ty = CGFloat(ty)
+    public init(_ a: CGFloat, _ b: CGFloat, _ c: CGFloat, _ d: CGFloat, _ tx: CGFloat, _ ty: CGFloat) {
+        self.a = a
+        self.b = b
+        self.c = c
+        self.d = d
+        self.tx = tx
+        self.ty = ty
     }
 
     public init(rotationAngle r: CGFloat) {
@@ -109,15 +109,15 @@ public struct AffineTransform: Equatable, Sendable {
     }
 
     public func rotated(by angle: CGFloat) -> Self {
-        self.concatenating(.init(rotationAngle: angle))
+        Self(rotationAngle: angle).concatenating(self)
     }
 
     public func scaledBy(x sx: CGFloat, y sy: CGFloat) -> Self {
-        self.concatenating(.init(scaleX: sx, y: sy))
+        Self(scaleX: sx, y: sy).concatenating(self)
     }
 
     public func translatedBy(x tx: CGFloat, y ty: CGFloat) -> Self {
-        self.concatenating(.init(translationX: tx, y: ty))
+        Self(translationX: tx, y: ty).concatenating(self)
     }
 }
 

@@ -803,11 +803,13 @@ extension GraphicsContext {
                 // make polygon array from path
                 switch element {
                 case .move(let to):
+                    polygons.append(polygon)
+                    polygon = PolygonElement()
                     startPoint = to
                     currentPoint = to
                 case .line(let p1):
                     if let p0 = currentPoint {
-                        if polygon.vertices.last != p0 {
+                        if polygon.vertices.isEmpty {
                             polygon.vertices.append(p0)
                         }
                         polygon.vertices.append(p1)
@@ -815,9 +817,6 @@ extension GraphicsContext {
                     currentPoint = p1
                 case .quadCurve(let p2, let p1):
                     if let p0 = currentPoint {
-                        if polygon.vertices.last != p0 {
-                            polygon.vertices.append(p0)
-                        }
                         let curve = QuadraticBezier(p0: p0, p1: p1, p2: p2)
                         let length = curve.approximateLength()
                         if length > .ulpOfOne {
@@ -834,9 +833,6 @@ extension GraphicsContext {
                     currentPoint = p2
                 case .curve(let p3, let p1, let p2):
                     if let p0 = currentPoint {
-                        if polygon.vertices.last != p0 {
-                            polygon.vertices.append(p0)
-                        }
                         let curve = CubicBezier(p0: p0, p1: p1, p2: p2, p3: p3)
                         let length = curve.approximateLength()
                         if length > .ulpOfOne {
@@ -847,24 +843,23 @@ extension GraphicsContext {
                                 let pt = curve.interpolate(t)
                                 polygon.vertices.append(pt)
                             }
-                            polygon.vertices.append(p2)
+                            polygon.vertices.append(p3)
                         }
                     }
                     currentPoint = p3
                 case .closeSubpath:
-                    if polygon.vertices.count > 0 {
-                        polygons.append(polygon)
-                        polygon = PolygonElement()
-                    }
+                    polygons.append(polygon)
+                    polygon = PolygonElement()
                     currentPoint = startPoint
                 }
             }
+            polygons.append(polygon)
         }
 
         let transform = self.transform.concatenating(self.viewTransform)
         var numVertices = 0
         polygons.forEach {
-            numVertices += $0.vertices.count + 1
+            numVertices += $0.vertices.count + 2
         }
         var vertexData: [Float2] = []
         vertexData.reserveCapacity(numVertices)
@@ -886,9 +881,10 @@ extension GraphicsContext {
             center = center / Scalar(element.vertices.count)
             let pivotIndex = UInt32(vertexData.count)
             vertexData.append(center.float2)
-            for i in 1..<pivotIndex {
-                indexData.append(baseIndex + i - 1)
-                indexData.append(baseIndex + i)
+
+            for i in (baseIndex + 1)..<pivotIndex {
+                indexData.append(i - 1)
+                indexData.append(i)
                 indexData.append(pivotIndex)
             }
             indexData.append(pivotIndex - 1)

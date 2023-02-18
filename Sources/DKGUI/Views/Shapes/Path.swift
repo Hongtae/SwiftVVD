@@ -396,11 +396,15 @@ extension Path {
         self.addRect(rect)
     }
 
-    public init(roundedRect rect: CGRect, cornerSize: CGSize, style: RoundedCornerStyle = .circular) {
+    public init(roundedRect rect: CGRect,
+                cornerSize: CGSize,
+                style: RoundedCornerStyle = .circular) {
         self.addRoundedRect(in: rect, cornerSize: cornerSize, style: style)
     }
 
-    public init(roundedRect rect: CGRect, cornerRadius: CGFloat, style: RoundedCornerStyle = .circular) {
+    public init(roundedRect rect: CGRect,
+                cornerRadius: CGFloat,
+                style: RoundedCornerStyle = .circular) {
         self.addRoundedRect(in: rect, cornerSize: CGSize(width: cornerRadius, height: cornerRadius), style: style)
     }
 
@@ -412,7 +416,8 @@ extension Path {
         callback(&self)
     }
 
-    public mutating func addRect(_ rect: CGRect, transform: CGAffineTransform = .identity) {
+    public mutating func addRect(_ rect: CGRect,
+                                 transform: CGAffineTransform = .identity) {
         let pt = [
             CGPoint(x: rect.minX, y: rect.minY).applying(transform),
             CGPoint(x: rect.maxX, y: rect.minY).applying(transform),
@@ -426,7 +431,10 @@ extension Path {
         self.closeSubpath()
     }
 
-    public mutating func addRoundedRect(in rect: CGRect, cornerSize: CGSize, style: RoundedCornerStyle = .circular, transform: CGAffineTransform = .identity) {
+    public mutating func addRoundedRect(in rect: CGRect,
+                                        cornerSize: CGSize,
+                                        style: RoundedCornerStyle = .circular,
+                                        transform: CGAffineTransform = .identity) {
         let midX = rect.midX
         let midY = rect.midY
         let minX = rect.minX
@@ -475,7 +483,8 @@ extension Path {
         self.closeSubpath()
     }
 
-    public mutating func addEllipse(in rect: CGRect, transform: CGAffineTransform = .identity) {
+    public mutating func addEllipse(in rect: CGRect,
+                                    transform: CGAffineTransform = .identity) {
         let midX = rect.midX
         let midY = rect.midY
         let minX = rect.minX
@@ -507,7 +516,8 @@ extension Path {
         self.closeSubpath()
     }
 
-    public mutating func addRects(_ rects: [CGRect], transform: CGAffineTransform = .identity) {
+    public mutating func addRects(_ rects: [CGRect],
+                                  transform: CGAffineTransform = .identity) {
         for rect in rects {
             self.addRect(rect, transform: transform)
         }
@@ -519,7 +529,11 @@ extension Path {
         }
     }
 
-    public mutating func addRelativeArc(center: CGPoint, radius: CGFloat, startAngle: Angle, delta: Angle, transform: CGAffineTransform = .identity) {
+    public mutating func addRelativeArc(center: CGPoint,
+                                        radius: CGFloat,
+                                        startAngle: Angle,
+                                        delta: Angle,
+                                        transform: CGAffineTransform = .identity) {
         var delta = delta.radians
         if delta.magnitude < .ulpOfOne { return }
 
@@ -528,8 +542,8 @@ extension Path {
             trans = trans.scaledBy(x: 1, y: -1) // flip
             delta = delta.magnitude
         }
-        trans = trans.rotated(by: startAngle.radians)
-        trans = trans.translatedBy(x: center.x, y: center.y)
+        trans = trans.concatenating(CGAffineTransform(rotationAngle: startAngle.radians))
+        trans = trans.concatenating(CGAffineTransform(translationX: center.x, y: center.y))
         trans = trans.concatenating(transform)
 
         let startPoint = CGPoint(x: 1, y: 0).applying(trans)
@@ -563,11 +577,16 @@ extension Path {
                 break
             }
             delta = delta - halfPi
-            rotate = rotate.rotated(by: halfPi)
+            rotate = rotate.concatenating(CGAffineTransform(rotationAngle: halfPi))
         }
     }
 
-    public mutating func addArc(center: CGPoint, radius: CGFloat, startAngle: Angle, endAngle: Angle, clockwise: Bool, transform: CGAffineTransform = .identity) {
+    public mutating func addArc(center: CGPoint,
+                                radius: CGFloat,
+                                startAngle: Angle,
+                                endAngle: Angle,
+                                clockwise: Bool,
+                                transform: CGAffineTransform = .identity) {
         var angle: Double = 0.0
 
         let normalizeRadian = { (r: Double) -> Double in
@@ -592,10 +611,10 @@ extension Path {
         if clockwise {
             trans = trans.scaledBy(x: 1, y: -1) // flip
         }
-        trans = trans.rotated(by: startAngle.radians)
-        trans = trans.translatedBy(x: center.x, y: center.y)
+        trans = trans.concatenating(CGAffineTransform(rotationAngle: startAngle.radians))
+        trans = trans.concatenating(CGAffineTransform(translationX: center.x, y: center.y))
         trans = trans.concatenating(transform)
-
+        
         let startPoint = CGPoint(x: 1, y: 0).applying(trans)
 
         if let last = self.elements.last, last != .closeSubpath {
@@ -605,8 +624,8 @@ extension Path {
         }
 
         let oneQuarter = CubicBezier(p0: CGPoint(x: 1, y: 0),
-                                     p1: CGPoint(x: 1, y: lerp(0, 1, _r)),
-                                     p2: CGPoint(x: lerp(0, 1, _r), y: 1),
+                                     p1: CGPoint(x: 1, y: _r),
+                                     p2: CGPoint(x: _r, y: 1),
                                      p3: CGPoint(x: 0, y: 1))
 
         let halfPi: Double = .pi * 0.5
@@ -627,11 +646,14 @@ extension Path {
                 break
             }
             angle = angle - halfPi
-            rotate = rotate.rotated(by: halfPi)
+            rotate = rotate.concatenating(CGAffineTransform(rotationAngle: halfPi))
         }
     }
 
-    public mutating func addArc(tangent1End p1: CGPoint, tangent2End p2: CGPoint, radius: CGFloat, transform: CGAffineTransform = .identity) {
+    public mutating func addArc(tangent1End p1: CGPoint,
+                                tangent2End p2: CGPoint,
+                                radius: CGFloat,
+                                transform: CGAffineTransform = .identity) {
         if radius < .ulpOfOne { return }
 
         let current = currentPoint ?? .zero
@@ -765,17 +787,23 @@ extension Path: LosslessStringConvertible {
     }
 
     public var description: String {
+        let format = { (val: CGFloat) in
+            if val.truncatingRemainder(dividingBy: 1) == 0.0 {
+                return "\(Int(val))"
+            }
+            return String(format: "%.3f", val)
+        }
         var desc: [String] = []
         self.forEach { element in
             switch element {
             case .move(let to):
-                desc.append("\(to.x) \(to.y) m")
+                desc.append("\(format(to.x)) \(format(to.y)) m")
             case .line(let to):
-                desc.append("\(to.x) \(to.y) l")
+                desc.append("\(format(to.x)) \(format(to.y)) l")
             case .quadCurve(let to, let c):
-                desc.append("\(c.x) \(c.y) \(to.x) \(to.y) q")
+                desc.append("\(format(c.x)) \(format(c.y)) \(format(to.x)) \(format(to.y)) q")
             case .curve(let to, let c1, let c2):
-                desc.append("\(c1.x) \(c1.y) \(c2.x) \(c2.y) \(to.x) \(to.y) c")
+                desc.append("\(format(c1.x)) \(format(c1.y)) \(format(c2.x)) \(format(c2.y)) \(format(to.x)) \(format(to.y)) c")
             case .closeSubpath:
                 desc.append("h")
             }
