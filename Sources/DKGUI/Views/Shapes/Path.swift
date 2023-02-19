@@ -441,45 +441,98 @@ extension Path {
         let maxX = rect.maxX
         let minY = rect.minY
         let maxY = rect.maxY
-        let cx = clamp(cornerSize.width, min: 0, max: (maxX - midX))
-        let cy = clamp(cornerSize.height, min: 0, max: (maxY - midY))
+        let cc = min(maxX - midX, maxY - midY)
+        let cx = clamp(cornerSize.width, min: 0, max: cc)
+        let cy = clamp(cornerSize.height, min: 0, max: cc)
 
-        let pt: [CGPoint] = [
-            CGPoint(x: maxX, y: midY).applying(transform),
-            CGPoint(x: maxX, y: maxY - cy).applying(transform),
+        if cx > .ulpOfOne && cy > .ulpOfOne {
 
-            CGPoint(x: maxX, y: lerp(maxY - cy, maxY, _r)).applying(transform),
-            CGPoint(x: lerp(maxX - cx, maxX, _r), y: maxY).applying(transform),
+            let t1 = CGAffineTransform(scaleX: cx, y: cy)
+                .concatenating(CGAffineTransform(translationX: maxX - cx, y: maxY - cy))
+                .concatenating(transform)
+            let t2 = CGAffineTransform(scaleX: -1, y: 1)
+                .concatenating(CGAffineTransform(translationX: 1, y: 0))
+                .concatenating(CGAffineTransform(scaleX: cx, y: cy))
+                .concatenating(CGAffineTransform(translationX: minX, y: maxY - cy))
+                .concatenating(transform)
+            let t3 = CGAffineTransform(rotationAngle: .pi)
+                .concatenating(CGAffineTransform(translationX: 1, y: 1))
+                .concatenating(CGAffineTransform(scaleX: cx, y: cy))
+                .concatenating(CGAffineTransform(translationX: minX, y: minY))
+                .concatenating(transform)
+            let t4 = CGAffineTransform(scaleX: 1, y: -1)
+                .concatenating(CGAffineTransform(translationX: 0, y: 1))
+                .concatenating(CGAffineTransform(scaleX: cx, y: cy))
+                .concatenating(CGAffineTransform(translationX: maxX - cx, y: minY))
+                .concatenating(transform)
 
-            CGPoint(x: maxX - cx, y: maxY).applying(transform),
-            CGPoint(x: minX + cx, y: maxY).applying(transform),
+            self.move(to: CGPoint(x: maxX, y: midY).applying(transform))
 
-            CGPoint(x: lerp(minX + cx, minX, _r), y: maxY).applying(transform),
-            CGPoint(x: minX, y: lerp(maxY - cy, maxY, _r)).applying(transform),
+            if style == .circular {
+                let corner = [CGPoint(x: 1, y: 0),
+                              CGPoint(x: 1, y: _r),
+                              CGPoint(x: _r, y: 1),
+                              CGPoint(x: 0, y: 1)]
 
-            CGPoint(x: minX, y: maxY - cy).applying(transform),
-            CGPoint(x: minX, y: minY + cy).applying(transform),
+                let c1 = corner.map { $0.applying(t1) }
+                let c2 = corner.reversed().map { $0.applying(t2) }
+                let c3 = corner.map { $0.applying(t3) }
+                let c4 = corner.reversed().map { $0.applying(t4) }
 
-            CGPoint(x: minX, y: lerp(minY + cy, minY, _r)).applying(transform),
-            CGPoint(x: lerp(minX + cx, minX, _r), y: minY).applying(transform),
+                self.addLine(to: c1[0])
+                self.addCurve(to: c1[3], control1: c1[1], control2: c1[2])
+                self.addLine(to: c2[0])
+                self.addCurve(to: c2[3], control1: c2[1], control2: c2[2])
+                self.addLine(to: c3[0])
+                self.addCurve(to: c3[3], control1: c3[1], control2: c3[2])
+                self.addLine(to: c4[0])
+                self.addCurve(to: c4[3], control1: c4[1], control2: c4[2])
+            } else { /* style == .continuous */
+                let rx = min((maxX - midX - cx) / (cx * 0.54), 1.0)
+                let ry = min((maxY - midY - cy) / (cy * 0.54), 1.0)
 
-            CGPoint(x: minX + cx, y: minY).applying(transform),
-            CGPoint(x: maxX - cx, y: minY).applying(transform),
+                let corner = [CGPoint(x: 1, y: lerp(0, -0.528665, ry)),
+                              CGPoint(x: 1, y: lerp(0.04, -0.08849, ry)),
+                              CGPoint(x: 1, y: lerp(0.18, 0.131593, ry)),
+                              CGPoint(x: 0.925089, y: 0.368506),
+                              CGPoint(x: 0.83094, y: 0.627176),
+                              CGPoint(x: 0.627176, y: 0.83094),
+                              CGPoint(x: 0.368506, y: 0.925089),
+                              CGPoint(x: lerp(0.18, 0.131593, rx), y: 1),
+                              CGPoint(x: lerp(0.004, -0.08849, rx), y: 1),
+                              CGPoint(x: lerp(0, -0.52866, rx) , y: 1)]
 
-            CGPoint(x: lerp(maxX - cx, maxX, _r), y: minY).applying(transform),
-            CGPoint(x: maxX, y: lerp(minY + cy, minY, _r)).applying(transform),
+                let c1 = corner.map { $0.applying(t1) }
+                let c2 = corner.reversed().map { $0.applying(t2) }
+                let c3 = corner.map { $0.applying(t3) }
+                let c4 = corner.reversed().map { $0.applying(t4) }
 
-            CGPoint(x: maxX, y: minY + cy).applying(transform),
-        ]
-        self.move(to: pt[0])
-        self.addLine(to: pt[1])
-        self.addCurve(to: pt[4], control1: pt[2], control2: pt[3])
-        self.addLine(to: pt[5])
-        self.addCurve(to: pt[8], control1: pt[6], control2: pt[7])
-        self.addLine(to: pt[9])
-        self.addCurve(to: pt[12], control1: pt[10], control2: pt[11])
-        self.addLine(to: pt[13])
-        self.addCurve(to: pt[16], control1: pt[14], control2: pt[15])
+                self.addLine(to: c1[0])
+                self.addCurve(to: c1[3], control1: c1[1], control2: c1[2])
+                self.addCurve(to: c1[6], control1: c1[4], control2: c1[5])
+                self.addCurve(to: c1[9], control1: c1[7], control2: c1[8])
+
+                self.addLine(to: c2[0])
+                self.addCurve(to: c2[3], control1: c2[1], control2: c2[2])
+                self.addCurve(to: c2[6], control1: c2[4], control2: c2[5])
+                self.addCurve(to: c2[9], control1: c2[7], control2: c2[8])
+
+                self.addLine(to: c3[0])
+                self.addCurve(to: c3[3], control1: c3[1], control2: c3[2])
+                self.addCurve(to: c3[6], control1: c3[4], control2: c3[5])
+                self.addCurve(to: c3[9], control1: c3[7], control2: c3[8])
+
+                self.addLine(to: c4[0])
+                self.addCurve(to: c4[3], control1: c4[1], control2: c4[2])
+                self.addCurve(to: c4[6], control1: c4[4], control2: c4[5])
+                self.addCurve(to: c4[9], control1: c4[7], control2: c4[8])
+            }
+        } else {
+            self.move(to: CGPoint(x: minX, y: minY).applying(transform))
+            self.addLine(to: CGPoint(x: maxX, y: minY).applying(transform))
+            self.addLine(to: CGPoint(x: maxX, y: maxY).applying(transform))
+            self.addLine(to: CGPoint(x: minX, y: maxY).applying(transform))
+        }
         self.closeSubpath()
     }
 
@@ -791,7 +844,7 @@ extension Path: LosslessStringConvertible {
             if val.truncatingRemainder(dividingBy: 1) == 0.0 {
                 return "\(Int(val))"
             }
-            return String(format: "%.3f", val)
+            return String(format: "%.4f", val)
         }
         var desc: [String] = []
         self.forEach { element in

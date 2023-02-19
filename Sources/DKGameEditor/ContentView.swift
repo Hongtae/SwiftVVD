@@ -10,7 +10,8 @@ struct ContentView: View {
 
             var star = Path()
             star.addRoundedRect(in: CGRect(x: 0, y: 0, width: 100, height: 100),
-                                cornerSize: CGSize(width: 15, height: 15))
+                                cornerSize: CGSize(width: 15, height: 15),
+                                style: .continuous)
             star.move(to: CGPoint(x: 95, y: 35))
             star.addLine(to: CGPoint(x: 5, y: 35))
             star.addLine(to: CGPoint(x: 80, y: 95))

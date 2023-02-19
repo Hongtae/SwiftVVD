@@ -127,6 +127,16 @@ struct QuadraticBezier {
             return false
         }.sorted()
     }
+
+    func applying(_ t: CGAffineTransform) -> QuadraticBezier {
+        QuadraticBezier(p0: self.p0.applying(t),
+                        p1: self.p1.applying(t),
+                        p2: self.p2.applying(t))
+    }
+
+    func reversed() -> QuadraticBezier {
+        QuadraticBezier(p0: self.p2, p1: self.p1, p2: self.p0)
+    }
 }
 
 struct CubicBezier {
@@ -346,5 +356,16 @@ struct CubicBezier {
             }
             return s >= 0 && s <= 1
         }.sorted()
+    }
+
+    func applying(_ t: CGAffineTransform) -> CubicBezier {
+        CubicBezier(p0: self.p0.applying(t),
+                    p1: self.p1.applying(t),
+                    p2: self.p2.applying(t),
+                    p3: self.p3.applying(t))
+    }
+
+    func reversed() -> CubicBezier {
+        CubicBezier(p0: self.p3, p1: self.p2, p2: self.p1, p3: self.p0)
     }
 }
