@@ -20,14 +20,16 @@ struct ContentView: View {
             star.closeSubpath()
 
             var path = Path()
-            path.addPath(star.applying(CGAffineTransform(translationX: 10, y: 10)))
-            path.addPath(star.applying(CGAffineTransform(translationX: 115, y: 10)))
+            path.addPath(star.applying(CGAffineTransform.identity
+                .concatenating(CGAffineTransform(scaleX: 3, y: 3))
+                .concatenating(CGAffineTransform(translationX: 50, y: 50))
+            ))
 
             print("Path: \(path)")
 
             context.fill(
                 path,
-                with: .color(.green),
+                with: .color(.red),
                 style: FillStyle(eoFill: true, antialiased: false))
         }
         .frame(width: 220, height: 220)

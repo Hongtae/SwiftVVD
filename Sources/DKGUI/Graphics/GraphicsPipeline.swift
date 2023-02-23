@@ -8,7 +8,7 @@
 import Foundation
 import DKGame
 
-
+// MARK: - SPIR-V Shaders
 // glslc {input-file} -o {output-file} -Os --target-env=vulkan1.2
 private let vsStencilGLSL = """
     /* vertex shader for writing stencil only */
@@ -309,8 +309,8 @@ private func encodeSPIRVData(from url: URL?) -> String? {
     return nil
 }
 
-
-private enum _Shader {
+// MARK: - Pipeline Types
+enum _Shader {
     case stencil        // fill stencil, no fragment function
     case color          // vertex color
     case image          // texture with tint color
@@ -318,7 +318,7 @@ private enum _Shader {
     case resolveMask    // merge two masks (a8, r8) to render target (r8)
 }
 
-private enum _Stencil {
+enum _Stencil {
     case generateWindingNumber
     case nonZero        // filled using the non-zero rule
     case even           // even-odd winding rule
@@ -327,19 +327,20 @@ private enum _Stencil {
     case ignore         // don't read stencil
 }
 
-private struct _Vertex {
+struct _Vertex {
     var position: Float2
     var texcoord: Float2
     var color: Float4
 }
 
-private struct _PushConstant {
+struct _PushConstant {
     var maskLinear: Float32 = 1.0
     var maskConstant: Float32 = 0.0
     var colorMatrix: ColorMatrix = .init()
     static let identity = _PushConstant()
 }
 
+// MARK: - Graphics Pipeline
 class GraphicsPipelineStates {
 
     struct ShaderFunctions {
@@ -355,21 +356,30 @@ class GraphicsPipelineStates {
     let defaultSampler: SamplerState
     let defaultMaskTexture: Texture // 2x2 r8
 
-    fileprivate struct RenderState: Hashable {
+    struct RenderStateDescriptor: Hashable {
         let shader: _Shader
         let colorFormat: PixelFormat
         let depthFormat: PixelFormat
         let blendState: BlendState
     }
-
-    private var pipelineStates: [RenderState: RenderPipelineState] = [:]
+    private var renderStates: [RenderStateDescriptor: RenderPipelineState] = [:]
     private var depthStencilStates: [_Stencil: DepthStencilState] = [:]
 
-    fileprivate func renderState(_ rs: RenderState) -> RenderPipelineState? {
+    func renderState(shader: _Shader,
+                     colorFormat: PixelFormat,
+                     depthFormat: PixelFormat,
+                     blendState: BlendState) -> RenderPipelineState? {
+        renderState(RenderStateDescriptor(shader: shader,
+                                          colorFormat: colorFormat,
+                                          depthFormat: depthFormat,
+                                          blendState: blendState))
+    }
+
+    func renderState(_ rs: RenderStateDescriptor) -> RenderPipelineState? {
         Self.lock.lock()
         defer { Self.lock.unlock() }
 
-        if let state = pipelineStates[rs] { return state }
+        if let state = renderStates[rs] { return state }
 
         guard let shader = shaderFunctions[rs.shader] else { return nil }
 
@@ -403,14 +413,14 @@ class GraphicsPipelineStates {
         var reflection = PipelineReflection()
         if let state = device.makeRenderPipelineState(descriptor: pipelineDescriptor,
                                                       reflection: &reflection) {
-            Log.debug("PipelineState (_Shader.\(rs.shader)) Reflection: \(reflection)")
-            pipelineStates[rs] = state
-            return pipelineStates[rs]
+            Log.debug("RenderPipelineState (_Shader.\(rs.shader)) Reflection: \(reflection)")
+            renderStates[rs] = state
+            return renderStates[rs]
         }
         return nil
     }
 
-    fileprivate func depthStencilState(_ ds: _Stencil) -> DepthStencilState? {
+    func depthStencilState(_ ds: _Stencil) -> DepthStencilState? {
         Self.lock.lock()
         defer { Self.lock.unlock() }
 
@@ -467,7 +477,7 @@ class GraphicsPipelineStates {
         self.defaultBindingSet2 = defaultBindingSet2
         self.defaultSampler = defaultSampler
         self.defaultMaskTexture = defaultMaskTexture
-        self.pipelineStates = [:]
+        self.renderStates = [:]
         self.depthStencilStates = [:]
     }
 
@@ -560,7 +570,7 @@ class GraphicsPipelineStates {
                                               height: 2,
                                               usage: [.copyDestination, .sampled]))
             else {
-                Log.err("\(Self.self).\(#function): makeSampler failed.")
+                Log.err("\(Self.self).\(#function): makeTexture failed.")
                 break
             }
 
@@ -618,27 +628,9 @@ class GraphicsPipelineStates {
 
         return instance
     }
-
-    func makeBuffer<T>(_ data: [T]) -> Buffer? {
-        if data.isEmpty { return nil }
-
-        let length = MemoryLayout<T>.stride * data.count
-        if let buffer = device.makeBuffer(length: length,
-                                          storageMode: .shared,
-                                          cpuCacheMode: .writeCombined) {
-            if let ptr = buffer.contents() {
-                data.withUnsafeBytes {
-                    assert($0.count == length)
-                    ptr.copyMemory(from: $0.baseAddress!, byteCount: $0.count)
-                }
-                buffer.flush()
-                return buffer
-            }
-        }
-        return nil
-    }
 }
 
+// MARK: - GraphicsContext extensions
 extension GraphicsContext {
     @discardableResult
     static func cachePipelineContext(_ deviceContext: GraphicsDeviceContext) -> Bool {
@@ -649,30 +641,6 @@ extension GraphicsContext {
             }
         }
         return false
-    }
-
-    public func drawLayer(content: (inout GraphicsContext) throws -> Void) rethrows {
-        if var context = self.makeLayerContext() {
-            do {
-                try content(&context)
-                let offset = -context.contentOffset
-                let scale = context.contentScale
-                let texture = context.backBuffer
-                self._draw(texture: texture,
-                           in: CGRect(origin: offset, size: scale),
-                           transform: .identity,
-                           textureFrame: CGRect(x: 0, y: 0,
-                                                width: texture.width,
-                                                height: texture.height),
-                           textureTransform: .identity,
-                           blendMode: context.blendMode,
-                           color: .white)
-            } catch {
-                Log.err("GraphicsContext error: \(error)")
-            }
-        } else {
-            Log.error("GraphicsContext error: failed to create new context.")
-        }
     }
 
     func drawLayer(in frame: CGRect, content: (inout GraphicsContext, CGSize) throws -> Void) rethrows {
@@ -704,24 +672,6 @@ extension GraphicsContext {
                textureTransform: CGAffineTransform,
                blendMode: BlendMode,
                color: DKGame.Color) {
-        let queue = self.commandBuffer.commandQueue
-        guard let pipeline = GraphicsPipelineStates.sharedInstance(commandQueue: queue) else {
-            Log.err("GraphicsContext error: pipeline failed.")
-            return
-        }
-        guard let pipelineState = pipeline.renderState(
-            .init(shader: .image,
-                  colorFormat: backBuffer.pixelFormat,
-                  depthFormat: .invalid,
-                  blendState: .defaultAlpha)) else {
-            Log.err("GraphicsContext error: pipeline.renderState failed.")
-            return
-        }
-        guard let depthState = pipeline.depthStencilState(.ignore) else {
-            Log.err("GraphicsContext error: pipeline.depthStencilState failed.")
-            return
-        }
-
         let makeVertex = { x, y, u, v in
             _Vertex(position: Vector2(x, y).applying(transform).float2,
                     texcoord: Vector2(u, v).applying(textureTransform).float2,
@@ -732,7 +682,7 @@ extension GraphicsContext {
         let uvMinY = textureFrame.minY / CGFloat(texture.height)
         let uvMaxY = textureFrame.maxY / CGFloat(texture.height)
 
-        let rectVertices: [_Vertex] = [
+        let vertices: [_Vertex] = [
             makeVertex(-1, -1, uvMinX, uvMaxY),
             makeVertex(-1,  1, uvMinX, uvMinY),
             makeVertex( 1, -1, uvMaxX, uvMaxY),
@@ -740,11 +690,6 @@ extension GraphicsContext {
             makeVertex(-1,  1, uvMinX, uvMinY),
             makeVertex( 1,  1, uvMaxX, uvMinY)
         ]
-        guard let vertexBuffer = pipeline.makeBuffer(rectVertices) else {
-            Log.err("GraphicsContext error: pipeline.makeBuffer() failed.")
-            return
-        }
-
         let renderPass = RenderPassDescriptor(
             colorAttachments: [
                 RenderPassColorAttachmentDescriptor(
@@ -757,27 +702,15 @@ extension GraphicsContext {
             return
         }
 
-        pipeline.defaultBindingSet2.setTexture(self.maskTexture, binding: 0)
-        pipeline.defaultBindingSet2.setTexture(texture, binding: 1)
-        pipeline.defaultBindingSet2.setSamplerState(pipeline.defaultSampler, binding: 0)
-        pipeline.defaultBindingSet2.setSamplerState(pipeline.defaultSampler, binding: 1)
-
-        encoder.setRenderPipelineState(pipelineState)
-        encoder.setDepthStencilState(depthState)
-        encoder.setResource(pipeline.defaultBindingSet2, atIndex: 0)
-        encoder.setCullMode(.none)
-        encoder.setFrontFacing(.clockwise)
-        encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
-
         let pc = _PushConstant()
-        withUnsafeBytes(of: pc) {
-            encoder.pushConstant(stages: .fragment, offset: 0, data: $0)
-        }
-
-        encoder.draw(vertexStart: 0,
-                     vertexCount: rectVertices.count,
-                     instanceCount: 1,
-                     baseInstance: 0)
+        self._encodeDrawCommand(shader: .image,
+                                stencil: .ignore,
+                                vertices: vertices,
+                                indices: nil,
+                                texture: texture,
+                                blendState: .defaultAlpha,
+                                pushConstantData: pc,
+                                encoder: encoder)
         encoder.endEncoding()
     }
 
@@ -899,21 +832,21 @@ extension GraphicsContext {
             Log.err("GraphicsContext error: pipeline failed.")
             return false
         }
-        guard let vertexBuffer = pipeline.makeBuffer(vertexData) else {
-            Log.err("GraphicsContext error: pipeline.makeBuffer failed.")
+        guard let vertexBuffer = self._makeBuffer(vertexData) else {
+            Log.err("GraphicsContext error: _makeBuffer failed.")
             return false
         }
-        guard let indexBuffer = pipeline.makeBuffer(indexData) else {
-            Log.err("GraphicsContext error: pipeline.makeBuffer failed.")
+        guard let indexBuffer = self._makeBuffer(indexData) else {
+            Log.err("GraphicsContext error: _makeBuffer failed.")
             return false
         }
 
         // pipeline states for generate polgon winding numbers
         guard let pipelineState = pipeline.renderState(
-            .init(shader: .stencil,
-                  colorFormat: backBuffer.pixelFormat,
-                  depthFormat: stencilBuffer.pixelFormat,
-                  blendState: .defaultOpaque)) else {
+            shader: .stencil,
+            colorFormat: backBuffer.pixelFormat,
+            depthFormat: stencilBuffer.pixelFormat,
+            blendState: .defaultOpaque) else {
             Log.err("GraphicsContext error: pipeline.renderState failed.")
             return false
         }
@@ -957,7 +890,7 @@ extension GraphicsContext {
                             baseVertex: 0,
                             baseInstance: 0)
 
-        // pass2: draw only pixels that pass the stencil test
+         // pass2: draw only pixels that pass the stencil test
         if draw(encoder) {
             encoder.endEncoding()
             return true
@@ -967,209 +900,98 @@ extension GraphicsContext {
         return false
     }
 
-    public func fill(_ path: Path, with shading: Shading, style: FillStyle = FillStyle()) {
-        self._fillStencil(path, backBuffer: self.backBuffer) { encoder in
-            let queue = self.commandBuffer.commandQueue
-            guard let pipeline = GraphicsPipelineStates.sharedInstance(commandQueue: queue) else {
-                Log.err("GraphicsContext error: pipeline failed.")
-                return false
-            }
+    func _encodeDrawCommand(shader: _Shader,
+                            stencil: _Stencil,
+                            vertices: [_Vertex],
+                            indices: [UInt32]?,
+                            texture: Texture?,
+                            blendState: BlendState,
+                            pushConstantData: _PushConstant?,
+                            encoder: RenderCommandEncoder) {
+        assert(shader != .stencil) // .stencil uses a different vertex format.
+        let queue = self.commandBuffer.commandQueue
+        guard let pipeline = GraphicsPipelineStates.sharedInstance(commandQueue: queue) else {
+            Log.err("GraphicsContext error: pipeline failed.")
+            return
+        }
+        guard let renderState = pipeline.renderState(
+            shader: shader,
+            colorFormat: backBuffer.pixelFormat,
+            depthFormat: stencil == .ignore ? .invalid : stencilBuffer.pixelFormat,
+            blendState: blendState) else {
+            Log.err("GraphicsContext error: pipeline.renderState failed.")
+            return
+        }
+        guard let depthState = pipeline.depthStencilState(stencil) else {
+            Log.err("GraphicsContext error: pipeline.depthStencilState failed.")
+            return
+        }
+        guard let vertexBuffer = self._makeBuffer(vertices) else {
+            Log.err("GraphicsContext error: _makeBuffer failed.")
+            return
+        }
 
-            // pipeline states for polygon fill
-            guard let pipelineState = pipeline.renderState(
-                .init(shader: .color,
-                      colorFormat: backBuffer.pixelFormat,
-                      depthFormat: stencilBuffer.pixelFormat,
-                      blendState: .defaultAlpha)) else {
-                Log.err("GraphicsContext error: pipeline.renderState failed.")
-                return false
-            }
-            let depthState: DepthStencilState?
-            if style.isEOFilled {
-                depthState = pipeline.depthStencilState(.even)
-            } else {
-                depthState = pipeline.depthStencilState(.nonZero)
-            }
-            guard let depthState else {
-                Log.err("GraphicsContext error: pipeline.depthStencilState failed.")
-                return false
-            }
-
-            let makeVertex = { x, y in
-                _Vertex(position: Vector2(x, y).float2,
-                        texcoord: Vector2.zero.float2,
-                        color: DKGame.Color.red.float4)
-            }
-            let rectVertices: [_Vertex] = [
-                makeVertex(-1, -1), makeVertex(-1, 1), makeVertex(1, -1),
-                makeVertex(1, -1), makeVertex(-1, 1), makeVertex(1, 1)
-            ]
-
-            guard let vertexBuffer = pipeline.makeBuffer(rectVertices) else {
-                Log.err("GraphicsContext error: pipeline.makeBuffer() failed.")
-                return false
-            }
-
+        encoder.setRenderPipelineState(renderState)
+        encoder.setDepthStencilState(depthState)
+        if let texture {
+            pipeline.defaultBindingSet2.setTexture(self.maskTexture, binding: 0)
+            pipeline.defaultBindingSet2.setTexture(texture, binding: 1)
+            pipeline.defaultBindingSet2.setSamplerState(pipeline.defaultSampler, binding: 0)
+            pipeline.defaultBindingSet2.setSamplerState(pipeline.defaultSampler, binding: 1)
+            encoder.setResource(pipeline.defaultBindingSet2, atIndex: 0)
+        } else {
             pipeline.defaultBindingSet1.setTexture(self.maskTexture, binding: 0)
             pipeline.defaultBindingSet1.setSamplerState(pipeline.defaultSampler, binding: 0)
-
-            encoder.setRenderPipelineState(pipelineState)
-            encoder.setDepthStencilState(depthState)
             encoder.setResource(pipeline.defaultBindingSet1, atIndex: 0)
-            encoder.setCullMode(.none)
-            encoder.setFrontFacing(.clockwise)
-            encoder.setStencilReferenceValue(0)
-            encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
+        }
+        encoder.setCullMode(.none)
+        encoder.setFrontFacing(.clockwise)
+        encoder.setStencilReferenceValue(0)
+        encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
 
-            let pc = _PushConstant()
-            withUnsafeBytes(of: pc) {
+        if let pushConstantData {
+            withUnsafeBytes(of: pushConstantData) {
                 encoder.pushConstant(stages: .fragment, offset: 0, data: $0)
             }
+        }
 
+        if let indices {
+            guard let indexBuffer = self._makeBuffer(indices) else {
+                Log.err("GraphicsContext error: _makeBuffer failed.")
+                return
+            }
+            encoder.drawIndexed(indexCount: indices.count,
+                                indexType: .uint32,
+                                indexBuffer: indexBuffer,
+                                indexBufferOffset: 0,
+                                instanceCount: 1,
+                                baseVertex: 0,
+                                baseInstance: 0)
+        } else {
             encoder.draw(vertexStart: 0,
-                         vertexCount: rectVertices.count,
+                         vertexCount: vertices.count,
                          instanceCount: 1,
                          baseInstance: 0)
-            return true
         }
     }
 
-    public func stroke(_ path: Path, with shading: Shading, style: StrokeStyle) {
-        if path.isEmpty { return }
-    }
+    func _makeBuffer<T>(_ data: [T]) -> Buffer? {
+        if data.isEmpty { return nil }
 
-    public func stroke(_ path: Path, with shading: Shading, lineWidth: CGFloat = 1) {
-        stroke(path, with: shading, style: StrokeStyle(lineWidth: lineWidth))
-    }
-
-    public mutating func clip(to path: Path,
-                              style: FillStyle = FillStyle(),
-                              options: ClipOptions = ClipOptions()) {
-        let resolution = self.resolution
-        let width = Int(resolution.width.rounded())
-        let height = Int(resolution.height.rounded())
         let device = self.commandBuffer.device
-        if let maskTexture = device.makeTexture(
-            descriptor: TextureDescriptor(textureType: .type2D,
-                                          pixelFormat: .r8Unorm,
-                                          width: width,
-                                          height: height,
-                                          usage: [.renderTarget, .sampled])) {
-            if let encoder = commandBuffer.makeRenderCommandEncoder(
-                descriptor: RenderPassDescriptor(colorAttachments: [
-                    RenderPassColorAttachmentDescriptor(renderTarget: backBuffer,
-                                                        loadAction: .clear,
-                                                        storeAction: .store,
-                                                        clearColor: .white)])) {
-                encoder.endEncoding()
-            } else {
-                Log.err("GraphicsContext warning: makeRenderCommandEncoder failed.")
+        let length = MemoryLayout<T>.stride * data.count
+        if let buffer = device.makeBuffer(length: length,
+                                          storageMode: .shared,
+                                          cpuCacheMode: .writeCombined) {
+            if let ptr = buffer.contents() {
+                data.withUnsafeBytes {
+                    assert($0.count == length)
+                    ptr.copyMemory(from: $0.baseAddress!, byteCount: $0.count)
+                }
+                buffer.flush()
+                return buffer
             }
-            // Create a new context to draw paths to a new mask texture
-            let drawn = self._fillStencil(path, backBuffer: maskTexture) { encoder in
-                let queue = self.commandBuffer.commandQueue
-                guard let pipeline = GraphicsPipelineStates.sharedInstance(commandQueue: queue) else {
-                    Log.err("GraphicsContext error: pipeline failed.")
-                    return false
-                }
-
-                // pipeline states for polygon fill
-                guard let pipelineState = pipeline.renderState(
-                    .init(shader: .color,
-                          colorFormat: backBuffer.pixelFormat,
-                          depthFormat: stencilBuffer.pixelFormat,
-                          blendState: .defaultAlpha)) else {
-                    Log.err("GraphicsContext error: pipeline.renderState failed.")
-                    return false
-                }
-                let depthState: DepthStencilState?
-                if style.isEOFilled {
-                    if options.contains(.inverse) {
-                        depthState = pipeline.depthStencilState(.odd)
-                    } else {
-                        depthState = pipeline.depthStencilState(.even)
-                    }
-                } else {
-                    if options.contains(.inverse) {
-                        depthState = pipeline.depthStencilState(.zero)
-                    }
-                    else {
-                        depthState = pipeline.depthStencilState(.nonZero)
-                    }
-                }
-                guard let depthState else {
-                    Log.err("GraphicsContext error: pipeline.depthStencilState failed.")
-                    return false
-                }
-
-                let makeVertex = { x, y in
-                    _Vertex(position: Vector2(x, y).float2,
-                            texcoord: Vector2.zero.float2,
-                            color: DKGame.Color.white.float4)
-                }
-                let rectVertices: [_Vertex] = [
-                    makeVertex(-1, -1), makeVertex(-1, 1), makeVertex(1, -1),
-                    makeVertex(1, -1), makeVertex(-1, 1), makeVertex(1, 1)
-                ]
-
-                guard let vertexBuffer = pipeline.makeBuffer(rectVertices) else {
-                    Log.err("GraphicsContext error: pipeline.makeBuffer() failed.")
-                    return false
-                }
-
-                // use current mask texture!
-                pipeline.defaultBindingSet1.setTexture(self.maskTexture, binding: 0)
-                pipeline.defaultBindingSet1.setSamplerState(pipeline.defaultSampler, binding: 0)
-
-                encoder.setRenderPipelineState(pipelineState)
-                encoder.setDepthStencilState(depthState)
-                encoder.setResource(pipeline.defaultBindingSet1, atIndex: 0)
-                encoder.setCullMode(.none)
-                encoder.setFrontFacing(.clockwise)
-                encoder.setStencilReferenceValue(0)
-                encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
-
-                let pc = _PushConstant()
-                withUnsafeBytes(of: pc) {
-                    encoder.pushConstant(stages: .fragment, offset: 0, data: $0)
-                }
-
-                encoder.draw(vertexStart: 0,
-                             vertexCount: rectVertices.count,
-                             instanceCount: 1,
-                             baseInstance: 0)
-                return true
-            }
-            if drawn {
-                self.clipBoundingRect = self.clipBoundingRect.union(path.boundingBoxOfPath)
-                self.maskTexture = maskTexture
-            }
-        } else {
-            Log.err("GraphicsContext error: makeTexture failed.")
         }
+        return nil
     }
-
-    public mutating func clipToLayer(opacity: Double = 1,
-                                     options: ClipOptions = ClipOptions(),
-                                     content: (inout GraphicsContext) throws -> Void) rethrows {
-        if var context = self.makeLayerContext() {
-            do {
-                try content(&context)
-                if let maskTexture = self._resolveMaskTexture(
-                    self.maskTexture,
-                    context.backBuffer,
-                    opacity: opacity,
-                    inverse: options.contains(.inverse)) {
-                    self.maskTexture = maskTexture
-                } else {
-                    Log.err("GraphicsContext error: unable to resolve mask image.")
-                }
-            } catch {
-                Log.err("GraphicsContext error: \(error)")
-            }
-        } else {
-            Log.error("GraphicsContext error: failed to create new context.")
-        }
-    }
-
 }

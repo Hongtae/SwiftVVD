@@ -49,6 +49,7 @@ public struct GraphicsContext {
     public internal(set) var environment: EnvironmentValues
     public var transform: CGAffineTransform
 
+    // MARK: -
     var viewTransform: CGAffineTransform
     var contentOffset: CGPoint {
         didSet {
@@ -196,6 +197,7 @@ public struct GraphicsContext {
                                stencilBuffer: stencil)
     }
 
+    // MARK: -
     public mutating func scaleBy(x: CGFloat, y: CGFloat) {
         self.transform = self.transform.scaledBy(x: x, y: y)
     }
@@ -212,6 +214,7 @@ public struct GraphicsContext {
         self.transform = self.transform.concatenating(matrix)
     }
 
+    // MARK: -
     public struct ClipOptions: OptionSet, Sendable {
         public let rawValue: UInt32
         public init(rawValue: UInt32) { self.rawValue = rawValue }
@@ -221,6 +224,91 @@ public struct GraphicsContext {
 
     public var clipBoundingRect: CGRect = .zero
 
+    public mutating func clip(to path: Path,
+                              style: FillStyle = FillStyle(),
+                              options: ClipOptions = ClipOptions()) {
+        let resolution = self.resolution
+        let width = Int(resolution.width.rounded())
+        let height = Int(resolution.height.rounded())
+        let device = self.commandBuffer.device
+        if let maskTexture = device.makeTexture(
+            descriptor: TextureDescriptor(textureType: .type2D,
+                                          pixelFormat: .r8Unorm,
+                                          width: width,
+                                          height: height,
+                                          usage: [.renderTarget, .sampled])) {
+            if let encoder = commandBuffer.makeRenderCommandEncoder(
+                descriptor: RenderPassDescriptor(colorAttachments: [
+                    RenderPassColorAttachmentDescriptor(renderTarget: backBuffer,
+                                                        loadAction: .clear,
+                                                        storeAction: .store,
+                                                        clearColor: .white)])) {
+                encoder.endEncoding()
+            } else {
+                Log.err("GraphicsContext warning: makeRenderCommandEncoder failed.")
+            }
+            // Create a new context to draw paths to a new mask texture
+            let drawn = self._fillStencil(path, backBuffer: maskTexture) { encoder in
+                let makeVertex = { x, y in
+                    _Vertex(position: Vector2(x, y).float2,
+                            texcoord: Vector2.zero.float2,
+                            color: DKGame.Color.white.float4)
+                }
+                let vertices: [_Vertex] = [
+                    makeVertex(-1, -1), makeVertex(-1, 1), makeVertex(1, -1),
+                    makeVertex(1, -1), makeVertex(-1, 1), makeVertex(1, 1)
+                ]
+
+                let stencil: _Stencil
+                if options.contains(.inverse) {
+                    stencil = style.isEOFilled ? .odd : .zero
+                } else {
+                    stencil = style.isEOFilled ? .even : .nonZero
+                }
+                let pc = _PushConstant()
+                self._encodeDrawCommand(shader: .color,
+                                        stencil: stencil,
+                                        vertices: vertices,
+                                        indices: nil,
+                                        texture: nil,
+                                        blendState: .defaultAlpha,
+                                        pushConstantData: pc,
+                                        encoder: encoder)
+                return true
+            }
+            if drawn {
+                self.clipBoundingRect = self.clipBoundingRect.union(path.boundingBoxOfPath)
+                self.maskTexture = maskTexture
+            }
+        } else {
+            Log.err("GraphicsContext error: makeTexture failed.")
+        }
+    }
+
+    public mutating func clipToLayer(opacity: Double = 1,
+                                     options: ClipOptions = ClipOptions(),
+                                     content: (inout GraphicsContext) throws -> Void) rethrows {
+        if var context = self.makeLayerContext() {
+            do {
+                try content(&context)
+                if let maskTexture = self._resolveMaskTexture(
+                    self.maskTexture,
+                    context.backBuffer,
+                    opacity: opacity,
+                    inverse: options.contains(.inverse)) {
+                    self.maskTexture = maskTexture
+                } else {
+                    Log.err("GraphicsContext error: unable to resolve mask image.")
+                }
+            } catch {
+                Log.err("GraphicsContext error: \(error)")
+            }
+        } else {
+            Log.error("GraphicsContext error: failed to create new context.")
+        }
+    }
+
+    // MARK: -
     public struct Filter {
         public static func projectionTransform(_ matrix: ProjectionTransform) -> Filter {
             fatalError()
@@ -312,35 +400,52 @@ public struct GraphicsContext {
     }
 
     public struct Shading {
+        enum Property {
+            case color(color: Color)
+            case style(style: ShapeStyle)
+            case linearGradient(gradient: Gradient, startPoint: CGPoint, endPoint: CGPoint, options: GradientOptions)
+            case radialGradient(gradient: Gradient, center: CGPoint, startRadius: CGFloat, endRadius: CGFloat, options: GradientOptions)
+            case conicGradient(gradient: Gradient, center: CGPoint, angle: Angle, options: GradientOptions)
+            case tiledImage(image: Image, origin: CGPoint, sourceRect: CGRect, scale: CGFloat)
+        }
+        let properties: [Property]
+
+        init(property: Property) {
+            self.properties = [property]
+        }
+        init(palette: [Shading]) {
+            self.properties = palette.flatMap { $0.properties }
+        }
+
         public static var backdrop: Shading     { fatalError() }
         public static var foreground: Shading   { fatalError() }
 
         public static func palette(_ array: [Shading]) -> Shading {
-            fatalError()
+            Shading(palette: array)
         }
         public static func color(_ color: Color) -> Shading {
-            return .init()
+            Shading(property: .color(color: color))
         }
         public static func color(_ colorSpace: Color.RGBColorSpace = .sRGB, red: Double, green: Double, blue: Double, opacity: Double = 1) -> Shading {
-            return color(Color(colorSpace, red: red, green: green, blue: blue, opacity: opacity))
+            color(Color(colorSpace, red: red, green: green, blue: blue, opacity: opacity))
         }
         public static func color(_ colorSpace: Color.RGBColorSpace = .sRGB, white: Double, opacity: Double = 1) -> Shading {
-            return color(Color(colorSpace, white: white, opacity: opacity))
+            color(Color(colorSpace, white: white, opacity: opacity))
         }
         public static func style<S>(_ style: S) -> Shading where S: ShapeStyle {
-            fatalError()
+            Shading(property: .style(style: style))
         }
         public static func linearGradient(_ gradient: Gradient, startPoint: CGPoint, endPoint: CGPoint, options: GradientOptions = GradientOptions()) -> Shading {
-            fatalError()
+            Shading(property: .linearGradient(gradient: gradient, startPoint: startPoint, endPoint: endPoint, options: options))
         }
         public static func radialGradient(_ gradient: Gradient, center: CGPoint, startRadius: CGFloat, endRadius: CGFloat, options: GradientOptions = GradientOptions()) -> Shading {
-            fatalError()
+            Shading(property: .radialGradient(gradient: gradient, center: center, startRadius: startRadius, endRadius: endRadius, options: options))
         }
         public static func conicGradient(_ gradient: Gradient, center: CGPoint, angle: Angle = Angle(), options: GradientOptions = GradientOptions()) -> Shading {
-            fatalError()
+            Shading(property: .conicGradient(gradient: gradient, center: center, angle: angle, options: options))
         }
         public static func tiledImage(_ image: Image, origin: CGPoint = .zero, sourceRect: CGRect = CGRect(x: 0, y: 0, width: 1, height: 1), scale: CGFloat = 1) -> Shading {
-            fatalError()
+            Shading(property: .tiledImage(image: image, origin: origin, sourceRect: sourceRect, scale: scale))
         }
     }
 
@@ -353,8 +458,74 @@ public struct GraphicsContext {
         public static var linearColor   = GradientOptions(rawValue: 4)
     }
 
+    // MARK: -
     public func resolve(_ shading: Shading) -> Shading {
         fatalError()
+    }
+
+    public func drawLayer(content: (inout GraphicsContext) throws -> Void) rethrows {
+        if var context = self.makeLayerContext() {
+            do {
+                try content(&context)
+                let offset = -context.contentOffset
+                let scale = context.contentScale
+                let texture = context.backBuffer
+                self._draw(texture: texture,
+                           in: CGRect(origin: offset, size: scale),
+                           transform: .identity,
+                           textureFrame: CGRect(x: 0, y: 0,
+                                                width: texture.width,
+                                                height: texture.height),
+                           textureTransform: .identity,
+                           blendMode: context.blendMode,
+                           color: .white)
+            } catch {
+                Log.err("GraphicsContext error: \(error)")
+            }
+        } else {
+            Log.error("GraphicsContext error: failed to create new context.")
+        }
+    }
+
+    public func fill(_ path: Path, with shading: Shading, style: FillStyle = FillStyle()) {
+        self._fillStencil(path, backBuffer: self.backBuffer) { encoder in
+
+            var color: DKGame.Color = .white
+            if shading.properties.count == 1, case .color(let c) = shading.properties.first {
+                color = c.dkColor
+            } else {
+                fatalError("Not implemented yet")
+            }
+
+            let makeVertex = { x, y in
+                _Vertex(position: Vector2(x, y).float2,
+                        texcoord: Vector2.zero.float2,
+                        color: color.float4)
+            }
+            let vertices: [_Vertex] = [
+                makeVertex(-1, -1), makeVertex(-1, 1), makeVertex(1, -1),
+                makeVertex(1, -1), makeVertex(-1, 1), makeVertex(1, 1)
+            ]
+            let stencil: _Stencil = style.isEOFilled ? .even : .nonZero
+            let pc = _PushConstant()
+            self._encodeDrawCommand(shader: .color,
+                                    stencil: stencil,
+                                    vertices: vertices,
+                                    indices: nil,
+                                    texture: nil,
+                                    blendState: .defaultAlpha,
+                                    pushConstantData: pc,
+                                    encoder: encoder)
+            return true
+        }
+    }
+
+    public func stroke(_ path: Path, with shading: Shading, style: StrokeStyle) {
+        if path.isEmpty { return }
+    }
+
+    public func stroke(_ path: Path, with shading: Shading, lineWidth: CGFloat = 1) {
+        stroke(path, with: shading, style: StrokeStyle(lineWidth: lineWidth))
     }
 
     public struct ResolvedImage {

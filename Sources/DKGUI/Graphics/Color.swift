@@ -5,6 +5,8 @@
 //  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
+import DKGame
+
 protocol ColorBox: Hashable {
     var red: Double     { get set }
     var green: Double   { get set }
@@ -64,6 +66,10 @@ class AnyColorBox: ColorBox {
     func copy() -> Self {
         Self(self.colorBox.copy())
     }
+
+    var dkColor: DKGame.Color {
+        .init(self.red, self.green, self.blue, self.alpha)
+    }
 }
 
 public struct Color: Hashable {
@@ -74,6 +80,7 @@ public struct Color: Hashable {
     }
 
     let provider: AnyColorBox
+    var dkColor: DKGame.Color { provider.dkColor }
 
     public init(_ colorSpace: RGBColorSpace = .sRGB, red: Double, green: Double, blue: Double, opacity: Double = 1) {
         let colorBox = LinearColor(red: red, green: green, blue: blue, alpha: opacity)
