@@ -900,6 +900,154 @@ extension GraphicsContext {
         return false
     }
 
+    func _encodeFillCommand(with shading: GraphicsContext.Shading,
+                            stencil: _Stencil,
+                            encoder: RenderCommandEncoder) {
+
+        var vertices: [_Vertex] = []
+        var shader: _Shader = .color
+
+        if let property = shading.properties.first {
+            switch property {
+            case let .color(c):
+                shader = .color
+                let makeVertex = { x, y in
+                    _Vertex(position: Vector2(x, y).float2,
+                            texcoord: Vector2.zero.float2,
+                            color: c.dkColor.float4)
+                }
+                vertices = [
+                    makeVertex(-1, -1), makeVertex(-1, 1), makeVertex(1, -1),
+                    makeVertex(1, -1), makeVertex(-1, 1), makeVertex(1, 1)
+                ]
+            case let .linearGradient(gradient, startPoint, endPoint, options):
+                let stops = gradient.normalized().stops
+                if stops.isEmpty { return }
+                let gradientVector = endPoint - startPoint
+                let length = gradientVector.magnitude
+                let dir = gradientVector.normalized()
+                // transform gradient space to world space
+                // ie: (0, 0) -> startPoint, (1, 0) -> endPoint
+                let gradientTransform = CGAffineTransform(
+                    a: dir.x * length, b: dir.y * length,
+                    c: -dir.y, d: dir.x,
+                    tx: startPoint.x, ty: startPoint.y)
+
+                let viewportToGradientTransform = self.viewTransform.inverted()
+                    .concatenating(gradientTransform.inverted())
+
+                let viewportExtents = [CGPoint(x: -1, y: -1),   // left-bottom
+                                       CGPoint(x: -1, y: 1),    // left-top
+                                       CGPoint(x: 1, y: 1),     // right-top
+                                       CGPoint(x: 1, y: -1)]    // right-bottom
+                    .map { $0.applying(viewportToGradientTransform) }
+                let maxX = viewportExtents.max { $0.x < $1.x }!.x
+                let minX = viewportExtents.min { $0.x < $1.x }!.x
+                let maxY = viewportExtents.max { $0.y < $1.y }!.y
+                let minY = viewportExtents.min { $0.y < $1.y }!.y
+
+                let gradientToViewportTransform = gradientTransform
+                    .concatenating(self.viewTransform)
+
+                let addGradientBox = { (x1: CGFloat, x2: CGFloat, c1: DKGame.Color, c2: DKGame.Color) in
+                    let verts = [_Vertex(position: Vector2(x1, maxY).applying(gradientToViewportTransform).float2,
+                                         texcoord: Vector2.zero.float2,
+                                         color: c1.float4),
+                                 _Vertex(position: Vector2(x1, minY).applying(gradientToViewportTransform).float2,
+                                         texcoord: Vector2.zero.float2,
+                                         color: c1.float4),
+                                 _Vertex(position: Vector2(x2, maxY).applying(gradientToViewportTransform).float2,
+                                         texcoord: Vector2.zero.float2,
+                                         color: c2.float4),
+                                 _Vertex(position: Vector2(x2, minY).applying(gradientToViewportTransform).float2,
+                                         texcoord: Vector2.zero.float2,
+                                         color: c2.float4)]
+                    vertices.append(contentsOf: [verts[0], verts[1], verts[2]])
+                    vertices.append(contentsOf: [verts[2], verts[1], verts[3]])
+                }
+                if options.contains(.mirror) {
+                    var pos = floor(minX)
+                    let rstops = stops.reversed()
+                    while pos < ceil(maxX) {
+                        if pos.magnitude.truncatingRemainder(dividingBy: 2).rounded() == 1.0 {
+                            for i in 0..<(rstops.count-1) {
+                                let s1 = stops[i]
+                                let s2 = stops[i+1]
+
+                                let loc1 = (1.0 - s1.location)
+                                let loc2 = (1.0 - s2.location)
+                                if loc1 + pos > maxX { break }
+                                if loc2 + pos < minX { continue }
+                                addGradientBox(loc1 + pos,
+                                               loc2 + pos,
+                                               s1.color.dkColor,
+                                               s2.color.dkColor)
+                            }
+                        } else {
+                            for i in 0..<(stops.count-1) {
+                                let s1 = stops[i]
+                                let s2 = stops[i+1]
+
+                                if s1.location + pos > maxX { break }
+                                if s2.location + pos < minX { continue }
+                                addGradientBox(s1.location + pos,
+                                               s2.location + pos,
+                                               s1.color.dkColor,
+                                               s2.color.dkColor)
+                            }
+                        }
+                        pos += 1
+                    }
+                } else if options.contains(.repeat) {
+                    var pos = floor(minX)
+                    while pos < ceil(maxX) {
+                        for i in 0..<(stops.count-1) {
+                            let s1 = stops[i]
+                            let s2 = stops[i+1]
+
+                            if s1.location + pos > maxX { break }
+                            if s2.location + pos < minX { continue }
+                            addGradientBox(s1.location + pos,
+                                           s2.location + pos,
+                                           s1.color.dkColor,
+                                           s2.color.dkColor)
+                        }
+                        pos += 1
+                    }
+                } else {
+                    for i in 0..<(stops.count-1) {
+                        let s1 = stops[i]
+                        let s2 = stops[i+1]
+
+                        addGradientBox(s1.location, s2.location,
+                                       s1.color.dkColor, s2.color.dkColor)
+                    }
+                    if let first = stops.first, first.location > minX {
+                        addGradientBox(minX, first.location,
+                                       first.color.dkColor, first.color.dkColor)
+                    }
+                    if let last = stops.last, last.location < maxX {
+                        addGradientBox(last.location, maxX,
+                                       last.color.dkColor, last.color.dkColor)
+                    }
+                }
+            default:
+                Log.err("Not implemented yet")
+                return
+            }
+        }
+
+        let pc = _PushConstant()
+        self._encodeDrawCommand(shader: shader,
+                                stencil: stencil,
+                                vertices: vertices,
+                                indices: nil,
+                                texture: nil,
+                                blendState: .defaultAlpha,
+                                pushConstantData: pc,
+                                encoder: encoder)
+    }
+
     func _encodeDrawCommand(shader: _Shader,
                             stencil: _Stencil,
                             vertices: [_Vertex],
@@ -909,6 +1057,10 @@ extension GraphicsContext {
                             pushConstantData: _PushConstant?,
                             encoder: RenderCommandEncoder) {
         assert(shader != .stencil) // .stencil uses a different vertex format.
+
+        if vertices.isEmpty { return }
+        if let indices, indices.isEmpty { return }
+
         let queue = self.commandBuffer.commandQueue
         guard let pipeline = GraphicsPipelineStates.sharedInstance(commandQueue: queue) else {
             Log.err("GraphicsContext error: pipeline failed.")

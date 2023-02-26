@@ -489,33 +489,8 @@ public struct GraphicsContext {
 
     public func fill(_ path: Path, with shading: Shading, style: FillStyle = FillStyle()) {
         self._fillStencil(path, backBuffer: self.backBuffer) { encoder in
-
-            var color: DKGame.Color = .white
-            if shading.properties.count == 1, case .color(let c) = shading.properties.first {
-                color = c.dkColor
-            } else {
-                fatalError("Not implemented yet")
-            }
-
-            let makeVertex = { x, y in
-                _Vertex(position: Vector2(x, y).float2,
-                        texcoord: Vector2.zero.float2,
-                        color: color.float4)
-            }
-            let vertices: [_Vertex] = [
-                makeVertex(-1, -1), makeVertex(-1, 1), makeVertex(1, -1),
-                makeVertex(1, -1), makeVertex(-1, 1), makeVertex(1, 1)
-            ]
             let stencil: _Stencil = style.isEOFilled ? .even : .nonZero
-            let pc = _PushConstant()
-            self._encodeDrawCommand(shader: .color,
-                                    stencil: stencil,
-                                    vertices: vertices,
-                                    indices: nil,
-                                    texture: nil,
-                                    blendState: .defaultAlpha,
-                                    pushConstantData: pc,
-                                    encoder: encoder)
+            self._encodeFillCommand(with: shading, stencil: stencil, encoder: encoder)
             return true
         }
     }

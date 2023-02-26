@@ -45,6 +45,41 @@ public struct Gradient {
         static let device = ColorSpace(id: 0)
         static let perceptual = ColorSpace(id: 2)
     }
+
+    func normalized() -> Self {
+        let stops1 = self.stops.sorted { $0.location < $1.location }
+        guard var current = stops1.first else {
+            return self // empty gradient
+        }
+        var stops2: [Stop] = []
+        stops2.reserveCapacity(stops1.count + 1)
+
+        if current.location > 0.0 {
+            stops2.append(Stop(color: current.color, location: 0.0))
+        }
+        for s in stops1 {
+            if s.location > 0.0 && s.location < 1.0 {
+                if current.location <= 0.0 {
+                    let t = (0.0 - current.location) / (s.location - current.location)
+                    stops2.append(Stop(color: .lerp(current.color, s.color, t),
+                                      location: 0.0))
+                }
+                stops2.append(s)
+            } else if s.location >= 1.0 {
+                let t = (1.0 - current.location) / (s.location - current.location)
+                stops2.append(Stop(color: .lerp(current.color, s.color, t),
+                                  location: 1.0))
+                break
+            }
+            current = s
+        }
+        if let last = stops2.last, last.location < 1.0 {
+            var stop = last
+            stop.location = 1.0
+            stops2.append(stop)
+        }
+        return Gradient(stops: stops2)
+    }
 }
 
 extension Gradient: ShapeStyle {

@@ -130,6 +130,15 @@ public struct Color: Hashable {
     init(_ provider: AnyColorBox) {
         self.provider = provider
     }
+
+    static func lerp(_ lhs: Self, _ rhs: Self, _ t: CGFloat) -> Self {
+        // FIXME: Convert RGB values to the correct color space.
+        let r = DKGame.lerp(lhs.provider.red, rhs.provider.red, t)
+        let g = DKGame.lerp(lhs.provider.green, rhs.provider.green, t)
+        let b = DKGame.lerp(lhs.provider.blue, rhs.provider.blue, t)
+        let a = DKGame.lerp(lhs.provider.alpha, rhs.provider.alpha, t)
+        return Self(.sRGB, red: r, green: g, blue: b, opacity: a)
+    }
 }
 
 extension Color {
