@@ -904,6 +904,8 @@ extension GraphicsContext {
                             stencil: _Stencil,
                             encoder: RenderCommandEncoder) {
 
+        if shading.properties.isEmpty { return }
+
         var vertices: [_Vertex] = []
         var shader: _Shader = .color
 
@@ -925,6 +927,11 @@ extension GraphicsContext {
                 if stops.isEmpty { return }
                 let gradientVector = endPoint - startPoint
                 let length = gradientVector.magnitude
+                if length < .ulpOfOne {
+                    return self._encodeFillCommand(with: .color(stops[0].color),
+                                                   stencil: stencil,
+                                                   encoder: encoder)
+                }
                 let dir = gradientVector.normalized()
                 // transform gradient space to world space
                 // ie: (0, 0) -> startPoint, (1, 0) -> endPoint
@@ -1030,6 +1037,50 @@ extension GraphicsContext {
                         addGradientBox(last.location, maxX,
                                        last.color.dkColor, last.color.dkColor)
                     }
+                }
+            case let .radialGradient(gradient, center, startRadius, endRadius, options):
+                let stops = gradient.normalized().stops
+                if stops.isEmpty { return }
+
+            case let .conicGradient(gradient, center, angle, _):
+                let gradient = gradient.normalized()
+                if gradient.stops.isEmpty { return }
+                let invViewTransform = self.viewTransform.inverted()
+                let scale = [CGPoint(x: -1, y: -1),     // left-bottom
+                             CGPoint(x: -1, y: 1),      // left-top
+                             CGPoint(x: 1, y: 1),       // right-top
+                             CGPoint(x: 1, y: -1)]      // right-bottom
+                    .map { ($0.applying(invViewTransform) - center).magnitudeSquared }
+                    .max()!.squareRoot()
+
+                let transform = CGAffineTransform(rotationAngle: angle.radians)
+                    .concatenating(CGAffineTransform(scaleX: scale, y: scale))
+                    .concatenating(CGAffineTransform(translationX: center.x, y: center.y))
+                    .concatenating(self.viewTransform)
+
+                let step = CGFloat.pi / 180.0
+                var progress: CGFloat = .zero
+                let texCoord = Vector2.zero.float2
+                let center = Vector2(0, 0).applying(transform)
+                let numTriangles = Int((CGFloat.pi * 2) / step) + 1
+                vertices.reserveCapacity(numTriangles * 3)
+                while progress < .pi * 2 {
+                    let p0 = Vector2(1, 0).rotated(by: progress).applying(transform)
+                    let p1 = Vector2(1, 0).rotated(by: progress + step).applying(transform)
+                    let color1 = gradient._linearInterpolatedColor(at: progress / (.pi * 2))
+                    let color2 = gradient._linearInterpolatedColor(at: (progress + step) / (.pi * 2))
+
+                    vertices.append(_Vertex(position: center.float2,
+                                            texcoord: texCoord,
+                                            color: color1.dkColor.float4))
+                    vertices.append(_Vertex(position: p0.float2,
+                                            texcoord: texCoord,
+                                            color: color1.dkColor.float4))
+                    vertices.append(_Vertex(position: p1.float2,
+                                            texcoord: texCoord,
+                                            color: color2.dkColor.float4))
+
+                    progress += step
                 }
             default:
                 Log.err("Not implemented yet")

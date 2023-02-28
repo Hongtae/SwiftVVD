@@ -80,6 +80,24 @@ public struct Gradient {
         }
         return Gradient(stops: stops2)
     }
+
+    func _linearInterpolatedColor(at location: CGFloat) -> Color {
+        // Gradients must have at least one color and must be sorted.
+        assert(stops.isEmpty == false)
+        var current = stops.first!
+        if location > current.location {
+            for i in 1..<stops.count {
+                let next = stops[i]
+                if next.location > location {
+                    return .lerp(current.color,
+                                 next.color,
+                                 (location - current.location) / (next.location - current.location))
+                }
+                current = next
+            }
+        }
+        return current.color
+    }
 }
 
 extension Gradient: ShapeStyle {

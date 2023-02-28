@@ -488,6 +488,7 @@ public struct GraphicsContext {
     }
 
     public func fill(_ path: Path, with shading: Shading, style: FillStyle = FillStyle()) {
+        if shading.properties.isEmpty { return }
         self._fillStencil(path, backBuffer: self.backBuffer) { encoder in
             let stencil: _Stencil = style.isEOFilled ? .even : .nonZero
             self._encodeFillCommand(with: shading, stencil: stencil, encoder: encoder)
@@ -496,6 +497,7 @@ public struct GraphicsContext {
     }
 
     public func stroke(_ path: Path, with shading: Shading, style: StrokeStyle) {
+        if shading.properties.isEmpty { return }
         if path.isEmpty { return }
     }
 
