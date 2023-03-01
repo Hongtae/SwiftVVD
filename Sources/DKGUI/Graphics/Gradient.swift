@@ -81,6 +81,12 @@ public struct Gradient {
         return Gradient(stops: stops2)
     }
 
+    func reversed() -> Self {
+        Self(stops: self.stops.reversed().map {
+            Stop(color: $0.color, location: 1.0 - $0.location)
+        })
+    }
+
     func _linearInterpolatedColor(at location: CGFloat) -> Color {
         // Gradients must have at least one color and must be sorted.
         assert(stops.isEmpty == false)

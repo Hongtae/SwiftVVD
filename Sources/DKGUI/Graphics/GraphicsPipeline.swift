@@ -1042,6 +1042,170 @@ extension GraphicsContext {
                 let stops = gradient.normalized().stops
                 if stops.isEmpty { return }
 
+                let length = (endRadius - startRadius).magnitude
+                if length < .ulpOfOne {
+                    if options.contains(.repeat) && !options.contains(.mirror) {
+                        return self._encodeFillCommand(with:
+                                .color(stops.last!.color),
+                                                       stencil: stencil,
+                                                       encoder: encoder)
+                    } else {
+                        return self._encodeFillCommand(with:
+                                .color(stops.first!.color),
+                                                       stencil: stencil,
+                                                       encoder: encoder)
+                    }
+                }
+                let invViewTransform = self.viewTransform.inverted()
+                let scale = [CGPoint(x: -1, y: -1),     // left-bottom
+                             CGPoint(x: -1, y: 1),      // left-top
+                             CGPoint(x: 1, y: 1),       // right-top
+                             CGPoint(x: 1, y: -1)]      // right-bottom
+                    .map { ($0.applying(invViewTransform) - center).magnitudeSquared }
+                    .max()!.squareRoot()
+
+                let transform = CGAffineTransform(translationX: center.x, y: center.y)
+                    .concatenating(self.viewTransform)
+
+                let texCoord = Vector2.zero.float2
+                let step = CGFloat.pi / 45.0
+                let addCircularArc = {
+                    (x1: CGFloat, x2: CGFloat, c1: Color, c2: Color) in
+
+                    if x1 >= scale && x2 >= scale { return }
+                    if x1 <= 0 && x2 <= 0 { return }
+                    if (x2 - x1).magnitude < .ulpOfOne { return }
+
+                    var x1 = x1, x2 = x2
+                    var c1 = c1, c2 = c2
+                    if x1 > x2 {
+                        (x1, x2) = (x2, x1)
+                        (c1, c2) = (c2, c1)
+                    }
+                    if x1 < 0 {
+                        c1 = .lerp(c1, c2, (0 - x1)/(x2 - x1))
+                        x1 = 0
+                    }
+                    if x2 > scale {
+                        c2 = .lerp(c1, c2, (x2 - scale)/(x2 - x1))
+                        x2 = scale
+                    }
+                    if (x2 - x1) < .ulpOfOne { return }
+                    assert(x2 > x1)
+
+                    let p0 = Vector2(x1, 0)
+                    let p1 = p0.rotated(by: step)
+                    let p2 = Vector2(x2, 0)
+                    let p3 = p2.rotated(by: step)
+
+                    let verts: [Vector2]
+                    let colors: [Color]
+                    if (p1 - p0).magnitudeSquared < .ulpOfOne {
+                        verts = [p0, p2, p3]
+                        colors = [c1, c2, c2]
+                    } else {
+                        verts = [p1, p0, p3, p3, p0, p2]
+                        colors = [c1, c1, c2, c2, c1, c2]
+                    }
+                    let numVertices = Int((CGFloat.pi * 2) / step) + 1
+                    vertices.reserveCapacity(vertices.count + numVertices * verts.count)
+                    var progress: CGFloat = .zero
+                    while progress < .pi * 2  {
+                        for (i, p) in verts.enumerated() {
+                            vertices.append(_Vertex(position: p.rotated(by: progress).applying(transform).float2,
+                                                    texcoord: texCoord,
+                                                    color: colors[i].dkColor.float4))
+                        }
+                        progress += step
+                    }
+                }
+
+                if options.contains(.mirror) {
+                    var startRadius = startRadius
+                    var reverse = false
+                    while startRadius > 0 {
+                        startRadius = startRadius - length
+                        reverse = !reverse
+                    }
+                    while startRadius < scale {
+                        if reverse {
+                            for i in 0..<(stops.count - 1) {
+                                let s1 = stops[i]
+                                let s2 = stops[i+1]
+                                let loc1 = startRadius + length - (s1.location * length)
+                                let loc2 = startRadius + length - (s2.location * length)
+                                if loc1 <= 0 && loc2 <= 0 { break }
+                                addCircularArc(loc1, loc2, s1.color, s2.color)
+                            }
+                        } else {
+                            for i in 0..<(stops.count - 1) {
+                                let s1 = stops[i]
+                                let s2 = stops[i+1]
+                                let loc1 = (s1.location * length) + startRadius
+                                let loc2 = (s2.location * length) + startRadius
+                                if loc1 >= scale && loc2 >= scale { break }
+                                addCircularArc(loc1, loc2, s1.color, s2.color)
+                            }
+                        }
+                        startRadius += length
+                        reverse = !reverse
+                    }
+                } else if options.contains(.repeat) {
+                    var startRadius = startRadius
+                    let reverse = endRadius < startRadius
+                    while startRadius > 0 {
+                        startRadius = startRadius - length
+                    }
+                    if reverse {
+                        while startRadius < scale {
+                            for i in 0..<(stops.count - 1) {
+                                let s1 = stops[i]
+                                let s2 = stops[i+1]
+                                let loc1 = startRadius + length - (s1.location * length)
+                                let loc2 = startRadius + length - (s2.location * length)
+                                if loc1 <= 0 && loc2 <= 0 { break }
+                                addCircularArc(loc1, loc2, s1.color, s2.color)
+                            }
+                            startRadius += length
+                        }
+                    } else {
+                        while startRadius < scale {
+                            for i in 0..<(stops.count - 1) {
+                                let s1 = stops[i]
+                                let s2 = stops[i+1]
+                                let loc1 = (s1.location * length) + startRadius
+                                let loc2 = (s2.location * length) + startRadius
+                                if loc1 >= scale && loc2 >= scale { break }
+                                addCircularArc(loc1, loc2, s1.color, s2.color)
+                            }
+                            startRadius += length
+                        }
+                    }
+                } else {
+                    if endRadius > startRadius {
+                        addCircularArc(0, startRadius, stops[0].color, stops[0].color)
+                        for i in 0..<(stops.count - 1) {
+                            let s1 = stops[i]
+                            let s2 = stops[i+1]
+                            let loc1 = (s1.location * length) + startRadius
+                            let loc2 = (s2.location * length) + startRadius
+                            if loc1 >= scale && loc2 >= scale { break }
+                            addCircularArc(loc1, loc2, s1.color, s2.color)
+                        }
+                        addCircularArc(endRadius, scale, stops.last!.color, stops.last!.color)
+                    } else {
+                        addCircularArc(0, endRadius, stops.last!.color, stops.last!.color)
+                        for i in 0..<(stops.count - 1) {
+                            let s1 = stops[i]
+                            let s2 = stops[i+1]
+                            let loc1 = startRadius - (s1.location * length)
+                            let loc2 = startRadius - (s2.location * length)
+                            if loc1 <= 0 && loc2 <= 0 { break }
+                            addCircularArc(loc1, loc2, s1.color, s2.color)
+                        }
+                        addCircularArc(startRadius, scale, stops[0].color, stops[0].color)
+                    }
+                }
             case let .conicGradient(gradient, center, angle, _):
                 let gradient = gradient.normalized()
                 if gradient.stops.isEmpty { return }
