@@ -5,6 +5,7 @@
 //  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
+import Foundation
 import DKGame
 
 protocol ColorBox: Hashable {
