@@ -248,7 +248,7 @@ public struct GraphicsContext {
                 Log.err("GraphicsContext warning: makeRenderCommandEncoder failed.")
             }
             // Create a new context to draw paths to a new mask texture
-            let drawn = self._fillStencil(path, backBuffer: maskTexture) { encoder in
+            let drawn = self._drawPathFillWithStencil(path, backBuffer: maskTexture) { encoder in
                 let makeVertex = { x, y in
                     _Vertex(position: Vector2(x, y).float2,
                             texcoord: Vector2.zero.float2,
@@ -489,16 +489,27 @@ public struct GraphicsContext {
 
     public func fill(_ path: Path, with shading: Shading, style: FillStyle = FillStyle()) {
         if shading.properties.isEmpty { return }
-        self._fillStencil(path, backBuffer: self.backBuffer) { encoder in
+        self._drawPathFillWithStencil(path, backBuffer: self.backBuffer) {
+            encoder in
             let stencil: _Stencil = style.isEOFilled ? .even : .nonZero
-            self._encodeFillCommand(with: shading, stencil: stencil, encoder: encoder)
+            self._encodeFillCommand(with: shading,
+                                    stencil: stencil,
+                                    encoder: encoder)
             return true
         }
     }
 
     public func stroke(_ path: Path, with shading: Shading, style: StrokeStyle) {
         if shading.properties.isEmpty { return }
-        if path.isEmpty { return }
+        self._drawPathStrokeWithStencil(path,
+                                        style: style,
+                                        backBuffer: self.backBuffer) {
+            encoder in
+            self._encodeFillCommand(with: shading,
+                                    stencil: .nonZero,
+                                    encoder: encoder)
+            return true
+        }
     }
 
     public func stroke(_ path: Path, with shading: Shading, lineWidth: CGFloat = 1) {

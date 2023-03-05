@@ -719,7 +719,240 @@ extension GraphicsContext {
     }
 
     @discardableResult
-    func _fillStencil(_ path: Path, backBuffer: Texture, draw: (_: RenderCommandEncoder) -> Bool) -> Bool{
+    func _drawPathStrokeWithStencil(_ path: Path,
+                                    style: StrokeStyle,
+                                    backBuffer: Texture,
+                                    drawShading: (_: RenderCommandEncoder) -> Bool
+    ) -> Bool {
+        if path.isEmpty { return false }
+        if style.lineWidth < .ulpOfOne { return false }
+
+        assert(backBuffer.dimensions == stencilBuffer.dimensions)
+
+        let dash = style.dash.map { $0.magnitude }
+        if dash.isEmpty == false && dash.count % 2 == 0 {
+            let dashes = stride(from: 0, to: dash.count, by: 2).map { dash[$0] }
+                .reduce(0, +)
+            let gaps = stride(from: 1, to: dash.count, by: 2).map { dash[$0] }
+                .reduce(0, +)
+            if gaps > 0 && dashes == 0 { return false }
+        }
+        let dashPatternLength = dash.reduce(0, +)
+        let lineWidth = style.lineWidth
+
+        var vertexData: [Float2] = []
+
+        var dashOffset = style.dashPhase
+
+        let nextDashPattern = { (t: CGFloat, visible: inout Bool) -> CGFloat in
+            assert(dashPatternLength > .ulpOfOne)
+            let r = t.truncatingRemainder(dividingBy: dashPatternLength)
+            assert(r < dashPatternLength)
+            var f: CGFloat = 0
+            for d in dash {
+                f = f + d
+                if f > t {
+                    visible = !visible
+                    if d < .ulpOfOne {
+                        continue
+                    }
+                    return f - t
+                }
+            }
+            return 0
+        }
+
+        let transform = self.transform.concatenating(self.viewTransform)
+
+        let addStrokeCap = { (pt: CGPoint, s: CGFloat) in
+        }
+        let addStrokeLine = { (p0: CGPoint, p1: CGPoint) in
+            let d = p1 - p0
+            let length = d.magnitude
+            if length < .ulpOfOne { return }
+            let dir = d.normalized()
+            if dashPatternLength > 0 {
+
+            } else {
+                let trans = CGAffineTransform(a: length * dir.x,
+                                              b: length * dir.y,
+                                              c: -lineWidth * dir.y,
+                                              d: lineWidth * dir.x,
+                                              tx: p0.x, ty: p0.y)
+                    .concatenating(transform)
+
+                let box = [CGPoint(x: 0, y: -0.5), CGPoint(x: 1, y: -0.5),
+                           CGPoint(x: 0, y: 0.5), CGPoint(x: 1, y: 0.5)].map {
+                    Vector2($0.applying(trans))
+                }
+                vertexData.append(contentsOf: [
+                    box[2].float2, box[0].float2, box[3].float2,
+                    box[3].float2, box[0].float2, box[1].float2])
+            }
+            dashOffset += length
+        }
+        let addStrokeJoin = { (pt: CGPoint, s0: CGFloat, s1: CGFloat) in
+        }
+
+        let slope = { (pt0: CGPoint, pt1: CGPoint) -> CGFloat in
+            assert((pt1 - pt0).magnitudeSquared > .zero)
+            let d = (pt1 - pt0).normalized()
+            return d.y / d.x
+        }
+
+        var initialPoint: CGPoint? = nil
+        var currentPoint: CGPoint? = nil
+        var initialSlope: CGFloat? = nil
+        var currentSlope: CGFloat? = nil
+        path.forEach { element in
+            switch element {
+            case .move(let to):
+                if let p = initialPoint, let s = initialSlope {
+                    addStrokeCap(p, s)
+                }
+                if let p = currentPoint, let s = currentSlope {
+                    addStrokeCap(p, s)
+                }
+                initialPoint = to
+                currentPoint = to
+                initialSlope = nil
+                currentSlope = nil
+            case .line(let p1):
+                if let p0 = currentPoint {
+                    let s1 = slope(p0, p1)
+                    if let s0 = currentSlope {
+                        addStrokeJoin(p0, s0, s1)
+                    }
+                    addStrokeLine(p0, p1)
+                    currentSlope = s1
+                    initialSlope = initialSlope ?? currentSlope
+                }
+                currentPoint = p1
+            case .quadCurve(let p2, let p1):
+                if let p0 = currentPoint {
+                    let curve = QuadraticBezier(p0: p0, p1: p1, p2: p2)
+                    let length = curve.approximateLength()
+                    if length > .ulpOfOne {
+                        let step = 1.0 / curve.approximateLength()
+                        var t = step
+                        var pt0 = p0
+                        while t < 1.0 {
+                            let pt1 = curve.interpolate(t)
+                            addStrokeLine(pt0, pt1)
+                            pt0 = pt1
+                            t += step
+                        }
+                        currentSlope = slope(p1, p2)
+                        initialSlope = initialSlope ?? currentSlope
+                    }
+                }
+                currentPoint = p2
+            case .curve(let p3, let p1, let p2):
+                if let p0 = currentPoint {
+                    let curve = CubicBezier(p0: p0, p1: p1, p2: p2, p3: p3)
+                    let length = curve.approximateLength()
+                    if length > .ulpOfOne {
+                        let step = 1.0 / curve.approximateLength()
+                        var t = step
+                        var pt0 = p0
+                        while t < 1.0 {
+                            let pt1 = curve.interpolate(t)
+                            addStrokeLine(pt0, pt1)
+                            pt0 = pt1
+                            t += step
+                        }
+                        currentSlope = slope(p2, p3)
+                        initialSlope = initialSlope ?? currentSlope
+                    }
+                }
+                currentPoint = p3
+            case .closeSubpath:
+                if let p0 = currentPoint, let p1 = initialPoint {
+                    let s0 = slope(p0, p1)
+                    if let s1 = initialSlope {
+                        addStrokeJoin(p1, s0, s1)
+                    }
+                    addStrokeLine(p0, p1)
+                }
+                currentPoint = initialPoint
+                initialSlope = nil
+                currentSlope = nil
+            }
+        }
+
+        if vertexData.count < 3 { return false }
+
+        let queue = self.commandBuffer.commandQueue
+        guard let pipeline = GraphicsPipelineStates.sharedInstance(commandQueue: queue) else {
+            Log.err("GraphicsContext error: pipeline failed.")
+            return false
+        }
+        guard let vertexBuffer = self._makeBuffer(vertexData) else {
+            Log.err("GraphicsContext error: _makeBuffer failed.")
+            return false
+        }
+
+        // pipeline states for generate polgon winding numbers
+        guard let pipelineState = pipeline.renderState(
+            shader: .stencil,
+            colorFormat: backBuffer.pixelFormat,
+            depthFormat: stencilBuffer.pixelFormat,
+            blendState: .defaultOpaque) else {
+            Log.err("GraphicsContext error: pipeline.renderState failed.")
+            return false
+        }
+        guard let depthState = pipeline.depthStencilState(.generateWindingNumber) else {
+            Log.err("GraphicsContext error: pipeline.depthStencilState failed.")
+            return false
+        }
+
+        let renderPass = RenderPassDescriptor(
+            colorAttachments: [
+                RenderPassColorAttachmentDescriptor(
+                    renderTarget: backBuffer,
+                    loadAction: .load,
+                    storeAction: .store)
+            ],
+            depthStencilAttachment:
+                RenderPassDepthStencilAttachmentDescriptor(
+                    renderTarget: stencilBuffer,
+                    loadAction: .clear,
+                    storeAction: .dontCare,
+                    clearStencil: 0))
+
+        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPass) else {
+            Log.err("GraphicsContext error: makeRenderCommandEncoder failed.")
+            return false
+        }
+
+        // pass1: Generate polygon winding numbers to stencil buffer
+        encoder.setRenderPipelineState(pipelineState)
+        encoder.setDepthStencilState(depthState)
+
+        encoder.setCullMode(.none)
+        encoder.setFrontFacing(.clockwise)
+        encoder.setStencilReferenceValue(0)
+        encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
+        encoder.draw(vertexStart: 0,
+                     vertexCount: vertexData.count,
+                     instanceCount: 1,
+                     baseInstance: 0)
+
+         // pass2: draw only pixels that pass the stencil test
+        if drawShading(encoder) {
+            encoder.endEncoding()
+            return true
+        } else {
+            Log.err("GraphicsContext error: draw callback failed.")
+        }
+        return false
+    }
+
+    @discardableResult
+    func _drawPathFillWithStencil(_ path: Path,
+                                  backBuffer: Texture,
+                                  drawShading: (_: RenderCommandEncoder) -> Bool
+    ) -> Bool{
         if path.isEmpty { return false }
 
         assert(backBuffer.dimensions == stencilBuffer.dimensions)
@@ -729,7 +962,7 @@ extension GraphicsContext {
         }
         var polygons: [PolygonElement] = []
         if true {
-            var startPoint: CGPoint? = nil
+            var initialPoint: CGPoint? = nil
             var currentPoint: CGPoint? = nil
             var polygon = PolygonElement()
             path.forEach { element in
@@ -738,7 +971,7 @@ extension GraphicsContext {
                 case .move(let to):
                     polygons.append(polygon)
                     polygon = PolygonElement()
-                    startPoint = to
+                    initialPoint = to
                     currentPoint = to
                 case .line(let p1):
                     if let p0 = currentPoint {
@@ -756,9 +989,9 @@ extension GraphicsContext {
                             let step = 1.0 / curve.approximateLength()
                             var t = step
                             while t < 1.0 {
-                                t += step
                                 let pt = curve.interpolate(t)
                                 polygon.vertices.append(pt)
+                                t += step
                             }
                             polygon.vertices.append(p2)
                         }
@@ -772,9 +1005,9 @@ extension GraphicsContext {
                             let step = 1.0 / curve.approximateLength()
                             var t = step
                             while t < 1.0 {
-                                t += step
                                 let pt = curve.interpolate(t)
                                 polygon.vertices.append(pt)
+                                t += step
                             }
                             polygon.vertices.append(p3)
                         }
@@ -783,7 +1016,7 @@ extension GraphicsContext {
                 case .closeSubpath:
                     polygons.append(polygon)
                     polygon = PolygonElement()
-                    currentPoint = startPoint
+                    currentPoint = initialPoint
                 }
             }
             polygons.append(polygon)
@@ -891,7 +1124,7 @@ extension GraphicsContext {
                             baseInstance: 0)
 
          // pass2: draw only pixels that pass the stencil test
-        if draw(encoder) {
+        if drawShading(encoder) {
             encoder.endEncoding()
             return true
         } else {
