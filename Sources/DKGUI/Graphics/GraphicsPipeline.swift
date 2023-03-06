@@ -729,67 +729,92 @@ extension GraphicsContext {
 
         assert(backBuffer.dimensions == stencilBuffer.dimensions)
 
-        let dash = style.dash.map { $0.magnitude }
-        if dash.isEmpty == false && dash.count % 2 == 0 {
-            let dashes = stride(from: 0, to: dash.count, by: 2).map { dash[$0] }
-                .reduce(0, +)
-            let gaps = stride(from: 1, to: dash.count, by: 2).map { dash[$0] }
-                .reduce(0, +)
-            if gaps > 0 && dashes == 0 { return false }
-        }
-        let dashPatternLength = dash.reduce(0, +)
+        let scaleRatio = CGSize(width: backBuffer.width, height: backBuffer.height) / self.contentScale
+        let scaleFactor = min(scaleRatio.width, scaleRatio.height)
+        let minVisibleDashes = 1.0 / scaleFactor
+
         let lineWidth = style.lineWidth
+
+        let dash = style.dash.map { $0.magnitude }
+        let numDashes = dash.count
+        let dashPatternLength = dash.reduce(0, +)
+//        let dashesLength = stride(from: 0, to: dash.count, by: 2).map { dash[$0] }.reduce(0, +)
+//        let gapsLength = stride(from: 1, to: dash.count, by: 2).map { dash[$0] }.reduce(0, +)
+
+        let dashLength = { index in dash[index % numDashes] }
+        let dashAvailable = (numDashes > 0 && (dashPatternLength / CGFloat(numDashes)) >= minVisibleDashes)
+
+        var dashIndex: Int = 0      // even: dash, odd: gap
+        var dashRemain: CGFloat = 0 // remaining length of the current dash(gap)
+        if dash.isEmpty == false {
+            if style.dashPhase > 0 {
+                let phase = style.dashPhase
+                dashRemain = dashLength(dashIndex)
+                while phase > dashRemain {
+                    dashIndex += 1
+                    dashRemain += dashLength(dashIndex)
+                }
+                dashRemain -= phase
+            } else {
+                var phase = style.dashPhase
+                while phase < 0 {
+                    if dashIndex == 0 { dashIndex += dash.count * 2 }
+                    dashIndex -= 1
+                    let f = dashLength(dashIndex)
+                    phase += f
+                }
+                dashRemain = dashLength(dashIndex) - phase
+            }
+        }
 
         var vertexData: [Float2] = []
 
-        var dashOffset = style.dashPhase
-
-        let nextDashPattern = { (t: CGFloat, visible: inout Bool) -> CGFloat in
-            assert(dashPatternLength > .ulpOfOne)
-            let r = t.truncatingRemainder(dividingBy: dashPatternLength)
-            assert(r < dashPatternLength)
-            var f: CGFloat = 0
-            for d in dash {
-                f = f + d
-                if f > t {
-                    visible = !visible
-                    if d < .ulpOfOne {
-                        continue
-                    }
-                    return f - t
-                }
-            }
-            return 0
-        }
-
         let transform = self.transform.concatenating(self.viewTransform)
+
+        let drawLineSegment = { (start: CGPoint, dir: CGPoint, length: CGFloat) in
+            let trans = CGAffineTransform(a: length * dir.x,
+                                          b: length * dir.y,
+                                          c: -lineWidth * dir.y,
+                                          d: lineWidth * dir.x,
+                                          tx: start.x, ty: start.y)
+                .concatenating(transform)
+
+            let box = [CGPoint(x: 0, y: -0.5), CGPoint(x: 1, y: -0.5),
+                       CGPoint(x: 0, y: 0.5), CGPoint(x: 1, y: 0.5)].map {
+                Vector2($0.applying(trans))
+            }
+            vertexData.append(contentsOf: [
+                box[2].float2, box[0].float2, box[3].float2,
+                box[3].float2, box[0].float2, box[1].float2])
+        }
 
         let addStrokeCap = { (pt: CGPoint, s: CGFloat) in
         }
         let addStrokeLine = { (p0: CGPoint, p1: CGPoint) in
             let d = p1 - p0
-            let length = d.magnitude
+            var length = d.magnitude
             if length < .ulpOfOne { return }
             let dir = d.normalized()
-            if dashPatternLength > 0 {
+            if dashAvailable {
+                var start = p0
+                while length > .ulpOfOne {
+                    let len = min(length, dashRemain)
+                    if dashIndex % 2 == 0 {
+                        drawLineSegment(start, dir, len)
+                    }
+                    start = start + (dir * len)
+                    length -= len
+                    dashRemain -= len
 
-            } else {
-                let trans = CGAffineTransform(a: length * dir.x,
-                                              b: length * dir.y,
-                                              c: -lineWidth * dir.y,
-                                              d: lineWidth * dir.x,
-                                              tx: p0.x, ty: p0.y)
-                    .concatenating(transform)
-
-                let box = [CGPoint(x: 0, y: -0.5), CGPoint(x: 1, y: -0.5),
-                           CGPoint(x: 0, y: 0.5), CGPoint(x: 1, y: 0.5)].map {
-                    Vector2($0.applying(trans))
+                    if dashRemain < .ulpOfOne {
+                        dashIndex += 1
+                        dashRemain = dashLength(dashIndex)
+                    }
                 }
-                vertexData.append(contentsOf: [
-                    box[2].float2, box[0].float2, box[3].float2,
-                    box[3].float2, box[0].float2, box[1].float2])
+                dashRemain -= length
+            } else {
+                drawLineSegment(p0, dir, length)
             }
-            dashOffset += length
         }
         let addStrokeJoin = { (pt: CGPoint, s0: CGFloat, s1: CGFloat) in
         }
