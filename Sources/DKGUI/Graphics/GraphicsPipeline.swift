@@ -766,6 +766,12 @@ extension GraphicsContext {
                 dashRemain = dashLength(dashIndex) - phase
             }
         }
+        let _initialDashIndex = dashIndex
+        let _initialDashRemain = dashRemain
+        let resetDashPhase = {
+            dashIndex = _initialDashIndex
+            dashRemain = _initialDashRemain
+        }
 
         var vertexData: [Float2] = []
 
@@ -788,7 +794,7 @@ extension GraphicsContext {
                 box[3].float2, box[0].float2, box[1].float2])
         }
 
-        let addStrokeCap = { (pt: CGPoint, s: CGFloat) in
+        let addStrokeCap = { (p: CGPoint, d: CGPoint) in
         }
         let addStrokeLine = { (p0: CGPoint, p1: CGPoint) in
             let d = p1 - p0
@@ -816,41 +822,40 @@ extension GraphicsContext {
                 drawLineSegment(p0, dir, length)
             }
         }
-        let addStrokeJoin = { (pt: CGPoint, s0: CGFloat, s1: CGFloat) in
-        }
-
-        let slope = { (pt0: CGPoint, pt1: CGPoint) -> CGFloat in
-            assert((pt1 - pt0).magnitudeSquared > .zero)
-            let d = (pt1 - pt0).normalized()
-            return d.y / d.x
+        let addStrokeJoin = { (pt: CGPoint, outDir: CGPoint, inDir: CGPoint) in
         }
 
         var initialPoint: CGPoint? = nil
         var currentPoint: CGPoint? = nil
-        var initialSlope: CGFloat? = nil
-        var currentSlope: CGFloat? = nil
+        var initialDir: CGPoint? = nil
+        var currentDir: CGPoint? = nil
         path.forEach { element in
             switch element {
             case .move(let to):
-                if let p = initialPoint, let s = initialSlope {
-                    addStrokeCap(p, s)
+                if let p = initialPoint, let d = initialDir {
+                    addStrokeCap(p, d)
                 }
-                if let p = currentPoint, let s = currentSlope {
-                    addStrokeCap(p, s)
+                if let p = currentPoint, let d = currentDir {
+                    addStrokeCap(p, d)
                 }
                 initialPoint = to
                 currentPoint = to
-                initialSlope = nil
-                currentSlope = nil
+                initialDir = nil
+                currentDir = nil
+                resetDashPhase()
             case .line(let p1):
                 if let p0 = currentPoint {
-                    let s1 = slope(p0, p1)
-                    if let s0 = currentSlope {
-                        addStrokeJoin(p0, s0, s1)
+                    let d = p1 - p0
+                    let length = d.magnitude
+                    if length > .ulpOfOne {
+                        let d1 = d / length
+                        if let d0 = currentDir {
+                            addStrokeJoin(p0, d0, d1)
+                        }
+                        addStrokeLine(p0, p1)
+                        currentDir = d1
+                        initialDir = initialDir ?? currentDir
                     }
-                    addStrokeLine(p0, p1)
-                    currentSlope = s1
-                    initialSlope = initialSlope ?? currentSlope
                 }
                 currentPoint = p1
             case .quadCurve(let p2, let p1):
@@ -867,8 +872,9 @@ extension GraphicsContext {
                             pt0 = pt1
                             t += step
                         }
-                        currentSlope = slope(p1, p2)
-                        initialSlope = initialSlope ?? currentSlope
+                        addStrokeLine(pt0, p2)
+                        currentDir = (p2 - p1).normalized()
+                        initialDir = initialDir ?? currentDir
                     }
                 }
                 currentPoint = p2
@@ -886,22 +892,24 @@ extension GraphicsContext {
                             pt0 = pt1
                             t += step
                         }
-                        currentSlope = slope(p2, p3)
-                        initialSlope = initialSlope ?? currentSlope
+                        addStrokeLine(pt0, p3)
+                        currentDir = (p3 - p2).normalized()
+                        initialDir = initialDir ?? currentDir
                     }
                 }
                 currentPoint = p3
             case .closeSubpath:
                 if let p0 = currentPoint, let p1 = initialPoint {
-                    let s0 = slope(p0, p1)
-                    if let s1 = initialSlope {
-                        addStrokeJoin(p1, s0, s1)
+                    let d0 = (p1 - p0).normalized()
+                    if let d1 = initialDir {
+                        addStrokeJoin(p1, d0, d1)
                     }
                     addStrokeLine(p0, p1)
                 }
                 currentPoint = initialPoint
-                initialSlope = nil
-                currentSlope = nil
+                initialDir = nil
+                currentDir = nil
+                resetDashPhase()
             }
         }
 
