@@ -261,9 +261,9 @@ public struct GraphicsContext {
 
                 let stencil: _Stencil
                 if options.contains(.inverse) {
-                    stencil = style.isEOFilled ? .odd : .zero
+                    stencil = style.isEOFilled ? .testOdd : .testZero
                 } else {
-                    stencil = style.isEOFilled ? .even : .nonZero
+                    stencil = style.isEOFilled ? .testEven : .testNonZero
                 }
                 let pc = _PushConstant()
                 self._encodeDrawCommand(shader: .color,
@@ -491,7 +491,7 @@ public struct GraphicsContext {
         if shading.properties.isEmpty { return }
         self._drawPathFillWithStencil(path, backBuffer: self.backBuffer) {
             encoder in
-            let stencil: _Stencil = style.isEOFilled ? .even : .nonZero
+            let stencil: _Stencil = style.isEOFilled ? .testEven : .testNonZero
             self._encodeFillCommand(with: shading,
                                     stencil: stencil,
                                     encoder: encoder)
@@ -506,7 +506,7 @@ public struct GraphicsContext {
                                         backBuffer: self.backBuffer) {
             encoder in
             self._encodeFillCommand(with: shading,
-                                    stencil: .nonZero,
+                                    stencil: .testNonZero,
                                     encoder: encoder)
             return true
         }

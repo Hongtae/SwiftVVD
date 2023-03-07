@@ -216,14 +216,14 @@ struct CubicBezier {
         let t2 = t * t
         let u = 1.0 - t
         let u2 = u * u
-        return (p0 * u2 * -3) + (p1 * u2 * 3) - (p1 * u * t * 6) - (p2 * t2 * 3) + (p2 * u * t * 6) + (p3 * u2 * 3)
+        return (p0 * u2 * -3) + (p1 * u2 * 3) - (p1 * u * t * 6) - (p2 * t2 * 3) + (p2 * u * t * 6) + (p3 * t2 * 3)
     }
 
     func tangent(_ t: CGPoint) -> CGPoint {
         let t2 = t * t
         let u = CGPoint(x: 1.0 - t.x, y: 1.0 - t.y)
         let u2 = u * u
-        return (p0 * u2 * -3) + (p1 * u2 * 3) - (p1 * u * t * 6) - (p2 * t2 * 3) + (p2 * u * t * 6) + (p3 * u2 * 3)
+        return (p0 * u2 * -3) + (p1 * u2 * 3) - (p1 * u * t * 6) - (p2 * t2 * 3) + (p2 * u * t * 6) + (p3 * t2 * 3)
     }
 
     var boundingBox: CGRect {

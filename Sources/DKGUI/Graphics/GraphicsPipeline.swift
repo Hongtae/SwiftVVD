@@ -319,11 +319,12 @@ enum _Shader {
 }
 
 enum _Stencil {
-    case generateWindingNumber
-    case nonZero        // filled using the non-zero rule
-    case even           // even-odd winding rule
-    case zero           // zero stencil (inverse of non-zero rule)
-    case odd            // odd winding (inverse of even-odd rule)
+    case makeFill
+    case makeStroke
+    case testNonZero    // filled using the non-zero rule
+    case testEven       // even-odd winding rule
+    case testZero       // zero stencil (inverse of non-zero rule)
+    case testOdd        // odd winding (inverse of even-odd rule)
     case ignore         // don't read stencil
 }
 
@@ -431,24 +432,27 @@ class GraphicsPipelineStates {
         descriptor.isDepthWriteEnabled = false
 
         switch ds {
-        case .generateWindingNumber:
+        case .makeFill:
             descriptor.frontFaceStencil.depthStencilPassOperation = .incrementWrap
             descriptor.backFaceStencil.depthStencilPassOperation = .decrementWrap
-        case .nonZero:
+        case .makeStroke:
+            descriptor.frontFaceStencil.depthStencilPassOperation = .incrementClamp
+            descriptor.backFaceStencil.depthStencilPassOperation = .incrementClamp
+        case .testNonZero:
             // filled using the non-zero rule. (reference stencil value: 0)
             descriptor.frontFaceStencil.stencilCompareFunction = .notEqual
             descriptor.backFaceStencil.stencilCompareFunction = .notEqual
-        case .even:
+        case .testEven:
             // even-odd winding rule. (reference stencil value: 0)
             descriptor.frontFaceStencil.stencilCompareFunction = .notEqual
             descriptor.backFaceStencil.stencilCompareFunction = .notEqual
             descriptor.frontFaceStencil.readMask = 1
             descriptor.backFaceStencil.readMask = 1
-        case .zero:
+        case .testZero:
             // inverse of non-zero rule
             descriptor.frontFaceStencil.stencilCompareFunction = .equal
             descriptor.backFaceStencil.stencilCompareFunction = .equal
-        case .odd:
+        case .testOdd:
             // inverse of even-odd rule
             descriptor.frontFaceStencil.stencilCompareFunction = .equal
             descriptor.backFaceStencil.stencilCompareFunction = .equal
@@ -777,18 +781,24 @@ extension GraphicsContext {
 
         let transform = self.transform.concatenating(self.viewTransform)
 
-        let drawLineSegment = { (start: CGPoint, dir: CGPoint, length: CGFloat) in
-            let trans = CGAffineTransform(a: length * dir.x,
-                                          b: length * dir.y,
-                                          c: -lineWidth * dir.y,
-                                          d: lineWidth * dir.x,
-                                          tx: start.x, ty: start.y)
-                .concatenating(transform)
+        let drawLineSegment = { (start: CGPoint, end: CGPoint, dir0: CGPoint, dir1: CGPoint) in
+            let t0 = CGAffineTransform(a: dir0.x, b: dir0.y,
+                                       c: -lineWidth * dir0.y,
+                                       d: lineWidth * dir0.x,
+                                       tx: start.x, ty: start.y)
 
-            let box = [CGPoint(x: 0, y: -0.5), CGPoint(x: 1, y: -0.5),
-                       CGPoint(x: 0, y: 0.5), CGPoint(x: 1, y: 0.5)].map {
-                Vector2($0.applying(trans))
+            let t1 = CGAffineTransform(a: dir1.x, b: dir1.y,
+                                       c: -lineWidth * dir1.y,
+                                       d: lineWidth * dir1.x,
+                                       tx: end.x, ty: end.y)
+
+            let box = [CGPoint(x: 0, y: -0.5).applying(t0),
+                       CGPoint(x: 0, y: -0.5).applying(t1),
+                       CGPoint(x: 0, y: 0.5).applying(t0),
+                       CGPoint(x: 0, y: 0.5).applying(t1)].map {
+                Vector2($0.applying(transform))
             }
+
             vertexData.append(contentsOf: [
                 box[2].float2, box[0].float2, box[3].float2,
                 box[3].float2, box[0].float2, box[1].float2])
@@ -796,33 +806,44 @@ extension GraphicsContext {
 
         let addStrokeCap = { (p: CGPoint, d: CGPoint) in
         }
-        let addStrokeLine = { (p0: CGPoint, p1: CGPoint) in
+        let addStrokeLine = { (p0: CGPoint, p1: CGPoint, d0: CGPoint, d1: CGPoint) in
             let d = p1 - p0
-            var length = d.magnitude
+            let length = d.magnitude
             if length < .ulpOfOne { return }
-            let dir = d.normalized()
             if dashAvailable {
+                var drawn: CGFloat = 0
                 var start = p0
-                while length > .ulpOfOne {
-                    let len = min(length, dashRemain)
-                    if dashIndex % 2 == 0 {
-                        drawLineSegment(start, dir, len)
+                var dir0 = d0
+                while drawn < length {
+
+                    while dashRemain < .ulpOfOne {
+                        dashIndex += 1
+                        dashRemain += dashLength(dashIndex)
                     }
-                    start = start + (dir * len)
-                    length -= len
+
+                    let remains = length - drawn
+                    let len = min(remains, dashRemain)
+
+                    drawn += len
                     dashRemain -= len
 
-                    if dashRemain < .ulpOfOne {
-                        dashIndex += 1
-                        dashRemain = dashLength(dashIndex)
+                    if len > .ulpOfOne {
+                        let t = drawn / length
+                        let end = lerp(p0, p1, t)
+                        let dir1 = lerp(d0, d1, t)
+
+                        if dashIndex % 2 == 0 {
+                            drawLineSegment(start, end, dir0, dir1)
+                        }
+                        start = end
+                        dir0 = dir1
                     }
                 }
-                dashRemain -= length
             } else {
-                drawLineSegment(p0, dir, length)
+                drawLineSegment(p0, p1, d0, d1)
             }
         }
-        let addStrokeJoin = { (pt: CGPoint, outDir: CGPoint, inDir: CGPoint) in
+        let addStrokeJoin = { (pt: CGPoint, dir0: CGPoint, dir1: CGPoint) in
         }
 
         var initialPoint: CGPoint? = nil
@@ -852,7 +873,7 @@ extension GraphicsContext {
                         if let d0 = currentDir {
                             addStrokeJoin(p0, d0, d1)
                         }
-                        addStrokeLine(p0, p1)
+                        addStrokeLine(p0, p1, d1, d1)
                         currentDir = d1
                         initialDir = initialDir ?? currentDir
                     }
@@ -866,14 +887,18 @@ extension GraphicsContext {
                         let step = 1.0 / curve.approximateLength()
                         var t = step
                         var pt0 = p0
+                        var d0 = currentDir ?? (p1 - p0).normalized()
                         while t < 1.0 {
                             let pt1 = curve.interpolate(t)
-                            addStrokeLine(pt0, pt1)
+                            let d1 = curve.tangent(t).normalized()
+                            addStrokeLine(pt0, pt1, d0, d1)
                             pt0 = pt1
+                            d0 = d1
                             t += step
                         }
-                        addStrokeLine(pt0, p2)
-                        currentDir = (p2 - p1).normalized()
+                        let d1 = (p2 - p1).normalized()
+                        addStrokeLine(pt0, p2, d0, d1)
+                        currentDir = d1
                         initialDir = initialDir ?? currentDir
                     }
                 }
@@ -886,14 +911,18 @@ extension GraphicsContext {
                         let step = 1.0 / curve.approximateLength()
                         var t = step
                         var pt0 = p0
+                        var d0 = currentDir ?? (p1 - p0).normalized()
                         while t < 1.0 {
                             let pt1 = curve.interpolate(t)
-                            addStrokeLine(pt0, pt1)
+                            let d1 = curve.tangent(t).normalized()
+                            addStrokeLine(pt0, pt1, d0, d1)
                             pt0 = pt1
+                            d0 = d1
                             t += step
                         }
-                        addStrokeLine(pt0, p3)
-                        currentDir = (p3 - p2).normalized()
+                        let d1 = (p3 - p2).normalized()
+                        addStrokeLine(pt0, p3, d0, d1)
+                        currentDir = d1
                         initialDir = initialDir ?? currentDir
                     }
                 }
@@ -904,7 +933,7 @@ extension GraphicsContext {
                     if let d1 = initialDir {
                         addStrokeJoin(p1, d0, d1)
                     }
-                    addStrokeLine(p0, p1)
+                    addStrokeLine(p0, p1, d0, d0)
                 }
                 currentPoint = initialPoint
                 initialDir = nil
@@ -934,7 +963,7 @@ extension GraphicsContext {
             Log.err("GraphicsContext error: pipeline.renderState failed.")
             return false
         }
-        guard let depthState = pipeline.depthStencilState(.generateWindingNumber) else {
+        guard let depthState = pipeline.depthStencilState(.makeStroke) else {
             Log.err("GraphicsContext error: pipeline.depthStencilState failed.")
             return false
         }
@@ -1116,7 +1145,7 @@ extension GraphicsContext {
             Log.err("GraphicsContext error: pipeline.renderState failed.")
             return false
         }
-        guard let depthState = pipeline.depthStencilState(.generateWindingNumber) else {
+        guard let depthState = pipeline.depthStencilState(.makeFill) else {
             Log.err("GraphicsContext error: pipeline.depthStencilState failed.")
             return false
         }

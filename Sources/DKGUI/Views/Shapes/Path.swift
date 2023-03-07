@@ -804,8 +804,8 @@ extension Path: LosslessStringConvertible {
                 }
             } else if str == "q" {
                 if floats.count == 4 {
-                    self.addQuadCurve(to: CGPoint(x: floats[0], y: floats[1]),
-                                      control: CGPoint(x: floats[2], y: floats[3]))
+                    self.addQuadCurve(to: CGPoint(x: floats[2], y: floats[3]),
+                                      control: CGPoint(x: floats[0], y: floats[1]))
                     floats.removeAll(keepingCapacity: true)
                 } else {
                     Log.err("Insufficient arguments to command.")
@@ -813,9 +813,9 @@ extension Path: LosslessStringConvertible {
                 }
             } else if str == "c" {
                 if floats.count == 6 {
-                    self.addCurve(to: CGPoint(x: floats[0], y: floats[1]),
-                                  control1: CGPoint(x: floats[2], y: floats[3]),
-                                  control2: CGPoint(x: floats[4], y: floats[5]))
+                    self.addCurve(to: CGPoint(x: floats[4], y: floats[5]),
+                                  control1: CGPoint(x: floats[0], y: floats[1]),
+                                  control2: CGPoint(x: floats[2], y: floats[3]))
                     floats.removeAll(keepingCapacity: true)
                 } else {
                     Log.err("Insufficient arguments to command.")
