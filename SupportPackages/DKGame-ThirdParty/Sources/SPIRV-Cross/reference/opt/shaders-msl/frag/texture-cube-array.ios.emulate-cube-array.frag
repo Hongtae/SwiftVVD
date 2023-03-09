@@ -5,16 +5,6 @@
 
 using namespace metal;
 
-struct main0_out
-{
-    float4 FragColor [[color(0)]];
-};
-
-struct main0_in
-{
-    float4 vUV [[user(locn0)]];
-};
-
 static inline __attribute__((always_inline))
 float3 spvCubemapTo2DArrayFace(float3 P)
 {
@@ -49,10 +39,20 @@ float3 spvCubemapTo2DArrayFace(float3 P)
     return float3(u, v, CubeFace);
 }
 
+struct main0_out
+{
+    float4 FragColor [[color(0)]];
+};
+
+struct main0_in
+{
+    float4 vUV [[user(locn0)]];
+};
+
 fragment main0_out main0(main0_in in [[stage_in]], texturecube<float> cubeSampler [[texture(0)]], texture2d_array<float> cubeArraySampler [[texture(1)]], texture2d_array<float> texArraySampler [[texture(2)]], sampler cubeSamplerSmplr [[sampler(0)]], sampler cubeArraySamplerSmplr [[sampler(1)]], sampler texArraySamplerSmplr [[sampler(2)]])
 {
     main0_out out = {};
-    out.FragColor = (cubeSampler.sample(cubeSamplerSmplr, in.vUV.xyz) + cubeArraySampler.sample(cubeArraySamplerSmplr, spvCubemapTo2DArrayFace(in.vUV.xyz).xy, uint(spvCubemapTo2DArrayFace(in.vUV.xyz).z) + (uint(round(in.vUV.w)) * 6u))) + texArraySampler.sample(texArraySamplerSmplr, in.vUV.xyz.xy, uint(round(in.vUV.xyz.z)));
+    out.FragColor = (cubeSampler.sample(cubeSamplerSmplr, in.vUV.xyz) + cubeArraySampler.sample(cubeArraySamplerSmplr, spvCubemapTo2DArrayFace(in.vUV.xyz).xy, uint(spvCubemapTo2DArrayFace(in.vUV.xyz).z) + (uint(rint(in.vUV.w)) * 6u))) + texArraySampler.sample(texArraySamplerSmplr, in.vUV.xyz.xy, uint(rint(in.vUV.xyz.z)));
     return out;
 }
 
