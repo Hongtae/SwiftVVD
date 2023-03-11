@@ -634,6 +634,8 @@ class GraphicsPipelineStates {
     }
 }
 
+let lineJoinOfClosingPathWithDashes = false
+
 // MARK: - GraphicsContext extensions
 extension GraphicsContext {
     @discardableResult
@@ -738,6 +740,7 @@ extension GraphicsContext {
         let minVisibleDashes = 1.0 / scaleFactor
 
         let lineWidth = style.lineWidth
+        let halfWidth = lineWidth * 0.5
 
         let dash = style.dash.map { $0.magnitude }
         let numDashes = dash.count
@@ -769,6 +772,10 @@ extension GraphicsContext {
                 }
                 dashRemain = dashLength(dashIndex) - phase
             }
+            while dashRemain < .ulpOfOne {
+                dashIndex += 1
+                dashRemain += dashLength(dashIndex)
+            }
         }
         let _initialDashIndex = dashIndex
         let _initialDashRemain = dashRemain
@@ -792,11 +799,11 @@ extension GraphicsContext {
                                        d: lineWidth * dir1.x,
                                        tx: end.x, ty: end.y)
 
-            let box = [CGPoint(x: 0, y: -0.5).applying(t0),
-                       CGPoint(x: 0, y: -0.5).applying(t1),
-                       CGPoint(x: 0, y: 0.5).applying(t0),
-                       CGPoint(x: 0, y: 0.5).applying(t1)].map {
-                Vector2($0.applying(transform))
+            let box = [Vector2(0, -0.5).applying(t0),
+                       Vector2(0, -0.5).applying(t1),
+                       Vector2(0,  0.5).applying(t0),
+                       Vector2(0,  0.5).applying(t1)].map {
+                $0.applying(transform)
             }
 
             vertexData.append(contentsOf: [
@@ -805,7 +812,54 @@ extension GraphicsContext {
         }
 
         let addStrokeCap = { (p: CGPoint, d: CGPoint) in
+            switch style.lineCap {
+            case .round:
+                let trans = CGAffineTransform(a: d.x, b: d.y,
+                                              c: -d.y, d: d.x,
+                                              tx: p.x, ty: p.y)
+                    .concatenating(transform)
+
+                let step = CGFloat.pi / lineWidth
+                var progress = CGFloat.zero
+
+                let center = Vector2(p).applying(transform)
+                var pt0 = Vector2(0, -halfWidth).applying(trans)
+                while progress < .pi {
+                    let pt1 = Vector2(0, -halfWidth).applying(
+                            CGAffineTransform(rotationAngle: progress)
+                                .concatenating(trans))
+
+                    vertexData.append(contentsOf: [center.float2,
+                                                   pt0.float2,
+                                                   pt1.float2])
+                    pt0 = pt1
+                    progress += step
+                }
+                let pt1 = Vector2(0, halfWidth).applying(trans)
+                vertexData.append(contentsOf: [center.float2,
+                                               pt0.float2,
+                                               pt1.float2])
+            case .square:
+                let trans = CGAffineTransform(a: lineWidth * d.x,
+                                              b: lineWidth * d.y,
+                                              c: lineWidth * -d.y,
+                                              d: lineWidth * d.x,
+                                              tx: p.x, ty: p.y)
+                    .concatenating(transform)
+
+                let pt = [Vector2(0.0,  0.5),
+                          Vector2(0.0, -0.5),
+                          Vector2(0.5,  0.5),
+                          Vector2(0.5, -0.5)].map {
+                    $0.applying(trans).float2
+                }
+                vertexData.append(contentsOf: [pt[0], pt[1], pt[2],
+                                             pt[2], pt[1], pt[3]])
+            default:
+                return
+            }
         }
+
         let addStrokeLine = { (p0: CGPoint, p1: CGPoint, d0: CGPoint, d1: CGPoint) in
             let d = p1 - p0
             let length = d.magnitude
@@ -814,36 +868,175 @@ extension GraphicsContext {
                 var drawn: CGFloat = 0
                 var start = p0
                 var dir0 = d0
+                var drawLineCap = false
                 while drawn < length {
 
                     while dashRemain < .ulpOfOne {
                         dashIndex += 1
                         dashRemain += dashLength(dashIndex)
+                        drawLineCap = true
                     }
 
                     let remains = length - drawn
                     let len = min(remains, dashRemain)
 
-                    drawn += len
-                    dashRemain -= len
-
                     if len > .ulpOfOne {
-                        let t = drawn / length
+                        let t = (drawn + len) / length
                         let end = lerp(p0, p1, t)
                         let dir1 = lerp(d0, d1, t)
 
                         if dashIndex % 2 == 0 {
+                            if drawLineCap {
+                                addStrokeCap(start, -dir1)
+                                drawLineCap = false
+                            }
                             drawLineSegment(start, end, dir0, dir1)
+                            if len == dashRemain {
+                                addStrokeCap(end, dir1)
+                            }
                         }
                         start = end
                         dir0 = dir1
                     }
+                    drawn += len
+                    dashRemain -= len
                 }
             } else {
                 drawLineSegment(p0, p1, d0, d1)
             }
         }
-        let addStrokeJoin = { (pt: CGPoint, dir0: CGPoint, dir1: CGPoint) in
+        let addStrokeJoin = { (p: CGPoint, dir0: CGPoint, dir1: CGPoint) in
+
+            if 1.0 - CGPoint.dot(dir0, dir1) < .ulpOfOne { return }
+
+            var join = style.lineJoin
+            if join == .miter {
+                let dot = CGPoint.dot(-dir0, dir1)
+                let angle = acos(dot)
+                let s = sin(angle * 0.5)
+                if s > .ulpOfOne {
+                    let miterLength = lineWidth / s
+                    if miterLength > style.miterLimit * lineWidth {
+                        join = .bevel
+                    }
+                } else {
+                    join = .bevel
+                }
+            }
+
+            let angle = { (d: CGPoint) -> CGFloat in
+                if d.y < 0 {
+                    return .pi * 2 - acos(d.x)
+                }
+                return acos(d.x)
+            }
+            var r1 = angle(dir0)
+            var r2 = angle(dir1)
+            if (r1 - r2).magnitude > .pi {
+                if r1 > r2 { r2 += .pi * 2 }
+                else { r1 += .pi * 2}
+            }
+
+            switch join {
+            case .bevel:
+                let t0 = CGAffineTransform(a: dir0.x, b: dir0.y,
+                                           c: -lineWidth * dir0.y,
+                                           d: lineWidth * dir0.x,
+                                           tx: p.x, ty: p.y)
+
+                let t1 = CGAffineTransform(a: dir1.x, b: dir1.y,
+                                           c: -lineWidth * dir1.y,
+                                           d: lineWidth * dir1.x,
+                                           tx: p.x, ty: p.y)
+                if r1 > r2 {
+                    let pt = [Vector2(p),
+                              Vector2(0,  0.5).applying(t0),
+                              Vector2(0,  0.5).applying(t1)].map {
+                        $0.applying(transform).float2
+                    }
+                    vertexData.append(contentsOf: [pt[0], pt[2], pt[1]])
+
+                } else {
+                    let pt = [Vector2(p),
+                              Vector2(0, -0.5).applying(t0),
+                              Vector2(0, -0.5).applying(t1)].map {
+                        $0.applying(transform).float2
+                    }
+                    vertexData.append(contentsOf: [pt[0], pt[1], pt[2]])
+                }
+            case .round:
+                let step = 1.0 / lineWidth
+                var progress: CGFloat = step
+                let p0 = Vector2(p)
+                if r1 > r2 {
+                    var p1 = Vector2(0, halfWidth).rotated(by: r1)
+                    while progress < 1.0 {
+                        let r = lerp(r1, r2, progress)
+                        let p2 = Vector2(0, halfWidth).rotated(by: r)
+                        vertexData.append(contentsOf: [p0, p2 + p0, p1 + p0].map {
+                            $0.applying(transform).float2
+                        })
+                        progress += step
+                        p1 = p2
+                    }
+                    let p2 = Vector2(0, halfWidth).rotated(by: r2)
+                    vertexData.append(contentsOf: [p0, p2 + p0, p1 + p0].map {
+                        $0.applying(transform).float2
+                    })
+                } else {
+                    var p1 = Vector2(0, -halfWidth).rotated(by: r1)
+                    while progress < 1.0 {
+                        let r = lerp(r1, r2, progress)
+                        let p2 = Vector2(0, -halfWidth).rotated(by: r)
+                        vertexData.append(contentsOf: [p0, p1 + p0, p2 + p0].map {
+                            $0.applying(transform).float2
+                        })
+                        progress += step
+                        p1 = p2
+                    }
+                    let p2 = Vector2(0, -halfWidth).rotated(by: r2)
+                    vertexData.append(contentsOf: [p0, p1 + p0, p2 + p0].map {
+                        $0.applying(transform).float2
+                    })
+                }
+            case .miter:
+                let dir0 = Vector2(dir0)
+                let dir1 = -Vector2(dir1)
+                let t0 = CGAffineTransform(a: dir0.x, b: dir0.y,
+                                           c: -lineWidth * dir0.y,
+                                           d: lineWidth * dir0.x,
+                                           tx: p.x, ty: p.y)
+
+                let t1 = CGAffineTransform(a: dir1.x, b: dir1.y,
+                                           c: -lineWidth * dir1.y,
+                                           d: lineWidth * dir1.x,
+                                           tx: p.x, ty: p.y)
+                if r1 > r2 {
+                    let pt = [Vector2(0, -0.5).applying(t1),
+                              Vector2(0,  0.5).applying(t0)]
+
+                    let p0 = Vector2(p)
+                    let p2 = dir1 * (pt[1] - pt[0]) / Vector2(dir1 - dir0) + pt[0]
+
+                    let triangles = [p0, pt[0], p2, p0, p2, pt[1]].map {
+                        $0.applying(transform).float2
+                    }
+                    vertexData.append(contentsOf: triangles)
+                } else {
+                    let pt = [Vector2(0, -0.5).applying(t0),
+                              Vector2(0,  0.5).applying(t1)]
+
+                    let p0 = Vector2(p)
+                    let p1 = dir0 * (pt[1] - pt[0]) / Vector2(dir0 - dir1) + pt[0]
+
+                    let triangles = [p0, pt[0], p1, p0, p1, pt[1]].map {
+                        $0.applying(transform).float2
+                    }
+                    vertexData.append(contentsOf: triangles)
+                }
+            default:
+                return
+            }
         }
 
         var initialPoint: CGPoint? = nil
@@ -853,12 +1046,14 @@ extension GraphicsContext {
         path.forEach { element in
             switch element {
             case .move(let to):
-                if let p = initialPoint, let d = initialDir {
-                    addStrokeCap(p, d)
+                if let p0 = initialPoint, let d0 = initialDir,
+                   let p1 = currentPoint, let d1 = currentDir {
+                    addStrokeCap(p0, -d0)
+                    if dashIndex % 2 == 0 {
+                        addStrokeCap(p1, d1)
+                    }
                 }
-                if let p = currentPoint, let d = currentDir {
-                    addStrokeCap(p, d)
-                }
+
                 initialPoint = to
                 currentPoint = to
                 initialDir = nil
@@ -870,7 +1065,7 @@ extension GraphicsContext {
                     let length = d.magnitude
                     if length > .ulpOfOne {
                         let d1 = d / length
-                        if let d0 = currentDir {
+                        if let d0 = currentDir, dashIndex % 2 == 0 {
                             addStrokeJoin(p0, d0, d1)
                         }
                         addStrokeLine(p0, p1, d1, d1)
@@ -929,16 +1124,44 @@ extension GraphicsContext {
                 currentPoint = p3
             case .closeSubpath:
                 if let p0 = currentPoint, let p1 = initialPoint {
-                    let d0 = (p1 - p0).normalized()
-                    if let d1 = initialDir {
-                        addStrokeJoin(p1, d0, d1)
+                    let d = (p1 - p0).normalized()
+                    if let d0 = currentDir, dashIndex % 2 == 0 {
+                        addStrokeJoin(p0, d0, d)
                     }
-                    addStrokeLine(p0, p1, d0, d0)
+                    addStrokeLine(p0, p1, d, d)
+                    if let d1 = initialDir {
+                        if dashIndex % 2 == 0 {
+                            resetDashPhase()
+                            if dashIndex % 2 == 0, lineJoinOfClosingPathWithDashes {
+                                // join with initial point
+                                addStrokeJoin(p1, d, d1)
+                            } else {
+                                // line cap current point
+                                addStrokeCap(p1, d)
+                            }
+                        } else {
+                            resetDashPhase()
+                            if dashIndex % 2 == 0 {
+                                // line cap initial point
+                                addStrokeCap(p1, -d1)
+                            }
+                        }
+                    }
                 }
                 currentPoint = initialPoint
                 initialDir = nil
                 currentDir = nil
                 resetDashPhase()
+            }
+        }
+        if let p0 = initialPoint, let d0 = initialDir,
+           let p1 = currentPoint, let d1 = currentDir {
+            if dashIndex % 2 == 0 {
+                addStrokeCap(p1, d1)
+            }
+            resetDashPhase()
+            if dashIndex % 2 == 0 {
+                addStrokeCap(p0, -d0)
             }
         }
 
@@ -991,7 +1214,7 @@ extension GraphicsContext {
         encoder.setRenderPipelineState(pipelineState)
         encoder.setDepthStencilState(depthState)
 
-        encoder.setCullMode(.none)
+        encoder.setCullMode(.back)
         encoder.setFrontFacing(.clockwise)
         encoder.setStencilReferenceValue(0)
         encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
