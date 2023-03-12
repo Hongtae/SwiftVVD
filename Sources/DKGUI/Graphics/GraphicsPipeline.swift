@@ -634,8 +634,6 @@ class GraphicsPipelineStates {
     }
 }
 
-let lineJoinOfClosingPathWithDashes = false
-
 // MARK: - GraphicsContext extensions
 extension GraphicsContext {
     @discardableResult
@@ -1001,7 +999,7 @@ extension GraphicsContext {
                 }
             case .miter:
                 let dir0 = Vector2(dir0)
-                let dir1 = -Vector2(dir1)
+                let dir1 = Vector2(dir1)
                 let t0 = CGAffineTransform(a: dir0.x, b: dir0.y,
                                            c: -lineWidth * dir0.y,
                                            d: lineWidth * dir0.x,
@@ -1012,22 +1010,26 @@ extension GraphicsContext {
                                            d: lineWidth * dir1.x,
                                            tx: p.x, ty: p.y)
                 if r1 > r2 {
-                    let pt = [Vector2(0, -0.5).applying(t1),
-                              Vector2(0,  0.5).applying(t0)]
+                    let pt = [Vector2(0, 0.5).applying(t0),
+                              Vector2(0, 0.5).applying(t1)]
 
                     let p0 = Vector2(p)
-                    let p2 = dir1 * (pt[1] - pt[0]) / Vector2(dir1 - dir0) + pt[0]
+                    let s = Vector2.cross(dir0, dir1)
+                    let t = Vector2.cross(pt[1] - pt[0], dir1) / s
+                    let p1 = pt[0] + dir0 * t
 
-                    let triangles = [p0, pt[0], p2, p0, p2, pt[1]].map {
+                    let triangles = [p0, p1, pt[0], p0, pt[1], p1].map {
                         $0.applying(transform).float2
                     }
                     vertexData.append(contentsOf: triangles)
                 } else {
                     let pt = [Vector2(0, -0.5).applying(t0),
-                              Vector2(0,  0.5).applying(t1)]
+                              Vector2(0, -0.5).applying(t1)]
 
                     let p0 = Vector2(p)
-                    let p1 = dir0 * (pt[1] - pt[0]) / Vector2(dir0 - dir1) + pt[0]
+                    let s = Vector2.cross(dir0, dir1)
+                    let t = Vector2.cross(pt[1] - pt[0], dir1) / s
+                    let p1 = pt[0] + dir0 * t
 
                     let triangles = [p0, pt[0], p1, p0, p1, pt[1]].map {
                         $0.applying(transform).float2
@@ -1048,9 +1050,15 @@ extension GraphicsContext {
             case .move(let to):
                 if let p0 = initialPoint, let d0 = initialDir,
                    let p1 = currentPoint, let d1 = currentDir {
-                    addStrokeCap(p0, -d0)
+
                     if dashIndex % 2 == 0 {
+                        // line cap current point
                         addStrokeCap(p1, d1)
+                    }
+                    resetDashPhase()
+                    if dashIndex % 2 == 0 {
+                        // line cap initial point
+                        addStrokeCap(p0, -d0)
                     }
                 }
 
@@ -1132,7 +1140,7 @@ extension GraphicsContext {
                     if let d1 = initialDir {
                         if dashIndex % 2 == 0 {
                             resetDashPhase()
-                            if dashIndex % 2 == 0, lineJoinOfClosingPathWithDashes {
+                            if dashIndex % 2 == 0 {
                                 // join with initial point
                                 addStrokeJoin(p1, d, d1)
                             } else {

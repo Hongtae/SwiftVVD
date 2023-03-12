@@ -53,6 +53,10 @@ public struct Vector2: Vector, Hashable {
         return v1.x * v2.x + v1.y * v2.y
     }
 
+    public static func cross(_ v1: Vector2, _ v2: Vector2) -> Scalar {
+        return v1.x * v2.y - v1.y * v2.x
+    }
+
     public func rotated(by angle: any BinaryFloatingPoint) -> Self {
         // Rotate
         // | cos  sin|

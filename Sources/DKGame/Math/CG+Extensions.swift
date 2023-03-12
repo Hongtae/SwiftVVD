@@ -38,6 +38,10 @@ public extension CGPoint {
         return v1.x * v2.x + v1.y * v2.y
     }
 
+    static func cross(_ v1: Self, _ v2: Self) -> CGFloat {
+        return v1.x * v2.y - v1.y * v2.x
+    }
+
     func normalized()->Self {
         let lengthSq = self.magnitudeSquared
         if lengthSq.isZero == false {
