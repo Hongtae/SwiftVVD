@@ -9,7 +9,7 @@ import Foundation
 import DKGame
 
 // MARK: - SPIR-V Shaders
-// glslc {input-file} -o {output-file} -Os --target-env=vulkan1.2
+// glslc {input-file} -o {output-file} -Os --target-env=vulkan1.3
 private let vsStencilGLSL = """
     /* vertex shader for writing stencil only */
     #version 450
@@ -59,18 +59,8 @@ private let vsSpvCEB64 = """
     41WIbZH6Q4iCPH0E3YsiAexGTRNjAeFh9tAsAA==
     """
 
-private let fsGLSL = """
-    /* fragment-shader: vertex color */
+private let fsVertexColorGLSL = """
     #version 450
-
-    layout (push_constant) uniform Constants {
-        float maskLinear;
-        float maskConstant;
-        float colorMatrixR[5];
-        float colorMatrixG[5];
-        float colorMatrixB[5];
-        float colorMatrixA[5];
-    } pc;
 
     layout (binding=0) uniform sampler2D maskImage;
 
@@ -81,48 +71,23 @@ private let fsGLSL = """
     layout (location=0) out vec4 outFragColor;
 
     void main(void) {
-        if ((texture(maskImage, maskUV).r * pc.maskLinear + pc.maskConstant) <= 0)
+        if (texture(maskImage, maskUV).r <= 0)
             discard;
-        vec4 cmR = vec4(pc.colorMatrixR[0], pc.colorMatrixR[1], pc.colorMatrixR[2], pc.colorMatrixR[3]);
-        vec4 cmG = vec4(pc.colorMatrixG[0], pc.colorMatrixG[1], pc.colorMatrixG[2], pc.colorMatrixG[3]);
-        vec4 cmB = vec4(pc.colorMatrixB[0], pc.colorMatrixB[1], pc.colorMatrixB[2], pc.colorMatrixB[3]);
-        vec4 cmA = vec4(pc.colorMatrixA[0], pc.colorMatrixA[1], pc.colorMatrixA[2], pc.colorMatrixA[3]);
-
-        float r = dot(color, cmR) + pc.colorMatrixR[4];
-        float g = dot(color, cmG) + pc.colorMatrixG[4];
-        float b = dot(color, cmB) + pc.colorMatrixB[4];
-        float a = dot(color, cmA) + pc.colorMatrixA[4];
-        outFragColor = vec4(r, g, b, a);
+        outFragColor = color;
     }
     """
 
-private let fsSpvCEB64 = """
-    XQAAAAQwCQAAAAAAAAABgJdesnC95qjyNRP3b3W1wTM2BjHpoMwr6OqAkVzhyMYm25asbk\
-    ckiEeMA4h9Gch5k9Liip1euGYLpx+XrZf81Fer63rg9Uo2ePP7TCWzYwudvprwuoN+z4Bq\
-    jv6COKye8CMrSguozbHc1g/nneOnP0DUgz2G9XwxikXvHdrQQ0LBA4dEDwXSf/jC0cy1ma\
-    R4CH3EDDqzZJ4AlnY6zii8cUAjwyqmjG3GfC9pIU/YtPzHIp7FY773jcHOdkEWiOI9Tz37\
-    9bZunMPRCFn8onhSPaQ3Y1cOKq6WQyZStF6DKy+FgQzMuh8scg2zWlTRS5rl2c+znZEadD\
-    zGuRl0MAIoKgHfQd8cc+bgQ0DswxNrUZZR+rkIH7sntGrN5+pbe3dyGXLMRf7j5yewylvo\
-    FEbYSU21Ur+xvJfT3akNzAd6TeN2USBwKX8TodyE3QDE/+L0rz5opl/i8ZyPASJKpl9mez\
-    loFY1VADWLlv3Vp2RXlIZjn/HGd0X798DGlHXWgRdaObSTG++k/977FPByDUmVEduiiXsJ\
-    UZlz0RA/7pNACoz+qO5rTpfUun/pSCQ62/qYpQIUz1klFfuh2GkbAB9GwMwuHJ3wS42B4+\
-    HjIz9iN7jb4oXCe1FXoTTmOqIwPv039/uocoCdV2GvsepSxAjiT0+njK3eAA5oNsjTvcHT\
-    YetBeWIHoM+vX/ffmQiZUeJcNV4ccfC6ya+ylxlKFeRd7LZGH91h/S4b9OQ84UDRaY+ZTg\
-    A=
+private let fsVertexColorSpvCEB64 = """
+    XQAAAASUAgAAAAAAAAABgJdesnDIkXTyNRPx9MW6ESsyRORUOdl1zDyzarYlCfMkl6fI14\
+    mXogxjfgm++4bKnd4h29/GCiwUxwJag764lX2AzXjdZaXubDwWd/Fr2CV/e6R13bj2xYYi\
+    7ryYNC91RJk8F/6t11QO+5hTX0Cqi3k7YqGDh2Y4IrTCZu/fBBEG6d8CtNoXDDHGh+fav8\
+    iOBrC3jR114MbV/ympDPJsrN7aFjKUJC8CMMLhVSCmO89CQxxq3TqR3Q2H7X6SoDvwYJY7\
+    vBXrqhEyXjYRebYsHgy85x0uDLrV6qgAHkRxKCt2ffl7IQ02n6oKd5UtGQ9pNd86LnEnQd\
+    9+uiss7KYRNcQkhAA=
     """
 
-private let fsTextureGLSL = """
-    /* fragment-shader: vertex color, uniform texture */
+private let fsImageGLSL = """
     #version 450
-
-    layout (push_constant) uniform Constants {
-        float maskLinear;
-        float maskConstant;
-        float colorMatrixR[5];
-        float colorMatrixG[5];
-        float colorMatrixB[5];
-        float colorMatrixA[5];
-    } pc;
 
     layout (binding=0) uniform sampler2D maskImage;
     layout (binding=1) uniform sampler2D image;
@@ -134,48 +99,23 @@ private let fsTextureGLSL = """
     layout (location=0) out vec4 outFragColor;
 
     void main() {
-        if ((texture(maskImage, maskUV).r * pc.maskLinear + pc.maskConstant) <= 0)
+        if (texture(maskImage, maskUV).r <= 0)
             discard;
-        vec4 fragColor = texture(image, texUV) * color;
-        vec4 cmR = vec4(pc.colorMatrixR[0], pc.colorMatrixR[1], pc.colorMatrixR[2], pc.colorMatrixR[3]);
-        vec4 cmG = vec4(pc.colorMatrixG[0], pc.colorMatrixG[1], pc.colorMatrixG[2], pc.colorMatrixG[3]);
-        vec4 cmB = vec4(pc.colorMatrixB[0], pc.colorMatrixB[1], pc.colorMatrixB[2], pc.colorMatrixB[3]);
-        vec4 cmA = vec4(pc.colorMatrixA[0], pc.colorMatrixA[1], pc.colorMatrixA[2], pc.colorMatrixA[3]);
-        float r = dot(fragColor, cmR) + pc.colorMatrixR[4];
-        float g = dot(fragColor, cmG) + pc.colorMatrixG[4];
-        float b = dot(fragColor, cmB) + pc.colorMatrixB[4];
-        float a = dot(fragColor, cmA) + pc.colorMatrixA[4];
-        outFragColor = vec4(r, g, b, a);
+        outFragColor = texture(image, texUV) * color;
     }
     """
 
-private let fsTextureSpvCEB64 = """
-    XQAAAATQCQAAAAAAAAABgJdesnC95qjyNRP3v8W1wTM2BjHpoMwr6OqAkVzhyMYm25asbk\
-    ckiEeMA4h9Gch5lXZ1/1xg8Mg+JKYBQqOqMgfbtxEa9gpBfcUzoORjKvVe0HwhWRcFAILe\
-    bxgqnQQbHWwJ6m1n0W/C0a9EuscdOmzfl9rVso0qROBmPhXAzTJqd9B+ecKGATaer6OeRp\
-    OjEhzADyUPtYRoP/SJkf3RfpJTFGf+gBY1UCZNBUhOP+33vN7KRJQRHRctxTLpRj0GKmEQ\
-    L8WHm+HZah/am1C/twkpnoA9rGC9qCKdaRlZOAk8xYbZu4g3PLs17krFfVyzpD6TpGxuRK\
-    OZ8Us/2GiMb5hyebAXINqTplsrTC6EzCb+uR04Xz32p02dRLZEzt0ef19DXKgGNcW20S4l\
-    CfajHhNM3AXyIl+hEiAR+bs/aJGIOSf24z1DOsXwtqauD6Lbg1un9SQjw41XHbnRVg4hVH\
-    FTxZwHLZyHweQOaOdeXFF2RCpHbJyv1MxzFJl2ilTmi951rNZS/Epp4nKxzQNy7IoDyume\
-    Yz+rtXkvzcGCW7OxRJArkS0/L1meD6A7dp7Lhj0OB9bpup/lG+chEpgLVRrcgfD8eyXeL/\
-    rE9iUlnOA+xkC6fT+hUnzFpe8PxdIS6hS326FwyK57K5qu5LMmbaKeOz9L4rySgfg+Wmkh\
-    7CibvsoX4XR9WGSpMLZTN5sqhlepHquzk5ONgJj5/N11tQHFFcaK/A5TCFgOTSMIKpaGeJ\
-    oR8JLikmlTSHXsSsvYkMH6Q2Ph9bt7e4RW/BnpzGkA
+private let fsImageSpvCEB64 = """
+    XQAAAAQ0AwAAAAAAAAABgJdesnDIkXTyNRPyaB1kVkXQvrmDdSIJ3pa9vk6Vb+532Il6Az\
+    ZWXfTwVJfXA+P+cPurpexpQfF8OuSqKY4gIf4ThhmBOvi1hxWEFA+l8t7/elXTSQ69x0EZ\
+    B/il77Vh+X/TjUHm9ZhAoCl92jGjYLpX+OkRhzK6fBBwSL5vltf2gOGuskZgD5H+2oLoB8\
+    7M/6mDOPA6VE+HOqXa+11bds3yNwsC9/NACG5BGeLUmLOLby8no6YZf1ogVFFSymst9Pph\
+    PEJkaGaWvJPqT8SOpS8Z2jg7W7oyygpcX0gLTbaofBMWPw4MJ2YkwwrbenWprffg2wfSeg\
+    iJLeNoGLxBMGhZwePC21RxrGqC11nriEO88nKYxJ/XrAr7CyMD/gwA
     """
 
-private let fsAlphaTextureGLSL = """
-    /* fragment-shader: vertex color, uniform texture alpha (r8) */
+private let fsRCImageGLSL = """
     #version 450
-
-    layout (push_constant) uniform Constants {
-        float maskLinear;
-        float maskConstant;
-        float colorMatrixR[5];
-        float colorMatrixG[5];
-        float colorMatrixB[5];
-        float colorMatrixA[5];
-    } pc;
 
     layout (binding=0) uniform sampler2D maskImage;
     layout (binding=1) uniform sampler2D image;
@@ -187,49 +127,24 @@ private let fsAlphaTextureGLSL = """
     layout (location=0) out vec4 outFragColor;
 
     void main(void) {
-        if ((texture(maskImage, maskUV).r * pc.maskLinear + pc.maskConstant) <= 0)
+        if (texture(maskImage, maskUV).r <= 0)
             discard;
-        vec4 fragColor = vec4(color.rgb, texture(image, texUV).r * color.a);
-        vec4 cmR = vec4(pc.colorMatrixR[0], pc.colorMatrixR[1], pc.colorMatrixR[2], pc.colorMatrixR[3]);
-        vec4 cmG = vec4(pc.colorMatrixG[0], pc.colorMatrixG[1], pc.colorMatrixG[2], pc.colorMatrixG[3]);
-        vec4 cmB = vec4(pc.colorMatrixB[0], pc.colorMatrixB[1], pc.colorMatrixB[2], pc.colorMatrixB[3]);
-        vec4 cmA = vec4(pc.colorMatrixA[0], pc.colorMatrixA[1], pc.colorMatrixA[2], pc.colorMatrixA[3]);
-        float r = dot(fragColor, cmR) + pc.colorMatrixR[4];
-        float g = dot(fragColor, cmG) + pc.colorMatrixG[4];
-        float b = dot(fragColor, cmB) + pc.colorMatrixB[4];
-        float a = dot(fragColor, cmA) + pc.colorMatrixA[4];
-        outFragColor = vec4(r, g, b, a);        
+        outFragColor = vec4(color.rgb, texture(image, texUV).r * color.a);
     }
     """
 
-private let fsAlphaTextureSpvCEB64 = """
-    XQAAAASACgAAAAAAAAABgJdesnC95qjyNRP4LjR13ShGBjHpoMwr6OqAkVzhyMYm25asbk\
-    ckiEeMA4h9Gch5lXZ1/1xg8Mg+JKYBQqOqMXLvaDa2VapCJlXKQRvkfsh+6rBb9AFK7tUY\
-    Ai1iuBSo9Ajzu0M6+kTurMvtSygHZpcS6ybs4HaeTonW+8EkgeSoWp0KEICMv0LJ2G2r3m\
-    OElTJ5sSl6V22G5M1+u+nqxzdxVwHc4YLK7BCfItj8pYPg3CUNVSpfD99MPPOgmS/d+8g4\
-    unXefV6xrGUAPoI0I9xmU/wSqz2lUvVMvP0PWooBrMbKkWAONR5nAhdH6CDb1ZuGwkMW1s\
-    eAkaSxmKT3hi0Wk4SEiEDy3Ugp2CCyeTo0t5Z7i9HEtqY34FpD4MhgOzLev53j3MgCe+so\
-    K2Dh8wkECOUQx6EqD+RvWl9Vd8MSUOyyC7uZ2YIkOfqD4y/J8VMhs3RXDr0vlQdxCnaYe8\
-    XFdlCEbDaW/70ifFI2qhTU8dfWiNSAc+Pya2mc1SZOJ49W8aER8c6uda5MyLMesM5ZQD1t\
-    h97tYfkMMpbpf7Bv07ng+wXlOwGtAGXS+MiEciLVLrZ3WVeyxKbxBrsWINRYvGAHPDAJLH\
-    P+ft80UnseiFASNR1kZRlbwkg/hNy5BFqZHpAGkRs8xxaSnmGRSSntYsXchaP6eni1z2MW\
-    2jkSMfHmXVkFP1Y8zGrQq8MS3UFDRYeSeOkcJ/PSU7rA2kJYzyCTt6BZVWyC3N9o/qHLIN\
-    Ohthd32UBa1NR++qTANMBvXKnfUWFqkumRjze30mhlRdWZeXPuy4kdF3dh6eJ45hdDjQPp\
-    ApjhSqpMhdAaaK84IBOFlQA=
+private let fsRCImageSpvCEB64 = """
+    XQAAAAT0AwAAAAAAAAABgJdesnDIkXTyNRPzLU/7FEkN1hUbMQvGqhcxUct3e3t7iNtpvE\
+    ZYQFGWZGd2oDREzGh0F99vQXe6znzgxXRaerG7l0NoHFEZRZ1LHxGpkorLEpcd8y4jYUML\
+    wt6aj1iRVmi/lUldd6bU5Ws77LmgM9GYvhidpUldJMwXLvDDeKVDsfkue7s70F0ysJ+aWc\
+    N5EQTw4kHd6PP7c9uaZQdi7qObtkb4yyLZcrQLvq1Mr8MRPOb2tAKaedXWPYmCb8E5p7XX\
+    oaRl3iDoPjaa3kfDO5QF/L0sFXh2kgh1IGui56ThenmYU+1kAfkylxWWeUFZUKoZ/UVp9W\
+    34ztcvdCPlM0clD9KXBrp1IqaLzsui7he3Zf4ulKmcHnu5caN2YckOkDWb2zBR/25gEB0N\
+    sUDX6kMjySM7ZpotaAFYLfi91v0WWe/48P/HGBNJIkrlXZQA
     """
 
 private let fsResolveMaskGLSL = """
-    /* fragment-shader: vertex color, uniform texture */
     #version 450
-
-    layout (push_constant) uniform Constants {
-        float maskLinear;
-        float maskConstant;
-        float colorMatrixR[5];
-        float colorMatrixG[5];
-        float colorMatrixB[5];
-        float colorMatrixA[5];
-    } pc;
 
     layout (binding=0) uniform sampler2D maskImage;
     layout (binding=1) uniform sampler2D image;
@@ -241,29 +156,76 @@ private let fsResolveMaskGLSL = """
     layout (location=0) out vec4 outFragColor;
 
     void main() {
-        if ((texture(maskImage, maskUV).r * pc.maskLinear + pc.maskConstant) <= 0)
+        if (texture(maskImage, maskUV).r <= 0)
             discard;
 
-        vec4 fragColor = texture(image, texUV) * color;
-        vec4 cmA = vec4(pc.colorMatrixA[0], pc.colorMatrixA[1], pc.colorMatrixA[2], pc.colorMatrixA[3]);
-        float a = dot(fragColor, cmA) + pc.colorMatrixA[4];
+        vec4 c = texture(image, texUV) * color;
         /* output target should be r8unorm */
-        outFragColor = vec4(a, a, a, a);
+        outFragColor = c.aaaa;
     }
     """
 
 private let fsResolveMaskSpvCEB64 = """
-    XQAAAAQEBgAAAAAAAAABgJdesnC95qjyNRP1TqkuUYBtYiFNRo5NmeAko5dxbKw6cfMUDv\
-    m077Y8SFv99HGiKQgiCpqph1AP2+nGsMDjlco1L4uZXOVIpxqur90t6Hv0XWK+2+TQVq4p\
-    VYetcae9cIzKya/aZZI8+awRrzXSaOxNfmvMrdjT48hm21MhvLZwTR1nY25jPg2RrVXL1r\
-    bCwkCd8PdIrl8q3+ToxDf9slX7dryiKkojIfgpzaSe6rH7nhxKgHg3MN73fk0TLntycEaH\
-    xpNU2Wx8sD9M7wW2HYrU773qveIlmyigmCdOzsCfHO5HeugrD5QdlOpw7idSzq8AIs2YLR\
-    fCwoGkifOJlKaTLe1T7+DNTkeeCw1N9Bsce21iAxGTWEybgElOpeCsyZ6nP+gZ9Z/7b8i1\
-    PuIemGepaWhiTRdCr5r4N9tLr5AfVasFbMwQmWwkPeqYH/a49Rm0dWqGDTYDbj8oTdQn4h\
-    G/vfLqzohxUePf/pkPyQ42NhVTy5e+D3HPOnub2WA5ieRAt3nufgLzoePA1L65AMihj6rQ\
-    omGyUrm2cDB1RIleDfkR5/DN0MQEb9E1o36eLloSiEMK1a9wQua90bglTgXqWzhcr3k/dj\
-    rHs+mbDOkq/i4=
+    XQAAAARYAwAAAAAAAAABgJdesnDIkXTyNRPysLo7c7gPRthELV8WOPdqmzPcDt/U+ygmOh\
+    3wlFVLEXTbfT8wG1R6wUKE6/M7779voxmGUK9Ko/Xb5akEVe8/ETGqlrDigO+pNAsx45+g\
+    PWVIoQy+HUk6L3xxMSZZXHxiJu3UksL+LXCw6/oR5c/rgaM+T3FmNkome6WAevjN5WbsZ2\
+    WdWxh1S9kNDbiFoDxEMrAqn6XPuQvIMH/AYMwWUkEOkVqFyGEqApMKi6HRTSxtdy0UiF23\
+    +eJifpHHYgtPQ/t338ok4V7LIlbS2p81LCqJl/LRvFVWn3JevQ5RvtCY4ey/7OrbFYni8O\
+    DY0PZlefvACJ+wQBvTRsyEQsEnpCZkJqNkNUKI7ug3SksOjOv1wzgg0nBEgUA=
     """
+
+private let fsColorMatrixImageGLSL = """
+    #version 450
+
+    layout (push_constant) uniform Constants {
+        float colorMatrixR[5];
+        float colorMatrixG[5];
+        float colorMatrixB[5];
+        float colorMatrixA[5];
+    } pc;
+
+    layout (binding=0) uniform sampler2D maskImage;
+    layout (binding=1) uniform sampler2D image;
+
+    layout (location=0) in vec2 maskUV;
+    layout (location=1) in vec2 texUV;
+    layout (location=2) in vec4 color;
+
+    layout (location=0) out vec4 outFragColor;
+
+    void main() {
+        if (texture(maskImage, maskUV).r <= 0)
+            discard;
+        vec4 fragColor = texture(image, texUV) * color;
+        vec4 cmR = vec4(pc.colorMatrixR[0], pc.colorMatrixR[1], pc.colorMatrixR[2], pc.colorMatrixR[3]);
+        vec4 cmG = vec4(pc.colorMatrixG[0], pc.colorMatrixG[1], pc.colorMatrixG[2], pc.colorMatrixG[3]);
+        vec4 cmB = vec4(pc.colorMatrixB[0], pc.colorMatrixB[1], pc.colorMatrixB[2], pc.colorMatrixB[3]);
+        vec4 cmA = vec4(pc.colorMatrixA[0], pc.colorMatrixA[1], pc.colorMatrixA[2], pc.colorMatrixA[3]);
+        float r = dot(fragColor, cmR) + pc.colorMatrixR[4];
+        float g = dot(fragColor, cmG) + pc.colorMatrixG[4];
+        float b = dot(fragColor, cmB) + pc.colorMatrixB[4];
+        float a = dot(fragColor, cmA) + pc.colorMatrixA[4];
+        outFragColor = vec4(r, g, b, a);
+    }
+    """
+
+private let fsColorMatrixImageSpvCEB64 = """
+    XQAAAAQoCQAAAAAAAAABgJdesnDIkXTyNRP3eX+1wTM2BjHpoMwrILM5Tt4ypo/o5Hzcc4\
+    fVT3pcir7GSZahyo6w0qIEQwu0yF5Q3L4VDFBKSEempWTi8pXfUkh8Z3PKE3DJwDlwR7uI\
+    iZ6YwbUPqHNNfdPbnxEG1+da/rwkLWcfAtyHTI+wlSmG3s78bDvVS6jzvTbwBNVBhkhZQ1\
+    27J32RcsQxAdix1RVbkQJQHaWM5Lq7Gc7YBuOicgOQyT7QnuyG269xsyGagVTz4ppic7xm\
+    GVWeq8Vz3W6PqNhgoYojfES1+Xl16SmxeNL0iBCHpeJ/DnFUUI6Havo3Kvl/Y4Bv8kDbIe\
+    30w2nGbQLq1LQeO94DNxirSTmOicceayDmS4AzA5DUiBQi2OcjfR9Zbzwgy6NlDn+0B7px\
+    7tWqVP4RxP0wIFMYI14YcsclnAfTRLJdKCH+PHSeRwgSKUW0Pq7qDoYxk+ITfgmzwllZcE\
+    YXo8BawzzUZte7wUM0l1t4FORCn2fSW2dzFguD4qJG+A304T2l5Oqck2WklWBacd1cbHuT\
+    vE+19ASW0E8sy5IwL6eRx6rl/5qblKUvQErRtCGQv98j3iTCISWOFI7hV8B48YFJ35/pah\
+    v3PxGeVdJ7ZgdBZc/zW8V7qyK2+mdt0eWNR0uPClPHOXnAsdN9h/IIc2LV3xZB9Lj0godI\
+    kfxeInef6twkwzEAs1da9eMZ15iPeg9AJgCUWBIsVAQ/G3wIqbFSB3T5wpqmD8oA
+    """
+
+private let fsBlurImageGLSL = ""
+
+private let fsBlurImageSpvCEB64 = ""
 
 
 private func decodeShader(device: GraphicsDevice, encodedText: String) -> ShaderFunction? {
@@ -312,10 +274,12 @@ private func encodeSPIRVData(from url: URL?) -> String? {
 // MARK: - Pipeline Types
 enum _Shader {
     case stencil        // fill stencil, no fragment function
-    case color          // vertex color
+    case vertexColor    // vertex color
     case image          // texture with tint color
-    case alphaTexture   // for glyph (single channel texture)
+    case rcImage        // for glyph, single(red) channel texture
     case resolveMask    // merge two masks (a8, r8) to render target (r8)
+    case colorMatrixImage
+    case blurImage
 }
 
 enum _Stencil {
@@ -335,8 +299,6 @@ struct _Vertex {
 }
 
 struct _PushConstant {
-    var maskLinear: Float32 = 1.0
-    var maskConstant: Float32 = 0.0
     var colorMatrix: ColorMatrix = .init()
     static let identity = _PushConstant()
 }
@@ -514,29 +476,36 @@ class GraphicsPipelineStates {
             guard let vertexFunction = loadShader("vs-default", vsSpvCEB64)
             else { break }
 
-            guard let fsFunction = loadShader("fs-defalut", fsSpvCEB64)
+            guard let fsVertexColorFunction = loadShader("fs-vertex-color", fsVertexColorSpvCEB64)
             else { break }
 
-            guard let fsTextureFunction = loadShader("fs-texture", fsTextureSpvCEB64)
+            guard let fsImageFunction = loadShader("fs-image", fsImageSpvCEB64)
             else { break }
 
-            guard let fsAlphaTextureFunction = loadShader("fs-alpha-texture", fsAlphaTextureSpvCEB64)
+            guard let fsRCImageFunction = loadShader("fs-red-channel-image", fsRCImageSpvCEB64)
             else { break }
 
             guard let fsResolveMaskFunction = loadShader("fs-resolve-mask", fsResolveMaskSpvCEB64)
             else { break }
 
+            guard let fsColorMatrixImageFunction = loadShader("fs-color-matrix-image", fsColorMatrixImageSpvCEB64)
+            else { break }
+
             var shaderFunctions: [_Shader: ShaderFunctions] = [:]
             shaderFunctions[.stencil] = ShaderFunctions(
                 vertexFunction: vsStencilFunction, fragmentFunction: nil)
-            shaderFunctions[.color] = ShaderFunctions(
-                vertexFunction: vertexFunction, fragmentFunction: fsFunction)
+            shaderFunctions[.vertexColor] = ShaderFunctions(
+                vertexFunction: vertexFunction, fragmentFunction: fsVertexColorFunction)
             shaderFunctions[.image] = ShaderFunctions(
-                vertexFunction: vertexFunction, fragmentFunction: fsTextureFunction)
-            shaderFunctions[.alphaTexture] = ShaderFunctions(
-                vertexFunction: vertexFunction, fragmentFunction: fsAlphaTextureFunction)
+                vertexFunction: vertexFunction, fragmentFunction: fsImageFunction)
+            shaderFunctions[.rcImage] = ShaderFunctions(
+                vertexFunction: vertexFunction, fragmentFunction: fsRCImageFunction)
             shaderFunctions[.resolveMask] = ShaderFunctions(
                 vertexFunction: vertexFunction, fragmentFunction: fsResolveMaskFunction)
+            shaderFunctions[.colorMatrixImage] = ShaderFunctions(
+                vertexFunction: vertexFunction, fragmentFunction: fsColorMatrixImageFunction)
+            shaderFunctions[.blurImage] = ShaderFunctions(
+                vertexFunction: vertexFunction, fragmentFunction: fsImageFunction)
 
             let bindingLayout1 = ShaderBindingSetLayout(
                 bindings: [
@@ -675,7 +644,8 @@ extension GraphicsContext {
                textureFrame: CGRect,
                textureTransform: CGAffineTransform,
                blendMode: BlendMode,
-               color: DKGame.Color) {
+               color: DKGame.Color,
+               colorMatrix: ColorMatrix? = nil) {
         let makeVertex = { x, y, u, v in
             _Vertex(position: Vector2(x, y).applying(transform).float2,
                     texcoord: Vector2(u, v).applying(textureTransform).float2,
@@ -706,15 +676,26 @@ extension GraphicsContext {
             return
         }
 
-        let pc = _PushConstant()
-        self._encodeDrawCommand(shader: .image,
-                                stencil: .ignore,
-                                vertices: vertices,
-                                indices: nil,
-                                texture: texture,
-                                blendState: .defaultAlpha,
-                                pushConstantData: pc,
-                                encoder: encoder)
+        if let colorMatrix {
+            let pc = _PushConstant(colorMatrix: colorMatrix)
+            self._encodeDrawCommand(shader: .colorMatrixImage,
+                                    stencil: .ignore,
+                                    vertices: vertices,
+                                    indices: nil,
+                                    texture: texture,
+                                    blendState: .defaultAlpha,
+                                    pushConstantData: pc,
+                                    encoder: encoder)
+        } else {
+            self._encodeDrawCommand(shader: .image,
+                                    stencil: .ignore,
+                                    vertices: vertices,
+                                    indices: nil,
+                                    texture: texture,
+                                    blendState: .defaultAlpha,
+                                    pushConstantData: nil,
+                                    encoder: encoder)
+        }
         encoder.endEncoding()
     }
 
@@ -1433,12 +1414,12 @@ extension GraphicsContext {
         if shading.properties.isEmpty { return }
 
         var vertices: [_Vertex] = []
-        var shader: _Shader = .color
+        var shader: _Shader = .vertexColor
 
         if let property = shading.properties.first {
             switch property {
             case let .color(c):
-                shader = .color
+                shader = .vertexColor
                 let makeVertex = { x, y in
                     _Vertex(position: Vector2(x, y).float2,
                             texcoord: Vector2.zero.float2,
@@ -1778,14 +1759,13 @@ extension GraphicsContext {
             }
         }
 
-        let pc = _PushConstant()
         self._encodeDrawCommand(shader: shader,
                                 stencil: stencil,
                                 vertices: vertices,
                                 indices: nil,
                                 texture: nil,
                                 blendState: .defaultAlpha,
-                                pushConstantData: pc,
+                                pushConstantData: nil,
                                 encoder: encoder)
     }
 
@@ -1798,6 +1778,10 @@ extension GraphicsContext {
                             pushConstantData: _PushConstant?,
                             encoder: RenderCommandEncoder) {
         assert(shader != .stencil) // .stencil uses a different vertex format.
+
+        if shader == .colorMatrixImage {
+            assert(pushConstantData != nil)
+        }
 
         if vertices.isEmpty { return }
         if let indices, indices.isEmpty { return }
@@ -1842,7 +1826,8 @@ extension GraphicsContext {
         encoder.setStencilReferenceValue(0)
         encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
 
-        if let pushConstantData {
+        if shader == .colorMatrixImage {
+            let pushConstantData = pushConstantData ?? _PushConstant()
             withUnsafeBytes(of: pushConstantData) {
                 encoder.pushConstant(stages: .fragment, offset: 0, data: $0)
             }

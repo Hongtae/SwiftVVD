@@ -265,14 +265,13 @@ public struct GraphicsContext {
                 } else {
                     stencil = style.isEOFilled ? .testEven : .testNonZero
                 }
-                let pc = _PushConstant()
-                self._encodeDrawCommand(shader: .color,
+                self._encodeDrawCommand(shader: .vertexColor,
                                         stencil: stencil,
                                         vertices: vertices,
                                         indices: nil,
                                         texture: nil,
                                         blendState: .defaultAlpha,
-                                        pushConstantData: pc,
+                                        pushConstantData: nil,
                                         encoder: encoder)
                 return true
             }
