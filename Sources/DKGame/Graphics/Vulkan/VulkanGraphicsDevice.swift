@@ -1178,7 +1178,6 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             return nil
         }
 
-        var memReqs = VkMemoryRequirements()
         var memProperties: VkMemoryPropertyFlags
         switch storageMode {
         case .shared:
@@ -1187,14 +1186,38 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             memProperties = VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT.rawValue)
         }
 
+        var dedicatedRequirements = VkMemoryDedicatedRequirements()
+        dedicatedRequirements.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_REQUIREMENTS
+        var memoryRequirements  = VkMemoryRequirements2()
+        memoryRequirements.sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2
+        withUnsafeMutablePointer(to: &dedicatedRequirements) {
+            memoryRequirements.pNext = UnsafeMutableRawPointer($0)
+            var memoryRequirementsInfo = VkBufferMemoryRequirementsInfo2()
+            memoryRequirementsInfo.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_REQUIREMENTS_INFO_2
+            memoryRequirementsInfo.buffer = buffer
+            vkGetBufferMemoryRequirements2(device, &memoryRequirementsInfo, &memoryRequirements)
+        }
+
+        let memReqs = memoryRequirements.memoryRequirements
         var memAllocInfo = VkMemoryAllocateInfo()
         memAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO
-        vkGetBufferMemoryRequirements(device, buffer, &memReqs)
         memAllocInfo.allocationSize = memReqs.size
         memAllocInfo.memoryTypeIndex = self.indexOfMemoryType(typeBits: memReqs.memoryTypeBits, properties: memProperties)
         assert(memAllocInfo.allocationSize >= bufferCreateInfo.size)
 
-        result = vkAllocateMemory(self.device, &memAllocInfo, self.allocationCallbacks, &memory)
+        if dedicatedRequirements.prefersDedicatedAllocation != 0 {
+            // bind resource to a dedicated allocation.
+            var memoryDedicatedAllocateInfo = VkMemoryDedicatedAllocateInfo()
+            memoryDedicatedAllocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO
+            memoryDedicatedAllocateInfo.buffer = buffer
+            result = withUnsafePointer(to: memoryDedicatedAllocateInfo) {
+                memAllocInfo.pNext = UnsafeRawPointer($0)
+                return vkAllocateMemory(self.device, &memAllocInfo, self.allocationCallbacks, &memory)
+            }
+        } else {
+            result = vkAllocateMemory(self.device, &memAllocInfo, self.allocationCallbacks, &memory)
+        }
+        
         if result != VK_SUCCESS {
             Log.err("vkAllocateMemory failed: \(result)")
             return nil
@@ -1300,14 +1323,38 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         }
 
         // Allocate device memory
-        var memReqs = VkMemoryRequirements()
-        vkGetImageMemoryRequirements(self.device, image, &memReqs)
+        var dedicatedRequirements = VkMemoryDedicatedRequirements()
+        dedicatedRequirements.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_REQUIREMENTS
+        var memoryRequirements  = VkMemoryRequirements2()
+        memoryRequirements.sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2
+        withUnsafeMutablePointer(to: &dedicatedRequirements) {
+            memoryRequirements.pNext = UnsafeMutableRawPointer($0)
+            var memoryRequirementsInfo = VkImageMemoryRequirementsInfo2()
+            memoryRequirementsInfo.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_REQUIREMENTS_INFO_2
+            memoryRequirementsInfo.image = image
+            vkGetImageMemoryRequirements2(device, &memoryRequirementsInfo, &memoryRequirements)
+        }
+
+        let memReqs = memoryRequirements.memoryRequirements
         var memAllocInfo = VkMemoryAllocateInfo()
         memAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO
         let memProperties = VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT.rawValue)
         memAllocInfo.allocationSize = memReqs.size
         memAllocInfo.memoryTypeIndex = self.indexOfMemoryType(typeBits: memReqs.memoryTypeBits, properties: memProperties)
-        result = vkAllocateMemory(self.device, &memAllocInfo, self.allocationCallbacks, &memory)
+
+        if dedicatedRequirements.prefersDedicatedAllocation != 0 {
+            // bind resource to a dedicated allocation.
+            var memoryDedicatedAllocateInfo = VkMemoryDedicatedAllocateInfo()
+            memoryDedicatedAllocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO
+            memoryDedicatedAllocateInfo.image = image
+            result = withUnsafePointer(to: memoryDedicatedAllocateInfo) {
+                memAllocInfo.pNext = UnsafeRawPointer($0)
+                return vkAllocateMemory(self.device, &memAllocInfo, self.allocationCallbacks, &memory)
+            }
+        } else {
+            result = vkAllocateMemory(self.device, &memAllocInfo, self.allocationCallbacks, &memory)
+        }
+
         if result != VK_SUCCESS {
             Log.err("vkAllocateMemory failed: \(result)")
             return nil
