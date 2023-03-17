@@ -21,6 +21,10 @@ public enum BlendFactor {
     case oneMinusBlendColor
     case blendAlpha
     case oneMinusBlendAlpha
+    case source1Color
+    case oneMinusSource1Color
+    case source1Alpha
+    case oneMinusSource1Alpha
 }
 
 public enum BlendOperation {

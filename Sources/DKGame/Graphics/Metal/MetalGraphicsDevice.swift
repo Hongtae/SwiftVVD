@@ -400,6 +400,10 @@ public class MetalGraphicsDevice: GraphicsDevice {
             case .oneMinusBlendColor:           return .oneMinusBlendColor
             case .blendAlpha:                   return .blendAlpha
             case .oneMinusBlendAlpha:           return .oneMinusBlendAlpha
+            case .source1Color:                 return .source1Color
+            case .oneMinusSource1Color:         return .oneMinusSource1Color
+            case .source1Alpha:                 return .source1Alpha
+            case .oneMinusSource1Alpha:         return .oneMinusSource1Alpha
             }
         }
 
