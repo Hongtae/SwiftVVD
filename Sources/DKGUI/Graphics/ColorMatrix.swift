@@ -23,31 +23,108 @@
 
 public struct ColorMatrix: Equatable, Sendable {
 
-    public var r1: Float = 1
-    public var r2: Float = 0
-    public var r3: Float = 0
-    public var r4: Float = 0
-    public var r5: Float = 0
+    public var r1: Float
+    public var r2: Float
+    public var r3: Float
+    public var r4: Float
+    public var r5: Float
 
-    public var g1: Float = 0
-    public var g2: Float = 1
-    public var g3: Float = 0
-    public var g4: Float = 0
-    public var g5: Float = 0
+    public var g1: Float
+    public var g2: Float
+    public var g3: Float
+    public var g4: Float
+    public var g5: Float
 
-    public var b1: Float = 0
-    public var b2: Float = 0
-    public var b3: Float = 1
-    public var b4: Float = 0
-    public var b5: Float = 0
+    public var b1: Float
+    public var b2: Float
+    public var b3: Float
+    public var b4: Float
+    public var b5: Float
 
-    public var a1: Float = 0
-    public var a2: Float = 0
-    public var a3: Float = 0
-    public var a4: Float = 1
-    public var a5: Float = 0
+    public var a1: Float
+    public var a2: Float
+    public var a3: Float
+    public var a4: Float
+    public var a5: Float
 
     public init() {
+        self.r1 = 1
+        self.r2 = 0
+        self.r3 = 0
+        self.r4 = 0
+        self.r5 = 0
+        self.g1 = 0
+        self.g2 = 1
+        self.g3 = 0
+        self.g4 = 0
+        self.g5 = 0
+        self.b1 = 0
+        self.b2 = 0
+        self.b3 = 1
+        self.b4 = 0
+        self.b5 = 0
+        self.a1 = 0
+        self.a2 = 0
+        self.a3 = 0
+        self.a4 = 1
+        self.a5 = 0
+    }
+
+    static var identity: ColorMatrix { ColorMatrix() }
+
+    static var zero: ColorMatrix {
+        var cm = ColorMatrix()
+        cm.r1 = 0
+        cm.g2 = 0
+        cm.b3 = 0
+        cm.a4 = 0
+        return cm
+    }
+
+    func concatenating(_ m: Self) -> Self {
+        typealias V = (Float, Float, Float, Float, Float)
+        let dot = { (v1: V, v2: V) -> Float in
+            v1.0 * v2.0 + v1.1 * v2.1 + v1.2 * v2.2 + v1.3 * v2.3 + v1.4 * v2.4
+        }
+
+        let row1: V = (self.r1, self.r2, self.r3, self.r4, self.r5)
+        let row2: V = (self.g1, self.g2, self.g3, self.g4, self.g5)
+        let row3: V = (self.b1, self.b2, self.b3, self.b4, self.b5)
+        let row4: V = (self.a1, self.a2, self.a3, self.a4, self.a5)
+
+        let col1: V = (m.r1, m.g1, m.b1, m.a1, 0)
+        let col2: V = (m.r2, m.g2, m.b2, m.a2, 0)
+        let col3: V = (m.r3, m.g3, m.b3, m.a3, 0)
+        let col4: V = (m.r4, m.g4, m.b4, m.a4, 0)
+        let col5: V = (m.r5, m.g5, m.b5, m.a5, 1)
+
+        var matrix = ColorMatrix()
+
+        matrix.r1 = dot(row1, col1)
+        matrix.r2 = dot(row1, col2)
+        matrix.r3 = dot(row1, col3)
+        matrix.r4 = dot(row1, col4)
+        matrix.r5 = dot(row1, col5)
+
+        matrix.g1 = dot(row2, col1)
+        matrix.g2 = dot(row2, col2)
+        matrix.g3 = dot(row2, col3)
+        matrix.g4 = dot(row2, col4)
+        matrix.g5 = dot(row2, col5)
+
+        matrix.b1 = dot(row3, col1)
+        matrix.b2 = dot(row3, col2)
+        matrix.b3 = dot(row3, col3)
+        matrix.b4 = dot(row3, col4)
+        matrix.b5 = dot(row3, col5)
+
+        matrix.a1 = dot(row4, col1)
+        matrix.a2 = dot(row4, col2)
+        matrix.a3 = dot(row4, col3)
+        matrix.a4 = dot(row4, col4)
+        matrix.a5 = dot(row4, col5)
+
+        return matrix
     }
 }
 
