@@ -8,16 +8,69 @@
 import DKGame
 import Foundation
 
+private struct ResourceBundleKey: EnvironmentKey {
+    static let defaultValue: Bundle? = nil
+}
+
+extension EnvironmentValues {
+    var resourceBundle: Bundle? {
+        get { self[ResourceBundleKey.self] }
+        set { self[ResourceBundleKey.self] = newValue }
+    }
+}
+
 class SharedContext {
     var appContext: AppContext
 
     var window: Window?
     var commandQueue: CommandQueue? // render queue for window swap-chain
 
-    var data: [String: Any] = [:]
+    var resourceData: [String: Data] = [:]
+    var resourceObjects: [String: AnyObject] = [:]
 
     init(appContext: AppContext) {
         self.appContext = appContext
+    }
+
+    func updateReferencedResourceObjects() {
+        struct WeakWrapper {
+            weak var value: AnyObject?
+        }
+        let weakMap = resourceObjects.mapValues {
+            WeakWrapper(value: $0)
+        }
+        resourceObjects.removeAll()
+        resourceObjects = weakMap.compactMapValues {
+            $0.value
+        }
+    }
+
+    func loadResourceData(name: String, bundle: Bundle?, cache: Bool) -> Data? {
+        Log.debug("Loading resource: \(name)...")
+        let bundle = bundle ?? Bundle.module
+        var url: URL? = nil
+#if os(macOS) || os(iOS)
+        url = bundle.url(forResource: name, withExtension: nil)
+#else
+        url = bundle.bundleURL.appendingPathComponent(name)
+#endif
+        if let url {
+            if let data = self.resourceData[url.path] {
+                return data
+            }
+            do {
+                Log.debug("Loading resource: \(url)")
+                let data = try Data(contentsOf: url, options: [])
+                if cache {
+                    self.resourceData[url.path] = data
+                }
+                return data
+            } catch {
+                Log.error("Error on loading data: \(error)")
+            }
+        }
+        Log.error("cannot load resource.")
+        return nil
     }
 }
 
@@ -41,6 +94,15 @@ extension ViewProxy {
     }
     func draw(frame: CGRect, context: GraphicsContext) {
         // Log.err("Existential types must implement the draw() method themselves.")
+    }
+
+    func loadResourceData(name: String, cache: Bool) -> Data? {
+        if let bundle = self.environmentValues.resourceBundle {
+            if let data = self.sharedContext.loadResourceData(name: name, bundle: bundle, cache: cache) {
+                return data
+            }
+        }
+        return self.sharedContext.loadResourceData(name: name, bundle: nil, cache: cache)
     }
 }
 

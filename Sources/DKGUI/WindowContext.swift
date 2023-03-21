@@ -90,7 +90,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                         stencilBuffer = device.makeTexture(descriptor: desc)
                     }
 
-                    renderPass.colorAttachments[0].clearColor = .cyan
+                    renderPass.colorAttachments[0].clearColor = .darkGray
                     if let commandBuffer = swapChain.commandQueue.makeCommandBuffer() {
                         // clear back buffer
                         if let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPass) {

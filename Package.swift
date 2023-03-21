@@ -90,6 +90,9 @@ let package = Package(
             name: "DKGUI",
             dependencies: [
                 .target(name: "DKGame"),
+            ],
+            resources: [
+                .copy("Resources/Fonts")
             ]),
         .executableTarget(
             name: "DKGameEditor",
@@ -101,12 +104,12 @@ let package = Package(
             name: "DKGameTests",
             dependencies: [
                 .target(name: "DKGame"),
-                ]),
+            ]),
         .executableTarget(
             name: "TestApp1",
             dependencies: [
                 .target(name: "DKGame"),
-                ],
+            ],
             resources: [
                 .copy("Resources")
             ],
