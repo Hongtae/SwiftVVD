@@ -194,30 +194,27 @@ class MyApplicationDelegate: ApplicationDelegate {
 }
 
 func loadResourceData(name: String) -> Data? {
-    let bundle = Bundle.main
-    print("bundle.bundleURL: \(bundle.bundleURL)")
-    // print("bundle.bundlePath: \(bundle.bundlePath)")
-    print("bundle.resourceURL: \(String(describing: bundle.resourceURL))")
-    // print("bundle.executableURL: \(String(describing: bundle.executableURL))")
-
-    let subdirs: [String?] = [
-        nil,
-        "DKGame_TestApp1.resources",                    // path for windows bundle
-        "DKGame_TestApp1.bundle",                       // path for mac bundle
-        "DKGame_TestApp1.bundle/Contents/Resources",    // path for Xcode bundle
-    ]
-
-    for subdir in subdirs {
-        if let url = bundle.url(forResource: name, withExtension: nil, subdirectory: subdir) {
-            do {
-                print("Loading resource: \(url)")
-                return try Data(contentsOf: url, options: [])
-            } catch {
-                print("Error on loading data: \(error)")
-            }
+    print("Loading resource: \(name)...")
+#if os(macOS) || os(iOS)
+    if let url = Bundle.module.url(forResource: name, withExtension: nil) {
+        do {
+            print("Loading resource: \(url)")
+            return try Data(contentsOf: url, options: [])
+        } catch {
+            print("Error on loading data: \(error)")
         }
     }
-
+#else
+    // We don't use Bundle.module because it crashes, we just get the path.
+    let bundleURL = Bundle.module.bundleURL
+    do {
+        let url = bundleURL.appendingPathComponent(name)
+        print("Loading resource: \(url)")
+        return try Data(contentsOf: url, options: [])
+    } catch {
+        print("Error on loading data: \(error)")
+    }  
+#endif
     print("cannot load resource.")
     return nil
 }
