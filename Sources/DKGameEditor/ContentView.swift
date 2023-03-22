@@ -25,7 +25,7 @@ struct ContentView: View {
                 .concatenating(CGAffineTransform(translationX: 50, y: 50))
             ))
 
-            print("Path: \(path)")
+            //print("Path: \(path)")
 
             context.fill(
                 path,

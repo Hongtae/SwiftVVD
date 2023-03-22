@@ -8,17 +8,6 @@
 import DKGame
 import Foundation
 
-private struct ResourceBundleKey: EnvironmentKey {
-    static let defaultValue: Bundle? = nil
-}
-
-extension EnvironmentValues {
-    var resourceBundle: Bundle? {
-        get { self[ResourceBundleKey.self] }
-        set { self[ResourceBundleKey.self] = newValue }
-    }
-}
-
 class SharedContext {
     var appContext: AppContext
 
@@ -49,6 +38,7 @@ class SharedContext {
         Log.debug("Loading resource: \(name)...")
         let bundle = bundle ?? Bundle.module
         var url: URL? = nil
+        //TODO: check for Bundle.module crashes on Windows,Linux after Swift 5.8
 #if os(macOS) || os(iOS)
         url = bundle.url(forResource: name, withExtension: nil)
 #else
@@ -71,6 +61,17 @@ class SharedContext {
         }
         Log.error("cannot load resource.")
         return nil
+    }
+}
+
+private struct ResourceBundleKey: EnvironmentKey {
+    static let defaultValue: Bundle? = nil
+}
+
+extension EnvironmentValues {
+    var resourceBundle: Bundle? {
+        get { self[ResourceBundleKey.self] }
+        set { self[ResourceBundleKey.self] = newValue }
     }
 }
 
