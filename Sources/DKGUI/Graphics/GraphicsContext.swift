@@ -639,6 +639,19 @@ public struct GraphicsContext {
         public func measure(in size: CGSize) -> CGSize { .zero }
         public func firstBaseline(in size: CGSize) -> CGFloat { .zero }
         public func lastBaseline(in size: CGSize) -> CGFloat { .zero }
+
+        struct GlyphVertex {
+            let pos: Vector2
+            let tex: Float2
+        }
+        struct GlyphGroup {
+            let texture: Texture
+            var vertices: [GlyphVertex]
+        }
+        let font: DKGame.Font
+        let text: String
+        var glyphGroups: [GlyphGroup] = []
+        var bounds: CGRect = .zero
     }
 
     public func resolve(_ text: Text) -> ResolvedText {
