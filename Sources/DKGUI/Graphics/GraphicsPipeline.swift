@@ -114,7 +114,7 @@ private let fsImageSpvCEB64 = """
     iJLeNoGLxBMGhZwePC21RxrGqC11nriEO88nKYxJ/XrAr7CyMD/gwA
     """
 
-private let fsRCImageGLSL = """
+private let fsRedToAlphaImageGLSL = """
     #version 450
 
     layout (binding=0) uniform sampler2D maskImage;
@@ -133,7 +133,7 @@ private let fsRCImageGLSL = """
     }
     """
 
-private let fsRCImageSpvCEB64 = """
+private let fsRedToAlphaImageSpvCEB64 = """
     XQAAAAT0AwAAAAAAAAABgJdesnDIkXTyNRPzLU/7FEkN1hUbMQvGqhcxUct3e3t7iNtpvE\
     ZYQFGWZGd2oDREzGh0F99vQXe6znzgxXRaerG7l0NoHFEZRZ1LHxGpkorLEpcd8y4jYUML\
     wt6aj1iRVmi/lUldd6bU5Ws77LmgM9GYvhidpUldJMwXLvDDeKVDsfkue7s70F0ysJ+aWc\
@@ -482,7 +482,7 @@ class GraphicsPipelineStates {
             guard let fsImageFunction = loadShader("fs-image", fsImageSpvCEB64)
             else { break }
 
-            guard let fsRCImageFunction = loadShader("fs-red-channel-image", fsRCImageSpvCEB64)
+            guard let fsRCImageFunction = loadShader("fs-red-alpha-channel-image", fsRedToAlphaImageSpvCEB64)
             else { break }
 
             guard let fsResolveMaskFunction = loadShader("fs-resolve-mask", fsResolveMaskSpvCEB64)
