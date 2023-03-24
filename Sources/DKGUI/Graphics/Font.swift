@@ -32,12 +32,12 @@ func faceStyle(from font: DKGame.Font) -> FaceStyle {
 
 class AnyFontBox {
     var font: DKGame.Font?
+    var fallbackFonts: [DKGame.Font] = []
 
     let identifier: String
     let style: FaceStyle
 
-    init(font: DKGame.Font? = nil, identifier: String, style: FaceStyle) {
-        self.font = font
+    init(identifier: String, style: FaceStyle) {
         self.identifier = identifier
         self.style = style
     }
@@ -49,8 +49,15 @@ class AnyFontBox {
         return self.font
     }
 
-    func glyphData(forChar c: UnicodeScalar) -> GlyphData? {
-        self.font?.glyphData(forChar: c)
+    func glyphData(for c: UnicodeScalar) -> GlyphData? {
+        if let font, font.hasGlyph(for: c) == false {
+            for ft in self.fallbackFonts {
+                if ft.hasGlyph(for: c) {
+                    return ft.glyphData(for: c)
+                }
+            }
+        }
+        return font?.glyphData(for: c)
     }
 }
 
@@ -149,7 +156,7 @@ extension Font {
         provider.loadFont(graphicsDevice)
     }
 
-    func glyphData(forChar c: UnicodeScalar) -> GlyphData? {
-        provider.glyphData(forChar: c)
+    func glyphData(for c: UnicodeScalar) -> GlyphData? {
+        provider.glyphData(for: c)
     }
 }

@@ -42,8 +42,8 @@ class MyFrame: Frame {
 
     override func load(screen: Screen) {
         if let fontData = loadResourceData(name: "Resources/Roboto-Regular.ttf") {
-            self.textFont = Font(deviceContext: screen.graphicsDeviceContext!, data: fontData)
-            self.outlineFont = Font(deviceContext: screen.graphicsDeviceContext!, data: fontData)
+            self.textFont = Font(deviceContext: screen.graphicsDeviceContext!, data: fontData, identifier: "")
+            self.outlineFont = Font(deviceContext: screen.graphicsDeviceContext!, data: fontData, identifier: "")
             let pointSize = 32.0
             if let font = self.textFont {
                 font.setStyle(pointSize: pointSize, dpi: dpi)
@@ -53,7 +53,7 @@ class MyFrame: Frame {
             }
         }
         if let fontData = loadResourceData(name: "Resources/BitstreamVeraSansMono.ttf") {
-            self.fpsFont = Font(deviceContext: screen.graphicsDeviceContext!, data: fontData)
+            self.fpsFont = Font(deviceContext: screen.graphicsDeviceContext!, data: fontData, identifier: "")
             if let font = self.fpsFont {
                 font.setStyle(pointSize: 24, dpi: dpi)
             }

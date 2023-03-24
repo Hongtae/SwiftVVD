@@ -1114,7 +1114,7 @@ public class Canvas {
         var c1 = UnicodeScalar(UInt8(0)) 
         for c2 in str {
             // get glyph info from font object
-            if let glyph = font.glyphData(forChar: c2) {
+            if let glyph = font.glyphData(for: c2) {
                 let posMin = Vector2(Scalar(glyph.position.x + offset), Scalar(glyph.position.y))
                 let posMax = Vector2(Scalar(glyph.frame.width), Scalar(glyph.frame.height)) + posMin
 

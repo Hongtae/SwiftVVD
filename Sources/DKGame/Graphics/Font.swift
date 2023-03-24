@@ -2,7 +2,7 @@
 //  File: Font.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -66,6 +66,7 @@ public class Font {
     private let faceLock = SpinLock()
     private var fontData: Data?
 
+    public let identifier: String
     public let deviceContext: GraphicsDeviceContext
     public let familyName: String
     public let styleName: String
@@ -166,12 +167,11 @@ public class Font {
     }
 
     private var glyphMap: [UnicodeScalar: GlyphData] = [:]
-    private var charIndexMap: [UnicodeScalar: UInt32] = [:]
     private var textures: [GlyphTextureAtlas] = []
     private var numGlyphsLoaded: Int = 0
 
     public init?(deviceContext: GraphicsDeviceContext, path: String) {
-        
+        self.identifier = path
         self._outline = 0.0
         self._embolden = 0.0
         self._size26d6 = 10 * 64
@@ -201,8 +201,8 @@ public class Font {
         self.styleName = .init(cString: face!.pointee.style_name)
     }
 
-    public init?(deviceContext: GraphicsDeviceContext, data: Data) {
-
+    public init?(deviceContext: GraphicsDeviceContext, data: Data, identifier: String) {
+        self.identifier = identifier
         self._outline = 0.0
         self._embolden = 0.0
         self._size26d6 = 10 * 64
@@ -281,7 +281,6 @@ public class Font {
             self._kerningEnabled = enableKerning
             
             self.glyphMap = [:]
-            self.charIndexMap = [:]
             self.textures = []
             self.numGlyphsLoaded = 0
         }
@@ -293,18 +292,8 @@ public class Font {
         var point: CGPoint = .zero
         if self._kerningEnabled && FT_HAS_KERNING(face) {
             synchronizedBy(locking: self.faceLock) {
-
-                let charIndex = { (c: UnicodeScalar) -> UInt32 in 
-                    var index = self.charIndexMap[c]
-                    if index == nil {
-                        index = FT_Get_Char_Index(self.face, FT_ULong(c.value))
-                        self.charIndexMap[c] = index!
-                    }
-                    return index!
-                }
-
-                let index1 = charIndex(left)
-                let index2 = charIndex(right)
+                let index1 = FT_Get_Char_Index(self.face, FT_ULong(left.value))
+                let index2 = FT_Get_Char_Index(self.face, FT_ULong(right.value))
                 if index1 != 0 && index2 != 0 {
                     var advance = FT_Vector()
                     if FT_Get_Kerning(face, index1, index2, FT_UInt(FT_KERNING_DEFAULT.rawValue), &advance) == 0 {
@@ -322,9 +311,32 @@ public class Font {
         var length: CGFloat = 0.0
         var c1 = UnicodeScalar(UInt8(0))
         for c2 in text.unicodeScalars {
-            if let glyph = self.glyphData(forChar: c2) {
-                length += CGFloat(glyph.advance.width)
-                length += CGFloat(self.kernAdvance(left: c1, right: c2).x)
+            if let glyph = self.glyphData(for: c2) {
+                length += glyph.advance.width
+                length += self.kernAdvance(left: c1, right: c2).x
+            }
+            c1 = c2
+        }
+        return length
+    }
+
+    public func lineWidth(of text: String,
+                          fallbackGlyph:(_:UnicodeScalar) -> GlyphData?) -> CGFloat {
+        var length: CGFloat = 0.0
+        var c1 = UnicodeScalar(UInt8(0))
+        for c2 in text.unicodeScalars {
+            var glyph: GlyphData?
+            var kerning: CGPoint = .zero
+            if self.hasGlyph(for: c2) == false {
+                glyph = fallbackGlyph(c2)
+            }
+            if glyph == nil {
+                glyph = self.glyphData(for: c2)
+                kerning = self.kernAdvance(left: c1, right: c2)
+            }
+            if let glyph {
+                length += glyph.advance.width
+                length += kerning.x
             }
             c1 = c2
         }
@@ -344,7 +356,7 @@ public class Font {
         var offset: CGFloat = 0.0
         var c1 = UnicodeScalar(UInt8(0)) 
         for c2 in text.unicodeScalars {
-            if let glyph = self.glyphData(forChar: c2) {
+            if let glyph = self.glyphData(for: c2) {
                 if offset > 0.0 {
                     let posMin = CGPoint(x: offset + glyph.position.x, y: glyph.position.y)
                     let posMax = CGPoint(x: posMin.x + glyph.frame.width, y: posMin.y + glyph.frame.height)
@@ -360,6 +372,44 @@ public class Font {
                 }
 
                 offset += glyph.advance.width + self.kernAdvance(left: c1, right: c2).x
+            }
+            c1 = c2
+        }
+        let size = CGSize(width: ceil(bboxMax.x - bboxMin.x), height: ceil(bboxMax.y - bboxMin.y))
+        return CGRect(origin: bboxMin, size: size)
+    }
+
+    public func bounds(of text: String,
+                       fallbackGlyph:(_:UnicodeScalar) -> GlyphData?) -> CGRect {
+        var bboxMin: CGPoint = .zero
+        var bboxMax: CGPoint = .zero
+        var offset: CGFloat = 0.0
+        var c1 = UnicodeScalar(UInt8(0))
+        for c2 in text.unicodeScalars {
+            var glyph: GlyphData?
+            var kerning: CGPoint = .zero
+            if self.hasGlyph(for: c2) == false {
+                glyph = fallbackGlyph(c2)
+            }
+            if glyph == nil {
+                glyph = self.glyphData(for: c2)
+                kerning = self.kernAdvance(left: c1, right: c2)
+            }
+            if let glyph {
+                if offset > 0.0 {
+                    let posMin = CGPoint(x: offset + glyph.position.x, y: glyph.position.y)
+                    let posMax = CGPoint(x: posMin.x + glyph.frame.width, y: posMin.y + glyph.frame.height)
+
+                    if bboxMin.x > posMin.x { bboxMin.x = posMin.x }
+                    if bboxMin.y > posMin.y { bboxMin.y = posMin.y }
+                    if bboxMax.x < posMax.x { bboxMax.x = posMax.x }
+                    if bboxMax.y < posMax.y { bboxMax.y = posMax.y }
+                } else {
+                    bboxMin = glyph.position
+                    bboxMax.x = bboxMin.x + glyph.frame.width
+                    bboxMax.y = bboxMin.y + glyph.frame.height
+                }
+                offset += glyph.advance.width + kerning.x
             }
             c1 = c2
         }
@@ -424,13 +474,18 @@ public class Font {
     public func clearCache() {
         synchronizedBy(locking: self.faceLock) {
             self.glyphMap = [:]
-            self.charIndexMap = [:]
             self.textures = []
             self.numGlyphsLoaded = 0
         }
     }
 
-    public func glyphData(forChar c: UnicodeScalar) -> GlyphData? {
+    public func hasGlyph(for c: UnicodeScalar) -> Bool {
+        synchronizedBy(locking: self.faceLock) {
+            FT_Get_Char_Index(self.face, FT_ULong(c.value)) != 0
+        }
+    }
+
+    public func glyphData(for c: UnicodeScalar) -> GlyphData? {
         if c.value == 0 { return nil }
         self.faceLock.lock()
         defer { self.faceLock.unlock() }

@@ -648,7 +648,6 @@ public struct GraphicsContext {
             let texture: Texture
             var vertices: [GlyphVertex]
         }
-        let font: DKGame.Font
         let text: String
         var glyphGroups: [GlyphGroup] = []
         var bounds: CGRect = .zero
