@@ -1170,8 +1170,8 @@ public class Canvas {
 
         // calculate transform matrix
         var trans = AffineTransform2(x: -bboxMin.x, y: -bboxMin.y)    // move origin
-        trans *= LinearTransform2(scaleX: 1.0 / width, scaleY: 1.0 / height) // normalize size
-        trans *= LinearTransform2(scaleX: Scalar(bounds.width), scaleY: Scalar(bounds.height)) // scale to bounds
+        trans *= LinearTransform2(scaleX: 1.0 / width, y: 1.0 / height) // normalize size
+        trans *= LinearTransform2(scaleX: Scalar(bounds.width), y: Scalar(bounds.height)) // scale to bounds
         trans.translate(x: Scalar(bounds.minX), y: Scalar(bounds.minY)) // move to bounds origin
 
         var matrix = trans.matrix3
@@ -1274,7 +1274,7 @@ public class Canvas {
         assert(contentScale.x > 0.0 && contentScale.y > 0.0)
 
         let offset = AffineTransform2(origin: -contentOffset).matrix3
-        let normalize = AffineTransform2(linear: .init(scaleX: 1.0 / contentScale.x, scaleY: 1.0 / contentScale.y)).matrix3
+        let normalize = AffineTransform2(linear: .init(scaleX: 1.0 / contentScale.x, y: 1.0 / contentScale.y)).matrix3
 
         // transform to screen viewport space.
         let clipSpace = Matrix3(row1: Vector3(2.0, 0.0, 0.0),

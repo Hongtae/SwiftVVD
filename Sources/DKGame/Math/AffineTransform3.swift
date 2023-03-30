@@ -55,8 +55,8 @@ public struct AffineTransform3: VectorTransformer, Hashable {
         self.translation = origin
     }
 
-    public init(left: Vector3, up: Vector3, forward: Vector3, origin: Vector3) {
-        self.matrix3 = .init(row1: left, row2: up, row3: forward)
+    public init(axisX x: Vector3, y: Vector3, z: Vector3, origin: Vector3) {
+        self.matrix3 = .init(row1: x, row2: y, row3: z)
         self.translation = origin
     }
 

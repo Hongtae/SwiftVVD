@@ -979,8 +979,6 @@ extension GraphicsContext {
                     })
                 }
             case .miter:
-                let dir0 = Vector2(dir0)
-                let dir1 = Vector2(dir1)
                 let t0 = CGAffineTransform(a: dir0.x, b: dir0.y,
                                            c: -lineWidth * dir0.y,
                                            d: lineWidth * dir0.x,
@@ -990,6 +988,8 @@ extension GraphicsContext {
                                            c: -lineWidth * dir1.y,
                                            d: lineWidth * dir1.x,
                                            tx: p.x, ty: p.y)
+                let dir0 = Vector2(dir0)
+                let dir1 = Vector2(dir1)
                 if r1 > r2 {
                     let pt = [Vector2(0, 0.5).applying(t0),
                               Vector2(0, 0.5).applying(t1)]

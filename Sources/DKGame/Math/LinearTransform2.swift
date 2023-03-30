@@ -22,18 +22,18 @@ public struct LinearTransform2: VectorTransformer, Hashable {
         self.matrix2 = matrix
     }
 
-    public init(rotation: Scalar) {
+    public init(rotationAngle r: Scalar) {
         self.matrix2 = .identity
-        self = self.rotated(by: rotation)
+        self = self.rotated(by: r)
     }
 
-    public init(scaleX: any BinaryFloatingPoint,
-                scaleY: any BinaryFloatingPoint) {
-        self.matrix2 = .init(scaleX, 0.0, 0.0, scaleY)
+    public init(scaleX x: any BinaryFloatingPoint,
+                y: any BinaryFloatingPoint) {
+        self.matrix2 = .init(x, 0.0, 0.0, y)
     }
 
-    public init(axisX: Vector2, axisY: Vector2) {
-        self.matrix2 = .init(row1: axisX, row2: axisY)
+    public init(axisX x: Vector2, y: Vector2) {
+        self.matrix2 = .init(row1: x, row2: y)
     }
 
     public func rotated(by angle: any BinaryFloatingPoint) -> Self {

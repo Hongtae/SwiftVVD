@@ -45,8 +45,8 @@ extension CGFloat: VectorArithmetic {
 
 extension Vector2 {
     public func applying(_ t: CGAffineTransform) -> Vector2 {
-        let x = self.x * t.a + self.y * t.c + t.tx
-        let y = self.x * t.b + self.y * t.d + t.ty
+        let x = self.x * Scalar(t.a) + self.y * Scalar(t.c + t.tx)
+        let y = self.x * Scalar(t.b) + self.y * Scalar(t.d + t.ty)
         return Vector2(x: x, y: y)
     }
 }

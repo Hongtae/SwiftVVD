@@ -437,7 +437,7 @@ public class Screen {
             assert(scale.x > 0.0 && scale.y > 0.0)
 
             // rescale vector
-            let windowToRoot = AffineTransform2(linear: .init(scaleX: scale.x / res.x, scaleY: scale.y / res.y)).matrix3
+            let windowToRoot = AffineTransform2(linear: .init(scaleX: scale.x / res.x, y: scale.y / res.y)).matrix3
             var pos = event.location.transformed(by: windowToRoot)
             var delta = event.delta.transformed(by: windowToRoot)
 
@@ -486,7 +486,7 @@ public class Screen {
                     // quantize to contents
                     let scale = Vector2(captor.contentScale)
                     assert(scale.x > 0.0 && scale.y > 0.0)
-                    tm = tm * AffineTransform2(linear: .init(scaleX: scale.x, scaleY: scale.y)).matrix3
+                    tm = tm * AffineTransform2(linear: .init(scaleX: scale.x, y: scale.y)).matrix3
 
                     // calculate delta
                     let posInFrame = pos.transformed(by: tm)

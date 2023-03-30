@@ -84,7 +84,7 @@ open class Frame {
             tm *= self.inverseTransform
 
             // apply local content scale.
-            tm *= AffineTransform2(linear: LinearTransform2(scaleX: Scalar(contentScale.width), scaleY: Scalar(contentScale.height))).matrix3
+            tm *= AffineTransform2(linear: LinearTransform2(scaleX: Scalar(contentScale.width), y: Scalar(contentScale.height))).matrix3
 
             // apply inversed content transform.
             tm *= self.inverseContentTransform
@@ -99,7 +99,7 @@ open class Frame {
             tm *= self.contentTransform
 
             // normalize local scale to (0.0 ~ 1.0)
-            tm *= AffineTransform2(linear: LinearTransform2(scaleX: Scalar(1.0 / contentScale.width), scaleY: Scalar(1.0 / contentScale.height))).matrix3
+            tm *= AffineTransform2(linear: LinearTransform2(scaleX: Scalar(1.0 / contentScale.width), y: Scalar(1.0 / contentScale.height))).matrix3
 
             // transform to parent
             tm *= self.transform
@@ -352,7 +352,7 @@ open class Frame {
                     // apply inversed frame transform (convert to normalized frame coordinates)
                     let scale = Vector2(frame.contentScale)
                     assert(scale.x > 0.0 && scale.y > 0.0)
-                    let tm = frame.inverseTransform * AffineTransform2(linear: .init(scaleX: scale.x, scaleY: scale.y)).matrix3
+                    let tm = frame.inverseTransform * AffineTransform2(linear: .init(scaleX: scale.x, y: scale.y)).matrix3
                     let posInFrame = localPos.transformed(by: tm)
 
                     if frame.bounds.contains(posInFrame) {
@@ -391,7 +391,7 @@ open class Frame {
                         for frame in subframes {
                             let scale = Vector2(frame.contentScale)
                             assert(scale.x > 0.0 && scale.y > 0.0)
-                            let tm = frame.inverseTransform * AffineTransform2(linear: .init(scaleX: scale.x, scaleY: scale.y)).matrix3
+                            let tm = frame.inverseTransform * AffineTransform2(linear: .init(scaleX: scale.x, y: scale.y)).matrix3
                             let posInFrame = localPos.transformed(by: tm)
 
                             if let hover = frame.findHoverFrame(at: posInFrame) {
