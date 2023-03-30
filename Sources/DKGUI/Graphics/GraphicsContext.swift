@@ -628,10 +628,10 @@ public struct GraphicsContext {
         fatalError()
     }
     public func draw(_ image: Image, in rect: CGRect, style: FillStyle = FillStyle()) {
-        fatalError()
+        draw(resolve(image), in: rect, style: style)
     }
     public func draw(_ image: Image, at point: CGPoint, anchor: UnitPoint = .center) {
-        fatalError()
+        draw(resolve(image), at: point, anchor: anchor)
     }
 
     public struct ResolvedText {
@@ -663,10 +663,10 @@ public struct GraphicsContext {
         fatalError()
     }
     public func draw(_ text: Text, in rect: CGRect) {
-        fatalError()
+        draw(resolve(text), in: rect)
     }
     public func draw(_ text: Text, at point: CGPoint, anchor: UnitPoint = .center) {
-        fatalError()
+        draw(resolve(text), at: point, anchor: anchor)
     }
 
     public struct ResolvedSymbol {
