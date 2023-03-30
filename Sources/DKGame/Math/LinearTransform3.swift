@@ -115,14 +115,16 @@ public struct LinearTransform3: VectorTransformer, Hashable {
     }
 
     public func rotated(angle: any BinaryFloatingPoint, axis: Vector3) -> Self {
-        if angle != 0 {
-            return self.rotated(by: Quaternion(angle: angle, axis: axis)) 
+        if angle.isZero == false {
+            return self.rotated(by: Quaternion(angle: angle, axis: axis))
         }
         return self
     }
 
     public mutating func rotate(angle: any BinaryFloatingPoint, axis: Vector3) {
-        if angle != 0 { self.rotate(by: Quaternion(angle: angle, axis: axis)) }
+        if angle.isZero == false {
+            self.rotate(by: Quaternion(angle: angle, axis: axis))
+        }
     }
 
     public mutating func rotateX(_ r: any BinaryFloatingPoint) {
