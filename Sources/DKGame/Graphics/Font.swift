@@ -64,7 +64,7 @@ public class Font {
     private let library: FTLibrary
     private var face: FT_Face
     private let faceLock = SpinLock()
-    private var fontData: Data?
+    private var fontData: RawBufferStorage?
 
     public let identifier: String
     public let deviceContext: GraphicsDeviceContext
@@ -201,7 +201,17 @@ public class Font {
         self.styleName = .init(cString: face!.pointee.style_name)
     }
 
-    public init?(deviceContext: GraphicsDeviceContext, data: Data, identifier: String) {
+    public convenience init?<D>(deviceContext: GraphicsDeviceContext,
+                                data: D,
+                                identifier: String) where D: DataProtocol {
+        if data.isEmpty { return nil }
+        let buffer = RawBufferStorage(data) // copy font data
+        self.init(deviceContext: deviceContext, data: buffer, identifier: identifier)
+    }
+
+    public init?(deviceContext: GraphicsDeviceContext, data: RawBufferStorage, identifier: String) {
+        if data.isEmpty { return nil }
+
         self.identifier = identifier
         self._outline = 0.0
         self._embolden = 0.0
@@ -214,9 +224,7 @@ public class Font {
 
         let library = sharedFTLibrary()
         var face: FT_Face? = nil
-        let err: FT_Error = self.fontData!.withUnsafeBytes {
-            FT_New_Memory_Face(library.library, $0.baseAddress, FT_Long($0.count), 0, &face)
-        }
+        let err: FT_Error = FT_New_Memory_Face(library.library, data.baseAddress, FT_Long(data.count), 0, &face)
         if err != 0 {
             return nil
         }
