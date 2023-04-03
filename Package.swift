@@ -8,10 +8,10 @@ let package = Package(
     platforms: [.macOS(.v12), .iOS(.v15), .macCatalyst(.v15)],
     products: [
         // Products define the executables and libraries a package produces, and make them visible to other packages.
-        .library(
-            name: "DKGame",
-            type: .dynamic,
-            targets: ["DKGame", "DKGUI", "DKGameEditor"]),
+        .library(name: "DKGame", type: .dynamic, targets: ["DKGame"]),
+        .library(name: "DKGUI", type: .dynamic, targets: ["DKGUI"]),
+        .executable(name: "DKGameEditor", targets: ["DKGameEditor"]),
+        .executable(name: "TestApp1", targets: ["TestApp1"])
     ],
     dependencies: [
         // Dependencies declare other packages that this package depends on.
