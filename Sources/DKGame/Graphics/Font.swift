@@ -66,7 +66,6 @@ public class Font {
     private let faceLock = SpinLock()
     private var fontData: RawBufferStorage?
 
-    public let identifier: String
     public let deviceContext: GraphicsDeviceContext
     public let familyName: String
     public let styleName: String
@@ -157,6 +156,8 @@ public class Font {
         public let position: CGPoint
         public let advance: CGSize
         public let frame: CGRect
+        public let ascender: CGFloat
+        public let descender: CGFloat
     }
 
     private struct GlyphTextureAtlas {
@@ -171,7 +172,6 @@ public class Font {
     private var numGlyphsLoaded: Int = 0
 
     public init?(deviceContext: GraphicsDeviceContext, path: String) {
-        self.identifier = path
         self._outline = 0.0
         self._embolden = 0.0
         self._size26d6 = 10 * 64
@@ -202,17 +202,15 @@ public class Font {
     }
 
     public convenience init?<D>(deviceContext: GraphicsDeviceContext,
-                                data: D,
-                                identifier: String) where D: DataProtocol {
+                                data: D) where D: DataProtocol {
         if data.isEmpty { return nil }
         let buffer = RawBufferStorage(data) // copy font data
-        self.init(deviceContext: deviceContext, data: buffer, identifier: identifier)
+        self.init(deviceContext: deviceContext, data: buffer)
     }
 
-    public init?(deviceContext: GraphicsDeviceContext, data: RawBufferStorage, identifier: String) {
+    public init?(deviceContext: GraphicsDeviceContext, data: RawBufferStorage) {
         if data.isEmpty { return nil }
 
-        self.identifier = identifier
         self._outline = 0.0
         self._embolden = 0.0
         self._size26d6 = 10 * 64
@@ -328,29 +326,6 @@ public class Font {
         return length
     }
 
-    public func lineWidth(of text: String,
-                          fallbackGlyph:(_:UnicodeScalar) -> GlyphData?) -> CGFloat {
-        var length: CGFloat = 0.0
-        var c1 = UnicodeScalar(UInt8(0))
-        for c2 in text.unicodeScalars {
-            var glyph: GlyphData?
-            var kerning: CGPoint = .zero
-            if self.hasGlyph(for: c2) == false {
-                glyph = fallbackGlyph(c2)
-            }
-            if glyph == nil {
-                glyph = self.glyphData(for: c2)
-                kerning = self.kernAdvance(left: c1, right: c2)
-            }
-            if let glyph {
-                length += glyph.advance.width
-                length += kerning.x
-            }
-            c1 = c2
-        }
-        return length
-    }
-
     /// pixel-height from baseline. not includes outline.
     public func lineHeight() -> CGFloat {
         let metrics = self.face.pointee.size.pointee.metrics
@@ -380,44 +355,6 @@ public class Font {
                 }
 
                 offset += glyph.advance.width + self.kernAdvance(left: c1, right: c2).x
-            }
-            c1 = c2
-        }
-        let size = CGSize(width: ceil(bboxMax.x - bboxMin.x), height: ceil(bboxMax.y - bboxMin.y))
-        return CGRect(origin: bboxMin, size: size)
-    }
-
-    public func bounds(of text: String,
-                       fallbackGlyph:(_:UnicodeScalar) -> GlyphData?) -> CGRect {
-        var bboxMin: CGPoint = .zero
-        var bboxMax: CGPoint = .zero
-        var offset: CGFloat = 0.0
-        var c1 = UnicodeScalar(UInt8(0))
-        for c2 in text.unicodeScalars {
-            var glyph: GlyphData?
-            var kerning: CGPoint = .zero
-            if self.hasGlyph(for: c2) == false {
-                glyph = fallbackGlyph(c2)
-            }
-            if glyph == nil {
-                glyph = self.glyphData(for: c2)
-                kerning = self.kernAdvance(left: c1, right: c2)
-            }
-            if let glyph {
-                if offset > 0.0 {
-                    let posMin = CGPoint(x: offset + glyph.position.x, y: glyph.position.y)
-                    let posMax = CGPoint(x: posMin.x + glyph.frame.width, y: posMin.y + glyph.frame.height)
-
-                    if bboxMin.x > posMin.x { bboxMin.x = posMin.x }
-                    if bboxMin.y > posMin.y { bboxMin.y = posMin.y }
-                    if bboxMax.x < posMax.x { bboxMax.x = posMax.x }
-                    if bboxMax.y < posMax.y { bboxMax.y = posMax.y }
-                } else {
-                    bboxMin = glyph.position
-                    bboxMax.x = bboxMin.x + glyph.frame.width
-                    bboxMax.y = bboxMin.y + glyph.frame.height
-                }
-                offset += glyph.advance.width + kerning.x
             }
             c1 = c2
         }
@@ -469,14 +406,14 @@ public class Font {
         return ft16d16ToFloat(metrics.y_scale)
     }
 
-    public var xPixelsPerEM: UInt {
+    public var xPixelsPerEM: Int {
         let metrics = self.face.pointee.size.pointee.metrics
-        return UInt(metrics.x_ppem)
+        return Int(metrics.x_ppem)
     }
 
-    public var yPixelsPerEM: UInt {
+    public var yPixelsPerEM: Int {
         let metrics = self.face.pointee.size.pointee.metrics
-        return UInt(metrics.y_ppem)
+        return Int(metrics.y_ppem)
     }
 
     public func clearCache() {
@@ -654,7 +591,12 @@ public class Font {
             }
         }
 
-        self.glyphMap[c] = GlyphData(texture: texture, position: position, advance: advance, frame: frame)
+        self.glyphMap[c] = GlyphData(texture: texture,
+                                     position: position,
+                                     advance: advance,
+                                     frame: frame,
+                                     ascender: self.ascender,
+                                     descender: self.descender)
         return self.glyphMap[c]
     }
 
@@ -824,5 +766,28 @@ public class Font {
         assert(texture != nil)
         self.numGlyphsLoaded += 1
         return texture
+    }
+
+    public struct SizeMetrics {
+        public let xPixelsPerEM: Int
+        public let yPixelsPerEM: Int
+        public let xScale: CGFloat
+        public let yScale: CGFloat
+        public let ascender: CGFloat
+        public let descender: CGFloat
+        public let height: CGFloat
+        public let maxAdvance: CGFloat
+    }
+
+    public var baseMetrics: SizeMetrics {
+        let metrics = self.face.pointee.size.pointee.metrics
+        return SizeMetrics(xPixelsPerEM: Int(metrics.x_ppem),
+                           yPixelsPerEM: Int(metrics.y_ppem),
+                           xScale: ft16d16ToFloat(metrics.x_scale),
+                           yScale: ft16d16ToFloat(metrics.y_scale),
+                           ascender: ft26d6ToFloat(metrics.ascender),
+                           descender: ft26d6ToFloat(metrics.descender),
+                           height: ft26d6ToFloat(metrics.height),
+                           maxAdvance: ft26d6ToFloat(metrics.max_advance))
     }
 }

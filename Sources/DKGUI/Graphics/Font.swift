@@ -59,6 +59,70 @@ class AnyFontBox {
         }
         return font?.glyphData(for: c)
     }
+
+    func kernAdvance(left: UnicodeScalar, right: UnicodeScalar) -> CGPoint {
+        if let font {
+            unowned var font1 = font
+            unowned var font2 = font
+
+            if font1.hasGlyph(for: left) == false {
+                font1 = self.fallbackFonts.first {
+                    $0.hasGlyph(for: left)
+                } ?? font1
+            }
+            if font2.hasGlyph(for: right) == false {
+                font2 = self.fallbackFonts.first {
+                    $0.hasGlyph(for: right)
+                } ?? font2
+            }
+            if font1 === font2 {
+                return font1.kernAdvance(left: left, right: right)
+            }
+        }
+        return .zero
+    }
+
+    func lineWidth(of text: String) -> CGFloat {
+        var length: CGFloat = 0.0
+        var c1 = UnicodeScalar(UInt8(0))
+        for c2 in text.unicodeScalars {
+            if let glyph = self.glyphData(for: c2) {
+                length += glyph.advance.width
+                length += self.kernAdvance(left: c1, right: c2).x
+            }
+            c1 = c2
+        }
+        return length
+    }
+
+    public func bounds(of text: String) -> CGRect {
+        var bboxMin: CGPoint = .zero
+        var bboxMax: CGPoint = .zero
+        var offset: CGFloat = 0.0
+        var c1 = UnicodeScalar(UInt8(0))
+        for c2 in text.unicodeScalars {
+            if let glyph = self.glyphData(for: c2) {
+                if offset > 0.0 {
+                    let posMin = CGPoint(x: offset + glyph.position.x,
+                                         y: glyph.position.y - glyph.ascender)
+                    let posMax = CGPoint(x: posMin.x + glyph.frame.width,
+                                         y: posMin.y + glyph.frame.height - glyph.ascender)
+
+                    bboxMin = .minimum(bboxMin, posMin)
+                    bboxMax = .maximum(bboxMax, posMax)
+                } else {
+                    bboxMin = glyph.position
+                    bboxMax.x = bboxMin.x + glyph.frame.width
+                    bboxMax.y = bboxMin.y + glyph.frame.height - glyph.ascender
+                }
+
+                offset += glyph.advance.width + self.kernAdvance(left: c1, right: c2).x
+            }
+            c1 = c2
+        }
+        let size = CGSize(width: ceil(bboxMax.x - bboxMin.x), height: ceil(bboxMax.y - bboxMin.y))
+        return CGRect(origin: bboxMin, size: size)
+    }
 }
 
 public struct Font: Hashable {
