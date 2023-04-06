@@ -306,6 +306,20 @@ public class MetalRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
+    public func setTriangleFillMode(_ fillMode: TriangleFillMode) {
+        assert(self.encoder != nil)
+
+        let triangleFillMode: MTLTriangleFillMode
+        switch fillMode {
+        case .fill:     triangleFillMode = .fill
+        case .lines:    triangleFillMode = .lines
+        }
+        self.encoder?.command.append {
+            (encoder: MTLRenderCommandEncoder, state: inout EncodingState) in
+            encoder.setTriangleFillMode(triangleFillMode)
+        }
+    }
+
     public func setBlendColor(red: Float, green: Float, blue: Float, alpha: Float) {
         assert(self.encoder != nil)
         self.encoder?.commands.append {
@@ -385,23 +399,30 @@ public class MetalRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func draw(vertexStart: Int, vertexCount: Int, instanceCount: Int, baseInstance: Int) {
+    public func drawPrimitives(type primitiveType: PrimitiveType, vertexStart: Int, vertexCount: Int, instanceCount: Int, baseInstance: Int) {
         assert(self.encoder != nil)
+
+        let primitiveTopology: MTLPrimitiveType
+        switch primitiveType {
+        case .point:            primitiveTopology = .point
+        case .line:             primitiveTopology = .line
+        case .lineStrip:        primitiveTopology = .lineStrip
+        case .triangle:         primitiveTopology = .triangle
+        case .triangleStrip:    primitiveTopology = .triangleStrip
+        }
 
         self.encoder?.commands.append {
             (encoder: MTLRenderCommandEncoder, state: inout EncodingState) in
 
-            if let pipelineState = state.pipelineState {
-                encoder.drawPrimitives(type: pipelineState.primitiveType,
-                                       vertexStart: vertexStart,
-                                       vertexCount: vertexCount,
-                                       instanceCount: instanceCount,
-                                       baseInstance: baseInstance)
-            }
+            encoder.drawPrimitives(type: primitiveTopology,
+                                   vertexStart: vertexStart,
+                                   vertexCount: vertexCount,
+                                   instanceCount: instanceCount,
+                                   baseInstance: baseInstance)
         }
     }
 
-    public func drawIndexed(indexCount: Int, indexType: IndexType, indexBuffer: Buffer, indexBufferOffset: Int, instanceCount: Int, baseVertex: Int, baseInstance: Int) {
+    public func drawIndexedPrimitives(type primitiveType: PrimitiveType, indexType: IndexType, indexBuffer: Buffer, indexBufferOffset: Int, instanceCount: Int, baseVertex: Int, baseInstance: Int) {
         assert(self.encoder != nil)
         assert(indexBuffer is MetalBuffer)
 
@@ -412,27 +433,34 @@ public class MetalRenderCommandEncoder: RenderCommandEncoder {
         case .uint32:   indexBufferType = .uint32
         }
 
+        let primitiveTopology: MTLPrimitiveType
+        switch primitiveType {
+        case .point:            primitiveTopology = .point
+        case .line:             primitiveTopology = .line
+        case .lineStrip:        primitiveTopology = .lineStrip
+        case .triangle:         primitiveTopology = .triangle
+        case .triangleStrip:    primitiveTopology = .triangleStrip
+        }
+
         self.encoder?.commands.append {
             (encoder: MTLRenderCommandEncoder, state: inout EncodingState) in
 
-            if let pipelineState = state.pipelineState {
-                if baseVertex == 0 && baseInstance == 0 {
-                    encoder.drawIndexedPrimitives(type: pipelineState.primitiveType,
-                                                  indexCount: indexCount,
-                                                  indexType: indexBufferType,
-                                                  indexBuffer: buffer.buffer,
-                                                  indexBufferOffset: indexBufferOffset,
-                                                  instanceCount: instanceCount)
-                } else {
-                    encoder.drawIndexedPrimitives(type: pipelineState.primitiveType,
-                                                  indexCount: indexCount,
-                                                  indexType: indexBufferType,
-                                                  indexBuffer: buffer.buffer,
-                                                  indexBufferOffset: indexBufferOffset,
-                                                  instanceCount: instanceCount,
-                                                  baseVertex: baseVertex,
-                                                  baseInstance: baseInstance)
-                }
+            if baseVertex == 0 && baseInstance == 0 {
+                encoder.drawIndexedPrimitives(type: primitiveTopology,
+                                              indexCount: indexCount,
+                                              indexType: indexBufferType,
+                                              indexBuffer: buffer.buffer,
+                                              indexBufferOffset: indexBufferOffset,
+                                              instanceCount: instanceCount)
+            } else {
+                encoder.drawIndexedPrimitives(type: primitiveTopology,
+                                              indexCount: indexCount,
+                                              indexType: indexBufferType,
+                                              indexBuffer: buffer.buffer,
+                                              indexBufferOffset: indexBufferOffset,
+                                              instanceCount: instanceCount,
+                                              baseVertex: baseVertex,
+                                              baseInstance: baseInstance)
             }
         }
     }

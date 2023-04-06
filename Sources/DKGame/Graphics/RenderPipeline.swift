@@ -59,10 +59,6 @@ public struct RenderPipelineDescriptor {
     public var vertexDescriptor: VertexDescriptor
     public var colorAttachments: [RenderPipelineColorAttachmentDescriptor]
     public var depthStencilAttachmentPixelFormat: PixelFormat
-
-    public var primitiveTopology: PrimitiveType
-
-    public var triangleFillMode: TriangleFillMode
     public var rasterizationEnabled: Bool
 
     public init(vertexFunction: ShaderFunction? = nil,
@@ -70,16 +66,12 @@ public struct RenderPipelineDescriptor {
                 vertexDescriptor: VertexDescriptor = .init(),
                 colorAttachments: [RenderPipelineColorAttachmentDescriptor] = [],
                 depthStencilAttachmentPixelFormat: PixelFormat = .invalid,
-                primitiveTopology: PrimitiveType = .point,
-                triangleFillMode: TriangleFillMode = .fill,
                 rasterizationEnabled: Bool = true) {
         self.vertexFunction = vertexFunction
         self.fragmentFunction = fragmentFunction
         self.vertexDescriptor = vertexDescriptor
         self.colorAttachments = colorAttachments
         self.depthStencilAttachmentPixelFormat = depthStencilAttachmentPixelFormat
-        self.primitiveTopology = primitiveTopology
-        self.triangleFillMode = triangleFillMode
         self.rasterizationEnabled = rasterizationEnabled
     }
 }

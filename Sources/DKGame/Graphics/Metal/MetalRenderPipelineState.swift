@@ -14,9 +14,6 @@ public class MetalRenderPipelineState: RenderPipelineState {
 
     let pipelineState: MTLRenderPipelineState
 
-    var primitiveType: MTLPrimitiveType
-    var triangleFillMode: MTLTriangleFillMode
-
     var vertexBindings: MetalStageResourceBindingMap
     var fragmentBindings: MetalStageResourceBindingMap
 

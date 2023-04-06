@@ -386,8 +386,6 @@ private class CanvasPipelineStates {
         pipelineDescriptor.vertexDescriptor.layouts = [
             .init(step: .vertex, stride: MemoryLayout<VertexData>.stride, bufferIndex: 0)
         ]
-        pipelineDescriptor.primitiveTopology = .triangle
-        pipelineDescriptor.triangleFillMode = .fill
         pipelineDescriptor.rasterizationEnabled = true
 
         if let state = device.makeRenderPipelineState(descriptor: pipelineDescriptor) {
@@ -1394,7 +1392,7 @@ public class Canvas {
         encoder.setCullMode(.none)
         encoder.setFrontFacing(.counterClockwise)
         encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
-        encoder.draw(vertexStart: 0, vertexCount: numVertices, instanceCount: 1, baseInstance: 0)
+        encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: numVertices, instanceCount: 1, baseInstance: 0)
         encoder.endEncoding()
     }
 }

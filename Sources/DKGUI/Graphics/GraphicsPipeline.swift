@@ -370,8 +370,6 @@ class GraphicsPipelineStates {
                 .init(step: .vertex, stride: MemoryLayout<_Vertex>.stride, bufferIndex: 0)
             ]
         }
-        pipelineDescriptor.primitiveTopology = .triangle
-        pipelineDescriptor.triangleFillMode = .fill
 
         var reflection = PipelineReflection()
         if let state = device.makeRenderPipelineState(descriptor: pipelineDescriptor,
@@ -1207,10 +1205,11 @@ extension GraphicsContext {
         encoder.setFrontFacing(.clockwise)
         encoder.setStencilReferenceValue(0)
         encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
-        encoder.draw(vertexStart: 0,
-                     vertexCount: vertexData.count,
-                     instanceCount: 1,
-                     baseInstance: 0)
+        encoder.drawPrimitives(type: .triangle,
+                               vertexStart: 0,
+                               vertexCount: vertexData.count,
+                               instanceCount: 1,
+                               baseInstance: 0)
 
          // pass2: draw only pixels that pass the stencil test
         if drawShading(encoder) {
@@ -1389,13 +1388,14 @@ extension GraphicsContext {
         encoder.setFrontFacing(.clockwise)
         encoder.setStencilReferenceValue(0)
         encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
-        encoder.drawIndexed(indexCount: indexData.count,
-                            indexType: .uint32,
-                            indexBuffer: indexBuffer,
-                            indexBufferOffset: 0,
-                            instanceCount: 1,
-                            baseVertex: 0,
-                            baseInstance: 0)
+        encoder.drawIndexedPrimitives(type: .triangle,
+                                      indexCount: indexData.count,
+                                      indexType: .uint32,
+                                      indexBuffer: indexBuffer,
+                                      indexBufferOffset: 0,
+                                      instanceCount: 1,
+                                      baseVertex: 0,
+                                      baseInstance: 0)
 
          // pass2: draw only pixels that pass the stencil test
         if drawShading(encoder) {
@@ -1838,18 +1838,20 @@ extension GraphicsContext {
                 Log.err("GraphicsContext error: _makeBuffer failed.")
                 return
             }
-            encoder.drawIndexed(indexCount: indices.count,
-                                indexType: .uint32,
-                                indexBuffer: indexBuffer,
-                                indexBufferOffset: 0,
-                                instanceCount: 1,
-                                baseVertex: 0,
-                                baseInstance: 0)
+            encoder.drawIndexedPrimitives(type: .triangle,
+                                          indexCount: indices.count,
+                                          indexType: .uint32,
+                                          indexBuffer: indexBuffer,
+                                          indexBufferOffset: 0,
+                                          instanceCount: 1,
+                                          baseVertex: 0,
+                                          baseInstance: 0)
         } else {
-            encoder.draw(vertexStart: 0,
-                         vertexCount: vertices.count,
-                         instanceCount: 1,
-                         baseInstance: 0)
+            encoder.drawPrimitives(type: .triangle,
+                                   vertexStart: 0,
+                                   vertexCount: vertices.count,
+                                   instanceCount: 1,
+                                   baseInstance: 0)
         }
     }
 

@@ -42,6 +42,7 @@ public class VulkanPhysicalDeviceDescription: CustomStringConvertible {
 
     public private(set) var features: VkPhysicalDeviceFeatures
     public private(set) var timelineSemaphoreFeatures: VkPhysicalDeviceTimelineSemaphoreFeatures
+    public private(set) var depthClipEnableFeatures: VkPhysicalDeviceDepthClipEnableFeaturesEXT
     public private(set) var extendedDynamicStateFeatures: VkPhysicalDeviceExtendedDynamicStateFeaturesEXT
     public private(set) var extendedDynamicState2Features: VkPhysicalDeviceExtendedDynamicState2FeaturesEXT
     public private(set) var extendedDynamicState3Features: VkPhysicalDeviceExtendedDynamicState3FeaturesEXT
@@ -66,6 +67,8 @@ public class VulkanPhysicalDeviceDescription: CustomStringConvertible {
         self.features = VkPhysicalDeviceFeatures()
         self.timelineSemaphoreFeatures = VkPhysicalDeviceTimelineSemaphoreFeatures()
         self.timelineSemaphoreFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES
+        self.depthClipEnableFeatures = VkPhysicalDeviceDepthClipEnableFeaturesEXT()
+        self.depthClipEnableFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_CLIP_ENABLE_FEATURES_EXT
         self.extendedDynamicStateFeatures = VkPhysicalDeviceExtendedDynamicStateFeaturesEXT()
         self.extendedDynamicStateFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT
         self.extendedDynamicState2Features = VkPhysicalDeviceExtendedDynamicState2FeaturesEXT()
@@ -118,6 +121,7 @@ public class VulkanPhysicalDeviceDescription: CustomStringConvertible {
         features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2
 
         appendNextChain(&features, unsafePointerCopy(from: self.timelineSemaphoreFeatures, holder: tempHolder))
+        appendNextChain(&features, unsafePointerCopy(from: self.depthClipEnableFeatures, holder: tempHolder))
         appendNextChain(&features, unsafePointerCopy(from: self.extendedDynamicStateFeatures, holder: tempHolder))
         appendNextChain(&features, unsafePointerCopy(from: self.extendedDynamicState2Features, holder: tempHolder))
         appendNextChain(&features, unsafePointerCopy(from: self.extendedDynamicState3Features, holder: tempHolder))
@@ -131,6 +135,9 @@ public class VulkanPhysicalDeviceDescription: CustomStringConvertible {
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES:
                 self.timelineSemaphoreFeatures =
                     ptr.bindMemory(to: VkPhysicalDeviceTimelineSemaphoreFeatures.self, capacity: 1).pointee
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_CLIP_ENABLE_FEATURES_EXT:
+                self.depthClipEnableFeatures = 
+                    ptr.bindMemory(to: VkPhysicalDeviceDepthClipEnableFeaturesEXT.self, capacity: 1).pointee
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT:
                 self.extendedDynamicStateFeatures =
                     ptr.bindMemory(to: VkPhysicalDeviceExtendedDynamicStateFeaturesEXT.self, capacity: 1).pointee

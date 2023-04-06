@@ -48,6 +48,7 @@ public protocol RenderCommandEncoder: CommandEncoder {
     func setDepthClipMode(_: DepthClipMode)
     func setCullMode(_: CullMode)
     func setFrontFacing(_: Winding)
+    func setTriangleFillMode(_: TriangleFillMode)
 
     func setBlendColor(red: Float, green: Float, blue: Float, alpha: Float)
     func setStencilReferenceValue(_: UInt32)
@@ -56,6 +57,6 @@ public protocol RenderCommandEncoder: CommandEncoder {
 
     func pushConstant<D: DataProtocol>(stages: ShaderStageFlags, offset: Int, data: D)
 
-    func draw(vertexStart: Int, vertexCount: Int, instanceCount: Int, baseInstance: Int)
-    func drawIndexed(indexCount: Int, indexType: IndexType, indexBuffer: Buffer, indexBufferOffset: Int, instanceCount: Int, baseVertex: Int, baseInstance: Int)
+    func drawPrimitives(type: PrimitiveType, vertexStart: Int, vertexCount: Int, instanceCount: Int, baseInstance: Int)
+    func drawIndexedPrimitives(type: PrimitiveType, indexCount: Int, indexType: IndexType, indexBuffer: Buffer, indexBufferOffset: Int, instanceCount: Int, baseVertex: Int, baseInstance: Int)
 }

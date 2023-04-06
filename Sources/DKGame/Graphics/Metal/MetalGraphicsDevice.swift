@@ -568,17 +568,6 @@ public class MetalGraphicsDevice: GraphicsDevice {
         }
 
         let state = MetalRenderPipelineState(device: self, pipelineState: pipelineState)
-        switch descriptor.primitiveTopology {
-        case .point:            state.primitiveType = .point
-        case .line:             state.primitiveType = .line
-        case .lineStrip:        state.primitiveType = .lineStrip
-        case .triangle:         state.primitiveType = .triangle
-        case .triangleStrip:    state.primitiveType = .triangleStrip
-        }
-        switch descriptor.triangleFillMode {
-        case .fill:             state.triangleFillMode = .fill
-        case .lines:            state.triangleFillMode = .lines
-        }
         if let vertexFunction = vertexFunction {
             state.vertexBindings = vertexFunction.module.bindings
         }

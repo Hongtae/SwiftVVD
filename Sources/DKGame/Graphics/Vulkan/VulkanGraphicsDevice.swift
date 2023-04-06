@@ -97,7 +97,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         requiredExtensions.append(VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME)
         requiredExtensions.append(VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME)
         requiredExtensions.append(VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME)
-        // requiredExtensions.append(VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME)
+        requiredExtensions.append(VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME)
 
         optionalExtensions.append(VK_KHR_MAINTENANCE2_EXTENSION_NAME)
         optionalExtensions.append(VK_KHR_MAINTENANCE3_EXTENSION_NAME)
@@ -142,21 +142,29 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             appendNextChain(&deviceCreateInfo, unsafePointerCopy(from: features, holder: tempHolder))
         }
         if deviceExtensions.contains(VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME) {
-            // VK_EXT_extended_dynamic_state
+            // VK_EXT_extended_dynamic_state2
             var features = VkPhysicalDeviceExtendedDynamicState2FeaturesEXT()
             features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_2_FEATURES_EXT
             features.extendedDynamicState2 = VK_TRUE
             appendNextChain(&deviceCreateInfo, unsafePointerCopy(from: features, holder: tempHolder))
         }
         if deviceExtensions.contains(VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME) {
-            // VK_EXT_extended_dynamic_state
+            // VK_EXT_extended_dynamic_state3
             var features = VkPhysicalDeviceExtendedDynamicState3FeaturesEXT()
             features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_3_FEATURES_EXT
             features.extendedDynamicState3DepthClampEnable = VK_TRUE
             features.extendedDynamicState3PolygonMode = VK_TRUE
             features.extendedDynamicState3DepthClipEnable = VK_TRUE
             appendNextChain(&deviceCreateInfo, unsafePointerCopy(from: features, holder: tempHolder))
+
+            // var depthClipEnableFeatures = VkPhysicalDeviceDepthClipEnableFeaturesEXT()
+            // depthClipEnableFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_CLIP_ENABLE_FEATURES_EXT
+            // depthClipEnableFeatures.depthClipEnable = VK_TRUE
+            // appendNextChain(&deviceCreateInfo, unsafePointerCopy(from: depthClipEnableFeatures, holder: tempHolder))
         }
+
+        // required for VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY, Unrestricted primitive topology
+        assert(self.physicalDevice.extendedDynamicState3Properties.dynamicPrimitiveTopologyUnrestricted != 0)
 
         var device: VkDevice? = nil
         let err = vkCreateDevice(physicalDevice.device, &deviceCreateInfo, instance.allocationCallbacks, &device)
@@ -674,13 +682,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         // input assembly
         var inputAssemblyState = VkPipelineInputAssemblyStateCreateInfo()
         inputAssemblyState.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO
-        switch desc.primitiveTopology {
-        case .point:            inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST
-        case .line:             inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST
-        case .lineStrip:        inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_LINE_STRIP
-        case .triangle:         inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
-        case .triangleStrip:    inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP
-        }
+        inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
         pipelineCreateInfo.pInputAssemblyState = unsafePointerCopy(from: inputAssemblyState, holder: tempHolder)
 
         // setup viewport
@@ -694,14 +696,6 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         var rasterizationState = VkPipelineRasterizationStateCreateInfo()
         rasterizationState.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO
         rasterizationState.polygonMode = VK_POLYGON_MODE_FILL
-        if desc.triangleFillMode == .lines {
-            if self.features.fillModeNonSolid != 0 {
-                rasterizationState.polygonMode = VK_POLYGON_MODE_LINE
-            } else {
-                Log.warn("VulkanGraphicsDevice.\(#function): PolygonFillMode not supported for this hardware.")
-            }
-        }
-
         rasterizationState.cullMode = VkCullModeFlags(VK_CULL_MODE_NONE.rawValue)
         rasterizationState.frontFace = VK_FRONT_FACE_CLOCKWISE
 
@@ -767,13 +761,14 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             // VK_EXT_extended_dynamic_state
             VK_DYNAMIC_STATE_CULL_MODE,
             VK_DYNAMIC_STATE_FRONT_FACE,
-            // VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY, //required: VkPhysicalDeviceExtendedDynamicState3PropertiesEXT.dynamicPrimitiveTopologyUnrestricted
+            VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY, //required: VkPhysicalDeviceExtendedDynamicState3PropertiesEXT.dynamicPrimitiveTopologyUnrestricted
 
             // VK_EXT_extended_dynamic_state3
-            // VK_DYNAMIC_STATE_POLYGON_MODE_EXT,
-            // VK_DYNAMIC_STATE_DEPTH_CLAMP_ENABLE_EXT
-            // VK_DYNAMIC_STATE_DEPTH_CLIP_ENABLE_EXT
+            VK_DYNAMIC_STATE_POLYGON_MODE_EXT,
+            VK_DYNAMIC_STATE_DEPTH_CLAMP_ENABLE_EXT,
+            //VK_DYNAMIC_STATE_DEPTH_CLIP_ENABLE_EXT  enabled when depth clamping is disabled
         ]
+
         var dynamicState = VkPipelineDynamicStateCreateInfo()
         dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO
         dynamicState.pDynamicStates = unsafePointerCopy(collection: dynamicStateEnables, holder: tempHolder)

@@ -312,6 +312,23 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
             // VK_DYNAMIC_STATE_FRONT_FACE
             // vkCmdSetFrontFace(commandBuffer, VK_FRONT_FACE_CLOCKWISE)
 
+            // VK_DYNAMIC_STATE_POLYGON_MODE_EXT
+            //FIXME - Use the built-in API after being promoted.
+            let vkCmdSetPolygonMode = {
+                unsafeBitCast(vkGetDeviceProcAddr(self.device.device, "vkCmdSetPolygonModeEXT"),
+                              to: PFN_vkCmdSetPolygonModeEXT.self)
+            }()
+            vkCmdSetPolygonMode(commandBuffer, VK_POLYGON_MODE_FILL)
+
+            // VK_DYNAMIC_STATE_DEPTH_CLAMP_ENABLE_EXT
+            //FIXME - Use the built-in API after being promoted.
+            let vkCmdSetDepthClampEnable = {
+                let device = self.commandBuffer.device as! VulkanGraphicsDevice
+                return unsafeBitCast(vkGetDeviceProcAddr(device.device, "vkCmdSetDepthClampEnableEXT"),
+                            to: PFN_vkCmdSetDepthClampEnableEXT.self)
+            }()
+            vkCmdSetDepthClampEnable(commandBuffer, VK_FALSE)
+
             // recording commands
             for cmd in self.commands {
                 cmd(commandBuffer, &state)
@@ -503,50 +520,71 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
             Log.warn("\(#function): DepthClamp not supported for this hardware.")
         }
 
-#if false
-        // VK_EXT_extended_dynamic_state3
+        // VK_EXT_extended_dynamic_state3        
+        //FIXME - Use the built-in API after being promoted.
+        let vkCmdSetDepthClampEnable = {
+            let device = self.commandBuffer.device as! VulkanGraphicsDevice
+            return unsafeBitCast(vkGetDeviceProcAddr(device.device, "vkCmdSetDepthClampEnableEXT"),
+                        to: PFN_vkCmdSetDepthClampEnableEXT.self)
+        }()
 
         let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
+            // the pipeline was not created with
+            // VK_DYNAMIC_STATE_DEPTH_CLIP_ENABLE_EXT enabled,
+            // then depth clipping is enabled when depth clamping is disabled
+            // and vice versa.
             switch mode {
             case .clip:
-                vkCmdSetDepthClampEnableEXT(commandBuffer, VK_FALSE)
-                vkCmdSetDepthClipEnableEXT(commandBuffer, VK_TRUE)
+                vkCmdSetDepthClampEnable(commandBuffer, VK_FALSE)
             case .clamp:
-                vkCmdSetDepthClipEnableEXT(commandBuffer, VK_FALSE)
-                vkCmdSetDepthClampEnableEXT(commandBuffer, VK_TRUE)
+                vkCmdSetDepthClampEnable(commandBuffer, VK_TRUE)
             }
         }
         self.encoder!.commands.append(command)
-#else
-        if (mode == .clamp) {
-            Log.err("\(#function) failed: VK_EXT_extended_dynamic_state3 is not supported.")
-        }
-#endif
     }
 
     public func setCullMode(_ mode: CullMode) {
+        let flags: VkCullModeFlags
+        switch mode {
+        case .none:     flags = VkCullModeFlags(VK_CULL_MODE_NONE.rawValue)
+        case .front:    flags = VkCullModeFlags(VK_CULL_MODE_FRONT_BIT.rawValue)
+        case .back:     flags = VkCullModeFlags(VK_CULL_MODE_BACK_BIT.rawValue)
+        }
         let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
-            let flags: VkCullModeFlags
-            switch mode {
-            case .none:     flags = VkCullModeFlags(VK_CULL_MODE_NONE.rawValue)
-            case .front:    flags = VkCullModeFlags(VK_CULL_MODE_FRONT_BIT.rawValue)
-            case .back:     flags = VkCullModeFlags(VK_CULL_MODE_BACK_BIT.rawValue)
-            }
             vkCmdSetCullMode(commandBuffer, flags)
         }
         self.encoder!.commands.append(command)
     }
 
     public func setFrontFacing(_ winding: Winding) {
-           let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
-            let frontFace: VkFrontFace
-            switch winding {
-            case .clockwise:        frontFace = VkFrontFace(VK_FRONT_FACE_CLOCKWISE.rawValue)
-            case .counterClockwise: frontFace = VkFrontFace(VK_FRONT_FACE_COUNTER_CLOCKWISE.rawValue)
-            }
+        let frontFace: VkFrontFace
+        switch winding {
+        case .clockwise:        frontFace = VkFrontFace(VK_FRONT_FACE_CLOCKWISE.rawValue)
+        case .counterClockwise: frontFace = VkFrontFace(VK_FRONT_FACE_COUNTER_CLOCKWISE.rawValue)
+        }
+        let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
             vkCmdSetFrontFace(commandBuffer, frontFace)
         }
-        self.encoder!.commands.append(command)     
+        self.encoder!.commands.append(command)
+    }
+
+    public func setTriangleFillMode(_ fillMode: TriangleFillMode) {
+        let polygonMode: VkPolygonMode
+        switch fillMode {
+        case .fill:     polygonMode = VK_POLYGON_MODE_FILL 
+        case .lines:    polygonMode = VK_POLYGON_MODE_LINE 
+        }
+
+        //FIXME - Use the built-in API after being promoted.
+        let vkCmdSetPolygonMode = {
+            let device = self.commandBuffer.device as! VulkanGraphicsDevice
+            return unsafeBitCast(vkGetDeviceProcAddr(device.device, "vkCmdSetPolygonModeEXT"),
+                                 to: PFN_vkCmdSetPolygonModeEXT.self)
+        }()
+        let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
+            vkCmdSetPolygonMode(commandBuffer, polygonMode)
+        }
+        self.encoder!.commands.append(command)
     }
 
     public func setBlendColor(red: Float, green: Float, blue: Float, alpha: Float) {
@@ -601,11 +639,22 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
         }
     }
  
-    public func draw(vertexStart: Int, vertexCount: Int, instanceCount: Int, baseInstance: Int) {
+    public func drawPrimitives(type primitiveType: PrimitiveType, vertexStart: Int, vertexCount: Int, instanceCount: Int, baseInstance: Int) {
         if vertexCount > 0 && instanceCount > 0 {
             assert(vertexStart >= 0)
             assert(baseInstance >= 0)
+
+            let primitiveTopology: VkPrimitiveTopology
+            switch primitiveType {
+            case .point:            primitiveTopology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST
+            case .line:             primitiveTopology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST
+            case .lineStrip:        primitiveTopology = VK_PRIMITIVE_TOPOLOGY_LINE_STRIP
+            case .triangle:         primitiveTopology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
+            case .triangleStrip:    primitiveTopology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP
+            }
+
             let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
+                vkCmdSetPrimitiveTopology(commandBuffer, primitiveTopology)
                 vkCmdDraw(commandBuffer,
                           UInt32(vertexCount),
                           UInt32(instanceCount),
@@ -616,7 +665,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func drawIndexed(indexCount: Int, indexType: IndexType, indexBuffer: Buffer, indexBufferOffset: Int, instanceCount: Int, baseVertex: Int, baseInstance: Int) {
+    public func drawIndexedPrimitives(type primitiveType: PrimitiveType, indexCount: Int, indexType: IndexType, indexBuffer: Buffer, indexBufferOffset: Int, instanceCount: Int, baseVertex: Int, baseInstance: Int) {
         if indexCount > 0 && instanceCount > 0 {
             assert(indexBufferOffset >= 0)
             assert(baseVertex >= 0)
@@ -627,6 +676,15 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
             assert(bufferView.buffer != nil)
             guard let buffer = bufferView.buffer else { return }
 
+            let primitiveTopology: VkPrimitiveTopology
+            switch primitiveType {
+            case .point:            primitiveTopology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST
+            case .line:             primitiveTopology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST
+            case .lineStrip:        primitiveTopology = VK_PRIMITIVE_TOPOLOGY_LINE_STRIP
+            case .triangle:         primitiveTopology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
+            case .triangleStrip:    primitiveTopology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP
+            }
+
             var type: VkIndexType
             switch indexType {
                 case .uint16:   type = VK_INDEX_TYPE_UINT16
@@ -634,6 +692,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
             }
 
             let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
+                vkCmdSetPrimitiveTopology(commandBuffer, primitiveTopology)
                 vkCmdBindIndexBuffer(commandBuffer, buffer.buffer, VkDeviceSize(indexBufferOffset), type)
                 vkCmdDrawIndexed(commandBuffer,
                                  UInt32(indexCount),
