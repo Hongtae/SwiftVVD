@@ -19,8 +19,8 @@ protocol AppContext: AnyObject {
     var graphicsDeviceContext: GraphicsDeviceContext? { get }
     var audioDeviceContext: AudioDeviceContext? { get }
 
-    func resourceData(forKey: String) -> RawBufferStorage?
-    func setResource(data: RawBufferStorage?, forKey: String)
+    func resourceData(forURL: URL) -> RawBufferStorage?
+    func setResource(data: RawBufferStorage?, forURL: URL)
 
     func checkWindowActivities()
 }
@@ -37,13 +37,13 @@ class AppMain<A>: ApplicationDelegate, AppContext where A: App {
 
     var graphicsDeviceContext: GraphicsDeviceContext?
     var audioDeviceContext: AudioDeviceContext?
-    var resources: [String: RawBufferStorage] = [:]
+    var resources: [URL: RawBufferStorage] = [:]
 
-    func resourceData(forKey key: String) -> RawBufferStorage? {
-        resources[key]
+    func resourceData(forURL url: URL) -> RawBufferStorage? {
+        resources[url]
     }
-    func setResource(data: RawBufferStorage?, forKey key: String) {
-        resources[key] = data
+    func setResource(data: RawBufferStorage?, forURL url: URL) {
+        resources[url] = data
     }
 
     let app: A

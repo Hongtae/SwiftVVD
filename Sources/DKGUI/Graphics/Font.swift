@@ -8,26 +8,49 @@
 import Foundation
 import DKGame
 
+var defaultFontURL: URL? {
+    Bundle.module.url(forResource: "Roboto-Regular",
+                      withExtension: "ttf",
+                      subdirectory: "Fonts")
+}
+
 struct FaceStyle: Hashable {
     var pointSize: CGFloat
     var outilne: CGFloat
     var embolden: CGFloat
-    var dpiX: UInt32
-    var dpiY: UInt32
-    var enableKerning: Bool
-    var forceBitmap: Bool
+    var dpiScale: CGFloat
 }
 
 typealias GlyphData = DKGame.Font.GlyphData
 
-func faceStyle(from font: DKGame.Font) -> FaceStyle {
-    FaceStyle(pointSize: font.pointSize,
-              outilne: font.outline,
-              embolden: font.embolden,
-              dpiX: font.dpi.x,
-              dpiY: font.dpi.y,
-              enableKerning: font.kerningEnabled,
-              forceBitmap: font.forceBitmap)
+extension DKGame.Font {
+    func setStyle(_ style: FaceStyle) {
+        let dpiX = CGFloat(DKGame.Font.defaultDPI.x) * style.dpiScale
+        let dpiY = CGFloat(DKGame.Font.defaultDPI.y) * style.dpiScale
+        self.setStyle(pointSize: style.pointSize,
+                      dpi: (UInt32(dpiX), UInt32(dpiY)),
+                      embolden: 0,
+                      outline: 0,
+                      enableKerning: true,
+                      forceBitmap: true)
+    }
+}
+
+extension View {
+    public func font(_ font: Font?) -> some View {
+        return environment(\.font, font)
+    }
+}
+
+enum FontEnvironmentKey: EnvironmentKey {
+    static var defaultValue: Font? { return nil }
+}
+
+extension EnvironmentValues {
+    public var font: Font? {
+        set { self[FontEnvironmentKey.self] = newValue }
+        get { self[FontEnvironmentKey.self] }
+    }
 }
 
 class AnyFontBox {
@@ -42,11 +65,26 @@ class AnyFontBox {
         self.style = style
     }
 
-    func loadFont(_ graphicsDevice: GraphicsDeviceContext) -> DKGame.Font? {
+    func loadFont(_ context: SharedContext) {
         if self.font == nil {
-            //TODO: load font with identifier or URL
+            if let url = context.fontIdentifierURLs[self.identifier] ?? defaultFontURL {
+                var data = context.appContext.resourceData(forURL: url)
+                if data == nil {
+                    do {
+                        print("Loading font resource: \(url)")
+                        let d = try Data(contentsOf: url, options: [])
+                        data = RawBufferStorage(d)
+                    } catch {
+                        print("Error on loading data: \(error)")
+                    }
+                }
+                if let data, let device = context.appContext.graphicsDeviceContext {
+                    self.font = DKGame.Font(deviceContext: device, data: data)
+                }
+            } else {
+                fatalError("font URL cannot be nil")
+            }
         }
-        return self.font
     }
 
     func glyphData(for c: UnicodeScalar) -> GlyphData? {
@@ -93,6 +131,10 @@ class AnyFontBox {
             c1 = c2
         }
         return length
+    }
+
+    var lineHeight: CGFloat {
+        font?.lineHeight() ?? 0
     }
 
     public func bounds(of text: String) -> CGRect {
@@ -216,11 +258,19 @@ extension Font {
 }
 
 extension Font {
-    func load(_ graphicsDevice: GraphicsDeviceContext) -> DKGame.Font? {
-        provider.loadFont(graphicsDevice)
+    func load(_ context: SharedContext) {
+        provider.loadFont(context)
     }
 
     func glyphData(for c: UnicodeScalar) -> GlyphData? {
         provider.glyphData(for: c)
+    }
+
+    func kernAdvance(left: UnicodeScalar, right: UnicodeScalar) -> CGPoint {
+        provider.kernAdvance(left: left, right: right)
+    }
+
+    var lineHeight: CGFloat {
+        provider.lineHeight
     }
 }

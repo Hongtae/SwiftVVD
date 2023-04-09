@@ -635,10 +635,23 @@ public struct GraphicsContext {
     }
 
     public struct ResolvedText {
+        public func measure(in size: CGSize) -> CGSize {
+            lines.reduce(CGSize.zero) { size, line in
+                CGSize(width: max(size.width, line.size.width),
+                       height: size.height + line.lineHeight)
+            }
+        }
+        public func firstBaseline(in size: CGSize) -> CGFloat {
+            lines.first?.baseline ?? 0
+        }
+        public func lastBaseline(in size: CGSize) -> CGFloat {
+            var height: CGFloat = 0
+            for line in lines[0..<(lines.count - 1)] {
+                height = height + line.lineHeight
+            }
+            return height + (lines.last?.baseline ?? 0)
+        }
         public var shading: Shading
-        public func measure(in size: CGSize) -> CGSize { .zero }
-        public func firstBaseline(in size: CGSize) -> CGFloat { .zero }
-        public func lastBaseline(in size: CGSize) -> CGFloat { .zero }
 
         struct GlyphVertex {
             let pos: Vector2
@@ -646,16 +659,150 @@ public struct GraphicsContext {
         }
         struct GlyphGroup {
             let texture: Texture
-            var vertices: [GlyphVertex]
+            let vertices: [GlyphVertex] // relative position per line (origin: 0,0)
         }
-        let text: String
-        var glyphGroups: [GlyphGroup] = []
-        var bounds: CGRect = .zero
+
+        struct Line {
+            let glyphGroups: [GlyphGroup]
+            let size: CGSize
+            let baseline: CGFloat
+            let lineHeight: CGFloat
+        }
+        let lines: [Line]
     }
 
     public func resolve(_ text: Text) -> ResolvedText {
-        fatalError()
+        var font = text.font
+        if font == nil {
+            font = self.environment.font
+        }
+        var lines: [ResolvedText.Line] = []
+
+        if let font {
+            typealias GlyphVertex = ResolvedText.GlyphVertex
+            struct Quad {
+                let lt: GlyphVertex
+                let rt: GlyphVertex
+                let lb: GlyphVertex
+                let rb: GlyphVertex
+                let texture: Texture
+            }
+            let str = text.storage.unicodeScalars
+            var quads: [Quad] = []
+            quads.reserveCapacity(str.count)
+
+            var bboxMin = Vector2(0, 0)
+            var bboxMax = Vector2(0, 0)
+            var offset: CGFloat = 0.0        // accumulated text width (pixel)
+
+            var c1: UnicodeScalar = UnicodeScalar(0)
+            for char in str {
+                let c2 = char as! UnicodeScalar
+
+                // get glyph info from font object
+                if let glyph = font.glyphData(for: c2) {
+                    let posMin = Vector2(Scalar(glyph.position.x + offset),
+                                         Scalar(glyph.position.y - glyph.ascender))
+                    let posMax = Vector2(Scalar(glyph.frame.width),
+                                         Scalar(glyph.frame.height - glyph.ascender)) + posMin
+
+                    if offset > 0.0 {
+                        bboxMin = .minimum(bboxMin, posMin)
+                        bboxMax = .maximum(bboxMax, posMax)
+                    } else {
+                        bboxMin = posMin
+                        bboxMax = posMax
+                    }
+                    if let texture = glyph.texture {
+                        let textureWidth = texture.width
+                        let textureHeight = texture.height
+                        if textureWidth > 0 && textureHeight > 0 {
+                            let invW = 1.0 / Float(textureWidth)
+                            let invH = 1.0 / Float(textureHeight)
+
+                            let uvMinX = Float(glyph.frame.minX) * invW
+                            let uvMinY = Float(glyph.frame.minY) * invH
+                            let uvMaxX = Float(glyph.frame.maxX) * invW
+                            let uvMaxY = Float(glyph.frame.maxY) * invH
+
+                            let q = Quad(
+                                lt: GlyphVertex(
+                                    pos: Vector2(posMin.x, posMin.y),
+                                    tex: (uvMinX, uvMinY)),
+                                rt: GlyphVertex(
+                                    pos: Vector2(posMax.x, posMin.y),
+                                    tex: (uvMaxX, uvMinY)),
+                                lb: GlyphVertex(
+                                    pos: Vector2(posMin.x, posMax.y),
+                                    tex: (uvMinX, uvMaxY)),
+                                rb: GlyphVertex(
+                                    pos: Vector2(posMax.x, posMax.y),
+                                    tex: (uvMaxX, uvMaxY)),
+                                texture: texture)
+                            quads.append(q)
+                        }
+                    }
+                    offset += glyph.advance.width + font.kernAdvance(left: c1, right: c2).x
+                }
+                c1 = c2
+            }
+            if quads.isEmpty == false {
+                let width = bboxMax.x - bboxMin.x
+                let height = bboxMax.y - bboxMin.y
+                let ascender = 0 - bboxMin.y
+                let offset = Vector2(0, ascender)
+
+                if width > .ulpOfOne, height > .ulpOfOne {
+                    // sort by texture order
+                    quads.sort {
+                        // unsafeBitCast($0.texture, to: UInt.self) > unsafeBitCast($1.texture, to: UInt.self)
+                        ObjectIdentifier($0.texture) > ObjectIdentifier($1.texture)
+                    }
+
+                    typealias GlyphGroup = ResolvedText.GlyphGroup
+
+                    var glyphGroups: [GlyphGroup] = []
+                    var size: CGSize = .zero
+                    var baseline: CGFloat = .zero
+                    var lineHeight: CGFloat = .zero
+
+                    var glyphTexture: Texture? = nil
+                    var vertices: [GlyphVertex] = []
+                    vertices.reserveCapacity(quads.count * 6)
+                    for q in quads {
+                        if q.texture !== glyphTexture {
+                            if vertices.isEmpty == false {
+                                glyphGroups.append(GlyphGroup(texture: q.texture,
+                                                              vertices: vertices))
+                            }
+                            vertices.removeAll(keepingCapacity: true)
+                            glyphTexture = q.texture
+                        }
+                        vertices.append(contentsOf: [q.lb, q.lt, q.rb].map {
+                                GlyphVertex(pos: $0.pos + offset, tex: $0.tex)
+                            })
+                        vertices.append(contentsOf: [q.rb, q.lt, q.rt].map {
+                                GlyphVertex(pos: $0.pos + offset, tex: $0.tex)
+                            })
+                    }
+                    if let glyphTexture, vertices.isEmpty == false {
+                        glyphGroups.append(GlyphGroup(texture: glyphTexture,
+                                                      vertices: vertices))
+                    }
+                    size = CGSize(width: width, height: height)
+                    baseline = ascender
+                    lineHeight = font.lineHeight
+
+                    lines.append(ResolvedText.Line(glyphGroups: glyphGroups,
+                                                   size: size,
+                                                   baseline: baseline,
+                                                   lineHeight: lineHeight))
+                }
+            }
+        }
+        return ResolvedText(shading: .color(.black), lines: lines)
     }
+
     public func draw(_ text: ResolvedText, in rect: CGRect) {
         fatalError()
     }

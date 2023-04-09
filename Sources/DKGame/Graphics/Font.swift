@@ -59,7 +59,8 @@ private func FT_HAS_FIXED_SIZES(_ face: FT_Face) -> Bool {
 
 public class Font {
     public typealias DPI = (x: UInt32, y: UInt32)
-    public static let defaultDPI = DPI(x: 96, y: 96)
+    //public static let defaultDPI = DPI(x: 96, y: 96)
+    public static let defaultDPI = DPI(x: 72, y: 72)
 
     private let library: FTLibrary
     private var face: FT_Face

@@ -14,6 +14,10 @@ struct AnyTextStorage {
 public struct Text: View {
     struct Storage {
         let anyTextStorage: AnyTextStorage
+
+        var unicodeScalars: any BidirectionalCollection {
+            anyTextStorage.content.unicodeScalars as any BidirectionalCollection
+        }
     }
     let storage: Storage
 
