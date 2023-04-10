@@ -164,6 +164,7 @@ public struct GraphicsContext {
         }
     }
 
+    // MARK: - Context Layer
     func makeLayerContext() -> Self? {
         return GraphicsContext(environment: self.environment,
                                contentOffset: self.contentOffset,
@@ -197,7 +198,31 @@ public struct GraphicsContext {
                                stencilBuffer: stencil)
     }
 
-    // MARK: -
+    public func drawLayer(content: (inout GraphicsContext) throws -> Void) rethrows {
+        if var context = self.makeLayerContext() {
+            do {
+                try content(&context)
+                let offset = -context.contentOffset
+                let scale = context.contentScale
+                let texture = context.backBuffer
+                self._draw(texture: texture,
+                           in: CGRect(origin: offset, size: scale),
+                           transform: .identity,
+                           textureFrame: CGRect(x: 0, y: 0,
+                                                width: texture.width,
+                                                height: texture.height),
+                           textureTransform: .identity,
+                           blendMode: context.blendMode,
+                           color: .white)
+            } catch {
+                Log.err("GraphicsContext error: \(error)")
+            }
+        } else {
+            Log.error("GraphicsContext error: failed to create new context.")
+        }
+    }
+
+    // MARK: - Transformation Matrix
     public mutating func scaleBy(x: CGFloat, y: CGFloat) {
         self.transform = self.transform.scaledBy(x: x, y: y)
     }
@@ -214,7 +239,7 @@ public struct GraphicsContext {
         self.transform = self.transform.concatenating(matrix)
     }
 
-    // MARK: -
+    // MARK: - Clipping
     public struct ClipOptions: OptionSet, Sendable {
         public let rawValue: UInt32
         public init(rawValue: UInt32) { self.rawValue = rawValue }
@@ -307,7 +332,7 @@ public struct GraphicsContext {
         }
     }
 
-    // MARK: -
+    // MARK: - Filter Rendering
     public struct Filter {
         enum FilterStyle {
             case transformMatrix(matrix: ProjectionTransform)
@@ -495,6 +520,7 @@ public struct GraphicsContext {
         }
     }
 
+    // MARK: - Shading Options
     public struct Shading {
         enum Property {
             case color(color: Color)
@@ -545,6 +571,10 @@ public struct GraphicsContext {
         }
     }
 
+    public func resolve(_ shading: Shading) -> Shading {
+        shading
+    }
+
     public struct GradientOptions: OptionSet, Sendable {
         public let rawValue: UInt32
         public init(rawValue: UInt32) { self.rawValue = rawValue }
@@ -554,35 +584,7 @@ public struct GraphicsContext {
         public static var linearColor   = GradientOptions(rawValue: 4)
     }
 
-    // MARK: -
-    public func resolve(_ shading: Shading) -> Shading {
-        fatalError()
-    }
-
-    public func drawLayer(content: (inout GraphicsContext) throws -> Void) rethrows {
-        if var context = self.makeLayerContext() {
-            do {
-                try content(&context)
-                let offset = -context.contentOffset
-                let scale = context.contentScale
-                let texture = context.backBuffer
-                self._draw(texture: texture,
-                           in: CGRect(origin: offset, size: scale),
-                           transform: .identity,
-                           textureFrame: CGRect(x: 0, y: 0,
-                                                width: texture.width,
-                                                height: texture.height),
-                           textureTransform: .identity,
-                           blendMode: context.blendMode,
-                           color: .white)
-            } catch {
-                Log.err("GraphicsContext error: \(error)")
-            }
-        } else {
-            Log.error("GraphicsContext error: failed to create new context.")
-        }
-    }
-
+    // MARK: - Path Rendering
     public func fill(_ path: Path, with shading: Shading, style: FillStyle = FillStyle()) {
         if shading.properties.isEmpty { return }
         self._drawPathFillWithStencil(path, backBuffer: self.backBuffer) {
@@ -612,6 +614,7 @@ public struct GraphicsContext {
         stroke(path, with: shading, style: StrokeStyle(lineWidth: lineWidth))
     }
 
+    // MARK: - Image Rendering
     public struct ResolvedImage {
         public var size: CGSize { .zero }
         public let baseline: CGFloat
@@ -634,6 +637,7 @@ public struct GraphicsContext {
         draw(resolve(image), at: point, anchor: anchor)
     }
 
+    // MARK: - Text Rendering
     public struct ResolvedText {
         public func measure(in size: CGSize) -> CGSize {
             lines.reduce(CGSize.zero) { size, line in
@@ -816,6 +820,7 @@ public struct GraphicsContext {
         draw(resolve(text), at: point, anchor: anchor)
     }
 
+    // MARK: - Symbol Rendering
     public struct ResolvedSymbol {
         public var size: CGSize { .zero }
     }
