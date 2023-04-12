@@ -17,7 +17,7 @@ protocol WindowProxy: AnyObject {
     @MainActor func makeWindow() -> Window?
 }
 
-protocol SceneProxy {
+protocol SceneProxy: AnyObject {
     associatedtype Content: Scene
     var scene: Content { get }
     var children: [any SceneProxy] { get }
@@ -44,7 +44,7 @@ extension SceneProxy {
     }
 }
 
-struct SceneContext<Content>: SceneProxy where Content: Scene {
+class SceneContext<Content>: SceneProxy where Content: Scene {
     var scene: Content
     var children: [any SceneProxy]
     var windows: [any WindowProxy]

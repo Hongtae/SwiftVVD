@@ -62,6 +62,8 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                 let date = Date(timeIntervalSinceNow: 0)
 
                 if state.bounds != contentBounds || state.contentScaleFactor != contentScaleFactor {
+                    self.environmentValues.displayScale = state.contentScaleFactor
+                    view.updateEnvironment(self.environmentValues)
                     view.layout(offset: state.bounds.origin,
                                 size: state.bounds.size,
                                 scaleFactor: state.contentScaleFactor)
@@ -97,14 +99,16 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                             encoder.endEncoding()
                         }
 
-                        if let context = GraphicsContext(environment: view.environmentValues,
-                                                      contentOffset: contentBounds.origin,
-                                                      contentScale: contentBounds.size,
-                                                      resolution: CGSize(width: backBuffer.width,
-                                                                         height: backBuffer.height),
-                                                      commandBuffer: commandBuffer,
-                                                      backBuffer: backBuffer,
-                                                      stencilBuffer: stencilBuffer) {
+                        if let context = GraphicsContext(
+                            sharedContext: self.sharedContext,
+                            environment: view.environmentValues,
+                            contentOffset: contentBounds.origin,
+                            contentScale: contentBounds.size,
+                            resolution: CGSize(width: backBuffer.width,
+                                               height: backBuffer.height),
+                            commandBuffer: commandBuffer,
+                            backBuffer: backBuffer,
+                            stencilBuffer: stencilBuffer) {
                             view.draw(frame: contentBounds, context: context)
                         }
 

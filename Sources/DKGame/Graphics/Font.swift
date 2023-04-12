@@ -65,11 +65,12 @@ public class Font {
     private let library: FTLibrary
     private var face: FT_Face
     private let faceLock = SpinLock()
-    private var fontData: RawBufferStorage?
+    public private(set) var fontData: RawBufferStorage?
 
     public let deviceContext: GraphicsDeviceContext
     public let familyName: String
     public let styleName: String
+    public let filePath: String
 
     public let maxPointSize: CGFloat = CGFloat(1<<25) - CGFloat(1.0/64.0)
 
@@ -200,6 +201,7 @@ public class Font {
         self.face = face!
         self.familyName = .init(cString: face!.pointee.family_name)
         self.styleName = .init(cString: face!.pointee.style_name)
+        self.filePath = path
     }
 
     public convenience init?<D>(deviceContext: GraphicsDeviceContext,
@@ -241,6 +243,7 @@ public class Font {
         self.face = face!
         self.familyName = .init(cString: face!.pointee.family_name)
         self.styleName = .init(cString: face!.pointee.style_name)
+        self.filePath = ""
     }
 
     deinit {

@@ -78,7 +78,10 @@ public struct GraphicsContext {
         CGSize(width: self.backBuffer.width, height: self.backBuffer.height)
     }
 
-    init?(environment: EnvironmentValues,
+    let sharedContext: SharedContext
+
+    init?(sharedContext: SharedContext,
+          environment: EnvironmentValues,
           contentOffset: CGPoint,
           contentScale: CGSize,
           transform: CGAffineTransform = .identity,
@@ -86,7 +89,7 @@ public struct GraphicsContext {
           commandBuffer: CommandBuffer,
           backBuffer: Texture? = nil,
           stencilBuffer: Texture? = nil) {
-
+        self.sharedContext = sharedContext
         self.opacity = 1
         self.blendMode = .normal
         self.transform = transform
@@ -166,7 +169,8 @@ public struct GraphicsContext {
 
     // MARK: - Context Layer
     func makeLayerContext() -> Self? {
-        return GraphicsContext(environment: self.environment,
+        return GraphicsContext(sharedContext: self.sharedContext,
+                               environment: self.environment,
                                contentOffset: self.contentOffset,
                                contentScale: self.contentScale,
                                transform: self.transform,
@@ -188,7 +192,8 @@ public struct GraphicsContext {
            height.rounded() == resolution.height.rounded() {
             stencil = self.stencilBuffer
         }
-        return GraphicsContext(environment: self.environment,
+        return GraphicsContext(sharedContext: self.sharedContext,
+                               environment: self.environment,
                                contentOffset: .zero,
                                contentScale: frame.size,
                                transform: self.transform,
@@ -667,12 +672,12 @@ public struct GraphicsContext {
         }
 
         struct Line {
-            let glyphGroups: [GlyphGroup]
             let size: CGSize
             let baseline: CGFloat
             let lineHeight: CGFloat
         }
         let lines: [Line]
+        let glyphGroups: [GlyphGroup]
     }
 
     public func resolve(_ text: Text) -> ResolvedText {
@@ -681,8 +686,12 @@ public struct GraphicsContext {
             font = self.environment.font
         }
         var lines: [ResolvedText.Line] = []
+        typealias GlyphGroup = ResolvedText.GlyphGroup
+        var glyphGroups: [GlyphGroup] = []
 
-        if let font {
+        if var font {
+            font.load(self.sharedContext)
+
             typealias GlyphVertex = ResolvedText.GlyphVertex
             struct Quad {
                 let lt: GlyphVertex
@@ -708,7 +717,7 @@ public struct GraphicsContext {
                     let posMin = Vector2(Scalar(glyph.position.x + offset),
                                          Scalar(glyph.position.y - glyph.ascender))
                     let posMax = Vector2(Scalar(glyph.frame.width),
-                                         Scalar(glyph.frame.height - glyph.ascender)) + posMin
+                                         Scalar(glyph.frame.height)) + posMin
 
                     if offset > 0.0 {
                         bboxMin = .minimum(bboxMin, posMin)
@@ -763,9 +772,6 @@ public struct GraphicsContext {
                         ObjectIdentifier($0.texture) > ObjectIdentifier($1.texture)
                     }
 
-                    typealias GlyphGroup = ResolvedText.GlyphGroup
-
-                    var glyphGroups: [GlyphGroup] = []
                     var size: CGSize = .zero
                     var baseline: CGFloat = .zero
                     var lineHeight: CGFloat = .zero
@@ -797,21 +803,68 @@ public struct GraphicsContext {
                     baseline = ascender
                     lineHeight = font.lineHeight
 
-                    lines.append(ResolvedText.Line(glyphGroups: glyphGroups,
-                                                   size: size,
+                    lines.append(ResolvedText.Line(size: size,
                                                    baseline: baseline,
                                                    lineHeight: lineHeight))
                 }
             }
         }
-        return ResolvedText(shading: .color(.black), lines: lines)
+        return ResolvedText(shading: .color(.black), lines: lines, glyphGroups: glyphGroups)
     }
 
     public func draw(_ text: ResolvedText, in rect: CGRect) {
         fatalError()
     }
     public func draw(_ text: ResolvedText, at point: CGPoint, anchor: UnitPoint = .center) {
-        fatalError()
+        guard let shading = text.shading.properties.first else {
+            fatalError()
+        }
+        if text.glyphGroups.isEmpty {
+            return
+        }
+
+        if case let .color(color) = shading {
+            let c = color.dkColor.float4
+            let scale = self.contentScale / self.resolution
+            let transform2 = CGAffineTransform(scaleX: scale.width, y: scale.height)
+                .concatenating(CGAffineTransform(translationX: point.x, y: point.y))
+                .concatenating(self.transform)
+                .concatenating(self.viewTransform)
+
+            let renderPass = RenderPassDescriptor(
+                colorAttachments: [
+                    RenderPassColorAttachmentDescriptor(
+                        renderTarget: backBuffer,
+                        loadAction: .load,
+                        storeAction: .store)
+                ])
+            guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPass) else {
+                Log.err("GraphicsContext error: makeRenderCommandEncoder failed.")
+                return
+            }
+
+            for glyphGroup in text.glyphGroups {
+                let texture = glyphGroup.texture
+                let vertices: [_Vertex] = glyphGroup.vertices.map {
+                    let v1 = $0.pos
+                    let v2 = v1.applying(transform2)
+                    return _Vertex(position: $0.pos.applying(transform2).float2,
+                            texcoord: $0.tex,
+                            color: c)
+                }
+                self._encodeDrawCommand(shader: .rcImage,
+                                        stencil: .ignore,
+                                        vertices: vertices,
+                                        indices: nil,
+                                        texture: texture,
+                                        blendState: .defaultAlpha,
+                                        pushConstantData: nil,
+                                        encoder: encoder)
+            }
+            encoder.endEncoding()
+        } else {
+            fatalError()
+        }
     }
     public func draw(_ text: Text, in rect: CGRect) {
         draw(resolve(text), in: rect)

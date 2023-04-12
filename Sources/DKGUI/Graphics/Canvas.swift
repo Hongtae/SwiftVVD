@@ -49,7 +49,7 @@ extension Canvas where Symbols == EmptyView {
     }
 }
 
-struct CanvasContext<Symbols>: ViewProxy where Symbols: View {
+class CanvasContext<Symbols>: ViewProxy where Symbols: View {
     typealias Content = Canvas<Symbols>
     var view: Content
 
@@ -73,7 +73,7 @@ struct CanvasContext<Symbols>: ViewProxy where Symbols: View {
         self.contentScaleFactor = 1
     }
 
-    mutating func layout(offset: CGPoint, size: CGSize, scaleFactor: CGFloat) {
+    func layout(offset: CGPoint, size: CGSize, scaleFactor: CGFloat) {
         self.layoutOffset = offset
         self.layoutSize = size
         self.contentScaleFactor = scaleFactor
