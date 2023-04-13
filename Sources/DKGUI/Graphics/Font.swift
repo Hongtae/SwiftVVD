@@ -83,9 +83,12 @@ class AnyFontBox {
                         print("Error on loading data: \(error)")
                     }
                 }
-                if let data, let device = context.appContext.graphicsDeviceContext {
-                    self.font = DKGame.Font(deviceContext: device, data: data)
-                    self.font?.setStyle(self.style, scale: dpiScale)
+                if let data {
+                    context.appContext.setResource(data: data, forURL: url)
+                    if let device = context.appContext.graphicsDeviceContext {
+                        self.font = DKGame.Font(deviceContext: device, data: data)
+                        self.font?.setStyle(self.style, scale: dpiScale)
+                    }
                 }
             } else {
                 fatalError("font URL cannot be nil")
@@ -99,18 +102,20 @@ class AnyFontBox {
             if let url = context.fontIdentifierURLs[self.identifier] ?? defaultFontURL {
                 var data = context.appContext.resourceData(forURL: url)
                 if data == nil {
-                    let session = URLSession.shared
-                    do {
-                        let (downloaded, _) = try await session.data(from: url)
-                        if downloaded.isEmpty == false {
-                            data = RawBufferStorage(downloaded)
-                        }
-                    } catch {
+                    let task = Task {
+                        try Data(contentsOf: url, options: [])
+                    }
+                    switch await task.result {
+                    case .failure(let error):
                         print("Error on loading data: \(error)")
+                    case .success(let downloaded):
+                        data = RawBufferStorage(downloaded)
                     }
                 }
-                if let data, let device = context.appContext.graphicsDeviceContext {
-                    if let font = DKGame.Font(deviceContext: device, data: data) {
+                if let data {
+                    context.appContext.setResource(data: data, forURL: url)
+                    if let device = context.appContext.graphicsDeviceContext,
+                       let font = DKGame.Font(deviceContext: device, data: data) {
                         await MainActor.run {
                             self.font = font
                             self.font?.setStyle(self.style, scale: dpiScale)
@@ -366,7 +371,7 @@ extension Font {
 
 extension Font {
     func load(_ context: SharedContext) {
-        provider.load(context)
+        //provider.load(context)
     }
 
     func glyphData(for c: UnicodeScalar) -> GlyphData? {

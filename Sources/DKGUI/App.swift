@@ -82,6 +82,7 @@ class AppMain<A>: ApplicationDelegate, AppContext where A: App {
         self.scene = EmptyScene().makeSceneProxy()
         self.graphicsDeviceContext = nil
         self.audioDeviceContext = nil
+        self.resources = [:]
     }
 
     init() {

@@ -689,7 +689,7 @@ public struct GraphicsContext {
         typealias GlyphGroup = ResolvedText.GlyphGroup
         var glyphGroups: [GlyphGroup] = []
 
-        if var font {
+        if let font {
             font.load(self.sharedContext)
 
             typealias GlyphVertex = ResolvedText.GlyphVertex
@@ -845,9 +845,7 @@ public struct GraphicsContext {
 
             for glyphGroup in text.glyphGroups {
                 let texture = glyphGroup.texture
-                let vertices: [_Vertex] = glyphGroup.vertices.map {
-                    let v1 = $0.pos
-                    let v2 = v1.applying(transform2)
+                let vertices = glyphGroup.vertices.map {
                     return _Vertex(position: $0.pos.applying(transform2).float2,
                             texcoord: $0.tex,
                             color: c)

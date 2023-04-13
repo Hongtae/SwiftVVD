@@ -40,17 +40,18 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
 
     private func runWindowUpdateTask() -> Task<Void, Never> {
         Task.detached(priority: .userInitiated) { @MainActor [weak self] in
-            Log.info("Window upate task start.")
+            Log.info("WindowContext<\(Content.self)> update task is started.")
             var tickCounter = TickCounter()
 
             var contentBounds: CGRect = .null
             var contentScaleFactor: CGFloat = 1
             var stencilBuffer: Texture? = nil
-            guard var view = self?.viewProxy else { return }
 
             mainLoop: while true {
                 guard let self = self else { break }
                 if Task.isCancelled { break }
+
+                let view = self.viewProxy
 
                 let swapChain = self.swapChain
                 let (state, config) = { (self.state, self.config) }()
@@ -124,6 +125,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                     await Task.yield()
                 }
             }
+            Log.info("WindowContext<\(Content.self)> update task is finished.")
         }
     }
 
