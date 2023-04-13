@@ -159,9 +159,6 @@ class TextContext: ViewProxy {
         self.layoutSize = size
         if scaleFactor != self.contentScaleFactor {
             self.contentScaleFactor = scaleFactor
-            if let font = self.view.font?.dpiScale(scaleFactor) {
-                self.view = self.view.font(font)
-            }
         }
     }
 
