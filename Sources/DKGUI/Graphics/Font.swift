@@ -21,6 +21,12 @@ struct FaceStyle: Hashable {
     var dpi: Int = 96
 }
 
+protocol TypeFace {
+    func glyphData(for c: UnicodeScalar) -> GlyphData?
+    func kernAdvance(left: UnicodeScalar, right: UnicodeScalar) -> CGPoint
+    var lineHeight: CGFloat { get }
+}
+
 typealias GlyphData = DKGame.Font.GlyphData
 
 extension DKGame.Font {
@@ -60,46 +66,103 @@ extension EnvironmentValues {
     }
 }
 
-protocol FontBox: AnyObject {
-    var identifier: String { get }
-    var style: FaceStyle { get }
+protocol FontBox {    
+    func isEqual(to: any FontBox) -> Bool
+    func hash(into hasher: inout Hasher)
 }
 
-class CustomFontBox: FontBox {
-    let identifier: String
-    let style: FaceStyle
+struct SystemFontBox: FontBox {
+    let size: CGFloat
+    let weight: Font.Weight
+    let design: Font.Design
 
-    init(identifier: String, style: FaceStyle) {
-        self.identifier = identifier
-        self.style = style
+    init(size: CGFloat, weight: Font.Weight, design: Font.Design) {
+        self.size = size
+        self.weight = weight
+        self.design = design
+    }
+
+    func isEqual(to: any FontBox) -> Bool {
+        if let other = to as? Self {
+            return self.size == other.size && 
+                   self.weight == other.weight &&
+                   self.design == other.design
+        }
+        return false
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(size)
+        hasher.combine(weight)
+        hasher.combine(design)
     }
 }
 
-class FixedFontBox: FontBox {
-    let identifier: String
-    let style: FaceStyle
+struct CustomFontBox: FontBox {
+    let name: String
+    let size: CGFloat
 
+    init(name: String, size: CGFloat) {
+        self.name = name
+        self.size = size
+    }
+
+    func isEqual(to: any FontBox) -> Bool {
+        if let other = to as? Self {
+            return self.name == other.name &&
+                   self.size == other.size
+        }
+        return false
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(name)
+        hasher.combine(size)
+    }
+}
+
+struct FixedFontBox: FontBox {
     let font: DKGame.Font
 
     init(_ font: DKGame.Font) {
         self.font = font
-        self.identifier = font.identifier
-        self.style = FaceStyle(pointSize: font.pointSize,
-                               outilne: font.outline,
-                               embolden: font.embolden,
-                               dpi: Int(font.dpi.x))
+    }
 
+    var identifier: String {
+        font.identifier        
+    }
+    var faceStyle: FaceStyle {
+        FaceStyle(pointSize: font.pointSize,
+                  outilne: font.outline,
+                  embolden: font.embolden,
+                  dpi: Int(font.dpi.x))
+    }
+
+    func isEqual(to: any FontBox) -> Bool {
+        if let other = to as? Self {
+            return ObjectIdentifier(self.font) == ObjectIdentifier(other.font)
+        }
+        return false
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(ObjectIdentifier(self.font))
     }
 }
 
 class AnyFontBox {
-    let fontBox: FontBox
+    let fontBox: any FontBox
 
-    var identifier: String  { fontBox.identifier }
-    var style: FaceStyle    { fontBox.style }
-
-    init(_ fontBox: FontBox) {
+    init(_ fontBox: any FontBox) {
         self.fontBox = fontBox
+    }
+
+    func isEqual(to other: AnyFontBox) -> Bool {
+        self.fontBox.isEqual(to: other.fontBox) && other.fontBox.isEqual(to: self.fontBox)
+    }
+
+    func hash(into hasher: inout Hasher) {
+        fontBox.hash(into: &hasher)
     }
 }
 
@@ -111,13 +174,11 @@ public struct Font: Hashable {
     }
 
     public static func == (lhs: Font, rhs: Font) -> Bool {
-        lhs.provider.identifier == rhs.provider.identifier &&
-        lhs.provider.style == rhs.provider.style
+        lhs.provider.isEqual(to: rhs.provider)
     }
 
     public func hash(into hasher: inout Hasher) {
-        hasher.combine(provider.identifier)
-        hasher.combine(provider.style)
+        provider.hash(into: &hasher)
     }
 }
 
@@ -148,43 +209,41 @@ extension Font {
         self.init(provider: AnyFontBox(fontBox))
     }
 
+    static func pointSize(for style: TextStyle) -> CGFloat {
+        switch style {
+        case .largeTitle:   return 26
+        case .title:        return 24
+        case .headline:     return 21
+        case .subheadline:  return 18
+        case .body:         return 16
+        case .callout:      return 12
+        case .footnote:     return 8
+        case .caption:      return 8
+        }
+    }
+
     public static func system(_ style: Font.TextStyle, design: Font.Design = .default) -> Font {
-        let style = FaceStyle(pointSize: 16,
-                              outilne: 0,
-                              embolden: 0)
-        let fontBox = CustomFontBox(identifier: "system-default", style: style)
+        let fontBox = SystemFontBox(size: pointSize(for: style), weight: .regular, design: design)
         return Font(provider: AnyFontBox(fontBox))
     }
 
     public static func system(size: CGFloat, weight: Font.Weight = .regular, design: Font.Design = .default) -> Font {
-        let style = FaceStyle(pointSize: 16,
-                              outilne: 0,
-                              embolden: 0)
-        let fontBox = CustomFontBox(identifier: "system-default", style: style)
+        let fontBox = SystemFontBox(size: size, weight: weight, design: design)
         return Font(provider: AnyFontBox(fontBox))
     }
 
     public static func custom(_ name: String, size: CGFloat, relativeTo textStyle: Font.TextStyle) -> Font {
-        let style = FaceStyle(pointSize: 16,
-                              outilne: 0,
-                              embolden: 0)
-        let fontBox = CustomFontBox(identifier: "system-default", style: style)
+        let fontBox = CustomFontBox(name: name, size: pointSize(for: textStyle) + size)
         return Font(provider: AnyFontBox(fontBox))
     }
 
     public static func custom(_ name: String, fixedSize: CGFloat) -> Font {
-        let style = FaceStyle(pointSize: fixedSize,
-                              outilne: 0,
-                              embolden: 0)
-        let fontBox = CustomFontBox(identifier: "system-default", style: style)
+        let fontBox = CustomFontBox(name: name, size: fixedSize)
         return Font(provider: AnyFontBox(fontBox))
     }
 
     public static func custom(_ name: String, size: CGFloat) -> Font {
-        let style = FaceStyle(pointSize: 16,
-                              outilne: 0,
-                              embolden: 0)
-        let fontBox = CustomFontBox(identifier: "system-default", style: style)
+        let fontBox = CustomFontBox(name: name, size: size)
         return Font(provider: AnyFontBox(fontBox))
     }
 }
@@ -232,3 +291,4 @@ extension Font {
     }
 
 }
+
