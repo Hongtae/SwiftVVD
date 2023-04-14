@@ -28,8 +28,6 @@ class SharedContext {
     var resourceData: [String: Data] = [:]
     var resourceObjects: [String: AnyObject] = [:]
 
-    var fontIdentifierURLs: [String: URL] = [:]
-
     init(appContext: AppContext) {
         self.appContext = appContext
     }
