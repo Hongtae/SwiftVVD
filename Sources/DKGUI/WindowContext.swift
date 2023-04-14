@@ -118,11 +118,13 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                     }
                 }
 
-                while tickCounter.elapsed < frameInterval {
-                    if Task.isCancelled {
+                let t = frameInterval - tickCounter.elapsed
+                if t > 0 {
+                    do {
+                        try await Task.sleep(until: .now + .seconds(t), clock: .suspending)
+                    } catch {
                         break mainLoop
                     }
-                    await Task.yield()
                 }
             }
             Log.info("WindowContext<\(Content.self)> update task is finished.")
