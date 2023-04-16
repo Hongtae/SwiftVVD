@@ -645,7 +645,54 @@ public struct GraphicsContext {
     // MARK: - Text Rendering
     public struct ResolvedText {
         public func measure(in size: CGSize) -> CGSize {
-            fatalError()
+            // TODO: replace rearrangeLineGlyphsToFit(in:)
+            var x: CGFloat = 0
+            var y: CGFloat = 0
+            var width: CGFloat = 0
+            let ellipsisWidth = ellipsis.reduce(CGFloat.zero) {
+                $0 + $1.advance.width + $1.kerning.x
+            }
+            lineLoop:
+            for (n, line) in lines.enumerated() {
+                var isLastLine: Bool { y + line.lineHeight > size.height }
+                let maxWidth = max(0, isLastLine ? size.width - ellipsisWidth : size.width)
+
+                var wordLength: CGFloat = 0
+                for glyph in line.glyphs {
+                    let w = glyph.advance.width + glyph.kerning.x
+                    if glyph.texture == nil { // whitespace
+                        if x > 0, x + wordLength > maxWidth {
+                            if isLastLine {
+                                x += ellipsisWidth
+                                width = max(width, x)
+                                break lineLoop
+                            }
+                            width = max(width, x)
+                            x = wordLength
+                            y += line.lineHeight
+                        } else {
+                            x += wordLength + w
+                        }
+                    } else {
+                        if wordLength > 0, wordLength + w > maxWidth {
+                            if isLastLine {
+                                wordLength += ellipsisWidth
+                                width = max(width, wordLength)
+                                break lineLoop
+                            }
+                            width = max(width, wordLength)
+                            wordLength = 0
+                            y += line.lineHeight
+                        }
+                        wordLength += w
+                    }
+                }
+                width = max(width, x + wordLength)
+                if n == lines.count - 1 { break }
+                y += line.lineHeight
+            }
+            width = clamp(width, min:0, max: max(size.width, 0))
+            return CGSize(width: width, height: y)
         }
         public func firstBaseline(in size: CGSize) -> CGFloat {
             lines.first?.baseline ?? 0
@@ -654,6 +701,10 @@ public struct GraphicsContext {
             fatalError()
         }
         public var shading: Shading
+
+        func rearrangeLineGlyphsToFit(in size: CGSize) -> [Line] {
+            []
+        }
 
         struct Glyph {
             var texture: Texture?
@@ -670,10 +721,25 @@ public struct GraphicsContext {
             var lineHeight: CGFloat
         }
         let lines: [Line]
+        let ellipsis: [Glyph]  // '...'
+
+        // size in pixels
+        var size: CGSize {
+            lines.reduce(CGSize.zero) { size, line in
+                let width = line.glyphs.reduce(CGFloat.zero) {
+                    $0 + $1.advance.width + $1.kerning.x
+                }
+                var size = size
+                size.width = .maximum(size.width, width)
+                size.height += line.lineHeight
+                return size
+            }
+        }
     }
 
     public func resolve(_ text: Text) -> ResolvedText {
         var lines: [ResolvedText.Line] = []
+        var ellipsis: [ResolvedText.Glyph] = []
         let displayScale = self.environment.displayScale
         let font = (text.font ?? self.environment.font)?
             .displayScale(displayScale)
@@ -781,8 +847,23 @@ public struct GraphicsContext {
             if glyphs.isEmpty == false {
                 lines.append(makeGlyphLine())
             }
+
+            // generate ellipsis glyphs...
+            c1 = UnicodeScalar(0)
+            for c2 in "...".unicodeScalars {
+                if let glyph = typeFace.glyphData(for: c2) {
+                    let kerning = typeFace.kernAdvance(left: c1, right: c2)
+                    ellipsis.append(ResolvedText.Glyph(texture: glyph.texture,
+                                                       position: glyph.position,
+                                                       size: glyph.frame.size,
+                                                       advance: glyph.advance,
+                                                       frame: glyph.frame,
+                                                       kerning: kerning))
+                }
+                c1 = c2
+            }
         }
-        return ResolvedText(shading: .foreground, lines: lines)
+        return ResolvedText(shading: .foreground, lines: lines, ellipsis: ellipsis)
     }
 
     public func draw(_ text: ResolvedText, in rect: CGRect) {
