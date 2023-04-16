@@ -40,17 +40,18 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
 
     private func runWindowUpdateTask() -> Task<Void, Never> {
         Task.detached(priority: .userInitiated) { @MainActor [weak self] in
-            Log.info("Window upate task start.")
+            Log.info("WindowContext<\(Content.self)> update task is started.")
             var tickCounter = TickCounter()
 
             var contentBounds: CGRect = .null
             var contentScaleFactor: CGFloat = 1
             var stencilBuffer: Texture? = nil
-            guard var view = self?.viewProxy else { return }
 
             mainLoop: while true {
                 guard let self = self else { break }
                 if Task.isCancelled { break }
+
+                let view = self.viewProxy
 
                 let swapChain = self.swapChain
                 let (state, config) = { (self.state, self.config) }()
@@ -62,8 +63,12 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                 let date = Date(timeIntervalSinceNow: 0)
 
                 if state.bounds != contentBounds || state.contentScaleFactor != contentScaleFactor {
-                    self.environmentValues.displayScale = state.contentScaleFactor
-                    view.updateEnvironment(self.environmentValues)
+
+                    if state.contentScaleFactor != contentScaleFactor {
+                        self.environmentValues.displayScale = state.contentScaleFactor
+                        view.updateEnvironment(self.environmentValues)
+                    }
+
                     view.layout(offset: state.bounds.origin,
                                 size: state.bounds.size,
                                 scaleFactor: state.contentScaleFactor)
@@ -117,13 +122,16 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                     }
                 }
 
-                while tickCounter.elapsed < frameInterval {
-                    if Task.isCancelled {
+                let t = frameInterval - tickCounter.elapsed
+                if t > 0 {
+                    do {
+                        try await Task.sleep(until: .now + .seconds(t), clock: .suspending)
+                    } catch {
                         break mainLoop
                     }
-                    await Task.yield()
                 }
             }
+            Log.info("WindowContext<\(Content.self)> update task is finished.")
         }
     }
 

@@ -159,9 +159,6 @@ class TextContext: ViewProxy {
         self.layoutSize = size
         if scaleFactor != self.contentScaleFactor {
             self.contentScaleFactor = scaleFactor
-            if let font = self.view.font?.dpiScale(scaleFactor) {
-                self.view = self.view.font(font)
-            }
         }
     }
 
@@ -170,6 +167,11 @@ class TextContext: ViewProxy {
             context.draw(self.view, in: CGRect(origin: self.layoutOffset,
                                                size: self.layoutSize))
         }
+    }
+
+    func updateEnvironment(_ environmentValues: EnvironmentValues) {
+        self.environmentValues = environmentValues._resolve(modifiers: modifiers)
+        // TODO: redraw
     }
 }
 

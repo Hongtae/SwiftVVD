@@ -33,9 +33,36 @@ public class BufferStorage<Element> {
     }
 }
 
-public class RawBufferStorage {
+public protocol FixedAddressStorageData: DataProtocol {
+    var count: Int { get }
+    var isEmpty: Bool { get }
+    var address: UnsafeRawPointer? { get }
+}
+
+extension BufferStorage: FixedAddressStorageData,
+                         DataProtocol,
+                         RandomAccessCollection,
+                         BidirectionalCollection,
+                         Collection,
+                         Sequence
+                          where Element == UInt8 {
+    public typealias Element = UnsafeBufferPointer<Element>.Element
+    public typealias Index = UnsafeBufferPointer<Element>.Index
+    public typealias SubSequence = UnsafeBufferPointer<Element>.SubSequence
+    public typealias Indices = UnsafeBufferPointer<Element>.Indices
+
+    public var regions: UnsafeBufferPointer<Element>.Regions { pointer.regions }
+    public subscript(bounds: Range<Index>) -> SubSequence { pointer[bounds] }
+    public subscript(position: Index) -> Element { pointer[position] }
+    public var startIndex: Index { pointer.startIndex }
+    public var endIndex: Index { pointer.endIndex }
+    public var address: UnsafeRawPointer? { UnsafeRawPointer(pointer.baseAddress) }
+}
+
+public class RawBufferStorage: FixedAddressStorageData {
     public let pointer: UnsafeRawBufferPointer
     public var baseAddress: UnsafeRawPointer? { pointer.baseAddress }
+    public var address: UnsafeRawPointer? { pointer.baseAddress }
     public var count: Int { pointer.count }
     public var isEmpty: Bool { pointer.isEmpty }
 
@@ -54,5 +81,25 @@ public class RawBufferStorage {
         if pointer.baseAddress != nil, pointer.count > 0 {
             pointer.deallocate()
         }
+    }
+}
+
+extension RawBufferStorage: DataProtocol {
+    public typealias Element = UnsafeRawBufferPointer.Element
+    public typealias Index = UnsafeRawBufferPointer.Index
+    public typealias SubSequence = UnsafeRawBufferPointer.SubSequence
+    public typealias Indices = UnsafeRawBufferPointer.Indices
+
+    public var regions: UnsafeRawBufferPointer.Regions { pointer.regions }
+    public subscript(bounds: Range<Index>) -> SubSequence { pointer[bounds] }
+    public subscript(position: Index) -> Element { pointer[position] }
+    public var startIndex: Index { pointer.startIndex }
+    public var endIndex: Index { pointer.endIndex }
+}
+
+extension DataProtocol {
+    public func makeFixedAddressStorage() -> any FixedAddressStorageData {
+        if let buff = self as? (any FixedAddressStorageData) { return buff }
+        return RawBufferStorage(self)
     }
 }

@@ -308,11 +308,13 @@ public class VulkanGraphicsDevice : GraphicsDevice {
                     }
 
                     if err == VK_TIMEOUT {
-                        while timer.elapsed < fenceWaitInterval {
-                            if Task.isCancelled {
+                        let t = fenceWaitInterval - timer.elapsed
+                        if t > 0 {
+                            do {
+                                try await Task.sleep(until: .now + .seconds(t), clock: .suspending)
+                            } catch {
                                 break mainLoop
                             }
-                            await Task.yield()
                         }
                     }
                     timer.reset()

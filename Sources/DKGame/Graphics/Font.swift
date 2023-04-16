@@ -65,7 +65,7 @@ public class Font {
     private let library: FTLibrary
     private var face: FT_Face
     private let faceLock = SpinLock()
-    public private(set) var fontData: RawBufferStorage?
+    public private(set) var fontData: (any FixedAddressStorageData)?
 
     public let deviceContext: GraphicsDeviceContext
     public let familyName: String
@@ -204,14 +204,7 @@ public class Font {
         self.filePath = path
     }
 
-    public convenience init?<D>(deviceContext: GraphicsDeviceContext,
-                                data: D) where D: DataProtocol {
-        if data.isEmpty { return nil }
-        let buffer = RawBufferStorage(data) // copy font data
-        self.init(deviceContext: deviceContext, data: buffer)
-    }
-
-    public init?(deviceContext: GraphicsDeviceContext, data: RawBufferStorage) {
+    public init?(deviceContext: GraphicsDeviceContext, data: any DataProtocol) {
         if data.isEmpty { return nil }
 
         self._outline = 0.0
@@ -221,11 +214,12 @@ public class Font {
         self._kerningEnabled = true
         self._forceBitmap = false
 
+        let data = data.makeFixedAddressStorage()
         self.fontData = data
 
         let library = sharedFTLibrary()
         var face: FT_Face? = nil
-        let err: FT_Error = FT_New_Memory_Face(library.library, data.baseAddress, FT_Long(data.count), 0, &face)
+        let err: FT_Error = FT_New_Memory_Face(library.library, data.address, FT_Long(data.count), 0, &face)
         if err != 0 {
             return nil
         }
