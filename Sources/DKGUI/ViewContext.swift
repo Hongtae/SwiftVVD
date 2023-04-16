@@ -27,6 +27,7 @@ class SharedContext {
 
     var resourceData: [String: Data] = [:]
     var resourceObjects: [String: AnyObject] = [:]
+    var cachedTypeFaces: [Font: TypeFace] = [:]
 
     init(appContext: AppContext) {
         self.appContext = appContext
@@ -117,9 +118,6 @@ extension ViewProxy {
         }
         return self.sharedContext.loadResourceData(name: name, bundle: nil, cache: cache)
     }
-
-    func updateEnvironment(_ environmentValues: EnvironmentValues) {
-    }
 }
 
 class ViewContext<Content>: ViewProxy where Content: View {
@@ -178,7 +176,7 @@ class ViewContext<Content>: ViewProxy where Content: View {
 
     func updateEnvironment(_ environmentValues: EnvironmentValues) {
         self.environmentValues = environmentValues._resolve(modifiers: modifiers)
-        // TODO: update subviews
+        self.subview.updateEnvironment(self.environmentValues)
     }
 }
 

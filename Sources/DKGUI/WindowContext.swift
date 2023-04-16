@@ -63,8 +63,12 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                 let date = Date(timeIntervalSinceNow: 0)
 
                 if state.bounds != contentBounds || state.contentScaleFactor != contentScaleFactor {
-                    self.environmentValues.displayScale = state.contentScaleFactor
-                    view.updateEnvironment(self.environmentValues)
+
+                    if state.contentScaleFactor != contentScaleFactor {
+                        self.environmentValues.displayScale = state.contentScaleFactor
+                        view.updateEnvironment(self.environmentValues)
+                    }
+
                     view.layout(offset: state.bounds.origin,
                                 size: state.bounds.size,
                                 scaleFactor: state.contentScaleFactor)

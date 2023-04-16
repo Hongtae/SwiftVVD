@@ -168,6 +168,11 @@ class TextContext: ViewProxy {
                                                size: self.layoutSize))
         }
     }
+
+    func updateEnvironment(_ environmentValues: EnvironmentValues) {
+        self.environmentValues = environmentValues._resolve(modifiers: modifiers)
+        // TODO: redraw
+    }
 }
 
 extension Text: _PrimitiveView {

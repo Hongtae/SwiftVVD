@@ -86,6 +86,11 @@ class CanvasContext<Symbols>: ViewProxy where Symbols: View {
             }
         }
     }
+
+    func updateEnvironment(_ environmentValues: EnvironmentValues) {
+        self.environmentValues = environmentValues._resolve(modifiers: modifiers)
+        // TODO: redraw!
+    }
 }
 
 extension Canvas: _PrimitiveView {
