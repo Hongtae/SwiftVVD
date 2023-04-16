@@ -693,14 +693,13 @@ public struct GraphicsContext {
 
             let makeGlyphLine = {
                 let baseline = 0 - bboxMin.y
-                // adjusts the glyph position relative to the baseline.
-                var glyphs = glyphs.map {
-                    var glyph = $0
-                    glyph.position.y += baseline
-                    return glyph
-                }
                 let line = ResolvedText.Line(
-                    glyphs: glyphs,
+                    // adjusts the glyph position relative to the baseline.
+                    glyphs: glyphs.map {
+                        var glyph = $0
+                        glyph.position.y += baseline
+                        return glyph
+                    },
                     bounds: CGRect(x: bboxMin.x,
                                    y: bboxMax.y,
                                    width: bboxMax.x - bboxMin.x,
@@ -856,7 +855,10 @@ public struct GraphicsContext {
                             texture: texture)
                         quads.append(q)
                     }
-                    offset.x += glyph.advance.width + glyph.kerning.x
+                    // No kerning for line leads
+                    let kerning: CGPoint = offset.x > 0 ? glyph.kerning : .zero
+                    offset.x += glyph.advance.width
+                    offset += Vector2(kerning)
                 }
                 offset.y += line.lineHeight
             }
