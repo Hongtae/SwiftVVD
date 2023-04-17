@@ -161,6 +161,13 @@ public class MetalSwapChain: SwapChain {
     func handleWindowEvent(_ event: WindowEvent) {
         if event.type == .resized {
             // update
+            let contentScale = event.contentScaleFactor
+            let bounds = event.contentBounds
+            let resolution = event.contentBounds.size * contentScale
+
+            self.layer.contentsScale = contentScale
+            self.layer.bounds = bounds
+            self.layer.drawableSize = resolution
         }
     }
 }
