@@ -130,6 +130,8 @@ extension Text {
             return nil
         }.first
     }
+    
+    var ellipsis: String { "..." }
 }
 
 class TextContext: ViewProxy {

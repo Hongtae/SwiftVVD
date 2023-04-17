@@ -707,6 +707,7 @@ public struct GraphicsContext {
         }
 
         struct Glyph {
+            var scalar: UnicodeScalar
             var texture: Texture?
             var position: CGPoint
             var size: CGSize
@@ -722,6 +723,7 @@ public struct GraphicsContext {
         }
         let lines: [Line]
         let ellipsis: [Glyph]  // '...'
+        let ellipsisBaseline: CGFloat
 
         // size in pixels
         var size: CGSize {
@@ -740,6 +742,7 @@ public struct GraphicsContext {
     public func resolve(_ text: Text) -> ResolvedText {
         var lines: [ResolvedText.Line] = []
         var ellipsis: [ResolvedText.Glyph] = []
+        var ellipsisBaseline: CGFloat = 0
         let displayScale = self.environment.displayScale
         let font = (text.font ?? self.environment.font)?
             .displayScale(displayScale)
@@ -801,25 +804,26 @@ public struct GraphicsContext {
                     }
                     if let glyph = face2.glyphData(for: c2) {
                         // Adjust the font scale of the fallback font.
-                        let scale = typeFace.lineHeight / face2.lineHeight
+                        let scale = typeFace.lineHeight /
+                                    (face2.lineHeight * displayScale)
                         let position = CGPoint(
                             x: glyph.position.x,
                             y: glyph.position.y - glyph.ascender) * scale
                         let advance = glyph.advance * scale
-                        let width = glyph.frame.size.width * scale
-                        let height = glyph.frame.size.height * scale
+                        let size = glyph.frame.size * scale
 
                         let ptMin = CGPoint(x: position.x + offset,
                                             y: position.y)
-                        let ptMax = CGPoint(x: width, y: height) + ptMin
+                        let ptMax = CGPoint(x: size.width,
+                                            y: size.height) + ptMin
 
                         if offset > 0.0 {
-                             bboxMin = .minimum(bboxMin, ptMin)
-                             bboxMax = .maximum(bboxMax, ptMax)
-                         } else {
-                             bboxMin = ptMin
-                             bboxMax = ptMax
-                         }
+                            bboxMin = .minimum(bboxMin, ptMin)
+                            bboxMax = .maximum(bboxMax, ptMax)
+                        } else {
+                            bboxMin = ptMin
+                            bboxMax = ptMax
+                        }
 
                         var kerning: CGPoint = .zero
                         if face2.isEqual(to: face1) {
@@ -828,6 +832,7 @@ public struct GraphicsContext {
                         kerning = kerning * scale
 
                         let resolvedGlyph = ResolvedText.Glyph(
+                            scalar: c2,
                             texture: glyph.texture,
                             position: position,
                             size: CGSize(width: ptMax.x - ptMin.x,
@@ -849,21 +854,31 @@ public struct GraphicsContext {
             }
 
             // generate ellipsis glyphs...
+            ellipsisBaseline = typeFace.ascender
+            let scale = 1.0 / displayScale
             c1 = UnicodeScalar(0)
-            for c2 in "...".unicodeScalars {
+            for c2 in text.ellipsis.unicodeScalars {
                 if let glyph = typeFace.glyphData(for: c2) {
-                    let kerning = typeFace.kernAdvance(left: c1, right: c2)
-                    ellipsis.append(ResolvedText.Glyph(texture: glyph.texture,
-                                                       position: glyph.position,
-                                                       size: glyph.frame.size,
-                                                       advance: glyph.advance,
+                    let position = glyph.position * scale
+                    let size = glyph.frame.size * scale
+                    let advance = glyph.advance * scale
+                    let kerning = typeFace.kernAdvance(left: c1,
+                                                       right: c2) * scale
+                    ellipsis.append(ResolvedText.Glyph(scalar: c2,
+                                                       texture: glyph.texture,
+                                                       position: position,
+                                                       size: size,
+                                                       advance: advance,
                                                        frame: glyph.frame,
                                                        kerning: kerning))
                 }
                 c1 = c2
             }
         }
-        return ResolvedText(shading: .foreground, lines: lines, ellipsis: ellipsis)
+        return ResolvedText(shading: .foreground,
+                            lines: lines,
+                            ellipsis: ellipsis,
+                            ellipsisBaseline: ellipsisBaseline)
     }
 
     public func draw(_ text: ResolvedText, in rect: CGRect) {

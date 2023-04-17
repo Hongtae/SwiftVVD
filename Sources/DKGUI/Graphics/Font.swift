@@ -48,7 +48,7 @@ protocol TypeFace {
 }
 
 extension DKGame.Font: TypeFace {
-    var lineHeight: DKGame.CGFloat {
+    var lineHeight: CGFloat {
         self.lineHeight()
     }
 
