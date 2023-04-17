@@ -645,65 +645,122 @@ public struct GraphicsContext {
     // MARK: - Text Rendering
     public struct ResolvedText {
         public func measure(in size: CGSize) -> CGSize {
-            // TODO: replace rearrangeLineGlyphsToFit(in:)
-            var x: CGFloat = 0
-            var y: CGFloat = 0
-            var width: CGFloat = 0
-            let ellipsisWidth = ellipsis.reduce(CGFloat.zero) {
-                $0 + $1.advance.width + $1.kerning.x
+            rearrangeLineGlyphs(toFit: size).reduce(CGSize.zero) {
+                size, line in
+                let bounds = Glyph.lineBounds(line.glyphs)
+                return CGSize(width: max(size.width, bounds.width),
+                              height: size.height + line.lineHeight)
             }
-            lineLoop:
-            for (n, line) in lines.enumerated() {
-                var isLastLine: Bool { y + line.lineHeight > size.height }
-                let maxWidth = max(0, isLastLine ? size.width - ellipsisWidth : size.width)
-
-                var wordLength: CGFloat = 0
-                for glyph in line.glyphs {
-                    let w = glyph.advance.width + glyph.kerning.x
-                    if glyph.texture == nil { // whitespace
-                        if x > 0, x + wordLength > maxWidth {
-                            if isLastLine {
-                                x += ellipsisWidth
-                                width = max(width, x)
-                                break lineLoop
-                            }
-                            width = max(width, x)
-                            x = wordLength
-                            y += line.lineHeight
-                        } else {
-                            x += wordLength + w
-                        }
-                    } else {
-                        if wordLength > 0, wordLength + w > maxWidth {
-                            if isLastLine {
-                                wordLength += ellipsisWidth
-                                width = max(width, wordLength)
-                                break lineLoop
-                            }
-                            width = max(width, wordLength)
-                            wordLength = 0
-                            y += line.lineHeight
-                        }
-                        wordLength += w
-                    }
-                }
-                width = max(width, x + wordLength)
-                if n == lines.count - 1 { break }
-                y += line.lineHeight
-            }
-            width = clamp(width, min:0, max: max(size.width, 0))
-            return CGSize(width: width, height: y)
         }
         public func firstBaseline(in size: CGSize) -> CGFloat {
-            lines.first?.baseline ?? 0
+            rearrangeLineGlyphs(toFit: size).first?.baseline ?? 0
         }
         public func lastBaseline(in size: CGSize) -> CGFloat {
-            fatalError()
+            rearrangeLineGlyphs(toFit: size).last?.baseline ?? 0
         }
         public var shading: Shading
 
-        func rearrangeLineGlyphsToFit(in size: CGSize) -> [Line] {
-            []
+        func rearrangeLineGlyphs(toFit size: CGSize) -> [Line] {
+            let whitespaces = CharacterSet.whitespaces
+            let alphanumerics = CharacterSet.alphanumerics
+            var lines: [Line] = []
+            var x: CGFloat = .zero
+            var y: CGFloat = .zero
+            var glyphs: [Glyph] = []
+            var appendEllipsis = false
+
+            lineLoop:
+            for (n, line) in self.lines.enumerated() {
+                x = 0
+                for glyph in line.glyphs {
+                    if x + glyph.advance.width > size.width {
+                        // break line
+                        if let wsIndex = glyphs.lastIndex(where: { glyph in
+                            //whitespaces.contains(glyph.scalar)
+                            !alphanumerics.contains(glyph.scalar)
+                        }) {
+                            let former = glyphs[0..<(wsIndex)]
+                            let latter = glyphs[(wsIndex+1)...]
+                            glyphs.removeAll(keepingCapacity: true)
+                            glyphs.append(contentsOf: former)
+                            // trim whitespaces
+                            while let scalar = glyphs.last?.scalar,
+                                  whitespaces.contains(scalar) {
+                                glyphs.removeLast()
+                            }
+                            lines.append(
+                                Line(glyphs: glyphs,
+                                     bounds: Glyph.lineBounds(glyphs),
+                                     baseline: line.baseline,
+                                     lineWidth: Glyph.lineWidth(glyphs),
+                                     lineHeight: line.lineHeight))
+
+                            glyphs.removeAll(keepingCapacity: true)
+                            glyphs.append(contentsOf: latter)
+                            x = Glyph.lineWidth(glyphs)
+                        } else {
+                            lines.append(
+                                Line(glyphs: glyphs,
+                                     bounds: Glyph.lineBounds(glyphs),
+                                     baseline: line.baseline,
+                                     lineWidth: Glyph.lineWidth(glyphs),
+                                     lineHeight: line.lineHeight))
+                            glyphs.removeAll(keepingCapacity: true)
+                            glyphs.append(glyph)
+                            x = 0
+                        }
+
+                        if y + line.lineHeight > size.height {
+                            if n < lines.count - 1 {
+                                appendEllipsis = true
+                            }
+                            break lineLoop
+                        }
+                        y += line.lineHeight
+                    }
+
+                    glyphs.append(glyph)
+                    if x > 0 { x += glyph.kerning.x }
+                    x += glyph.advance.width
+                }
+
+                if y + line.lineHeight > size.height {
+                    if n < lines.count - 1 {
+                        appendEllipsis = true
+                    }
+                    break lineLoop
+                }
+                // add line
+                lines.append(Line(glyphs: glyphs,
+                                  bounds: Glyph.lineBounds(glyphs),
+                                  baseline: line.baseline,
+                                  lineWidth: Glyph.lineWidth(glyphs),
+                                  lineHeight: line.lineHeight))
+                y += line.lineHeight
+                glyphs.removeAll(keepingCapacity: true)
+            }
+            if appendEllipsis {     // append ellipsis on last line
+                if var line = lines.last {
+                    let ellipsisWidth = Glyph.lineWidth(self.ellipsis)
+                    let minWidth = size.width - ellipsisWidth
+                    var glyphs: [Glyph] = []
+                    var offset: CGFloat = 0
+                    var x: CGFloat = 0
+                    for glyph in line.glyphs {
+                        if offset > 0 { offset += glyph.kerning.x }
+                        offset += glyph.advance.width
+                        let width = glyph.position.x + glyph.size.width + offset
+                        if x + width > minWidth { break }
+                        x = max(x, width)
+                        glyphs.append(glyph)
+                    }
+                    glyphs.append(contentsOf: self.ellipsis)
+                    line.glyphs = glyphs
+                    lines.removeLast()
+                    lines.append(line)
+                }
+            }
+            return lines
         }
 
         struct Glyph {
@@ -714,27 +771,52 @@ public struct GraphicsContext {
             var advance: CGSize
             var frame: CGRect
             var kerning: CGPoint
+
+            static func lineWidth(_ glyphs: [Glyph]) -> CGFloat {
+                glyphs.reduce(CGFloat.zero) {
+                    if $0 > 0 { return $0 + $1.advance.width + $1.kerning.x }
+                    return $0 + $1.advance.width
+                }
+            }
+            static func lineBounds(_ glyphs: [Glyph]) -> CGRect {
+                var bboxMin: CGPoint = .zero
+                var bboxMax: CGPoint = .zero
+                var offset: CGFloat = .zero
+                glyphs.forEach { glyph in
+                    let ptMin = CGPoint(x: glyph.position.x + offset,
+                                        y: glyph.position.y)
+                    let ptMax = CGPoint(x: glyph.size.width,
+                                        y: glyph.size.height) + ptMin
+                    if offset > 0 {
+                        bboxMin = .minimum(bboxMin, ptMin)
+                        bboxMax = .maximum(bboxMax, ptMax)
+                        offset += glyph.kerning.x
+                    } else {
+                        bboxMin = ptMin
+                        bboxMax = ptMax
+                    }
+                    offset += glyph.advance.width
+                }
+                return CGRect(x: bboxMin.x, y: bboxMin.y,
+                              width: bboxMax.x - bboxMin.x,
+                              height: bboxMax.y - bboxMin.y)
+            }
         }
         struct Line {
             var glyphs: [Glyph]
             var bounds: CGRect
             var baseline: CGFloat
+            var lineWidth: CGFloat
             var lineHeight: CGFloat
         }
         let lines: [Line]
         let ellipsis: [Glyph]  // '...'
         let ellipsisBaseline: CGFloat
 
-        // size in pixels
         var size: CGSize {
             lines.reduce(CGSize.zero) { size, line in
-                let width = line.glyphs.reduce(CGFloat.zero) {
-                    $0 + $1.advance.width + $1.kerning.x
-                }
-                var size = size
-                size.width = .maximum(size.width, width)
-                size.height += line.lineHeight
-                return size
+                CGSize(width: max(size.width, line.lineWidth),
+                       height: size.height + line.lineHeight)
             }
         }
     }
@@ -744,6 +826,7 @@ public struct GraphicsContext {
         var ellipsis: [ResolvedText.Glyph] = []
         var ellipsisBaseline: CGFloat = 0
         let displayScale = self.environment.displayScale
+        assert(displayScale > .ulpOfOne)
         let font = (text.font ?? self.environment.font)?
             .displayScale(displayScale)
         if let typeFace = font?.typeFace(forContext: self.sharedContext) {
@@ -755,7 +838,7 @@ public struct GraphicsContext {
             var bboxMax: CGPoint = .zero
             var offset: CGFloat = .zero
             var glyphs: [ResolvedText.Glyph] = []
-            var lineHeight: CGFloat = typeFace.lineHeight
+            let lineHeight: CGFloat = typeFace.lineHeight / displayScale
 
             var c1: UnicodeScalar = UnicodeScalar(0)
             var face1 = typeFace
@@ -774,13 +857,13 @@ public struct GraphicsContext {
                                    width: bboxMax.x - bboxMin.x,
                                    height: bboxMax.y - bboxMin.y),
                     baseline: baseline,
+                    lineWidth: offset,
                     lineHeight: lineHeight)
 
                 bboxMax = .zero
                 bboxMax = .zero
                 offset = .zero
                 glyphs = []
-                lineHeight = typeFace.lineHeight
                 c1 = UnicodeScalar(0)
                 face1 = typeFace
                 return line
@@ -804,8 +887,7 @@ public struct GraphicsContext {
                     }
                     if let glyph = face2.glyphData(for: c2) {
                         // Adjust the font scale of the fallback font.
-                        let scale = typeFace.lineHeight /
-                                    (face2.lineHeight * displayScale)
+                        let scale = lineHeight / face2.lineHeight
                         let position = CGPoint(
                             x: glyph.position.x,
                             y: glyph.position.y - glyph.ascender) * scale
@@ -904,9 +986,7 @@ public struct GraphicsContext {
 
         if case let .color(color) = shading {
             let c = color.dkColor.float4
-            let scale = self.contentScale / self.resolution
-            let transform = CGAffineTransform(scaleX: scale.width, y: scale.height)
-                .concatenating(CGAffineTransform(translationX: point.x, y: point.y))
+            let transform = CGAffineTransform(translationX: point.x, y: point.y)
                 .concatenating(self.transform)
                 .concatenating(self.viewTransform)
 

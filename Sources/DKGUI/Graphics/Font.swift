@@ -31,7 +31,7 @@ var defaultFontURL: URL? {
                       subdirectory: "Fonts/Roboto")
 }
 
-let defaultDPI = 96
+let defaultDPI = 72
 
 typealias GlyphData = DKGame.Font.GlyphData
 
