@@ -107,7 +107,6 @@ public struct GraphicsContext {
             assert(backBuffer.dimensions == (width, height, 1))
             self.backBuffer = backBuffer
         } else {
-
             guard let backBuffer = device.makeTexture(
                 descriptor: TextureDescriptor(textureType: .type2D,
                                               pixelFormat: .rgba8Unorm,
@@ -684,11 +683,13 @@ public struct GraphicsContext {
                             Glyph.width(glyphs) > size.width { // split!
                             if let index = glyphs.lastIndex(where: {
                                 breakables.contains($0.scalar)
-                            }) {
-                                remains.insert(contentsOf: glyphs[(index+1)...], at: remains.startIndex)
+                            }), index < glyphs.count - 1 {
+                                remains.insert(contentsOf: glyphs[(index+1)...],
+                                               at: remains.startIndex)
                                 glyphs = glyphs[...index]
                             } else { // no whitespace, break characters.
-                                remains.insert(glyphs.removeLast(), at: remains.startIndex)
+                                remains.insert(glyphs.removeLast(),
+                                               at: remains.startIndex)
                             }
                         } else {
                             // remove tailing whitespaces
@@ -702,11 +703,43 @@ public struct GraphicsContext {
                                               lineWidth: Glyph.width(glyphs),
                                               lineHeight: line.lineHeight))
                             glyphs = remains[...]
+                            // remove leading whitespaces
+                            while let first = glyphs.first,
+                                  whitespaces.contains(first.scalar) {
+                                glyphs.removeFirst()
+                            }
                             remains.removeAll(keepingCapacity: true)
                         }
                     }
                     assert(remains.isEmpty)
                 }
+            }
+            let numVisibleLines = {
+                var n = 0
+                var offset = CGFloat.zero
+                for line in lines {
+                    offset += line.lineHeight
+                    if offset > size.height { break }
+                    n += 1
+                }
+                return n
+            }()
+            if lines.isEmpty == false, numVisibleLines < lines.count {
+                let index = max(numVisibleLines-1, 0)
+                var line = lines[index]
+                let offset = line.baseline - self.ellipsisBaseline
+                let ellipsisWidth = Glyph.width(self.ellipsis)
+                while line.glyphs.isEmpty == false,
+                    Glyph.width(line.glyphs) + ellipsisWidth > size.width {
+                    line.glyphs.removeLast()
+                }
+                line.glyphs.append(contentsOf: self.ellipsis.map {
+                    var glyph = $0
+                    glyph.position.y += offset
+                    return glyph
+                })
+                lines[index] = line
+                lines = Array(lines[...index])
             }
             return lines
         }
@@ -825,7 +858,8 @@ public struct GraphicsContext {
                     }
                     if let glyph = face2.glyphData(for: c2) {
                         // Adjust the font scale of the fallback font.
-                        let scale = lineHeight / face2.lineHeight
+                        let scale = typeFace.ascender / (face2.ascender *
+                                                         displayScale)
                         let position = CGPoint(
                             x: glyph.position.x,
                             y: glyph.position.y - glyph.ascender) * scale
@@ -863,8 +897,8 @@ public struct GraphicsContext {
             }
 
             // generate ellipsis glyphs...
-            ellipsisBaseline = typeFace.ascender
             let scale = 1.0 / displayScale
+            ellipsisBaseline = typeFace.ascender * scale
             c1 = UnicodeScalar(0)
             for c2 in text.ellipsis.unicodeScalars {
                 if let glyph = typeFace.glyphData(for: c2) {
@@ -1043,3 +1077,5 @@ public struct GraphicsContext {
         fatalError()
     }
 }
+
+
