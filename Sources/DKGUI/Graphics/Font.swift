@@ -289,7 +289,7 @@ extension Font {
 
     static func pointSize(for style: TextStyle) -> CGFloat {
         switch style {
-        case .largeTitle:   return 26
+        case .largeTitle:   return 28
         case .title:        return 24
         case .headline:     return 21
         case .subheadline:  return 18

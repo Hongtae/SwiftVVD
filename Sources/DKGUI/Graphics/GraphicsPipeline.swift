@@ -621,6 +621,9 @@ extension GraphicsContext {
             do {
                 try content(&context, context.contentScale)
                 let texture = context.backBuffer
+
+                // FIXME:  Use the correct blendState for the blendMode.
+                let blendState: BlendState = .defaultAlpha
                 self._draw(texture: texture,
                            in: frame,
                            transform: .identity,
@@ -628,7 +631,7 @@ extension GraphicsContext {
                                                 width: texture.width,
                                                 height: texture.height),
                            textureTransform: .identity,
-                           blendMode: context.blendMode,
+                           blendState: blendState,
                            color: .white)
             } catch {
                 Log.err("GraphicsContext error: \(error)")
@@ -638,16 +641,41 @@ extension GraphicsContext {
         }
     }
 
+    func _makeEncoder(_ backBuffer: Texture,
+                  stencilBuffer: Texture? = nil) -> RenderCommandEncoder? {
+        var renderPass = RenderPassDescriptor(
+            colorAttachments: [
+                RenderPassColorAttachmentDescriptor(
+                    renderTarget: backBuffer,
+                    loadAction: .load,
+                    storeAction: .store)
+            ])
+        if let stencilBuffer {
+            renderPass.depthStencilAttachment = RenderPassDepthStencilAttachmentDescriptor(
+                renderTarget: stencilBuffer,
+                loadAction: .clear,
+                storeAction: .dontCare,
+                clearStencil: 0)
+        }
+
+        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPass) else {
+            Log.err("GraphicsContext error: makeRenderCommandEncoder failed.")
+            return nil
+        }
+        return encoder
+    }
+
     func _draw(texture: Texture,
-               in: CGRect,
+               in frame: CGRect,
                transform: CGAffineTransform,
                textureFrame: CGRect,
                textureTransform: CGAffineTransform,
-               blendMode: BlendMode,
+               blendState: BlendState,
                color: DKGame.Color,
                colorMatrix: ColorMatrix? = nil) {
+        let trans = transform.concatenating(self.viewTransform)
         let makeVertex = { x, y, u, v in
-            _Vertex(position: Vector2(x, y).applying(transform).float2,
+            _Vertex(position: Vector2(x, y).applying(trans).float2,
                     texcoord: Vector2(u, v).applying(textureTransform).float2,
                     color: color.float4)
         }
@@ -657,22 +685,15 @@ extension GraphicsContext {
         let uvMaxY = textureFrame.maxY / CGFloat(texture.height)
 
         let vertices: [_Vertex] = [
-            makeVertex(-1, -1, uvMinX, uvMaxY),
-            makeVertex(-1,  1, uvMinX, uvMinY),
-            makeVertex( 1, -1, uvMaxX, uvMaxY),
-            makeVertex( 1, -1, uvMaxX, uvMaxY),
-            makeVertex(-1,  1, uvMinX, uvMinY),
-            makeVertex( 1,  1, uvMaxX, uvMinY)
+            makeVertex(frame.minX, frame.maxY, uvMinX, uvMaxY),
+            makeVertex(frame.minX, frame.minY, uvMinX, uvMinY),
+            makeVertex(frame.maxX, frame.maxY, uvMaxX, uvMaxY),
+            makeVertex(frame.maxX, frame.maxY, uvMaxX, uvMaxY),
+            makeVertex(frame.minX, frame.minY, uvMinX, uvMinY),
+            makeVertex(frame.maxX, frame.minY, uvMaxX, uvMinY)
         ]
-        let renderPass = RenderPassDescriptor(
-            colorAttachments: [
-                RenderPassColorAttachmentDescriptor(
-                    renderTarget: backBuffer,
-                    loadAction: .load,
-                    storeAction: .store)
-            ])
-        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPass) else {
-            Log.err("GraphicsContext error: makeRenderCommandEncoder failed.")
+
+        guard let encoder = self._makeEncoder(self.backBuffer) else {
             return
         }
 
@@ -683,7 +704,7 @@ extension GraphicsContext {
                                     vertices: vertices,
                                     indices: nil,
                                     texture: texture,
-                                    blendState: .defaultAlpha,
+                                    blendState: blendState,
                                     pushConstantData: pc,
                                     encoder: encoder)
         } else {
@@ -692,7 +713,7 @@ extension GraphicsContext {
                                     vertices: vertices,
                                     indices: nil,
                                     texture: texture,
-                                    blendState: .defaultAlpha,
+                                    blendState: blendState,
                                     pushConstantData: nil,
                                     encoder: encoder)
         }
@@ -701,6 +722,105 @@ extension GraphicsContext {
 
     func _resolveMaskTexture(_ texture1: Texture, _ texture2: Texture, opacity: Double, inverse: Bool) -> Texture? {
         fatalError("Not implemented")
+    }
+
+    func _drawText(_ lines: [ResolvedText.Line], transform: CGAffineTransform,
+                   color: DKGame.Color, blendState: BlendState) {
+        if lines.isEmpty { return }
+        
+        struct GlyphVertex {
+            let pos: Vector2
+            let tex: Float2
+        }
+        struct Quad {
+            let lt: GlyphVertex
+            let rt: GlyphVertex
+            let lb: GlyphVertex
+            let rb: GlyphVertex
+            let texture: Texture
+        }
+
+        let c = color.float4
+        let transform = transform
+            .concatenating(self.transform)
+            .concatenating(self.viewTransform)
+
+        guard let encoder = self._makeEncoder(self.backBuffer) else {
+            return
+        }
+
+        var quads: [Quad] = []
+        var offset: Vector2 = .zero
+        for line in lines {
+            offset.x = 0
+            for glyph in line.glyphs {
+                if let texture = glyph.texture {
+                    let invW = 1.0 / Float(texture.width)
+                    let invH = 1.0 / Float(texture.height)
+
+                    let uvMinX = Float(glyph.frame.minX) * invW
+                    let uvMinY = Float(glyph.frame.minY) * invH
+                    let uvMaxX = Float(glyph.frame.maxX) * invW
+                    let uvMaxY = Float(glyph.frame.maxY) * invH
+
+                    let posMin = Vector2(glyph.position) + offset
+                    let posMax = Vector2(glyph.size) + posMin
+
+                    let q = Quad(
+                        lt: GlyphVertex(pos: Vector2(posMin.x, posMin.y),
+                                        tex: (uvMinX, uvMinY)),
+                        rt: GlyphVertex(pos: Vector2(posMax.x, posMin.y),
+                                        tex: (uvMaxX, uvMinY)),
+                        lb: GlyphVertex(pos: Vector2(posMin.x, posMax.y),
+                                        tex: (uvMinX, uvMaxY)),
+                        rb: GlyphVertex(pos: Vector2(posMax.x, posMax.y),
+                                        tex: (uvMaxX, uvMaxY)),
+                        texture: texture)
+                    quads.append(q)
+                }
+                // No kerning for line leads
+                let kerning: CGPoint = offset.x > 0 ? glyph.kerning : .zero
+                offset.x += glyph.advance.width
+                offset += Vector2(kerning)
+            }
+            offset.y += line.lineHeight
+        }
+        quads.sort {
+            ObjectIdentifier($0.texture) > ObjectIdentifier($1.texture)
+        }
+        var texture: Texture? = nil
+        var vertices: [_Vertex] = []
+        let draw = {
+            if vertices.isEmpty == false {
+                self._encodeDrawCommand(shader: .rcImage,
+                                        stencil: .ignore,
+                                        vertices: vertices,
+                                        indices: nil,
+                                        texture: texture,
+                                        blendState: .defaultAlpha,
+                                        pushConstantData: nil,
+                                        encoder: encoder)
+                vertices = []
+            }
+        }
+        for quad in quads {
+            if quad.texture !== texture {
+                draw()
+                texture = quad.texture
+            }
+            vertices.append(contentsOf: [quad.lb, quad.lt, quad.rb].map {
+                _Vertex(position: $0.pos.applying(transform).float2,
+                        texcoord: $0.tex,
+                        color: c)
+                })
+            vertices.append(contentsOf: [quad.rb, quad.lt, quad.rt].map {
+                _Vertex(position: $0.pos.applying(transform).float2,
+                        texcoord: $0.tex,
+                        color: c)
+                })
+        }
+        draw()
+        encoder.endEncoding()
     }
 
     @discardableResult
@@ -1180,22 +1300,9 @@ extension GraphicsContext {
             return false
         }
 
-        let renderPass = RenderPassDescriptor(
-            colorAttachments: [
-                RenderPassColorAttachmentDescriptor(
-                    renderTarget: backBuffer,
-                    loadAction: .load,
-                    storeAction: .store)
-            ],
-            depthStencilAttachment:
-                RenderPassDepthStencilAttachmentDescriptor(
-                    renderTarget: stencilBuffer,
-                    loadAction: .clear,
-                    storeAction: .dontCare,
-                    clearStencil: 0))
-
-        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPass) else {
-            Log.err("GraphicsContext error: makeRenderCommandEncoder failed.")
+        guard let encoder = self._makeEncoder(self.backBuffer,
+                                              stencilBuffer: self.stencilBuffer)
+        else {
             return false
         }
 
@@ -1362,22 +1469,9 @@ extension GraphicsContext {
             return false
         }
 
-        let renderPass = RenderPassDescriptor(
-            colorAttachments: [
-                RenderPassColorAttachmentDescriptor(
-                    renderTarget: backBuffer,
-                    loadAction: .load,
-                    storeAction: .store)
-            ],
-            depthStencilAttachment:
-                RenderPassDepthStencilAttachmentDescriptor(
-                    renderTarget: stencilBuffer,
-                    loadAction: .clear,
-                    storeAction: .dontCare,
-                    clearStencil: 0))
-
-        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPass) else {
-            Log.err("GraphicsContext error: makeRenderCommandEncoder failed.")
+        guard let encoder = self._makeEncoder(self.backBuffer,
+                                              stencilBuffer: self.stencilBuffer)
+        else {
             return false
         }
 
@@ -1409,6 +1503,7 @@ extension GraphicsContext {
 
     func _encodeFillCommand(with shading: GraphicsContext.Shading,
                             stencil: _Stencil,
+                            blendState: BlendState = .defaultAlpha,
                             encoder: RenderCommandEncoder) {
 
         if shading.properties.isEmpty { return }
@@ -1764,7 +1859,7 @@ extension GraphicsContext {
                                 vertices: vertices,
                                 indices: nil,
                                 texture: nil,
-                                blendState: .defaultAlpha,
+                                blendState: blendState,
                                 pushConstantData: nil,
                                 encoder: encoder)
     }

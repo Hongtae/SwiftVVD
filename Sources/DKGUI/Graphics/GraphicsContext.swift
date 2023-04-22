@@ -209,6 +209,10 @@ public struct GraphicsContext {
                 let offset = -context.contentOffset
                 let scale = context.contentScale
                 let texture = context.backBuffer
+
+                // FIXME:  Use the correct blendState for the blendMode.
+                let blendState: BlendState = .defaultAlpha
+
                 self._draw(texture: texture,
                            in: CGRect(origin: offset, size: scale),
                            transform: .identity,
@@ -216,7 +220,7 @@ public struct GraphicsContext {
                                                 width: texture.width,
                                                 height: texture.height),
                            textureTransform: .identity,
-                           blendMode: context.blendMode,
+                           blendState: blendState,
                            color: .white)
             } catch {
                 Log.err("GraphicsContext error: \(error)")
@@ -652,7 +656,7 @@ public struct GraphicsContext {
                 let h = y + $0.lineHeight
                 width = max(width, w)
                 height = max(height, h)
-                y += height
+                y = height
             }
             return CGSize(width: width, height: height)
         }
@@ -939,113 +943,34 @@ public struct GraphicsContext {
             fatalError()
         }
 
-        struct GlyphVertex {
-            let pos: Vector2
-            let tex: Float2
-        }
-        struct Quad {
-            let lt: GlyphVertex
-            let rt: GlyphVertex
-            let lb: GlyphVertex
-            let rb: GlyphVertex
-            let texture: Texture
-        }
-        if case let .color(color) = shading {
-            let c = color.dkColor.float4
-            let transform = CGAffineTransform(translationX: rect.origin.x,
-                                              y: rect.origin.y)
-                .concatenating(self.transform)
-                .concatenating(self.viewTransform)
-
-            let renderPass = RenderPassDescriptor(
-                colorAttachments: [
-                    RenderPassColorAttachmentDescriptor(
-                        renderTarget: backBuffer,
-                        loadAction: .load,
-                        storeAction: .store)
-                ])
-            guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPass) else {
-                Log.err("GraphicsContext error: makeRenderCommandEncoder failed.")
-                return
-            }
-
-            var quads: [Quad] = []
-            var offset: Vector2 = .zero
-            for line in lines {
-                offset.x = 0
-                for glyph in line.glyphs {
-                    if let texture = glyph.texture {
-                        let invW = 1.0 / Float(texture.width)
-                        let invH = 1.0 / Float(texture.height)
-
-                        let uvMinX = Float(glyph.frame.minX) * invW
-                        let uvMinY = Float(glyph.frame.minY) * invH
-                        let uvMaxX = Float(glyph.frame.maxX) * invW
-                        let uvMaxY = Float(glyph.frame.maxY) * invH
-
-                        let posMin = Vector2(glyph.position) + offset
-                        let posMax = Vector2(glyph.size) + posMin
-
-                        let q = Quad(
-                            lt: GlyphVertex(pos: Vector2(posMin.x, posMin.y),
-                                            tex: (uvMinX, uvMinY)),
-                            rt: GlyphVertex(pos: Vector2(posMax.x, posMin.y),
-                                            tex: (uvMaxX, uvMinY)),
-                            lb: GlyphVertex(pos: Vector2(posMin.x, posMax.y),
-                                            tex: (uvMinX, uvMaxY)),
-                            rb: GlyphVertex(pos: Vector2(posMax.x, posMax.y),
-                                            tex: (uvMaxX, uvMaxY)),
-                            texture: texture)
-                        quads.append(q)
-                    }
-                    // No kerning for line leads
-                    let kerning: CGPoint = offset.x > 0 ? glyph.kerning : .zero
-                    offset.x += glyph.advance.width
-                    offset += Vector2(kerning)
-                }
-                offset.y += line.lineHeight
-            }
-            quads.sort {
-                ObjectIdentifier($0.texture) > ObjectIdentifier($1.texture)
-            }
-            var texture: Texture? = nil
-            var vertices: [_Vertex] = []
-            let draw = {
-                if vertices.isEmpty == false {
-                    self._encodeDrawCommand(shader: .rcImage,
-                                            stencil: .ignore,
-                                            vertices: vertices,
-                                            indices: nil,
-                                            texture: texture,
-                                            blendState: .defaultAlpha,
-                                            pushConstantData: nil,
-                                            encoder: encoder)
-                    vertices = []
-                }
-            }
-            for quad in quads {
-                if quad.texture !== texture {
-                    draw()
-                    texture = quad.texture
-                }
-                vertices.append(contentsOf: [quad.lb, quad.lt, quad.rb].map {
-                    _Vertex(position: $0.pos.applying(transform).float2,
-                            texcoord: $0.tex,
-                            color: c)
-                    })
-                vertices.append(contentsOf: [quad.rb, quad.lt, quad.rt].map {
-                    _Vertex(position: $0.pos.applying(transform).float2,
-                            texcoord: $0.tex,
-                            color: c)
-                    })
-            }
-            draw()
-            encoder.endEncoding()
+        let transform = CGAffineTransform(translationX: rect.origin.x,
+                                          y: rect.origin.y)
+        let measure = text.measure(in: rect.size)
+        if case let .color(color) = shading, rect.size.width >= measure.width {
+            self._drawText(lines,
+                           transform: transform,
+                           color: color.dkColor,
+                           blendState: .defaultAlpha)
         } else {
-            fatalError()
+            self.drawLayer(in: rect) { context, size in
+                context.contentOffset = -rect.origin
+                context._drawText(lines,
+                                  transform: transform,
+                                  color: .white,
+                                  blendState: .defaultAlpha)
+                if let encoder = context._makeEncoder(context.backBuffer) {
+                    context._encodeFillCommand(with: text.shading,
+                                               stencil: .ignore,
+                                               blendState: .defaultMultiply,
+                                               encoder: encoder)
+                    encoder.endEncoding()
+                }
+            }
         }
     }
-    public func draw(_ text: ResolvedText, at point: CGPoint, anchor: UnitPoint = .center) {
+    public func draw(_ text: ResolvedText,
+                     at point: CGPoint,
+                     anchor: UnitPoint = .center) {
         if text.lines.isEmpty { return }
 
         var frame = text.frame
