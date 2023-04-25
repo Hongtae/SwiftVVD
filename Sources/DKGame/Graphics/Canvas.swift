@@ -572,7 +572,7 @@ public class Canvas {
     public func drawLines(_ points: [CGPoint],
                           lineWidth: CGFloat = 1.0,
                           color: Color,
-                          blendState: BlendState = .defaultAlpha) {
+                          blendState: BlendState = .alphaBlend) {
         if points.isEmpty || lineWidth < Self.minimumScaleFactor { return }
 
         let numPoints = points.count
@@ -612,7 +612,7 @@ public class Canvas {
     public func drawLineStrip(_ points: [CGPoint],
                               lineWidth: CGFloat = 1.0,
                               color: Color,
-                              blendState: BlendState = .defaultAlpha) {
+                              blendState: BlendState = .alphaBlend) {
 
         if points.isEmpty || lineWidth < Self.minimumScaleFactor { return }
 
@@ -648,7 +648,7 @@ public class Canvas {
 
     public func drawTriangles(_ vertices: [CGPoint],
                               color: Color,
-                              blendState: BlendState = .defaultAlpha) {
+                              blendState: BlendState = .alphaBlend) {
         let numVerts = vertices.count
         if numVerts > 2 {
             var vertexData: [VertexData] = []
@@ -670,7 +670,7 @@ public class Canvas {
     }
 
     public func drawTriangles(_ vertices: [ColoredVertex],
-                              blendState: BlendState = .defaultAlpha) {
+                              blendState: BlendState = .alphaBlend) {
         let numVerts = vertices.count
         if numVerts > 2 {
             var vertexData: [VertexData] = []
@@ -693,7 +693,7 @@ public class Canvas {
 
     public func drawTriangles(_ vertices: [TexturedVertex],
                               texture: Texture,
-                              blendState: BlendState = .defaultAlpha) {
+                              blendState: BlendState = .alphaBlend) {
         let numVerts = vertices.count
         if numVerts > 2 {
             var vertexData: [VertexData] = []
@@ -716,7 +716,7 @@ public class Canvas {
 
     public func  drawTriangleStrip(_ vertices: [CGPoint],
                                    color: Color,
-                                   blendState: BlendState = .defaultAlpha) {
+                                   blendState: BlendState = .alphaBlend) {
         let numVerts = vertices.count
         if numVerts > 2 {
             var verts: [CGPoint] = []
@@ -737,7 +737,7 @@ public class Canvas {
     }
 
     public func  drawTriangleStrip(_ vertices: [ColoredVertex],
-                                   blendState: BlendState = .defaultAlpha) {
+                                   blendState: BlendState = .alphaBlend) {
         let numVerts = vertices.count
         if numVerts > 2 {
             var verts: [ColoredVertex] = []
@@ -759,7 +759,7 @@ public class Canvas {
 
     public func  drawTriangleStrip(_ vertices: [TexturedVertex],
                                    texture: Texture,
-                                   blendState: BlendState = .defaultAlpha) {
+                                   blendState: BlendState = .alphaBlend) {
         let numVerts = vertices.count
         if numVerts > 2 {
             var verts: [TexturedVertex] = []
@@ -784,7 +784,7 @@ public class Canvas {
                          leftBottom lb: CGPoint,
                          rightBottom rb: CGPoint,
                          color: Color,
-                         blendState: BlendState = .defaultAlpha) {
+                         blendState: BlendState = .alphaBlend) {
         let tpos0 = lt.transformed(by: self.contentTransform)
         let tpos1 = rt.transformed(by: self.contentTransform)
         let tpos2 = lb.transformed(by: self.contentTransform)
@@ -809,7 +809,7 @@ public class Canvas {
                          leftBottom lb: TexturedVertex,
                          rightBottom rb: TexturedVertex,
                          texture: Texture,
-                         blendState: BlendState = .defaultAlpha) {
+                         blendState: BlendState = .alphaBlend) {
         let tpos0 = lt.position.transformed(by: self.contentTransform)
         let tpos1 = rt.position.transformed(by: self.contentTransform)
         let tpos2 = lb.position.transformed(by: self.contentTransform)
@@ -832,7 +832,7 @@ public class Canvas {
     public func drawRect(_ rect: CGRect,
                          transform tm: Matrix3 = .identity,
                          color: Color,
-                         blendState: BlendState = .defaultAlpha) {        
+                         blendState: BlendState = .alphaBlend) {
         if rect.isEmpty || rect.isInfinite { return }
 
         let pos0 = CGPoint(x: rect.minX, y: rect.minY).transformed(by: tm) // left-top
@@ -865,7 +865,7 @@ public class Canvas {
                          textureTransform texTM: Matrix3 = .identity,
                          texture: Texture,
                          color: Color,
-                         blendState: BlendState = .defaultAlpha) {
+                         blendState: BlendState = .alphaBlend) {
         if rect.isEmpty || rect.isInfinite { return }
 
         let pos0 = CGPoint(x: rect.minX, y: rect.minY).transformed(by: tm) // left-top
@@ -916,7 +916,7 @@ public class Canvas {
                             inset: CGSize,
                             transform: Matrix3 = .identity,
                             color: Color,
-                            blendState: BlendState = .defaultAlpha) {
+                            blendState: BlendState = .alphaBlend) {
         if bounds.isEmpty || bounds.isInfinite { return }
         if inset.width < Self.minimumScaleFactor || inset.height < Self.minimumScaleFactor { return }
 
@@ -981,7 +981,7 @@ public class Canvas {
     public func drawEllipse(bounds: CGRect,
                             transform: Matrix3 = .identity,
                             color: Color,
-                            blendState: BlendState = .defaultAlpha) {
+                            blendState: BlendState = .alphaBlend) {
         if bounds.isEmpty || bounds.isInfinite { return }
 
         let tm = transform * screenTransform    // user transform * screen space
@@ -1032,7 +1032,7 @@ public class Canvas {
                             textureTransform uvTransform: Matrix3 = .identity,
                             texture: Texture,
                             color: Color,
-                            blendState: BlendState = .defaultAlpha) {
+                            blendState: BlendState = .alphaBlend) {
         if bounds.isEmpty || bounds.isInfinite { return }
 
         let tm = transform * screenTransform    // user transform * screen space
@@ -1186,7 +1186,7 @@ public class Canvas {
                 if triangles.count > 0 {
                     self.encodeDrawCommand(shaderIndex: .vertexColorAlphaTexture,
                         vertices: triangles, texture: lastTexture!,
-                        blendState: .defaultAlpha, pushConstantData: nil)
+                        blendState: .alphaBlend, pushConstantData: nil)
                 }
                 triangles.removeAll(keepingCapacity: true)
                 lastTexture = q.texture
@@ -1205,7 +1205,7 @@ public class Canvas {
         if triangles.count > 0 {
             self.encodeDrawCommand(shaderIndex: .vertexColorAlphaTexture,
                 vertices: triangles, texture: lastTexture!,
-                blendState: .defaultAlpha, pushConstantData: nil)
+                blendState: .alphaBlend, pushConstantData: nil)
         }
     }
 

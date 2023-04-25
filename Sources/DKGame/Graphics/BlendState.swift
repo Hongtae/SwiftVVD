@@ -79,50 +79,57 @@ public struct BlendState: Hashable {
     }
 
     // preset
-    public static let defaultOpaque = BlendState(enabled: false)
-    public static let defaultAlpha = BlendState(enabled: true,
+    public static let opaque = BlendState(enabled: false)
+    public static let alphaBlend = BlendState(
+        enabled: true,
         sourceRGBBlendFactor: .sourceAlpha,
-        sourceAlphaBlendFactor: .oneMinusDestinationAlpha,
+        sourceAlphaBlendFactor: .one,
         destinationRGBBlendFactor: .oneMinusSourceAlpha,
-        destinationAlphaBlendFactor: .one,
+        destinationAlphaBlendFactor: .oneMinusSourceAlpha,
         rgbBlendOperation: .add,
         alphaBlendOperation: .add)
-    public static let defaultMultiply = BlendState(enabled: true,
-        sourceRGBBlendFactor: .zero,
-        sourceAlphaBlendFactor: .zero,
-        destinationRGBBlendFactor: .sourceColor,
-        destinationAlphaBlendFactor: .sourceColor,
+    public static let multiply = BlendState(
+        enabled: true,
+        sourceRGBBlendFactor: .destinationColor,
+        sourceAlphaBlendFactor: .destinationAlpha,
+        destinationRGBBlendFactor: .zero,
+        destinationAlphaBlendFactor: .zero,
         rgbBlendOperation: .add,
         alphaBlendOperation: .add)
-    public static let defaultScreen = BlendState(enabled: true,
+    public static let screen = BlendState(
+        enabled: true,
         sourceRGBBlendFactor: .oneMinusDestinationColor,
         sourceAlphaBlendFactor: .oneMinusDestinationColor,
         destinationRGBBlendFactor: .one,
         destinationAlphaBlendFactor: .one,
         rgbBlendOperation: .add,
         alphaBlendOperation: .add)
-    public static let defaultDarken = BlendState(enabled: true,
+    public static let darken = BlendState(
+        enabled: true,
         sourceRGBBlendFactor: .one,
         sourceAlphaBlendFactor: .one,
         destinationRGBBlendFactor: .one,
         destinationAlphaBlendFactor: .one,
         rgbBlendOperation: .min,
         alphaBlendOperation: .min)
-    public static let defaultLighten = BlendState(enabled: true,
+    public static let lighten = BlendState(
+        enabled: true,
         sourceRGBBlendFactor: .one,
         sourceAlphaBlendFactor: .one,
         destinationRGBBlendFactor: .one,
         destinationAlphaBlendFactor: .one,
         rgbBlendOperation: .max,
         alphaBlendOperation: .max)
-    public static let defaultLinearBurn = BlendState(enabled: true,
+    public static let linearBurn = BlendState(
+        enabled: true,
         sourceRGBBlendFactor: .one,
         sourceAlphaBlendFactor: .one,
         destinationRGBBlendFactor: .oneMinusDestinationColor,
         destinationAlphaBlendFactor: .oneMinusDestinationColor,
         rgbBlendOperation: .subtract,
         alphaBlendOperation: .subtract)
-    public static let defaultLinearDodge = BlendState(enabled: true,
+    public static let linearDodge = BlendState(
+        enabled: true,
         sourceRGBBlendFactor: .one,
         sourceAlphaBlendFactor: .one,
         destinationRGBBlendFactor: .one,
