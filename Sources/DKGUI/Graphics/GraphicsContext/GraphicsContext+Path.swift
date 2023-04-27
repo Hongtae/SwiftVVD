@@ -779,4 +779,367 @@ extension GraphicsContext {
         }
         return false
     }
+
+    func _encodeFillCommand(with shading: GraphicsContext.Shading,
+                            stencil: _Stencil,
+                            blendState: BlendState = .alphaBlend,
+                            encoder: RenderCommandEncoder) {
+
+        if shading.properties.isEmpty { return }
+
+        var vertices: [_Vertex] = []
+        var shader: _Shader = .vertexColor
+
+        if let property = shading.properties.first {
+            switch property {
+            case let .color(c):
+                shader = .vertexColor
+                let makeVertex = { x, y in
+                    _Vertex(position: Vector2(x, y).float2,
+                            texcoord: Vector2.zero.float2,
+                            color: c.dkColor.float4)
+                }
+                vertices = [
+                    makeVertex(-1, -1), makeVertex(-1, 1), makeVertex(1, -1),
+                    makeVertex(1, -1), makeVertex(-1, 1), makeVertex(1, 1)
+                ]
+            case let .linearGradient(gradient, startPoint, endPoint, options):
+                let stops = gradient.normalized().stops
+                if stops.isEmpty { return }
+                let gradientVector = endPoint - startPoint
+                let length = gradientVector.magnitude
+                if length < .ulpOfOne {
+                    return self._encodeFillCommand(with: .color(stops[0].color),
+                                                   stencil: stencil,
+                                                   encoder: encoder)
+                }
+                let dir = gradientVector.normalized()
+                // transform gradient space to world space
+                // ie: (0, 0) -> startPoint, (1, 0) -> endPoint
+                let gradientTransform = CGAffineTransform(
+                    a: dir.x * length, b: dir.y * length,
+                    c: -dir.y, d: dir.x,
+                    tx: startPoint.x, ty: startPoint.y)
+
+                let viewportToGradientTransform = self.viewTransform.inverted()
+                    .concatenating(gradientTransform.inverted())
+
+                let viewportExtents = [CGPoint(x: -1, y: -1),   // left-bottom
+                                       CGPoint(x: -1, y: 1),    // left-top
+                                       CGPoint(x: 1, y: 1),     // right-top
+                                       CGPoint(x: 1, y: -1)]    // right-bottom
+                    .map { $0.applying(viewportToGradientTransform) }
+                let maxX = viewportExtents.max { $0.x < $1.x }!.x
+                let minX = viewportExtents.min { $0.x < $1.x }!.x
+                let maxY = viewportExtents.max { $0.y < $1.y }!.y
+                let minY = viewportExtents.min { $0.y < $1.y }!.y
+
+                let gradientToViewportTransform = gradientTransform
+                    .concatenating(self.viewTransform)
+
+                let addGradientBox = { (x1: CGFloat, x2: CGFloat, c1: DKGame.Color, c2: DKGame.Color) in
+                    let verts = [_Vertex(position: Vector2(x1, maxY).applying(gradientToViewportTransform).float2,
+                                         texcoord: Vector2.zero.float2,
+                                         color: c1.float4),
+                                 _Vertex(position: Vector2(x1, minY).applying(gradientToViewportTransform).float2,
+                                         texcoord: Vector2.zero.float2,
+                                         color: c1.float4),
+                                 _Vertex(position: Vector2(x2, maxY).applying(gradientToViewportTransform).float2,
+                                         texcoord: Vector2.zero.float2,
+                                         color: c2.float4),
+                                 _Vertex(position: Vector2(x2, minY).applying(gradientToViewportTransform).float2,
+                                         texcoord: Vector2.zero.float2,
+                                         color: c2.float4)]
+                    vertices.append(contentsOf: [verts[0], verts[1], verts[2]])
+                    vertices.append(contentsOf: [verts[2], verts[1], verts[3]])
+                }
+                if options.contains(.mirror) {
+                    var pos = floor(minX)
+                    let rstops = stops.reversed()
+                    while pos < ceil(maxX) {
+                        if pos.magnitude.truncatingRemainder(dividingBy: 2).rounded() == 1.0 {
+                            for i in 0..<(rstops.count-1) {
+                                let s1 = stops[i]
+                                let s2 = stops[i+1]
+
+                                let loc1 = (1.0 - s1.location)
+                                let loc2 = (1.0 - s2.location)
+                                if loc1 + pos > maxX { break }
+                                if loc2 + pos < minX { continue }
+                                addGradientBox(loc1 + pos,
+                                               loc2 + pos,
+                                               s1.color.dkColor,
+                                               s2.color.dkColor)
+                            }
+                        } else {
+                            for i in 0..<(stops.count-1) {
+                                let s1 = stops[i]
+                                let s2 = stops[i+1]
+
+                                if s1.location + pos > maxX { break }
+                                if s2.location + pos < minX { continue }
+                                addGradientBox(s1.location + pos,
+                                               s2.location + pos,
+                                               s1.color.dkColor,
+                                               s2.color.dkColor)
+                            }
+                        }
+                        pos += 1
+                    }
+                } else if options.contains(.repeat) {
+                    var pos = floor(minX)
+                    while pos < ceil(maxX) {
+                        for i in 0..<(stops.count-1) {
+                            let s1 = stops[i]
+                            let s2 = stops[i+1]
+
+                            if s1.location + pos > maxX { break }
+                            if s2.location + pos < minX { continue }
+                            addGradientBox(s1.location + pos,
+                                           s2.location + pos,
+                                           s1.color.dkColor,
+                                           s2.color.dkColor)
+                        }
+                        pos += 1
+                    }
+                } else {
+                    for i in 0..<(stops.count-1) {
+                        let s1 = stops[i]
+                        let s2 = stops[i+1]
+
+                        addGradientBox(s1.location, s2.location,
+                                       s1.color.dkColor, s2.color.dkColor)
+                    }
+                    if let first = stops.first, first.location > minX {
+                        addGradientBox(minX, first.location,
+                                       first.color.dkColor, first.color.dkColor)
+                    }
+                    if let last = stops.last, last.location < maxX {
+                        addGradientBox(last.location, maxX,
+                                       last.color.dkColor, last.color.dkColor)
+                    }
+                }
+            case let .radialGradient(gradient, center, startRadius, endRadius, options):
+                let stops = gradient.normalized().stops
+                if stops.isEmpty { return }
+
+                let length = (endRadius - startRadius).magnitude
+                if length < .ulpOfOne {
+                    if options.contains(.repeat) && !options.contains(.mirror) {
+                        return self._encodeFillCommand(with:
+                                .color(stops.last!.color),
+                                                       stencil: stencil,
+                                                       encoder: encoder)
+                    } else {
+                        return self._encodeFillCommand(with:
+                                .color(stops.first!.color),
+                                                       stencil: stencil,
+                                                       encoder: encoder)
+                    }
+                }
+                let invViewTransform = self.viewTransform.inverted()
+                let scale = [CGPoint(x: -1, y: -1),     // left-bottom
+                             CGPoint(x: -1, y: 1),      // left-top
+                             CGPoint(x: 1, y: 1),       // right-top
+                             CGPoint(x: 1, y: -1)]      // right-bottom
+                    .map { ($0.applying(invViewTransform) - center).magnitudeSquared }
+                    .max()!.squareRoot()
+
+                let transform = CGAffineTransform(translationX: center.x, y: center.y)
+                    .concatenating(self.viewTransform)
+
+                let texCoord = Vector2.zero.float2
+                let step = CGFloat.pi / 45.0
+                let addCircularArc = {
+                    (x1: CGFloat, x2: CGFloat, c1: Color, c2: Color) in
+
+                    if x1 >= scale && x2 >= scale { return }
+                    if x1 <= 0 && x2 <= 0 { return }
+                    if (x2 - x1).magnitude < .ulpOfOne { return }
+
+                    var x1 = x1, x2 = x2
+                    var c1 = c1, c2 = c2
+                    if x1 > x2 {
+                        (x1, x2) = (x2, x1)
+                        (c1, c2) = (c2, c1)
+                    }
+                    if x1 < 0 {
+                        c1 = .lerp(c1, c2, (0 - x1)/(x2 - x1))
+                        x1 = 0
+                    }
+                    if x2 > scale {
+                        c2 = .lerp(c1, c2, (x2 - scale)/(x2 - x1))
+                        x2 = scale
+                    }
+                    if (x2 - x1) < .ulpOfOne { return }
+                    assert(x2 > x1)
+
+                    let p0 = Vector2(x1, 0)
+                    let p1 = p0.rotated(by: step)
+                    let p2 = Vector2(x2, 0)
+                    let p3 = p2.rotated(by: step)
+
+                    let verts: [Vector2]
+                    let colors: [Color]
+                    if (p1 - p0).magnitudeSquared < .ulpOfOne {
+                        verts = [p0, p2, p3]
+                        colors = [c1, c2, c2]
+                    } else {
+                        verts = [p1, p0, p3, p3, p0, p2]
+                        colors = [c1, c1, c2, c2, c1, c2]
+                    }
+                    let numVertices = Int((CGFloat.pi * 2) / step) + 1
+                    vertices.reserveCapacity(vertices.count + numVertices * verts.count)
+                    var progress: CGFloat = .zero
+                    while progress < .pi * 2  {
+                        for (i, p) in verts.enumerated() {
+                            vertices.append(_Vertex(position: p.rotated(by: progress).applying(transform).float2,
+                                                    texcoord: texCoord,
+                                                    color: colors[i].dkColor.float4))
+                        }
+                        progress += step
+                    }
+                }
+
+                if options.contains(.mirror) {
+                    var startRadius = startRadius
+                    var reverse = false
+                    while startRadius > 0 {
+                        startRadius = startRadius - length
+                        reverse = !reverse
+                    }
+                    while startRadius < scale {
+                        if reverse {
+                            for i in 0..<(stops.count - 1) {
+                                let s1 = stops[i]
+                                let s2 = stops[i+1]
+                                let loc1 = startRadius + length - (s1.location * length)
+                                let loc2 = startRadius + length - (s2.location * length)
+                                if loc1 <= 0 && loc2 <= 0 { break }
+                                addCircularArc(loc1, loc2, s1.color, s2.color)
+                            }
+                        } else {
+                            for i in 0..<(stops.count - 1) {
+                                let s1 = stops[i]
+                                let s2 = stops[i+1]
+                                let loc1 = (s1.location * length) + startRadius
+                                let loc2 = (s2.location * length) + startRadius
+                                if loc1 >= scale && loc2 >= scale { break }
+                                addCircularArc(loc1, loc2, s1.color, s2.color)
+                            }
+                        }
+                        startRadius += length
+                        reverse = !reverse
+                    }
+                } else if options.contains(.repeat) {
+                    var startRadius = startRadius
+                    let reverse = endRadius < startRadius
+                    while startRadius > 0 {
+                        startRadius = startRadius - length
+                    }
+                    if reverse {
+                        while startRadius < scale {
+                            for i in 0..<(stops.count - 1) {
+                                let s1 = stops[i]
+                                let s2 = stops[i+1]
+                                let loc1 = startRadius + length - (s1.location * length)
+                                let loc2 = startRadius + length - (s2.location * length)
+                                if loc1 <= 0 && loc2 <= 0 { break }
+                                addCircularArc(loc1, loc2, s1.color, s2.color)
+                            }
+                            startRadius += length
+                        }
+                    } else {
+                        while startRadius < scale {
+                            for i in 0..<(stops.count - 1) {
+                                let s1 = stops[i]
+                                let s2 = stops[i+1]
+                                let loc1 = (s1.location * length) + startRadius
+                                let loc2 = (s2.location * length) + startRadius
+                                if loc1 >= scale && loc2 >= scale { break }
+                                addCircularArc(loc1, loc2, s1.color, s2.color)
+                            }
+                            startRadius += length
+                        }
+                    }
+                } else {
+                    if endRadius > startRadius {
+                        addCircularArc(0, startRadius, stops[0].color, stops[0].color)
+                        for i in 0..<(stops.count - 1) {
+                            let s1 = stops[i]
+                            let s2 = stops[i+1]
+                            let loc1 = (s1.location * length) + startRadius
+                            let loc2 = (s2.location * length) + startRadius
+                            if loc1 >= scale && loc2 >= scale { break }
+                            addCircularArc(loc1, loc2, s1.color, s2.color)
+                        }
+                        addCircularArc(endRadius, scale, stops.last!.color, stops.last!.color)
+                    } else {
+                        addCircularArc(0, endRadius, stops.last!.color, stops.last!.color)
+                        for i in 0..<(stops.count - 1) {
+                            let s1 = stops[i]
+                            let s2 = stops[i+1]
+                            let loc1 = startRadius - (s1.location * length)
+                            let loc2 = startRadius - (s2.location * length)
+                            if loc1 <= 0 && loc2 <= 0 { break }
+                            addCircularArc(loc1, loc2, s1.color, s2.color)
+                        }
+                        addCircularArc(startRadius, scale, stops[0].color, stops[0].color)
+                    }
+                }
+            case let .conicGradient(gradient, center, angle, _):
+                let gradient = gradient.normalized()
+                if gradient.stops.isEmpty { return }
+                let invViewTransform = self.viewTransform.inverted()
+                let scale = [CGPoint(x: -1, y: -1),     // left-bottom
+                             CGPoint(x: -1, y: 1),      // left-top
+                             CGPoint(x: 1, y: 1),       // right-top
+                             CGPoint(x: 1, y: -1)]      // right-bottom
+                    .map { ($0.applying(invViewTransform) - center).magnitudeSquared }
+                    .max()!.squareRoot()
+
+                let transform = CGAffineTransform(rotationAngle: angle.radians)
+                    .concatenating(CGAffineTransform(scaleX: scale, y: scale))
+                    .concatenating(CGAffineTransform(translationX: center.x, y: center.y))
+                    .concatenating(self.viewTransform)
+
+                let step = CGFloat.pi / 180.0
+                var progress: CGFloat = .zero
+                let texCoord = Vector2.zero.float2
+                let center = Vector2(0, 0).applying(transform)
+                let numTriangles = Int((CGFloat.pi * 2) / step) + 1
+                vertices.reserveCapacity(numTriangles * 3)
+                while progress < .pi * 2 {
+                    let p0 = Vector2(1, 0).rotated(by: progress).applying(transform)
+                    let p1 = Vector2(1, 0).rotated(by: progress + step).applying(transform)
+                    let color1 = gradient._linearInterpolatedColor(at: progress / (.pi * 2))
+                    let color2 = gradient._linearInterpolatedColor(at: (progress + step) / (.pi * 2))
+
+                    vertices.append(_Vertex(position: center.float2,
+                                            texcoord: texCoord,
+                                            color: color1.dkColor.float4))
+                    vertices.append(_Vertex(position: p0.float2,
+                                            texcoord: texCoord,
+                                            color: color1.dkColor.float4))
+                    vertices.append(_Vertex(position: p1.float2,
+                                            texcoord: texCoord,
+                                            color: color2.dkColor.float4))
+
+                    progress += step
+                }
+            default:
+                Log.err("Not implemented yet")
+                return
+            }
+        }
+
+        self._encodeDrawCommand(shader: shader,
+                                stencil: stencil,
+                                vertices: vertices,
+                                indices: nil,
+                                texture: nil,
+                                blendState: blendState,
+                                pushConstantData: nil,
+                                encoder: encoder)
+    }
 }

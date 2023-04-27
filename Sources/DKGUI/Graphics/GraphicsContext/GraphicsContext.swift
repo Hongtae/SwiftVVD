@@ -161,8 +161,11 @@ public struct GraphicsContext {
 
     public var clipBoundingRect: CGRect = .zero
 
-    var unfilteredBackBuffer: Texture? = nil
     var filters: [(Filter, FilterOptions)] = []
+
+    func backdrop() -> Texture {
+        fatalError()
+    }
 
     func makeRenderTarget(withFormat pixelFormat: PixelFormat) -> Texture? {
         let device = commandBuffer.device
@@ -174,5 +177,11 @@ public struct GraphicsContext {
                                           width: width,
                                           height: height,
                                           usage: [.renderTarget, .sampled]))
+    }
+
+    func applyFilters() {
+    }
+
+    func applyBlendModeAndMask() {
     }
 }

@@ -185,11 +185,5 @@ extension GraphicsContext {
     public mutating func addFilter(_ filter: Filter,
                                    options: FilterOptions = FilterOptions()) {
         filters.append((filter, options))
-        if unfilteredBackBuffer == nil {
-            // If any filters are present, they must be rendered in two passes.
-
-            // TODO: create new render-target! (rgba8)
-            fatalError("Not implemented yet")
-        }
     }
 }

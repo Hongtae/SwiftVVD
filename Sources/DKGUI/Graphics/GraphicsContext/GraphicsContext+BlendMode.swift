@@ -86,17 +86,6 @@ extension GraphicsContext {
     // plusDarker:      R = MAX(0, 1 - ((1 - D) + (1 - S)))
     // plusLighter:     R = MIN(1, S + D)
 
-    var isSinglePassBlending: Bool {
-        false
-    }
-
-    func renderTarget() -> Texture? {
-        if isSinglePassBlending {
-            return backBuffer
-        }
-        // create new render target
-        return nil
-    }
 
     func blendState() -> BlendState {
         switch self.blendMode {
@@ -152,9 +141,6 @@ extension GraphicsContext {
         return .opaque
     }
 
-    func backdrop() -> Texture {
-        fatalError()
-    }
 
     func resolve(_ renderTarget: Texture) {
         if renderTarget !== backBuffer {

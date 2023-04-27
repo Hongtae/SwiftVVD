@@ -98,4 +98,8 @@ extension GraphicsContext {
             Log.error("GraphicsContext error: failed to create new context.")
         }
     }
+
+    func _resolveMaskTexture(_ texture1: Texture, _ texture2: Texture, opacity: Double, inverse: Bool) -> Texture? {
+        fatalError("Not implemented")
+    }
 }
