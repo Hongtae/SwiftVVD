@@ -1447,6 +1447,176 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         return nil
     }
 
+    public func makeTransientRenderTarget(type textureType: TextureType,
+                                          pixelFormat: PixelFormat,
+                                          width: Int,
+                                          height: Int,
+                                          depth: Int) -> Texture? {
+        var image: VkImage? = nil
+        var memory: VkDeviceMemory? = nil
+
+        defer {
+            if image != nil {
+                vkDestroyImage(self.device, image, self.allocationCallbacks)
+            }
+            if memory != nil {
+                vkFreeMemory(self.device, memory, self.allocationCallbacks)
+            }
+        }
+
+        var imageCreateInfo = VkImageCreateInfo()
+        imageCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO
+        switch textureType {
+        case .type1D:
+            imageCreateInfo.imageType = VK_IMAGE_TYPE_1D
+        case .type2D:
+            imageCreateInfo.imageType = VK_IMAGE_TYPE_2D
+        case .type3D:
+            imageCreateInfo.imageType = VK_IMAGE_TYPE_3D
+        case .typeCube:
+            imageCreateInfo.imageType = VK_IMAGE_TYPE_2D
+            imageCreateInfo.flags |= UInt32(VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT.rawValue)
+        default:
+            assertionFailure("Invalid texture type!")
+            Log.err("VulkanGraphicsDevice.makeTransientRenderTarget(): Invalid texture type!")
+            return nil
+        }
+
+        if width < 1 || height < 1 || depth < 1 {
+            Log.err("Texture dimensions (width, height, depth) value must be greater than or equal to 1.")
+            return nil
+        }
+
+        imageCreateInfo.arrayLayers = 1
+        imageCreateInfo.format = pixelFormat.vkFormat()
+        assert(imageCreateInfo.format != VK_FORMAT_UNDEFINED, "Unsupported format!")
+
+        imageCreateInfo.extent.width = UInt32(width)
+        imageCreateInfo.extent.height = UInt32(height)
+        imageCreateInfo.extent.depth = UInt32(depth)
+        imageCreateInfo.mipLevels = UInt32(1)
+        imageCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT
+        imageCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL
+        imageCreateInfo.usage = UInt32(VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT.rawValue |
+                                       VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT.rawValue)
+        if pixelFormat.isDepthFormat() || pixelFormat.isStencilFormat() {
+            imageCreateInfo.usage |= UInt32(VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT.rawValue)
+        } else {
+            imageCreateInfo.usage |= UInt32(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT.rawValue)
+        }
+        
+        imageCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE
+        // Set initial layout of the image to undefined
+        imageCreateInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
+
+        var result: VkResult = vkCreateImage(self.device, &imageCreateInfo, self.allocationCallbacks, &image)
+        if result != VK_SUCCESS {
+            Log.err("vkCreateImage failed: \(result)")
+            return nil
+        }
+
+        // Allocate device memory
+        var dedicatedRequirements = VkMemoryDedicatedRequirements()
+        dedicatedRequirements.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_REQUIREMENTS
+        var memoryRequirements  = VkMemoryRequirements2()
+        memoryRequirements.sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2
+        withUnsafeMutablePointer(to: &dedicatedRequirements) {
+            memoryRequirements.pNext = UnsafeMutableRawPointer($0)
+            var memoryRequirementsInfo = VkImageMemoryRequirementsInfo2()
+            memoryRequirementsInfo.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_REQUIREMENTS_INFO_2
+            memoryRequirementsInfo.image = image
+            vkGetImageMemoryRequirements2(device, &memoryRequirementsInfo, &memoryRequirements)
+        }
+
+        let memReqs = memoryRequirements.memoryRequirements
+        var memAllocInfo = VkMemoryAllocateInfo()
+        memAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO
+        let memProperties = VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT.rawValue |
+                                                  VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT.rawValue)
+        memAllocInfo.allocationSize = memReqs.size
+        memAllocInfo.memoryTypeIndex = self.indexOfMemoryType(typeBits: memReqs.memoryTypeBits, properties: memProperties)
+
+        if dedicatedRequirements.prefersDedicatedAllocation != 0 {
+            // bind resource to a dedicated allocation.
+            var memoryDedicatedAllocateInfo = VkMemoryDedicatedAllocateInfo()
+            memoryDedicatedAllocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO
+            memoryDedicatedAllocateInfo.image = image
+            result = withUnsafePointer(to: memoryDedicatedAllocateInfo) {
+                memAllocInfo.pNext = UnsafeRawPointer($0)
+                return vkAllocateMemory(self.device, &memAllocInfo, self.allocationCallbacks, &memory)
+            }
+        } else {
+            result = vkAllocateMemory(self.device, &memAllocInfo, self.allocationCallbacks, &memory)
+        }
+
+        if result != VK_SUCCESS {
+            Log.err("vkAllocateMemory failed: \(result)")
+            return nil
+        }
+        result = vkBindImageMemory(self.device, image, memory, 0)
+        if result != VK_SUCCESS {
+            Log.err("vkBindBufferMemory failed: \(result)")
+            return nil
+        }
+
+        let memoryType = self.deviceMemoryTypes[Int(memAllocInfo.memoryTypeIndex)]
+        let deviceMemory = VulkanDeviceMemory(device: self, memory: memory!, type: memoryType, size: memAllocInfo.allocationSize)
+        memory = nil
+
+        let imageObject = VulkanImage(memory: deviceMemory, image: image!, imageCreateInfo: imageCreateInfo)
+        image = nil
+
+        // create imageView
+        var imageViewCreateInfo = VkImageViewCreateInfo()
+        imageViewCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO
+        imageViewCreateInfo.image = imageObject.image
+
+        switch textureType {
+        case .type1D:
+            imageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_1D
+        case .type2D:
+            imageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D
+        case .type3D:
+            imageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_3D
+        case .typeCube:
+            imageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_CUBE
+        default:
+            assertionFailure("Unknown texture type!")
+            return nil
+        }
+
+        imageViewCreateInfo.format = imageCreateInfo.format
+        imageViewCreateInfo.components = VkComponentMapping(
+            r: VK_COMPONENT_SWIZZLE_R,
+            g: VK_COMPONENT_SWIZZLE_G,
+            b: VK_COMPONENT_SWIZZLE_B,
+            a: VK_COMPONENT_SWIZZLE_A)
+        
+        if pixelFormat.isColorFormat() {
+            imageViewCreateInfo.subresourceRange.aspectMask |= UInt32(VK_IMAGE_ASPECT_COLOR_BIT.rawValue)
+        }
+        if pixelFormat.isDepthFormat() {
+            imageViewCreateInfo.subresourceRange.aspectMask |= UInt32(VK_IMAGE_ASPECT_DEPTH_BIT.rawValue)
+        }
+        if pixelFormat.isStencilFormat() {
+            imageViewCreateInfo.subresourceRange.aspectMask |= UInt32(VK_IMAGE_ASPECT_STENCIL_BIT.rawValue)
+        }
+
+        imageViewCreateInfo.subresourceRange.baseMipLevel = 0
+        imageViewCreateInfo.subresourceRange.baseArrayLayer = 0
+        imageViewCreateInfo.subresourceRange.layerCount = imageCreateInfo.arrayLayers
+        imageViewCreateInfo.subresourceRange.levelCount = imageCreateInfo.mipLevels
+
+        var imageView: VkImageView? = nil
+        result = vkCreateImageView(self.device, &imageViewCreateInfo, self.allocationCallbacks, &imageView)
+        if result != VK_SUCCESS {
+            Log.err("vkCreateImageView failed: \(result)")
+            return nil
+        }
+        return VulkanImageView(image: imageObject, imageView: imageView!, imageViewCreateInfo: imageViewCreateInfo)
+    }
+
+
     public func makeSamplerState(descriptor desc: SamplerDescriptor) -> SamplerState? {
         let filter = { (f: SamplerMinMagFilter) -> VkFilter in
             switch f {

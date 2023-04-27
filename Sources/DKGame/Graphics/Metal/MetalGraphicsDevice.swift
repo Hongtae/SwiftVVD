@@ -791,6 +791,52 @@ public class MetalGraphicsDevice: GraphicsDevice {
         return nil
     }
 
+    public func makeTransientRenderTarget(type textureType: TextureType,
+                                          pixelFormat: PixelFormat,
+                                          width: Int,
+                                          height: Int,
+                                          depth: Int) -> Texture? {
+        let pixelFormat = pixelFormat.mtlPixelFormat()
+        if pixelFormat == .invalid {
+            Log.err("MetalGraphicsDevice.makeTexture error: Invalid pixel format!")
+            return nil
+        }
+        if width < 1 || height < 1 || depth < 1 {
+            Log.error("Texture dimensions (width, height, depth) value must be greater than or equal to 1.")
+            return nil
+        }
+
+        let desc = MTLTextureDescriptor()
+        switch textureType {
+        case .type1D:       desc.textureType = .type1D
+        case .type2D:       desc.textureType = .type2D
+        case .typeCube:     desc.textureType = .typeCube
+        case .type3D:       desc.textureType = .type3D
+        case .unknown:
+            Log.err("MetalGraphicsDevice.makeTexture error: Unknown texture type!")
+            return nil
+        }
+        desc.pixelFormat = pixelFormat
+        desc.width = width
+        desc.height = height
+        desc.depth = depth
+        desc.mipmapLevelCount = 1
+        desc.sampleCount = 1
+        desc.arrayLength = 1
+        desc.resourceOptions = .storageModeMemoryless
+        desc.cpuCacheMode = .defaultCache
+        desc.storageMode = .memoryless
+        desc.allowGPUOptimizedContents = true
+        desc.usage = .renderTarget
+
+        if let texture = device.makeTexture(descriptor: desc) {
+            return MetalTexture(device: self, texture: texture)
+        } else {
+            Log.err("MTLDevice.makeTexture failed!")
+        }
+        return nil
+    }
+
     public func makeSamplerState(descriptor: SamplerDescriptor) -> SamplerState? {
         let addressMode = { (m: SamplerAddressMode) -> MTLSamplerAddressMode in
             switch m {

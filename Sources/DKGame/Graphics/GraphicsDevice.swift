@@ -35,6 +35,7 @@ public protocol GraphicsDevice {
 
     func makeBuffer(length: Int, storageMode: StorageMode, cpuCacheMode: CPUCacheMode) -> Buffer?
     func makeTexture(descriptor: TextureDescriptor) -> Texture?
+    func makeTransientRenderTarget(type: TextureType, pixelFormat: PixelFormat, width: Int, height: Int, depth: Int) -> Texture?
     func makeSamplerState(descriptor: SamplerDescriptor) -> SamplerState?
 
     func makeEvent() -> Event?
