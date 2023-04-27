@@ -8,6 +8,17 @@
 import Foundation
 import DKGame
 
+class DrawableTargets {
+    var source: Texture
+    var backdrop: Texture
+    var composited: Texture
+    let stencilBuffer: Texture
+
+    init(device: GraphicsDevice) {
+        fatalError()
+    }
+}
+
 public struct GraphicsContext {
 
     public var opacity: Double
@@ -152,4 +163,16 @@ public struct GraphicsContext {
 
     var unfilteredBackBuffer: Texture? = nil
     var filters: [(Filter, FilterOptions)] = []
+
+    func makeRenderTarget(withFormat pixelFormat: PixelFormat) -> Texture? {
+        let device = commandBuffer.device
+        let width = backBuffer.width
+        let height = backBuffer.height
+        return device.makeTexture(
+            descriptor: TextureDescriptor(textureType: .type2D,
+                                          pixelFormat: pixelFormat,
+                                          width: width,
+                                          height: height,
+                                          usage: [.renderTarget, .sampled]))
+    }
 }

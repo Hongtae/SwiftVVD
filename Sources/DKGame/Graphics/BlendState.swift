@@ -60,15 +60,14 @@ public struct BlendState: Hashable {
 
     public var writeMask : ColorWriteMask
 
-    public init(enabled : Bool = false,
-                sourceRGBBlendFactor : BlendFactor = .one,
+    public init(sourceRGBBlendFactor : BlendFactor = .one,
                 sourceAlphaBlendFactor : BlendFactor = .one,
                 destinationRGBBlendFactor : BlendFactor = .zero,
                 destinationAlphaBlendFactor : BlendFactor = .zero,
                 rgbBlendOperation : BlendOperation = .add,
                 alphaBlendOperation : BlendOperation = .add,
                 writeMask : ColorWriteMask = .all) {
-        self.enabled = enabled
+        self.enabled = true
         self.sourceRGBBlendFactor = sourceRGBBlendFactor
         self.sourceAlphaBlendFactor = sourceAlphaBlendFactor
         self.destinationRGBBlendFactor = destinationRGBBlendFactor
@@ -78,10 +77,34 @@ public struct BlendState: Hashable {
         self.writeMask = writeMask
     }
 
+    public init(sourceBlendFactor: BlendFactor,
+                destinationBlendFactor: BlendFactor,
+                blendOperation: BlendOperation,
+                writeMask: ColorWriteMask = .all) {
+        self.enabled = true
+        self.sourceRGBBlendFactor = sourceBlendFactor
+        self.sourceAlphaBlendFactor = sourceBlendFactor
+        self.destinationRGBBlendFactor = destinationBlendFactor
+        self.destinationAlphaBlendFactor = destinationBlendFactor
+        self.rgbBlendOperation = blendOperation
+        self.alphaBlendOperation = blendOperation
+        self.writeMask = writeMask
+    }
+
+    public init(enabled: Bool = false) {
+        self.enabled = enabled
+        self.sourceRGBBlendFactor = .one
+        self.sourceAlphaBlendFactor = .one
+        self.destinationRGBBlendFactor = .zero
+        self.destinationAlphaBlendFactor = .zero
+        self.rgbBlendOperation = .add
+        self.alphaBlendOperation = .add
+        self.writeMask = .all   
+    }
+
     // preset
     public static let opaque = BlendState(enabled: false)
     public static let alphaBlend = BlendState(
-        enabled: true,
         sourceRGBBlendFactor: .sourceAlpha,
         sourceAlphaBlendFactor: .one,
         destinationRGBBlendFactor: .oneMinusSourceAlpha,
@@ -89,7 +112,6 @@ public struct BlendState: Hashable {
         rgbBlendOperation: .add,
         alphaBlendOperation: .add)
     public static let multiply = BlendState(
-        enabled: true,
         sourceRGBBlendFactor: .destinationColor,
         sourceAlphaBlendFactor: .destinationAlpha,
         destinationRGBBlendFactor: .zero,
@@ -97,7 +119,6 @@ public struct BlendState: Hashable {
         rgbBlendOperation: .add,
         alphaBlendOperation: .add)
     public static let screen = BlendState(
-        enabled: true,
         sourceRGBBlendFactor: .oneMinusDestinationColor,
         sourceAlphaBlendFactor: .oneMinusDestinationColor,
         destinationRGBBlendFactor: .one,
@@ -105,7 +126,6 @@ public struct BlendState: Hashable {
         rgbBlendOperation: .add,
         alphaBlendOperation: .add)
     public static let darken = BlendState(
-        enabled: true,
         sourceRGBBlendFactor: .one,
         sourceAlphaBlendFactor: .one,
         destinationRGBBlendFactor: .one,
@@ -113,7 +133,6 @@ public struct BlendState: Hashable {
         rgbBlendOperation: .min,
         alphaBlendOperation: .min)
     public static let lighten = BlendState(
-        enabled: true,
         sourceRGBBlendFactor: .one,
         sourceAlphaBlendFactor: .one,
         destinationRGBBlendFactor: .one,
@@ -121,7 +140,6 @@ public struct BlendState: Hashable {
         rgbBlendOperation: .max,
         alphaBlendOperation: .max)
     public static let linearBurn = BlendState(
-        enabled: true,
         sourceRGBBlendFactor: .one,
         sourceAlphaBlendFactor: .one,
         destinationRGBBlendFactor: .oneMinusDestinationColor,
@@ -129,7 +147,6 @@ public struct BlendState: Hashable {
         rgbBlendOperation: .subtract,
         alphaBlendOperation: .subtract)
     public static let linearDodge = BlendState(
-        enabled: true,
         sourceRGBBlendFactor: .one,
         sourceAlphaBlendFactor: .one,
         destinationRGBBlendFactor: .one,

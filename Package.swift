@@ -92,7 +92,8 @@ let package = Package(
                 .target(name: "DKGame"),
             ],
             resources: [
-                .copy("Resources/Fonts")
+                .copy("Resources/Fonts"),
+                .copy("Resources/Shaders/SPIRV")
             ]),
         .executableTarget(
             name: "DKGameEditor",

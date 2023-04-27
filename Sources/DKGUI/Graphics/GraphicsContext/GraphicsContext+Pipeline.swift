@@ -8,226 +8,7 @@
 import Foundation
 import DKGame
 
-// MARK: - SPIR-V Shaders
-// glslc {input-file} -o {output-file} -Os --target-env=vulkan1.3
-private let vsStencilGLSL = """
-    /* vertex shader for writing stencil only */
-    #version 450
-
-    layout (location=0) in vec2 position;
-
-    void main() {
-        gl_Position = vec4(position, 0, 1);
-    }
-    """
-
-private let vsStencilSpvCEB64 = """
-    XQAAAAR4AgAAAAAAAAABgJdesnC95qjyNRPxiVbqegigYKDoCIXwQXVuG9QUdX/sz/g0ud\
-    Z1k9NMG4TOnzFTBQWL0mum/q1NErbUd7wshLipDIuwIE/3pJbxD0oPiyriJ9ME6rvrrNEK\
-    3yiko9ulTcWJOlMz9ZO+aUyf3WUw/WQ5tqoIyvbK6Ne+GivV5pvo2dX2+hzkJ9cH082r1K\
-    Wbh3D8SghnyRA3ymyR2ju+b8hXKAXIqk9toUqXZI5wODcc03rWbnT1lW5YHGytgQVvc5ZV\
-    sUFn5EsZY3P+3s+h8PF5h+sh8EXya8RNGWYxbs9yCpBLutJ7cccwXimZP3DwVCNDJlg=
-    """
-
-private let vsGLSL = """
-    /* vertex shader for vertex-color, texcoord */
-    #version 450
-
-    layout (location=0) in vec2 position;
-    layout (location=1) in vec2 texcoord;
-    layout (location=2) in vec4 color;
-
-    layout (location=0) out vec2 outMaskUV;
-    layout (location=1) out vec2 outTexUV;
-    layout (location=2) out vec4 outColor;
-
-    void main() {
-        outMaskUV = (position + vec2(1, -1)) * vec2(0.5, -0.5);
-        outTexUV = texcoord;
-        outColor = color;
-        gl_Position = vec4(position, 0, 1);
-    }
-    """
-
-private let vsSpvCEB64 = """
-    XQAAAAQQBAAAAAAAAAABgJdesnC95qjyNRPy1HqTc7gPRthELV8YDfBHNWmt93l0V6ZSk2\
-    s6fW41iQ5gA3M3dIKJKHQBbfk2ux785iNMcOzvSUxGzMdCYrZ1qT/LVH9/z/oSnRpnkLix\
-    kQ15KbbSYTuAEEVwxpGQ1QXokFQsHl4pd0qLCZzOvH/xzezIiNwnzG7nAUdPeQJzwRYZjp\
-    P0LHfRAgDbn30FRqT3HB3Y+TQUYnc1k/pMSnSQgBmp13QHXYLyZRt+E6aTrGLqg7jtsgDA\
-    wxsnlA3WyMhcnHuq9FyVQysA/CoLBDy0r7XobWVvQJ2BJxOFhvT3U5IlU/miEMC5+npsUU\
-    2DCnXXCer6hDoJXnbNHI+avpFcdDBbB+P8/jLtp+qNMVmYmrUCjvhM+EiGZ15ms7yCzAk2\
-    41WIbZH6Q4iCPH0E3YsiAexGTRNjAeFh9tAsAA==
-    """
-
-private let fsVertexColorGLSL = """
-    #version 450
-
-    layout (binding=0) uniform sampler2D maskImage;
-
-    layout (location=0) in vec2 maskUV;
-    layout (location=1) in vec2 texUV;
-    layout (location=2) in vec4 color;
-
-    layout (location=0) out vec4 outFragColor;
-
-    void main(void) {
-        if (texture(maskImage, maskUV).r <= 0)
-            discard;
-        outFragColor = color;
-    }
-    """
-
-private let fsVertexColorSpvCEB64 = """
-    XQAAAASUAgAAAAAAAAABgJdesnDIkXTyNRPx9MW6ESsyRORUOdl1zDyzarYlCfMkl6fI14\
-    mXogxjfgm++4bKnd4h29/GCiwUxwJag764lX2AzXjdZaXubDwWd/Fr2CV/e6R13bj2xYYi\
-    7ryYNC91RJk8F/6t11QO+5hTX0Cqi3k7YqGDh2Y4IrTCZu/fBBEG6d8CtNoXDDHGh+fav8\
-    iOBrC3jR114MbV/ympDPJsrN7aFjKUJC8CMMLhVSCmO89CQxxq3TqR3Q2H7X6SoDvwYJY7\
-    vBXrqhEyXjYRebYsHgy85x0uDLrV6qgAHkRxKCt2ffl7IQ02n6oKd5UtGQ9pNd86LnEnQd\
-    9+uiss7KYRNcQkhAA=
-    """
-
-private let fsImageGLSL = """
-    #version 450
-
-    layout (binding=0) uniform sampler2D maskImage;
-    layout (binding=1) uniform sampler2D image;
-
-    layout (location=0) in vec2 maskUV;
-    layout (location=1) in vec2 texUV;
-    layout (location=2) in vec4 color;
-
-    layout (location=0) out vec4 outFragColor;
-
-    void main() {
-        if (texture(maskImage, maskUV).r <= 0)
-            discard;
-        outFragColor = texture(image, texUV) * color;
-    }
-    """
-
-private let fsImageSpvCEB64 = """
-    XQAAAAQ0AwAAAAAAAAABgJdesnDIkXTyNRPyaB1kVkXQvrmDdSIJ3pa9vk6Vb+532Il6Az\
-    ZWXfTwVJfXA+P+cPurpexpQfF8OuSqKY4gIf4ThhmBOvi1hxWEFA+l8t7/elXTSQ69x0EZ\
-    B/il77Vh+X/TjUHm9ZhAoCl92jGjYLpX+OkRhzK6fBBwSL5vltf2gOGuskZgD5H+2oLoB8\
-    7M/6mDOPA6VE+HOqXa+11bds3yNwsC9/NACG5BGeLUmLOLby8no6YZf1ogVFFSymst9Pph\
-    PEJkaGaWvJPqT8SOpS8Z2jg7W7oyygpcX0gLTbaofBMWPw4MJ2YkwwrbenWprffg2wfSeg\
-    iJLeNoGLxBMGhZwePC21RxrGqC11nriEO88nKYxJ/XrAr7CyMD/gwA
-    """
-
-private let fsRedToAlphaImageGLSL = """
-    #version 450
-
-    layout (binding=0) uniform sampler2D maskImage;
-    layout (binding=1) uniform sampler2D image;
-
-    layout (location=0) in vec2 maskUV;
-    layout (location=1) in vec2 texUV;
-    layout (location=2) in vec4 color;
-
-    layout (location=0) out vec4 outFragColor;
-
-    void main(void) {
-        if (texture(maskImage, maskUV).r <= 0)
-            discard;
-        outFragColor = vec4(color.rgb, texture(image, texUV).r * color.a);
-    }
-    """
-
-private let fsRedToAlphaImageSpvCEB64 = """
-    XQAAAAT0AwAAAAAAAAABgJdesnDIkXTyNRPzLU/7FEkN1hUbMQvGqhcxUct3e3t7iNtpvE\
-    ZYQFGWZGd2oDREzGh0F99vQXe6znzgxXRaerG7l0NoHFEZRZ1LHxGpkorLEpcd8y4jYUML\
-    wt6aj1iRVmi/lUldd6bU5Ws77LmgM9GYvhidpUldJMwXLvDDeKVDsfkue7s70F0ysJ+aWc\
-    N5EQTw4kHd6PP7c9uaZQdi7qObtkb4yyLZcrQLvq1Mr8MRPOb2tAKaedXWPYmCb8E5p7XX\
-    oaRl3iDoPjaa3kfDO5QF/L0sFXh2kgh1IGui56ThenmYU+1kAfkylxWWeUFZUKoZ/UVp9W\
-    34ztcvdCPlM0clD9KXBrp1IqaLzsui7he3Zf4ulKmcHnu5caN2YckOkDWb2zBR/25gEB0N\
-    sUDX6kMjySM7ZpotaAFYLfi91v0WWe/48P/HGBNJIkrlXZQA
-    """
-
-private let fsResolveMaskGLSL = """
-    #version 450
-
-    layout (binding=0) uniform sampler2D maskImage;
-    layout (binding=1) uniform sampler2D image;
-
-    layout (location=0) in vec2 maskUV;
-    layout (location=1) in vec2 texUV;
-    layout (location=2) in vec4 color;
-
-    layout (location=0) out vec4 outFragColor;
-
-    void main() {
-        if (texture(maskImage, maskUV).r <= 0)
-            discard;
-
-        vec4 c = texture(image, texUV) * color;
-        /* output target should be r8unorm */
-        outFragColor = c.aaaa;
-    }
-    """
-
-private let fsResolveMaskSpvCEB64 = """
-    XQAAAARYAwAAAAAAAAABgJdesnDIkXTyNRPysLo7c7gPRthELV8WOPdqmzPcDt/U+ygmOh\
-    3wlFVLEXTbfT8wG1R6wUKE6/M7779voxmGUK9Ko/Xb5akEVe8/ETGqlrDigO+pNAsx45+g\
-    PWVIoQy+HUk6L3xxMSZZXHxiJu3UksL+LXCw6/oR5c/rgaM+T3FmNkome6WAevjN5WbsZ2\
-    WdWxh1S9kNDbiFoDxEMrAqn6XPuQvIMH/AYMwWUkEOkVqFyGEqApMKi6HRTSxtdy0UiF23\
-    +eJifpHHYgtPQ/t338ok4V7LIlbS2p81LCqJl/LRvFVWn3JevQ5RvtCY4ey/7OrbFYni8O\
-    DY0PZlefvACJ+wQBvTRsyEQsEnpCZkJqNkNUKI7ug3SksOjOv1wzgg0nBEgUA=
-    """
-
-private let fsColorMatrixImageGLSL = """
-    #version 450
-
-    layout (push_constant) uniform Constants {
-        float colorMatrixR[5];
-        float colorMatrixG[5];
-        float colorMatrixB[5];
-        float colorMatrixA[5];
-    } pc;
-
-    layout (binding=0) uniform sampler2D maskImage;
-    layout (binding=1) uniform sampler2D image;
-
-    layout (location=0) in vec2 maskUV;
-    layout (location=1) in vec2 texUV;
-    layout (location=2) in vec4 color;
-
-    layout (location=0) out vec4 outFragColor;
-
-    void main() {
-        if (texture(maskImage, maskUV).r <= 0)
-            discard;
-        vec4 fragColor = texture(image, texUV) * color;
-        vec4 cmR = vec4(pc.colorMatrixR[0], pc.colorMatrixR[1], pc.colorMatrixR[2], pc.colorMatrixR[3]);
-        vec4 cmG = vec4(pc.colorMatrixG[0], pc.colorMatrixG[1], pc.colorMatrixG[2], pc.colorMatrixG[3]);
-        vec4 cmB = vec4(pc.colorMatrixB[0], pc.colorMatrixB[1], pc.colorMatrixB[2], pc.colorMatrixB[3]);
-        vec4 cmA = vec4(pc.colorMatrixA[0], pc.colorMatrixA[1], pc.colorMatrixA[2], pc.colorMatrixA[3]);
-        float r = dot(fragColor, cmR) + pc.colorMatrixR[4];
-        float g = dot(fragColor, cmG) + pc.colorMatrixG[4];
-        float b = dot(fragColor, cmB) + pc.colorMatrixB[4];
-        float a = dot(fragColor, cmA) + pc.colorMatrixA[4];
-        outFragColor = vec4(r, g, b, a);
-    }
-    """
-
-private let fsColorMatrixImageSpvCEB64 = """
-    XQAAAAQoCQAAAAAAAAABgJdesnDIkXTyNRP3eX+1wTM2BjHpoMwrILM5Tt4ypo/o5Hzcc4\
-    fVT3pcir7GSZahyo6w0qIEQwu0yF5Q3L4VDFBKSEempWTi8pXfUkh8Z3PKE3DJwDlwR7uI\
-    iZ6YwbUPqHNNfdPbnxEG1+da/rwkLWcfAtyHTI+wlSmG3s78bDvVS6jzvTbwBNVBhkhZQ1\
-    27J32RcsQxAdix1RVbkQJQHaWM5Lq7Gc7YBuOicgOQyT7QnuyG269xsyGagVTz4ppic7xm\
-    GVWeq8Vz3W6PqNhgoYojfES1+Xl16SmxeNL0iBCHpeJ/DnFUUI6Havo3Kvl/Y4Bv8kDbIe\
-    30w2nGbQLq1LQeO94DNxirSTmOicceayDmS4AzA5DUiBQi2OcjfR9Zbzwgy6NlDn+0B7px\
-    7tWqVP4RxP0wIFMYI14YcsclnAfTRLJdKCH+PHSeRwgSKUW0Pq7qDoYxk+ITfgmzwllZcE\
-    YXo8BawzzUZte7wUM0l1t4FORCn2fSW2dzFguD4qJG+A304T2l5Oqck2WklWBacd1cbHuT\
-    vE+19ASW0E8sy5IwL6eRx6rl/5qblKUvQErRtCGQv98j3iTCISWOFI7hV8B48YFJ35/pah\
-    v3PxGeVdJ7ZgdBZc/zW8V7qyK2+mdt0eWNR0uPClPHOXnAsdN9h/IIc2LV3xZB9Lj0godI\
-    kfxeInef6twkwzEAs1da9eMZ15iPeg9AJgCUWBIsVAQ/G3wIqbFSB3T5wpqmD8oA
-    """
-
-private let fsBlurImageGLSL = ""
-
-private let fsBlurImageSpvCEB64 = ""
-
-
+#if false
 private func decodeShader(device: GraphicsDevice, encodedText: String) -> ShaderFunction? {
     if let data = Data(base64Encoded: encodedText, options: .ignoreUnknownCharacters) {
         let inputStream = InputStream(data: data)
@@ -270,6 +51,7 @@ private func encodeSPIRVData(from url: URL?) -> String? {
     }
     return nil
 }
+#endif
 
 // MARK: - Pipeline Types
 enum _Shader {
@@ -462,33 +244,46 @@ class GraphicsPipelineStates {
 
         let device = commandQueue.device
         repeat {
-            let loadShader = { (name: String, content: String) -> ShaderFunction? in
-                let fn = decodeShader(device: device, encodedText: content)
-                if fn == nil {
-                    Log.err("\(Self.self).\(#function): unable to decode shader: \(name)")
+            let loadShader = { (name: String) -> ShaderFunction? in
+                if let url = Bundle.module.url(forResource: name,
+                                               withExtension: "spv",
+                                               subdirectory: "SPIRV") {
+                    do {
+                        let d = try Data(contentsOf: url, options: [])
+                        if let shader = Shader(data: d, name: name), shader.validate() {
+                            Log.debug("GraphicsPipeline Shader loaded: \(shader)")
+                            if let module = device.makeShaderModule(from: shader) {
+                                return module.makeFunction(name: module.functionNames.first ?? "")
+                            }
+                        } else {
+                            Log.error("Failed to load shader: \(name)")
+                        }
+                    } catch {
+                        Log.error("URL(\(url)) error: \(error)")
+                    }
                 }
-                return fn
+                return nil
             }
 
-            guard let vsStencilFunction = loadShader("vs-stencil", vsStencilSpvCEB64)
+            guard let vsStencilFunction = loadShader("stencil.vert")
             else { break }
 
-            guard let vertexFunction = loadShader("vs-default", vsSpvCEB64)
+            guard let vertexFunction = loadShader("default.vert")
             else { break }
 
-            guard let fsVertexColorFunction = loadShader("fs-vertex-color", fsVertexColorSpvCEB64)
+            guard let fsVertexColorFunction = loadShader("vertex_color.frag")
             else { break }
 
-            guard let fsImageFunction = loadShader("fs-image", fsImageSpvCEB64)
+            guard let fsImageFunction = loadShader("draw_image.frag")
             else { break }
 
-            guard let fsRCImageFunction = loadShader("fs-red-alpha-channel-image", fsRedToAlphaImageSpvCEB64)
+            guard let fsRCImageFunction = loadShader("r8_opacity_image.frag")
             else { break }
 
-            guard let fsResolveMaskFunction = loadShader("fs-resolve-mask", fsResolveMaskSpvCEB64)
+            guard let fsResolveMaskFunction = loadShader("resolve_mask.frag")
             else { break }
 
-            guard let fsColorMatrixImageFunction = loadShader("fs-color-matrix-image", fsColorMatrixImageSpvCEB64)
+            guard let fsColorMatrixImageFunction = loadShader("draw_image_color_matrix.frag")
             else { break }
 
             var shaderFunctions: [_Shader: ShaderFunctions] = [:]

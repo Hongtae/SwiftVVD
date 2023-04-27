@@ -99,7 +99,57 @@ extension GraphicsContext {
     }
 
     func blendState() -> BlendState {
-        .opaque
+        switch self.blendMode {
+        case .normal:
+            return .alphaBlend
+        case .clear:
+            return BlendState(sourceBlendFactor: .zero,
+                              destinationBlendFactor: .zero,
+                              blendOperation: .add)
+        case .copy:
+            return BlendState(sourceBlendFactor: .one,
+                              destinationBlendFactor: .zero,
+                              blendOperation: .add)
+        case .sourceIn:
+            return BlendState(sourceBlendFactor: .destinationAlpha,
+                              destinationBlendFactor: .zero,
+                              blendOperation: .add)
+        case .sourceOut:
+            return BlendState(sourceBlendFactor: .oneMinusDestinationAlpha,
+                              destinationBlendFactor: .zero,
+                              blendOperation: .add)
+        case .sourceAtop:
+            return BlendState(sourceBlendFactor: .destinationAlpha,
+                              destinationBlendFactor: .oneMinusSourceAlpha,
+                              blendOperation: .add)
+        case .destinationOver:
+            return BlendState(sourceBlendFactor: .oneMinusDestinationAlpha,
+                              destinationBlendFactor: .one,
+                              blendOperation: .add)
+        case .destinationIn:
+            return BlendState(sourceBlendFactor: .zero,
+                              destinationBlendFactor: .sourceAlpha,
+                              blendOperation: .add)
+        case .destinationOut:
+            return BlendState(sourceBlendFactor: .zero,
+                              destinationBlendFactor: .oneMinusSourceAlpha,
+                              blendOperation: .add)
+        case .destinationAtop:
+            return BlendState(sourceBlendFactor: .oneMinusDestinationAlpha,
+                              destinationBlendFactor: .sourceAlpha,
+                              blendOperation: .add)
+        case .xor:
+            return BlendState(sourceBlendFactor: .oneMinusDestinationAlpha,
+                              destinationBlendFactor: .oneMinusSourceAlpha,
+                              blendOperation: .add)
+        case .plusLighter:
+            return BlendState(sourceBlendFactor: .one,
+                              destinationBlendFactor: .one,
+                              blendOperation: .add)
+        default:
+            break
+        }
+        return .opaque
     }
 
     func backdrop() -> Texture {
