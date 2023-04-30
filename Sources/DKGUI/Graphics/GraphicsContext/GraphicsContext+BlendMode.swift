@@ -86,8 +86,11 @@ extension GraphicsContext {
     // plusDarker:      R = MAX(0, 1 - ((1 - D) + (1 - S)))
     // plusLighter:     R = MIN(1, S + D)
 
+    var isSinglePassBlending: Bool {
+        true
+    }
 
-    func blendState() -> BlendState {
+    var blendState: BlendState {
         switch self.blendMode {
         case .normal:
             return .alphaBlend
@@ -141,13 +144,35 @@ extension GraphicsContext {
         return .opaque
     }
 
+    func applyBlendModeAndMask() {
+        if isSinglePassBlending == false {
+            let blendSrc = self.renderTargets.source
+            let blendDst = self.renderTargets.backdrop
+            let blendResult = self.renderTargets.composited
 
-    func resolve(_ renderTarget: Texture) {
-        if renderTarget !== backBuffer {
-            switch self.blendMode {
-            default:
-                break
-            }            
+            if let encoder = self.makeEncoder(renderTarget: blendResult,
+                                              enableStencil: false,
+                                              clear: true) {
+                let scale = self.resolution / self.contentScaleFactor
+                // FIXME: use blend-mode shader
+                self.encodeDrawTextureCommand(
+                    texture: blendSrc,
+                    in: CGRect(origin: .zero, size: scale),
+                    transform: .identity,
+                    textureFrame: CGRect(x: 0, y: 0,
+                                         width: self.renderTargets.width,
+                                         height: self.renderTargets.height),
+                    textureTransform: .identity,
+                    blendState: .opaque,
+                    color: .white,
+                    colorMatrix: nil,
+                    encoder: encoder)
+                encoder.endEncoding()
+            }
+
+            self.renderTargets.backdrop = blendResult
+            self.renderTargets.composited = blendDst
         }
+        self.renderTargets.initialized = true
     }
 }

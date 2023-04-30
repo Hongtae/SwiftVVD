@@ -10,57 +10,57 @@ import DKGame
 
 extension GraphicsContext {
     func makeLayerContext() -> Self? {
-        return GraphicsContext(sharedContext: self.sharedContext,
-                               environment: self.environment,
-                               contentOffset: self.contentOffset,
-                               contentScale: self.contentScale,
-                               transform: self.transform,
-                               resolution: self.resolution,
-                               commandBuffer: self.commandBuffer,
-                               backBuffer: nil, /* to make new buffer */
-                               stencilBuffer: self.stencilBuffer)
+        GraphicsContext(sharedContext: self.sharedContext,
+                        environment: self.environment,
+                        viewport: self.viewport,
+                        contentOffset: self.contentOffset,
+                        contentScaleFactor: self.contentScaleFactor,
+                        resolution: self.resolution,
+                        commandBuffer: self.commandBuffer)
     }
 
     func makeRegionLayerContext(_ frame: CGRect) -> Self? {
         let frame = frame.standardized
 
-        let resolution = self.resolution
-        let width = resolution.width * (frame.width / self.contentScale.width)
-        let height = resolution.height * (frame.height / self.contentScale.height)
+        let width = frame.width * self.contentScaleFactor
+        let height = frame.height * self.contentScaleFactor
 
-        var stencil: Texture? = nil
-        if width.rounded() == resolution.width.rounded() &&
-           height.rounded() == resolution.height.rounded() {
-            stencil = self.stencilBuffer
-        }
         return GraphicsContext(sharedContext: self.sharedContext,
                                environment: self.environment,
+                               viewport: CGRect(x: 0, y: 0, width: width, height: height),
                                contentOffset: .zero,
-                               contentScale: frame.size,
-                               transform: self.transform,
+                               contentScaleFactor: self.contentScaleFactor,
                                resolution: CGSize(width: width, height: height),
-                               commandBuffer: self.commandBuffer,
-                               backBuffer: nil,
-                               stencilBuffer: stencil)
+                               commandBuffer: self.commandBuffer)
     }
 
     func drawLayer(in frame: CGRect, content: (inout GraphicsContext, CGSize) throws -> Void) rethrows {
         if var context = self.makeRegionLayerContext(frame) {
             do {
-                try content(&context, context.contentScale)
-                let texture = context.backBuffer
+                let size = context.resolution / context.contentScaleFactor
+                try content(&context, size)
+                if context.renderTargets.initialized {
+                    let texture = context.backdrop
 
-                // FIXME:  Use the correct blendState for the blendMode.
-                let blendState: BlendState = .alphaBlend
-                self._draw(texture: texture,
-                           in: frame,
-                           transform: .identity,
-                           textureFrame: CGRect(x: 0, y: 0,
-                                                width: texture.width,
-                                                height: texture.height),
-                           textureTransform: .identity,
-                           blendState: blendState,
-                           color: .white)
+                    if let encoder = self.makeEncoder(enableStencil: false) {
+                        let textureFrame = CGRect(x: 0, y: 0,
+                                                  width: texture.width,
+                                                  height: texture.height)
+                        self.encodeDrawTextureCommand(
+                            texture: texture,
+                            in: frame,
+                            transform: .identity,
+                            textureFrame: textureFrame,
+                            textureTransform: .identity,
+                            blendState: self.blendState,
+                            color: .white,
+                            encoder: encoder)
+                        encoder.endEncoding()
+
+                        self.applyFilters()
+                        self.applyBlendModeAndMask()
+                    }
+                }
             } catch {
                 Log.err("GraphicsContext error: \(error)")
             }
@@ -73,22 +73,29 @@ extension GraphicsContext {
         if var context = self.makeLayerContext() {
             do {
                 try content(&context)
-                let offset = -context.contentOffset
-                let scale = context.contentScale
-                let texture = context.backBuffer
+                if context.renderTargets.initialized {
+                    let offset = -context.contentOffset
+                    let scale = context.resolution / context.contentScaleFactor
+                    let texture = context.backdrop
 
-                // FIXME:  Use the correct blendState for the blendMode.
-                let blendState: BlendState = .alphaBlend
+                    let textureFrame = CGRect(x: 0, y: 0,
+                                              width: texture.width,
+                                              height: texture.height)
 
-                self._draw(texture: texture,
-                           in: CGRect(origin: offset, size: scale),
-                           transform: .identity,
-                           textureFrame: CGRect(x: 0, y: 0,
-                                                width: texture.width,
-                                                height: texture.height),
-                           textureTransform: .identity,
-                           blendState: blendState,
-                           color: .white)
+                    if let encoder = self.makeEncoder(enableStencil: false) {
+                        self.encodeDrawTextureCommand(
+                            texture: texture,
+                            in: CGRect(origin: offset, size: scale),
+                            textureFrame: textureFrame,
+                            blendState: self.blendState,
+                            color: .white,
+                            encoder: encoder)
+                        encoder.endEncoding()
+
+                        self.applyFilters()
+                        self.applyBlendModeAndMask()
+                    }
+                }
             } catch {
                 Log.err("GraphicsContext error: \(error)")
             }

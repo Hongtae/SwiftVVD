@@ -45,7 +45,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
 
             var contentBounds: CGRect = .null
             var contentScaleFactor: CGFloat = 1
-            var stencilBuffer: Texture? = nil
+            var renderTargets: GraphicsContext.RenderTargets? = nil
 
             mainLoop: while true {
                 guard let self = self else { break }
@@ -85,36 +85,55 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
 
                     let dim = { (tex: Texture) in (tex.width, tex.height, tex.depth) }
 
-                    if let stencilBuffer, dim(stencilBuffer) == dim(backBuffer) {
-                        // reuse the stencil buffer.
+                    if let renderTargets, dim(renderTargets.backdrop) == dim(backBuffer) {
                     } else {
-                        // create a new stencil buffer.
-                        let desc = TextureDescriptor(textureType: .type2D,
-                                                     pixelFormat: .stencil8,
-                                                     width: backBuffer.width,
-                                                     height: backBuffer.height,
-                                                     usage: [.renderTarget])
-                        stencilBuffer = device.makeTexture(descriptor: desc)
+                        renderTargets = GraphicsContext.RenderTargets(
+                            device: device,
+                            width: backBuffer.width,
+                            height: backBuffer.height)
                     }
 
                     renderPass.colorAttachments[0].clearColor = .darkGray
-                    if let commandBuffer = swapChain.commandQueue.makeCommandBuffer() {
-                        // clear back buffer
-                        if let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPass) {
-                            encoder.endEncoding()
-                        }
+                    if let renderTargets,
+                       let commandBuffer = swapChain.commandQueue.makeCommandBuffer() {
 
+                        renderTargets.initialized = false
                         if let context = GraphicsContext(
                             sharedContext: self.sharedContext,
                             environment: view.environmentValues,
+                            viewport: CGRect(x: 0, y: 0,
+                                             width: backBuffer.width,
+                                             height: backBuffer.height),
                             contentOffset: contentBounds.origin,
-                            contentScale: contentBounds.size,
-                            resolution: CGSize(width: backBuffer.width,
-                                               height: backBuffer.height),
-                            commandBuffer: commandBuffer,
-                            backBuffer: backBuffer,
-                            stencilBuffer: stencilBuffer) {
+                            contentScaleFactor: state.contentScaleFactor,
+                            renderTargets: renderTargets,
+                            commandBuffer: commandBuffer) {
                             view.draw(frame: contentBounds, context: context)
+
+                            if let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPass) {
+                                if renderTargets.initialized {
+                                    let backdrop = renderTargets.backdrop
+                                    renderTargets.backdrop = backBuffer
+                                    defer {
+                                        renderTargets.backdrop = backdrop
+                                    }
+                                    
+                                    context.encodeDrawTextureCommand(
+                                        texture: backdrop,
+                                        in: contentBounds,
+                                        textureFrame: CGRect(x: 0, y: 0,
+                                                             width: backBuffer.width,
+                                                             height: backBuffer.height),
+                                        blendState: .opaque,
+                                        color: .white,
+                                        encoder: encoder)
+                                }
+                                encoder.endEncoding()
+                            }
+                        } else {
+                            if let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPass) {
+                                encoder.endEncoding()
+                            }
                         }
 
                         commandBuffer.commit()

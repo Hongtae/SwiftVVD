@@ -186,4 +186,7 @@ extension GraphicsContext {
                                    options: FilterOptions = FilterOptions()) {
         filters.append((filter, options))
     }
+
+    func applyFilters() {
+    }
 }

@@ -438,6 +438,16 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
         self.encoder!.commands.append(command)
     }
 
+    public func setScissorRect(_ r: ScissorRect) {
+        var scissorRect = VkRect2D(offset: VkOffset2D(x: r.x, y: r.y),
+                                   extent: VkExtent2D(width: UInt32(r.width),
+                                                      height: UInt32(r.height)))
+        let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
+            vkCmdSetScissor(commandBuffer, 0, 1, &scissorRect)
+        }
+        self.encoder!.commands.append(command)
+    }
+
     public func setVertexBuffer(_ buffer: Buffer, offset: Int, index: Int) {
         setVertexBuffers([buffer], offsets: [offset], index: index)
     }

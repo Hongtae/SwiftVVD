@@ -310,27 +310,60 @@ extension GraphicsContext {
                                           y: rect.origin.y)
         let measure = text.measure(in: rect.size)
         if case let .color(color) = shading, rect.size.width >= measure.width {
-            self._drawText(lines,
-                           transform: transform,
-                           color: color.dkColor,
-                           blendState: .alphaBlend)
+            if let encoder = self.makeEncoder(
+                renderTarget: self.renderTargets.backdrop,
+                enableStencil: false,
+                clear: false) {
+                self.encodeDrawTextCommand(lines,
+                                           transform: transform,
+                                           color: color.dkColor,
+                                           blendState: .alphaBlend,
+                                           encoder: encoder)
+                encoder.endEncoding()
+            }
         } else {
-            self.drawLayer(in: rect) { context, size in
-                context.contentOffset = -rect.origin
-                context._drawText(lines,
-                                  transform: transform,
-                                  color: .white,
-                                  blendState: .alphaBlend)
-                if let encoder = context._makeEncoder(context.backBuffer) {
-                    context._encodeFillCommand(with: text.shading,
-                                               stencil: .ignore,
-                                               blendState: .multiply,
-                                               encoder: encoder)
-                    encoder.endEncoding()
-                }
+            let width = Int(rect.width * self.contentScaleFactor)
+            let height = Int(rect.height * self.contentScaleFactor)
+
+            if let encoder = self.makeEncoder(
+                renderTarget: self.renderTargets.source,
+                enableStencil: false,
+                clear: true) {
+
+                encoder.setScissorRect(ScissorRect(x: 0, y: 0,
+                                                   width: width,
+                                                   height: height))
+                self.encodeDrawTextCommand(lines,
+                                           transform: transform,
+                                           color: .white,
+                                           blendState: .opaque,
+                                           encoder: encoder)
+                self.encodeShadingBoxCommand(text.shading,
+                                             stencil: .ignore,
+                                             blendState: .multiply,
+                                             encoder: encoder)
+                encoder.endEncoding()
+            } else {
+                return
+            }
+            // copy to backdrop
+            if let encoder = self.makeEncoder(renderTarget: self.backdrop,
+                                              enableStencil: false,
+                                              clear: false) {
+
+                let textureFrame = CGRect(x: 0, y: 0,
+                                          width: width, height: height)
+                self.encodeDrawTextureCommand(texture: self.renderTargets.source,
+                                              in: rect,
+                                              textureFrame: textureFrame,
+                                              blendState: .alphaBlend,
+                                              color: .white,
+                                              encoder: encoder)
+                encoder.endEncoding()
             }
         }
     }
+
     public func draw(_ text: ResolvedText,
                      at point: CGPoint,
                      anchor: UnitPoint = .center) {
@@ -349,9 +382,11 @@ extension GraphicsContext {
         draw(resolve(text), at: point, anchor: anchor)
     }
 
-
-    func _drawText(_ lines: [ResolvedText.Line], transform: CGAffineTransform,
-                   color: DKGame.Color, blendState: BlendState) {
+    func encodeDrawTextCommand(_ lines: [ResolvedText.Line],
+                               transform: CGAffineTransform,
+                               color: DKGame.Color,
+                               blendState: BlendState,
+                               encoder: RenderCommandEncoder) {
         if lines.isEmpty { return }
         
         struct GlyphVertex {
@@ -370,10 +405,6 @@ extension GraphicsContext {
         let transform = transform
             .concatenating(self.transform)
             .concatenating(self.viewTransform)
-
-        guard let encoder = self._makeEncoder(self.backBuffer) else {
-            return
-        }
 
         var quads: [Quad] = []
         var offset: Vector2 = .zero
@@ -418,14 +449,14 @@ extension GraphicsContext {
         var vertices: [_Vertex] = []
         let draw = {
             if vertices.isEmpty == false {
-                self._encodeDrawCommand(shader: .rcImage,
-                                        stencil: .ignore,
-                                        vertices: vertices,
-                                        indices: nil,
-                                        texture: texture,
-                                        blendState: .alphaBlend,
-                                        pushConstantData: nil,
-                                        encoder: encoder)
+                self.encodeDrawCommand(shader: .rcImage,
+                                       stencil: .ignore,
+                                       vertices: vertices,
+                                       indices: nil,
+                                       texture: texture,
+                                       blendState: .alphaBlend,
+                                       pushConstantData: nil,
+                                       encoder: encoder)
                 vertices = []
             }
         }
@@ -446,6 +477,5 @@ extension GraphicsContext {
                 })
         }
         draw()
-        encoder.endEncoding()
     }
 }

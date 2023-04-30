@@ -29,47 +29,42 @@ extension GraphicsContext {
                                           width: width,
                                           height: height,
                                           usage: [.renderTarget, .sampled])) {
-            if let encoder = commandBuffer.makeRenderCommandEncoder(
-                descriptor: RenderPassDescriptor(colorAttachments: [
-                    RenderPassColorAttachmentDescriptor(renderTarget: backBuffer,
-                                                        loadAction: .clear,
-                                                        storeAction: .store,
-                                                        clearColor: .white)])) {
+            if let encoder = self.makeEncoder(renderTarget: maskTexture,
+                                              enableStencil: true,
+                                              clear: true) {
+                if self.encodeStencilPathFillCommand(path, encoder: encoder) {
+
+                    let makeVertex = { x, y in
+                        _Vertex(position: Vector2(x, y).float2,
+                                texcoord: Vector2.zero.float2,
+                                color: DKGame.Color.white.float4)
+                    }
+                    let vertices: [_Vertex] = [
+                        makeVertex(-1, -1), makeVertex(-1, 1), makeVertex(1, -1),
+                        makeVertex(1, -1), makeVertex(-1, 1), makeVertex(1, 1)
+                    ]
+
+                    let stencil: _Stencil
+                    if options.contains(.inverse) {
+                        stencil = style.isEOFilled ? .testOdd : .testZero
+                    } else {
+                        stencil = style.isEOFilled ? .testEven : .testNonZero
+                    }
+                    self.encodeDrawCommand(shader: .vertexColor,
+                                           stencil: stencil,
+                                           vertices: vertices,
+                                           indices: nil,
+                                           texture: nil,
+                                           blendState: .alphaBlend,
+                                           pushConstantData: nil,
+                                           encoder: encoder)
+
+                    self.clipBoundingRect = self.clipBoundingRect.union(path.boundingBoxOfPath)
+                    self.maskTexture = maskTexture
+                }
                 encoder.endEncoding()
             } else {
-                Log.err("GraphicsContext warning: makeRenderCommandEncoder failed.")
-            }
-            // Create a new context to draw paths to a new mask texture
-            let drawn = self._drawPathFillWithStencil(path, backBuffer: maskTexture) { encoder in
-                let makeVertex = { x, y in
-                    _Vertex(position: Vector2(x, y).float2,
-                            texcoord: Vector2.zero.float2,
-                            color: DKGame.Color.white.float4)
-                }
-                let vertices: [_Vertex] = [
-                    makeVertex(-1, -1), makeVertex(-1, 1), makeVertex(1, -1),
-                    makeVertex(1, -1), makeVertex(-1, 1), makeVertex(1, 1)
-                ]
-
-                let stencil: _Stencil
-                if options.contains(.inverse) {
-                    stencil = style.isEOFilled ? .testOdd : .testZero
-                } else {
-                    stencil = style.isEOFilled ? .testEven : .testNonZero
-                }
-                self._encodeDrawCommand(shader: .vertexColor,
-                                        stencil: stencil,
-                                        vertices: vertices,
-                                        indices: nil,
-                                        texture: nil,
-                                        blendState: .alphaBlend,
-                                        pushConstantData: nil,
-                                        encoder: encoder)
-                return true
-            }
-            if drawn {
-                self.clipBoundingRect = self.clipBoundingRect.union(path.boundingBoxOfPath)
-                self.maskTexture = maskTexture
+                Log.error("GraphicsContext.makeEncoder failed.")
             }
         } else {
             Log.err("GraphicsContext error: makeTexture failed.")
@@ -82,14 +77,16 @@ extension GraphicsContext {
         if var context = self.makeLayerContext() {
             do {
                 try content(&context)
-                if let maskTexture = self._resolveMaskTexture(
-                    self.maskTexture,
-                    context.backBuffer,
-                    opacity: opacity,
-                    inverse: options.contains(.inverse)) {
-                    self.maskTexture = maskTexture
-                } else {
-                    Log.err("GraphicsContext error: unable to resolve mask image.")
+                if context.renderTargets.initialized {
+                    if let maskTexture = self._resolveMaskTexture(
+                        self.maskTexture,
+                        context.backdrop,
+                        opacity: self.opacity,
+                        inverse: options.contains(.inverse)) {
+                        self.maskTexture = maskTexture
+                    } else {
+                        Log.err("GraphicsContext error: unable to resolve mask image.")
+                    }
                 }
             } catch {
                 Log.err("GraphicsContext error: \(error)")
