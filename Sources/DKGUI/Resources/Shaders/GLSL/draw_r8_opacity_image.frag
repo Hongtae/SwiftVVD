@@ -7,6 +7,6 @@ layout (location=1) in vec4 color;
 
 layout (location=0) out vec4 outFragColor;
 
-void main() {
-    outFragColor = texture(image, texUV) * color;
+void main(void) {
+    outFragColor = vec4(color.rgb, texture(image, texUV).r * color.a);
 }

@@ -124,7 +124,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                                         textureFrame: CGRect(x: 0, y: 0,
                                                              width: backBuffer.width,
                                                              height: backBuffer.height),
-                                        blendState: .opaque,
+                                        blendState: .alphaBlend,
                                         color: .white,
                                         encoder: encoder)
                                 }

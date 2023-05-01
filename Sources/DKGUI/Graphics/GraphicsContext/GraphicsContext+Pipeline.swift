@@ -96,8 +96,8 @@ class GraphicsPipelineStates {
     let device: GraphicsDevice
     private let shaderFunctions: [_Shader: ShaderFunctions]
 
-    let defaultBindingSet1: ShaderBindingSet    // 1 texture (mask)
-    let defaultBindingSet2: ShaderBindingSet    // 2 textures (mask, diffuse)
+    let defaultBindingSet1: ShaderBindingSet    // 1 texture
+    let defaultBindingSet2: ShaderBindingSet    // 2 textures
     let defaultSampler: SamplerState
     let defaultMaskTexture: Texture // 2x2 r8
 
@@ -267,40 +267,41 @@ class GraphicsPipelineStates {
 
             guard let vsStencilFunction = loadShader("stencil.vert")
             else { break }
-
             guard let vertexFunction = loadShader("default.vert")
             else { break }
-
             guard let fsVertexColorFunction = loadShader("vertex_color.frag")
             else { break }
-
             guard let fsImageFunction = loadShader("draw_image.frag")
             else { break }
-
-            guard let fsRCImageFunction = loadShader("r8_opacity_image.frag")
+            guard let fsRCImageFunction = loadShader("draw_r8_opacity_image.frag")
             else { break }
-
             guard let fsResolveMaskFunction = loadShader("resolve_mask.frag")
             else { break }
-
-            guard let fsColorMatrixImageFunction = loadShader("draw_image_color_matrix.frag")
+            guard let fsColorMatrixImageFunction = loadShader("filter_color_matrix.frag")
             else { break }
 
             var shaderFunctions: [_Shader: ShaderFunctions] = [:]
             shaderFunctions[.stencil] = ShaderFunctions(
-                vertexFunction: vsStencilFunction, fragmentFunction: nil)
+                vertexFunction: vsStencilFunction,
+                fragmentFunction: nil)
             shaderFunctions[.vertexColor] = ShaderFunctions(
-                vertexFunction: vertexFunction, fragmentFunction: fsVertexColorFunction)
+                vertexFunction: vertexFunction,
+                fragmentFunction: fsVertexColorFunction)
             shaderFunctions[.image] = ShaderFunctions(
-                vertexFunction: vertexFunction, fragmentFunction: fsImageFunction)
+                vertexFunction: vertexFunction,
+                fragmentFunction: fsImageFunction)
             shaderFunctions[.rcImage] = ShaderFunctions(
-                vertexFunction: vertexFunction, fragmentFunction: fsRCImageFunction)
+                vertexFunction: vertexFunction,
+                fragmentFunction: fsRCImageFunction)
             shaderFunctions[.resolveMask] = ShaderFunctions(
-                vertexFunction: vertexFunction, fragmentFunction: fsResolveMaskFunction)
+                vertexFunction: vertexFunction,
+                fragmentFunction: fsResolveMaskFunction)
             shaderFunctions[.colorMatrixImage] = ShaderFunctions(
-                vertexFunction: vertexFunction, fragmentFunction: fsColorMatrixImageFunction)
+                vertexFunction: vertexFunction,
+                fragmentFunction: fsColorMatrixImageFunction)
             shaderFunctions[.blurImage] = ShaderFunctions(
-                vertexFunction: vertexFunction, fragmentFunction: fsImageFunction)
+                vertexFunction: vertexFunction,
+                fragmentFunction: fsImageFunction)
 
             let bindingLayout1 = ShaderBindingSetLayout(
                 bindings: [
@@ -373,10 +374,15 @@ class GraphicsPipelineStates {
                 break
             }
             encoder.copy(from: stgBuffer,
-                         sourceOffset: BufferImageOrigin(offset: 0, imageWidth: texWidth, imageHeight: texHeight),
+                         sourceOffset: BufferImageOrigin(offset: 0,
+                                                         imageWidth: texWidth,
+                                                         imageHeight: texHeight),
                          to: defaultMaskTexture,
-                         destinationOffset: TextureOrigin(layer: 0, level: 0, x: 0, y: 0, z: 0),
-                         size: TextureSize(width: texWidth, height: texHeight, depth: 1))
+                         destinationOffset: TextureOrigin(layer: 0, level: 0,
+                                                          x: 0, y: 0, z: 0),
+                         size: TextureSize(width: texWidth,
+                                           height: texHeight,
+                                           depth: 1))
 
             encoder.endEncoding()
             commandBuffer.commit()
@@ -566,6 +572,7 @@ extension GraphicsContext {
                            vertices: [_Vertex],
                            indices: [UInt32]?,
                            texture: Texture?,
+                           texture2: Texture? = nil,
                            blendState: BlendState,
                            pushConstantData: _PushConstant?,
                            encoder: RenderCommandEncoder) {
@@ -603,16 +610,19 @@ extension GraphicsContext {
         encoder.setRenderPipelineState(renderState)
         encoder.setDepthStencilState(depthState)
         if let texture {
-            pipeline.defaultBindingSet2.setTexture(self.maskTexture, binding: 0)
-            pipeline.defaultBindingSet2.setTexture(texture, binding: 1)
-            pipeline.defaultBindingSet2.setSamplerState(pipeline.defaultSampler, binding: 0)
-            pipeline.defaultBindingSet2.setSamplerState(pipeline.defaultSampler, binding: 1)
-            encoder.setResource(pipeline.defaultBindingSet2, atIndex: 0)
-        } else {
-            pipeline.defaultBindingSet1.setTexture(self.maskTexture, binding: 0)
-            pipeline.defaultBindingSet1.setSamplerState(pipeline.defaultSampler, binding: 0)
-            encoder.setResource(pipeline.defaultBindingSet1, atIndex: 0)
+            if let texture2 {
+                pipeline.defaultBindingSet2.setTexture(texture, binding: 0)
+                pipeline.defaultBindingSet2.setTexture(texture2, binding: 1)
+                pipeline.defaultBindingSet2.setSamplerState(pipeline.defaultSampler, binding: 0)
+                pipeline.defaultBindingSet2.setSamplerState(pipeline.defaultSampler, binding: 1)
+                encoder.setResource(pipeline.defaultBindingSet2, atIndex: 0)
+            } else {
+                pipeline.defaultBindingSet1.setTexture(texture, binding: 0)
+                pipeline.defaultBindingSet1.setSamplerState(pipeline.defaultSampler, binding: 0)
+                encoder.setResource(pipeline.defaultBindingSet1, atIndex: 0)
+            }
         }
+
         encoder.setCullMode(.none)
         encoder.setFrontFacing(.clockwise)
         encoder.setStencilReferenceValue(0)
