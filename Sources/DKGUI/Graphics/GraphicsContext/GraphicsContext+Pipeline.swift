@@ -60,8 +60,12 @@ enum _Shader {
     case image          // texture with tint color
     case rcImage        // for glyph, single(red) channel texture
     case resolveMask    // merge two masks (a8, r8) to render target (r8)
-    case colorMatrixImage
-    case blurImage
+
+    case filterColorMatrix
+    case filterBlur
+
+    case blendNormal;
+    case blendMultiply;
 }
 
 enum _Stencil {
@@ -243,8 +247,12 @@ class GraphicsPipelineStates {
         if instance != nil { return instance }
 
         let device = commandQueue.device
-        repeat {
-            let loadShader = { (name: String) -> ShaderFunction? in
+        do {
+            struct LoadError: Error {
+                let message: String
+            }
+
+            let loadShader = { (name: String) throws -> ShaderFunction in
                 if let url = Bundle.module.url(forResource: name,
                                                withExtension: "spv",
                                                subdirectory: "SPIRV") {
@@ -253,32 +261,23 @@ class GraphicsPipelineStates {
                         if let shader = Shader(data: d, name: name), shader.validate() {
                             Log.debug("GraphicsPipeline Shader loaded: \(shader)")
                             if let module = device.makeShaderModule(from: shader) {
-                                return module.makeFunction(name: module.functionNames.first ?? "")
+                                if let fn = module.makeFunction(name: module.functionNames.first ?? "") {
+                                    return fn
+                                }
                             }
                         } else {
-                            Log.error("Failed to load shader: \(name)")
+                            throw LoadError(message: "Failed to load shader: \(name)")
                         }
                     } catch {
                         Log.error("URL(\(url)) error: \(error)")
+                        throw error
                     }
                 }
-                return nil
+                throw LoadError(message: "Unable to load shader: \(name)")
             }
 
-            guard let vsStencilFunction = loadShader("stencil.vert")
-            else { break }
-            guard let vertexFunction = loadShader("default.vert")
-            else { break }
-            guard let fsVertexColorFunction = loadShader("vertex_color.frag")
-            else { break }
-            guard let fsImageFunction = loadShader("draw_image.frag")
-            else { break }
-            guard let fsRCImageFunction = loadShader("draw_r8_opacity_image.frag")
-            else { break }
-            guard let fsResolveMaskFunction = loadShader("resolve_mask.frag")
-            else { break }
-            guard let fsColorMatrixImageFunction = loadShader("filter_color_matrix.frag")
-            else { break }
+            let vsStencilFunction = try loadShader("stencil.vert")
+            let vertexFunction = try loadShader("default.vert")
 
             var shaderFunctions: [_Shader: ShaderFunctions] = [:]
             shaderFunctions[.stencil] = ShaderFunctions(
@@ -286,22 +285,29 @@ class GraphicsPipelineStates {
                 fragmentFunction: nil)
             shaderFunctions[.vertexColor] = ShaderFunctions(
                 vertexFunction: vertexFunction,
-                fragmentFunction: fsVertexColorFunction)
+                fragmentFunction: try loadShader("vertex_color.frag"))
             shaderFunctions[.image] = ShaderFunctions(
                 vertexFunction: vertexFunction,
-                fragmentFunction: fsImageFunction)
+                fragmentFunction: try loadShader("draw_image.frag"))
             shaderFunctions[.rcImage] = ShaderFunctions(
                 vertexFunction: vertexFunction,
-                fragmentFunction: fsRCImageFunction)
+                fragmentFunction: try loadShader("draw_r8_opacity_image.frag"))
             shaderFunctions[.resolveMask] = ShaderFunctions(
                 vertexFunction: vertexFunction,
-                fragmentFunction: fsResolveMaskFunction)
-            shaderFunctions[.colorMatrixImage] = ShaderFunctions(
+                fragmentFunction: try loadShader("resolve_mask.frag"))
+
+            // load filter
+            shaderFunctions[.filterColorMatrix] = ShaderFunctions(
                 vertexFunction: vertexFunction,
-                fragmentFunction: fsColorMatrixImageFunction)
-            shaderFunctions[.blurImage] = ShaderFunctions(
+                fragmentFunction: try loadShader("filter_color_matrix.frag"))
+
+            // load blend functions
+            shaderFunctions[.blendNormal] = ShaderFunctions(
                 vertexFunction: vertexFunction,
-                fragmentFunction: fsImageFunction)
+                fragmentFunction: try loadShader("blend_normal.frag"))
+            shaderFunctions[.blendMultiply] = ShaderFunctions(
+                vertexFunction: vertexFunction,
+                fragmentFunction: try loadShader("blend_multiply.frag"))
 
             let bindingLayout1 = ShaderBindingSetLayout(
                 bindings: [
@@ -316,20 +322,17 @@ class GraphicsPipelineStates {
 
             guard let defaultBindingSet1 = device.makeShaderBindingSet(layout: bindingLayout1)
             else {
-                Log.err("\(Self.self).\(#function): makeShaderBindingSet failed.")
-                break
+                throw LoadError(message: "makeShaderBindingSet failed.")
             }
             guard let defaultBindingSet2 = device.makeShaderBindingSet(layout: bindingLayout2)
             else {
-                Log.err("\(Self.self).\(#function): makeShaderBindingSet failed.")
-                break
+                throw LoadError(message: "makeShaderBindingSet failed.")
             }
 
             let samplerDesc = SamplerDescriptor()
             guard let defaultSampler = device.makeSamplerState(descriptor: samplerDesc)
             else {
-                Log.err("\(Self.self).\(#function): makeSampler failed.")
-                break
+                throw LoadError(message: "makeSampler failed.")
             }
             
             guard let defaultMaskTexture = device.makeTexture(
@@ -339,8 +342,7 @@ class GraphicsPipelineStates {
                                               height: 2,
                                               usage: [.copyDestination, .sampled]))
             else {
-                Log.err("\(Self.self).\(#function): makeTexture failed.")
-                break
+                throw LoadError(message: "makeTexture failed.")
             }
 
             let texWidth = defaultMaskTexture.width
@@ -350,8 +352,7 @@ class GraphicsPipelineStates {
                                                     storageMode: .shared,
                                                     cpuCacheMode: .writeCombined)
             else {
-                Log.err("\(Self.self).\(#function): makeBuffer failed.")
-                break
+                throw LoadError(message: "makeBuffer failed.")
             }
             if let ptr = stgBuffer.contents() {
                 let pixelData = [UInt8](repeating: 1, count: bufferLength)
@@ -361,22 +362,20 @@ class GraphicsPipelineStates {
                 }
                 stgBuffer.flush()
             } else {
-                Log.err("\(Self.self).\(#function): buffer.contents() failed.")
-                break
+                throw LoadError(message: "buffer.contents() failed.")
             }
 
             guard let commandBuffer = commandQueue.makeCommandBuffer() else {
-                Log.err("\(Self.self).\(#function): makeCommandBuffer failed.")
-                break
+                throw LoadError(message: "makeCommandBuffer failed.")
             }
             guard let encoder = commandBuffer.makeCopyCommandEncoder() else {
-                Log.err("\(Self.self).\(#function): makeCopyCommandEncoder failed.")
-                break
+                throw LoadError(message: "makeCopyCommandEncoder failed.")
             }
             encoder.copy(from: stgBuffer,
-                         sourceOffset: BufferImageOrigin(offset: 0,
-                                                         imageWidth: texWidth,
-                                                         imageHeight: texHeight),
+                         sourceOffset: BufferImageOrigin(
+                            offset: 0,
+                            imageWidth: texWidth,
+                            imageHeight: texHeight),
                          to: defaultMaskTexture,
                          destinationOffset: TextureOrigin(layer: 0, level: 0,
                                                           x: 0, y: 0, z: 0),
@@ -397,8 +396,10 @@ class GraphicsPipelineStates {
 
             // make weak-ref
             Self.sharedInstance = instance
-            Log.info("\(Self.self) instance created.")
-        } while false
+            Log.info("\(Self.self).\(#function): instance created.")
+        } catch {
+            Log.error("\(Self.self).\(#function) Error: \(error)")
+        }
 
         return instance
     }
@@ -420,7 +421,8 @@ extension GraphicsContext {
     func makeEncoder(enableStencil: Bool, clear: Bool = false) -> RenderCommandEncoder? {
         let renderTarget: Texture
         var clear = clear
-        if self.isSinglePassBlending {
+        let singlePass = self.isSinglePassBlending
+        if singlePass {
             renderTarget = self.renderTargets.backdrop
         } else {
             renderTarget = self.renderTargets.source
@@ -435,11 +437,10 @@ extension GraphicsContext {
         }
 
         var renderPass = RenderPassDescriptor(
-            colorAttachments: [
-                RenderPassColorAttachmentDescriptor(renderTarget: renderTarget,
-                                                    loadAction: loadAction,
-                                                    storeAction: .store)
-            ])
+            colorAttachments: [.init(renderTarget: renderTarget,
+                                     loadAction: loadAction,
+                                     storeAction: .store,
+                                     clearColor: self.clearColor)])
         if enableStencil {
             renderPass
                 .depthStencilAttachment = RenderPassDepthStencilAttachmentDescriptor(
@@ -453,6 +454,10 @@ extension GraphicsContext {
             Log.err("GraphicsContext error: makeRenderCommandEncoder failed.")
             return nil
         }
+        if singlePass && self.renderTargets.initialized == false {
+            self.renderTargets.initialized = true
+        }
+
         let x = Int(self.viewport.origin.x)
         let y = Int(self.viewport.origin.y)
         let width = Int(self.viewport.width)
@@ -481,14 +486,12 @@ extension GraphicsContext {
         }
 
         var renderPass = RenderPassDescriptor(
-            colorAttachments: [
-                RenderPassColorAttachmentDescriptor(
-                    renderTarget: renderTarget,
-                    loadAction: loadAction,
-                    storeAction: .store)
-            ])
+            colorAttachments: [.init(renderTarget: renderTarget,
+                                     loadAction: loadAction,
+                                     storeAction: .store,
+                                     clearColor: self.clearColor)])
         if enableStencil {
-            renderPass.depthStencilAttachment = RenderPassDepthStencilAttachmentDescriptor(
+            renderPass.depthStencilAttachment = .init(
                 renderTarget: self.renderTargets.stencilBuffer,
                 loadAction: .clear,
                 storeAction: .dontCare,
@@ -514,6 +517,15 @@ extension GraphicsContext {
                                                width: width, height: height))
         }
         return encoder
+    }
+
+    func clear() {
+        if let encoder = self.makeEncoder(renderTarget: self.backdrop,
+                                          enableStencil: false,
+                                          clear: true) {
+            encoder.endEncoding()
+            self.renderTargets.initialized = true
+        }
     }
 
     func encodeDrawTextureCommand(texture: Texture,
@@ -547,7 +559,7 @@ extension GraphicsContext {
 
         if let colorMatrix {
             let pc = _PushConstant(colorMatrix: colorMatrix)
-            self.encodeDrawCommand(shader: .colorMatrixImage,
+            self.encodeDrawCommand(shader: .filterColorMatrix,
                                    stencil: .ignore,
                                    vertices: vertices,
                                    indices: nil,
@@ -574,11 +586,11 @@ extension GraphicsContext {
                            texture: Texture?,
                            texture2: Texture? = nil,
                            blendState: BlendState,
-                           pushConstantData: _PushConstant?,
+                           pushConstantData: _PushConstant? = nil,
                            encoder: RenderCommandEncoder) {
         assert(shader != .stencil) // .stencil uses a different vertex format.
 
-        if shader == .colorMatrixImage {
+        if shader == .filterColorMatrix {
             assert(pushConstantData != nil)
         }
 
@@ -628,7 +640,7 @@ extension GraphicsContext {
         encoder.setStencilReferenceValue(0)
         encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
 
-        if shader == .colorMatrixImage {
+        if shader == .filterColorMatrix {
             let pushConstantData = pushConstantData ?? _PushConstant()
             withUnsafeBytes(of: pushConstantData) {
                 encoder.pushConstant(stages: .fragment, offset: 0, data: $0)

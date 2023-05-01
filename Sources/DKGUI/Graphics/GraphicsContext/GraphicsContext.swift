@@ -43,13 +43,16 @@ public struct GraphicsContext {
     let sharedContext: SharedContext
     let commandBuffer: CommandBuffer
 
+    var clearColor: DKGame.Color = .clear
+
     init?(sharedContext: SharedContext,
-         environment: EnvironmentValues,
-         viewport: CGRect,
-         contentOffset: CGPoint,
-         contentScaleFactor: CGFloat,
-         renderTargets: RenderTargets,
-         commandBuffer: CommandBuffer) {
+          environment: EnvironmentValues,
+          viewport: CGRect,
+          contentOffset: CGPoint,
+          contentScaleFactor: CGFloat,
+          renderTargets: RenderTargets,
+          clearColor: DKGame.Color = .clear,
+          commandBuffer: CommandBuffer) {
 
         let viewport = viewport.standardized
         if viewport.isEmpty || viewport.isInfinite {
@@ -69,6 +72,7 @@ public struct GraphicsContext {
         self.commandBuffer = commandBuffer
         self.contentScaleFactor = contentScaleFactor
         self.renderTargets = renderTargets
+        self.clearColor = clearColor
 
         let queue = commandBuffer.commandQueue
         guard let maskTexture = GraphicsPipelineStates.sharedInstance(
@@ -165,6 +169,7 @@ extension GraphicsContext {
           contentOffset: CGPoint,
           contentScaleFactor: CGFloat,
           resolution: CGSize,
+          clearColor: DKGame.Color = .clear,
           commandBuffer: CommandBuffer) {
 
         let device = commandBuffer.device
@@ -188,6 +193,7 @@ extension GraphicsContext {
                   contentOffset: contentOffset,
                   contentScaleFactor: contentScaleFactor,
                   renderTargets: renderTargets,
+                  clearColor: clearColor,
                   commandBuffer: commandBuffer)
     }
 }

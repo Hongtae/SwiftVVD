@@ -16,6 +16,7 @@ extension GraphicsContext {
                         contentOffset: self.contentOffset,
                         contentScaleFactor: self.contentScaleFactor,
                         resolution: self.resolution,
+                        clearColor: self.clearColor,
                         commandBuffer: self.commandBuffer)
     }
 
@@ -31,6 +32,7 @@ extension GraphicsContext {
                                contentOffset: .zero,
                                contentScaleFactor: self.contentScaleFactor,
                                resolution: CGSize(width: width, height: height),
+                               clearColor: self.clearColor,
                                commandBuffer: self.commandBuffer)
     }
 
@@ -52,7 +54,7 @@ extension GraphicsContext {
                             transform: .identity,
                             textureFrame: textureFrame,
                             textureTransform: .identity,
-                            blendState: self.blendState,
+                            blendState: .opaque,
                             color: .white,
                             encoder: encoder)
                         encoder.endEncoding()
@@ -87,7 +89,7 @@ extension GraphicsContext {
                             texture: texture,
                             in: CGRect(origin: offset, size: scale),
                             textureFrame: textureFrame,
-                            blendState: self.blendState,
+                            blendState: .opaque,
                             color: .white,
                             encoder: encoder)
                         encoder.endEncoding()

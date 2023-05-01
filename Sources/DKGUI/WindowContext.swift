@@ -93,7 +93,8 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                             height: backBuffer.height)
                     }
 
-                    renderPass.colorAttachments[0].clearColor = .darkGray
+                    let clearColor: DKGame.Color = .init(rgba8: (245, 242, 241, 255))
+                    renderPass.colorAttachments[0].clearColor = clearColor
                     if let renderTargets,
                        let commandBuffer = swapChain.commandQueue.makeCommandBuffer() {
 
@@ -107,7 +108,9 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                             contentOffset: contentBounds.origin,
                             contentScaleFactor: state.contentScaleFactor,
                             renderTargets: renderTargets,
+                            clearColor: clearColor,
                             commandBuffer: commandBuffer) {
+
                             view.draw(frame: contentBounds, context: context)
 
                             if let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPass) {

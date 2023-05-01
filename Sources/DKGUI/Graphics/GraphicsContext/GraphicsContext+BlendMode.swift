@@ -96,40 +96,65 @@ extension GraphicsContext {
 
     func applyBlendModeAndMask() {
         if isSinglePassBlending == false {
+
             let blendSrc = self.renderTargets.source
             let blendDst = self.renderTargets.backdrop
             let blendResult = self.renderTargets.composited
 
-            if let encoder = self.makeEncoder(renderTarget: blendResult,
-                                              enableStencil: false,
-                                              clear: true) {
-                let scale = self.resolution / self.contentScaleFactor
-                // FIXME: use blend-mode shader
-                self.encodeDrawTextureCommand(
-                    texture: blendSrc,
-                    in: CGRect(origin: .zero, size: scale),
-                    transform: .identity,
-                    textureFrame: CGRect(x: 0, y: 0,
-                                         width: self.renderTargets.width,
-                                         height: self.renderTargets.height),
-                    textureTransform: .identity,
-                    blendState: .opaque,
-                    color: .white,
-                    colorMatrix: nil,
-                    encoder: encoder)
-                encoder.endEncoding()
-            }
+            if self.renderTargets.initialized {
+                if let encoder = self.makeEncoder(renderTarget: blendResult,
+                                                  enableStencil: false,
+                                                  clear: true) {
+                    let shader: _Shader
+                    switch self.blendMode {
+                    case .normal:   shader = .blendNormal
+                    case .multiply: shader = .blendMultiply
+                    default:
+                        shader = .blendNormal
+                    }
 
-            self.renderTargets.backdrop = blendResult
-            self.renderTargets.composited = blendDst
+                    let color = DKGame.Color(1, 1, 1, self.opacity).float4
+                    let makeVertex = { x, y, u, v in
+                        _Vertex(position: Vector2(x, y).float2,
+                                texcoord: Vector2(u, v).float2,
+                                color: color)
+                    }
+                    let vertices = [
+                        makeVertex(-1, -1, 0, 1), makeVertex(-1, 1, 0, 0), makeVertex(1, -1, 1, 1),
+                        makeVertex(1, -1, 1, 1), makeVertex(-1, 1, 0, 0), makeVertex(1, 1, 1, 0)
+                    ]
+
+                    self.encodeDrawCommand(shader: shader,
+                                           stencil: .ignore,
+                                           vertices: vertices,
+                                           indices: nil,
+                                           texture: blendSrc,
+                                           texture2: blendDst,
+                                           blendState: .opaque,
+                                           encoder: encoder)
+                    encoder.endEncoding()
+                    self.renderTargets.backdrop = blendResult
+                    self.renderTargets.composited = blendDst
+                } else {
+                    Log.error("makeEncoder failed!")
+                    self.renderTargets.backdrop = blendSrc
+                    self.renderTargets.source = blendDst
+                    self.renderTargets.initialized = true
+                }
+            } else {
+                self.renderTargets.backdrop = blendSrc
+                self.renderTargets.source = blendDst
+                self.renderTargets.initialized = true
+            }
         }
-        self.renderTargets.initialized = true
+//        else {    // single pass blending
+//            self.renderTargets.initialized = true
+//        }
     }
 }
 
 extension GraphicsContext.BlendMode: Hashable {
     static let singlePassBlendModeStates: [Self: BlendState] = [
-        .normal: .alphaBlend,
         .copy: BlendState(
             sourceBlendFactor: .one,
             destinationBlendFactor: .zero,
