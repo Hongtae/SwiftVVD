@@ -559,11 +559,6 @@ extension GraphicsContext {
 
         if vertexData.count < 3 { return false }
 
-        let queue = self.commandBuffer.commandQueue
-        guard let pipeline = GraphicsPipelineStates.sharedInstance(commandQueue: queue) else {
-            Log.err("GraphicsContext error: pipeline failed.")
-            return false
-        }
         guard let vertexBuffer = self.makeBuffer(vertexData) else {
             Log.err("GraphicsContext error: _makeBuffer failed.")
             return false
@@ -1109,10 +1104,8 @@ extension GraphicsContext {
         self.encodeDrawCommand(shader: shader,
                                stencil: stencil,
                                vertices: vertices,
-                               indices: nil,
                                texture: nil,
                                blendState: blendState,
-                               pushConstantData: nil,
                                encoder: encoder)
     }
 }

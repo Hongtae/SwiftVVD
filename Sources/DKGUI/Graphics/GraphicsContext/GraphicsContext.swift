@@ -42,8 +42,7 @@ public struct GraphicsContext {
 
     let sharedContext: SharedContext
     let commandBuffer: CommandBuffer
-
-    var clearColor: DKGame.Color = .clear
+    let pipeline: GraphicsPipelineStates
 
     init?(sharedContext: SharedContext,
           environment: EnvironmentValues,
@@ -51,7 +50,6 @@ public struct GraphicsContext {
           contentOffset: CGPoint,
           contentScaleFactor: CGFloat,
           renderTargets: RenderTargets,
-          clearColor: DKGame.Color = .clear,
           commandBuffer: CommandBuffer) {
 
         let viewport = viewport.standardized
@@ -72,16 +70,15 @@ public struct GraphicsContext {
         self.commandBuffer = commandBuffer
         self.contentScaleFactor = contentScaleFactor
         self.renderTargets = renderTargets
-        self.clearColor = clearColor
 
         let queue = commandBuffer.commandQueue
-        guard let maskTexture = GraphicsPipelineStates.sharedInstance(
-            commandQueue: queue)?.defaultMaskTexture
-        else {
+        guard let pipeline = GraphicsPipelineStates.sharedInstance(
+            commandQueue: queue) else {
             Log.error("GraphicsPipelineStates error")
             return nil
         }
-        self.maskTexture = maskTexture
+        self.pipeline = pipeline
+        self.maskTexture = pipeline.defaultMaskTexture
 
         self.contentOffset = .zero
         self.viewTransform = .identity
@@ -114,6 +111,7 @@ public struct GraphicsContext {
 
     var backdrop: Texture { renderTargets.backdrop }
     var stencilBuffer: Texture { renderTargets.stencilBuffer }
+
     var colorFormat: PixelFormat { renderTargets.colorFormat }
     var depthFormat: PixelFormat { renderTargets.depthFormat }
     var resolution: CGSize { CGSize(width: renderTargets.width,
@@ -126,8 +124,6 @@ extension GraphicsContext {
         var backdrop: Texture   // output (swap with composited)
         var composited: Texture // composited output
         let stencilBuffer: Texture
-
-        var initialized: Bool
 
         var width: Int { backdrop.width }
         var height: Int { backdrop.height }
@@ -156,10 +152,12 @@ extension GraphicsContext {
             if let renderTarget = makeRenderTarget(.rgba8Unorm, usage) {
                 self.composited = renderTarget
             } else { return nil }
-            if let renderTarget = makeRenderTarget(.stencil8, .renderTarget) {
+            if let renderTarget = device.makeTransientRenderTarget(
+                type: .type2D,
+                pixelFormat: .stencil8,
+                width: width, height: height, depth: 1) {
                 self.stencilBuffer = renderTarget
             } else { return nil }
-            self.initialized = false
         }
     }
 
@@ -169,7 +167,6 @@ extension GraphicsContext {
           contentOffset: CGPoint,
           contentScaleFactor: CGFloat,
           resolution: CGSize,
-          clearColor: DKGame.Color = .clear,
           commandBuffer: CommandBuffer) {
 
         let device = commandBuffer.device
@@ -193,7 +190,6 @@ extension GraphicsContext {
                   contentOffset: contentOffset,
                   contentScaleFactor: contentScaleFactor,
                   renderTargets: renderTargets,
-                  clearColor: clearColor,
                   commandBuffer: commandBuffer)
     }
 }

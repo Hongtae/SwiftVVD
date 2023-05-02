@@ -10,14 +10,16 @@ import DKGame
 
 extension GraphicsContext {
     func makeLayerContext() -> Self? {
-        GraphicsContext(sharedContext: self.sharedContext,
-                        environment: self.environment,
-                        viewport: self.viewport,
-                        contentOffset: self.contentOffset,
-                        contentScaleFactor: self.contentScaleFactor,
-                        resolution: self.resolution,
-                        clearColor: self.clearColor,
-                        commandBuffer: self.commandBuffer)
+        let context = GraphicsContext(
+            sharedContext: self.sharedContext,
+            environment: self.environment,
+            viewport: self.viewport,
+            contentOffset: self.contentOffset,
+            contentScaleFactor: self.contentScaleFactor,
+            resolution: self.resolution,
+            commandBuffer: self.commandBuffer)
+        context?.clear(with: .clear)
+        return context
     }
 
     func makeRegionLayerContext(_ frame: CGRect) -> Self? {
@@ -26,14 +28,16 @@ extension GraphicsContext {
         let width = frame.width * self.contentScaleFactor
         let height = frame.height * self.contentScaleFactor
 
-        return GraphicsContext(sharedContext: self.sharedContext,
-                               environment: self.environment,
-                               viewport: CGRect(x: 0, y: 0, width: width, height: height),
-                               contentOffset: .zero,
-                               contentScaleFactor: self.contentScaleFactor,
-                               resolution: CGSize(width: width, height: height),
-                               clearColor: self.clearColor,
-                               commandBuffer: self.commandBuffer)
+        let context = GraphicsContext(
+            sharedContext: self.sharedContext,
+            environment: self.environment,
+            viewport: CGRect(x: 0, y: 0, width: width, height: height),
+            contentOffset: .zero,
+            contentScaleFactor: self.contentScaleFactor,
+            resolution: CGSize(width: width, height: height),
+            commandBuffer: self.commandBuffer)
+        context?.clear(with: .clear)
+        return context
     }
 
     func drawLayer(in frame: CGRect, content: (inout GraphicsContext, CGSize) throws -> Void) rethrows {
@@ -41,27 +45,22 @@ extension GraphicsContext {
             do {
                 let size = context.resolution / context.contentScaleFactor
                 try content(&context, size)
-                if context.renderTargets.initialized {
-                    let texture = context.backdrop
+                let texture = context.backdrop
 
-                    if let encoder = self.makeEncoder(enableStencil: false) {
-                        let textureFrame = CGRect(x: 0, y: 0,
-                                                  width: texture.width,
-                                                  height: texture.height)
-                        self.encodeDrawTextureCommand(
-                            texture: texture,
-                            in: frame,
-                            transform: .identity,
-                            textureFrame: textureFrame,
-                            textureTransform: .identity,
-                            blendState: .opaque,
-                            color: .white,
-                            encoder: encoder)
-                        encoder.endEncoding()
+                if let encoder = self.makeEncoder(enableStencil: false) {
+                    self.encodeDrawTextureCommand(
+                        texture: texture,
+                        in: frame,
+                        transform: .identity,
+                        textureFrame: context.viewport,
+                        textureTransform: .identity,
+                        blendState: .opaque,
+                        color: .white,
+                        encoder: encoder)
+                    encoder.endEncoding()
 
-                        self.applyFilters()
-                        self.applyBlendModeAndMask()
-                    }
+                    self.applyFilters()
+                    self.applyBlendModeAndMask()
                 }
             } catch {
                 Log.err("GraphicsContext error: \(error)")
@@ -75,28 +74,22 @@ extension GraphicsContext {
         if var context = self.makeLayerContext() {
             do {
                 try content(&context)
-                if context.renderTargets.initialized {
-                    let offset = -context.contentOffset
-                    let scale = context.resolution / context.contentScaleFactor
-                    let texture = context.backdrop
+                let offset = -context.contentOffset
+                let scale = context.viewport.size / context.contentScaleFactor
+                let texture = context.backdrop
 
-                    let textureFrame = CGRect(x: 0, y: 0,
-                                              width: texture.width,
-                                              height: texture.height)
+                if let encoder = self.makeEncoder(enableStencil: false) {
+                    self.encodeDrawTextureCommand(
+                        texture: texture,
+                        in: CGRect(origin: offset, size: scale),
+                        textureFrame: context.viewport,
+                        blendState: .opaque,
+                        color: .white,
+                        encoder: encoder)
+                    encoder.endEncoding()
 
-                    if let encoder = self.makeEncoder(enableStencil: false) {
-                        self.encodeDrawTextureCommand(
-                            texture: texture,
-                            in: CGRect(origin: offset, size: scale),
-                            textureFrame: textureFrame,
-                            blendState: .opaque,
-                            color: .white,
-                            encoder: encoder)
-                        encoder.endEncoding()
-
-                        self.applyFilters()
-                        self.applyBlendModeAndMask()
-                    }
+                    self.applyFilters()
+                    self.applyBlendModeAndMask()
                 }
             } catch {
                 Log.err("GraphicsContext error: \(error)")

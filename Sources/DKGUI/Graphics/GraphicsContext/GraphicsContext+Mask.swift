@@ -53,10 +53,8 @@ extension GraphicsContext {
                     self.encodeDrawCommand(shader: .vertexColor,
                                            stencil: stencil,
                                            vertices: vertices,
-                                           indices: nil,
                                            texture: nil,
                                            blendState: .alphaBlend,
-                                           pushConstantData: nil,
                                            encoder: encoder)
 
                     self.clipBoundingRect = self.clipBoundingRect.union(path.boundingBoxOfPath)
@@ -77,16 +75,14 @@ extension GraphicsContext {
         if var context = self.makeLayerContext() {
             do {
                 try content(&context)
-                if context.renderTargets.initialized {
-                    if let maskTexture = self._resolveMaskTexture(
-                        self.maskTexture,
-                        context.backdrop,
-                        opacity: self.opacity,
-                        inverse: options.contains(.inverse)) {
-                        self.maskTexture = maskTexture
-                    } else {
-                        Log.err("GraphicsContext error: unable to resolve mask image.")
-                    }
+                if let maskTexture = self._resolveMaskTexture(
+                    self.maskTexture,
+                    context.backdrop,
+                    opacity: self.opacity,
+                    inverse: options.contains(.inverse)) {
+                    self.maskTexture = maskTexture
+                } else {
+                    Log.err("GraphicsContext error: unable to resolve mask image.")
                 }
             } catch {
                 Log.err("GraphicsContext error: \(error)")

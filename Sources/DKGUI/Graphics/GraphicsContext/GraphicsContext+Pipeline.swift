@@ -418,78 +418,44 @@ extension GraphicsContext {
         return false
     }
 
-    func makeEncoder(enableStencil: Bool, clear: Bool = false) -> RenderCommandEncoder? {
-        let renderTarget: Texture
-        var clear = clear
-        let singlePass = self.isSinglePassBlending
-        if singlePass {
-            renderTarget = self.renderTargets.backdrop
-        } else {
-            renderTarget = self.renderTargets.source
-            clear = true
-        }
-
-        let loadAction: RenderPassAttachmentLoadAction
-        if clear || self.renderTargets.initialized == false {
-            loadAction = .clear
-        } else {
-            loadAction = .load
-        }
-
-        var renderPass = RenderPassDescriptor(
-            colorAttachments: [.init(renderTarget: renderTarget,
-                                     loadAction: loadAction,
-                                     storeAction: .store,
-                                     clearColor: self.clearColor)])
-        if enableStencil {
-            renderPass
-                .depthStencilAttachment = RenderPassDepthStencilAttachmentDescriptor(
-                    renderTarget: renderTargets.stencilBuffer,
-                    loadAction: .clear,
-                    storeAction: .dontCare,
-                    clearStencil: 0)
-        }
-
-        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPass) else {
-            Log.err("GraphicsContext error: makeRenderCommandEncoder failed.")
-            return nil
-        }
-        if singlePass && self.renderTargets.initialized == false {
-            self.renderTargets.initialized = true
-        }
-
-        let x = Int(self.viewport.origin.x)
-        let y = Int(self.viewport.origin.y)
-        let width = Int(self.viewport.width)
-        let height = Int(self.viewport.height)
-        if x != 0 && y != 0
-            && width != self.renderTargets.width
-            && height != self.renderTargets.height {
-            encoder.setViewport(Viewport(x: self.viewport.origin.x,
-                                         y: self.viewport.origin.y,
-                                         width: self.viewport.width,
-                                         height: self.viewport.height,
-                                         nearZ: .zero, farZ: 1))
-            encoder.setScissorRect(ScissorRect(x: x, y: y,
-                                               width: width, height: height))
-        }
-        return encoder
+    func makeEncoder(enableStencil: Bool) -> RenderCommandEncoder? {
+        return makeEncoder(renderTarget: self.renderTargets.source,
+                           enableStencil: enableStencil,
+                           clear: true,
+                           clearColor: .clear)
     }
 
-    func makeEncoder(renderTarget: Texture, enableStencil: Bool,
-                     clear: Bool) -> RenderCommandEncoder? {
+    func makeEncoderCompositionTarget() -> RenderCommandEncoder? {
+        return makeEncoder(renderTarget: self.renderTargets.composited,
+                           enableStencil: false,
+                           clear: true,
+                           clearColor: .clear)
+    }
+
+    func makeEncoderBackdrop(clear: Bool = false,
+                             clearColor: DKGame.Color = .clear) -> RenderCommandEncoder? {
+        return makeEncoder(renderTarget: self.renderTargets.backdrop,
+                           enableStencil: false,
+                           clear: clear,
+                           clearColor: clearColor)
+    }
+
+    func makeEncoder(renderTarget: Texture,
+                     enableStencil: Bool,
+                     clear: Bool,
+                     clearColor: DKGame.Color? = nil) -> RenderCommandEncoder? {
         let loadAction: RenderPassAttachmentLoadAction
         if clear {
             loadAction = .clear
         } else {
             loadAction = .load
         }
-
+        let clearColor = clearColor ?? .clear
         var renderPass = RenderPassDescriptor(
             colorAttachments: [.init(renderTarget: renderTarget,
                                      loadAction: loadAction,
                                      storeAction: .store,
-                                     clearColor: self.clearColor)])
+                                     clearColor: clearColor)])
         if enableStencil {
             renderPass.depthStencilAttachment = .init(
                 renderTarget: self.renderTargets.stencilBuffer,
@@ -519,89 +485,24 @@ extension GraphicsContext {
         return encoder
     }
 
-    func clear() {
-        if let encoder = self.makeEncoder(renderTarget: self.backdrop,
-                                          enableStencil: false,
-                                          clear: true) {
+    func clear(with color: DKGame.Color) {
+        if let encoder = self.makeEncoderBackdrop(clear: true,
+                                                  clearColor: color) {
             encoder.endEncoding()
-            self.renderTargets.initialized = true
-        }
-    }
-
-    func encodeDrawTextureCommand(texture: Texture,
-                                  in frame: CGRect,
-                                  transform: CGAffineTransform = .identity,
-                                  textureFrame: CGRect,
-                                  textureTransform: CGAffineTransform = .identity,
-                                  blendState: BlendState,
-                                  color: DKGame.Color,
-                                  colorMatrix: ColorMatrix? = nil,
-                                  encoder: RenderCommandEncoder) {
-        let trans = transform.concatenating(self.viewTransform)
-        let makeVertex = { x, y, u, v in
-            _Vertex(position: Vector2(x, y).applying(trans).float2,
-                    texcoord: Vector2(u, v).applying(textureTransform).float2,
-                    color: color.float4)
-        }
-        let uvMinX = textureFrame.minX / CGFloat(texture.width)
-        let uvMaxX = textureFrame.maxX / CGFloat(texture.width)
-        let uvMinY = textureFrame.minY / CGFloat(texture.height)
-        let uvMaxY = textureFrame.maxY / CGFloat(texture.height)
-
-        let vertices: [_Vertex] = [
-            makeVertex(frame.minX, frame.maxY, uvMinX, uvMaxY),
-            makeVertex(frame.minX, frame.minY, uvMinX, uvMinY),
-            makeVertex(frame.maxX, frame.maxY, uvMaxX, uvMaxY),
-            makeVertex(frame.maxX, frame.maxY, uvMaxX, uvMaxY),
-            makeVertex(frame.minX, frame.minY, uvMinX, uvMinY),
-            makeVertex(frame.maxX, frame.minY, uvMaxX, uvMinY)
-        ]
-
-        if let colorMatrix {
-            let pc = _PushConstant(colorMatrix: colorMatrix)
-            self.encodeDrawCommand(shader: .filterColorMatrix,
-                                   stencil: .ignore,
-                                   vertices: vertices,
-                                   indices: nil,
-                                   texture: texture,
-                                   blendState: blendState,
-                                   pushConstantData: pc,
-                                   encoder: encoder)
-        } else {
-            self.encodeDrawCommand(shader: .image,
-                                   stencil: .ignore,
-                                   vertices: vertices,
-                                   indices: nil,
-                                   texture: texture,
-                                   blendState: blendState,
-                                   pushConstantData: nil,
-                                   encoder: encoder)
         }
     }
 
     func encodeDrawCommand(shader: _Shader,
                            stencil: _Stencil,
                            vertices: [_Vertex],
-                           indices: [UInt32]?,
                            texture: Texture?,
-                           texture2: Texture? = nil,
                            blendState: BlendState,
-                           pushConstantData: _PushConstant? = nil,
                            encoder: RenderCommandEncoder) {
         assert(shader != .stencil) // .stencil uses a different vertex format.
-
-        if shader == .filterColorMatrix {
-            assert(pushConstantData != nil)
-        }
+        assert(shader != .filterColorMatrix)
 
         if vertices.isEmpty { return }
-        if let indices, indices.isEmpty { return }
 
-        let queue = self.commandBuffer.commandQueue
-        guard let pipeline = GraphicsPipelineStates.sharedInstance(commandQueue: queue) else {
-            Log.err("GraphicsContext error: pipeline failed.")
-            return
-        }
         guard let renderState = pipeline.renderState(
             shader: shader,
             colorFormat: self.renderTargets.colorFormat,
@@ -622,49 +523,19 @@ extension GraphicsContext {
         encoder.setRenderPipelineState(renderState)
         encoder.setDepthStencilState(depthState)
         if let texture {
-            if let texture2 {
-                pipeline.defaultBindingSet2.setTexture(texture, binding: 0)
-                pipeline.defaultBindingSet2.setTexture(texture2, binding: 1)
-                pipeline.defaultBindingSet2.setSamplerState(pipeline.defaultSampler, binding: 0)
-                pipeline.defaultBindingSet2.setSamplerState(pipeline.defaultSampler, binding: 1)
-                encoder.setResource(pipeline.defaultBindingSet2, atIndex: 0)
-            } else {
-                pipeline.defaultBindingSet1.setTexture(texture, binding: 0)
-                pipeline.defaultBindingSet1.setSamplerState(pipeline.defaultSampler, binding: 0)
-                encoder.setResource(pipeline.defaultBindingSet1, atIndex: 0)
-            }
+            pipeline.defaultBindingSet1.setTexture(texture, binding: 0)
+            pipeline.defaultBindingSet1.setSamplerState(pipeline.defaultSampler, binding: 0)
         }
+        encoder.setResource(pipeline.defaultBindingSet1, atIndex: 0)
 
         encoder.setCullMode(.none)
         encoder.setFrontFacing(.clockwise)
         encoder.setStencilReferenceValue(0)
         encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
-
-        if shader == .filterColorMatrix {
-            let pushConstantData = pushConstantData ?? _PushConstant()
-            withUnsafeBytes(of: pushConstantData) {
-                encoder.pushConstant(stages: .fragment, offset: 0, data: $0)
-            }
-        }
-
-        if let indices {
-            guard let indexBuffer = self.makeBuffer(indices) else {
-                Log.err("GraphicsContext error: _makeBuffer failed.")
-                return
-            }
-            encoder.drawIndexed(indexCount: indices.count,
-                                indexType: .uint32,
-                                indexBuffer: indexBuffer,
-                                indexBufferOffset: 0,
-                                instanceCount: 1,
-                                baseVertex: 0,
-                                baseInstance: 0)
-        } else {
-            encoder.draw(vertexStart: 0,
-                         vertexCount: vertices.count,
-                         instanceCount: 1,
-                         baseInstance: 0)
-        }
+        encoder.draw(vertexStart: 0,
+                     vertexCount: vertices.count,
+                     instanceCount: 1,
+                     baseInstance: 0)
     }
 
     func makeBuffer<T>(_ data: [T]) -> Buffer? {

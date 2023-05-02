@@ -309,58 +309,29 @@ extension GraphicsContext {
         let transform = CGAffineTransform(translationX: rect.origin.x,
                                           y: rect.origin.y)
         let measure = text.measure(in: rect.size)
-        if case let .color(color) = shading, rect.size.width >= measure.width {
-            if let encoder = self.makeEncoder(
-                renderTarget: self.renderTargets.backdrop,
-                enableStencil: false,
-                clear: false) {
-                self.encodeDrawTextCommand(lines,
-                                           transform: transform,
-                                           color: color.dkColor,
-                                           blendState: .alphaBlend,
-                                           encoder: encoder)
-                encoder.endEncoding()
-            }
-        } else {
-            let width = Int(rect.width * self.contentScaleFactor)
-            let height = Int(rect.height * self.contentScaleFactor)
+ 
+        let x = Int(rect.origin.x * self.contentScaleFactor)
+        let y = Int(rect.origin.y * self.contentScaleFactor)
+        let width = Int(rect.width * self.contentScaleFactor)
+        let height = Int(rect.height * self.contentScaleFactor)
 
-            if let encoder = self.makeEncoder(
-                renderTarget: self.renderTargets.source,
-                enableStencil: false,
-                clear: true) {
+        if let encoder = self.makeEncoder(enableStencil: false) {
+            // encoder.setScissorRect(ScissorRect(x: x, y: y,
+            //                                    width: width,
+            //                                    height: height))
+            self.encodeDrawTextCommand(lines,
+                                       transform: transform,
+                                       color: .white,
+                                       blendState: .opaque,
+                                       encoder: encoder)
+            self.encodeShadingBoxCommand(text.shading,
+                                         stencil: .ignore,
+                                         blendState: .multiply,
+                                         encoder: encoder)
+            encoder.endEncoding()
 
-                encoder.setScissorRect(ScissorRect(x: 0, y: 0,
-                                                   width: width,
-                                                   height: height))
-                self.encodeDrawTextCommand(lines,
-                                           transform: transform,
-                                           color: .white,
-                                           blendState: .opaque,
-                                           encoder: encoder)
-                self.encodeShadingBoxCommand(text.shading,
-                                             stencil: .ignore,
-                                             blendState: .multiply,
-                                             encoder: encoder)
-                encoder.endEncoding()
-            } else {
-                return
-            }
-            // copy to backdrop
-            if let encoder = self.makeEncoder(renderTarget: self.backdrop,
-                                              enableStencil: false,
-                                              clear: false) {
-
-                let textureFrame = CGRect(x: 0, y: 0,
-                                          width: width, height: height)
-                self.encodeDrawTextureCommand(texture: self.renderTargets.source,
-                                              in: rect,
-                                              textureFrame: textureFrame,
-                                              blendState: .alphaBlend,
-                                              color: .white,
-                                              encoder: encoder)
-                encoder.endEncoding()
-            }
+            self.applyFilters()
+            self.applyBlendModeAndMask()
         }
     }
 
@@ -452,10 +423,8 @@ extension GraphicsContext {
                 self.encodeDrawCommand(shader: .rcImage,
                                        stencil: .ignore,
                                        vertices: vertices,
-                                       indices: nil,
                                        texture: texture,
                                        blendState: .alphaBlend,
-                                       pushConstantData: nil,
                                        encoder: encoder)
                 vertices = []
             }

@@ -77,6 +77,11 @@ public struct Color: Hashable {
         self.rgba8 = rgba8
     }
 
+    public init(white: any BinaryFloatingPoint,
+                opacity: any BinaryFloatingPoint = 1) {
+        self.init(white, white, white, opacity)
+    }
+
     public init(hue: any BinaryFloatingPoint,
                 saturation: any BinaryFloatingPoint,
                 brightness: any BinaryFloatingPoint,

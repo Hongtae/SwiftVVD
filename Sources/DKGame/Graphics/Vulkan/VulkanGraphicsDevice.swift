@@ -427,14 +427,15 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         }
     }
 
-    private func indexOfMemoryType(typeBits: UInt32, properties: VkMemoryPropertyFlags) -> UInt32 {
+    private func indexOfMemoryType(typeBits: UInt32, properties: VkMemoryPropertyFlags) -> UInt32? {
         for i in 0..<self.deviceMemoryTypes.count {
             if (typeBits & (1 << i)) != 0 && (self.deviceMemoryTypes[i].propertyFlags & properties) == properties {
                     return UInt32(i)
-                }
+            }
         }
-        assertionFailure("VulkanGraphicsDevice error: Unknown memory type!")
-        return UInt32.max
+        // assertionFailure("VulkanGraphicsDevice error: Unknown memory type!")
+        // return UInt32.max
+        return nil
     }
 
     public func makeCommandQueue(flags: CommandQueueFlags) -> CommandQueue? {
@@ -1208,7 +1209,11 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         var memAllocInfo = VkMemoryAllocateInfo()
         memAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO
         memAllocInfo.allocationSize = memReqs.size
-        memAllocInfo.memoryTypeIndex = self.indexOfMemoryType(typeBits: memReqs.memoryTypeBits, properties: memProperties)
+        if let memoryTypeIndex = self.indexOfMemoryType(typeBits: memReqs.memoryTypeBits, properties: memProperties) {
+            memAllocInfo.memoryTypeIndex = memoryTypeIndex
+        } else {
+            fatalError("VulkanGraphicsDevice error: Unknown memory type!")
+        }
         assert(memAllocInfo.allocationSize >= bufferCreateInfo.size)
 
         if dedicatedRequirements.prefersDedicatedAllocation != 0 {
@@ -1346,7 +1351,12 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         memAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO
         let memProperties = VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT.rawValue)
         memAllocInfo.allocationSize = memReqs.size
-        memAllocInfo.memoryTypeIndex = self.indexOfMemoryType(typeBits: memReqs.memoryTypeBits, properties: memProperties)
+
+        if let memoryTypeIndex = self.indexOfMemoryType(typeBits: memReqs.memoryTypeBits, properties: memProperties) {
+            memAllocInfo.memoryTypeIndex = memoryTypeIndex
+        } else {
+            fatalError("VulkanGraphicsDevice error: Unknown memory type!")
+        }
 
         if dedicatedRequirements.prefersDedicatedAllocation != 0 {
             // bind resource to a dedicated allocation.
@@ -1531,10 +1541,23 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         let memReqs = memoryRequirements.memoryRequirements
         var memAllocInfo = VkMemoryAllocateInfo()
         memAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO
-        let memProperties = VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT.rawValue |
-                                                  VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT.rawValue)
         memAllocInfo.allocationSize = memReqs.size
-        memAllocInfo.memoryTypeIndex = self.indexOfMemoryType(typeBits: memReqs.memoryTypeBits, properties: memProperties)
+
+        // try lazily allocated memory type
+        if let memoryTypeIndex = self.indexOfMemoryType(
+            typeBits: memReqs.memoryTypeBits,
+            properties: VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT.rawValue)) {
+            memAllocInfo.memoryTypeIndex = memoryTypeIndex
+        } else {
+            // Not supported, fall back to device local memory
+            if let memoryTypeIndex = self.indexOfMemoryType(
+                typeBits: memReqs.memoryTypeBits,
+                properties: VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT.rawValue)) {
+                memAllocInfo.memoryTypeIndex = memoryTypeIndex
+            } else {
+                fatalError("VulkanGraphicsDevice error: Unknown memory type!")
+            }
+        }
 
         if dedicatedRequirements.prefersDedicatedAllocation != 0 {
             // bind resource to a dedicated allocation.

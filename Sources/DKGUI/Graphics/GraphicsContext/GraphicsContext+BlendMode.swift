@@ -86,70 +86,89 @@ extension GraphicsContext {
     // plusDarker:      R = MAX(0, 1 - ((1 - D) + (1 - S)))
     // plusLighter:     R = MIN(1, S + D)
 
-    var isSinglePassBlending: Bool {
-        BlendMode.singlePassBlendModeStates[self.blendMode] != nil
-    }
-
     var blendState: BlendState {
         BlendMode.singlePassBlendModeStates[self.blendMode, default: .opaque]
     }
 
     func applyBlendModeAndMask() {
-        if isSinglePassBlending == false {
+        if let encoder = self.makeEncoderCompositionTarget() {
+            let shader: _Shader
+            switch self.blendMode {
+            case .normal:   shader = .blendNormal
+            case .multiply: shader = .blendMultiply
+            default:
+                shader = .blendNormal
+            }
+
+            let color = DKGame.Color(white: 1, opacity: self.opacity).float4
+            let makeVertex = { x, y, u, v in
+                _Vertex(position: Vector2(x, y).float2,
+                        texcoord: Vector2(u, v).float2,
+                        color: color)
+            }
+
+            let invW = 1.0 / CGFloat(self.renderTargets.width)
+            let invH = 1.0 / CGFloat(self.renderTargets.height)
+            let u1 = self.viewport.minX * invW
+            let u2 = self.viewport.maxX * invW
+            let v1 = self.viewport.minY * invH
+            let v2 = self.viewport.maxY * invH
+            let vertices = [
+                makeVertex(-1, -1, u1, v2),
+                makeVertex(-1,  1, u1, v1),
+                makeVertex( 1, -1, u2, v2),
+                makeVertex( 1, -1, u2, v2),
+                makeVertex(-1,  1, u1, v1),
+                makeVertex( 1,  1, u2, v1)
+            ]
 
             let blendSrc = self.renderTargets.source
             let blendDst = self.renderTargets.backdrop
             let blendResult = self.renderTargets.composited
 
-            if self.renderTargets.initialized {
-                if let encoder = self.makeEncoder(renderTarget: blendResult,
-                                                  enableStencil: false,
-                                                  clear: true) {
-                    let shader: _Shader
-                    switch self.blendMode {
-                    case .normal:   shader = .blendNormal
-                    case .multiply: shader = .blendMultiply
-                    default:
-                        shader = .blendNormal
-                    }
-
-                    let color = DKGame.Color(1, 1, 1, self.opacity).float4
-                    let makeVertex = { x, y, u, v in
-                        _Vertex(position: Vector2(x, y).float2,
-                                texcoord: Vector2(u, v).float2,
-                                color: color)
-                    }
-                    let vertices = [
-                        makeVertex(-1, -1, 0, 1), makeVertex(-1, 1, 0, 0), makeVertex(1, -1, 1, 1),
-                        makeVertex(1, -1, 1, 1), makeVertex(-1, 1, 0, 0), makeVertex(1, 1, 1, 0)
-                    ]
-
-                    self.encodeDrawCommand(shader: shader,
-                                           stencil: .ignore,
-                                           vertices: vertices,
-                                           indices: nil,
-                                           texture: blendSrc,
-                                           texture2: blendDst,
-                                           blendState: .opaque,
-                                           encoder: encoder)
-                    encoder.endEncoding()
-                    self.renderTargets.backdrop = blendResult
-                    self.renderTargets.composited = blendDst
-                } else {
-                    Log.error("makeEncoder failed!")
-                    self.renderTargets.backdrop = blendSrc
-                    self.renderTargets.source = blendDst
-                    self.renderTargets.initialized = true
-                }
-            } else {
-                self.renderTargets.backdrop = blendSrc
-                self.renderTargets.source = blendDst
-                self.renderTargets.initialized = true
+            guard let renderState = pipeline.renderState(
+                shader: shader,
+                colorFormat: self.renderTargets.colorFormat,
+                depthFormat: .invalid,
+                blendState: blendState) else {
+                Log.err("GraphicsContext error: pipeline.renderState failed.")
+                return
             }
+            guard let depthState = pipeline.depthStencilState(.ignore) else {
+                Log.err("GraphicsContext error: pipeline.depthStencilState failed.")
+                return
+            }
+            guard let vertexBuffer = self.makeBuffer(vertices) else {
+                Log.err("GraphicsContext error: _makeBuffer failed.")
+                return
+            }
+
+            encoder.setRenderPipelineState(renderState)
+            encoder.setDepthStencilState(depthState)
+
+            pipeline.defaultBindingSet2.setTexture(blendSrc, binding: 0)
+            pipeline.defaultBindingSet2.setTexture(blendDst, binding: 1)
+            pipeline.defaultBindingSet2.setSamplerState(pipeline.defaultSampler, binding: 0)
+            pipeline.defaultBindingSet2.setSamplerState(pipeline.defaultSampler, binding: 1)
+            encoder.setResource(pipeline.defaultBindingSet2, atIndex: 0)
+
+            encoder.setCullMode(.none)
+            encoder.setFrontFacing(.clockwise)
+            encoder.setStencilReferenceValue(0)
+            encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
+
+            encoder.draw(vertexStart: 0,
+                         vertexCount: vertices.count,
+                         instanceCount: 1,
+                         baseInstance: 0)
+            encoder.endEncoding()
+
+            // swap buffers
+            self.renderTargets.backdrop = blendResult
+            self.renderTargets.composited = blendDst
+        } else {
+            Log.error("makeEncoder failed!")
         }
-//        else {    // single pass blending
-//            self.renderTargets.initialized = true
-//        }
     }
 }
 

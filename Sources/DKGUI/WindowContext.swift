@@ -98,7 +98,6 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                     if let renderTargets,
                        let commandBuffer = swapChain.commandQueue.makeCommandBuffer() {
 
-                        renderTargets.initialized = false
                         if let context = GraphicsContext(
                             sharedContext: self.sharedContext,
                             environment: view.environmentValues,
@@ -108,29 +107,24 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                             contentOffset: contentBounds.origin,
                             contentScaleFactor: state.contentScaleFactor,
                             renderTargets: renderTargets,
-                            clearColor: clearColor,
                             commandBuffer: commandBuffer) {
 
+                            context.clear(with: clearColor)
                             view.draw(frame: contentBounds, context: context)
 
                             if let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPass) {
-                                if renderTargets.initialized {
-                                    let backdrop = renderTargets.backdrop
-                                    renderTargets.backdrop = backBuffer
-                                    defer {
-                                        renderTargets.backdrop = backdrop
-                                    }
-                                    
-                                    context.encodeDrawTextureCommand(
-                                        texture: backdrop,
-                                        in: contentBounds,
-                                        textureFrame: CGRect(x: 0, y: 0,
-                                                             width: backBuffer.width,
-                                                             height: backBuffer.height),
-                                        blendState: .alphaBlend,
-                                        color: .white,
-                                        encoder: encoder)
-                                }
+                                let backdrop = renderTargets.backdrop
+                                renderTargets.backdrop = backBuffer
+                                defer {
+                                    renderTargets.backdrop = backdrop
+                                }                                
+                                context.encodeDrawTextureCommand(
+                                    texture: backdrop,
+                                    in: contentBounds,
+                                    textureFrame: context.viewport,
+                                    blendState: .opaque,
+                                    color: .white,
+                                    encoder: encoder)
                                 encoder.endEncoding()
                             }
                         } else {
