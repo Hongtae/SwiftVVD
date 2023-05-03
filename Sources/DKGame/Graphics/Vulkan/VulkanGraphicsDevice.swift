@@ -99,8 +99,9 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         requiredExtensions.append(VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME)
         // requiredExtensions.append(VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME)
 
-        optionalExtensions.append(VK_KHR_MAINTENANCE2_EXTENSION_NAME)
-        optionalExtensions.append(VK_KHR_MAINTENANCE3_EXTENSION_NAME)
+        optionalExtensions.append(VK_KHR_MAINTENANCE_2_EXTENSION_NAME)
+        optionalExtensions.append(VK_KHR_MAINTENANCE_3_EXTENSION_NAME)
+        optionalExtensions.append(VK_KHR_MAINTENANCE_4_EXTENSION_NAME)
 
         // setup extensions
         var deviceExtensions: [String] = []
@@ -155,6 +156,13 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             features.extendedDynamicState3DepthClampEnable = VK_TRUE
             features.extendedDynamicState3PolygonMode = VK_TRUE
             features.extendedDynamicState3DepthClipEnable = VK_TRUE
+            appendNextChain(&deviceCreateInfo, unsafePointerCopy(from: features, holder: tempHolder))
+        }
+        if deviceExtensions.contains(VK_KHR_MAINTENANCE_4_EXTENSION_NAME) {
+            // VK_KHR_maintenance4
+            var features = VkPhysicalDeviceMaintenance4Features()
+            features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES
+            features.maintenance4 = VK_TRUE
             appendNextChain(&deviceCreateInfo, unsafePointerCopy(from: features, holder: tempHolder))
         }
 

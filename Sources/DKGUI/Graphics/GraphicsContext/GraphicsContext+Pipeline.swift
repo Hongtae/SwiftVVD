@@ -276,13 +276,12 @@ class GraphicsPipelineStates {
                 throw LoadError(message: "Unable to load shader: \(name)")
             }
 
-            let vsStencilFunction = try loadShader("stencil.vert")
             let vertexFunction = try loadShader("default.vert")
-
+            
             var shaderFunctions: [_Shader: ShaderFunctions] = [:]
             shaderFunctions[.stencil] = ShaderFunctions(
-                vertexFunction: vsStencilFunction,
-                fragmentFunction: nil)
+                vertexFunction: try loadShader("stencil.vert"),
+                fragmentFunction: try loadShader("stencil.frag"))
             shaderFunctions[.vertexColor] = ShaderFunctions(
                 vertexFunction: vertexFunction,
                 fragmentFunction: try loadShader("vertex_color.frag"))
@@ -525,8 +524,8 @@ extension GraphicsContext {
         if let texture {
             pipeline.defaultBindingSet1.setTexture(texture, binding: 0)
             pipeline.defaultBindingSet1.setSamplerState(pipeline.defaultSampler, binding: 0)
+            encoder.setResource(pipeline.defaultBindingSet1, atIndex: 0)
         }
-        encoder.setResource(pipeline.defaultBindingSet1, atIndex: 0)
 
         encoder.setCullMode(.none)
         encoder.setFrontFacing(.clockwise)
