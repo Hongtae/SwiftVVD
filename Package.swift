@@ -91,6 +91,10 @@ let package = Package(
             dependencies: [
                 .target(name: "DKGame"),
             ],
+            exclude: [
+                "Resources/Shaders/GLSL",
+                "Resources/Shaders/gen_spv.py"
+            ],
             resources: [
                 .copy("Resources/Fonts"),
                 .copy("Resources/Shaders/SPIRV")
