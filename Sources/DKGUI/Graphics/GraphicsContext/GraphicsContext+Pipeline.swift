@@ -277,7 +277,7 @@ class GraphicsPipelineStates {
             }
 
             let vertexFunction = try loadShader("default.vert")
-            
+
             var shaderFunctions: [_Shader: ShaderFunctions] = [:]
             shaderFunctions[.stencil] = ShaderFunctions(
                 vertexFunction: try loadShader("stencil.vert"),
@@ -420,36 +420,28 @@ extension GraphicsContext {
     func makeEncoder(enableStencil: Bool) -> RenderCommandEncoder? {
         return makeEncoder(renderTarget: self.renderTargets.source,
                            enableStencil: enableStencil,
-                           clear: true,
-                           clearColor: .clear)
+                           loadAction: .clear)
     }
 
     func makeEncoderCompositionTarget() -> RenderCommandEncoder? {
         return makeEncoder(renderTarget: self.renderTargets.composited,
                            enableStencil: false,
-                           clear: true,
-                           clearColor: .clear)
+                           loadAction: .dontCare)
     }
 
     func makeEncoderBackdrop(clear: Bool = false,
                              clearColor: DKGame.Color = .clear) -> RenderCommandEncoder? {
+        let loadAction: RenderPassAttachmentLoadAction = clear ? .clear : .load
         return makeEncoder(renderTarget: self.renderTargets.backdrop,
                            enableStencil: false,
-                           clear: clear,
+                           loadAction: loadAction,
                            clearColor: clearColor)
     }
 
     func makeEncoder(renderTarget: Texture,
                      enableStencil: Bool,
-                     clear: Bool,
-                     clearColor: DKGame.Color? = nil) -> RenderCommandEncoder? {
-        let loadAction: RenderPassAttachmentLoadAction
-        if clear {
-            loadAction = .clear
-        } else {
-            loadAction = .load
-        }
-        let clearColor = clearColor ?? .clear
+                     loadAction: RenderPassAttachmentLoadAction,
+                     clearColor: DKGame.Color = .clear) -> RenderCommandEncoder? {
         var renderPass = RenderPassDescriptor(
             colorAttachments: [.init(renderTarget: renderTarget,
                                      loadAction: loadAction,

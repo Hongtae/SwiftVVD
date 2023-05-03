@@ -130,7 +130,7 @@ extension GraphicsContext {
                 shader: shader,
                 colorFormat: self.renderTargets.colorFormat,
                 depthFormat: .invalid,
-                blendState: blendState) else {
+                blendState: .opaque) else {
                 Log.err("GraphicsContext error: pipeline.renderState failed.")
                 return
             }

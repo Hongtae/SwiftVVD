@@ -88,13 +88,14 @@ public enum GraphicsAPI {
 }
 
 public func makeGraphicsDeviceContext(api: GraphicsAPI = .auto) -> GraphicsDeviceContext? {
-    var enableValidation = false
-#if DEBUG
-        enableValidation = true
-#endif
-
     if api == .vulkan || api == .auto {
 #if ENABLE_VULKAN
+        var enableValidation = false
+#if DEBUG
+        if CommandLine.arguments.contains(where: { $0.lowercased() == "--disable-validation"}) == false {
+            enableValidation = true
+        }
+#endif
         if let instance = VulkanInstance(enableValidation: enableValidation) {
             if let device = instance.makeDevice() {
                 return GraphicsDeviceContext(device: device)

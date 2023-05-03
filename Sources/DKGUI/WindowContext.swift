@@ -117,7 +117,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                                 renderTargets.backdrop = backBuffer
                                 defer {
                                     renderTargets.backdrop = backdrop
-                                }                                
+                                }
                                 context.encodeDrawTextureCommand(
                                     texture: backdrop,
                                     in: contentBounds,

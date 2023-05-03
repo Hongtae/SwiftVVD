@@ -31,7 +31,7 @@ extension GraphicsContext {
                                           usage: [.renderTarget, .sampled])) {
             if let encoder = self.makeEncoder(renderTarget: maskTexture,
                                               enableStencil: true,
-                                              clear: true) {
+                                              loadAction: .clear) {
                 if self.encodeStencilPathFillCommand(path, encoder: encoder) {
 
                     let makeVertex = { x, y in
