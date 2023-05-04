@@ -42,28 +42,24 @@ extension GraphicsContext {
 
     func drawLayer(in frame: CGRect, content: (inout GraphicsContext, CGSize) throws -> Void) rethrows {
         if var context = self.makeRegionLayerContext(frame) {
-            do {
-                let size = context.resolution / context.contentScaleFactor
-                try content(&context, size)
-                let texture = context.backdrop
+            let size = context.resolution / context.contentScaleFactor
+            try content(&context, size)
+            let texture = context.backdrop
 
-                if let encoder = self.makeEncoder(enableStencil: false) {
-                    self.encodeDrawTextureCommand(
-                        texture: texture,
-                        in: frame,
-                        transform: .identity,
-                        textureFrame: context.viewport,
-                        textureTransform: .identity,
-                        blendState: .opaque,
-                        color: .white,
-                        encoder: encoder)
-                    encoder.endEncoding()
+            if let encoder = self.makeEncoder(enableStencil: false) {
+                self.encodeDrawTextureCommand(
+                    texture: texture,
+                    in: frame,
+                    transform: .identity,
+                    textureFrame: context.viewport,
+                    textureTransform: .identity,
+                    blendState: .opaque,
+                    color: .white,
+                    encoder: encoder)
+                encoder.endEncoding()
 
-                    self.applyFilters()
-                    self.applyBlendModeAndMask()
-                }
-            } catch {
-                Log.err("GraphicsContext error: \(error)")
+                self.applyFilters()
+                self.applyBlendModeAndMask()
             }
         } else {
             Log.error("GraphicsContext error: failed to create new context.")
@@ -72,27 +68,23 @@ extension GraphicsContext {
 
     public func drawLayer(content: (inout GraphicsContext) throws -> Void) rethrows {
         if var context = self.makeLayerContext() {
-            do {
-                try content(&context)
-                let offset = -context.contentOffset
-                let scale = context.viewport.size / context.contentScaleFactor
-                let texture = context.backdrop
+            try content(&context)
+            let offset = -context.contentOffset
+            let scale = context.viewport.size / context.contentScaleFactor
+            let texture = context.backdrop
 
-                if let encoder = self.makeEncoder(enableStencil: false) {
-                    self.encodeDrawTextureCommand(
-                        texture: texture,
-                        in: CGRect(origin: offset, size: scale),
-                        textureFrame: context.viewport,
-                        blendState: .opaque,
-                        color: .white,
-                        encoder: encoder)
-                    encoder.endEncoding()
+            if let encoder = self.makeEncoder(enableStencil: false) {
+                self.encodeDrawTextureCommand(
+                    texture: texture,
+                    in: CGRect(origin: offset, size: scale),
+                    textureFrame: context.viewport,
+                    blendState: .opaque,
+                    color: .white,
+                    encoder: encoder)
+                encoder.endEncoding()
 
-                    self.applyFilters()
-                    self.applyBlendModeAndMask()
-                }
-            } catch {
-                Log.err("GraphicsContext error: \(error)")
+                self.applyFilters()
+                self.applyBlendModeAndMask()
             }
         } else {
             Log.error("GraphicsContext error: failed to create new context.")
