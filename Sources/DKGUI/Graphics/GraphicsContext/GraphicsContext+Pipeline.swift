@@ -64,8 +64,34 @@ enum _Shader {
     case filterColorMatrix
     case filterBlur
 
-    case blendNormal;
-    case blendMultiply;
+    case blendNormal
+    case blendMultiply
+    case blendScreen
+    case blendOverlay
+    case blendDarken
+    case blendLighten
+    case blendColorDodge
+    case blendColorBurn
+    case blendSoftLight
+    case blendHardLight
+    case blendDifference
+    case blendExclusion
+    case blendHue
+    case blendSaturation
+    case blendColor
+    case blendLuminosity
+    case blendClear
+    case blendCopy
+    case blendSourceIn
+    case blendSourceOut
+    case blendSourceAtop
+    case blendDestinationOver
+    case blendDestinationIn
+    case blendDestinationOut
+    case blendDestinationAtop
+    case blendXor
+    case blendPlusDarker
+    case blendPlusLighter
 }
 
 enum _Stencil {
@@ -282,31 +308,49 @@ class GraphicsPipelineStates {
             shaderFunctions[.stencil] = ShaderFunctions(
                 vertexFunction: try loadShader("stencil.vert"),
                 fragmentFunction: try loadShader("stencil.frag"))
-            shaderFunctions[.vertexColor] = ShaderFunctions(
-                vertexFunction: vertexFunction,
-                fragmentFunction: try loadShader("vertex_color.frag"))
-            shaderFunctions[.image] = ShaderFunctions(
-                vertexFunction: vertexFunction,
-                fragmentFunction: try loadShader("draw_image.frag"))
-            shaderFunctions[.rcImage] = ShaderFunctions(
-                vertexFunction: vertexFunction,
-                fragmentFunction: try loadShader("draw_r8_opacity_image.frag"))
-            shaderFunctions[.resolveMask] = ShaderFunctions(
-                vertexFunction: vertexFunction,
-                fragmentFunction: try loadShader("resolve_mask.frag"))
+
+            let loadFragmentFunction = { (name: String) in
+                ShaderFunctions(vertexFunction: vertexFunction,
+                                fragmentFunction: try loadShader(name))
+            }
+
+            shaderFunctions[.vertexColor] = try loadFragmentFunction("vertex_color.frag")
+            shaderFunctions[.image] = try loadFragmentFunction("draw_image.frag")
+            shaderFunctions[.rcImage] = try loadFragmentFunction("draw_r8_opacity_image.frag")
+            shaderFunctions[.resolveMask] = try loadFragmentFunction("resolve_mask.frag")
 
             // load filter
-            shaderFunctions[.filterColorMatrix] = ShaderFunctions(
-                vertexFunction: vertexFunction,
-                fragmentFunction: try loadShader("filter_color_matrix.frag"))
+            shaderFunctions[.filterColorMatrix] = try loadFragmentFunction("filter_color_matrix.frag")
 
             // load blend functions
-            shaderFunctions[.blendNormal] = ShaderFunctions(
-                vertexFunction: vertexFunction,
-                fragmentFunction: try loadShader("blend_normal.frag"))
-            shaderFunctions[.blendMultiply] = ShaderFunctions(
-                vertexFunction: vertexFunction,
-                fragmentFunction: try loadShader("blend_multiply.frag"))
+            shaderFunctions[.blendNormal] = try loadFragmentFunction("blend_normal.frag")
+            shaderFunctions[.blendMultiply] = try loadFragmentFunction("blend_multiply.frag")
+            shaderFunctions[.blendScreen] = try loadFragmentFunction("blend_screen.frag")
+            shaderFunctions[.blendOverlay] = try loadFragmentFunction("blend_overlay.frag")
+            shaderFunctions[.blendDarken] = try loadFragmentFunction("blend_darken.frag")
+            shaderFunctions[.blendLighten] = try loadFragmentFunction("blend_lighten.frag")
+            shaderFunctions[.blendColorDodge] = try loadFragmentFunction("blend_colorDodge.frag")
+            shaderFunctions[.blendColorBurn] = try loadFragmentFunction("blend_colorBurn.frag")
+            shaderFunctions[.blendSoftLight] = try loadFragmentFunction("blend_softLight.frag")
+            shaderFunctions[.blendHardLight] = try loadFragmentFunction("blend_hardLight.frag")
+            shaderFunctions[.blendDifference] = try loadFragmentFunction("blend_difference.frag")
+            shaderFunctions[.blendExclusion] = try loadFragmentFunction("blend_exclusion.frag")
+            shaderFunctions[.blendHue] = try loadFragmentFunction("blend_hue.frag")
+            shaderFunctions[.blendSaturation] = try loadFragmentFunction("blend_saturation.frag")
+            shaderFunctions[.blendColor] = try loadFragmentFunction("blend_color.frag")
+            shaderFunctions[.blendLuminosity] = try loadFragmentFunction("blend_luminosity.frag")
+            shaderFunctions[.blendClear] = try loadFragmentFunction("blend_clear.frag")
+            shaderFunctions[.blendCopy] = try loadFragmentFunction("blend_copy.frag")
+            shaderFunctions[.blendSourceIn] = try loadFragmentFunction("blend_sourceIn.frag")
+            shaderFunctions[.blendSourceOut] = try loadFragmentFunction("blend_sourceOut.frag")
+            shaderFunctions[.blendSourceAtop] = try loadFragmentFunction("blend_sourceAtop.frag")
+            shaderFunctions[.blendDestinationOver] = try loadFragmentFunction("blend_destinationOver.frag")
+            shaderFunctions[.blendDestinationIn] = try loadFragmentFunction("blend_destinationIn.frag")
+            shaderFunctions[.blendDestinationOut] = try loadFragmentFunction("blend_destinationOut.frag")
+            shaderFunctions[.blendDestinationAtop] = try loadFragmentFunction("blend_destinationAtop.frag")
+            shaderFunctions[.blendXor] = try loadFragmentFunction("blend_xor.frag")
+            shaderFunctions[.blendPlusDarker] = try loadFragmentFunction("blend_plusDarker.frag")
+            shaderFunctions[.blendPlusLighter] = try loadFragmentFunction("blend_plusLighter.frag")
 
             let bindingLayout1 = ShaderBindingSetLayout(
                 bindings: [
@@ -397,7 +441,7 @@ class GraphicsPipelineStates {
             Self.sharedInstance = instance
             Log.info("\(Self.self).\(#function): instance created.")
         } catch {
-            Log.error("\(Self.self).\(#function) Error: \(error)")
+            fatalError("\(Self.self).\(#function) Error: \(error)")
         }
 
         return instance

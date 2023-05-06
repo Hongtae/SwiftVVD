@@ -109,7 +109,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                             renderTargets: renderTargets,
                             commandBuffer: commandBuffer) {
 
-                            context.clear(with: clearColor)
+                            context.clear(with: .clear)
                             view.draw(frame: contentBounds, context: context)
 
                             if let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPass) {
@@ -122,7 +122,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                                     texture: backdrop,
                                     in: contentBounds,
                                     textureFrame: context.viewport,
-                                    blendState: .opaque,
+                                    blendState: .alphaBlend,
                                     color: .white,
                                     encoder: encoder)
                                 encoder.endEncoding()

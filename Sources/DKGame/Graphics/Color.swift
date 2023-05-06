@@ -108,6 +108,10 @@ public struct Color: Hashable {
         self.init(r + m, g + m, b + m, opacity)
     }
 
+    public func opacity(_ opacity: Double) -> Color {
+        Color(self.r, self.g, self.b, opacity)
+    }
+
     public static let black = Color(0.0, 0.0, 0.0)
     public static let white = Color(1.0, 1.0, 1.0)
     public static let blue = Color(0.0, 0.0, 1.0)

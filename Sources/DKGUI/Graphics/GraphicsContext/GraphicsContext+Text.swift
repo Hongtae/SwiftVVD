@@ -316,9 +316,9 @@ extension GraphicsContext {
         let height = Int(rect.height * self.contentScaleFactor)
 
         if let encoder = self.makeEncoder(enableStencil: false) {
-            // encoder.setScissorRect(ScissorRect(x: x, y: y,
-            //                                    width: width,
-            //                                    height: height))
+             encoder.setScissorRect(ScissorRect(x: x, y: y,
+                                                width: width,
+                                                height: height))
             self.encodeDrawTextCommand(lines,
                                        transform: transform,
                                        color: .white,

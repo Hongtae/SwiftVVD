@@ -44,47 +44,12 @@ extension GraphicsContext {
         public static var plusLighter       = BlendMode(rawValue: 27)
     }
 
-    // https://developer.apple.com/documentation/coregraphics/cgblendmode/
-    //   R is the premultiplied result
-    //   S is the source color, and includes alpha
-    //   D is the destination color, and includes alpha
-    //   Ra, Sa, and Da are the alpha components of R, S, and D
-    //
-    //  formula: https://www.w3.org/TR/compositing/
-    //  for GLSL: https://github.com/jamieowen/glsl-blend
-    //
-    // simple composition color, alpha(opacity):
-    //  R = S * Sa + D * (1-Sa)
-    //  Ra = Sa + Da * (1-Sa)
-    //
-    // normal:      
-    // multiply:    S * D
-    // screen:      1-(1-S)(1-D)
-    // overlay:     if (S < 0.5) { 2SD } else { 1-2(1-S)(1-D) }
-    // darken:      MIN(S, D)
-    // lighten:     MAX(S, D)
-    // colorDodge:  B/(1-A)
-    // colorBurn:   1-(1-B)/A
-    // softLight:
-    // hardLight:
-    // difference:      abs(S-A)
-    // exclusion:       S*(1-D) + D*(1-S) => S+D-2*S*D
-    // hue:
-    // saturation:
-    // color:
-    // luminosity:
-    // clear:           R = 0
-    // copy:            R = S
-    // sourceIn:        R = S*Da
-    // sourceOut:       R = S*(1 - Da)
-    // sourceAtop:      R = S*Da + D*(1 - Sa)
-    // destinationOver: R = S*(1 - Da) + D
-    // destinationIn:   R = D*Sa
-    // destinationOut:  R = D*(1 - Sa)
-    // destinationAtop: R = S*(1 - Da) + D*Sa
-    // xor:             R = S*(1 - Da) + D*(1 - Sa)
-    // plusDarker:      R = MAX(0, 1 - ((1 - D) + (1 - S)))
-    // plusLighter:     R = MIN(1, S + D)
+    // references:
+    //  https://developer.apple.com/documentation/coregraphics/cgblendmode/
+    //  https://www.w3.org/TR/compositing/#blending
+    // GLSL:
+    //  https://hg.mozilla.org/mozilla-central/file/tip/gfx/wr/webrender/res/cs_svg_filter.glsl
+    //  https://fossies.org/linux/firefox/gfx/wr/webrender/res/cs_svg_filter.glsl
 
     var blendState: BlendState {
         BlendMode.singlePassBlendModeStates[self.blendMode, default: .opaque]
@@ -94,10 +59,35 @@ extension GraphicsContext {
         if let encoder = self.makeEncoderCompositionTarget() {
             let shader: _Shader
             switch self.blendMode {
-            case .normal:   shader = .blendNormal
-            case .multiply: shader = .blendMultiply
-            default:
-                shader = .blendNormal
+            case .normal:           shader = .blendNormal
+            case .multiply:         shader = .blendMultiply
+            case .screen:           shader = .blendScreen
+            case .overlay:          shader = .blendOverlay
+            case .darken:           shader = .blendDarken
+            case .lighten:          shader = .blendLighten
+            case .colorDodge:       shader = .blendColorDodge
+            case .colorBurn:        shader = .blendColorBurn
+            case .softLight:        shader = .blendSoftLight
+            case .hardLight:        shader = .blendHardLight
+            case .difference:       shader = .blendDifference
+            case .exclusion:        shader = .blendExclusion
+            case .hue:              shader = .blendHue
+            case .saturation:       shader = .blendSaturation       
+            case .color:            shader = .blendColor
+            case .luminosity:       shader = .blendLuminosity
+            case .clear:            shader = .blendClear
+            case .copy:             shader = .blendCopy
+            case .sourceIn:         shader = .blendSourceIn
+            case .sourceOut:        shader = .blendSourceOut
+            case .sourceAtop:       shader = .blendSourceAtop
+            case .destinationOver:  shader = .blendDestinationOver
+            case .destinationIn:    shader = .blendDestinationIn
+            case .destinationOut:   shader = .blendDestinationOut
+            case .destinationAtop:  shader = .blendDestinationAtop
+            case .xor:              shader = .blendXor
+            case .plusDarker:       shader = .blendPlusDarker
+            case .plusLighter:      shader = .blendPlusLighter
+            default:                shader = .blendNormal
             }
 
             let color = DKGame.Color(white: 1, opacity: self.opacity).float4

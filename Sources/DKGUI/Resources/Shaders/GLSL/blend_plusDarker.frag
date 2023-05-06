@@ -9,7 +9,7 @@ layout (location=1) in vec4 color;
 layout (location=0) out vec4 outFragColor;
 
 vec3 blend(vec3 src, vec3 dst) {
-    return src * dst;
+    return 1 - ((1 - dst) + (1 - src));
 }
 
 void main() {

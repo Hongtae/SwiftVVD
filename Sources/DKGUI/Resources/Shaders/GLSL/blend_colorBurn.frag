@@ -8,8 +8,12 @@ layout (location=1) in vec4 color;
 
 layout (location=0) out vec4 outFragColor;
 
+float blend(float src, float dst) {
+    return (dst == 1) ? 1 : ((src == 0) ? 0 : (1 - min(1, (1 - dst) / src)));
+}
+
 vec3 blend(vec3 src, vec3 dst) {
-    return src * dst;
+    return src;
 }
 
 void main() {

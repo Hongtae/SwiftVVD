@@ -74,7 +74,6 @@ extension GraphicsContext {
 
     public func fill(_ path: Path, with shading: Shading, style: FillStyle = FillStyle()) {
         if shading.properties.isEmpty { return }
-
         if let encoder = self.makeEncoder(enableStencil: true) {
             if self.encodeStencilPathFillCommand(path, encoder: encoder) {
 
@@ -86,8 +85,8 @@ extension GraphicsContext {
                 self.applyFilters()
                 self.applyBlendModeAndMask()
             } else {
-               encoder.endEncoding()
-           }
+                encoder.endEncoding()
+            }
         }
     }
 
@@ -569,7 +568,7 @@ extension GraphicsContext {
             shader: .stencil,
             colorFormat: self.colorFormat,
             depthFormat: self.depthFormat,
-            blendState: .opaque) else {
+            blendState: BlendState(writeMask: [])) else {
             Log.err("GraphicsContext error: pipeline.renderState failed.")
             return false
         }
@@ -704,11 +703,6 @@ extension GraphicsContext {
         if vertexData.count < 3 { return false }
         if indexData.count < 3 { return false }
 
-        let queue = self.commandBuffer.commandQueue
-        guard let pipeline = GraphicsPipelineStates.sharedInstance(commandQueue: queue) else {
-            Log.err("GraphicsContext error: pipeline failed.")
-            return false
-        }
         guard let vertexBuffer = self.makeBuffer(vertexData) else {
             Log.err("GraphicsContext error: _makeBuffer failed.")
             return false
@@ -723,7 +717,7 @@ extension GraphicsContext {
             shader: .stencil,
             colorFormat: self.colorFormat,
             depthFormat: self.depthFormat,
-            blendState: .opaque) else {
+            blendState: BlendState(writeMask: [])) else {
             Log.err("GraphicsContext error: pipeline.renderState failed.")
             return false
         }

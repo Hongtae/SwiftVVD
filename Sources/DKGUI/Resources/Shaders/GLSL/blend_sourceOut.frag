@@ -8,14 +8,14 @@ layout (location=1) in vec4 color;
 
 layout (location=0) out vec4 outFragColor;
 
-vec3 blend(vec3 src, vec3 dst) {
-    return src * dst;
+vec4 blend(vec4 src, vec4 dst) {
+    return src * (1 - dst.a);
 }
 
 void main() {
     vec4 src = texture(image1, texUV);
     vec4 dst = texture(image2, texUV);
 
-    vec3 rgb = (1 - dst.a) * src.rgb + dst.a * blend(src.rgb, dst.rgb);
-    outFragColor = mix(vec4(dst.rgb * dst.a, dst.a), vec4(rgb, 1), src.a * color.a);
+    vec4 rgba = blend(src, dst);
+    outFragColor = mix(vec4(dst.rgb * dst.a, dst.a), rgba, src.a * color.a);
 }
