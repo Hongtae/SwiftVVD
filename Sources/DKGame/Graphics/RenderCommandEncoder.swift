@@ -36,9 +36,24 @@ public struct Viewport {
     }
 }
 
+public struct ScissorRect {
+    public var x: Int
+    public var y: Int
+    public var width: Int
+    public var height: Int
+
+    public init(x: Int, y: Int, width: Int, height: Int) {
+        self.x = x
+        self.y = y
+        self.width = width
+        self.height = height
+    }
+}
+
 public protocol RenderCommandEncoder: CommandEncoder {
     func setResource(_: ShaderBindingSet, atIndex: Int)
     func setViewport(_: Viewport)
+    func setScissorRect(_: ScissorRect)
     func setRenderPipelineState(_: RenderPipelineState)
 
     func setVertexBuffer(_: Buffer, offset: Int, index: Int)

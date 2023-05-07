@@ -82,8 +82,8 @@ class MyFrame: Frame {
         canvas.clear(color: Color(0, 0, 0.6))
         canvas.drawEllipse(bounds: CGRect(x: 150, y: 50, width: 200, height: 200),
             inset: CGSize(width: 20, height: 20),
-            color: Color(v, 0, 0), blendState: .defaultOpaque)
-        canvas.drawRect(CGRect(x: 50, y: 15, width: 200, height: 200), color: Color(1, 1, 1, 0.5), blendState: .defaultAlpha)
+            color: Color(v, 0, 0), blendState: .opaque)
+        canvas.drawRect(CGRect(x: 50, y: 15, width: 200, height: 200), color: Color(1, 1, 1, 0.5), blendState: .alphaBlend)
         if let textFont = self.textFont, let outlineFont = self.outlineFont {
 
             canvas.drawLines(baseline, lineWidth: 2, color: Color(1, 1, 1))

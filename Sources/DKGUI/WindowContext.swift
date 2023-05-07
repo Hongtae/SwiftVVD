@@ -40,17 +40,18 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
 
     private func runWindowUpdateTask() -> Task<Void, Never> {
         Task.detached(priority: .userInitiated) { @MainActor [weak self] in
-            Log.info("Window upate task start.")
+            Log.info("WindowContext<\(Content.self)> update task is started.")
             var tickCounter = TickCounter()
 
             var contentBounds: CGRect = .null
             var contentScaleFactor: CGFloat = 1
-            var stencilBuffer: Texture? = nil
-            guard var view = self?.viewProxy else { return }
+            var renderTargets: GraphicsContext.RenderTargets? = nil
 
             mainLoop: while true {
                 guard let self = self else { break }
                 if Task.isCancelled { break }
+
+                let view = self.viewProxy
 
                 let swapChain = self.swapChain
                 let (state, config) = { (self.state, self.config) }()
@@ -62,6 +63,12 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                 let date = Date(timeIntervalSinceNow: 0)
 
                 if state.bounds != contentBounds || state.contentScaleFactor != contentScaleFactor {
+
+                    if state.contentScaleFactor != contentScaleFactor {
+                        self.environmentValues.displayScale = state.contentScaleFactor
+                        view.updateEnvironment(self.environmentValues)
+                    }
+
                     view.layout(offset: state.bounds.origin,
                                 size: state.bounds.size,
                                 scaleFactor: state.contentScaleFactor)
@@ -78,34 +85,52 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
 
                     let dim = { (tex: Texture) in (tex.width, tex.height, tex.depth) }
 
-                    if let stencilBuffer, dim(stencilBuffer) == dim(backBuffer) {
-                        // reuse the stencil buffer.
+                    if let renderTargets, dim(renderTargets.backdrop) == dim(backBuffer) {
                     } else {
-                        // create a new stencil buffer.
-                        let desc = TextureDescriptor(textureType: .type2D,
-                                                     pixelFormat: .stencil8,
-                                                     width: backBuffer.width,
-                                                     height: backBuffer.height,
-                                                     usage: [.renderTarget])
-                        stencilBuffer = device.makeTexture(descriptor: desc)
+                        renderTargets = GraphicsContext.RenderTargets(
+                            device: device,
+                            width: backBuffer.width,
+                            height: backBuffer.height)
                     }
 
-                    renderPass.colorAttachments[0].clearColor = .darkGray
-                    if let commandBuffer = swapChain.commandQueue.makeCommandBuffer() {
-                        // clear back buffer
-                        if let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPass) {
-                            encoder.endEncoding()
-                        }
+                    let clearColor: DKGame.Color = .init(rgba8: (245, 242, 241, 255))
+                    renderPass.colorAttachments[0].clearColor = clearColor
+                    if let renderTargets,
+                       let commandBuffer = swapChain.commandQueue.makeCommandBuffer() {
 
-                        if let context = GraphicsContext(environment: view.environmentValues,
-                                                      contentOffset: contentBounds.origin,
-                                                      contentScale: contentBounds.size,
-                                                      resolution: CGSize(width: backBuffer.width,
-                                                                         height: backBuffer.height),
-                                                      commandBuffer: commandBuffer,
-                                                      backBuffer: backBuffer,
-                                                      stencilBuffer: stencilBuffer) {
+                        if let context = GraphicsContext(
+                            sharedContext: self.sharedContext,
+                            environment: view.environmentValues,
+                            viewport: CGRect(x: 0, y: 0,
+                                             width: backBuffer.width,
+                                             height: backBuffer.height),
+                            contentOffset: contentBounds.origin,
+                            contentScaleFactor: state.contentScaleFactor,
+                            renderTargets: renderTargets,
+                            commandBuffer: commandBuffer) {
+
+                            context.clear(with: .clear)
                             view.draw(frame: contentBounds, context: context)
+
+                            if let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPass) {
+                                let backdrop = renderTargets.backdrop
+                                renderTargets.backdrop = backBuffer
+                                defer {
+                                    renderTargets.backdrop = backdrop
+                                }
+                                context.encodeDrawTextureCommand(
+                                    texture: backdrop,
+                                    in: contentBounds,
+                                    textureFrame: context.viewport,
+                                    blendState: .alphaBlend,
+                                    color: .white,
+                                    encoder: encoder)
+                                encoder.endEncoding()
+                            }
+                        } else {
+                            if let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPass) {
+                                encoder.endEncoding()
+                            }
                         }
 
                         commandBuffer.commit()
@@ -113,13 +138,16 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                     }
                 }
 
-                while tickCounter.elapsed < frameInterval {
-                    if Task.isCancelled {
+                let t = frameInterval - tickCounter.elapsed
+                if t > 0 {
+                    do {
+                        try await Task.sleep(until: .now + .seconds(t), clock: .suspending)
+                    } catch {
                         break mainLoop
                     }
-                    await Task.yield()
                 }
             }
+            Log.info("WindowContext<\(Content.self)> update task is finished.")
         }
     }
 

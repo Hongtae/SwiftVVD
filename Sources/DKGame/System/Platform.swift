@@ -47,13 +47,7 @@ func appFinalize() {
 
 public class Platform {
     public static var headlessMode: Bool = {
-        let key = "DKGAME_HEADLESS"
-        let value = ProcessInfo.processInfo.environment[key] ?? "0"
-        if let v = Int(value), v != 0 {
-            Log.info("HEADLESS-MODE: (\(key)=\(value))")
-            return true 
-        }
-        return false
+        CommandLine.arguments.contains { $0.lowercased() == "--headless" }
     }()
 
     public class var factory: PlatformFactory {

@@ -19,8 +19,8 @@ protocol AppContext: AnyObject {
     var graphicsDeviceContext: GraphicsDeviceContext? { get }
     var audioDeviceContext: AudioDeviceContext? { get }
 
-    func resourceData(forKey: String) -> RawBufferStorage?
-    func setResource(data: RawBufferStorage?, forKey: String)
+    func resourceData(forURL: URL) -> (any DataProtocol)?
+    func setResource(data: (any DataProtocol)?, forURL: URL)
 
     func checkWindowActivities()
 }
@@ -37,13 +37,13 @@ class AppMain<A>: ApplicationDelegate, AppContext where A: App {
 
     var graphicsDeviceContext: GraphicsDeviceContext?
     var audioDeviceContext: AudioDeviceContext?
-    var resources: [String: RawBufferStorage] = [:]
+    var resources: [URL: (any DataProtocol)] = [:]
 
-    func resourceData(forKey key: String) -> RawBufferStorage? {
-        resources[key]
+    func resourceData(forURL url: URL) -> (any DataProtocol)? {
+        resources[url]
     }
-    func setResource(data: RawBufferStorage?, forKey key: String) {
-        resources[key] = data
+    func setResource(data: (any DataProtocol)?, forURL url: URL) {
+        resources[url] = data
     }
 
     let app: A
@@ -82,6 +82,7 @@ class AppMain<A>: ApplicationDelegate, AppContext where A: App {
         self.scene = EmptyScene().makeSceneProxy()
         self.graphicsDeviceContext = nil
         self.audioDeviceContext = nil
+        self.resources = [:]
     }
 
     init() {

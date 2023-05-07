@@ -38,7 +38,7 @@ open class Frame {
 
     public var color: Color = .black { didSet { self.redraw() } }
     public var pixelFormat: PixelFormat = .rgba8Unorm   { didSet { self.redraw() } }
-    public var blendState: BlendState = .defaultOpaque  { didSet { self.redraw() } }
+    public var blendState: BlendState = .opaque  { didSet { self.redraw() } }
 
     public private(set) var renderTarget: Texture? = nil
 

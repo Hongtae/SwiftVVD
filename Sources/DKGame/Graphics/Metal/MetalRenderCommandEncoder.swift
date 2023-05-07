@@ -186,6 +186,17 @@ public class MetalRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
+    public func setScissorRect(_ r: ScissorRect) {
+        assert(self.encoder != nil)
+        let rect = MTLScissorRect(x: r.x, y: r.y,
+                                  width: r.width, height: r.height)
+
+        self.encoder?.commands.append {
+            (encoder: MTLRenderCommandEncoder, state: inout EncodingState) in
+            encoder.setScissorRect(rect)
+        }
+    }
+
     public func setRenderPipelineState(_ pipelineState: RenderPipelineState) {
         assert(self.encoder != nil)
         assert(pipelineState is MetalRenderPipelineState)

@@ -14,6 +14,10 @@ struct AnyTextStorage {
 public struct Text: View {
     struct Storage {
         let anyTextStorage: AnyTextStorage
+
+        var unicodeScalars: any BidirectionalCollection {
+            anyTextStorage.content.unicodeScalars as any BidirectionalCollection
+        }
     }
     let storage: Storage
 
@@ -126,13 +130,58 @@ extension Text {
             return nil
         }.first
     }
+    
+    var ellipsis: String { "..." }
+}
+
+class TextContext: ViewProxy {
+    var view: Text
+    var modifiers: [any ViewModifier]
+    var environmentValues: EnvironmentValues
+    var sharedContext: SharedContext
+    var layoutOffset: CGPoint
+    var layoutSize: CGSize
+    var contentScaleFactor: CGFloat
+
+    init(view: Text,
+         modifiers: [any ViewModifier],
+         environmentValues: EnvironmentValues,
+         sharedContext: SharedContext) {
+        self.modifiers = modifiers
+        self.environmentValues = environmentValues._resolve(modifiers: modifiers)
+        self.view = self.environmentValues._resolve(view)
+        self.sharedContext = sharedContext
+        self.layoutOffset = .zero
+        self.layoutSize = .zero
+        self.contentScaleFactor = 1
+    }
+
+    func layout(offset: CGPoint, size: CGSize, scaleFactor: CGFloat) {
+        self.layoutOffset = offset
+        self.layoutSize = size
+        if scaleFactor != self.contentScaleFactor {
+            self.contentScaleFactor = scaleFactor
+        }
+    }
+
+    func draw(frame: CGRect, context: GraphicsContext) {
+        if self.layoutSize.width > 0 && self.layoutSize.height > 0 {
+            context.draw(self.view, in: CGRect(origin: self.layoutOffset,
+                                               size: self.layoutSize))
+        }
+    }
+
+    func updateEnvironment(_ environmentValues: EnvironmentValues) {
+        self.environmentValues = environmentValues._resolve(modifiers: modifiers)
+        // TODO: redraw
+    }
 }
 
 extension Text: _PrimitiveView {
     func makeViewProxy(modifiers: [any ViewModifier],
                        environmentValues: EnvironmentValues,
                        sharedContext: SharedContext) -> any ViewProxy {
-        ViewContext(view: self,
+        TextContext(view: self,
                     modifiers: modifiers,
                     environmentValues: environmentValues,
                     sharedContext: sharedContext)

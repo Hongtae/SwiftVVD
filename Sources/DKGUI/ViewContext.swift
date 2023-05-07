@@ -8,6 +8,17 @@
 import DKGame
 import Foundation
 
+enum DisplayScaleEnvironmentKey: EnvironmentKey {
+    static var defaultValue: CGFloat { return 1 }
+}
+
+extension EnvironmentValues {
+    public var displayScale: CGFloat {
+        set { self[DisplayScaleEnvironmentKey.self] = newValue }
+        get { self[DisplayScaleEnvironmentKey.self] }
+    }
+}
+
 class SharedContext {
     var appContext: AppContext
 
@@ -16,6 +27,7 @@ class SharedContext {
 
     var resourceData: [String: Data] = [:]
     var resourceObjects: [String: AnyObject] = [:]
+    var cachedTypeFaces: [Font: TypeFace] = [:]
 
     init(appContext: AppContext) {
         self.appContext = appContext
@@ -75,7 +87,7 @@ extension EnvironmentValues {
     }
 }
 
-protocol ViewProxy {
+protocol ViewProxy: AnyObject {
     associatedtype Content: View
     var view: Content { get }
     var modifiers: [any ViewModifier] { get }
@@ -85,9 +97,10 @@ protocol ViewProxy {
     var layoutSize: CGSize { get }
     var contentScaleFactor: CGFloat { get }
 
-    mutating func layout(offset: CGPoint, size: CGSize, scaleFactor: CGFloat)
+    func layout(offset: CGPoint, size: CGSize, scaleFactor: CGFloat)
     func update(tick: UInt64, delta: Double, date: Date)
     func draw(frame: CGRect, context: GraphicsContext)
+    func updateEnvironment(_ environmentValues: EnvironmentValues)
 }
 
 extension ViewProxy {
@@ -107,7 +120,7 @@ extension ViewProxy {
     }
 }
 
-struct ViewContext<Content>: ViewProxy where Content: View {
+class ViewContext<Content>: ViewProxy where Content: View {
     var view: Content
     var subview: any ViewProxy
     var modifiers: [any ViewModifier]
@@ -152,13 +165,18 @@ struct ViewContext<Content>: ViewProxy where Content: View {
         self.drawOverlay(frame: frame, context: context)
     }
 
-    mutating func layout(offset: CGPoint, size: CGSize, scaleFactor: CGFloat) {
+    func layout(offset: CGPoint, size: CGSize, scaleFactor: CGFloat) {
         self.layoutOffset = offset
         self.layoutSize = size
         self.contentScaleFactor = scaleFactor
         self.subview.layout(offset: self.layoutOffset,
                             size: self.layoutSize,
                             scaleFactor: self.contentScaleFactor)
+    }
+
+    func updateEnvironment(_ environmentValues: EnvironmentValues) {
+        self.environmentValues = environmentValues._resolve(modifiers: modifiers)
+        self.subview.updateEnvironment(self.environmentValues)
     }
 }
 

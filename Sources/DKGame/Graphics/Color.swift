@@ -77,6 +77,11 @@ public struct Color: Hashable {
         self.rgba8 = rgba8
     }
 
+    public init(white: any BinaryFloatingPoint,
+                opacity: any BinaryFloatingPoint = 1) {
+        self.init(white, white, white, opacity)
+    }
+
     public init(hue: any BinaryFloatingPoint,
                 saturation: any BinaryFloatingPoint,
                 brightness: any BinaryFloatingPoint,
@@ -101,6 +106,10 @@ public struct Color: Hashable {
             (r, g, b) = (c, x, 0)
         }
         self.init(r + m, g + m, b + m, opacity)
+    }
+
+    public func opacity(_ opacity: Double) -> Color {
+        Color(self.r, self.g, self.b, opacity)
     }
 
     public static let black = Color(0.0, 0.0, 0.0)

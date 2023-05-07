@@ -8,138 +8,255 @@
 import Foundation
 import DKGame
 
-struct FaceStyle: Hashable {
-    var pointSize: CGFloat
-    var outilne: CGFloat
-    var embolden: CGFloat
-    var dpiX: UInt32
-    var dpiY: UInt32
-    var enableKerning: Bool
-    var forceBitmap: Bool
+extension View {
+    public func font(_ font: Font?) -> some View {
+        return environment(\.font, font)
+    }
 }
+
+enum FontEnvironmentKey: EnvironmentKey {
+    static var defaultValue: Font? { return nil }
+}
+
+extension EnvironmentValues {
+    public var font: Font? {
+        set { self[FontEnvironmentKey.self] = newValue }
+        get { self[FontEnvironmentKey.self] }
+    }
+}
+
+var defaultFontURL: URL? {
+    Bundle.module.url(forResource: "Roboto-Regular",
+                      withExtension: "ttf",
+                      subdirectory: "Fonts/Roboto")
+}
+
+let defaultDPI = 72
 
 typealias GlyphData = DKGame.Font.GlyphData
 
-func faceStyle(from font: DKGame.Font) -> FaceStyle {
-    FaceStyle(pointSize: font.pointSize,
-              outilne: font.outline,
-              embolden: font.embolden,
-              dpiX: font.dpi.x,
-              dpiY: font.dpi.y,
-              enableKerning: font.kerningEnabled,
-              forceBitmap: font.forceBitmap)
+protocol TypeFace {
+    func glyphData(for c: UnicodeScalar) -> GlyphData?
+    func kernAdvance(left: UnicodeScalar, right: UnicodeScalar) -> CGPoint
+    func hasGlyph(for: UnicodeScalar) -> Bool
+
+    var lineHeight: CGFloat { get }
+    var ascender: CGFloat { get }
+    var descender: CGFloat { get }
+
+    func isEqual(to: any TypeFace) -> Bool
+}
+
+extension DKGame.Font: TypeFace {
+    var lineHeight: CGFloat {
+        self.lineHeight()
+    }
+
+    var identifier: String {
+        if let data = self.fontData {
+            return "\(self.familyName):\(unsafeBitCast(data.address, to: Int.self))"            
+        } else {
+            return "<\(self.filePath)>"
+        }
+    }
+
+    func isEqual(to: any TypeFace) -> Bool {
+        if let other = to as? DKGame.Font {
+            return self === other
+        }
+        return false
+    }
+}
+
+protocol TypeFaceProvider {    
+    func isEqual(to: any TypeFaceProvider) -> Bool
+    func hash(into hasher: inout Hasher)
+
+    func makeTypeFace(_: AppContext, displayScale: CGFloat) -> TypeFace?
+
+    var isShareable: Bool { get }
+}
+
+extension TypeFaceProvider {
+    func makeTypeFace(_: SharedContext) -> TypeFace? { nil }
+    var isShareable: Bool { true }
+}
+
+struct SystemFontProvider: TypeFaceProvider {
+    let size: CGFloat
+    let weight: Font.Weight
+    let design: Font.Design
+
+    init(size: CGFloat, weight: Font.Weight, design: Font.Design) {
+        self.size = size
+        self.weight = weight
+        self.design = design
+    }
+
+    func isEqual(to: any TypeFaceProvider) -> Bool {
+        if let other = to as? Self {
+            return self.size == other.size && 
+                   self.weight == other.weight &&
+                   self.design == other.design
+        }
+        return false
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(size)
+        hasher.combine(weight)
+        hasher.combine(design)
+    }
+
+    func makeTypeFace(_ context: AppContext,
+                      displayScale: CGFloat) -> TypeFace? {
+        if let url = defaultFontURL {
+            var data = context.resourceData(forURL: url)
+            if data == nil {
+                do {
+                    Log.debug("Loading font resource: \(url)")
+                    let d = try Data(contentsOf: url, options: [])
+                    data = d.makeFixedAddressStorage()
+                    if data != nil {
+                        context.setResource(data: data, forURL: url)
+                    }
+                } catch {
+                    Log.error("Error on loading data: \(error)")
+                }
+                if let data, let device = context.graphicsDeviceContext {
+                    let dpi = CGFloat(defaultDPI) * displayScale
+                    let font = DKGame.Font(deviceContext: device, data: data)
+                    font?.setStyle(pointSize: self.size,
+                                   dpi: (UInt32(dpi), UInt32(dpi)))
+                    return font
+                }
+            }
+        }
+        return nil
+    }
+}
+
+struct CustomFontProvider: TypeFaceProvider {
+    let name: String
+    let size: CGFloat
+
+    init(name: String, size: CGFloat) {
+        self.name = name
+        self.size = size
+    }
+
+    func isEqual(to: any TypeFaceProvider) -> Bool {
+        if let other = to as? Self {
+            return self.name == other.name &&
+                   self.size == other.size
+        }
+        return false
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(name)
+        hasher.combine(size)
+    }
+
+    func makeTypeFace(_ context: AppContext,
+                      displayScale: CGFloat) -> TypeFace? {
+        nil
+    }
+}
+
+struct FixedFontProvider: TypeFaceProvider {
+    let font: DKGame.Font
+
+    init(_ font: DKGame.Font) {
+        self.font = font
+    }
+
+    var identifier: String {
+        font.identifier        
+    }
+
+    func isEqual(to: any TypeFaceProvider) -> Bool {
+        if let other = to as? Self {
+            return ObjectIdentifier(self.font) == ObjectIdentifier(other.font)
+        }
+        return false
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(ObjectIdentifier(self.font))
+    }
+
+    func makeTypeFace(_: AppContext,
+                      displayScale: CGFloat) -> TypeFace? { self.font }
+
+    var isShareable: Bool { false }
 }
 
 class AnyFontBox {
-    var font: DKGame.Font?
-    var fallbackFonts: [DKGame.Font] = []
+    let fontBox: any TypeFaceProvider
 
-    let identifier: String
-    let style: FaceStyle
-
-    init(identifier: String, style: FaceStyle) {
-        self.identifier = identifier
-        self.style = style
+    init(_ fontBox: any TypeFaceProvider) {
+        self.fontBox = fontBox
     }
 
-    func loadFont(_ graphicsDevice: GraphicsDeviceContext) -> DKGame.Font? {
-        if self.font == nil {
-            //TODO: load font with identifier or URL
-        }
-        return self.font
+    func isEqual(to other: AnyFontBox) -> Bool {
+        self.fontBox.isEqual(to: other.fontBox)
     }
 
-    func glyphData(for c: UnicodeScalar) -> GlyphData? {
-        if let font, font.hasGlyph(for: c) == false {
-            for ft in self.fallbackFonts {
-                if ft.hasGlyph(for: c) {
-                    return ft.glyphData(for: c)
-                }
-            }
-        }
-        return font?.glyphData(for: c)
+    func hash(into hasher: inout Hasher) {
+        fontBox.hash(into: &hasher)
     }
 
-    func kernAdvance(left: UnicodeScalar, right: UnicodeScalar) -> CGPoint {
-        if let font {
-            unowned var font1 = font
-            unowned var font2 = font
-
-            if font1.hasGlyph(for: left) == false {
-                font1 = self.fallbackFonts.first {
-                    $0.hasGlyph(for: left)
-                } ?? font1
-            }
-            if font2.hasGlyph(for: right) == false {
-                font2 = self.fallbackFonts.first {
-                    $0.hasGlyph(for: right)
-                } ?? font2
-            }
-            if font1 === font2 {
-                return font1.kernAdvance(left: left, right: right)
-            }
-        }
-        return .zero
+    func makeTypeFace(_ context: AppContext,
+                      displayScale: CGFloat) -> TypeFace? {
+        fontBox.makeTypeFace(context, displayScale: displayScale)
     }
-
-    func lineWidth(of text: String) -> CGFloat {
-        var length: CGFloat = 0.0
-        var c1 = UnicodeScalar(UInt8(0))
-        for c2 in text.unicodeScalars {
-            if let glyph = self.glyphData(for: c2) {
-                length += glyph.advance.width
-                length += self.kernAdvance(left: c1, right: c2).x
-            }
-            c1 = c2
-        }
-        return length
-    }
-
-    public func bounds(of text: String) -> CGRect {
-        var bboxMin: CGPoint = .zero
-        var bboxMax: CGPoint = .zero
-        var offset: CGFloat = 0.0
-        var c1 = UnicodeScalar(UInt8(0))
-        for c2 in text.unicodeScalars {
-            if let glyph = self.glyphData(for: c2) {
-                if offset > 0.0 {
-                    let posMin = CGPoint(x: offset + glyph.position.x,
-                                         y: glyph.position.y - glyph.ascender)
-                    let posMax = CGPoint(x: posMin.x + glyph.frame.width,
-                                         y: posMin.y + glyph.frame.height - glyph.ascender)
-
-                    bboxMin = .minimum(bboxMin, posMin)
-                    bboxMax = .maximum(bboxMax, posMax)
-                } else {
-                    bboxMin = glyph.position
-                    bboxMax.x = bboxMin.x + glyph.frame.width
-                    bboxMax.y = bboxMin.y + glyph.frame.height - glyph.ascender
-                }
-
-                offset += glyph.advance.width + self.kernAdvance(left: c1, right: c2).x
-            }
-            c1 = c2
-        }
-        let size = CGSize(width: ceil(bboxMax.x - bboxMin.x), height: ceil(bboxMax.y - bboxMin.y))
-        return CGRect(origin: bboxMin, size: size)
-    }
+    var isShareable: Bool { fontBox.isShareable }
 }
 
 public struct Font: Hashable {
     let provider: AnyFontBox
+    let displayScale: CGFloat
 
-    init(provider: AnyFontBox) {
+    init(provider: AnyFontBox, displayScale: CGFloat) {
         self.provider = provider
+        self.displayScale = displayScale
     }
 
     public static func == (lhs: Font, rhs: Font) -> Bool {
-        lhs.provider.identifier == rhs.provider.identifier &&
-        lhs.provider.style == rhs.provider.style
+        lhs.provider.isEqual(to: rhs.provider) &&
+        lhs.displayScale == rhs.displayScale
     }
 
     public func hash(into hasher: inout Hasher) {
-        hasher.combine(provider.identifier)
-        hasher.combine(provider.style)
+        provider.hash(into: &hasher)
+        hasher.combine(displayScale)
+    }
+
+    func typeFace(forContext context: SharedContext) -> TypeFace? {
+        if provider.isShareable {
+            if let typeFace = context.cachedTypeFaces[self] {
+                return typeFace
+            }
+            if let typeFace = provider.makeTypeFace(
+                context.appContext,
+                displayScale: self.displayScale) {
+                context.cachedTypeFaces[self] = typeFace
+                return typeFace
+            }
+        } else {
+            return provider.makeTypeFace(context.appContext,
+                                         displayScale: self.displayScale)
+        }
+        return nil
+    }
+    
+    var fallbackTypeFaces: [TypeFace] {
+        []
+    }
+
+    func displayScale(_ scale: CGFloat) -> Font {
+        Font(provider: self.provider, displayScale: scale)
     }
 }
 
@@ -166,27 +283,46 @@ extension Font {
 extension Font {
 
     public init(_ font: DKGame.Font) {
-        fatalError()
+        let fontBox = FixedFontProvider(font)
+        self.init(provider: AnyFontBox(fontBox), displayScale: 1)
+    }
+
+    static func pointSize(for style: TextStyle) -> CGFloat {
+        switch style {
+        case .largeTitle:   return 28
+        case .title:        return 24
+        case .headline:     return 21
+        case .subheadline:  return 18
+        case .body:         return 16
+        case .callout:      return 12
+        case .footnote:     return 8
+        case .caption:      return 8
+        }
     }
 
     public static func system(_ style: Font.TextStyle, design: Font.Design = .default) -> Font {
-        fatalError()
+        let provider = SystemFontProvider(size: pointSize(for: style), weight: .regular, design: design)
+        return Font(provider: AnyFontBox(provider), displayScale: 1)
     }
 
     public static func system(size: CGFloat, weight: Font.Weight = .regular, design: Font.Design = .default) -> Font {
-        fatalError()
+        let provider = SystemFontProvider(size: size, weight: weight, design: design)
+        return Font(provider: AnyFontBox(provider), displayScale: 1)
     }
 
     public static func custom(_ name: String, size: CGFloat, relativeTo textStyle: Font.TextStyle) -> Font {
-        fatalError()
+        let provider = CustomFontProvider(name: name, size: pointSize(for: textStyle) + size)
+        return Font(provider: AnyFontBox(provider), displayScale: 1)
     }
 
     public static func custom(_ name: String, fixedSize: CGFloat) -> Font {
-        fatalError()
+        let provider = CustomFontProvider(name: name, size: fixedSize)
+        return Font(provider: AnyFontBox(provider), displayScale: 1)
     }
 
     public static func custom(_ name: String, size: CGFloat) -> Font {
-        fatalError()
+        let provider = CustomFontProvider(name: name, size: size)
+        return Font(provider: AnyFontBox(provider), displayScale: 1)
     }
 }
 
@@ -213,14 +349,4 @@ extension Font {
     public static var callout = Font.system(Font.TextStyle.callout)
     public static var footnote = Font.system(Font.TextStyle.footnote)
     public static var caption = Font.system(Font.TextStyle.caption)
-}
-
-extension Font {
-    func load(_ graphicsDevice: GraphicsDeviceContext) -> DKGame.Font? {
-        provider.loadFont(graphicsDevice)
-    }
-
-    func glyphData(for c: UnicodeScalar) -> GlyphData? {
-        provider.glyphData(for: c)
-    }
 }

@@ -59,16 +59,18 @@ private func FT_HAS_FIXED_SIZES(_ face: FT_Face) -> Bool {
 
 public class Font {
     public typealias DPI = (x: UInt32, y: UInt32)
-    public static let defaultDPI = DPI(x: 96, y: 96)
+    //public static let defaultDPI = DPI(x: 96, y: 96)
+    public static let defaultDPI = DPI(x: 72, y: 72)
 
     private let library: FTLibrary
     private var face: FT_Face
     private let faceLock = SpinLock()
-    private var fontData: RawBufferStorage?
+    public private(set) var fontData: (any FixedAddressStorageData)?
 
     public let deviceContext: GraphicsDeviceContext
     public let familyName: String
     public let styleName: String
+    public let filePath: String
 
     public let maxPointSize: CGFloat = CGFloat(1<<25) - CGFloat(1.0/64.0)
 
@@ -199,16 +201,10 @@ public class Font {
         self.face = face!
         self.familyName = .init(cString: face!.pointee.family_name)
         self.styleName = .init(cString: face!.pointee.style_name)
+        self.filePath = path
     }
 
-    public convenience init?<D>(deviceContext: GraphicsDeviceContext,
-                                data: D) where D: DataProtocol {
-        if data.isEmpty { return nil }
-        let buffer = RawBufferStorage(data) // copy font data
-        self.init(deviceContext: deviceContext, data: buffer)
-    }
-
-    public init?(deviceContext: GraphicsDeviceContext, data: RawBufferStorage) {
+    public init?(deviceContext: GraphicsDeviceContext, data: any DataProtocol) {
         if data.isEmpty { return nil }
 
         self._outline = 0.0
@@ -218,11 +214,12 @@ public class Font {
         self._kerningEnabled = true
         self._forceBitmap = false
 
+        let data = data.makeFixedAddressStorage()
         self.fontData = data
 
         let library = sharedFTLibrary()
         var face: FT_Face? = nil
-        let err: FT_Error = FT_New_Memory_Face(library.library, data.baseAddress, FT_Long(data.count), 0, &face)
+        let err: FT_Error = FT_New_Memory_Face(library.library, data.address, FT_Long(data.count), 0, &face)
         if err != 0 {
             return nil
         }
@@ -240,6 +237,7 @@ public class Font {
         self.face = face!
         self.familyName = .init(cString: face!.pointee.family_name)
         self.styleName = .init(cString: face!.pointee.style_name)
+        self.filePath = ""
     }
 
     deinit {
