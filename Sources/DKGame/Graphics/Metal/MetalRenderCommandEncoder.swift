@@ -204,7 +204,6 @@ public class MetalRenderCommandEncoder: RenderCommandEncoder {
                 (encoder: MTLRenderCommandEncoder, state: inout EncodingState) in
 
                 encoder.setRenderPipelineState(pipelineState.pipelineState)
-                encoder.setTriangleFillMode(pipelineState.triangleFillMode)
                 state.pipelineState = pipelineState
             }
         }
@@ -314,7 +313,7 @@ public class MetalRenderCommandEncoder: RenderCommandEncoder {
         case .fill:     triangleFillMode = .fill
         case .lines:    triangleFillMode = .lines
         }
-        self.encoder?.command.append {
+        self.encoder?.commands.append {
             (encoder: MTLRenderCommandEncoder, state: inout EncodingState) in
             encoder.setTriangleFillMode(triangleFillMode)
         }
@@ -422,7 +421,7 @@ public class MetalRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func drawIndexedPrimitives(type primitiveType: PrimitiveType, indexType: IndexType, indexBuffer: Buffer, indexBufferOffset: Int, instanceCount: Int, baseVertex: Int, baseInstance: Int) {
+    public func drawIndexedPrimitives(type primitiveType: PrimitiveType, indexCount: Int, indexType: IndexType, indexBuffer: Buffer, indexBufferOffset: Int, instanceCount: Int, baseVertex: Int, baseInstance: Int) {
         assert(self.encoder != nil)
         assert(indexBuffer is MetalBuffer)
 

@@ -21,9 +21,6 @@ public class MetalRenderPipelineState: RenderPipelineState {
         self.device = device
         self.pipelineState = pipelineState
 
-        self.primitiveType = .triangle
-        self.triangleFillMode = .fill
-
         self.vertexBindings = MetalStageResourceBindingMap(
             resourceBindings: [],
             inputAttributeIndexOffset: 0,
