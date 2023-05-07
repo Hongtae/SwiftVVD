@@ -47,9 +47,7 @@ extension GraphicsContext {
     // references:
     //  https://developer.apple.com/documentation/coregraphics/cgblendmode/
     //  https://www.w3.org/TR/compositing/#blending
-    // GLSL:
-    //  https://hg.mozilla.org/mozilla-central/file/tip/gfx/wr/webrender/res/cs_svg_filter.glsl
-    //  https://fossies.org/linux/firefox/gfx/wr/webrender/res/cs_svg_filter.glsl
+    //  https://www.w3.org/TR/compositing/#advancedcompositing
 
     var blendState: BlendState {
         BlendMode.singlePassBlendModeStates[self.blendMode, default: .opaque]

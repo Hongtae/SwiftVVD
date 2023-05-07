@@ -80,6 +80,7 @@ extension GraphicsContext {
                 let stencil: _Stencil = style.isEOFilled ? .testEven : .testNonZero
                 self.encodeShadingBoxCommand(shading,
                                              stencil: stencil,
+                                             blendState: .opaque,
                                              encoder: encoder)
                 encoder.endEncoding()
                 self.applyFilters()
@@ -99,6 +100,7 @@ extension GraphicsContext {
                                                    encoder: encoder) {
                 self.encodeShadingBoxCommand(shading,
                                              stencil: .testNonZero,
+                                             blendState: .opaque,
                                              encoder: encoder)
                 encoder.endEncoding()
                 self.applyFilters()
@@ -746,7 +748,7 @@ extension GraphicsContext {
 
     func encodeShadingBoxCommand(_ shading: GraphicsContext.Shading,
                                  stencil: _Stencil,
-                                 blendState: BlendState = .alphaBlend,
+                                 blendState: BlendState,
                                  encoder: RenderCommandEncoder) {
 
         if shading.properties.isEmpty { return }
@@ -775,6 +777,7 @@ extension GraphicsContext {
                 if length < .ulpOfOne {
                     return self.encodeShadingBoxCommand(.color(stops[0].color),
                                                         stencil: stencil,
+                                                        blendState: blendState,
                                                         encoder: encoder)
                 }
                 let dir = gradientVector.normalized()
@@ -892,10 +895,12 @@ extension GraphicsContext {
                     if options.contains(.repeat) && !options.contains(.mirror) {
                         return self.encodeShadingBoxCommand(.color(stops.last!.color),
                                                             stencil: stencil,
+                                                            blendState: blendState,
                                                             encoder: encoder)
                     } else {
                         return self.encodeShadingBoxCommand(.color(stops.first!.color),
                                                             stencil: stencil,
+                                                            blendState: blendState,
                                                             encoder: encoder)
                     }
                 }

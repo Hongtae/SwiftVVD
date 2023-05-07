@@ -16,5 +16,8 @@ void main() {
     vec4 src = texture(image1, texUV);
     vec4 dst = texture(image2, texUV);
 
-    outFragColor = mix(dst, blend(vec4(src.rgb, 1), dst), src.a * color.a);
+    if (src != vec4(0))
+        outFragColor = blend(src * color, dst);
+    else
+        outFragColor = dst;
 }
