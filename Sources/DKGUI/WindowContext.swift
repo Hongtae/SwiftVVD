@@ -30,8 +30,8 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
         var bounds: CGRect = .zero
     }
     struct Configuration {
-        var activeFrameInterval = 1.0 / 60.0
-        var inactiveFrameInterval = 1.0 / 30.0
+        var activeFrameInterval = 1.0 / 5.0
+        var inactiveFrameInterval = 1.0 / 5.0
     }
     @MainActor var state = State()
     @MainActor var config = Configuration()

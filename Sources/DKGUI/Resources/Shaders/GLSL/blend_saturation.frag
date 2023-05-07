@@ -16,15 +16,15 @@ vec3 clip(vec3 c) {
     float l = lum(c);
     float n = min(c.r, min(c.g, c.b));
     float x = max(c.r, max(c.g, c.b));
-    if (n < 0)
-        return l + (((c - l) * l) / (l - n));
-    if (x > 1)
-        return l + (((c - l) * (1 - l)) / (x - l));
+    if (n < 0.0)
+        c = l + (((c - l) * l) / (l - n));
+    if (x > 1.0)
+        c = l + (((c - l) * (1.0 - l)) / (x - l));
     return c;
 }
 
 vec3 set_lum(vec3 c, float l) {
-    float d = 1 - lum(c);
+    float d = l - lum(c);
     return clip(c + d);
 }
 
@@ -37,10 +37,10 @@ void set_sat_inner(inout float cmin, inout float cmid, inout float cmax, float s
         cmid = (((cmid - cmin) * s) / (cmax - cmin));
         cmax = s;
     } else {
-        cmid = 0;
-        cmax = 0;
+        cmid = 0.0;
+        cmax = 0.0;
     }
-    cmin = 0;
+    cmin = 0.0;
 }
 
 vec3 set_sat(vec3 c, float s) {
@@ -73,9 +73,12 @@ vec3 blend(vec3 src, vec3 dst) {
 }
 
 void main() {
-    vec4 src = texture(image1, texUV);
+    vec4 src = texture(image1, texUV) * color;
     vec4 dst = texture(image2, texUV);
 
-    vec3 rgb = (1 - dst.a) * src.rgb + dst.a * blend(src.rgb, dst.rgb);
-    outFragColor = mix(vec4(dst.rgb * dst.a, dst.a), vec4(rgb, 1), src.a * color.a);
+    if (src.a != 0.0)   src.rgb /= src.a;
+    if (dst.a != 0.0)   dst.rgb /= dst.a;
+
+    vec3 rgb = (1.0 - dst.a) * src.rgb + dst.a * blend(src.rgb, dst.rgb);
+    outFragColor = mix(vec4(dst.rgb * dst.a, dst.a), vec4(rgb, 1.0), src.a);
 }
