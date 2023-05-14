@@ -61,8 +61,11 @@ enum _Shader {
     case rcImage        // for glyph, single(red) channel texture
     case resolveMask    // merge two masks (a8, r8) to render target (r8)
 
+    case filterProjectionTransform
     case filterColorMatrix
     case filterBlur
+    case filterSrgbToLinear
+    case filterLinearToSrgb
 
     case blendNormal
     case blendMultiply
@@ -108,11 +111,6 @@ struct _Vertex {
     var position: Float2
     var texcoord: Float2
     var color: Float4
-}
-
-struct _PushConstant {
-    var colorMatrix: ColorMatrix = .init()
-    static let identity = _PushConstant()
 }
 
 // MARK: - Graphics Pipeline
@@ -305,6 +303,11 @@ class GraphicsPipelineStates {
             let vertexFunction = try loadShader("default.vert")
 
             var shaderFunctions: [_Shader: ShaderFunctions] = [:]
+
+            //NOTE - Vulkan does not allow nil-fragment shader, unless rasterizer discard is enabled.
+            // The Vulkan spec states: The pipeline must be created with a complete set of state
+            // [VUID-VkGraphicsPipelineCreateInfo-None-06573]
+            // https://registry.khronos.org/vulkan/specs/1.3/html/chap10.html#pipelines-graphics-subsets-complete
             shaderFunctions[.stencil] = ShaderFunctions(
                 vertexFunction: try loadShader("stencil.vert"),
                 fragmentFunction: try loadShader("stencil.frag"))
@@ -319,8 +322,12 @@ class GraphicsPipelineStates {
             shaderFunctions[.rcImage] = try loadFragmentFunction("draw_r8_opacity_image.frag")
             shaderFunctions[.resolveMask] = try loadFragmentFunction("resolve_mask.frag")
 
-            // load filter
-            shaderFunctions[.filterColorMatrix] = try loadFragmentFunction("filter_color_matrix.frag")
+            // load filters
+            shaderFunctions[.filterProjectionTransform] = try loadFragmentFunction("filter_projectionTransform.frag")
+            shaderFunctions[.filterColorMatrix] = try loadFragmentFunction("filter_colorMatrix.frag")
+            shaderFunctions[.filterBlur] = try loadFragmentFunction("filter_blur.frag")
+            shaderFunctions[.filterSrgbToLinear] = try loadFragmentFunction("filter_srgbToLinear.frag")
+            shaderFunctions[.filterLinearToSrgb] = try loadFragmentFunction("filter_linearToSrgb.frag")
 
             // load blend functions
             shaderFunctions[.blendNormal] = try loadFragmentFunction("blend_normal.frag")
@@ -372,7 +379,8 @@ class GraphicsPipelineStates {
                 throw LoadError(message: "makeShaderBindingSet failed.")
             }
 
-            let samplerDesc = SamplerDescriptor()
+            let samplerDesc = SamplerDescriptor(minFilter: .linear,
+                                                magFilter: .linear)
             guard let defaultSampler = device.makeSamplerState(descriptor: samplerDesc)
             else {
                 throw LoadError(message: "makeSampler failed.")
@@ -461,87 +469,124 @@ extension GraphicsContext {
         return false
     }
 
-    func makeEncoder(enableStencil: Bool) -> RenderCommandEncoder? {
-        return makeEncoder(renderTarget: self.renderTargets.source,
-                           enableStencil: enableStencil,
-                           loadAction: .clear)
+    struct RenderPass {
+        let encoder: RenderCommandEncoder
+        let descriptor: RenderPassDescriptor
+
+        func end() {
+            if self.encoder.isCompleted == false {
+                self.encoder.endEncoding()
+            }
+        }
+
+        var colorFormat: PixelFormat {
+            descriptor.colorAttachments.first?.renderTarget?.pixelFormat ??
+                .invalid
+        }
+
+        var depthFormat: PixelFormat {
+            descriptor.depthStencilAttachment.renderTarget?.pixelFormat ??
+                .invalid
+        }
     }
 
-    func makeEncoderCompositionTarget() -> RenderCommandEncoder? {
-        return makeEncoder(renderTarget: self.renderTargets.composited,
-                           enableStencil: false,
-                           loadAction: .dontCare)
+    func beginRenderPass(enableStencil: Bool) -> RenderPass? {
+        let stencilBuffer = enableStencil ?
+            self.renderTargets.stencilBuffer : nil
+        let loadAction: RenderPassAttachmentLoadAction = .clear
+        return beginRenderPass(viewport: self.viewport,
+                               renderTarget: self.renderTargets.source,
+                               stencilBuffer: stencilBuffer,
+                               loadAction: loadAction,
+                               clearColor: .clear)
     }
 
-    func makeEncoderBackdrop(clear: Bool = false,
-                             clearColor: DKGame.Color = .clear) -> RenderCommandEncoder? {
+    func beginRenderPassCompositionTarget() -> RenderPass? {
+        return beginRenderPass(viewport: self.viewport,
+                               renderTarget: self.renderTargets.composited,
+                               stencilBuffer: nil,
+                               loadAction: .dontCare,
+                               clearColor: .clear)
+    }
+
+    func beginRenderPassBackdropTarget(clear: Bool = false,
+                                       clearColor: DKGame.Color = .clear
+    ) -> RenderPass? {
         let loadAction: RenderPassAttachmentLoadAction = clear ? .clear : .load
-        return makeEncoder(renderTarget: self.renderTargets.backdrop,
-                           enableStencil: false,
-                           loadAction: loadAction,
-                           clearColor: clearColor)
+        return beginRenderPass(viewport: self.viewport,
+                               renderTarget: self.renderTargets.backdrop,
+                               stencilBuffer: nil,
+                               loadAction: loadAction,
+                               clearColor: clearColor)
     }
 
-    func makeEncoder(renderTarget: Texture,
-                     enableStencil: Bool,
-                     loadAction: RenderPassAttachmentLoadAction,
-                     clearColor: DKGame.Color = .clear) -> RenderCommandEncoder? {
-        var renderPass = RenderPassDescriptor(
+    func beginRenderPass(viewport: CGRect,
+                         renderTarget: Texture,
+                         stencilBuffer: Texture?,
+                         loadAction: RenderPassAttachmentLoadAction,
+                         clearColor: DKGame.Color) -> RenderPass? {
+        var descriptor = RenderPassDescriptor(
             colorAttachments: [.init(renderTarget: renderTarget,
                                      loadAction: loadAction,
                                      storeAction: .store,
                                      clearColor: clearColor)])
-        if enableStencil {
-            renderPass.depthStencilAttachment = .init(
-                renderTarget: self.renderTargets.stencilBuffer,
+        if let stencilBuffer {
+            descriptor.depthStencilAttachment = .init(
+                renderTarget: stencilBuffer,
                 loadAction: .clear,
                 storeAction: .dontCare,
                 clearStencil: 0)
         }
-        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPass) else {
+        return self.beginRenderPass(descriptor: descriptor, viewport: viewport)
+    }
+
+    func beginRenderPass(descriptor: RenderPassDescriptor,
+                         viewport: CGRect) -> RenderPass? {
+        guard let encoder = commandBuffer.makeRenderCommandEncoder(
+            descriptor: descriptor) else {
             Log.err("GraphicsContext error: makeRenderCommandEncoder failed.")
             return nil
         }
-        let x = Int(self.viewport.origin.x)
-        let y = Int(self.viewport.origin.y)
-        let width = Int(self.viewport.width)
-        let height = Int(self.viewport.height)
-        if x != 0 && y != 0
-            && width != self.renderTargets.width
-            && height != self.renderTargets.height {
-            encoder.setViewport(Viewport(x: self.viewport.origin.x,
-                                         y: self.viewport.origin.y,
-                                         width: self.viewport.width,
-                                         height: self.viewport.height,
-                                         nearZ: .zero, farZ: 1))
-            encoder.setScissorRect(ScissorRect(x: x, y: y,
-                                               width: width, height: height))
-        }
-        return encoder
+        let viewport = viewport.standardized
+        let x = Int(viewport.origin.x)
+        let y = Int(viewport.origin.y)
+        let width = Int(viewport.width)
+        let height = Int(viewport.height)
+
+        encoder.setViewport(Viewport(x: viewport.origin.x,
+                                     y: viewport.origin.y,
+                                     width: viewport.width,
+                                     height: viewport.height,
+                                     nearZ: .zero, farZ: 1))
+        encoder.setScissorRect(ScissorRect(x: x, y: y,
+                                           width: width, height: height))
+
+        return RenderPass(encoder: encoder,
+                          descriptor: descriptor)
     }
 
     func clear(with color: DKGame.Color) {
-        if let encoder = self.makeEncoderBackdrop(clear: true,
-                                                  clearColor: color) {
-            encoder.endEncoding()
+        if let renderPass = self.beginRenderPassBackdropTarget(
+            clear: true,
+            clearColor: color) {
+            renderPass.end()
         }
     }
 
-    func encodeDrawCommand(shader: _Shader,
+    func encodeDrawCommand(renderPass: RenderPass,
+                           shader: _Shader,
                            stencil: _Stencil,
                            vertices: [_Vertex],
                            texture: Texture?,
-                           blendState: BlendState,
-                           encoder: RenderCommandEncoder) {
+                           blendState: BlendState) {
         assert(shader != .stencil) // .stencil uses a different vertex format.
-        assert(shader != .filterColorMatrix)
 
         if vertices.isEmpty { return }
 
         guard let renderState = pipeline.renderState(
             shader: shader,
-            colorFormat: self.renderTargets.colorFormat,
-            depthFormat: stencil == .ignore ? .invalid : stencilBuffer.pixelFormat,
+            colorFormat: renderPass.colorFormat,
+            depthFormat: renderPass.depthFormat,
             blendState: blendState) else {
             Log.err("GraphicsContext error: pipeline.renderState failed.")
             return
@@ -555,6 +600,7 @@ extension GraphicsContext {
             return
         }
 
+        let encoder = renderPass.encoder
         encoder.setRenderPipelineState(renderState)
         encoder.setDepthStencilState(depthState)
         if let texture {

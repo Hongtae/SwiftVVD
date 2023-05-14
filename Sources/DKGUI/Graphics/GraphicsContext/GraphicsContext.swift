@@ -105,17 +105,20 @@ public struct GraphicsContext {
         self.transform = self.transform.concatenating(matrix)
     }
 
-    public var clipBoundingRect: CGRect = .zero
+    public internal(set) var clipBoundingRect: CGRect = .zero
 
     var filters: [(Filter, FilterOptions)] = []
 
     var backdrop: Texture { renderTargets.backdrop }
     var stencilBuffer: Texture { renderTargets.stencilBuffer }
+    var sourceTexture: Texture { renderTargets.source }
 
     var colorFormat: PixelFormat { renderTargets.colorFormat }
     var depthFormat: PixelFormat { renderTargets.depthFormat }
-    var resolution: CGSize { CGSize(width: renderTargets.width,
-                                    height: renderTargets.height) }
+
+    var resolution: CGSize {
+        CGSize(width: renderTargets.width, height: renderTargets.height)
+    }
 }
 
 extension GraphicsContext {
@@ -123,6 +126,7 @@ extension GraphicsContext {
         var source: Texture     // blend source, temporary
         var backdrop: Texture   // output (swap with composited)
         var composited: Texture // composited output
+        var temporary: Texture  // temporary buffer for iteration (blur)
         let stencilBuffer: Texture
 
         var width: Int { backdrop.width }
@@ -152,12 +156,51 @@ extension GraphicsContext {
             if let renderTarget = makeRenderTarget(.rgba8Unorm, usage) {
                 self.composited = renderTarget
             } else { return nil }
+            if let renderTarget = makeRenderTarget(.rgba8Unorm, usage) {
+                self.temporary = renderTarget
+            } else { return nil }
             if let renderTarget = device.makeTransientRenderTarget(
                 type: .type2D,
                 pixelFormat: .stencil8,
                 width: width, height: height, depth: 1) {
                 self.stencilBuffer = renderTarget
             } else { return nil }
+        }
+
+        func switchSourceToComposited() {
+            let tmp = self.source
+            self.source = self.composited
+            self.composited = tmp
+        }
+
+        func switchSourceToBackdrop() {
+            let tmp = self.source
+            self.source = self.backdrop
+            self.backdrop = tmp
+        }
+
+        func switchCompositedToBackdrop() {
+            let tmp = self.composited
+            self.composited = self.backdrop
+            self.backdrop = tmp
+        }
+
+        func switchTemporaryToSource() {
+            let tmp = self.temporary
+            self.temporary = self.source
+            self.source = tmp
+        }
+
+        func switchTemporaryToComposited() {
+            let tmp = self.temporary
+            self.temporary = self.composited
+            self.composited = tmp
+        }
+
+        func switchTemporaryToBackdrop() {
+            let tmp = self.temporary
+            self.temporary = self.backdrop
+            self.backdrop = tmp
         }
     }
 
@@ -191,5 +234,19 @@ extension GraphicsContext {
                   contentScaleFactor: contentScaleFactor,
                   renderTargets: renderTargets,
                   commandBuffer: commandBuffer)
+    }
+
+    func drawSource() {
+        var sourceDiscarded = false
+        for (filter, _) in self.filters {
+            if case let .shadow(_, _, _, _, opts) = filter.style,
+               opts.contains(.shadowOnly) {
+                sourceDiscarded = true
+                break
+            }
+        }
+        self.applyFilters(sourceDiscarded: sourceDiscarded)
+        if sourceDiscarded == false { self.applyBlendMode(applyMask: true) }
+        self.applyLayeredFilters(sourceDiscarded: sourceDiscarded)
     }
 }

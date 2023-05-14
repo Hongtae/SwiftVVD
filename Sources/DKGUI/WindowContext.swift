@@ -109,23 +109,26 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                             renderTargets: renderTargets,
                             commandBuffer: commandBuffer) {
 
-                            context.clear(with: .clear)
+                            context.clear(with: clearColor)
                             view.draw(frame: contentBounds, context: context)
 
-                            if let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPass) {
-                                let backdrop = renderTargets.backdrop
-                                renderTargets.backdrop = backBuffer
-                                defer {
-                                    renderTargets.backdrop = backdrop
-                                }
+                            let backdrop = renderTargets.backdrop
+                            renderTargets.backdrop = backBuffer
+                            defer {
+                                renderTargets.backdrop = backdrop
+                            }
+                            if let rp = context.beginRenderPass(descriptor: renderPass,
+                                                                viewport: context.viewport) {
                                 context.encodeDrawTextureCommand(
+                                    renderPass: rp,
                                     texture: backdrop,
-                                    in: contentBounds,
+                                    frame: contentBounds,
                                     textureFrame: context.viewport,
-                                    blendState: .alphaBlend,
-                                    color: .white,
-                                    encoder: encoder)
-                                encoder.endEncoding()
+                                    blendState: .opaque,
+                                    color: .white)
+                                rp.end()
+                            } else {
+                                Log.error("beginRenderPass failed.")
                             }
                         } else {
                             if let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPass) {

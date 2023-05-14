@@ -74,19 +74,19 @@ extension GraphicsContext {
 
     public func fill(_ path: Path, with shading: Shading, style: FillStyle = FillStyle()) {
         if shading.properties.isEmpty { return }
-        if let encoder = self.makeEncoder(enableStencil: true) {
-            if self.encodeStencilPathFillCommand(path, encoder: encoder) {
+        if let renderPass = self.beginRenderPass(enableStencil: true) {
+            if self.encodeStencilPathFillCommand(renderPass: renderPass,
+                                                 path: path) {
 
                 let stencil: _Stencil = style.isEOFilled ? .testEven : .testNonZero
-                self.encodeShadingBoxCommand(shading,
+                self.encodeShadingBoxCommand(renderPass: renderPass,
+                                             shading: shading,
                                              stencil: stencil,
-                                             blendState: .opaque,
-                                             encoder: encoder)
-                encoder.endEncoding()
-                self.applyFilters()
-                self.applyBlendModeAndMask()
+                                             blendState: .opaque)
+                renderPass.end()
+                self.drawSource()
             } else {
-                encoder.endEncoding()
+                renderPass.end()
             }
         }
     }
@@ -94,19 +94,18 @@ extension GraphicsContext {
     public func stroke(_ path: Path, with shading: Shading, style: StrokeStyle) {
         if shading.properties.isEmpty { return }
 
-        if let encoder = self.makeEncoder(enableStencil: true) {
-            if self.encodeStencilPathStrokeCommand(path,
-                                                   style: style,
-                                                   encoder: encoder) {
-                self.encodeShadingBoxCommand(shading,
+        if let renderPass = self.beginRenderPass(enableStencil: true) {
+            if self.encodeStencilPathStrokeCommand(renderPass: renderPass,
+                                                   path: path,
+                                                   style: style) {
+                self.encodeShadingBoxCommand(renderPass: renderPass,
+                                             shading: shading,
                                              stencil: .testNonZero,
-                                             blendState: .opaque,
-                                             encoder: encoder)
-                encoder.endEncoding()
-                self.applyFilters()
-                self.applyBlendModeAndMask()
+                                             blendState: .opaque)
+                renderPass.end()
+                self.drawSource()
             } else {
-                encoder.endEncoding()
+                renderPass.end()
             }
         }
     }
@@ -115,8 +114,9 @@ extension GraphicsContext {
         stroke(path, with: shading, style: StrokeStyle(lineWidth: lineWidth))
     }
 
-    func encodeStencilPathStrokeCommand(_ path: Path, style: StrokeStyle,
-                                        encoder: RenderCommandEncoder) -> Bool {
+    func encodeStencilPathStrokeCommand(renderPass: RenderPass,
+                                        path: Path,
+                                        style: StrokeStyle) -> Bool {
         if path.isEmpty { return false }
         if style.lineWidth < .ulpOfOne { return false }
 
@@ -170,7 +170,6 @@ extension GraphicsContext {
         var vertexData: [Float2] = []
 
         let transform = self.transform.concatenating(self.viewTransform)
-
         let drawLineSegment = { (start: CGPoint, end: CGPoint, dir0: CGPoint, dir1: CGPoint) in
             let t0 = CGAffineTransform(a: dir0.x, b: dir0.y,
                                        c: -lineWidth * dir0.y,
@@ -568,8 +567,8 @@ extension GraphicsContext {
         // pipeline states for generate polgon winding numbers
         guard let pipelineState = pipeline.renderState(
             shader: .stencil,
-            colorFormat: self.colorFormat,
-            depthFormat: self.depthFormat,
+            colorFormat: renderPass.colorFormat,
+            depthFormat: renderPass.depthFormat,
             blendState: BlendState(writeMask: [])) else {
             Log.err("GraphicsContext error: pipeline.renderState failed.")
             return false
@@ -579,9 +578,7 @@ extension GraphicsContext {
             return false
         }
 
-        guard let encoder = self.makeEncoder(enableStencil: true) else {
-            return false
-        }
+        let encoder = renderPass.encoder
 
         // pass1: Generate polygon winding numbers to stencil buffer
         encoder.setRenderPipelineState(pipelineState)
@@ -598,8 +595,8 @@ extension GraphicsContext {
         return true
     }
 
-    func encodeStencilPathFillCommand(_ path: Path,
-                                      encoder: RenderCommandEncoder) -> Bool {
+    func encodeStencilPathFillCommand(renderPass: RenderPass,
+                                      path: Path) -> Bool {
         if path.isEmpty { return false }
 
         struct PolygonElement {
@@ -717,8 +714,8 @@ extension GraphicsContext {
         // pipeline states for generate polygon winding numbers
         guard let pipelineState = pipeline.renderState(
             shader: .stencil,
-            colorFormat: self.colorFormat,
-            depthFormat: self.depthFormat,
+            colorFormat: renderPass.colorFormat,
+            depthFormat: renderPass.depthFormat,
             blendState: BlendState(writeMask: [])) else {
             Log.err("GraphicsContext error: pipeline.renderState failed.")
             return false
@@ -727,6 +724,8 @@ extension GraphicsContext {
             Log.err("GraphicsContext error: pipeline.depthStencilState failed.")
             return false
         }
+
+        let encoder = renderPass.encoder
 
         // pass1: Generate polygon winding numbers to stencil buffer
         encoder.setRenderPipelineState(pipelineState)
@@ -746,10 +745,10 @@ extension GraphicsContext {
         return true
     }
 
-    func encodeShadingBoxCommand(_ shading: GraphicsContext.Shading,
+    func encodeShadingBoxCommand(renderPass: RenderPass,
+                                 shading: GraphicsContext.Shading,
                                  stencil: _Stencil,
-                                 blendState: BlendState,
-                                 encoder: RenderCommandEncoder) {
+                                 blendState: BlendState) {
 
         if shading.properties.isEmpty { return }
 
@@ -775,10 +774,10 @@ extension GraphicsContext {
                 let gradientVector = endPoint - startPoint
                 let length = gradientVector.magnitude
                 if length < .ulpOfOne {
-                    return self.encodeShadingBoxCommand(.color(stops[0].color),
+                    return self.encodeShadingBoxCommand(renderPass: renderPass,
+                                                        shading: .color(stops[0].color),
                                                         stencil: stencil,
-                                                        blendState: blendState,
-                                                        encoder: encoder)
+                                                        blendState: blendState)
                 }
                 let dir = gradientVector.normalized()
                 // transform gradient space to world space
@@ -893,15 +892,17 @@ extension GraphicsContext {
                 let length = (endRadius - startRadius).magnitude
                 if length < .ulpOfOne {
                     if options.contains(.repeat) && !options.contains(.mirror) {
-                        return self.encodeShadingBoxCommand(.color(stops.last!.color),
-                                                            stencil: stencil,
-                                                            blendState: blendState,
-                                                            encoder: encoder)
+                        return self.encodeShadingBoxCommand(
+                            renderPass: renderPass,
+                            shading: .color(stops.last!.color),
+                            stencil: stencil,
+                            blendState: blendState)
                     } else {
-                        return self.encodeShadingBoxCommand(.color(stops.first!.color),
-                                                            stencil: stencil,
-                                                            blendState: blendState,
-                                                            encoder: encoder)
+                        return self.encodeShadingBoxCommand(
+                            renderPass: renderPass,
+                            shading: .color(stops.first!.color),
+                            stencil: stencil,
+                            blendState: blendState)
                     }
                 }
                 let invViewTransform = self.viewTransform.inverted()
@@ -1100,11 +1101,11 @@ extension GraphicsContext {
             }
         }
 
-        self.encodeDrawCommand(shader: shader,
+        self.encodeDrawCommand(renderPass: renderPass,
+                               shader: shader,
                                stencil: stencil,
                                vertices: vertices,
                                texture: nil,
-                               blendState: blendState,
-                               encoder: encoder)
+                               blendState: blendState)
     }
 }

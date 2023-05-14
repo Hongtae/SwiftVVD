@@ -49,158 +49,140 @@ extension GraphicsContext {
     //  https://www.w3.org/TR/compositing/#blending
     //  https://www.w3.org/TR/compositing/#advancedcompositing
 
-    var blendState: BlendState {
-        BlendMode.singlePassBlendModeStates[self.blendMode, default: .opaque]
-    }
+    @discardableResult
+    func applyBlendMode(blendMode: BlendMode? = nil,
+                        opacity: Double? = nil,
+                        applyMask: Bool) -> Bool {
+        let blendMode = blendMode ?? self.blendMode
 
-    func applyBlendModeAndMask() {
-        if let encoder = self.makeEncoderCompositionTarget() {
-            let shader: _Shader
-            switch self.blendMode {
-            case .normal:           shader = .blendNormal
-            case .multiply:         shader = .blendMultiply
-            case .screen:           shader = .blendScreen
-            case .overlay:          shader = .blendOverlay
-            case .darken:           shader = .blendDarken
-            case .lighten:          shader = .blendLighten
-            case .colorDodge:       shader = .blendColorDodge
-            case .colorBurn:        shader = .blendColorBurn
-            case .softLight:        shader = .blendSoftLight
-            case .hardLight:        shader = .blendHardLight
-            case .difference:       shader = .blendDifference
-            case .exclusion:        shader = .blendExclusion
-            case .hue:              shader = .blendHue
-            case .saturation:       shader = .blendSaturation       
-            case .color:            shader = .blendColor
-            case .luminosity:       shader = .blendLuminosity
-            case .clear:            shader = .blendClear
-            case .copy:             shader = .blendCopy
-            case .sourceIn:         shader = .blendSourceIn
-            case .sourceOut:        shader = .blendSourceOut
-            case .sourceAtop:       shader = .blendSourceAtop
-            case .destinationOver:  shader = .blendDestinationOver
-            case .destinationIn:    shader = .blendDestinationIn
-            case .destinationOut:   shader = .blendDestinationOut
-            case .destinationAtop:  shader = .blendDestinationAtop
-            case .xor:              shader = .blendXor
-            case .plusDarker:       shader = .blendPlusDarker
-            case .plusLighter:      shader = .blendPlusLighter
-            default:                shader = .blendNormal
+        let blendSrc = self.renderTargets.source
+        let blendDst = self.renderTargets.backdrop
+        let blendResult = self.renderTargets.composited
+
+        let opacity = opacity ?? self.opacity
+        let color = DKGame.Color(white: 1, opacity: opacity)
+
+        if let renderPass = self.beginRenderPassCompositionTarget() {
+            if self.encodeBlendTexturesCommand(renderPass: renderPass,
+                                               source: blendSrc,
+                                               backdrop: blendDst,
+                                               textureFrame: self.viewport,
+                                               blendMode: blendMode,
+                                               color: color) {
+                renderPass.end()
+
+                // swap buffers
+                self.renderTargets.switchCompositedToBackdrop()
+                return true
+            } else {
+                Log.error("GraphicsContext.encodeBlendTexturesCommand failed.")
             }
-
-            let color = DKGame.Color(white: 1, opacity: self.opacity).float4
-            let makeVertex = { x, y, u, v in
-                _Vertex(position: Vector2(x, y).float2,
-                        texcoord: Vector2(u, v).float2,
-                        color: color)
-            }
-
-            let invW = 1.0 / CGFloat(self.renderTargets.width)
-            let invH = 1.0 / CGFloat(self.renderTargets.height)
-            let u1 = self.viewport.minX * invW
-            let u2 = self.viewport.maxX * invW
-            let v1 = self.viewport.minY * invH
-            let v2 = self.viewport.maxY * invH
-            let vertices = [
-                makeVertex(-1, -1, u1, v2),
-                makeVertex(-1,  1, u1, v1),
-                makeVertex( 1, -1, u2, v2),
-                makeVertex( 1, -1, u2, v2),
-                makeVertex(-1,  1, u1, v1),
-                makeVertex( 1,  1, u2, v1)
-            ]
-
-            let blendSrc = self.renderTargets.source
-            let blendDst = self.renderTargets.backdrop
-            let blendResult = self.renderTargets.composited
-
-            guard let renderState = pipeline.renderState(
-                shader: shader,
-                colorFormat: self.renderTargets.colorFormat,
-                depthFormat: .invalid,
-                blendState: .opaque) else {
-                Log.err("GraphicsContext error: pipeline.renderState failed.")
-                return
-            }
-            guard let depthState = pipeline.depthStencilState(.ignore) else {
-                Log.err("GraphicsContext error: pipeline.depthStencilState failed.")
-                return
-            }
-            guard let vertexBuffer = self.makeBuffer(vertices) else {
-                Log.err("GraphicsContext error: _makeBuffer failed.")
-                return
-            }
-
-            encoder.setRenderPipelineState(renderState)
-            encoder.setDepthStencilState(depthState)
-
-            pipeline.defaultBindingSet2.setTexture(blendSrc, binding: 0)
-            pipeline.defaultBindingSet2.setTexture(blendDst, binding: 1)
-            pipeline.defaultBindingSet2.setSamplerState(pipeline.defaultSampler, binding: 0)
-            pipeline.defaultBindingSet2.setSamplerState(pipeline.defaultSampler, binding: 1)
-            encoder.setResource(pipeline.defaultBindingSet2, atIndex: 0)
-
-            encoder.setCullMode(.none)
-            encoder.setFrontFacing(.clockwise)
-            encoder.setStencilReferenceValue(0)
-            encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
-
-            encoder.draw(vertexStart: 0,
-                         vertexCount: vertices.count,
-                         instanceCount: 1,
-                         baseInstance: 0)
-            encoder.endEncoding()
-
-            // swap buffers
-            self.renderTargets.backdrop = blendResult
-            self.renderTargets.composited = blendDst
         } else {
-            Log.error("makeEncoder failed!")
+            Log.error("GraphicsContext.beginRenderPassCompositionTarget failed!")
         }
+        return false
     }
-}
 
-extension GraphicsContext.BlendMode: Hashable {
-    static let singlePassBlendModeStates: [Self: BlendState] = [
-        .copy: BlendState(
-            sourceBlendFactor: .one,
-            destinationBlendFactor: .zero,
-            blendOperation: .add),
-        .sourceIn: BlendState(
-            sourceBlendFactor: .destinationAlpha,
-            destinationBlendFactor: .zero,
-            blendOperation: .add),
-        .sourceOut: BlendState(
-            sourceBlendFactor: .oneMinusDestinationAlpha,
-            destinationBlendFactor: .zero,
-            blendOperation: .add),
-        .sourceAtop: BlendState(
-            sourceBlendFactor: .destinationAlpha,
-            destinationBlendFactor: .oneMinusSourceAlpha,
-            blendOperation: .add),
-        .destinationOver: BlendState(
-            sourceBlendFactor: .oneMinusDestinationAlpha,
-            destinationBlendFactor: .one,
-            blendOperation: .add),
-        .destinationIn: BlendState(
-            sourceBlendFactor: .zero,
-            destinationBlendFactor: .sourceAlpha,
-            blendOperation: .add),
-        .destinationOut: BlendState(
-            sourceBlendFactor: .zero,
-            destinationBlendFactor: .oneMinusSourceAlpha,
-            blendOperation: .add),
-        .destinationAtop: BlendState(
-            sourceBlendFactor: .oneMinusDestinationAlpha,
-            destinationBlendFactor: .sourceAlpha,
-            blendOperation: .add),
-        .xor: BlendState(
-            sourceBlendFactor: .oneMinusDestinationAlpha,
-            destinationBlendFactor: .oneMinusSourceAlpha,
-            blendOperation: .add),
-        .plusLighter: BlendState(
-            sourceBlendFactor: .one,
-            destinationBlendFactor: .one,
-            blendOperation: .add)
-    ]
+    func encodeBlendTexturesCommand(renderPass: RenderPass,
+                                    source: Texture,
+                                    backdrop: Texture,
+                                    textureFrame: CGRect,
+                                    blendMode: BlendMode,
+                                    color: DKGame.Color) -> Bool {
+        if source.dimensions != backdrop.dimensions {
+            Log.error("GraphicsContext.encodeBlendTexturesCommand failed.")
+            return false
+        }
+
+        let shader: _Shader
+        switch blendMode {
+        case .normal:           shader = .blendNormal
+        case .multiply:         shader = .blendMultiply
+        case .screen:           shader = .blendScreen
+        case .overlay:          shader = .blendOverlay
+        case .darken:           shader = .blendDarken
+        case .lighten:          shader = .blendLighten
+        case .colorDodge:       shader = .blendColorDodge
+        case .colorBurn:        shader = .blendColorBurn
+        case .softLight:        shader = .blendSoftLight
+        case .hardLight:        shader = .blendHardLight
+        case .difference:       shader = .blendDifference
+        case .exclusion:        shader = .blendExclusion
+        case .hue:              shader = .blendHue
+        case .saturation:       shader = .blendSaturation
+        case .color:            shader = .blendColor
+        case .luminosity:       shader = .blendLuminosity
+        case .clear:            shader = .blendClear
+        case .copy:             shader = .blendCopy
+        case .sourceIn:         shader = .blendSourceIn
+        case .sourceOut:        shader = .blendSourceOut
+        case .sourceAtop:       shader = .blendSourceAtop
+        case .destinationOver:  shader = .blendDestinationOver
+        case .destinationIn:    shader = .blendDestinationIn
+        case .destinationOut:   shader = .blendDestinationOut
+        case .destinationAtop:  shader = .blendDestinationAtop
+        case .xor:              shader = .blendXor
+        case .plusDarker:       shader = .blendPlusDarker
+        case .plusLighter:      shader = .blendPlusLighter
+        default:                shader = .blendNormal
+        }
+
+        let color = color.float4
+        let makeVertex = { x, y, u, v in
+            _Vertex(position: Vector2(x, y).float2,
+                    texcoord: Vector2(u, v).float2,
+                    color: color)
+        }
+
+        let invW = 1.0 / CGFloat(source.width)
+        let invH = 1.0 / CGFloat(source.height)
+        let u1 = textureFrame.minX * invW
+        let u2 = textureFrame.maxX * invW
+        let v1 = textureFrame.minY * invH
+        let v2 = textureFrame.maxY * invH
+        let vertices = [
+            makeVertex(-1, -1, u1, v2),
+            makeVertex(-1,  1, u1, v1),
+            makeVertex( 1, -1, u2, v2),
+            makeVertex( 1, -1, u2, v2),
+            makeVertex(-1,  1, u1, v1),
+            makeVertex( 1,  1, u2, v1)
+        ]
+
+        guard let renderState = pipeline.renderState(
+            shader: shader,
+            colorFormat: renderPass.colorFormat,
+            depthFormat: renderPass.depthFormat,
+            blendState: .opaque) else {
+            Log.err("GraphicsContext error: pipeline.renderState failed.")
+            return false
+        }
+        guard let depthState = pipeline.depthStencilState(.ignore) else {
+            Log.err("GraphicsContext error: pipeline.depthStencilState failed.")
+            return false
+        }
+        guard let vertexBuffer = self.makeBuffer(vertices) else {
+            Log.err("GraphicsContext error: _makeBuffer failed.")
+            return false
+        }
+
+        let encoder = renderPass.encoder
+        encoder.setRenderPipelineState(renderState)
+        encoder.setDepthStencilState(depthState)
+        pipeline.defaultBindingSet2.setTexture(source, binding: 0)
+        pipeline.defaultBindingSet2.setTexture(backdrop, binding: 1)
+        pipeline.defaultBindingSet2.setSamplerState(pipeline.defaultSampler, binding: 0)
+        pipeline.defaultBindingSet2.setSamplerState(pipeline.defaultSampler, binding: 1)
+        encoder.setResource(pipeline.defaultBindingSet2, atIndex: 0)
+
+        encoder.setCullMode(.none)
+        encoder.setFrontFacing(.clockwise)
+        encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
+
+        encoder.draw(vertexStart: 0,
+                     vertexCount: vertices.count,
+                     instanceCount: 1,
+                     baseInstance: 0)
+        return true
+    }
 }

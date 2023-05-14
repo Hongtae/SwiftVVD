@@ -29,11 +29,14 @@ extension GraphicsContext {
                                           width: width,
                                           height: height,
                                           usage: [.renderTarget, .sampled])) {
-            if let encoder = self.makeEncoder(renderTarget: maskTexture,
-                                              enableStencil: true,
-                                              loadAction: .clear) {
-                if self.encodeStencilPathFillCommand(path, encoder: encoder) {
-
+            let viewport = CGRect(x: 0, y: 0, width: width, height: height)
+            if let renderPass = self.beginRenderPass(viewport: viewport,
+                                                     renderTarget: maskTexture,
+                                                     stencilBuffer: self.stencilBuffer,
+                                                     loadAction: .clear,
+                                                     clearColor: .clear) {
+                if self.encodeStencilPathFillCommand(renderPass: renderPass,
+                                                     path: path) {
                     let makeVertex = { x, y in
                         _Vertex(position: Vector2(x, y).float2,
                                 texcoord: Vector2.zero.float2,
@@ -50,17 +53,17 @@ extension GraphicsContext {
                     } else {
                         stencil = style.isEOFilled ? .testEven : .testNonZero
                     }
-                    self.encodeDrawCommand(shader: .vertexColor,
+                    self.encodeDrawCommand(renderPass: renderPass,
+                                           shader: .vertexColor,
                                            stencil: stencil,
                                            vertices: vertices,
                                            texture: nil,
-                                           blendState: .alphaBlend,
-                                           encoder: encoder)
+                                           blendState: .alphaBlend)
 
                     self.clipBoundingRect = self.clipBoundingRect.union(path.boundingBoxOfPath)
                     self.maskTexture = maskTexture
                 }
-                encoder.endEncoding()
+                renderPass.end()
             } else {
                 Log.error("GraphicsContext.makeEncoder failed.")
             }
