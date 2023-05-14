@@ -112,16 +112,11 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                             context.clear(with: clearColor)
                             view.draw(frame: contentBounds, context: context)
 
-                            let backdrop = renderTargets.backdrop
-                            renderTargets.backdrop = backBuffer
-                            defer {
-                                renderTargets.backdrop = backdrop
-                            }
                             if let rp = context.beginRenderPass(descriptor: renderPass,
                                                                 viewport: context.viewport) {
                                 context.encodeDrawTextureCommand(
                                     renderPass: rp,
-                                    texture: backdrop,
+                                    texture: context.backdrop,
                                     frame: contentBounds,
                                     textureFrame: context.viewport,
                                     blendState: .opaque,
