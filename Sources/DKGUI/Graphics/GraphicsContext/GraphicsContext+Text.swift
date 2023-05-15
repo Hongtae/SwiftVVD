@@ -302,9 +302,9 @@ extension GraphicsContext {
         }
         if lines.isEmpty { return }
 
-        guard let shading = text.shading.properties.first else {
-            fatalError()
-        }
+        if text.shading.properties.isEmpty { 
+            fatalError("Invalid shading property!")
+         }
 
         let transform = CGAffineTransform(translationX: rect.origin.x,
                                           y: rect.origin.y)
@@ -315,23 +315,22 @@ extension GraphicsContext {
         let width = Int(rect.width * self.contentScaleFactor)
         let height = Int(rect.height * self.contentScaleFactor)
 
-        if let encoder = self.makeEncoder(enableStencil: false) {
-             encoder.setScissorRect(ScissorRect(x: x, y: y,
-                                                width: width,
-                                                height: height))
-            self.encodeDrawTextCommand(lines,
+        if let renderPass = self.beginRenderPass(enableStencil: false) {
+            renderPass.encoder.setScissorRect(ScissorRect(x: x, y: y,
+                                                          width: width,
+                                                          height: height))
+            self.encodeDrawTextCommand(renderPass: renderPass,
+                                       text: lines,
                                        transform: transform,
                                        color: .white,
-                                       blendState: .opaque,
-                                       encoder: encoder)
-            self.encodeShadingBoxCommand(text.shading,
+                                       blendState: .opaque)
+            self.encodeShadingBoxCommand(renderPass: renderPass,
+                                         shading: text.shading,
                                          stencil: .ignore,
-                                         blendState: .multiply,
-                                         encoder: encoder)
-            encoder.endEncoding()
+                                         blendState: .multiply)
+            renderPass.end()
 
-            self.applyFilters()
-            self.applyBlendModeAndMask()
+            self.drawSource()
         }
     }
 
@@ -346,19 +345,21 @@ extension GraphicsContext {
         frame.origin = origin
         draw(text, in: frame)
     }
+
     public func draw(_ text: Text, in rect: CGRect) {
         draw(resolve(text), in: rect)
     }
+    
     public func draw(_ text: Text, at point: CGPoint, anchor: UnitPoint = .center) {
         draw(resolve(text), at: point, anchor: anchor)
     }
 
-    func encodeDrawTextCommand(_ lines: [ResolvedText.Line],
+    func encodeDrawTextCommand(renderPass: RenderPass,
+                               text: [ResolvedText.Line],
                                transform: CGAffineTransform,
                                color: DKGame.Color,
-                               blendState: BlendState,
-                               encoder: RenderCommandEncoder) {
-        if lines.isEmpty { return }
+                               blendState: BlendState) {
+        if text.isEmpty { return }
         
         struct GlyphVertex {
             let pos: Vector2
@@ -379,7 +380,7 @@ extension GraphicsContext {
 
         var quads: [Quad] = []
         var offset: Vector2 = .zero
-        for line in lines {
+        for line in text {
             offset.x = 0
             for glyph in line.glyphs {
                 if let texture = glyph.texture {
@@ -420,13 +421,13 @@ extension GraphicsContext {
         var vertices: [_Vertex] = []
         let draw = {
             if vertices.isEmpty == false {
-                self.encodeDrawCommand(shader: .rcImage,
+                self.encodeDrawCommand(renderPass: renderPass,
+                                       shader: .rcImage,
                                        stencil: .ignore,
                                        vertices: vertices,
                                        texture: texture,
-                                       blendState: .alphaBlend,
-                                       encoder: encoder)
-                vertices = []
+                                       blendState: .alphaBlend)
+                vertices.removeAll(keepingCapacity: true)
             }
         }
         for quad in quads {

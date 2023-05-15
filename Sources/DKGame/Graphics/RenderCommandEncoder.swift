@@ -75,3 +75,24 @@ public protocol RenderCommandEncoder: CommandEncoder {
     func drawPrimitives(type: PrimitiveType, vertexStart: Int, vertexCount: Int, instanceCount: Int, baseInstance: Int)
     func drawIndexedPrimitives(type: PrimitiveType, indexCount: Int, indexType: IndexType, indexBuffer: Buffer, indexBufferOffset: Int, instanceCount: Int, baseVertex: Int, baseInstance: Int)
 }
+
+public extension RenderCommandEncoder {
+    func setViewport(frame: CGRect,
+                     near: any BinaryFloatingPoint,
+                     far: any BinaryFloatingPoint) {
+        let frame = frame.standardized
+        self.setViewport(Viewport(x: Double(frame.origin.x),
+                                  y: Double(frame.origin.y),
+                                  width: Double(frame.width),
+                                  height: Double(frame.height),
+                                  nearZ: Double(near), farZ: Double(far)))
+    }
+
+    func setScissorRect(_ rect: CGRect) {
+        let rect = rect.standardized
+        self.setScissorRect(ScissorRect(x: Int(rect.origin.x),
+                                        y: Int(rect.origin.y),
+                                        width: Int(rect.width),
+                                        height: Int(rect.height)))
+    }
+}

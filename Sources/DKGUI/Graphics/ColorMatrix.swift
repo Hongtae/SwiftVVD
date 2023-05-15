@@ -81,6 +81,16 @@ public struct ColorMatrix: Equatable, Sendable {
         return cm
     }
 
+    static func constantColor(_ color: Color) -> ColorMatrix {
+        let c = color.dkColor
+        var cm = ColorMatrix.zero
+        cm.r5 = Float(color.provider.red)
+        cm.g5 = Float(color.provider.green)
+        cm.b5 = Float(color.provider.blue)
+        cm.a5 = Float(color.provider.alpha)
+        return cm
+    }
+
     func concatenating(_ m: Self) -> Self {
         typealias V = (Float, Float, Float, Float, Float)
         let dot = { (v1: V, v2: V) -> Float in

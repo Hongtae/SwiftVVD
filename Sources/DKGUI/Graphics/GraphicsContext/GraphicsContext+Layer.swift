@@ -46,20 +46,17 @@ extension GraphicsContext {
             try content(&context, size)
             let texture = context.backdrop
 
-            if let encoder = self.makeEncoder(enableStencil: false) {
-                self.encodeDrawTextureCommand(
-                    texture: texture,
-                    in: frame,
-                    transform: .identity,
-                    textureFrame: context.viewport,
-                    textureTransform: .identity,
-                    blendState: .opaque,
-                    color: .white,
-                    encoder: encoder)
-                encoder.endEncoding()
-
-                self.applyFilters()
-                self.applyBlendModeAndMask()
+            if let renderPass = self.beginRenderPass(enableStencil: false) {
+                self.encodeDrawTextureCommand(renderPass: renderPass,
+                                              texture: texture,
+                                              frame: frame,
+                                              transform: .identity,
+                                              textureFrame: context.viewport,
+                                              textureTransform: .identity,
+                                              blendState: .opaque,
+                                              color: .white)
+                renderPass.end()
+                self.drawSource()
             }
         } else {
             Log.error("GraphicsContext error: failed to create new context.")
@@ -73,18 +70,16 @@ extension GraphicsContext {
             let scale = context.viewport.size / context.contentScaleFactor
             let texture = context.backdrop
 
-            if let encoder = self.makeEncoder(enableStencil: false) {
-                self.encodeDrawTextureCommand(
-                    texture: texture,
-                    in: CGRect(origin: offset, size: scale),
-                    textureFrame: context.viewport,
-                    blendState: .opaque,
-                    color: .white,
-                    encoder: encoder)
-                encoder.endEncoding()
-
-                self.applyFilters()
-                self.applyBlendModeAndMask()
+            if let renderPass = self.beginRenderPass(enableStencil: false) {
+                self.encodeDrawTextureCommand(renderPass: renderPass,
+                                              texture: texture,
+                                              frame: CGRect(origin: offset,
+                                                            size: scale),
+                                              textureFrame: context.viewport,
+                                              blendState: .opaque,
+                                              color: .white)
+                renderPass.end()
+                self.drawSource()
             }
         } else {
             Log.error("GraphicsContext error: failed to create new context.")

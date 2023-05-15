@@ -11,7 +11,7 @@ import DKGame
 extension GraphicsContext {
         public struct Filter {
         enum FilterStyle {
-            case transformMatrix(matrix: ProjectionTransform)
+            case projectionTransform(matrix: ProjectionTransform)
             case colorMatrix(matrix: ColorMatrix)
             case blur(radius: CGFloat, options: BlurOptions)
             case shadow(color: Color, radius: CGFloat, offset: CGPoint, blendMode: BlendMode, options: ShadowOptions)
@@ -19,7 +19,7 @@ extension GraphicsContext {
         let style: FilterStyle
 
         public static func projectionTransform(_ matrix: ProjectionTransform) -> Filter {
-            Filter(style: .transformMatrix(matrix: matrix))
+            Filter(style: .projectionTransform(matrix: matrix))
         }
 
         public static func shadow(color: Color = Color(.sRGBLinear, white: 0, opacity: 0.33),
@@ -187,6 +187,369 @@ extension GraphicsContext {
         filters.append((filter, options))
     }
 
-    func applyFilters() {
+    func applyFilters(sourceDiscarded: Bool) {
+        self.filters.forEach { (filter, options) in
+            if case let .shadow(_, _, _, _, opts) = filter.style,
+               opts.contains([.disablesGroup, .shadowAbove]) {
+            } else {
+                applyFilter(filter: filter,
+                            options: options,
+                            sourceDiscarded: sourceDiscarded)
+            }
+        }
+    }
+
+    func applyLayeredFilters(sourceDiscarded: Bool) {
+        self.filters.forEach { (filter, options) in
+            if case let .shadow(_, _, _, _, opts) = filter.style,
+               opts.contains([.disablesGroup, .shadowAbove]) {
+                applyFilter(filter: filter,
+                            options: options,
+                            sourceDiscarded: sourceDiscarded)
+            }
+        }
+    }
+
+    func applyFilter(filter: Filter,
+                     options filterOptions: FilterOptions,
+                     sourceDiscarded: Bool) {
+        let maxBlurIteration = 3
+
+        let width = CGFloat(self.renderTargets.width)
+        let height = CGFloat(self.renderTargets.height)
+        let texFrame = CGRect(x: 0, y: 0, width: width, height: height)
+        let frame = CGRect(x: 0, y: 0,
+                           width: self.viewport.width / self.contentScaleFactor,
+                           height: self.viewport.height / self.contentScaleFactor)
+
+        switch filter.style {
+        case let .projectionTransform(matrix):
+            if matrix.isIdentity { break }
+            if let renderPass = self.beginRenderPassCompositionTarget() {
+                if self.encodeProjectionTransformFilter(renderPass: renderPass,
+                                                        texture: self.sourceTexture,
+                                                        textureFrame: texFrame,
+                                                        projectionTransform: matrix,
+                                                        blendState: .opaque,
+                                                        color: .white) {
+                    renderPass.end()
+                    self.renderTargets.switchSourceToComposited()
+                } else {
+                    Log.error("GraphicsContext.encodeProjectionTransformFilter failed.")
+                }
+            } else {
+                Log.error("GraphicsContext.beginRenderPassCompositionTarget failed.")
+            }
+            break
+        case let .colorMatrix(matrix):
+            if let renderPass = self.beginRenderPassCompositionTarget() {
+                if self.encodeColorMatrixFilter(renderPass: renderPass,
+                                                frame: frame,
+                                                texture: self.sourceTexture,
+                                                textureFrame: texFrame,
+                                                colorMatrix: matrix,
+                                                blendState: .opaque,
+                                                color: .white) {
+                    renderPass.end()
+                    self.renderTargets.switchSourceToComposited()
+                } else {
+                    Log.error("GraphicsContext.encodeColorMatrixFilter failed.")
+                }
+            } else {
+                Log.error("GraphicsContext.beginRenderPassCompositionTarget failed.")
+            }
+        case let .blur(radius, options):
+            if radius < .ulpOfOne { break }
+            for pass in 0..<(maxBlurIteration*2) {
+                if let renderPass = self.beginRenderPassCompositionTarget() {
+                    let r = radius * CGFloat(pass/2+1) / CGFloat(maxBlurIteration)
+                    if self.encodeBlurFilter(renderPass: renderPass,
+                                             texture: self.sourceTexture,
+                                             textureFrame: texFrame,
+                                             radius: r,
+                                             options: options,
+                                             blurPass: pass,
+                                             blendState: .opaque,
+                                             color: .white) {
+                        renderPass.end()
+                        self.renderTargets.switchSourceToComposited()
+                    } else {
+                        Log.error("GraphicsContext.encodeBlurFilter failed.")
+                        break
+                    }
+                } else {
+                    Log.error("GraphicsContext.beginRenderPassCompositionTarget failed.")
+                    break
+                }
+            }
+        case let .shadow(color, radius, offset, blendMode, options):
+            var colorMatrix = ColorMatrix.zero
+            let color = color.dkColor
+            colorMatrix.a4 = Float(color.a) // alpha factor (multiply)
+            colorMatrix.r5 = Float(color.r) // constant
+            colorMatrix.g5 = Float(color.g) // constant
+            colorMatrix.b5 = Float(color.b) // constant
+            // make solid color copy
+            if let renderPass = self.beginRenderPass(viewport: self.viewport,
+                                                     renderTarget: self.renderTargets.temporary,
+                                                     stencilBuffer: nil,
+                                                     loadAction: .clear,
+                                                     clearColor: .clear) {
+                if self.encodeColorMatrixFilter(renderPass: renderPass,
+                                                frame: frame.offsetBy(dx: offset.x, dy: offset.y),
+                                                texture: self.sourceTexture,
+                                                textureFrame: texFrame,
+                                                colorMatrix: colorMatrix,
+                                                blendState: .opaque,
+                                                color: .white) {
+                    renderPass.end()
+                    // backup source for later use
+                    self.renderTargets.switchTemporaryToSource()
+                    // temporary: original image
+                    // source: shadow texture
+                } else {
+                    Log.error("GraphicsContext.encodeColorMatrixFilter failed.")
+                    break
+                }
+            } else {
+                Log.error("GraphicsContext.beginRenderPassCompositionTarget failed.")
+                break
+            }
+            // apply blur (the source texture is solid color image)
+            applyFilter(filter: .blur(radius: radius), options: filterOptions,
+                        sourceDiscarded: sourceDiscarded)
+
+            var disablesGroup = options.contains(.disablesGroup)
+            if sourceDiscarded { disablesGroup = true }
+
+            if disablesGroup {
+                self.applyBlendMode(blendMode: blendMode, opacity: self.opacity, applyMask: true)
+            } else {
+                self.renderTargets.switchTemporaryToBackdrop()
+                // source: shadow
+                // backdrop: original image
+                // temporary: original backdrop
+
+                if options.contains(.shadowAbove) {
+                } else {
+                    self.renderTargets.switchSourceToBackdrop()
+                    // source: original image
+                    // backdrop: shadow
+                }
+
+                if self.applyBlendMode(blendMode: .normal, opacity: 1, applyMask: false) {
+                    // restore render targets
+                } else {
+                    Log.error("GraphicsContext.applyBlendMode failed.")
+                }
+                self.renderTargets.switchTemporaryToBackdrop()
+            }
+            self.renderTargets.switchTemporaryToSource()
+        }
+    }
+
+    func encodeProjectionTransformFilter(renderPass: RenderPass,
+                                         texture: Texture,
+                                         textureFrame: CGRect,
+                                         projectionTransform: ProjectionTransform,
+                                         blendState: BlendState,
+                                         color: DKGame.Color) -> Bool {
+
+        let invW = 1.0 / CGFloat(texture.width)
+        let invH = 1.0 / CGFloat(texture.height)
+        let uvMinX = Float(textureFrame.minX * invW)
+        let uvMaxX = Float(textureFrame.maxX * invW)
+        let uvMinY = Float(textureFrame.minY * invH)
+        let uvMaxY = Float(textureFrame.maxY * invH)
+
+        let makeVertex = { x, y, u, v in
+            _Vertex(position: (x, y), texcoord: (u, v), color: color.float4)
+        }
+        let vertices: [_Vertex] = [
+            makeVertex(-1, -1, uvMinX, uvMaxY), // left bottom
+            makeVertex(-1,  1, uvMinX, uvMinY), // left top
+            makeVertex( 1, -1, uvMaxX, uvMaxY), // right bottom
+            makeVertex( 1, -1, uvMaxX, uvMaxY), // right bottom
+            makeVertex(-1,  1, uvMinX, uvMinY), // left top
+            makeVertex( 1,  1, uvMaxX, uvMinY), // right top
+        ]
+
+        guard let renderState = pipeline.renderState(
+            shader: .filterProjectionTransform,
+            colorFormat: renderPass.colorFormat,
+            depthFormat: renderPass.depthFormat,
+            blendState: blendState) else {
+            Log.err("GraphicsContext error: pipeline.renderState failed.")
+            return false
+        }
+        guard let depthState = pipeline.depthStencilState(.ignore) else {
+            Log.err("GraphicsContext error: pipeline.depthStencilState failed.")
+            return false
+        }
+        guard let vertexBuffer = self.makeBuffer(vertices) else {
+            Log.err("GraphicsContext error: _makeBuffer failed.")
+            return false
+        }
+
+        let encoder = renderPass.encoder
+        encoder.setRenderPipelineState(renderState)
+        encoder.setDepthStencilState(depthState)
+
+        pipeline.defaultBindingSet1.setTexture(texture, binding: 0)
+        pipeline.defaultBindingSet1.setSamplerState(pipeline.defaultSampler, binding: 0)
+        encoder.setResource(pipeline.defaultBindingSet1, atIndex: 0)
+
+        withUnsafeBytes(of: projectionTransform) {
+            encoder.pushConstant(stages: .fragment, offset: 0, data: $0)
+        }
+        encoder.setCullMode(.none)
+        encoder.setFrontFacing(.clockwise)
+        encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
+        encoder.draw(vertexStart: 0,
+                     vertexCount: vertices.count,
+                     instanceCount: 1,
+                     baseInstance: 0)
+        return true
+    }
+
+    func encodeColorMatrixFilter(renderPass: RenderPass,
+                                 frame: CGRect,
+                                 texture: Texture,
+                                 textureFrame: CGRect,
+                                 colorMatrix: ColorMatrix,
+                                 blendState: BlendState,
+                                 color: DKGame.Color) -> Bool {
+        let invW = 1.0 / CGFloat(texture.width)
+        let invH = 1.0 / CGFloat(texture.height)
+        let uvMinX = Float(textureFrame.minX * invW)
+        let uvMaxX = Float(textureFrame.maxX * invW)
+        let uvMinY = Float(textureFrame.minY * invH)
+        let uvMaxY = Float(textureFrame.maxY * invH)
+
+        let makeVertex = { x, y, u, v in
+            _Vertex(position: Vector2(x, y).applying(self.viewTransform).float2,
+                    texcoord: (u, v), color: color.float4)
+        }
+        let frame = frame.standardized
+        let vertices: [_Vertex] = [
+            makeVertex(frame.minX, frame.maxY, uvMinX, uvMaxY), // left bottom
+            makeVertex(frame.minX, frame.minY, uvMinX, uvMinY), // left top
+            makeVertex(frame.maxX, frame.maxY, uvMaxX, uvMaxY), // right bottom
+            makeVertex(frame.maxX, frame.maxY, uvMaxX, uvMaxY), // right bottom
+            makeVertex(frame.minX, frame.minY, uvMinX, uvMinY), // left top
+            makeVertex(frame.maxX, frame.minY, uvMaxX, uvMinY), // right top
+        ]
+
+        guard let renderState = pipeline.renderState(
+            shader: .filterColorMatrix,
+            colorFormat: renderPass.colorFormat,
+            depthFormat: renderPass.depthFormat,
+            blendState: blendState) else {
+            Log.err("GraphicsContext error: pipeline.renderState failed.")
+            return false
+        }
+        guard let depthState = pipeline.depthStencilState(.ignore) else {
+            Log.err("GraphicsContext error: pipeline.depthStencilState failed.")
+            return false
+        }
+        guard let vertexBuffer = self.makeBuffer(vertices) else {
+            Log.err("GraphicsContext error: _makeBuffer failed.")
+            return false
+        }
+
+        let encoder = renderPass.encoder
+        encoder.setRenderPipelineState(renderState)
+        encoder.setDepthStencilState(depthState)
+
+        pipeline.defaultBindingSet1.setTexture(texture, binding: 0)
+        pipeline.defaultBindingSet1.setSamplerState(pipeline.defaultSampler, binding: 0)
+        encoder.setResource(pipeline.defaultBindingSet1, atIndex: 0)
+
+        withUnsafeBytes(of: colorMatrix) {
+            encoder.pushConstant(stages: .fragment, offset: 0, data: $0)
+        }
+        encoder.setCullMode(.none)
+        encoder.setFrontFacing(.clockwise)
+        encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
+        encoder.draw(vertexStart: 0,
+                     vertexCount: vertices.count,
+                     instanceCount: 1,
+                     baseInstance: 0)
+        return true
+    }
+
+    func encodeBlurFilter(renderPass: RenderPass,
+                          texture: Texture,
+                          textureFrame: CGRect,
+                          radius: CGFloat,
+                          options: BlurOptions,
+                          blurPass: Int,
+                          blendState: BlendState,
+                          color: DKGame.Color) -> Bool {
+        struct PushConstant {
+            var resolution: Float2
+            var direction: Float2
+        }
+        let radius = Float(radius)
+        let blurDirection = blurPass % 2 == 0 ? (radius, 0) : (0, radius)
+        let blurParameters = PushConstant(
+                            resolution: (Float(texture.width),
+                                         Float(texture.height)),
+                            direction: blurDirection)
+
+        let invW = 1.0 / CGFloat(texture.width)
+        let invH = 1.0 / CGFloat(texture.height)
+        let uvMinX = Float(textureFrame.minX * invW)
+        let uvMaxX = Float(textureFrame.maxX * invW)
+        let uvMinY = Float(textureFrame.minY * invH)
+        let uvMaxY = Float(textureFrame.maxY * invH)
+        let makeVertex = { x, y, u, v in
+            _Vertex(position: (x, y), texcoord: (u, v), color: color.float4)
+        }
+        let vertices: [_Vertex] = [
+            makeVertex(-1, -1, uvMinX, uvMaxY), // left bottom
+            makeVertex(-1,  1, uvMinX, uvMinY), // left top
+            makeVertex( 1, -1, uvMaxX, uvMaxY), // right bottom
+            makeVertex( 1, -1, uvMaxX, uvMaxY), // right bottom
+            makeVertex(-1,  1, uvMinX, uvMinY), // left top
+            makeVertex( 1,  1, uvMaxX, uvMinY), // right top
+        ]
+
+        guard let renderState = pipeline.renderState(
+            shader: .filterBlur,
+            colorFormat: renderPass.colorFormat,
+            depthFormat: renderPass.depthFormat,
+            blendState: blendState) else {
+            Log.err("GraphicsContext error: pipeline.renderState failed.")
+            return false
+        }
+        guard let depthState = pipeline.depthStencilState(.ignore) else {
+            Log.err("GraphicsContext error: pipeline.depthStencilState failed.")
+            return false
+        }
+        guard let vertexBuffer = self.makeBuffer(vertices) else {
+            Log.err("GraphicsContext error: _makeBuffer failed.")
+            return false
+        }
+
+        let encoder = renderPass.encoder
+        encoder.setRenderPipelineState(renderState)
+        encoder.setDepthStencilState(depthState)
+
+        pipeline.defaultBindingSet1.setTexture(texture, binding: 0)
+        pipeline.defaultBindingSet1.setSamplerState(pipeline.defaultSampler, binding: 0)
+        encoder.setResource(pipeline.defaultBindingSet1, atIndex: 0)
+
+        withUnsafeBytes(of: blurParameters) {
+            encoder.pushConstant(stages: .fragment, offset: 0, data: $0)
+        }
+        encoder.setCullMode(.none)
+        encoder.setFrontFacing(.clockwise)
+        encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
+        encoder.draw(vertexStart: 0,
+                     vertexCount: vertices.count,
+                     instanceCount: 1,
+                     baseInstance: 0)
+        return true
     }
 }
