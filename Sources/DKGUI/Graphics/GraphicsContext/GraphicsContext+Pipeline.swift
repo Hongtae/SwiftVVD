@@ -491,13 +491,11 @@ extension GraphicsContext {
     }
 
     func beginRenderPass(enableStencil: Bool) -> RenderPass? {
-        let stencilBuffer = enableStencil ?
-            self.renderTargets.stencilBuffer : nil
-        let loadAction: RenderPassAttachmentLoadAction = .clear
+        let stencil = enableStencil ? self.renderTargets.stencilBuffer : nil
         return beginRenderPass(viewport: self.viewport,
                                renderTarget: self.renderTargets.source,
-                               stencilBuffer: stencilBuffer,
-                               loadAction: loadAction,
+                               stencilBuffer: stencil,
+                               loadAction: .clear,
                                clearColor: .clear)
     }
 
