@@ -70,3 +70,85 @@ extension AnimatablePair: Equatable {
 
 extension AnimatablePair: Sendable where First: Sendable, Second: Sendable {
 }
+
+private extension VectorArithmetic {
+    @inline(__always)
+    func add(_ rhs: any VectorArithmetic) -> Self {
+        assert(rhs is Self)
+        return self + (rhs as! Self)
+    }
+    @inline(__always)
+    func subtract(_ rhs: any VectorArithmetic) -> Self {
+        assert(rhs is Self)
+        return self - (rhs as! Self)
+    }
+    @inline(__always)
+    func isEqual(to rhs: any VectorArithmetic) -> Bool {
+        if let v = rhs as? Self {
+            return self == v
+        }
+        return false
+    }
+}
+
+public struct _AnyAnimatableData: VectorArithmetic {
+
+    private struct _Zero: VectorArithmetic {
+        static func += (_: inout Self, _: Self)     { fatalError() }
+        static func -= (_: inout Self, _: Self)     { fatalError() }
+        static func + (_: Self, _: Self) -> Self    { fatalError() }
+        static func - (_: Self, _: Self) -> Self    { fatalError() }
+        static func == (_: Self, _: Self) -> Bool   { fatalError() }
+        static var zero: Self { Self() }
+        func scale(by: Double) { }
+        var magnitudeSquared: Double { 0 }
+    }
+
+    var value: any VectorArithmetic
+
+    init(_ value: any VectorArithmetic) {
+        self.value = value
+    }
+
+    public static var zero: Self {
+        Self(_Zero.zero)
+    }
+
+    public static func += (lhs: inout Self, rhs: Self) {
+        lhs = lhs + rhs
+    }
+
+    public static func -= (lhs: inout Self, rhs: Self) {
+        lhs = lhs - rhs
+    }
+
+    public static func + (lhs: Self, rhs: Self) -> Self {
+        if lhs.value is _Zero { return Self(rhs) }
+        if rhs.value is _Zero { return Self(lhs) }
+        return Self(lhs.add(rhs))
+    }
+
+    public static func - (lhs: Self, rhs: Self) -> Self {
+        if lhs.value is _Zero {
+            var v = rhs.value
+            v.scale(by: -1)
+            return Self(v)
+        }
+        if rhs.value is _Zero { return Self(lhs) }
+        return Self(lhs.subtract(rhs))
+    }
+
+    public mutating func scale(by rhs: Double) {
+        self.value.scale(by: rhs)
+    }
+
+    public var magnitudeSquared: Double {
+        self.value.magnitudeSquared
+    }
+
+    public static func == (a: Self, b: Self) -> Bool {
+        if a.value is _Zero { return b.magnitudeSquared == 0 }
+        if b.value is _Zero { return a.magnitudeSquared == 0 }
+        return a.value.isEqual(to: b.value)
+    }
+}

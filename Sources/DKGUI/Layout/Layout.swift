@@ -28,18 +28,28 @@ extension Layout {
         .init()
     }
 
-    public func updateCache(_ cache: inout Self.Cache, subviews: Self.Subviews) {
+    public func updateCache(_ cache: inout Self.Cache,
+                            subviews: Self.Subviews) {
     }
 
-    public func explicitAlignment(of guide: HorizontalAlignment, in bounds: CGRect, proposal: ProposedViewSize, subviews: Self.Subviews, cache: inout Self.Cache) -> CGFloat? {
+    public func explicitAlignment(of guide: HorizontalAlignment,
+                           in bounds: CGRect,
+                           proposal: ProposedViewSize,
+                           subviews: Self.Subviews,
+                           cache: inout Self.Cache) -> CGFloat? {
         nil
     }
 
-    public func explicitAlignment(of guide: VerticalAlignment, in bounds: CGRect, proposal: ProposedViewSize, subviews: Self.Subviews, cache: inout Self.Cache) -> CGFloat? {
+    public func explicitAlignment(of guide: VerticalAlignment,
+                           in bounds: CGRect,
+                           proposal: ProposedViewSize,
+                           subviews: Self.Subviews,
+                           cache: inout Self.Cache) -> CGFloat? {
         nil
     }
 
-    public func spacing(subviews: Self.Subviews, cache: inout Self.Cache) -> ViewSpacing {
+    public func spacing(subviews: Self.Subviews,
+                 cache: inout Self.Cache) -> ViewSpacing {
         .init()
     }
 }
@@ -65,5 +75,154 @@ public struct LayoutProperties {
     public var stackOrientation: Axis?
     public init(stackOrientation: Axis? = nil) {
         self.stackOrientation = stackOrientation
+    }
+}
+
+private extension Layout {
+    @inline(__always)
+    mutating func _setAnimatableData(_ data: AnyLayout.AnimatableData) {
+        assert(data.value is Self.AnimatableData)
+        self.animatableData = data.value as! Self.AnimatableData
+    }
+    @inline(__always)
+    func _updateCache(_ cache: inout AnyLayout.Cache,
+                      subviews: AnyLayout.Subviews) {
+        var c = cache.cache as! Self.Cache
+        self.updateCache(&c, subviews: subviews)
+        cache.cache = c
+    }
+    @inline(__always)
+    func _spacing(subviews: AnyLayout.Subviews,
+                  cache: inout AnyLayout.Cache) -> ViewSpacing {
+        var c = cache.cache as! Self.Cache
+        let result = self.spacing(subviews: subviews, cache: &c)
+        cache.cache = c
+        return result
+    }
+    @inline(__always)
+    func _sizeThatFits(proposal: ProposedViewSize,
+                       subviews: AnyLayout.Subviews,
+                       cache: inout AnyLayout.Cache) -> CGSize {
+        var c = cache.cache as! Self.Cache
+        let result = self.sizeThatFits(proposal: proposal,
+                                       subviews: subviews,
+                                       cache: &c)
+        cache.cache = c
+        return result       
+    }
+    @inline(__always)
+    func _placeSubviews(in bounds: CGRect,
+                        proposal: ProposedViewSize,
+                        subviews: AnyLayout.Subviews,
+                        cache: inout AnyLayout.Cache) {
+        var c = cache.cache as! Self.Cache
+        self.placeSubviews(in: bounds,
+                           proposal: proposal,
+                           subviews: subviews,
+                           cache: &c)
+        cache.cache = c  
+    }
+    @inline(__always)
+    func _explicitAlignment(of guide: HorizontalAlignment,
+                            in bounds: CGRect,
+                            proposal: ProposedViewSize,
+                            subviews: AnyLayout.Subviews,
+                            cache: inout AnyLayout.Cache) -> CGFloat? {
+        var c = cache.cache as! Self.Cache
+        let result = self.explicitAlignment(of: guide,
+                                            in: bounds,
+                                            proposal: proposal,
+                                            subviews: subviews,
+                                            cache: &c)
+        cache.cache = c
+        return result      
+    }
+    @inline(__always)
+    func _explicitAlignment(of guide: VerticalAlignment,
+                            in bounds: CGRect,
+                            proposal: ProposedViewSize,
+                            subviews: AnyLayout.Subviews,
+                            cache: inout AnyLayout.Cache) -> CGFloat? {
+        var c = cache.cache as! Self.Cache
+        let result = self.explicitAlignment(of: guide,
+                                            in: bounds,
+                                            proposal: proposal,
+                                            subviews: subviews,
+                                            cache: &c)
+        cache.cache = c
+        return result      
+    }
+}
+
+public struct AnyLayout: Layout {
+    var layout: any Layout
+
+    public struct Cache {
+        var cache: Any
+    }
+
+    public typealias AnimatableData = _AnyAnimatableData
+
+    public init<L>(_ layout: L) where L : Layout {
+        self.layout = layout
+    }
+
+    public var animatableData: AnimatableData {
+        get { AnimatableData(self.layout.animatableData) }
+        set { self.layout._setAnimatableData(newValue) }
+    }
+
+    public func placeSubviews(in bounds: CGRect,
+                              proposal: ProposedViewSize,
+                              subviews: Subviews,
+                              cache: inout Cache) {
+        self.layout._placeSubviews(in: bounds,
+                                   proposal: proposal,
+                                   subviews: subviews,
+                                   cache: &cache)
+    }
+
+    public func sizeThatFits(proposal: ProposedViewSize,
+                             subviews: Subviews,
+                             cache: inout Cache) -> CGSize {
+        self.layout._sizeThatFits(proposal: proposal,
+                                  subviews: subviews,
+                                  cache: &cache)
+    }
+
+    public func explicitAlignment(of guide: HorizontalAlignment,
+                                  in bounds: CGRect,
+                                  proposal: ProposedViewSize,
+                                  subviews: Subviews,
+                                  cache: inout Cache) -> CGFloat? {
+        self.layout._explicitAlignment(of: guide,
+                                       in: bounds,
+                                       proposal: proposal,
+                                       subviews: subviews,
+                                       cache: &cache)
+    }
+
+    public func explicitAlignment(of guide: VerticalAlignment,
+                                  in bounds: CGRect,
+                                  proposal: ProposedViewSize,
+                                  subviews: Subviews,
+                                  cache: inout Cache) -> CGFloat? {
+        self.layout._explicitAlignment(of: guide,
+                                       in: bounds,
+                                       proposal: proposal,
+                                       subviews: subviews,
+                                       cache: &cache)
+    }
+
+    public func spacing(subviews: Subviews, cache: inout Cache) -> ViewSpacing {
+        self.layout._spacing(subviews: subviews, cache: &cache)
+    }
+
+    public func makeCache(subviews: Subviews) -> Cache {
+        Cache(cache: self.layout.makeCache(subviews: subviews))
+    }
+
+    public func updateCache(_ cache: inout Cache, subviews: Subviews) {
+        self.layout._updateCache(&cache, subviews: subviews)
     }
 }
