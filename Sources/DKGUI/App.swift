@@ -26,8 +26,8 @@ protocol AppContext: AnyObject {
 }
 
 struct EmptyScene: Scene, _PrimitiveScene {
-    func makeSceneProxy() -> any SceneProxy {
-        SceneContext(scene: self, children: [])
+    func makeSceneProxy(modifiers: [any _SceneModifier]) -> any SceneProxy {
+        SceneContext(scene: self, modifiers: modifiers, children: [])
     }
 }
 
@@ -65,7 +65,7 @@ class AppMain<A>: ApplicationDelegate, AppContext where A: App {
         self.graphicsDeviceContext = makeGraphicsDeviceContext()
         self.audioDeviceContext = makeAudioDeviceContext()
 
-        self.scene = _makeSceneProxy(self.app.body)
+        self.scene = _makeSceneProxy(self.app.body, modifiers: [])
 
         let windows = self.scene.windows
         Task { @MainActor in
@@ -79,7 +79,7 @@ class AppMain<A>: ApplicationDelegate, AppContext where A: App {
     }
 
     func finalize(application: Application) {
-        self.scene = EmptyScene().makeSceneProxy()
+        self.scene = EmptyScene().makeSceneProxy(modifiers: [])
         self.graphicsDeviceContext = nil
         self.audioDeviceContext = nil
         self.resources = [:]
@@ -87,7 +87,7 @@ class AppMain<A>: ApplicationDelegate, AppContext where A: App {
 
     init() {
         self.app = A()
-        self.scene = EmptyScene().makeSceneProxy()
+        self.scene = EmptyScene().makeSceneProxy(modifiers: [])
     }
 }
 

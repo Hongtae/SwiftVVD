@@ -17,6 +17,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
     private(set) var swapChain: SwapChain?
     private(set) var window: Window?
 
+    var modifiers: [any _SceneModifier] = []
     var viewProxy: any ViewProxy
     var environmentValues: EnvironmentValues
     var sharedContext: SharedContext
@@ -216,11 +217,21 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                 }
             }
         }
+        self.applyModifiers()
         return self.window
     }
 
-    func makeSceneProxy() -> any SceneProxy {
-        SceneContext(scene: self, window: self)
+    @MainActor
+    func applyModifiers() {
+        if let frameRate = self.modifiers.first(where: { $0 is _UpdateFrameRate }) as? _UpdateFrameRate {
+            self.config.activeFrameInterval = frameRate.activeFrameRate
+            self.config.inactiveFrameInterval = frameRate.inactiveFrameRate
+        }
+    }
+
+    func makeSceneProxy(modifiers: [any _SceneModifier]) -> any SceneProxy {
+        self.modifiers = modifiers
+        return SceneContext(scene: self, modifiers: modifiers, window: self)
     }
 
     @MainActor

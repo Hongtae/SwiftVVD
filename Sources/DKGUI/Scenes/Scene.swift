@@ -13,7 +13,7 @@ public protocol Scene {
 }
 
 protocol _PrimitiveScene: Scene {
-    func makeSceneProxy() -> any SceneProxy
+    func makeSceneProxy(modifiers: [any _SceneModifier]) -> any SceneProxy
 }
 
 extension _PrimitiveScene {
@@ -31,13 +31,13 @@ struct TupleScene<T>: Scene, _PrimitiveScene {
         self.value[keyPath: keyPath]
     }
 
-    func makeSceneProxy() -> any SceneProxy {
+    func makeSceneProxy(modifiers: [any _SceneModifier]) -> any SceneProxy {
         let mirror = Mirror(reflecting: value)
         let children = mirror.children.map { child in
             let scene = child as! (any Scene)
-            return _makeSceneProxy(scene)
+            return _makeSceneProxy(scene, modifiers: modifiers)
         }
-        let proxy = SceneContext(scene: self, children: children)
+        let proxy = SceneContext(scene: self, modifiers: modifiers, children: children)
         return proxy
     }
 }
