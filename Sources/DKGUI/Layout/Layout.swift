@@ -33,23 +33,23 @@ extension Layout {
     }
 
     public func explicitAlignment(of guide: HorizontalAlignment,
-                           in bounds: CGRect,
-                           proposal: ProposedViewSize,
-                           subviews: Self.Subviews,
-                           cache: inout Self.Cache) -> CGFloat? {
+                                  in bounds: CGRect,
+                                  proposal: ProposedViewSize,
+                                  subviews: Self.Subviews,
+                                  cache: inout Self.Cache) -> CGFloat? {
         nil
     }
 
     public func explicitAlignment(of guide: VerticalAlignment,
-                           in bounds: CGRect,
-                           proposal: ProposedViewSize,
-                           subviews: Self.Subviews,
-                           cache: inout Self.Cache) -> CGFloat? {
+                                  in bounds: CGRect,
+                                  proposal: ProposedViewSize,
+                                  subviews: Self.Subviews,
+                                  cache: inout Self.Cache) -> CGFloat? {
         nil
     }
 
     public func spacing(subviews: Self.Subviews,
-                 cache: inout Self.Cache) -> ViewSpacing {
+                        cache: inout Self.Cache) -> ViewSpacing {
         .init()
     }
 }
@@ -108,7 +108,7 @@ private extension Layout {
                                        subviews: subviews,
                                        cache: &c)
         cache.cache = c
-        return result       
+        return result
     }
     @inline(__always)
     func _placeSubviews(in bounds: CGRect,
@@ -120,7 +120,7 @@ private extension Layout {
                            proposal: proposal,
                            subviews: subviews,
                            cache: &c)
-        cache.cache = c  
+        cache.cache = c
     }
     @inline(__always)
     func _explicitAlignment(of guide: HorizontalAlignment,
@@ -135,7 +135,7 @@ private extension Layout {
                                             subviews: subviews,
                                             cache: &c)
         cache.cache = c
-        return result      
+        return result
     }
     @inline(__always)
     func _explicitAlignment(of guide: VerticalAlignment,
@@ -150,7 +150,7 @@ private extension Layout {
                                             subviews: subviews,
                                             cache: &c)
         cache.cache = c
-        return result      
+        return result
     }
 }
 

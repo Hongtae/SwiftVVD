@@ -5,8 +5,8 @@
 //  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
-import DKGame
 import Foundation
+import DKGame
 
 enum DisplayScaleEnvironmentKey: EnvironmentKey {
     static var defaultValue: CGFloat { return 1 }
@@ -93,6 +93,7 @@ protocol ViewProxy: AnyObject {
     var modifiers: [any ViewModifier] { get }
     var environmentValues: EnvironmentValues { get }
     var sharedContext: SharedContext { get }
+
     var layoutOffset: CGPoint { get }
     var layoutSize: CGSize { get }
     var contentScaleFactor: CGFloat { get }
@@ -126,6 +127,7 @@ class ViewContext<Content>: ViewProxy where Content: View {
     var modifiers: [any ViewModifier]
     var environmentValues: EnvironmentValues
     var sharedContext: SharedContext
+
     var layoutOffset: CGPoint = .zero
     var layoutSize: CGSize = .zero
     var contentScaleFactor: CGFloat = 1
