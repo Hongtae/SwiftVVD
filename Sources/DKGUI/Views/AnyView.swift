@@ -6,23 +6,35 @@
 //
 
 public struct AnyView: View {
-    var view: any View
+
+    let makeView: (_: _ViewInputs)->_ViewOutputs
+    let makeViewList: (_: _ViewListInputs)->_ViewListOutputs
+
     public init<V>(_ view: V) where V: View {
-        self.view = view
+        self.makeView = { inputs in
+            V._makeView(view: _GraphValue<V>(value: view), inputs: inputs)
+        }
+        self.makeViewList = { inputs in
+            V._makeViewList(view: _GraphValue<V>(value: view), inputs: inputs)
+        }
     }
 
     public init<V>(erasing view: V) where V: View {
-        self.view = view
+        self.makeView = { inputs in
+            V._makeView(view: _GraphValue<V>(value: view), inputs: inputs)
+        }
+        self.makeViewList = { inputs in
+            V._makeViewList(view: _GraphValue<V>(value: view), inputs: inputs)
+        }
     }
 }
 
 extension AnyView: _PrimitiveView {
-    func makeViewProxy(modifiers: [any ViewModifier],
-                       environmentValues: EnvironmentValues,
-                       sharedContext: SharedContext) -> any ViewProxy {
-        ViewContext(view: self,
-                    modifiers: modifiers,
-                    environmentValues: environmentValues,
-                    sharedContext: sharedContext)
+    public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        return view.value.makeView(inputs)
+    }
+
+    public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
+        return view.value.makeViewList(inputs)
     }
 }

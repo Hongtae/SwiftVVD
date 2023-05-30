@@ -157,10 +157,17 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
 
         self.environmentValues = EnvironmentValues()
         self.sharedContext = SharedContext(appContext: appContext!)
-        self.viewProxy = _makeViewProxy(content,
-                                        modifiers: [],
-                                        environmentValues: self.environmentValues,
-                                        sharedContext: self.sharedContext)
+
+        let graph = _GraphValue(value: content)
+        let viewInputs = _ViewInputs(sharedContext: self.sharedContext,
+                                     modifiers: [],
+                                     environmentValues: self.environmentValues,
+                                     transform: .identity,
+                                     position: .zero,
+                                     size: self.state.bounds.size,
+                                     safeAreaInsets: EdgeInsets())
+        let viewOutputs = Content._makeView(view: graph, inputs: viewInputs)
+        self.viewProxy = viewOutputs.viewProxy
     }
 
     deinit {

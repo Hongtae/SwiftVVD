@@ -89,7 +89,7 @@ extension EnvironmentValues {
 
 protocol ViewProxy: AnyObject {
     associatedtype Content: View
-    var view: Content { get }
+    var view: _GraphValue<Content> { get }
     var modifiers: [any ViewModifier] { get }
     var environmentValues: EnvironmentValues { get }
     var sharedContext: SharedContext { get }
@@ -98,15 +98,24 @@ protocol ViewProxy: AnyObject {
     var layoutSize: CGSize { get }
     var contentScaleFactor: CGFloat { get }
 
+    func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize
     func layout(offset: CGPoint, size: CGSize, scaleFactor: CGFloat)
     func update(tick: UInt64, delta: Double, date: Date)
     func draw(frame: CGRect, context: GraphicsContext)
     func updateEnvironment(_ environmentValues: EnvironmentValues)
+
+    func trait<Trait>(_ key: Trait.Type) -> Trait.Value where Trait: _ViewTraitKey
+    func layoutValue<Trait>(_ key: Trait.Type) -> Trait.Value where Trait: LayoutValueKey
 }
 
 extension ViewProxy {
+    func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
+        proposal.replacingUnspecifiedDimensions(by: self.layoutSize)
+    }
+
     func update(tick: UInt64, delta: Double, date: Date) {
     }
+
     func draw(frame: CGRect, context: GraphicsContext) {
         // Log.err("Existential types must implement the draw() method themselves.")
     }
@@ -121,9 +130,18 @@ extension ViewProxy {
     }
 }
 
+extension ViewProxy {
+    func trait<Trait>(_ key: Trait.Type) -> Trait.Value where Trait: _ViewTraitKey {
+        Trait.defaultValue
+    }
+    func layoutValue<Trait>(_ key: Trait.Type) -> Trait.Value where Trait: LayoutValueKey {
+        Trait.defaultValue
+    }
+}
+
 class ViewContext<Content>: ViewProxy where Content: View {
-    var view: Content
-    var subview: any ViewProxy
+    var view: _GraphValue<Content>
+    var subviews: [any ViewProxy]
     var modifiers: [any ViewModifier]
     var environmentValues: EnvironmentValues
     var sharedContext: SharedContext
@@ -132,18 +150,14 @@ class ViewContext<Content>: ViewProxy where Content: View {
     var layoutSize: CGSize = .zero
     var contentScaleFactor: CGFloat = 1
 
-    init(view: Content,
-         modifiers: [any ViewModifier],
-         environmentValues: EnvironmentValues,
-         sharedContext: SharedContext) {
-        self.environmentValues = environmentValues._resolve(modifiers: modifiers)
+    init(view: _GraphValue<Content>, inputs: _ViewInputs, listOutputs: _ViewListOutputs) {
+        let modifiers = inputs.modifiers
+        self.environmentValues = inputs.environmentValues._resolve(modifiers: modifiers)
         self.view = self.environmentValues._resolve(view)
         self.modifiers = modifiers
-        self.sharedContext = sharedContext
-        self.subview = _makeViewProxy(self.view.body,
-                                      modifiers: self.modifiers,
-                                      environmentValues: self.environmentValues,
-                                      sharedContext: sharedContext)
+        self.sharedContext = inputs.sharedContext
+
+        self.subviews = []
     }
 
     func drawBackground(frame: CGRect, context: GraphicsContext) {
@@ -155,15 +169,15 @@ class ViewContext<Content>: ViewProxy where Content: View {
     func draw(frame: CGRect, context: GraphicsContext) {
         self.drawBackground(frame: frame, context: context)
 
-        let drawSubview = true
-        if drawSubview {
-            let subviewFrame = CGRect(origin: subview.layoutOffset, size: subview.layoutSize)
-                .offsetBy(dx: frame.minX, dy: frame.minY)
-            var subviewContext = context
-            subviewContext.environment = subview.environmentValues
-            subviewContext.contentOffset += subview.layoutOffset
-            subview.draw(frame: subviewFrame, context: subviewContext)
-        }
+//        let drawSubview = true
+//        if drawSubview {
+//            let subviewFrame = CGRect(origin: subview.layoutOffset, size: subview.layoutSize)
+//                .offsetBy(dx: frame.minX, dy: frame.minY)
+//            var subviewContext = context
+//            subviewContext.environment = subview.environmentValues
+//            subviewContext.contentOffset += subview.layoutOffset
+//            subview.draw(frame: subviewFrame, context: subviewContext)
+//        }
         self.drawOverlay(frame: frame, context: context)
     }
 
@@ -171,28 +185,13 @@ class ViewContext<Content>: ViewProxy where Content: View {
         self.layoutOffset = offset
         self.layoutSize = size
         self.contentScaleFactor = scaleFactor
-        self.subview.layout(offset: self.layoutOffset,
-                            size: self.layoutSize,
-                            scaleFactor: self.contentScaleFactor)
+//        self.subview.layout(offset: self.layoutOffset,
+//                            size: self.layoutSize,
+//                            scaleFactor: self.contentScaleFactor)
     }
 
     func updateEnvironment(_ environmentValues: EnvironmentValues) {
         self.environmentValues = environmentValues._resolve(modifiers: modifiers)
-        self.subview.updateEnvironment(self.environmentValues)
+        self.subviews.forEach { $0.updateEnvironment(self.environmentValues) }
     }
-}
-
-func _makeViewProxy<Content>(_ view: Content,
-                             modifiers: [any ViewModifier],
-                             environmentValues: EnvironmentValues,
-                             sharedContext: SharedContext) -> any ViewProxy where Content: View {
-    if let prim = view as? (any _PrimitiveView) {
-        return prim.makeViewProxy(modifiers: modifiers,
-                                  environmentValues: environmentValues,
-                                  sharedContext: sharedContext)
-    }
-    return ViewContext(view: view,
-                       modifiers: modifiers,
-                       environmentValues: environmentValues,
-                       sharedContext: sharedContext)
 }

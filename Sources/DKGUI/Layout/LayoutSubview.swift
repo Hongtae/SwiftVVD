@@ -14,18 +14,19 @@ public protocol LayoutValueKey {
 
 public struct LayoutSubview: Equatable {
 
-    public subscript<K>(key: K.Type) -> K.Value where K : LayoutValueKey {
-        K.defaultValue
+    public subscript<K>(key: K.Type) -> K.Value where K: LayoutValueKey {
+        viewProxy.layoutValue(key)
     }
 
     public var priority: Double { 0 }
 
     public func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
-        proposal.replacingUnspecifiedDimensions()
+        viewProxy.sizeThatFits(proposal)
     }
 
     public func dimensions(in proposal: ProposedViewSize) -> ViewDimensions {
-        let size = proposal.replacingUnspecifiedDimensions()
+        let layoutSize = viewProxy.layoutSize
+        let size = proposal.replacingUnspecifiedDimensions(by: layoutSize)
         return .init(height: size.width, width: size.height)
     }
 
@@ -34,10 +35,23 @@ public struct LayoutSubview: Equatable {
     }
 
     public func place(at position: CGPoint, anchor: UnitPoint = .topLeading, proposal: ProposedViewSize) {
+        let px = containerSize.width * anchor.x
+        let py = containerSize.height * anchor.y
+        let offset = CGPoint(x: px + position.x, y: py + position.y)
+        let size = proposal.replacingUnspecifiedDimensions(by: viewProxy.layoutSize)
+        let scale = viewProxy.contentScaleFactor
+        viewProxy.layout(offset: offset, size: size, scaleFactor: scale)
     }
 
     public static func == (a: LayoutSubview, b: LayoutSubview) -> Bool {
-        return false
+        a.viewProxy === b.viewProxy
+    }
+
+    let viewProxy: any ViewProxy
+    let containerSize: CGSize
+    init(viewProxy: any ViewProxy, containerSize: CGSize) {
+        self.viewProxy = viewProxy
+        self.containerSize = containerSize
     }
 }
 
@@ -66,7 +80,7 @@ public struct LayoutSubviews: Equatable, RandomAccessCollection {
         .init(subviews: subviews[bounds], layoutDirection: layoutDirection)
     }
 
-    public subscript<S>(indices: S) -> LayoutSubviews where S : Sequence, S.Element == Int {
+    public subscript<S>(indices: S) -> LayoutSubviews where S: Sequence, S.Element == Int {
         var items: [LayoutSubview] = []
         for i in indices {
             items.append(self.subviews[i])

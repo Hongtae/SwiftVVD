@@ -19,15 +19,7 @@ public struct VStack<Content>: View where Content: View {
 }
 
 extension VStack: _PrimitiveView {
-    func makeViewProxy(modifiers: [any ViewModifier],
-                       environmentValues: EnvironmentValues,
-                       sharedContext: SharedContext) -> any ViewProxy {
-        var subviews: [any ViewProxy] = []
-        return ViewGroupContext(view: self,
-                                layout: self._tree.root,
-                                subviews: subviews,
-                                modifiers: modifiers,
-                                environmentValues: environmentValues,
-                                sharedContext: sharedContext)
+    public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        fatalError()
     }
 }

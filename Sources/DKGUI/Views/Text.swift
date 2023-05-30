@@ -135,7 +135,7 @@ extension Text {
 }
 
 class TextContext: ViewProxy {
-    var view: Text
+    var view: _GraphValue<Text>
     var modifiers: [any ViewModifier]
     var environmentValues: EnvironmentValues
     var sharedContext: SharedContext
@@ -143,7 +143,7 @@ class TextContext: ViewProxy {
     var layoutSize: CGSize
     var contentScaleFactor: CGFloat
 
-    init(view: Text,
+    init(view: _GraphValue<Text>,
          modifiers: [any ViewModifier],
          environmentValues: EnvironmentValues,
          sharedContext: SharedContext) {
@@ -166,8 +166,9 @@ class TextContext: ViewProxy {
 
     func draw(frame: CGRect, context: GraphicsContext) {
         if self.layoutSize.width > 0 && self.layoutSize.height > 0 {
-            context.draw(self.view, in: CGRect(origin: self.layoutOffset,
-                                               size: self.layoutSize))
+            context.draw(self.view.value,
+                         in: CGRect(origin: self.layoutOffset,
+                                    size: self.layoutSize))
         }
     }
 
@@ -178,12 +179,12 @@ class TextContext: ViewProxy {
 }
 
 extension Text: _PrimitiveView {
-    func makeViewProxy(modifiers: [any ViewModifier],
-                       environmentValues: EnvironmentValues,
-                       sharedContext: SharedContext) -> any ViewProxy {
-        TextContext(view: self,
-                    modifiers: modifiers,
-                    environmentValues: environmentValues,
-                    sharedContext: sharedContext)
+    public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        let viewProxy = TextContext(view: view,
+                                      modifiers: inputs.modifiers,
+                                      environmentValues: inputs.environmentValues,
+                                      sharedContext: inputs.sharedContext)
+        return _ViewOutputs(viewProxy: viewProxy)
     }
+
 }

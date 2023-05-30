@@ -51,8 +51,8 @@ extension Canvas where Symbols == EmptyView {
 
 class CanvasContext<Symbols>: ViewProxy where Symbols: View {
     typealias Content = Canvas<Symbols>
-    var view: Content
-
+    var view: _GraphValue<Content>
+    
     var modifiers: [any ViewModifier]
     var environmentValues: EnvironmentValues
     var sharedContext: SharedContext
@@ -60,14 +60,11 @@ class CanvasContext<Symbols>: ViewProxy where Symbols: View {
     var layoutSize: CGSize
     var contentScaleFactor: CGFloat
 
-    init(view: Content,
-         modifiers: [any ViewModifier],
-         environmentValues: EnvironmentValues,
-         sharedContext: SharedContext) {
-        self.modifiers = modifiers
-        self.environmentValues = environmentValues._resolve(modifiers: modifiers)
+    init(view: _GraphValue<Content>, inputs: _ViewInputs) {
+        self.modifiers = inputs.modifiers
+        self.environmentValues = inputs.environmentValues._resolve(modifiers: modifiers)
         self.view = self.environmentValues._resolve(view)
-        self.sharedContext = sharedContext
+        self.sharedContext = inputs.sharedContext
         self.layoutOffset = .zero
         self.layoutSize = .zero
         self.contentScaleFactor = 1
@@ -82,7 +79,8 @@ class CanvasContext<Symbols>: ViewProxy where Symbols: View {
     func draw(frame: CGRect, context: GraphicsContext) {
         if self.layoutSize.width > 0 && self.layoutSize.height > 0 {
             context.drawLayer(in: frame) { context, size in
-                self.view.renderer(&context, size)
+                let renderer = self.view[\.renderer].value
+                renderer(&context, size)
             }
         }
     }
@@ -94,12 +92,8 @@ class CanvasContext<Symbols>: ViewProxy where Symbols: View {
 }
 
 extension Canvas: _PrimitiveView {
-    func makeViewProxy(modifiers: [any ViewModifier],
-                       environmentValues: EnvironmentValues,
-                       sharedContext: SharedContext) -> any ViewProxy {
-        CanvasContext(view: self,
-                      modifiers: modifiers,
-                      environmentValues: environmentValues,
-                      sharedContext: sharedContext)
+    public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        let viewProxy = CanvasContext(view: view, inputs: inputs)
+        return _ViewOutputs(viewProxy: viewProxy)
     }
 }

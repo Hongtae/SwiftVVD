@@ -10,7 +10,7 @@ import DKGame
 
 typealias LayoutProtocol = Layout
 class ViewGroupContext<Layout, Content>: ViewProxy where Layout: LayoutProtocol, Content: View {
-    var view: Content
+    var view: _GraphValue<Content>
     var layout: Layout
     var modifiers: [any ViewModifier]
     var environmentValues: EnvironmentValues
@@ -21,7 +21,7 @@ class ViewGroupContext<Layout, Content>: ViewProxy where Layout: LayoutProtocol,
     var layoutSize: CGSize = .zero
     var contentScaleFactor: CGFloat = 1
 
-    init(view: Content,
+    init(view: _GraphValue<Content>,
          layout: Layout,
          subviews: [any ViewProxy],
          modifiers: [any ViewModifier],

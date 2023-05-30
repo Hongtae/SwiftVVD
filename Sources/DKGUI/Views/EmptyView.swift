@@ -9,12 +9,9 @@ public struct EmptyView: View {
 }
 
 extension EmptyView: _PrimitiveView {
-    func makeViewProxy(modifiers: [any ViewModifier],
-                       environmentValues: EnvironmentValues,
-                       sharedContext: SharedContext) -> any ViewProxy {
-        ViewContext(view: self,
-                    modifiers: modifiers,
-                    environmentValues: environmentValues,
-                    sharedContext: sharedContext)
+    public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        let listOutputs = _ViewListOutputs(views: [])
+        let viewProxy = ViewContext(view: view, inputs: inputs, listOutputs: listOutputs)
+        return _ViewOutputs(viewProxy: viewProxy)
     }
 }

@@ -7,6 +7,13 @@
 
 public struct _ViewModifier_Content<Modifier> where Modifier: ViewModifier {
     public typealias Body = Never
+
+    public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        fatalError()
+    }
+    public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
+        fatalError()
+    }
 }
 
 extension _ViewModifier_Content: View {
@@ -17,36 +24,64 @@ public protocol ViewModifier {
     associatedtype Body: View
     @ViewBuilder func body(content: Self.Content) -> Self.Body
     typealias Content = _ViewModifier_Content<Self>
+
+    static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs
+    static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs
 }
 
 extension ViewModifier where Self.Body == Never {
     public func body(content: Self.Content) -> Self.Body { neverBody() }
+
+    public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
+        fatalError("\(Self.self) may not have Body == Never")
+    }
+    public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
+        fatalError("\(Self.self) may not have Body == Never")
+    }
 }
 
 extension ViewModifier {
     public func concat<T>(_ modifier: T) -> ModifiedContent<Self, T> {
         ModifiedContent(content: self, modifier: modifier)
     }
+
+    public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
+        fatalError()
+    }
+    public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
+        fatalError()
+    }
 }
 
 extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
-    public var body: Never { neverBody() }
 }
 
 extension ModifiedContent: _PrimitiveView where Content: View, Modifier: ViewModifier {
-    func makeViewProxy(modifiers: [any ViewModifier],
-                       environmentValues: EnvironmentValues,
-                       sharedContext: SharedContext) -> any ViewProxy {
-        var modifiers = modifiers
-        modifiers.append(self.modifier)
-        return _makeViewProxy(self.content,
-                              modifiers: modifiers,
-                              environmentValues: environmentValues,
-                              sharedContext: sharedContext)
+    public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        var modifiers = inputs.modifiers
+        modifiers.append(view.value.modifier)
+        let viewInputs = _ViewInputs(sharedContext: inputs.sharedContext,
+                                     modifiers: modifiers,
+                                     environmentValues: inputs.environmentValues,
+                                     transform: inputs.transform,
+                                     position: inputs.position,
+                                     size: inputs.size,
+                                     safeAreaInsets: inputs.safeAreaInsets)
+
+        return Modifier._makeView(modifier: view[\.modifier], inputs: viewInputs) {
+            graph, inputs in
+            fatalError()
+        }
     }
 }
 
 extension ModifiedContent: ViewModifier where Content: ViewModifier, Modifier: ViewModifier {
+    public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
+        fatalError()
+    }
+    public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
+        fatalError()
+    }
 }
 
 extension View {
