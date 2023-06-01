@@ -12,19 +12,19 @@ public struct AnyView: View {
 
     public init<V>(_ view: V) where V: View {
         self.makeView = { inputs in
-            V._makeView(view: _GraphValue<V>(value: view), inputs: inputs)
+            V._makeView(view: _GraphValue<V>(view), inputs: inputs)
         }
         self.makeViewList = { inputs in
-            V._makeViewList(view: _GraphValue<V>(value: view), inputs: inputs)
+            V._makeViewList(view: _GraphValue<V>(view), inputs: inputs)
         }
     }
 
     public init<V>(erasing view: V) where V: View {
         self.makeView = { inputs in
-            V._makeView(view: _GraphValue<V>(value: view), inputs: inputs)
+            V._makeView(view: _GraphValue<V>(view), inputs: inputs)
         }
         self.makeViewList = { inputs in
-            V._makeViewList(view: _GraphValue<V>(value: view), inputs: inputs)
+            V._makeViewList(view: _GraphValue<V>(view), inputs: inputs)
         }
     }
 }

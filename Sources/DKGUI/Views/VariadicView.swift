@@ -83,6 +83,27 @@ public protocol _VariadicView_UnaryViewRoot: _VariadicView_ViewRoot {
 public protocol _VariadicView_MultiViewRoot: _VariadicView_ViewRoot {
 }
 
+extension _VariadicView_ViewRoot {
+    public static func _makeView(root: _GraphValue<Self>, inputs: _ViewInputs, body: (_Graph, _ViewInputs) -> _ViewListOutputs) -> _ViewOutputs {
+        fatalError()
+    }
+    public static func _makeViewList(root: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
+        fatalError()
+    }
+}
+
+extension _VariadicView_UnaryViewRoot {
+    public static func _makeViewList(root: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
+        fatalError()
+    }
+}
+
+extension _VariadicView_MultiViewRoot {
+    public static func _makeView(root: _GraphValue<Self>, inputs: _ViewInputs, body: (_Graph, _ViewInputs) -> _ViewListOutputs) -> _ViewOutputs {
+        fatalError()
+    }
+}
+
 public enum _VariadicView {
     public typealias Root = _VariadicView_Root
     public typealias ViewRoot = _VariadicView_ViewRoot
@@ -105,27 +126,6 @@ public enum _VariadicView {
     }
 }
 
-extension _VariadicView_UnaryViewRoot {
-    public static func _makeViewList(root: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        fatalError()
-    }
-}
-
-extension _VariadicView_MultiViewRoot {
-    public static func _makeView(root: _GraphValue<Self>, inputs: _ViewInputs, body: (_Graph, _ViewInputs) -> _ViewListOutputs) -> _ViewOutputs {
-        fatalError()
-    }
-}
-
-extension _VariadicView_ViewRoot {
-    public static func _makeView(root: _GraphValue<Self>, inputs: _ViewInputs, body: (_Graph, _ViewInputs) -> _ViewListOutputs) -> _ViewOutputs {
-        fatalError()
-    }
-    public static func _makeViewList(root: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        fatalError()
-    }
-}
-
 extension _VariadicView.Tree: View where Root: _VariadicView_ViewRoot, Content: View {
     public typealias Body = Never
     public var body: Never { neverBody() }
@@ -134,6 +134,9 @@ extension _VariadicView.Tree: View where Root: _VariadicView_ViewRoot, Content: 
         fatalError()
     }
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        fatalError()
+        Root._makeViewList(root: view[\.root], inputs: inputs) {
+            graph, viewListInputs in
+            Content._makeViewList(view: view[\.content], inputs: inputs)
+        }
     }
 }

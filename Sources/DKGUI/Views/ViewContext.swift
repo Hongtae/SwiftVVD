@@ -103,9 +103,6 @@ protocol ViewProxy: AnyObject {
     func update(tick: UInt64, delta: Double, date: Date)
     func draw(frame: CGRect, context: GraphicsContext)
     func updateEnvironment(_ environmentValues: EnvironmentValues)
-
-    func trait<Trait>(_ key: Trait.Type) -> Trait.Value where Trait: _ViewTraitKey
-    func layoutValue<Trait>(_ key: Trait.Type) -> Trait.Value where Trait: LayoutValueKey
 }
 
 extension ViewProxy {
@@ -132,10 +129,12 @@ extension ViewProxy {
 
 extension ViewProxy {
     func trait<Trait>(_ key: Trait.Type) -> Trait.Value where Trait: _ViewTraitKey {
-        Trait.defaultValue
-    }
-    func layoutValue<Trait>(_ key: Trait.Type) -> Trait.Value where Trait: LayoutValueKey {
-        Trait.defaultValue
+        for modifier in modifiers {
+            if let trait = modifier as? _TraitWritingModifier<Trait> {
+                return trait.value
+            }
+        }
+        return Trait.defaultValue
     }
 }
 

@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import DKGame
 
 public struct HStack<Content>: View where Content: View {
     public var body: Never { neverBody() }
@@ -20,6 +19,6 @@ public struct HStack<Content>: View where Content: View {
 
 extension HStack: _PrimitiveView {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        fatalError()
+        _VariadicView.Tree<_HStackLayout, Content>._makeView(view: view[\._tree], inputs: inputs)
     }
 }

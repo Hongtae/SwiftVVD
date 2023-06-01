@@ -158,7 +158,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
         self.environmentValues = EnvironmentValues()
         self.sharedContext = SharedContext(appContext: appContext!)
 
-        let graph = _GraphValue(value: content)
+        let graph = _GraphValue(content)
         let viewInputs = _ViewInputs(sharedContext: self.sharedContext,
                                      modifiers: [],
                                      environmentValues: self.environmentValues,

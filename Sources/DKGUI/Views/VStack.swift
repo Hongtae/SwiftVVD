@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import DKGame
 
 public struct VStack<Content>: View where Content: View {
     public var body: Never { neverBody() }
@@ -20,6 +19,6 @@ public struct VStack<Content>: View where Content: View {
 
 extension VStack: _PrimitiveView {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        fatalError()
+        _VariadicView.Tree<_VStackLayout, Content>._makeView(view: view[\._tree], inputs: inputs)
     }
 }

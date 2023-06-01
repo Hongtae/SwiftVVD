@@ -2,7 +2,7 @@
 //  File: TraitWritingModifier.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -13,8 +13,8 @@ public protocol _ViewTraitKey {
 }
 
 public struct _TraitWritingModifier<Trait>: ViewModifier where Trait: _ViewTraitKey {
-  public let value: Trait.Value
-  public init(value: Trait.Value) {
+    public let value: Trait.Value
+    public init(value: Trait.Value) {
         self.value = value
     }
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {

@@ -124,7 +124,7 @@ extension EnvironmentValues {
     }
 
     func _resolve<Content>(_ view: _GraphValue<Content>) -> _GraphValue<Content> where Content: View {
-        _GraphValue(value: _resolve(view.value))
+        _GraphValue(_resolve(view.value))
     }
 
     func _resolve<Content>(_ view: Content) -> Content where Content: View {

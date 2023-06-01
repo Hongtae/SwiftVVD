@@ -7,18 +7,19 @@
 
 import Foundation
 
-public protocol LayoutValueKey {
-    associatedtype Value
-    static var defaultValue: Self.Value { get }
-}
-
 public struct LayoutSubview: Equatable {
 
-    public subscript<K>(key: K.Type) -> K.Value where K: LayoutValueKey {
-        viewProxy.layoutValue(key)
+    public func _trait<K>(key: K.Type) -> K.Value where K : _ViewTraitKey {
+        viewProxy.trait(key)
     }
 
-    public var priority: Double { 0 }
+    public subscript<K>(key: K.Type) -> K.Value where K: LayoutValueKey {
+        _trait(key: _LayoutTrait<K>.self)
+    }
+
+    public var priority: Double {
+        _trait(key: LayoutPriorityTraitKey.self)
+    }
 
     public func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
         viewProxy.sizeThatFits(proposal)

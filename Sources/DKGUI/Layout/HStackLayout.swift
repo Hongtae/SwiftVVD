@@ -32,11 +32,6 @@ public struct HStackLayout: Layout {
 
     public func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout _StackLayoutCache) {
     }
-
-    public func callAsFunction<V>(@ViewBuilder _ content: () -> V) -> some View where V : View {
-        _VariadicView.Tree(root: _LayoutRoot(self),
-                           content: content())
-    }
 }
 
 public typealias _HStackLayout = HStackLayout

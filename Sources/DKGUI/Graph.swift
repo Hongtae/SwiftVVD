@@ -54,12 +54,12 @@ public struct _ViewListOutputs {
 
 public struct _GraphValue<Value>: Equatable {
     var value: Value
-    init(value: Value) {
+    init(_ value: Value) {
         self.value = value
     }
 
     public subscript<U>(keyPath: KeyPath<Value, U>) -> _GraphValue<U> {
-        _GraphValue<U>(value: self.value[keyPath: keyPath])
+        _GraphValue<U>(self.value[keyPath: keyPath])
     }
 
     public static func == (a: _GraphValue<Value>, b: _GraphValue<Value>) -> Bool {

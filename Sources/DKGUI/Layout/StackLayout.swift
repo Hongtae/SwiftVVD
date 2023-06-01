@@ -10,11 +10,3 @@ import Foundation
 public struct _StackLayoutCache {
 
 }
-
-public struct _LayoutRoot<L>: _VariadicView_ViewRoot where L: Layout {
-    let layout: L
-
-    init(_ layout: L) {
-        self.layout = layout
-    }
-}
