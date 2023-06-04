@@ -94,6 +94,6 @@ class CanvasContext<Symbols>: ViewProxy where Symbols: View {
 extension Canvas: _PrimitiveView {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         let viewProxy = CanvasContext(view: view, inputs: inputs)
-        return _ViewOutputs(viewProxy: viewProxy)
+        return _ViewOutputs(view: viewProxy)
     }
 }

@@ -62,8 +62,7 @@ extension Layout where Self.Cache == () {
 
 extension Layout {
     public func callAsFunction<V>(@ViewBuilder _ content: () -> V) -> some View where V : View {
-        _VariadicView.Tree(root: _LayoutRoot(self),
-                           content: content())
+        _VariadicView.Tree(root: _LayoutRoot(self), content: content())
     }
 }
 
@@ -229,17 +228,12 @@ public struct AnyLayout: Layout {
 }
 
 //MARK: - LayoutRoot, VariadicView Root for Layout
-struct _LayoutRoot<L>: _VariadicView_ViewRoot where L: Layout {
+struct _LayoutRoot<L>: _VariadicView.UnaryViewRoot where L: Layout {
     let layout: L
 
-    init(_ layout: L) {
-        self.layout = layout
-    }
+    init(_ layout: L) { self.layout = layout }
 
     public static func _makeView(root: _GraphValue<Self>, inputs: _ViewInputs, body: (_Graph, _ViewInputs) -> _ViewListOutputs) -> _ViewOutputs {
-        fatalError()
-    }
-    public static func _makeViewList(root: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
         fatalError()
     }
 }

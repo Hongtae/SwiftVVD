@@ -184,7 +184,7 @@ extension Text: _PrimitiveView {
                                       modifiers: inputs.modifiers,
                                       environmentValues: inputs.environmentValues,
                                       sharedContext: inputs.sharedContext)
-        return _ViewOutputs(viewProxy: viewProxy)
+        return _ViewOutputs(view: viewProxy)
     }
 
 }

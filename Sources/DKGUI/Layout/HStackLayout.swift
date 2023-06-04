@@ -35,5 +35,5 @@ public struct HStackLayout: Layout {
 }
 
 public typealias _HStackLayout = HStackLayout
-extension _HStackLayout: _VariadicView_ViewRoot {
+extension _HStackLayout: _VariadicView_UnaryViewRoot {
 }

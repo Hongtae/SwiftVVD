@@ -26,7 +26,7 @@ extension View {
                                          safeAreaInsets: inputs.safeAreaInsets)
         let listOutputs = Self._makeViewList(view: view, inputs: listInputs)
         let viewProxy = ViewContext(view: view, inputs: inputs, listOutputs: listOutputs)
-        return _ViewOutputs(viewProxy: viewProxy)
+        return _ViewOutputs(view: viewProxy)
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
@@ -40,7 +40,7 @@ extension View {
                                          size: inputs.size,
                                          safeAreaInsets: inputs.safeAreaInsets)
             let viewOutputs = Self.Body._makeView(view: body, inputs: viewInputs)
-            return _ViewListOutputs(views: [viewOutputs.viewProxy])
+            return _ViewListOutputs(views: [viewOutputs.view])
         }
         return Self.Body._makeViewList(view: body, inputs: inputs)
     }

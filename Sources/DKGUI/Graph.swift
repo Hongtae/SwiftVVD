@@ -30,7 +30,7 @@ public struct _ViewOutputs {
     var preferences: [String?: Any] = [:]
     //var _layoutComputer: Any? = nil
     var layout: (any Layout)? = nil
-    var viewProxy: any ViewProxy
+    var view: any ViewProxy
     var subviews: [any ViewProxy] = []
 }
 

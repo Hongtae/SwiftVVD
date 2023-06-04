@@ -12,6 +12,6 @@ extension EmptyView: _PrimitiveView {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         let listOutputs = _ViewListOutputs(views: [])
         let viewProxy = ViewContext(view: view, inputs: inputs, listOutputs: listOutputs)
-        return _ViewOutputs(viewProxy: viewProxy)
+        return _ViewOutputs(view: viewProxy)
     }
 }

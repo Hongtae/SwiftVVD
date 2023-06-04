@@ -8,6 +8,7 @@
 import Foundation
 
 public struct ZStackLayout: Layout {
+    public typealias Cache = Void
     public var alignment: Alignment
 
     public var animatableData: EmptyAnimatableData {
@@ -20,21 +21,14 @@ public struct ZStackLayout: Layout {
         self.animatableData = EmptyAnimatableData()
     }
 
-    public func makeCache(subviews: Subviews) -> _StackLayoutCache {
-        _StackLayoutCache()
-    }
-
-    public func updateCache(_ cache: inout _StackLayoutCache, subviews: Subviews) {
-    }
-
-    public func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout _StackLayoutCache) -> CGSize {
+    public func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) -> CGSize {
         .zero
     }
 
-    public func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout _StackLayoutCache) {
+    public func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) {
     }
 }
 
 public typealias _ZStackLayout = ZStackLayout
-extension _ZStackLayout: _VariadicView_ViewRoot {
+extension _ZStackLayout: _VariadicView_UnaryViewRoot {
 }
