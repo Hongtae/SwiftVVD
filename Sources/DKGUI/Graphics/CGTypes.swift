@@ -38,9 +38,47 @@ public enum CGLineJoin: Int32, Sendable {
 
 #endif
 
+extension Float: VectorArithmetic {
+    public mutating func scale(by rhs: Double) { self *= Float(rhs) }
+    public var magnitudeSquared: Double { Double(self * self) }
+}
+
+extension Double: VectorArithmetic {
+    public mutating func scale(by rhs: Double) { self *= rhs }
+    public var magnitudeSquared: Double { self * self }
+}
+
 extension CGFloat: VectorArithmetic {
     public mutating func scale(by rhs: Double) { self = self * rhs }
     public var magnitudeSquared: Double { self * self }
+}
+
+extension CGPoint: Animatable {
+    public typealias AnimatableData = AnimatablePair<CGFloat, CGFloat>
+    public var animatableData: AnimatableData {
+        @inlinable get { return .init(x, y) }
+        @inlinable set { (x, y) = newValue[] }
+    }
+}
+
+extension CGSize: Animatable {
+    public typealias AnimatableData = AnimatablePair<CGFloat, CGFloat>
+    public var animatableData: AnimatableData {
+        @inlinable get { return .init(width, height) }
+        @inlinable set { (width, height) = newValue[] }
+    }
+}
+
+extension CGRect: Animatable {
+    public typealias AnimatableData = AnimatablePair<CGPoint.AnimatableData, CGSize.AnimatableData>
+    public var animatableData: AnimatableData {
+        @inlinable get {
+            return .init(origin.animatableData, size.animatableData)
+        }
+        @inlinable set {
+            (origin.animatableData, size.animatableData) = newValue[]
+        }
+    }
 }
 
 extension Vector2 {

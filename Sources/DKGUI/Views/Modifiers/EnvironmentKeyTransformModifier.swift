@@ -5,15 +5,22 @@
 //  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
-struct _EnvironmentKeyTransformModifier<Value>: ViewModifier, _EnvironmentValuesResolve {
-    typealias Body = Never
+public struct _EnvironmentKeyTransformModifier<Value>: ViewModifier, _GraphInputsModifier, _EnvironmentValuesResolve {
+    public typealias Body = Never
 
-    var keyPath: WritableKeyPath<EnvironmentValues, Value>
-    let transform: (inout Value) -> Void
+    public var keyPath: WritableKeyPath<EnvironmentValues, Value>
+    public let transform: (inout Value) -> Void
 
-    init(keyPath: WritableKeyPath<EnvironmentValues, Value>, transform: @escaping (inout Value) -> Void) {
+    @inlinable public init(keyPath: WritableKeyPath<EnvironmentValues, Value>, transform: @escaping (inout Value) -> Void) {
         self.keyPath = keyPath
         self.transform = transform
+    }
+
+    public static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GraphInputs) {
+        let modifier = modifier.value
+        var value = inputs.environmentValues[keyPath: modifier.keyPath]
+        modifier.transform(&value)
+        inputs.environmentValues[keyPath: modifier.keyPath] = value
     }
 
     func _resolve(_ values: EnvironmentValues) -> EnvironmentValues {
@@ -26,7 +33,7 @@ struct _EnvironmentKeyTransformModifier<Value>: ViewModifier, _EnvironmentValues
 }
 
 extension View {
-    public func transformEnvironment<V>(_ keyPath: WritableKeyPath<EnvironmentValues, V>, transform: @escaping (inout V) -> Void) -> some View {
+    @inlinable public func transformEnvironment<V>(_ keyPath: WritableKeyPath<EnvironmentValues, V>, transform: @escaping (inout V) -> Void) -> some View {
         return modifier(_EnvironmentKeyTransformModifier(keyPath: keyPath, transform: transform))
     }
 }

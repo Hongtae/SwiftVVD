@@ -39,7 +39,7 @@ extension Edge {
     }
 }
 
-public struct EdgeInsets : Equatable, Sendable, Animatable {
+public struct EdgeInsets : Equatable, Animatable, _VectorMath {
     public var top: CGFloat
     public var leading: CGFloat
     public var bottom: CGFloat
@@ -63,10 +63,11 @@ public struct EdgeInsets : Equatable, Sendable, Animatable {
     public var animatableData: AnimatableData {
         get { .init(top, .init(leading, .init(bottom, trailing))) }
         set {
-            top = newValue.first
-            leading = newValue.second.first
-            bottom = newValue.second.second.first
-            trailing = newValue.second.second.second
+            let top = newValue[].0
+            let leading = newValue[].1[].0
+            let (bottom, trailing) = newValue[].1[].1[]
+            self = .init(
+                top: top, leading: leading, bottom: bottom, trailing: trailing)
         }
     }
 }

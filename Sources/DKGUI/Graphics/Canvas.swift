@@ -62,7 +62,7 @@ class CanvasContext<Symbols>: ViewProxy where Symbols: View {
 
     init(view: _GraphValue<Content>, inputs: _ViewInputs) {
         self.modifiers = inputs.modifiers
-        self.environmentValues = inputs.environmentValues._resolve(modifiers: modifiers)
+        self.environmentValues = inputs.environmentValues
         self.view = self.environmentValues._resolve(view)
         self.sharedContext = inputs.sharedContext
         self.layoutOffset = .zero
@@ -93,7 +93,9 @@ class CanvasContext<Symbols>: ViewProxy where Symbols: View {
 
 extension Canvas: _PrimitiveView {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let viewProxy = CanvasContext(view: view, inputs: inputs)
-        return _ViewOutputs(view: viewProxy)
+        let makeView: _ViewOutputs.MakeView = {
+            CanvasContext(view: view, inputs: inputs)
+        }
+        return _ViewOutputs(makeView: makeView)
     }
 }

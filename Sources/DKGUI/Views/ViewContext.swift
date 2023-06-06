@@ -149,14 +149,24 @@ class ViewContext<Content>: ViewProxy where Content: View {
     var layoutSize: CGSize = .zero
     var contentScaleFactor: CGFloat = 1
 
-    init(view: _GraphValue<Content>, inputs: _ViewInputs, listOutputs: _ViewListOutputs) {
+    var layout: AnyLayout
+    var layoutCache: AnyLayout.Cache?
+
+    init(view: _GraphValue<Content>, inputs: _ViewInputs, outputs: _ViewListOutputs? = nil) {
         let modifiers = inputs.modifiers
-        self.environmentValues = inputs.environmentValues._resolve(modifiers: modifiers)
+        self.environmentValues = inputs.environmentValues
         self.view = self.environmentValues._resolve(view)
         self.modifiers = modifiers
         self.sharedContext = inputs.sharedContext
 
-        self.subviews = []
+        if let outputs {
+            let makeViews = outputs.makeViews(inputs: inputs)
+            self.subviews = makeViews.map { $0.makeView() }
+        } else {
+            self.subviews = []
+        }
+        self.layout = .init(_VStackLayout())
+        self.layoutCache = nil
     }
 
     func drawBackground(frame: CGRect, context: GraphicsContext) {
@@ -168,15 +178,14 @@ class ViewContext<Content>: ViewProxy where Content: View {
     func draw(frame: CGRect, context: GraphicsContext) {
         self.drawBackground(frame: frame, context: context)
 
-//        let drawSubview = true
-//        if drawSubview {
-//            let subviewFrame = CGRect(origin: subview.layoutOffset, size: subview.layoutSize)
-//                .offsetBy(dx: frame.minX, dy: frame.minY)
-//            var subviewContext = context
-//            subviewContext.environment = subview.environmentValues
-//            subviewContext.contentOffset += subview.layoutOffset
-//            subview.draw(frame: subviewFrame, context: subviewContext)
-//        }
+        self.subviews.forEach { view in
+            let viewFrame = CGRect(origin: view.layoutOffset, size: view.layoutSize)
+                .offsetBy(dx: frame.minX, dy: frame.minY)
+            var graphicsContext = context
+            graphicsContext.environment = view.environmentValues
+            graphicsContext.contentOffset += view.layoutOffset
+            view.draw(frame: viewFrame, context: graphicsContext)
+        }
         self.drawOverlay(frame: frame, context: context)
     }
 
@@ -184,9 +193,14 @@ class ViewContext<Content>: ViewProxy where Content: View {
         self.layoutOffset = offset
         self.layoutSize = size
         self.contentScaleFactor = scaleFactor
-//        self.subview.layout(offset: self.layoutOffset,
-//                            size: self.layoutSize,
-//                            scaleFactor: self.contentScaleFactor)
+
+        if self.subviews.count > 1 {
+            // perform layout!
+        } else if let first = self.subviews.first {
+            first.layout(offset: .zero,
+                         size: self.layoutSize,
+                         scaleFactor: self.contentScaleFactor)
+        }
     }
 
     func updateEnvironment(_ environmentValues: EnvironmentValues) {

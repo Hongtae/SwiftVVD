@@ -11,45 +11,60 @@ public struct _Graph {
 }
 
 public struct _GraphInputs {
+    var environmentValues: EnvironmentValues
+}
+
+public protocol _GraphInputsModifier {
+    static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GraphInputs)
 }
 
 public struct _ViewInputs {
-    let preferences: [String?: Any] = [:]
     let sharedContext: SharedContext
-    let modifiers: [any ViewModifier]
-    let environmentValues: EnvironmentValues
 
-    let transform: CGAffineTransform
-    let position: CGPoint
-    //let containerPosition: CGPoint
-    let size: CGSize
-    let safeAreaInsets: EdgeInsets
+    var preferences: [String?: Any] = [:]
+    var modifiers: [any ViewModifier]
+    var environmentValues: EnvironmentValues
+
+    var transform: CGAffineTransform
+    var position: CGPoint
+    var size: CGSize
+    var safeAreaInsets: EdgeInsets
 }
 
 public struct _ViewOutputs {
     var preferences: [String?: Any] = [:]
     //var _layoutComputer: Any? = nil
-    var layout: (any Layout)? = nil
-    var view: any ViewProxy
-    var subviews: [any ViewProxy] = []
+
+    typealias MakeView = ()-> any ViewProxy
+    var makeView: MakeView
 }
 
 public struct _ViewListInputs {
-    let preferences: [String?: Any] = [:]
-    let sharedContext: SharedContext
-    let modifiers: [any ViewModifier]
-    let environmentValues: EnvironmentValues
-
-    let transform: CGAffineTransform
-    let position: CGPoint
-    let size: CGSize
-
-    let safeAreaInsets: EdgeInsets
+    var inputs: _ViewInputs
 }
 
 public struct _ViewListOutputs {
     var preferences: [String?: Any] = [:]
-    var views: [any ViewProxy]
+
+    typealias MakeViewList = (_Graph, _ViewListInputs)-> _ViewListOutputs
+    typealias MakeView = (_Graph, _ViewInputs)->_ViewOutputs
+    enum Item {
+        case makeView(_: MakeView)
+        case viewList(_: [_ViewListOutputs])
+    }
+    var item: Item
+
+    func makeViews(inputs: _ViewInputs)->[_ViewOutputs] {
+        var list: [_ViewOutputs] = []
+        if case let .makeView(mk) = item {
+            list.append(mk(_Graph(), inputs))
+        } else if case let .viewList(vl) = item {
+            list.append(contentsOf: vl.map {
+                $0.makeViews(inputs: inputs)
+            }.joined())
+        }
+        return list
+    }
 }
 
 public struct _GraphValue<Value>: Equatable {

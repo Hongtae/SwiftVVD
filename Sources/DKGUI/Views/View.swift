@@ -9,7 +9,7 @@ import Foundation
 
 public protocol View {
     associatedtype Body: View
-    var body: Self.Body { get }
+    @ViewBuilder var body: Self.Body { get }
 
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs
     static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs
@@ -17,30 +17,21 @@ public protocol View {
 
 extension View {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let listInputs = _ViewListInputs(sharedContext: inputs.sharedContext,
-                                         modifiers: inputs.modifiers,
-                                         environmentValues: inputs.environmentValues,
-                                         transform: inputs.transform,
-                                         position: inputs.position,
-                                         size: inputs.size,
-                                         safeAreaInsets: inputs.safeAreaInsets)
+        let listInputs = _ViewListInputs(inputs: inputs)
         let listOutputs = Self._makeViewList(view: view, inputs: listInputs)
-        let viewProxy = ViewContext(view: view, inputs: inputs, listOutputs: listOutputs)
-        return _ViewOutputs(view: viewProxy)
+        let makeView: _ViewOutputs.MakeView = {
+            ViewContext(view: view, inputs: inputs, outputs: listOutputs)
+        }
+        return _ViewOutputs(makeView: makeView)
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
         let body = view[\.body]
         if body.value is _PrimitiveView {
-            let viewInputs = _ViewInputs(sharedContext: inputs.sharedContext,
-                                         modifiers: inputs.modifiers,
-                                         environmentValues: inputs.environmentValues,
-                                         transform: inputs.transform,
-                                         position: inputs.position,
-                                         size: inputs.size,
-                                         safeAreaInsets: inputs.safeAreaInsets)
-            let viewOutputs = Self.Body._makeView(view: body, inputs: viewInputs)
-            return _ViewListOutputs(views: [viewOutputs.view])
+            let makeView: _ViewListOutputs.MakeView = { graph, inputs in
+                Self.Body._makeView(view: body, inputs: inputs)
+            }
+            return _ViewListOutputs(item: .makeView(makeView))
         }
         return Self.Body._makeViewList(view: body, inputs: inputs)
     }
@@ -54,6 +45,10 @@ extension View where Body == Never {
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
         fatalError("\(Self.self) may not have Body == Never")
     }
+
+    public var body: Never {
+        fatalError("\(Self.self) may not have Body == Never")
+    }
 }
 
 protocol _PrimitiveView {
@@ -61,7 +56,6 @@ protocol _PrimitiveView {
 
 extension _PrimitiveView {
     public typealias Body = Never
-    public var body: Never { neverBody() }
 }
 
 //MARK: - View with ID

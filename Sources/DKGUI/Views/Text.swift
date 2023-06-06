@@ -143,14 +143,11 @@ class TextContext: ViewProxy {
     var layoutSize: CGSize
     var contentScaleFactor: CGFloat
 
-    init(view: _GraphValue<Text>,
-         modifiers: [any ViewModifier],
-         environmentValues: EnvironmentValues,
-         sharedContext: SharedContext) {
-        self.modifiers = modifiers
-        self.environmentValues = environmentValues._resolve(modifiers: modifiers)
+    init(view: _GraphValue<Text>, inputs: _ViewInputs) {
+        self.modifiers = inputs.modifiers
+        self.environmentValues = inputs.environmentValues
         self.view = self.environmentValues._resolve(view)
-        self.sharedContext = sharedContext
+        self.sharedContext = inputs.sharedContext
         self.layoutOffset = .zero
         self.layoutSize = .zero
         self.contentScaleFactor = 1
@@ -180,11 +177,9 @@ class TextContext: ViewProxy {
 
 extension Text: _PrimitiveView {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let viewProxy = TextContext(view: view,
-                                      modifiers: inputs.modifiers,
-                                      environmentValues: inputs.environmentValues,
-                                      sharedContext: inputs.sharedContext)
-        return _ViewOutputs(view: viewProxy)
+        let makeView: _ViewOutputs.MakeView = {
+            TextContext(view: view, inputs: inputs)
+        }
+        return _ViewOutputs(makeView: makeView)
     }
-
 }

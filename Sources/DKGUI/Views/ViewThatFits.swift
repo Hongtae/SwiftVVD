@@ -14,7 +14,7 @@ public struct ViewThatFits<Content>: View where Content: View {
 
 extension ViewThatFits: _PrimitiveView {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        fatalError()
+        _VariadicView.Tree<_SizeFittingRoot, Content>._makeView(view: view[\._tree], inputs: inputs)
     }
 }
 

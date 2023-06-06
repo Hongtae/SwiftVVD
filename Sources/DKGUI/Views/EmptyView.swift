@@ -6,12 +6,16 @@
 //
 
 public struct EmptyView: View {
-}
+    public init() {}
 
-extension EmptyView: _PrimitiveView {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let listOutputs = _ViewListOutputs(views: [])
-        let viewProxy = ViewContext(view: view, inputs: inputs, listOutputs: listOutputs)
-        return _ViewOutputs(view: viewProxy)
+        _ViewOutputs(makeView: {
+            ViewContext(view: view, inputs: inputs)
+        })
     }
+    public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
+        _ViewListOutputs(item: .viewList([]))
+    }
+
+    public typealias Body = Swift.Never
 }

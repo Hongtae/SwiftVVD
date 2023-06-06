@@ -229,8 +229,9 @@ public struct AnyLayout: Layout {
 
 //MARK: - LayoutRoot, VariadicView Root for Layout
 struct _LayoutRoot<L>: _VariadicView.UnaryViewRoot where L: Layout {
-    let layout: L
+    public typealias Body = Never
 
+    let layout: L
     init(_ layout: L) { self.layout = layout }
 
     public static func _makeView(root: _GraphValue<Self>, inputs: _ViewInputs, body: (_Graph, _ViewInputs) -> _ViewListOutputs) -> _ViewOutputs {

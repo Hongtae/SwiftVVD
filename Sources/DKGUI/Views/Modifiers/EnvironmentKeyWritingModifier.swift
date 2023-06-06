@@ -5,15 +5,20 @@
 //  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
-struct _EnvironmentKeyWritingModifier<Value>: ViewModifier, _EnvironmentValuesResolve {
-    typealias Body = Never
+public struct _EnvironmentKeyWritingModifier<Value>: ViewModifier, _GraphInputsModifier, _EnvironmentValuesResolve {
+    public typealias Body = Never
 
-    var keyPath: WritableKeyPath<EnvironmentValues, Value>
-    var value: Value
+    public var keyPath: WritableKeyPath<EnvironmentValues, Value>
+    public var value: Value
 
-    init(keyPath: WritableKeyPath<EnvironmentValues, Value>, value: Value) {
+    @inlinable public init(keyPath: WritableKeyPath<EnvironmentValues, Value>, value: Value) {
         self.keyPath = keyPath
         self.value = value
+    }
+
+    public static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GraphInputs) {
+        let modifier = modifier.value
+        inputs.environmentValues[keyPath: modifier.keyPath] = modifier.value
     }
 
     func _resolve(_ values: EnvironmentValues) -> EnvironmentValues {
@@ -24,7 +29,7 @@ struct _EnvironmentKeyWritingModifier<Value>: ViewModifier, _EnvironmentValuesRe
 }
 
 extension View {
-    public func environment<V>(_ keyPath: WritableKeyPath<EnvironmentValues, V>, _ value: V) -> some View {
+    @inlinable public func environment<V>(_ keyPath: WritableKeyPath<EnvironmentValues, V>, _ value: V) -> some View {
         return modifier(_EnvironmentKeyWritingModifier(keyPath: keyPath, value: value))
     }
 }

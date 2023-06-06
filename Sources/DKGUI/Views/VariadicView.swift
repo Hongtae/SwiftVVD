@@ -48,7 +48,7 @@ extension _VariadicView_Children: RandomAccessCollection {
         public typealias Body = Never
 
         let view: AnyView
-        var modifiers: [any ViewModifier]
+        var traits: [any ViewModifier]
         var viewID: any Hashable
     }
     public var startIndex: Int { elements.startIndex }
@@ -59,11 +59,18 @@ extension _VariadicView_Children: RandomAccessCollection {
     public typealias Iterator = IndexingIterator<_VariadicView_Children>
     public typealias SubSequence = Slice<_VariadicView_Children>
     public typealias Indices = Range<Int>
+
+    init(_ content: (_Graph, _ViewInputs)->_ViewListOutputs) {
+        fatalError()
+    }
+    init(_ content: (_Graph, _ViewListInputs)->_ViewListOutputs) {
+        fatalError()
+    }
 }
 
 public protocol _VariadicView_ViewRoot: _VariadicView_Root {
     associatedtype Body: View
-    func body(children: _VariadicView.Children) -> Self.Body
+    @ViewBuilder func body(children: _VariadicView.Children) -> Self.Body
 }
 
 extension _VariadicView_ViewRoot where Self.Body == Never {
@@ -80,22 +87,26 @@ public protocol _VariadicView_MultiViewRoot: _VariadicView_ViewRoot {
 
 extension _VariadicView_ViewRoot {
     public static func _makeView(root: _GraphValue<Self>, inputs: _ViewInputs, body: (_Graph, _ViewInputs) -> _ViewListOutputs) -> _ViewOutputs {
-        fatalError()
+        let content = root.value.body(children: _VariadicView_Children(body))
+        return Self.Body._makeView(view: _GraphValue(content), inputs: inputs)
     }
     public static func _makeViewList(root: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        fatalError()
+        let content = root.value.body(children: _VariadicView.Children(body))
+        return Self.Body._makeViewList(view: _GraphValue(content), inputs: inputs)
     }
 }
 
 extension _VariadicView_UnaryViewRoot {
     public static func _makeViewList(root: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        fatalError()
+        let content = root.value.body(children: _VariadicView_Children(body))
+        return Self.Body._makeViewList(view: _GraphValue(content), inputs: inputs)
     }
 }
 
 extension _VariadicView_MultiViewRoot {
     public static func _makeView(root: _GraphValue<Self>, inputs: _ViewInputs, body: (_Graph, _ViewInputs) -> _ViewListOutputs) -> _ViewOutputs {
-        fatalError()
+        let content = root.value.body(children: _VariadicView_Children(body))
+        return Self.Body._makeView(view: _GraphValue(content), inputs: inputs)
     }
 }
 
@@ -129,50 +140,17 @@ extension _VariadicView.Tree: View where Root: _VariadicView_ViewRoot, Content: 
         let root = view[\.root]
         let content = view[\.content]
 
-        if root.value is any _VariadicView_UnaryViewRoot {
-            let listInputs = _ViewListInputs(sharedContext: inputs.sharedContext,
-                                             modifiers: inputs.modifiers,
-                                             environmentValues: inputs.environmentValues,
-                                             transform: inputs.transform,
-                                             position: inputs.position,
-                                             size: inputs.size,
-                                             safeAreaInsets: inputs.safeAreaInsets)
-            let listOutputs = Root._makeViewList(root: root, inputs: listInputs) {
-                graph, listInputs in
-                if content.value is _PrimitiveView {
-                    let inputs = _ViewInputs(sharedContext: listInputs.sharedContext,
-                                             modifiers: listInputs.modifiers,
-                                             environmentValues: listInputs.environmentValues,
-                                             transform: listInputs.transform,
-                                             position: listInputs.position,
-                                             size: listInputs.size,
-                                             safeAreaInsets: listInputs.safeAreaInsets)
-                    let outputs = Content._makeView(view: content, inputs: inputs)
-                    return _ViewListOutputs(views: outputs.subviews)
-                } else {
-                    return Content._makeViewList(view: content, inputs: listInputs)
+        return Root._makeView(root: root, inputs: inputs) {
+            graph, inputs in
+
+            let listInputs = _ViewListInputs(inputs: inputs)
+            if content.value is _PrimitiveView {
+                let makeView: _ViewListOutputs.MakeView = { graph, inputs in
+                    Content._makeView(view: content, inputs: inputs)
                 }
+                return _ViewListOutputs(item: .makeView(makeView))
             }
-            let viewProxy = _VariadicView.UnaryViewRootProxy(view: view, inputs: inputs)
-            let subviews = listOutputs.views
-            return _ViewOutputs(view: viewProxy, subviews: subviews)
-        } else {
-            return Root._makeView(root: root, inputs: inputs) {
-                graph, inputs in
-                if content.value is _PrimitiveView {
-                    let outputs = Content._makeView(view: content, inputs: inputs)
-                    return _ViewListOutputs(views: [outputs.view])
-                } else {
-                    let listInputs = _ViewListInputs(sharedContext: inputs.sharedContext,
-                                                     modifiers: inputs.modifiers,
-                                                     environmentValues: inputs.environmentValues,
-                                                     transform: inputs.transform,
-                                                     position: inputs.position,
-                                                     size: inputs.size,
-                                                     safeAreaInsets: inputs.safeAreaInsets)
-                    return Content._makeViewList(view: content, inputs: listInputs)
-                }
-            }
+            return Content._makeViewList(view: content, inputs: listInputs)
         }
     }
 
@@ -185,7 +163,7 @@ extension _VariadicView.Tree: View where Root: _VariadicView_ViewRoot, Content: 
 }
 
 extension _VariadicView {
-    class UnaryViewRootProxy<Root, Content>: ViewProxy where _VariadicView.Tree<Root, Content>: View {
+    class RootViewProxy<Root, Content>: ViewProxy where _VariadicView.Tree<Root, Content>: View {
         var view: _GraphValue<Tree<Root, Content>>
         var modifiers: [any ViewModifier]
         var environmentValues: EnvironmentValues
@@ -201,8 +179,7 @@ extension _VariadicView {
         func updateEnvironment(_ environmentValues: EnvironmentValues) {
         }
 
-        init(view: _GraphValue<Tree<Root, Content>>,
-             inputs: _ViewInputs) {
+        init(view: _GraphValue<Tree<Root, Content>>, inputs: _ViewInputs, outputs: _ViewListOutputs) {
             self.view = view
             self.modifiers = inputs.modifiers
             self.environmentValues = inputs.environmentValues

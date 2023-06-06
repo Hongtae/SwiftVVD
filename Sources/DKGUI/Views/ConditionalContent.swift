@@ -5,21 +5,21 @@
 //  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
-public struct _ConditionalContent<TrueContent, FalseContent>: View where TrueContent: View, FalseContent: View {
-    public enum Storage {
+public struct _ConditionalContent<TrueContent, FalseContent> {
+    enum Storage {
         case trueContent(TrueContent)
         case falseContent(FalseContent)
     }
-
-    public let storage: Storage
-
-    init(storage: Storage) {
-        self.storage = storage
-    }
+    let storage: Storage
 }
 
-extension _ConditionalContent: _PrimitiveView {
+extension _ConditionalContent: View where TrueContent: View, FalseContent: View {
+    public typealias Body = Never
+
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        fatalError()
+    }
+    public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
         fatalError()
     }
 }

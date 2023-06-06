@@ -891,6 +891,6 @@ extension Path: Shape {
     }
 
     public var body: _ShapeView<Self, ForegroundStyle> {
-        .init(shape: self, style: ForegroundStyle())
+        _ShapeView<Self, ForegroundStyle>(shape: self, style: ForegroundStyle())
     }
 }

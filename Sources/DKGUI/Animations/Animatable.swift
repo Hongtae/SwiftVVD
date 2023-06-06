@@ -13,6 +13,8 @@ public protocol VectorArithmetic: AdditiveArithmetic {
 public protocol Animatable {
     associatedtype AnimatableData : VectorArithmetic
     var animatableData: Self.AnimatableData { get set }
+
+    static func _makeAnimatable(value: inout _GraphValue<Self>, inputs: _GraphInputs)
 }
 
 extension Animatable where Self: VectorArithmetic {
@@ -20,7 +22,17 @@ extension Animatable where Self: VectorArithmetic {
 }
 
 extension Animatable where Self.AnimatableData == EmptyAnimatableData {
-    public var animatableData: EmptyAnimatableData { .init() }
+    public var animatableData: EmptyAnimatableData {
+        @inlinable get { return EmptyAnimatableData() }
+        @inlinable set {}
+    }
+    public static func _makeAnimatable(value: inout _GraphValue<Self>, inputs: _GraphInputs) {
+    }
+}
+
+extension Animatable {
+    public static func _makeAnimatable(value: inout _GraphValue<Self>, inputs: _GraphInputs) {
+    }
 }
 
 public struct AnimatablePair<First, Second>: VectorArithmetic where First: VectorArithmetic, Second: VectorArithmetic {
@@ -32,33 +44,40 @@ public struct AnimatablePair<First, Second>: VectorArithmetic where First: Vecto
         self.second = second
     }
 
+    @inlinable internal subscript() -> (First, Second) {
+      get { return (first, second) }
+      set { (first, second) = newValue }
+    }
+
     public static var zero: AnimatablePair<First, Second> {
-        AnimatablePair<First, Second>(.zero, .zero)
+        return .init(First.zero, Second.zero)
     }
 
     public static func += (lhs: inout AnimatablePair<First, Second>, rhs: AnimatablePair<First, Second>) {
-        lhs = lhs + rhs
+        lhs.first += rhs.first
+        lhs.second += rhs.second
     }
 
     public static func -= (lhs: inout AnimatablePair<First, Second>, rhs: AnimatablePair<First, Second>) {
-        lhs = lhs - rhs
+        lhs.first -= rhs.first
+        lhs.second -= rhs.second
     }
 
     public static func + (lhs: AnimatablePair<First, Second>, rhs: AnimatablePair<First, Second>) -> AnimatablePair<First, Second> {
-        return AnimatablePair<First, Second>(lhs.first + rhs.first, lhs.second + rhs.second)
+        return .init(lhs.first + rhs.first, lhs.second + rhs.second)
     }
 
     public static func - (lhs: AnimatablePair<First, Second>, rhs: AnimatablePair<First, Second>) -> AnimatablePair<First, Second> {
-        return AnimatablePair<First, Second>(lhs.first - rhs.first, lhs.second - rhs.second)
+        return .init(lhs.first - rhs.first, lhs.second - rhs.second)
     }
 
     public mutating func scale(by rhs: Double) {
-        self.first.scale(by: rhs)
-        self.second.scale(by: rhs)
+        first.scale(by: rhs)
+        second.scale(by: rhs)
     }
 
     public var magnitudeSquared: Double {
-        self.first.magnitudeSquared + self.second.magnitudeSquared
+        return first.magnitudeSquared + second.magnitudeSquared
     }
 }
 
