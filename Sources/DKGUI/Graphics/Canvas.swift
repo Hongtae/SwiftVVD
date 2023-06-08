@@ -53,7 +53,7 @@ class CanvasContext<Symbols>: ViewProxy where Symbols: View {
     typealias Content = Canvas<Symbols>
     var view: _GraphValue<Content>
     
-    var modifiers: [any ViewModifier]
+    var modifiers: [ObjectIdentifier: any ViewModifier]
     var environmentValues: EnvironmentValues
     var sharedContext: SharedContext
     var layoutOffset: CGPoint
@@ -85,8 +85,12 @@ class CanvasContext<Symbols>: ViewProxy where Symbols: View {
         }
     }
 
+    func modifier<K>(key: K.Type) -> K? where K : ViewModifier {
+        modifiers[ObjectIdentifier(key)] as? K
+    }
+
     func updateEnvironment(_ environmentValues: EnvironmentValues) {
-        self.environmentValues = environmentValues._resolve(modifiers: modifiers)
+        //self.environmentValues = environmentValues._resolve(modifiers: modifiers)
         // TODO: redraw!
     }
 }

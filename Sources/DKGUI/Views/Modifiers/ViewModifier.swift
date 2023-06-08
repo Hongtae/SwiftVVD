@@ -44,7 +44,7 @@ extension ViewModifier where Self.Body == Never {
 extension ViewModifier {
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
         var inputs = inputs
-        inputs.modifiers.append(modifier.value)
+        inputs.modifiers[ObjectIdentifier(Self.self)] = modifier.value
         let makeView: _ViewOutputs.MakeView = {
             let body = modifier.value.body(content: Content(makeView: body))
             let outputs = Self.Body._makeView(view: _GraphValue(body), inputs: inputs)
@@ -54,7 +54,7 @@ extension ViewModifier {
     }
     public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
         var inputs = inputs
-        inputs.inputs.modifiers.append(modifier.value)
+        inputs.inputs.modifiers[ObjectIdentifier(Self.self)] = modifier.value
         let body = modifier.value.body(content: Content(makeViewList: body))
         let outputs = Self.Body._makeViewList(view: _GraphValue(body), inputs: inputs)
         return _ViewListOutputs(item: .viewList([outputs]))

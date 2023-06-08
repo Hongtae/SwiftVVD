@@ -31,25 +31,27 @@ extension _VariadicView_Children: RandomAccessCollection {
         }
         public subscript<Trait>(key: Trait.Type) -> Trait.Value where Trait: _ViewTraitKey {
             get {
-                for t in traits where t is _TraitWritingModifier<Trait> {
-                    return (t as! _TraitWritingModifier<Trait>).value
+                typealias Modifier = _TraitWritingModifier<Trait>
+                if let trait = traits[ObjectIdentifier(Modifier.self)] as? Modifier {
+                    return trait.value
                 }
                 return Trait.defaultValue
             }
             set {
-                fatalError()
+                typealias Modifier = _TraitWritingModifier<Trait>
+                traits[ObjectIdentifier(Modifier.self)] = Modifier(value: newValue)
             }
         }
         public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
             var inputs = inputs
-            inputs.modifiers.append(contentsOf: view[\.traits].value)
+            //inputs.modifiers.append(contentsOf: view[\.traits].value)
             return AnyView._makeView(view: view[\.view], inputs: inputs)
         }
         public typealias ID = AnyHashable
         public typealias Body = Never
 
         let view: AnyView
-        var traits: [any ViewModifier]
+        var traits: [ObjectIdentifier: any ViewModifier]
         var viewID: AnyHashable
     }
     public var startIndex: Int { elements.startIndex }
@@ -154,7 +156,7 @@ extension _VariadicView.Tree: View where Root: _VariadicView_ViewRoot, Content: 
             return Content._makeViewList(view: content, inputs: listInputs)
         }
     }
-
+    
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
         Root._makeViewList(root: view[\.root], inputs: inputs) {
             graph, inputs in
@@ -166,13 +168,17 @@ extension _VariadicView.Tree: View where Root: _VariadicView_ViewRoot, Content: 
 extension _VariadicView {
     class RootViewProxy<Root, Content>: ViewProxy where _VariadicView.Tree<Root, Content>: View {
         var view: _GraphValue<Tree<Root, Content>>
-        var modifiers: [any ViewModifier]
+        var modifiers: [ObjectIdentifier: any ViewModifier]
         var environmentValues: EnvironmentValues
         var sharedContext: SharedContext
 
         var layoutOffset: CGPoint = .zero
         var layoutSize: CGSize = .zero
         var contentScaleFactor: CGFloat = 1
+
+        func modifier<K>(key: K.Type) -> K? where K : ViewModifier {
+            modifiers[ObjectIdentifier(key)] as? K
+        }
 
         func layout(offset: CGPoint, size: CGSize, scaleFactor: CGFloat) {
         }

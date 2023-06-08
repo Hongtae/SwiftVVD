@@ -136,7 +136,7 @@ extension Text {
 
 class TextContext: ViewProxy {
     var view: _GraphValue<Text>
-    var modifiers: [any ViewModifier]
+    var modifiers: [ObjectIdentifier: any ViewModifier]
     var environmentValues: EnvironmentValues
     var sharedContext: SharedContext
     var layoutOffset: CGPoint
@@ -169,8 +169,12 @@ class TextContext: ViewProxy {
         }
     }
 
+    func modifier<K>(key: K.Type) -> K? where K : ViewModifier {
+        modifiers[ObjectIdentifier(key)] as? K
+    }
+
     func updateEnvironment(_ environmentValues: EnvironmentValues) {
-        self.environmentValues = environmentValues._resolve(modifiers: modifiers)
+        //self.environmentValues = environmentValues._resolve(modifiers: modifiers)
         // TODO: redraw
     }
 }

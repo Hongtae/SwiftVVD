@@ -90,7 +90,9 @@ extension EnvironmentValues {
 protocol ViewProxy: AnyObject {
     associatedtype Content: View
     var view: _GraphValue<Content> { get }
-    var modifiers: [any ViewModifier] { get }
+
+    func modifier<K>(key: K.Type) -> K? where K: ViewModifier
+
     var environmentValues: EnvironmentValues { get }
     var sharedContext: SharedContext { get }
 
@@ -128,11 +130,10 @@ extension ViewProxy {
 }
 
 extension ViewProxy {
+    //func modifier<K>(key: K.Type) -> K? where K: ViewModifier { nil }
     func trait<Trait>(_ key: Trait.Type) -> Trait.Value where Trait: _ViewTraitKey {
-        for modifier in modifiers {
-            if let trait = modifier as? _TraitWritingModifier<Trait> {
-                return trait.value
-            }
+        if let trait = modifier(key: _TraitWritingModifier<Trait>.self) {
+            return trait.value
         }
         return Trait.defaultValue
     }
@@ -141,7 +142,7 @@ extension ViewProxy {
 class ViewContext<Content>: ViewProxy where Content: View {
     var view: _GraphValue<Content>
     var subviews: [any ViewProxy]
-    var modifiers: [any ViewModifier]
+    var modifiers: [ObjectIdentifier: any ViewModifier]
     var environmentValues: EnvironmentValues
     var sharedContext: SharedContext
 
@@ -203,8 +204,12 @@ class ViewContext<Content>: ViewProxy where Content: View {
         }
     }
 
+    func modifier<K>(key: K.Type) -> K? where K: ViewModifier {
+        modifiers[ObjectIdentifier(key)] as? K
+    }
+
     func updateEnvironment(_ environmentValues: EnvironmentValues) {
-        self.environmentValues = environmentValues._resolve(modifiers: modifiers)
+        //self.environmentValues = environmentValues._resolve(modifiers: modifiers)
         self.subviews.forEach { $0.updateEnvironment(self.environmentValues) }
     }
 }

@@ -160,7 +160,6 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
 
         let graph = _GraphValue(content)
         let viewInputs = _ViewInputs(sharedContext: self.sharedContext,
-                                     modifiers: [],
                                      environmentValues: self.environmentValues,
                                      transform: .identity,
                                      position: .zero,

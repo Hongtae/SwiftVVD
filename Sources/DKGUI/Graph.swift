@@ -22,7 +22,7 @@ public struct _ViewInputs {
     let sharedContext: SharedContext
 
     var preferences: [String?: Any] = [:]
-    var modifiers: [any ViewModifier]
+    var modifiers: [ObjectIdentifier: any ViewModifier] = [:]
     var environmentValues: EnvironmentValues
 
     var transform: CGAffineTransform
