@@ -10,23 +10,28 @@ import Foundation
 public struct _OverlayModifier<Overlay>: ViewModifier where Overlay: View {
     public typealias Body = Never
 
-    let overlay: Overlay
-    let alignment: Alignment
+    public let overlay: Overlay
+    public let alignment: Alignment
+
+    @inlinable public init(overlay: Overlay, alignment: Alignment = .center) {
+        self.overlay = overlay
+        self.alignment = alignment
+    }
+
+    public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
+        fatalError()
+    }
+}
+
+extension _OverlayModifier: Equatable where Overlay: Equatable {
 }
 
 extension View {
-    public func border<S>(_ content: S,
-                          width: CGFloat = 1) -> some View where S: ShapeStyle {
+    @inlinable public func overlay<Overlay>(_ overlay: Overlay, alignment: Alignment = .center) -> some View where Overlay: View {
+        return modifier(_OverlayModifier(overlay: overlay, alignment: alignment))
+    }
 
-        let strokeStyle = StrokeStyle()
-        let strokeShape = Rectangle._Inset(amount: width * 0.5)
-
-        let shape = _StrokedShape(shape: strokeShape, style: strokeStyle)
-        let overlay = _ShapeView(shape: shape,
-                                 style: content,
-                                 fillStyle: FillStyle(eoFill: false, antialiased: true))
-
-        let modifier = _OverlayModifier(overlay: overlay, alignment: .center)
-        return self.modifier(modifier)
+    @inlinable public func border<S>(_ content: S, width: CGFloat = 1) -> some View where S: ShapeStyle {
+        return overlay(Rectangle().strokeBorder(content, lineWidth: width))
     }
 }

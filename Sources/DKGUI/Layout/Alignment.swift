@@ -47,7 +47,7 @@ public struct VerticalAlignment: Equatable {
     public static let lastTextBaseline = VerticalAlignment(alignmentKey: 17)
 }
 
-public struct Alignment {
+public struct Alignment: Equatable {
     public var horizontal: HorizontalAlignment
     public var vertical: VerticalAlignment
 

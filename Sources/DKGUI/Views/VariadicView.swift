@@ -23,33 +23,34 @@ public struct _VariadicView_Children: View {
 
 extension _VariadicView_Children: RandomAccessCollection {
     public struct Element: View, Identifiable {
-        public var body: Never
-
         public var id: AnyHashable {
-            get {
-                fatalError()
-            }
+            viewID
         }
         public func id<ID>(as _: ID.Type = ID.self) -> ID? where ID: Hashable {
-            fatalError()
+            nil
         }
         public subscript<Trait>(key: Trait.Type) -> Trait.Value where Trait: _ViewTraitKey {
             get {
-                fatalError()
+                for t in traits where t is _TraitWritingModifier<Trait> {
+                    return (t as! _TraitWritingModifier<Trait>).value
+                }
+                return Trait.defaultValue
             }
             set {
                 fatalError()
             }
         }
         public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-            fatalError()
+            var inputs = inputs
+            inputs.modifiers.append(contentsOf: view[\.traits].value)
+            return AnyView._makeView(view: view[\.view], inputs: inputs)
         }
         public typealias ID = AnyHashable
         public typealias Body = Never
 
         let view: AnyView
         var traits: [any ViewModifier]
-        var viewID: any Hashable
+        var viewID: AnyHashable
     }
     public var startIndex: Int { elements.startIndex }
     public var endIndex: Int { elements.endIndex }

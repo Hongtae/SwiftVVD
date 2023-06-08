@@ -25,17 +25,40 @@ public struct Rectangle: Shape {
     }
 }
 
-extension Rectangle {
-    struct _Inset: Shape {
-        typealias AnimatableData = EmptyAnimatableData
-        typealias Body = Never
+extension Rectangle: InsettableShape {
+    @inlinable public func inset(by amount: CGFloat) -> some InsettableShape {
+        return _Inset(amount: amount)
+    }
 
-        let amount: CGFloat
-
-        var animatableData: AnimatableData {
-            get { .init() }
-            set { }
+    @usableFromInline
+    struct _Inset: InsettableShape {
+        @usableFromInline
+        internal var amount: CGFloat
+        @inlinable internal init(amount: CGFloat) {
+            self.amount = amount
         }
-        var body: Never { neverBody() }
+        @usableFromInline
+        internal func path(in rect: CGRect) -> Path { fatalError() }
+        @usableFromInline
+        internal var animatableData: CGFloat {
+            get { fatalError() }
+            set { fatalError() }
+        }
+        @inlinable internal func inset(by amount: CGFloat) -> _Inset {
+            var copy = self
+            copy.amount += amount
+            return copy
+        }
+        @usableFromInline
+        internal typealias AnimatableData = CGFloat
+        @usableFromInline
+        internal typealias Body = _ShapeView<_Inset, ForegroundStyle>
+        @usableFromInline
+        internal typealias InsetShape = _Inset
+
+        @usableFromInline
+        internal var body: _ShapeView<_Inset, ForegroundStyle> {
+            _ShapeView<_Inset, ForegroundStyle>(shape: self, style: ForegroundStyle())
+        }
     }
 }
