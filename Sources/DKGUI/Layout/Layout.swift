@@ -235,6 +235,6 @@ struct _LayoutRoot<L>: _VariadicView.UnaryViewRoot where L: Layout {
     init(_ layout: L) { self.layout = layout }
 
     public static func _makeView(root: _GraphValue<Self>, inputs: _ViewInputs, body: (_Graph, _ViewInputs) -> _ViewListOutputs) -> _ViewOutputs {
-        fatalError()
+        return _ViewOutputs(item: .layout(root.value.layout, body(_Graph(), inputs)))
     }
 }

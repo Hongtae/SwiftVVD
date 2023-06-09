@@ -166,7 +166,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                                      size: self.state.bounds.size,
                                      safeAreaInsets: EdgeInsets())
         let viewOutputs = Content._makeView(view: graph, inputs: viewInputs)
-        self.viewProxy = viewOutputs.makeView()
+        self.viewProxy = viewOutputs.view
     }
 
     deinit {

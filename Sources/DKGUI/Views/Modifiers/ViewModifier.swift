@@ -45,12 +45,9 @@ extension ViewModifier {
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
         var inputs = inputs
         inputs.modifiers[ObjectIdentifier(Self.self)] = modifier.value
-        let makeView: _ViewOutputs.MakeView = {
-            let body = modifier.value.body(content: Content(makeView: body))
-            let outputs = Self.Body._makeView(view: _GraphValue(body), inputs: inputs)
-            return outputs.makeView()
-        }
-        return _ViewOutputs(makeView: makeView)
+
+        let body = modifier.value.body(content: Content(makeView: body))
+        return Self.Body._makeView(view: _GraphValue(body), inputs: inputs)
     }
     public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
         var inputs = inputs
@@ -67,12 +64,7 @@ extension ViewModifier where Self: _GraphInputsModifier, Self.Body == Never {
         var graphInputs = _GraphInputs(environmentValues: inputs.environmentValues)
         Self._makeInputs(modifier: modifier, inputs: &graphInputs)
         inputs.environmentValues = graphInputs.environmentValues
-
-        let makeView: _ViewOutputs.MakeView = {
-            let outputs = body(_Graph(), inputs)
-            return outputs.makeView()
-        }
-        return _ViewOutputs(makeView: makeView)
+        return body(_Graph(), inputs)
     }
     public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
         var inputs = inputs

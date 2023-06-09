@@ -33,10 +33,16 @@ public struct _ViewInputs {
 
 public struct _ViewOutputs {
     var preferences: [String?: Any] = [:]
-    //var _layoutComputer: Any? = nil
 
-    typealias MakeView = ()-> any ViewProxy
-    var makeView: MakeView
+    enum Item {
+        case view(_: any ViewProxy)
+        case layout(_: any Layout, _: _ViewListOutputs)
+    }
+    let item: Item
+    var view: any ViewProxy {
+        if case let .view(view) = item { return view }
+        fatalError()
+    }
 }
 
 public struct _ViewListInputs {
@@ -46,24 +52,26 @@ public struct _ViewListInputs {
 public struct _ViewListOutputs {
     var preferences: [String?: Any] = [:]
 
-    typealias MakeViewList = (_Graph, _ViewListInputs)-> _ViewListOutputs
-    typealias MakeView = (_Graph, _ViewInputs)->_ViewOutputs
+    struct ViewInfo {
+        let view: AnyView
+        let inputs: _ViewInputs
+    }
+
     enum Item {
-        case makeView(_: MakeView)
+        case view(_: ViewInfo)
         case viewList(_: [_ViewListOutputs])
     }
     var item: Item
 
-    func makeViews(inputs: _ViewInputs)->[_ViewOutputs] {
-        var list: [_ViewOutputs] = []
-        if case let .makeView(mk) = item {
-            list.append(mk(_Graph(), inputs))
-        } else if case let .viewList(vl) = item {
-            list.append(contentsOf: vl.map {
-                $0.makeViews(inputs: inputs)
-            }.joined())
+    var views: [ViewInfo] {
+        var outputs: [ViewInfo] = []
+        if case let .view(view) = item {
+            outputs.append(view)
         }
-        return list
+        if case let .viewList(list) = item {
+            outputs.append(contentsOf: list.flatMap { $0.views } )
+        }
+        return outputs
     }
 }
 

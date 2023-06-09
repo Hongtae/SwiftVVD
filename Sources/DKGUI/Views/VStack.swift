@@ -15,10 +15,11 @@ public struct VStack<Content>: View where Content: View {
         _tree = .init(
             root: _VStackLayout(alignment: alignment, spacing: spacing), content: content())
     }
-}
 
-extension VStack: _PrimitiveView {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         _VariadicView.Tree<_VStackLayout, Content>._makeView(view: view[\._tree], inputs: inputs)
     }
+}
+
+extension VStack: _PrimitiveView {
 }

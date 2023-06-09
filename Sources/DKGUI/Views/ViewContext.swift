@@ -130,7 +130,6 @@ extension ViewProxy {
 }
 
 extension ViewProxy {
-    //func modifier<K>(key: K.Type) -> K? where K: ViewModifier { nil }
     func trait<Trait>(_ key: Trait.Type) -> Trait.Value where Trait: _ViewTraitKey {
         if let trait = modifier(key: _TraitWritingModifier<Trait>.self) {
             return trait.value
@@ -153,7 +152,7 @@ class ViewContext<Content>: ViewProxy where Content: View {
     var layout: AnyLayout
     var layoutCache: AnyLayout.Cache?
 
-    init(view: _GraphValue<Content>, inputs: _ViewInputs, outputs: _ViewListOutputs? = nil) {
+    init(view: _GraphValue<Content>, inputs: _ViewInputs, outputs: _ViewListOutputs? = nil, layout: (any Layout)? = nil) {
         let modifiers = inputs.modifiers
         self.environmentValues = inputs.environmentValues
         self.view = self.environmentValues._resolve(view)
@@ -161,12 +160,22 @@ class ViewContext<Content>: ViewProxy where Content: View {
         self.sharedContext = inputs.sharedContext
 
         if let outputs {
-            let makeViews = outputs.makeViews(inputs: inputs)
-            self.subviews = makeViews.map { $0.makeView() }
+            let viewOutputs = outputs.views.map {
+                $0.view.makeView(graph: _Graph(), inputs: $0.inputs)
+            }
+            self.subviews = viewOutputs.compactMap {
+                if case let .view(view) = $0.item { return view }
+                return nil
+            }
         } else {
             self.subviews = []
         }
-        self.layout = .init(_VStackLayout())
+
+        if let layout {
+            self.layout = AnyLayout(layout)
+        } else {
+            self.layout = AnyLayout(_VStackLayout())
+        }
         self.layoutCache = nil
     }
 

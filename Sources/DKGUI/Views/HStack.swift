@@ -15,10 +15,11 @@ public struct HStack<Content>: View where Content: View {
         _tree = .init(
             root: _HStackLayout(alignment: alignment, spacing: spacing), content: content())
     }
-}
 
-extension HStack: _PrimitiveView {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         _VariadicView.Tree<_HStackLayout, Content>._makeView(view: view[\._tree], inputs: inputs)
     }
+}
+
+extension HStack: _PrimitiveView {
 }

@@ -181,9 +181,7 @@ class TextContext: ViewProxy {
 
 extension Text: _PrimitiveView {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let makeView: _ViewOutputs.MakeView = {
-            TextContext(view: view, inputs: inputs)
-        }
-        return _ViewOutputs(makeView: makeView)
+        let view = TextContext(view: view, inputs: inputs)
+        return _ViewOutputs(item: .view(view))
     }
 }

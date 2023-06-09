@@ -15,10 +15,11 @@ public struct ZStack<Content>: View where Content: View {
         _tree = .init(
             root: _ZStackLayout(alignment: alignment), content: content())
     }
-}
 
-extension ZStack: _PrimitiveView {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         _VariadicView.Tree<_ZStackLayout, Content>._makeView(view: view[\._tree], inputs: inputs)
     }
+}
+
+extension ZStack: _PrimitiveView {
 }

@@ -37,3 +37,6 @@ public struct VStackLayout: Layout {
 public typealias _VStackLayout = VStackLayout
 extension _VStackLayout: _VariadicView_UnaryViewRoot {
 }
+
+extension _VStackLayout: _VariadicView_ViewRoot {
+}

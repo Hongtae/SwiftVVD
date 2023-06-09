@@ -19,19 +19,15 @@ extension View {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         let listInputs = _ViewListInputs(inputs: inputs)
         let listOutputs = Self._makeViewList(view: view, inputs: listInputs)
-        let makeView: _ViewOutputs.MakeView = {
-            ViewContext(view: view, inputs: inputs, outputs: listOutputs)
-        }
-        return _ViewOutputs(makeView: makeView)
+        let view = ViewContext(view: view, inputs: inputs, outputs: listOutputs)
+        return _ViewOutputs(item: .view(view))
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
         let body = view[\.body]
-        if body.value is _PrimitiveView {
-            let makeView: _ViewListOutputs.MakeView = { graph, inputs in
-                Self.Body._makeView(view: body, inputs: inputs)
-            }
-            return _ViewListOutputs(item: .makeView(makeView))
+        if _isPrimitiveView(body.value) {
+            let inputs: _ViewInputs = inputs.inputs
+            return _ViewListOutputs(item: .view(.init(view: AnyView(body.value), inputs: inputs)))
         }
         return Self.Body._makeViewList(view: body, inputs: inputs)
     }
@@ -56,6 +52,13 @@ protocol _PrimitiveView {
 
 extension _PrimitiveView {
     public typealias Body = Never
+}
+
+extension View {
+    static func _isPrimitiveView(_ view: any View) -> Bool {
+        if let view = view as? AnyView { return view.view is _PrimitiveView }
+        return view is _PrimitiveView
+    }
 }
 
 //MARK: - View with ID

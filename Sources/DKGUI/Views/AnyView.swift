@@ -51,10 +51,16 @@ struct AnyViewBoxType<T>: AnyViewStorageBase where T: View {
 public struct AnyView: View {
     public typealias Body = Never
 
+    var view: any View { storage.view }
+
     let storage: any AnyViewStorageBase
 
     public init<V>(_ view: V) where V: View {
-        self.storage = AnyViewBoxType(view)
+        if let view = view as? AnyView {
+            self.storage = view.storage
+        } else {
+            self.storage = AnyViewBoxType(view)
+        }
     }
 
     public init<V>(erasing view: V) where V: View {
@@ -65,21 +71,26 @@ public struct AnyView: View {
         guard let view = value as? any View else {
             return nil
         }
-        self.storage = AnyViewBox(view)
+        if let view = value as? AnyView {
+            self.storage = view.storage
+        } else {
+            self.storage = AnyViewBox(view)
+        }
     }
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let storage = view[\.storage].value
-        return storage.makeView(graph: _Graph(), inputs: inputs)
+        view.value.makeView(graph: _Graph(), inputs: inputs)
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        let storage = view[\.storage].value
-        if storage.view is _PrimitiveView {
-            return _ViewListOutputs(item: .makeView({ graph, inputs in
-                storage.makeView(graph: graph, inputs: inputs)
-            }))
-        }
+        view.value.makeViewList(graph: _Graph(), inputs: inputs)
+    }
+    
+    func makeView(graph: _Graph, inputs: _ViewInputs)->_ViewOutputs {
+        return storage.makeView(graph: _Graph(), inputs: inputs)
+    }
+
+    func makeViewList(graph: _Graph, inputs: _ViewListInputs)->_ViewListOutputs {
         return storage.makeViewList(graph: _Graph(), inputs: inputs)
     }
 }
