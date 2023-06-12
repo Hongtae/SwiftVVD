@@ -50,7 +50,9 @@ extension Layout {
 
     public func spacing(subviews: Self.Subviews,
                         cache: inout Self.Cache) -> ViewSpacing {
-        .init()
+        subviews.reduce(ViewSpacing()) { spacing, subview in
+            spacing.union(subview.spacing, edges: .all)
+        }
     }
 }
 

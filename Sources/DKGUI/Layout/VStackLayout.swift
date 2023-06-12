@@ -31,6 +31,18 @@ public struct VStackLayout: Layout {
     }
 
     public func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout _StackLayoutCache) {
+        var offset = bounds.origin
+        let width = bounds.width
+        let height = bounds.height
+
+        let count = subviews.count
+
+        for view in subviews {
+            let layoutSize = view.sizeThatFits(proposal)
+            let h = height / CGFloat(count)
+            view.place(at: offset, proposal: ProposedViewSize(width: layoutSize.width, height: h))
+            offset.y += h
+        }
     }
 }
 

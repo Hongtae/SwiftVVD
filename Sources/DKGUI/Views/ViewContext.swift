@@ -189,11 +189,14 @@ class ViewContext<Content>: ViewProxy where Content: View {
         self.drawBackground(frame: frame, context: context)
 
         self.subviews.forEach { view in
+            guard view.layoutSize.width > 0 && view.layoutSize.height > 0 else {
+                return
+            }
+
             let viewFrame = CGRect(origin: view.layoutOffset, size: view.layoutSize)
                 .offsetBy(dx: frame.minX, dy: frame.minY)
             var graphicsContext = context
             graphicsContext.environment = view.environmentValues
-            graphicsContext.contentOffset += view.layoutOffset
             view.draw(frame: viewFrame, context: graphicsContext)
         }
         self.drawOverlay(frame: frame, context: context)
@@ -205,7 +208,43 @@ class ViewContext<Content>: ViewProxy where Content: View {
         self.contentScaleFactor = scaleFactor
 
         if self.subviews.count > 1 {
-            // perform layout!
+            let containerSize = self.layoutSize
+            let subviews: [LayoutSubview] = self.subviews.map {
+                LayoutSubview(viewProxy: $0, containerSize: containerSize)
+            }
+            let layoutSubviews = AnyLayout.Subviews(subviews: subviews, layoutDirection: .leftToRight)
+
+            if var cache = self.layoutCache {
+                self.layout.updateCache(&cache, subviews: layoutSubviews)
+            } else {
+                self.layoutCache = self.layout.makeCache(subviews: layoutSubviews)
+            }
+            if var cache = self.layoutCache {
+                let proposed = ProposedViewSize(self.layoutSize)
+                let size = self.layout.sizeThatFits(proposal: proposed,
+                                                    subviews: layoutSubviews,
+                                                    cache: &cache)
+                let halign: HorizontalAlignment = .leading
+                let valign: VerticalAlignment = .top
+                let xmargin = self.layout.explicitAlignment(of: halign,
+                                                            in: CGRect(origin: self.layoutOffset, size: self.layoutSize),
+                                                            proposal: proposed,
+                                                            subviews: layoutSubviews,
+                                                            cache: &cache)
+                let ymargin = self.layout.explicitAlignment(of: valign,
+                                                            in: CGRect(origin: self.layoutOffset, size: self.layoutSize),
+                                                            proposal: proposed,
+                                                            subviews: layoutSubviews,
+                                                            cache: &cache)
+                self.layout.placeSubviews(in: CGRect(origin: self.layoutOffset,
+                                                     size: self.layoutSize),
+                                          proposal: proposed,
+                                          subviews: layoutSubviews,
+                                          cache: &cache)
+                self.layoutCache = cache
+            } else {
+                Log.error("Invalid layout cache")
+            }
         } else if let first = self.subviews.first {
             first.layout(offset: .zero,
                          size: self.layoutSize,
