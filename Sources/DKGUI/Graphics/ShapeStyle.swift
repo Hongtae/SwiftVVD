@@ -6,7 +6,15 @@
 //
 
 public protocol ShapeStyle {
+    func _apply(to shape: inout _ShapeStyle_Shape)
+    static func _apply(to type: inout _ShapeStyle_ShapeType)
+}
 
+extension ShapeStyle {
+    public func _apply(to shape: inout _ShapeStyle_Shape) {
+    }
+    public static func _apply(to type: inout _ShapeStyle_ShapeType) {
+    }
 }
 
 public struct ForegroundStyle: ShapeStyle {
@@ -44,4 +52,46 @@ extension ShapeStyle where Self == Color {
     public static var gray: Color   { .gray }
     public static var black: Color  { .black }
     public static var clear: Color  { .clear }
+}
+
+public struct _ShapeStyle_Shape {
+}
+
+public struct _ShapeStyle_ShapeType {
+}
+
+public struct AnyShapeStyle: ShapeStyle {
+    @usableFromInline
+    struct Storage: Equatable {
+        var box: AnyShapeStyleBox
+        @usableFromInline
+        static func == (lhs: AnyShapeStyle.Storage, rhs: AnyShapeStyle.Storage) -> Bool {
+            lhs.box === rhs.box
+        }
+    }
+    var storage: Storage
+    public init<S>(_ style: S) where S: ShapeStyle {
+        self.storage = Storage(box: AnyShapeStyleBox(style: style))
+    }
+
+    public func _apply(to shape: inout _ShapeStyle_Shape) {
+        storage.box._apply(to: &shape)
+    }
+
+    public static func _apply(to type: inout _ShapeStyle_ShapeType) {
+
+    }
+}
+
+class AnyShapeStyleBox {
+    let style: any ShapeStyle
+    init<S>(style: S) where S: ShapeStyle {
+        self.style = style
+    }
+
+    func _apply(to shape: inout _ShapeStyle_Shape) {
+    }
+
+    static func _apply(to type: inout _ShapeStyle_ShapeType) {
+    }
 }
