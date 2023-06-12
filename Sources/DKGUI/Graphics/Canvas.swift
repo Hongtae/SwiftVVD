@@ -74,6 +74,7 @@ class CanvasContext<Symbols>: ViewProxy where Symbols: View {
         self.layoutOffset = offset
         self.layoutSize = size
         self.contentScaleFactor = scaleFactor
+        self.environmentValues.displayScale = scaleFactor
     }
 
     func draw(frame: CGRect, context: GraphicsContext) {

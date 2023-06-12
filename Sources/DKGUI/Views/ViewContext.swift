@@ -210,7 +210,7 @@ class ViewContext<Content>: ViewProxy where Content: View {
         if self.subviews.count > 1 {
             let containerSize = self.layoutSize
             let subviews: [LayoutSubview] = self.subviews.map {
-                LayoutSubview(viewProxy: $0, containerSize: containerSize)
+                LayoutSubview(viewProxy: $0, containerSize: containerSize, contentScaleFactor: scaleFactor)
             }
             let layoutSubviews = AnyLayout.Subviews(subviews: subviews, layoutDirection: .leftToRight)
 

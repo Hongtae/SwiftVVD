@@ -40,7 +40,7 @@ public struct LayoutSubview: Equatable {
         let py = containerSize.height * anchor.y
         let offset = CGPoint(x: px + position.x, y: py + position.y)
         let size = proposal.replacingUnspecifiedDimensions(by: viewProxy.layoutSize)
-        let scale = viewProxy.contentScaleFactor
+        let scale = self.contentScaleFactor
         viewProxy.layout(offset: offset, size: size, scaleFactor: scale)
     }
 
@@ -50,9 +50,11 @@ public struct LayoutSubview: Equatable {
 
     let viewProxy: any ViewProxy
     let containerSize: CGSize
-    init(viewProxy: any ViewProxy, containerSize: CGSize) {
+    let contentScaleFactor: CGFloat
+    init(viewProxy: any ViewProxy, containerSize: CGSize, contentScaleFactor: CGFloat) {
         self.viewProxy = viewProxy
         self.containerSize = containerSize
+        self.contentScaleFactor = contentScaleFactor
     }
 }
 

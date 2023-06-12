@@ -151,6 +151,10 @@ class TextContext: ViewProxy {
         self.layoutOffset = .zero
         self.layoutSize = .zero
         self.contentScaleFactor = 1
+
+        if self.environmentValues.font == nil {
+            self.environmentValues.font = .system(.title)
+        }
     }
 
     func layout(offset: CGPoint, size: CGSize, scaleFactor: CGFloat) {
@@ -158,6 +162,7 @@ class TextContext: ViewProxy {
         self.layoutSize = size
         if scaleFactor != self.contentScaleFactor {
             self.contentScaleFactor = scaleFactor
+            self.environmentValues.displayScale = scaleFactor
         }
     }
 
