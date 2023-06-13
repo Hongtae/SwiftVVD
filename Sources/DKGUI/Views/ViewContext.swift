@@ -194,7 +194,9 @@ class ViewContext<Content>: ViewProxy where Content: View {
             }
 
             let viewFrame = CGRect(origin: view.layoutOffset, size: view.layoutSize)
-                .offsetBy(dx: frame.minX, dy: frame.minY)
+            if frame.intersection(viewFrame).isNull {
+                return
+            }
             var graphicsContext = context
             graphicsContext.environment = view.environmentValues
             view.draw(frame: viewFrame, context: graphicsContext)
