@@ -168,7 +168,8 @@ extension GraphicsContext {
         var lines: [ResolvedText.Line] = []
         var ellipsis: [ResolvedText.Glyph] = []
         var ellipsisBaseline: CGFloat = 0
-        let displayScale = self.environment.displayScale
+        //let displayScale = self.environment.displayScale
+        let displayScale = self.sharedContext.contentScaleFactor
         assert(displayScale > .ulpOfOne)
         let font = (text.font ?? self.environment.font)?
             .displayScale(displayScale)
@@ -295,6 +296,13 @@ extension GraphicsContext {
         let rect = rect.standardized
         if rect.isEmpty { return }
 
+        let x = Int(rect.origin.x * self.contentScaleFactor)
+        let y = Int(rect.origin.y * self.contentScaleFactor)
+        let width = Int(rect.width * self.contentScaleFactor)
+        let height = Int(rect.height * self.contentScaleFactor)
+
+        if x > Int(self.viewport.maxX) || y > Int(self.viewport.maxY) { return }
+
         var lines = text.lines
         let frame = text.frame
         if rect.size.width < frame.width || rect.size.height < frame.height {
@@ -309,11 +317,6 @@ extension GraphicsContext {
         let transform = CGAffineTransform(translationX: rect.origin.x,
                                           y: rect.origin.y)
         let measure = text.measure(in: rect.size)
- 
-        let x = Int(rect.origin.x * self.contentScaleFactor)
-        let y = Int(rect.origin.y * self.contentScaleFactor)
-        let width = Int(rect.width * self.contentScaleFactor)
-        let height = Int(rect.height * self.contentScaleFactor)
 
         if let renderPass = self.beginRenderPass(enableStencil: false) {
             renderPass.encoder.setScissorRect(ScissorRect(x: x, y: y,

@@ -15,17 +15,17 @@ public struct ProposedViewSize: Equatable, Sendable {
     public static let unspecified = ProposedViewSize(width: nil, height: nil)
     public static let infinity = ProposedViewSize(width: .infinity, height: .infinity)
 
-    public init(width: CGFloat? = nil, height: CGFloat? = nil) {
+    @inlinable public init(width: CGFloat? = nil, height: CGFloat? = nil) {
         self.width = width
         self.height = height
     }
 
-    public init(_ size: CGSize) {
+    @inlinable public init(_ size: CGSize) {
         self.width = size.width
         self.height = size.height
     }
 
-    public func replacingUnspecifiedDimensions(by size: CGSize = CGSize(width: 10, height: 10)) -> CGSize {
+    @inlinable public func replacingUnspecifiedDimensions(by size: CGSize = CGSize(width: 10, height: 10)) -> CGSize {
         CGSize(width: self.width ?? size.width, height: self.height ?? size.height)
     }
 }

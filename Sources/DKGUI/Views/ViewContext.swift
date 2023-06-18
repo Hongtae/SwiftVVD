@@ -25,12 +25,19 @@ class SharedContext {
     var window: Window?
     var commandQueue: CommandQueue? // render queue for window swap-chain
 
+    var contentBounds: CGRect
+    var contentScaleFactor: CGFloat
+    var needsLayout: Bool
+
     var resourceData: [String: Data] = [:]
     var resourceObjects: [String: AnyObject] = [:]
     var cachedTypeFaces: [Font: TypeFace] = [:]
 
     init(appContext: AppContext) {
         self.appContext = appContext
+        self.contentBounds = .zero
+        self.contentScaleFactor = 1
+        self.needsLayout = true
     }
 
     func updateReferencedResourceObjects() {
@@ -96,20 +103,41 @@ protocol ViewProxy: AnyObject {
     var environmentValues: EnvironmentValues { get }
     var sharedContext: SharedContext { get }
 
-    var layoutOffset: CGPoint { get }
-    var layoutSize: CGSize { get }
-    var contentScaleFactor: CGFloat { get }
+    var frame: CGRect { get set }
+    var spacing: ViewSpacing { get }
 
     func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize
-    func layout(offset: CGPoint, size: CGSize, scaleFactor: CGFloat)
+    func dimensions(in proposal: ProposedViewSize) -> ViewDimensions
+    func place(at position: CGPoint, anchor: UnitPoint, proposal: ProposedViewSize)
+    func layoutSubviews()
+
     func update(tick: UInt64, delta: Double, date: Date)
     func draw(frame: CGRect, context: GraphicsContext)
+
     func updateEnvironment(_ environmentValues: EnvironmentValues)
 }
 
 extension ViewProxy {
+    var spacing: ViewSpacing { .init() }
+
     func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
-        proposal.replacingUnspecifiedDimensions(by: self.layoutSize)
+        proposal.replacingUnspecifiedDimensions()
+    }
+
+    func dimensions(in proposal: ProposedViewSize) -> ViewDimensions {
+        ViewDimensions(width: self.frame.width, height: self.frame.height)
+    }
+
+    func place(at position: CGPoint, anchor: UnitPoint, proposal: ProposedViewSize) {
+        let size = sizeThatFits(proposal)
+        let offset = CGPoint(x: position.x - size.width * anchor.x,
+                             y: position.y - size.height * anchor.y)
+
+        self.frame = CGRect(origin: offset, size: size)
+        self.layoutSubviews()
+    }
+
+    func layoutSubviews() {
     }
 
     func update(tick: UInt64, delta: Double, date: Date) {
@@ -145,9 +173,7 @@ class ViewContext<Content>: ViewProxy where Content: View {
     var environmentValues: EnvironmentValues
     var sharedContext: SharedContext
 
-    var layoutOffset: CGPoint = .zero
-    var layoutSize: CGSize = .zero
-    var contentScaleFactor: CGFloat = 1
+    var frame: CGRect
 
     var layout: AnyLayout
     var layoutCache: AnyLayout.Cache?
@@ -177,6 +203,7 @@ class ViewContext<Content>: ViewProxy where Content: View {
             self.layout = AnyLayout(_VStackLayout())
         }
         self.layoutCache = nil
+        self.frame = .zero
     }
 
     func drawBackground(frame: CGRect, context: GraphicsContext) {
@@ -189,58 +216,83 @@ class ViewContext<Content>: ViewProxy where Content: View {
         self.drawBackground(frame: frame, context: context)
 
         self.subviews.forEach { view in
-            guard view.layoutSize.width > 0 && view.layoutSize.height > 0 else {
+            let width = view.frame.width
+            let height = view.frame.height
+            guard width > 0 && height > 0 else {
                 return
             }
 
-            let viewFrame = CGRect(origin: view.layoutOffset, size: view.layoutSize)
-            if frame.intersection(viewFrame).isNull {
+            if frame.intersection(view.frame).isNull {
                 return
             }
             var graphicsContext = context
             graphicsContext.environment = view.environmentValues
-            view.draw(frame: viewFrame, context: graphicsContext)
+            view.draw(frame: view.frame, context: graphicsContext)
         }
         self.drawOverlay(frame: frame, context: context)
     }
 
-    func layout(offset: CGPoint, size: CGSize, scaleFactor: CGFloat) {
-        self.layoutOffset = offset
-        self.layoutSize = size
-        self.contentScaleFactor = scaleFactor
-
+    func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
         if self.subviews.count > 1 {
-            let containerSize = self.layoutSize
+
             let subviews: [LayoutSubview] = self.subviews.map {
-                LayoutSubview(viewProxy: $0, containerSize: containerSize, contentScaleFactor: scaleFactor)
+                LayoutSubview(view: $0)
             }
             let layoutSubviews = AnyLayout.Subviews(subviews: subviews, layoutDirection: .leftToRight)
 
             if var cache = self.layoutCache {
                 self.layout.updateCache(&cache, subviews: layoutSubviews)
+                self.layoutCache = cache
             } else {
                 self.layoutCache = self.layout.makeCache(subviews: layoutSubviews)
             }
             if var cache = self.layoutCache {
-                let proposed = ProposedViewSize(self.layoutSize)
-                let size = self.layout.sizeThatFits(proposal: proposed,
+                let ret = self.layout.sizeThatFits(proposal: proposal,
+                                                   subviews: layoutSubviews,
+                                                   cache: &cache)
+                self.layoutCache = cache
+                return ret
+            }
+        } else if let first = self.subviews.first {
+            return first.sizeThatFits(proposal)
+        }
+        return proposal.replacingUnspecifiedDimensions()
+    }
+
+    func layoutSubviews() {
+        let frame = self.frame.standardized
+        guard frame.width > 0 && frame.height > 0 else { return }
+
+        if self.subviews.count > 1 {
+            let subviews: [LayoutSubview] = self.subviews.map {
+                LayoutSubview(view: $0)
+            }
+            let layoutSubviews = AnyLayout.Subviews(subviews: subviews, layoutDirection: .leftToRight)
+
+            if var cache = self.layoutCache {
+                self.layout.updateCache(&cache, subviews: layoutSubviews)
+                self.layoutCache = cache
+            } else {
+                self.layoutCache = self.layout.makeCache(subviews: layoutSubviews)
+            }
+            if var cache = self.layoutCache {
+                let proposal = ProposedViewSize(frame.size)
+                let size = self.layout.sizeThatFits(proposal: proposal,
                                                     subviews: layoutSubviews,
                                                     cache: &cache)
-                let halign: HorizontalAlignment = .leading
-                let valign: VerticalAlignment = .top
-                let xmargin = self.layout.explicitAlignment(of: halign,
-                                                            in: CGRect(origin: self.layoutOffset, size: self.layoutSize),
-                                                            proposal: proposed,
-                                                            subviews: layoutSubviews,
-                                                            cache: &cache)
-                let ymargin = self.layout.explicitAlignment(of: valign,
-                                                            in: CGRect(origin: self.layoutOffset, size: self.layoutSize),
-                                                            proposal: proposed,
-                                                            subviews: layoutSubviews,
-                                                            cache: &cache)
-                self.layout.placeSubviews(in: CGRect(origin: self.layoutOffset,
-                                                     size: self.layoutSize),
-                                          proposal: proposed,
+                let halign = self.layout.explicitAlignment(of: HorizontalAlignment.center,
+                                                           in: frame,
+                                                           proposal: proposal,
+                                                           subviews: layoutSubviews,
+                                                           cache: &cache)
+                let valign = self.layout.explicitAlignment(of: VerticalAlignment.center,
+                                                           in: frame,
+                                                           proposal: proposal,
+                                                           subviews: layoutSubviews,
+                                                           cache: &cache)
+                // TODO: calcuate alignment guide.
+                self.layout.placeSubviews(in: frame,
+                                          proposal: proposal,
                                           subviews: layoutSubviews,
                                           cache: &cache)
                 self.layoutCache = cache
@@ -248,9 +300,10 @@ class ViewContext<Content>: ViewProxy where Content: View {
                 Log.error("Invalid layout cache")
             }
         } else if let first = self.subviews.first {
-            first.layout(offset: .zero,
-                         size: self.layoutSize,
-                         scaleFactor: self.contentScaleFactor)
+            first.place(at: .zero,
+                        anchor: .topLeading,
+                        proposal: ProposedViewSize(width: self.frame.width,
+                                                   height: self.frame.height))
         }
     }
 

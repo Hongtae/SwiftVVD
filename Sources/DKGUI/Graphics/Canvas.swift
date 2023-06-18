@@ -50,35 +50,25 @@ extension Canvas where Symbols == EmptyView {
 }
 
 class CanvasContext<Symbols>: ViewProxy where Symbols: View {
+
     typealias Content = Canvas<Symbols>
     var view: _GraphValue<Content>
     
     var modifiers: [ObjectIdentifier: any ViewModifier]
     var environmentValues: EnvironmentValues
     var sharedContext: SharedContext
-    var layoutOffset: CGPoint
-    var layoutSize: CGSize
-    var contentScaleFactor: CGFloat
+    var frame: CGRect
 
     init(view: _GraphValue<Content>, inputs: _ViewInputs) {
         self.modifiers = inputs.modifiers
         self.environmentValues = inputs.environmentValues
         self.view = self.environmentValues._resolve(view)
         self.sharedContext = inputs.sharedContext
-        self.layoutOffset = .zero
-        self.layoutSize = .zero
-        self.contentScaleFactor = 1
-    }
-
-    func layout(offset: CGPoint, size: CGSize, scaleFactor: CGFloat) {
-        self.layoutOffset = offset
-        self.layoutSize = size
-        self.contentScaleFactor = scaleFactor
-        self.environmentValues.displayScale = scaleFactor
+        self.frame = .zero
     }
 
     func draw(frame: CGRect, context: GraphicsContext) {
-        if self.layoutSize.width > 0 && self.layoutSize.height > 0 {
+        if self.frame.width > 0 && self.frame.height > 0 {
             context.drawLayer(in: frame) { context, size in
                 let renderer = self.view[\.renderer].value
                 renderer(&context, size)

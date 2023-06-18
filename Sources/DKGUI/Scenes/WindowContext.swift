@@ -66,15 +66,23 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                 if state.bounds != contentBounds || state.contentScaleFactor != contentScaleFactor {
 
                     if state.contentScaleFactor != contentScaleFactor {
+                        sharedContext.contentScaleFactor = state.contentScaleFactor
                         self.environmentValues.displayScale = state.contentScaleFactor
                         view.updateEnvironment(self.environmentValues)
                     }
 
-                    view.layout(offset: state.bounds.origin,
-                                size: state.bounds.size,
-                                scaleFactor: state.contentScaleFactor)
                     contentBounds = state.bounds
                     contentScaleFactor = state.contentScaleFactor
+
+                    let bounds = state.bounds.standardized
+                    sharedContext.contentBounds = bounds
+                    sharedContext.contentScaleFactor = state.contentScaleFactor
+
+                    view.place(at: bounds.origin, anchor: .topLeading, proposal: ProposedViewSize(bounds.size))
+                }
+                if sharedContext.needsLayout {
+                    sharedContext.needsLayout = false
+                    view.layoutSubviews()
                 }
                 view.update(tick: tick, delta: delta, date: date)
 
@@ -106,7 +114,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                                              width: backBuffer.width,
                                              height: backBuffer.height),
                             contentOffset: contentBounds.origin,
-                            contentScaleFactor: state.contentScaleFactor,
+                            contentScaleFactor: contentScaleFactor,
                             renderTargets: renderTargets,
                             commandBuffer: commandBuffer) {
 

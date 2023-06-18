@@ -41,6 +41,11 @@ extension GraphicsContext {
     }
 
     func drawLayer(in frame: CGRect, content: (inout GraphicsContext, CGSize) throws -> Void) rethrows {
+        if frame.minX > self.viewport.maxX * self.contentScaleFactor ||
+            frame.minY > self.viewport.maxY * self.contentScaleFactor {
+            return
+        }
+
         if var context = self.makeRegionLayerContext(frame) {
             let size = context.resolution / context.contentScaleFactor
             try content(&context, size)

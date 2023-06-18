@@ -10,7 +10,7 @@ import Foundation
 public struct LayoutSubview: Equatable {
 
     public func _trait<K>(key: K.Type) -> K.Value where K : _ViewTraitKey {
-        viewProxy.trait(key)
+        view.trait(key)
     }
 
     public subscript<K>(key: K.Type) -> K.Value where K: LayoutValueKey {
@@ -22,39 +22,28 @@ public struct LayoutSubview: Equatable {
     }
 
     public func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
-        viewProxy.sizeThatFits(proposal)
+        view.sizeThatFits(proposal)
     }
 
     public func dimensions(in proposal: ProposedViewSize) -> ViewDimensions {
-        let layoutSize = viewProxy.layoutSize
-        let size = proposal.replacingUnspecifiedDimensions(by: layoutSize)
-        return .init(height: size.width, width: size.height)
+        view.dimensions(in: proposal)
     }
 
     public var spacing: ViewSpacing {
-        .init()
+        view.spacing
     }
 
     public func place(at position: CGPoint, anchor: UnitPoint = .topLeading, proposal: ProposedViewSize) {
-        let px = containerSize.width * anchor.x
-        let py = containerSize.height * anchor.y
-        let offset = CGPoint(x: px + position.x, y: py + position.y)
-        let size = proposal.replacingUnspecifiedDimensions(by: viewProxy.layoutSize)
-        let scale = self.contentScaleFactor
-        viewProxy.layout(offset: offset, size: size, scaleFactor: scale)
+        view.place(at: position, anchor: anchor, proposal: proposal)
     }
 
     public static func == (a: LayoutSubview, b: LayoutSubview) -> Bool {
-        a.viewProxy === b.viewProxy
+        a.view === b.view
     }
 
-    let viewProxy: any ViewProxy
-    let containerSize: CGSize
-    let contentScaleFactor: CGFloat
-    init(viewProxy: any ViewProxy, containerSize: CGSize, contentScaleFactor: CGFloat) {
-        self.viewProxy = viewProxy
-        self.containerSize = containerSize
-        self.contentScaleFactor = contentScaleFactor
+    let view: any ViewProxy
+    init(view: any ViewProxy) {
+        self.view = view
     }
 }
 

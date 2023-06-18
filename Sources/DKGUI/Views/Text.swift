@@ -139,38 +139,52 @@ class TextContext: ViewProxy {
     var modifiers: [ObjectIdentifier: any ViewModifier]
     var environmentValues: EnvironmentValues
     var sharedContext: SharedContext
-    var layoutOffset: CGPoint
-    var layoutSize: CGSize
-    var contentScaleFactor: CGFloat
+    var frame: CGRect
+
+    var resolvedText: GraphicsContext.ResolvedText?
 
     init(view: _GraphValue<Text>, inputs: _ViewInputs) {
         self.modifiers = inputs.modifiers
         self.environmentValues = inputs.environmentValues
         self.view = self.environmentValues._resolve(view)
         self.sharedContext = inputs.sharedContext
-        self.layoutOffset = .zero
-        self.layoutSize = .zero
-        self.contentScaleFactor = 1
+        self.frame = .zero
 
         if self.environmentValues.font == nil {
-            self.environmentValues.font = .system(.title)
+            self.environmentValues.font = .system(.body)
         }
     }
 
-    func layout(offset: CGPoint, size: CGSize, scaleFactor: CGFloat) {
-        self.layoutOffset = offset
-        self.layoutSize = size
-        if scaleFactor != self.contentScaleFactor {
-            self.contentScaleFactor = scaleFactor
-            self.environmentValues.displayScale = scaleFactor
+    func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
+        if let resolvedText {
+            if proposal == .zero {
+                if let glyph = resolvedText.lines.first?.glyphs.first {
+                    let bounds = GraphicsContext.ResolvedText.Glyph.bounds([glyph])
+                    return CGSize(width: bounds.width, height: bounds.height)
+                } else {
+                    let proposed = proposal.replacingUnspecifiedDimensions()
+                    return resolvedText.measure(in: proposed)
+                }
+            } else if proposal == .infinity {
+                let frame = resolvedText.frame
+                return CGSize(width: frame.maxX, height: frame.maxY)
+            } else {
+                let frame = resolvedText.frame
+                return CGSize(width: frame.maxX, height: frame.maxY)
+            }
         }
+        return proposal.replacingUnspecifiedDimensions()
     }
 
     func draw(frame: CGRect, context: GraphicsContext) {
-        if self.layoutSize.width > 0 && self.layoutSize.height > 0 {
-            context.draw(self.view.value,
-                         in: CGRect(origin: self.layoutOffset,
-                                    size: self.layoutSize))
+        if self.frame.width > 0 && self.frame.height > 0 {
+            if self.resolvedText == nil {
+                self.resolvedText = context.resolve(self.view.value)
+                self.sharedContext.needsLayout = true
+            }
+            if let resolvedText {
+                context.draw(resolvedText, in: frame)
+            }
         }
     }
 

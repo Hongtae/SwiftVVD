@@ -21,4 +21,11 @@ public struct Divider: View {
 
     public init() {
     }
+
+    public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        fatalError()
+    }
+}
+
+extension Divider: _PrimitiveView {
 }
