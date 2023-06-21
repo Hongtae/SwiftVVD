@@ -23,6 +23,7 @@ public struct _ViewInputs {
 
     var preferences: [String?: Any] = [:]
     var modifiers: [ObjectIdentifier: any ViewModifier] = [:]
+    var traits: [ObjectIdentifier: Any] = [:]
     var environmentValues: EnvironmentValues
 
     var transform: CGAffineTransform

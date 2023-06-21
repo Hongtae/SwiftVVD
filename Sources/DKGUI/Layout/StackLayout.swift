@@ -11,5 +11,6 @@ public struct _StackLayoutCache {
     var minSizes: [CGSize] = []
     var maxSizes: [CGSize] = []
     var spacings: [ViewSpacing] = []
+    var priorities: [Double] = []
     var subviewSpacings: CGFloat = .zero
 }

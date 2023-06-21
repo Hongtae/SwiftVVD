@@ -29,6 +29,7 @@ public struct VStackLayout: Layout {
     }
 
     public func updateCache(_ cache: inout Self.Cache, subviews: Subviews) {
+        cache.priorities = subviews.map { $0.priority }
         cache.spacings = subviews.map { $0.spacing }
         cache.minSizes = subviews.map { $0.sizeThatFits(.zero) }
         cache.maxSizes = subviews.map { $0.sizeThatFits(.infinity) }

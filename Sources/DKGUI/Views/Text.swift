@@ -137,6 +137,7 @@ extension Text {
 class TextContext: ViewProxy {
     var view: _GraphValue<Text>
     var modifiers: [ObjectIdentifier: any ViewModifier]
+    var traits: [ObjectIdentifier: Any]
     var environmentValues: EnvironmentValues
     var sharedContext: SharedContext
     var frame: CGRect
@@ -145,6 +146,7 @@ class TextContext: ViewProxy {
 
     init(view: _GraphValue<Text>, inputs: _ViewInputs) {
         self.modifiers = inputs.modifiers
+        self.traits = inputs.traits
         self.environmentValues = inputs.environmentValues
         self.view = self.environmentValues._resolve(view)
         self.sharedContext = inputs.sharedContext
@@ -190,6 +192,10 @@ class TextContext: ViewProxy {
 
     func modifier<K>(key: K.Type) -> K? where K : ViewModifier {
         modifiers[ObjectIdentifier(key)] as? K
+    }
+
+    func trait<Trait>(key: Trait.Type) -> Trait.Value where Trait: _ViewTraitKey {
+        traits[ObjectIdentifier(key)] as? Trait.Value ?? Trait.defaultValue
     }
 
     func updateEnvironment(_ environmentValues: EnvironmentValues) {

@@ -10,7 +10,7 @@ import Foundation
 public struct LayoutSubview: Equatable {
 
     public func _trait<K>(key: K.Type) -> K.Value where K : _ViewTraitKey {
-        view.trait(key)
+        view.trait(key: key)
     }
 
     public subscript<K>(key: K.Type) -> K.Value where K: LayoutValueKey {

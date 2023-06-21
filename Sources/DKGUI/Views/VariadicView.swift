@@ -31,20 +31,19 @@ extension _VariadicView_Children: RandomAccessCollection {
         }
         public subscript<Trait>(key: Trait.Type) -> Trait.Value where Trait: _ViewTraitKey {
             get {
-                typealias Modifier = _TraitWritingModifier<Trait>
-                if let trait = modifiers[ObjectIdentifier(Modifier.self)] as? Modifier {
-                    return trait.value
+                if let value = traits[ObjectIdentifier(key)] {
+                    return value as! Trait.Value
                 }
                 return Trait.defaultValue
             }
             set {
-                typealias Modifier = _TraitWritingModifier<Trait>
-                modifiers[ObjectIdentifier(Modifier.self)] = Modifier(value: newValue)
+                traits[ObjectIdentifier(key)] = newValue
             }
         }
         public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
             var inputs = inputs
-            inputs.modifiers = view.value.modifiers
+            inputs.modifiers.merge(view.value.modifiers) { $1 }
+            inputs.traits.merge(view.value.traits) { $1 }
             return view.value.view.makeView(graph: _Graph(), inputs: inputs)
         }
 
@@ -53,6 +52,7 @@ extension _VariadicView_Children: RandomAccessCollection {
 
         let view: AnyView
         var modifiers: [ObjectIdentifier: any ViewModifier]
+        var traits: [ObjectIdentifier: Any]
         var viewID: AnyHashable
     }
     public var startIndex: Int { elements.startIndex }
@@ -69,6 +69,7 @@ extension _VariadicView_Children: RandomAccessCollection {
         self.elements = content.views.map {
             let element = Element(view: $0.view,
                                   modifiers: $0.inputs.modifiers,
+                                  traits: $0.inputs.traits,
                                   viewID: AnyHashable(index))
             index += 1
             return element

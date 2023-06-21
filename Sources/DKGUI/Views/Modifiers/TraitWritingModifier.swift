@@ -17,11 +17,17 @@ public struct _TraitWritingModifier<Trait>: ViewModifier where Trait: _ViewTrait
     public init(value: Trait.Value) {
         self.value = value
     }
+
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        fatalError()
+        var inputs = inputs
+        inputs.traits[ObjectIdentifier(Self.self)] = modifier.value.value
+        return body(_Graph(), inputs)
     }
+
     public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        fatalError()
+        var inputs = inputs
+        inputs.inputs.traits[ObjectIdentifier(Self.self)] = modifier.value.value
+        return body(_Graph(), inputs)
     }
 
     public typealias Body = Never
