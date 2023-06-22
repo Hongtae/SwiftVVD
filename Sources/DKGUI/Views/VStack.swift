@@ -22,5 +22,8 @@ public struct VStack<Content>: View where Content: View {
     public typealias Body = Never
 }
 
-extension VStack: _PrimitiveView {
+extension VStack: PrimitiveView {
+}
+
+extension VStack: ViewProxyProvider {
 }

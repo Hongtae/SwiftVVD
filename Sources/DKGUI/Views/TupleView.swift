@@ -5,6 +5,9 @@
 //  Copyright (c) 2022 Hongtae Kim. All rights reserved.
 //
 
+import Foundation
+import DKGame
+
 public struct TupleView<T>: View {
     public var value: T
     public typealias Body = Never
@@ -16,7 +19,8 @@ public struct TupleView<T>: View {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         let listInputs = _ViewListInputs(inputs: inputs)
         let listOutputs = Self._makeViewList(view: view, inputs: listInputs)
-        let view = ViewContext(view: view, inputs: inputs, outputs: listOutputs)
+        let subviews = listOutputs.viewProxies
+        let view = ViewGroupProxy(view: view.value, inputs: inputs, subviews: subviews, layout: VStackLayout())
         return _ViewOutputs(item: .view(view))
     }
 
@@ -25,7 +29,7 @@ public struct TupleView<T>: View {
         Mirror(reflecting: view.value.value).children.forEach { label, value in
             if let v = value as? any View {
                 let view = AnyView(v)
-                if _isPrimitiveView(view) {
+                if view.viewProxyProvider != nil {
                     viewList.append(_ViewListOutputs(item: .view(.init(view: view, inputs: inputs.inputs))))
                 } else {
                     let outputs = view.makeViewList(graph: _Graph(), inputs: inputs)
@@ -37,5 +41,5 @@ public struct TupleView<T>: View {
     }
 }
 
-extension TupleView: _PrimitiveView {
+extension TupleView: PrimitiveView {
 }

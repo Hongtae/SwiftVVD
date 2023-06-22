@@ -77,7 +77,7 @@ extension _VariadicView_Children: RandomAccessCollection {
     }
 }
 
-extension _VariadicView_Children.Element: _PrimitiveView {
+extension _VariadicView_Children.Element: PrimitiveView {
 }
 
 public protocol _VariadicView_ViewRoot: _VariadicView_Root {
@@ -162,14 +162,15 @@ extension _VariadicView.Tree: View where Root: _VariadicView_ViewRoot, Content: 
 
         let outputs = Root._makeView(root: root, inputs: inputs) {
             graph, inputs in
-            if _isPrimitiveView(content.value) {
+            if content.value is ViewProxyProvider {
                 return _ViewListOutputs(item: .view(.init(view: AnyView(content.value), inputs: inputs)))
             }
             return Content._makeViewList(view: content, inputs: _ViewListInputs(inputs: inputs))
         }
 
         if case let .layout(layout, content) = outputs.item {
-            let view = ViewContext(view: view, inputs: inputs, outputs: content, layout: layout)
+            let subviews = content.viewProxies
+            let view = ViewGroupProxy(view: view.value, inputs: inputs, subviews: subviews, layout: layout)
             return _ViewOutputs(item: .view(view))
         }
         return outputs
@@ -182,5 +183,5 @@ extension _VariadicView.Tree: View where Root: _VariadicView_ViewRoot, Content: 
     }
 }
 
-extension _VariadicView.Tree: _PrimitiveView where Self: View {
+extension _VariadicView.Tree: PrimitiveView where Self: View {
 }

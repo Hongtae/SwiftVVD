@@ -36,11 +36,11 @@ public struct _ViewOutputs {
     var preferences: [String?: Any] = [:]
 
     enum Item {
-        case view(_: any ViewProxy)
+        case view(_: ViewProxy)
         case layout(_: any Layout, _: _ViewListOutputs)
     }
     let item: Item
-    var view: any ViewProxy {
+    var view: ViewProxy {
         if case let .view(view) = item { return view }
         fatalError()
     }
@@ -73,6 +73,16 @@ public struct _ViewListOutputs {
             outputs.append(contentsOf: list.flatMap { $0.views } )
         }
         return outputs
+    }
+
+    var viewProxies: [ViewProxy] {
+        let viewOutputs = self.views.map {
+            $0.view.makeView(graph: _Graph(), inputs: $0.inputs)
+        }
+        return viewOutputs.compactMap {
+            if case let .view(view) = $0.item { return view }
+            return nil
+        }
     }
 }
 

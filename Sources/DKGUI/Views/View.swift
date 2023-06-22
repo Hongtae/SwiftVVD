@@ -18,14 +18,26 @@ public protocol View {
 extension View {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         let listInputs = _ViewListInputs(inputs: inputs)
+        if let provider = view.value as? ViewProxyProvider {
+            let proxy = provider.makeViewProxy(inputs: inputs)
+            return _ViewOutputs(item: .view(proxy))
+        }
+        if view.value is PrimitiveView {
+            return Self.Body._makeView(view: view[\.body], inputs: inputs)
+        }
         let listOutputs = Self._makeViewList(view: view, inputs: listInputs)
-        let view = ViewContext(view: view, inputs: inputs, outputs: listOutputs)
+        let subviews = listOutputs.viewProxies
+        let view = ViewProxy(inputs: inputs, subviews: subviews)
         return _ViewOutputs(item: .view(view))
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
         let body = view[\.body]
-        if _isPrimitiveView(body.value) {
+        if body.value is ViewProxyProvider {
+//            let inputs: _ViewInputs = inputs.inputs
+//            return _ViewListOutputs(item: .view(.init(view: AnyView(body.value), inputs: inputs)))
+//        }
+//        if body.value is PrimitiveView {
             let inputs: _ViewInputs = inputs.inputs
             return _ViewListOutputs(item: .view(.init(view: AnyView(body.value), inputs: inputs)))
         }
@@ -49,19 +61,13 @@ extension View where Body == Never {
 }
 */
 
-protocol _PrimitiveView {
+// PrimitiveView cannot have a body. (body = Never)
+protocol PrimitiveView {
 }
 
-extension _PrimitiveView {
+extension PrimitiveView {
     public var body: Never {
         fatalError("\(Self.self) may not have Body == Never")
-    }
-}
-
-extension View {
-    static func _isPrimitiveView(_ view: any View) -> Bool {
-        if let view = view as? AnyView { return view.view is _PrimitiveView }
-        return view is _PrimitiveView
     }
 }
 
@@ -71,14 +77,20 @@ extension Never: View {
 extension Optional: View where Wrapped: View {
     public typealias Body = Never
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        fatalError()
+        if case let .some(wrapped) = view.value {
+            return Wrapped._makeView(view: _GraphValue<Wrapped>(wrapped), inputs: inputs)
+        }
+        fatalError("\(Self.self) is nil")
     }
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        fatalError()
+        if case let .some(wrapped) = view.value {
+            return Wrapped._makeViewList(view: _GraphValue<Wrapped>(wrapped), inputs: inputs)
+        }
+        fatalError("\(Self.self) is nil")
     }
 }
 
-extension Optional: _PrimitiveView where Self: View {
+extension Optional: PrimitiveView where Self: View {
 }
 
 //MARK: - View with ID

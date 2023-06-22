@@ -34,7 +34,7 @@ public struct HStackLayout: Layout {
         cache.minSizes = subviews.map { $0.sizeThatFits(.zero) }
         cache.maxSizes = subviews.map { $0.sizeThatFits(.infinity) }
 
-        let defaultSpacing: CGFloat = self.spacing ?? 0
+        let defaultSpacing: CGFloat = max(self.spacing ?? 0, 0)
         var spacing = ViewSpacing()
         var subviewSpacings = CGFloat.zero
         for index in cache.spacings.indices {
@@ -101,6 +101,18 @@ public struct HStackLayout: Layout {
         var offset = bounds.origin
         let width = bounds.width
         let height = bounds.height
+        var anchor: UnitPoint
+        switch self.alignment {
+        case .top:
+            offset.y = bounds.origin.y
+            anchor = .topLeading
+        case .bottom:
+            offset.y = bounds.origin.y + height
+            anchor = .bottomLeading
+        default:
+            offset.y = bounds.origin.y + height * 0.5
+            anchor = .leading
+        }
 
         let proposalSize = proposal.replacingUnspecifiedDimensions()
         let proposedSizes = subviews.map {
@@ -140,7 +152,7 @@ public struct HStackLayout: Layout {
                 numFlexibleViews -= 1
             }
             subviews[index].place(at: offset,
-                                  anchor: .topLeading,
+                                  anchor: anchor,
                                   proposal: proposal)
             let placed = subviews[index].dimensions(in: proposal)
             if flexibleSize {
@@ -148,6 +160,10 @@ public struct HStackLayout: Layout {
             }
             offset.x += placed.width
         }
+    }
+
+    static public var layoutProperties: LayoutProperties {
+        LayoutProperties(stackOrientation: .horizontal)
     }
 }
 

@@ -94,32 +94,32 @@ extension EnvironmentValues {
     }
 }
 
-protocol ViewProxy: AnyObject {
-    associatedtype Content: View
-    var view: _GraphValue<Content> { get }
+class ViewProxy {
+    var modifiers: [ObjectIdentifier: any ViewModifier]
+    var traits: [ObjectIdentifier: Any]
+    var environmentValues: EnvironmentValues
+    var sharedContext: SharedContext
+    var frame: CGRect
+    var spacing: ViewSpacing
+    var subviews: [ViewProxy]
 
-    func modifier<K>(key: K.Type) -> K? where K: ViewModifier
-    func trait<Trait>(key: Trait.Type) -> Trait.Value where Trait: _ViewTraitKey
+    init(inputs: _ViewInputs, subviews: [ViewProxy] = []) {
+        self.subviews = subviews
+        self.modifiers = inputs.modifiers
+        self.traits = inputs.traits
+        self.environmentValues = inputs.environmentValues
+        self.sharedContext = inputs.sharedContext
+        self.frame = .zero
+        self.spacing = .init()
+    }
 
-    var environmentValues: EnvironmentValues { get }
-    var sharedContext: SharedContext { get }
+    func modifier<K>(key: K.Type) -> K? where K: ViewModifier {
+        modifiers[ObjectIdentifier(key)] as? K
+    }
 
-    var frame: CGRect { get set }
-    var spacing: ViewSpacing { get }
-
-    func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize
-    func dimensions(in proposal: ProposedViewSize) -> ViewDimensions
-    func place(at position: CGPoint, anchor: UnitPoint, proposal: ProposedViewSize)
-    func layoutSubviews()
-
-    func update(tick: UInt64, delta: Double, date: Date)
-    func draw(frame: CGRect, context: GraphicsContext)
-
-    func updateEnvironment(_ environmentValues: EnvironmentValues)
-}
-
-extension ViewProxy {
-    var spacing: ViewSpacing { .init() }
+    func trait<Trait>(key: Trait.Type) -> Trait.Value where Trait: _ViewTraitKey {
+        traits[ObjectIdentifier(key)] as? Trait.Value ?? Trait.defaultValue
+    }
 
     func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
         proposal.replacingUnspecifiedDimensions()
@@ -138,76 +138,32 @@ extension ViewProxy {
         self.layoutSubviews()
     }
 
+    func setLayoutProperties(_: LayoutProperties) {
+    }
+
     func layoutSubviews() {
+        let proposal = ProposedViewSize(width: self.frame.width,
+                                        height: self.frame.height)
+        self.subviews.first?.place(at: .zero,
+                                   anchor: .topLeading,
+                                   proposal: proposal)
     }
 
     func update(tick: UInt64, delta: Double, date: Date) {
     }
 
     func draw(frame: CGRect, context: GraphicsContext) {
-        // Log.err("Existential types must implement the draw() method themselves.")
-    }
-
-    func loadResourceData(name: String, cache: Bool) -> Data? {
-        if let bundle = self.environmentValues.resourceBundle {
-            if let data = self.sharedContext.loadResourceData(name: name, bundle: bundle, cache: cache) {
-                return data
-            }
-        }
-        return self.sharedContext.loadResourceData(name: name, bundle: nil, cache: cache)
-    }
-}
-
-class ViewContext<Content>: ViewProxy where Content: View {
-    var view: _GraphValue<Content>
-    var subviews: [any ViewProxy]
-    var modifiers: [ObjectIdentifier: any ViewModifier]
-    var traits: [ObjectIdentifier: Any]
-    var environmentValues: EnvironmentValues
-    var sharedContext: SharedContext
-
-    var frame: CGRect
-
-    var layout: AnyLayout
-    var layoutCache: AnyLayout.Cache?
-
-    init(view: _GraphValue<Content>, inputs: _ViewInputs, outputs: _ViewListOutputs? = nil, layout: (any Layout)? = nil) {
-        let modifiers = inputs.modifiers
-        self.environmentValues = inputs.environmentValues
-        self.view = self.environmentValues._resolve(view)
-        self.modifiers = modifiers
-        self.traits = inputs.traits
-        self.sharedContext = inputs.sharedContext
-
-        if let outputs {
-            let viewOutputs = outputs.views.map {
-                $0.view.makeView(graph: _Graph(), inputs: $0.inputs)
-            }
-            self.subviews = viewOutputs.compactMap {
-                if case let .view(view) = $0.item { return view }
-                return nil
-            }
-        } else {
-            self.subviews = []
-        }
-
-        if let layout {
-            self.layout = AnyLayout(layout)
-        } else {
-            self.layout = AnyLayout(_VStackLayout())
-        }
-        self.layoutCache = nil
-        self.frame = .zero
     }
 
     func drawBackground(frame: CGRect, context: GraphicsContext) {
     }
 
-    func drawOverlay(frame: CGRect, context: GraphicsContext) {
+    func drawOverlay(frame: CGRect, context: GraphicsContext){
     }
 
-    func draw(frame: CGRect, context: GraphicsContext) {
+    func drawView(frame: CGRect, context: GraphicsContext) {
         self.drawBackground(frame: frame, context: context)
+        self.draw(frame: frame, context: context)
 
         self.subviews.forEach { view in
             let width = view.frame.width
@@ -221,12 +177,58 @@ class ViewContext<Content>: ViewProxy where Content: View {
             }
             var graphicsContext = context
             graphicsContext.environment = view.environmentValues
-            view.draw(frame: view.frame, context: graphicsContext)
+            view.drawView(frame: view.frame, context: graphicsContext)
         }
         self.drawOverlay(frame: frame, context: context)
     }
 
-    func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
+    func updateEnvironment(_ environmentValues: EnvironmentValues) {
+        //self.environmentValues = environmentValues._resolve(modifiers: modifiers)
+        self.subviews.forEach { $0.updateEnvironment(self.environmentValues) }
+    }
+
+    func loadResourceData(name: String, cache: Bool) -> Data? {
+        if let bundle = self.environmentValues.resourceBundle {
+            if let data = self.sharedContext.loadResourceData(name: name, bundle: bundle, cache: cache) {
+                return data
+            }
+        }
+        return self.sharedContext.loadResourceData(name: name, bundle: nil, cache: cache)
+    }
+}
+
+// View must provide its own proxy instance.
+protocol ViewProxyProvider {
+    func makeViewProxy(inputs: _ViewInputs) -> ViewProxy
+}
+
+extension ViewProxyProvider {
+    func makeViewProxy(inputs: _ViewInputs) -> ViewProxy {
+        fatalError("ViewProxy for \(Self.self) must be provided.")
+    }
+}
+
+class ViewGroupProxy<Content>: ViewProxy where Content: View {
+    var view: Content
+    var layout: AnyLayout
+    var layoutCache: AnyLayout.Cache?
+    let layoutProperties: LayoutProperties
+
+    init<L: Layout>(view: Content, inputs: _ViewInputs, subviews: [ViewProxy] = [], layout: L) {
+        self.view = inputs.environmentValues._resolve(view)
+        self.layout = AnyLayout(layout)
+        self.layoutCache = nil
+        self.layoutProperties = L.layoutProperties
+        super.init(inputs: inputs, subviews: subviews)
+
+        defer {
+            self.subviews.forEach {
+                $0.setLayoutProperties(self.layoutProperties)
+            }
+        }
+    }
+
+    override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
         if self.subviews.count > 1 {
 
             let subviews: [LayoutSubview] = self.subviews.map {
@@ -253,7 +255,7 @@ class ViewContext<Content>: ViewProxy where Content: View {
         return proposal.replacingUnspecifiedDimensions()
     }
 
-    func layoutSubviews() {
+    override func layoutSubviews() {
         let frame = self.frame.standardized
         guard frame.width > 0 && frame.height > 0 else { return }
 
@@ -299,18 +301,5 @@ class ViewContext<Content>: ViewProxy where Content: View {
                         proposal: ProposedViewSize(width: self.frame.width,
                                                    height: self.frame.height))
         }
-    }
-
-    func modifier<K>(key: K.Type) -> K? where K: ViewModifier {
-        modifiers[ObjectIdentifier(key)] as? K
-    }
-
-    func trait<Trait>(key: Trait.Type) -> Trait.Value where Trait: _ViewTraitKey {
-        traits[ObjectIdentifier(key)] as? Trait.Value ?? Trait.defaultValue
-    }
-
-    func updateEnvironment(_ environmentValues: EnvironmentValues) {
-        //self.environmentValues = environmentValues._resolve(modifiers: modifiers)
-        self.subviews.forEach { $0.updateEnvironment(self.environmentValues) }
     }
 }

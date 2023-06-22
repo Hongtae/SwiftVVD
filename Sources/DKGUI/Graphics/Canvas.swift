@@ -51,54 +51,35 @@ extension Canvas where Symbols == EmptyView {
 
 extension Canvas {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let view = CanvasContext(view: view, inputs: inputs)
+        let view = view.value.makeViewProxy(inputs: inputs)
         return _ViewOutputs(item: .view(view))
     }
 }
 
-extension Canvas: _PrimitiveView {
+extension Canvas: PrimitiveView {
 }
 
+extension Canvas: ViewProxyProvider {
+    func makeViewProxy(inputs: _ViewInputs) -> ViewProxy {
+        CanvasProxy(view: self, inputs: inputs)
+    }
+}
 
-class CanvasContext<Symbols>: ViewProxy where Symbols: View {
-
+class CanvasProxy<Symbols>: ViewProxy where Symbols: View {
     typealias Content = Canvas<Symbols>
-    var view: _GraphValue<Content>
+    var view: Content
     
-    var modifiers: [ObjectIdentifier: any ViewModifier]
-    var traits: [ObjectIdentifier: Any]
-    var environmentValues: EnvironmentValues
-    var sharedContext: SharedContext
-    var frame: CGRect
-
-    init(view: _GraphValue<Content>, inputs: _ViewInputs) {
-        self.modifiers = inputs.modifiers
-        self.traits = inputs.traits
-        self.environmentValues = inputs.environmentValues
-        self.view = self.environmentValues._resolve(view)
-        self.sharedContext = inputs.sharedContext
-        self.frame = .zero
+    init(view: Content, inputs: _ViewInputs) {
+        self.view = inputs.environmentValues._resolve(view)
+        super.init(inputs: inputs)
     }
 
-    func draw(frame: CGRect, context: GraphicsContext) {
+    override func draw(frame: CGRect, context: GraphicsContext) {
         if self.frame.width > 0 && self.frame.height > 0 {
             context.drawLayer(in: frame) { context, size in
-                let renderer = self.view[\.renderer].value
+                let renderer = self.view.renderer
                 renderer(&context, size)
             }
         }
-    }
-
-    func modifier<K>(key: K.Type) -> K? where K : ViewModifier {
-        modifiers[ObjectIdentifier(key)] as? K
-    }
-
-    func trait<Trait>(key: Trait.Type) -> Trait.Value where Trait: _ViewTraitKey {
-        traits[ObjectIdentifier(key)] as? Trait.Value ?? Trait.defaultValue
-    }
-
-    func updateEnvironment(_ environmentValues: EnvironmentValues) {
-        //self.environmentValues = environmentValues._resolve(modifiers: modifiers)
-        // TODO: redraw!
     }
 }

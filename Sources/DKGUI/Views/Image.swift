@@ -26,5 +26,5 @@ extension Image: View {
     public typealias Body = Never
 }
 
-extension Image: _PrimitiveView {
+extension Image: PrimitiveView {
 }

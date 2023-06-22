@@ -41,8 +41,8 @@ public struct LayoutSubview: Equatable {
         a.view === b.view
     }
 
-    let view: any ViewProxy
-    init(view: any ViewProxy) {
+    let view: ViewProxy
+    init(view: ViewProxy) {
         self.view = view
     }
 }

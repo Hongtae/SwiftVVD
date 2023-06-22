@@ -5,11 +5,14 @@
 //  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
-protocol AnyViewStorageBase {
-    func makeView(graph: _Graph, inputs: _ViewInputs)->_ViewOutputs
-    func makeViewList(graph: _Graph, inputs: _ViewListInputs)->_ViewListOutputs
-
-    var view: any View { get }
+class AnyViewStorageBase {
+    func makeView(graph: _Graph, inputs: _ViewInputs)->_ViewOutputs {
+        fatalError()
+    }
+    func makeViewList(graph: _Graph, inputs: _ViewListInputs)->_ViewListOutputs {
+        fatalError()
+    }
+    var viewProxyProvider: ViewProxyProvider? { nil }
 }
 
 private struct _MakeViewFromAnyView {
@@ -25,35 +28,44 @@ private extension View {
     }
 }
 
-struct AnyViewBox: AnyViewStorageBase {
-    let view: any View
-    func makeView(graph: _Graph, inputs: _ViewInputs)->_ViewOutputs {
+class AnyViewBox: AnyViewStorageBase {
+    override func makeView(graph: _Graph, inputs: _ViewInputs)->_ViewOutputs {
         view._makeView(graph: graph, inputs: inputs, _MakeViewFromAnyView(graph: graph))
     }
-    func makeViewList(graph: _Graph, inputs: _ViewListInputs)->_ViewListOutputs {
+    override func makeViewList(graph: _Graph, inputs: _ViewListInputs)->_ViewListOutputs {
         view._makeViewList(graph: graph, inputs: inputs, _MakeViewFromAnyView(graph: graph))
     }
-    init(_ view: any View) { self.view = view }
+
+    let view: any View
+    init(_ view: any View) {
+        self.view = view
+    }
+
+    override var viewProxyProvider: ViewProxyProvider? {
+        view as? ViewProxyProvider
+    }
 }
 
-struct AnyViewBoxType<T>: AnyViewStorageBase where T: View {
-    let _view: T
-    func makeView(graph: _Graph, inputs: _ViewInputs)->_ViewOutputs {
-        T._makeView(view: _GraphValue<T>(_view), inputs: inputs)
+class AnyViewBoxType<T>: AnyViewStorageBase where T: View {
+    override func makeView(graph: _Graph, inputs: _ViewInputs)->_ViewOutputs {
+        T._makeView(view: _GraphValue<T>(view), inputs: inputs)
     }
-    func makeViewList(graph: _Graph, inputs: _ViewListInputs)->_ViewListOutputs {
-        T._makeViewList(view: _GraphValue<T>(_view), inputs: inputs)
+    override func makeViewList(graph: _Graph, inputs: _ViewListInputs)->_ViewListOutputs {
+        T._makeViewList(view: _GraphValue<T>(view), inputs: inputs)
     }
-    var view: any View { _view }
-    init(_ view: T) { self._view = view }
+
+    let view: T
+    init(_ view: T) {
+        self.view = view
+    }
+
+    override var viewProxyProvider: ViewProxyProvider? {
+        view as? ViewProxyProvider
+    }
 }
 
 public struct AnyView: View {
-    public typealias Body = Never
-
-    var view: any View { storage.view }
-
-    let storage: any AnyViewStorageBase
+    var storage: AnyViewStorageBase
 
     public init<V>(_ view: V) where V: View {
         if let view = view as? AnyView {
@@ -93,7 +105,15 @@ public struct AnyView: View {
     func makeViewList(graph: _Graph, inputs: _ViewListInputs)->_ViewListOutputs {
         return storage.makeViewList(graph: _Graph(), inputs: inputs)
     }
+
+    public typealias Body = Never
 }
 
-extension AnyView: _PrimitiveView {
+extension AnyView: PrimitiveView {
+}
+
+extension AnyView {
+    var viewProxyProvider: ViewProxyProvider? {
+        self.storage.viewProxyProvider
+    }
 }

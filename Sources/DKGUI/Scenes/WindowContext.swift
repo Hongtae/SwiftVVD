@@ -18,7 +18,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
     private(set) var window: Window?
 
     var modifiers: [any _SceneModifier] = []
-    var viewProxy: any ViewProxy
+    var viewProxy: ViewProxy
     var environmentValues: EnvironmentValues
     var sharedContext: SharedContext
 
@@ -119,7 +119,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                             commandBuffer: commandBuffer) {
 
                             context.clear(with: clearColor)
-                            view.draw(frame: contentBounds, context: context)
+                            view.drawView(frame: contentBounds, context: context)
 
                             if let rp = context.beginRenderPass(descriptor: renderPass,
                                                                 viewport: context.viewport) {

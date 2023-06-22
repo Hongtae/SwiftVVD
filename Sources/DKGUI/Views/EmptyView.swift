@@ -9,7 +9,7 @@ public struct EmptyView: View {
     public init() {}
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        _ViewOutputs(item: .view(ViewContext(view: view, inputs: inputs)))
+        _ViewOutputs(item: .view(ViewProxy(inputs: inputs)))
     }
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
         _ViewListOutputs(item: .viewList([]))
@@ -18,5 +18,5 @@ public struct EmptyView: View {
     public typealias Body = Never
 }
 
-extension EmptyView: _PrimitiveView {
+extension EmptyView: PrimitiveView {
 }

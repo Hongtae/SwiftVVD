@@ -36,7 +36,6 @@ public struct Text: Equatable {
         }
     }
 
-
     public enum Case: Hashable {
         case lowercase
         case uppercase
@@ -152,38 +151,34 @@ extension Text {
 
 extension Text: View {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let view = TextContext(view: view, inputs: inputs)
+        let view = view.value.makeViewProxy(inputs: inputs)
         return _ViewOutputs(item: .view(view))
     }
 }
 
-extension Text: _PrimitiveView {
+extension Text: PrimitiveView {
+}
+
+extension Text: ViewProxyProvider {
+    func makeViewProxy(inputs: _ViewInputs) -> ViewProxy {
+        return TextContext(view: self, inputs: inputs)
+    }
 }
 
 class TextContext: ViewProxy {
-    var view: _GraphValue<Text>
-    var modifiers: [ObjectIdentifier: any ViewModifier]
-    var traits: [ObjectIdentifier: Any]
-    var environmentValues: EnvironmentValues
-    var sharedContext: SharedContext
-    var frame: CGRect
-
+    var view: Text
     var resolvedText: GraphicsContext.ResolvedText?
 
-    init(view: _GraphValue<Text>, inputs: _ViewInputs) {
-        self.modifiers = inputs.modifiers
-        self.traits = inputs.traits
-        self.environmentValues = inputs.environmentValues
-        self.view = self.environmentValues._resolve(view)
-        self.sharedContext = inputs.sharedContext
-        self.frame = .zero
+    init(view: Text, inputs: _ViewInputs) {
+        self.view = inputs.environmentValues._resolve(view)
+        super.init(inputs: inputs)
 
         if self.environmentValues.font == nil {
             self.environmentValues.font = .system(.body)
         }
     }
 
-    func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
+    override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
         if let resolvedText {
             if proposal == .zero {
                 if let glyph = resolvedText.lines.first?.glyphs.first {
@@ -204,28 +199,15 @@ class TextContext: ViewProxy {
         return proposal.replacingUnspecifiedDimensions()
     }
 
-    func draw(frame: CGRect, context: GraphicsContext) {
+    override func draw(frame: CGRect, context: GraphicsContext) {
         if self.frame.width > 0 && self.frame.height > 0 {
             if self.resolvedText == nil {
-                self.resolvedText = context.resolve(self.view.value)
+                self.resolvedText = context.resolve(self.view)
                 self.sharedContext.needsLayout = true
             }
             if let resolvedText {
                 context.draw(resolvedText, in: frame)
             }
         }
-    }
-
-    func modifier<K>(key: K.Type) -> K? where K : ViewModifier {
-        modifiers[ObjectIdentifier(key)] as? K
-    }
-
-    func trait<Trait>(key: Trait.Type) -> Trait.Value where Trait: _ViewTraitKey {
-        traits[ObjectIdentifier(key)] as? Trait.Value ?? Trait.defaultValue
-    }
-
-    func updateEnvironment(_ environmentValues: EnvironmentValues) {
-        //self.environmentValues = environmentValues._resolve(modifiers: modifiers)
-        // TODO: redraw
     }
 }

@@ -18,7 +18,7 @@ public struct ViewThatFits<Content>: View where Content: View {
     public typealias Body = Never
 }
 
-extension ViewThatFits: _PrimitiveView {
+extension ViewThatFits: PrimitiveView {
 }
 
 public struct _SizeFittingRoot: _VariadicView.UnaryViewRoot {

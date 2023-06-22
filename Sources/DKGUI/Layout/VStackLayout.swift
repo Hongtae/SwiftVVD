@@ -34,7 +34,7 @@ public struct VStackLayout: Layout {
         cache.minSizes = subviews.map { $0.sizeThatFits(.zero) }
         cache.maxSizes = subviews.map { $0.sizeThatFits(.infinity) }
 
-        let defaultSpacing: CGFloat = self.spacing ?? 0
+        let defaultSpacing: CGFloat = max(self.spacing ?? 0, 0)
         var spacing = ViewSpacing()
         var subviewSpacings = CGFloat.zero
         for index in cache.spacings.indices {
@@ -101,6 +101,18 @@ public struct VStackLayout: Layout {
         var offset = bounds.origin
         let width = bounds.width
         let height = bounds.height
+        var anchor: UnitPoint
+        switch self.alignment {
+        case .leading:
+            offset.x = bounds.origin.x
+            anchor = .topLeading
+        case .trailing:
+            offset.x = bounds.origin.x + width
+            anchor = .topTrailing
+        default:
+            offset.x = bounds.origin.x + width * 0.5
+            anchor = .top
+        }
 
         let proposalSize = proposal.replacingUnspecifiedDimensions()
         let proposedSizes = subviews.map {
@@ -140,7 +152,7 @@ public struct VStackLayout: Layout {
                 numFlexibleViews -= 1
             }
             subviews[index].place(at: offset,
-                                  anchor: .topLeading,
+                                  anchor: anchor,
                                   proposal: proposal)
             let placed = subviews[index].dimensions(in: proposal)
             if flexibleSize {
@@ -148,6 +160,10 @@ public struct VStackLayout: Layout {
             }
             offset.y += placed.height
         }
+    }
+
+    static public var layoutProperties: LayoutProperties {
+        LayoutProperties(stackOrientation: .vertical)
     }
 }
 
