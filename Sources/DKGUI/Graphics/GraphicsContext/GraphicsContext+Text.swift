@@ -208,7 +208,7 @@ extension GraphicsContext {
                 return line
             }
 
-            let str = text.storage.unicodeScalars
+            let str = text.unicodeScalars
             for char in str {
                 let c2 = char as! UnicodeScalar
 

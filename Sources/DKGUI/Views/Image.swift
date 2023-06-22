@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct Image: View {
+public struct Image: Equatable {
     public init() {
     }
 
@@ -18,8 +18,13 @@ public struct Image: View {
     }
 }
 
-extension Image: _PrimitiveView {
+extension Image: View {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         fatalError()
     }
+
+    public typealias Body = Never
+}
+
+extension Image: _PrimitiveView {
 }

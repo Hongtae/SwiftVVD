@@ -36,3 +36,6 @@ public struct TupleView<T>: View {
         return _ViewListOutputs(item: .viewList(viewList))
     }
 }
+
+extension TupleView: _PrimitiveView {
+}

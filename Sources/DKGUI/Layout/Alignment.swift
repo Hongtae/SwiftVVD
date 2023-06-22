@@ -11,6 +11,7 @@ public protocol AlignmentID {
     static func defaultValue(in context: ViewDimensions) -> CGFloat
 }
 
+@usableFromInline
 struct AlignmentKey: Equatable {
     let bits: UInt
 }
@@ -20,6 +21,7 @@ public struct HorizontalAlignment: Equatable {
         self.key = AlignmentKey(bits: 0)
     }
 
+    @usableFromInline
     let key: AlignmentKey
     init(alignmentKey: UInt) {
         self.key = AlignmentKey(bits: alignmentKey)
@@ -35,6 +37,7 @@ public struct VerticalAlignment: Equatable {
         self.key = AlignmentKey(bits: 0)
     }
 
+    @usableFromInline
     let key: AlignmentKey
     init(alignmentKey: UInt) {
         self.key = AlignmentKey(bits: alignmentKey)
@@ -51,7 +54,7 @@ public struct Alignment: Equatable {
     public var horizontal: HorizontalAlignment
     public var vertical: VerticalAlignment
 
-    public init(horizontal: HorizontalAlignment, vertical: VerticalAlignment) {
+    @inlinable public init(horizontal: HorizontalAlignment, vertical: VerticalAlignment) {
         self.horizontal = horizontal
         self.vertical = vertical
     }

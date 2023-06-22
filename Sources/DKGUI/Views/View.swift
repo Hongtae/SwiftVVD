@@ -33,6 +33,7 @@ extension View {
     }
 }
 
+/*
 extension View where Body == Never {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         fatalError("\(Self.self) may not have Body == Never")
@@ -46,12 +47,15 @@ extension View where Body == Never {
         fatalError("\(Self.self) may not have Body == Never")
     }
 }
+*/
 
 protocol _PrimitiveView {
 }
 
 extension _PrimitiveView {
-    public typealias Body = Never
+    public var body: Never {
+        fatalError("\(Self.self) may not have Body == Never")
+    }
 }
 
 extension View {
@@ -59,6 +63,22 @@ extension View {
         if let view = view as? AnyView { return view.view is _PrimitiveView }
         return view is _PrimitiveView
     }
+}
+
+extension Never: View {
+}
+
+extension Optional: View where Wrapped: View {
+    public typealias Body = Never
+    public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        fatalError()
+    }
+    public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
+        fatalError()
+    }
+}
+
+extension Optional: _PrimitiveView where Self: View {
 }
 
 //MARK: - View with ID
@@ -71,8 +91,8 @@ struct IDView<Content, ID>: View where Content: View, ID: Hashable {
         self.id = id
     }
 
-    typealias Body = Swift.Never
-    var body: Swift.Never { neverBody() }
+    typealias Body = Never
+    var body: Never { neverBody() }
 }
 
 extension View {

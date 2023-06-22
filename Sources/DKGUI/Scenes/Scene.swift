@@ -20,6 +20,9 @@ extension _PrimitiveScene {
     public var body: Never { neverBody() }
 }
 
+extension Never: Scene {
+}
+
 struct TupleScene<T>: Scene, _PrimitiveScene {
     public var value: T
 

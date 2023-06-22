@@ -8,7 +8,6 @@
 import Foundation
 
 public struct ZStack<Content>: View where Content: View {
-    public var body: Never { neverBody() }
     public var _tree: _VariadicView.Tree<_ZStackLayout, Content>
 
     public init(alignment: Alignment = .center, @ViewBuilder content: () -> Content) {
@@ -19,6 +18,8 @@ public struct ZStack<Content>: View where Content: View {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         _VariadicView.Tree<_ZStackLayout, Content>._makeView(view: view[\._tree], inputs: inputs)
     }
+
+    public typealias Body = Never
 }
 
 extension ZStack: _PrimitiveView {

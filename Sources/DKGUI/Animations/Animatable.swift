@@ -35,6 +35,15 @@ extension Animatable {
     }
 }
 
+extension View where Self: Animatable {
+    public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        fatalError()
+    }
+    public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
+        fatalError()
+    }
+}
+
 public struct AnimatablePair<First, Second>: VectorArithmetic where First: VectorArithmetic, Second: VectorArithmetic {
     public var first: First
     public var second: Second

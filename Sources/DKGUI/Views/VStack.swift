@@ -8,7 +8,6 @@
 import Foundation
 
 public struct VStack<Content>: View where Content: View {
-    public var body: Never { neverBody() }
     public var _tree: _VariadicView.Tree<_VStackLayout, Content>
 
     public init(alignment: HorizontalAlignment = .center, spacing: CGFloat? = nil, @ViewBuilder content: () -> Content) {
@@ -19,6 +18,8 @@ public struct VStack<Content>: View where Content: View {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         _VariadicView.Tree<_VStackLayout, Content>._makeView(view: view[\._tree], inputs: inputs)
     }
+
+    public typealias Body = Never
 }
 
 extension VStack: _PrimitiveView {

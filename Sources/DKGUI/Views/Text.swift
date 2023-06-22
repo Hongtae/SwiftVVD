@@ -7,27 +7,43 @@
 
 import Foundation
 
-struct AnyTextStorage {
+class AnyTextStorage: Equatable {
     let content: any StringProtocol
+
+    init(content: any StringProtocol) {
+        self.content = content
+    }
+
+    static func == (lhs: AnyTextStorage, rhs: AnyTextStorage) -> Bool {
+        String(lhs.content) == String(rhs.content)
+    }
 }
 
-public struct Text: View {
-    struct Storage {
-        let anyTextStorage: AnyTextStorage
+public struct Text: Equatable {
+    enum Storage: Equatable {
+        case verbatim(String)
+        case anyTextStorage(AnyTextStorage)
+    }
 
-        var unicodeScalars: any BidirectionalCollection {
-            anyTextStorage.content.unicodeScalars as any BidirectionalCollection
+    let storage: Storage
+
+    var unicodeScalars: any BidirectionalCollection {
+        switch self.storage {
+        case let .verbatim(text):
+            return text
+        case let .anyTextStorage(anyTextStorage):
+            return anyTextStorage.content.unicodeScalars as any BidirectionalCollection
         }
     }
-    let storage: Storage
+
 
     public enum Case: Hashable {
         case lowercase
         case uppercase
     }
 
-    public struct LineStyle {
-        public struct Pattern {
+    public struct LineStyle: Hashable {
+        public struct Pattern: Equatable {
             enum UnderlineStyle {
                 case solid
                 case dot
@@ -57,7 +73,7 @@ public struct Text: View {
         }
     }
 
-    enum Modifier {
+    enum Modifier: Equatable {
         case font(Font)
         case fontWeight(Font.Weight)
         case foregroundColor(Color)
@@ -75,12 +91,12 @@ public struct Text: View {
     let modifiers: [Modifier]
 
     public init<S>(_ content: S) where S : StringProtocol {
-        self.storage = Storage(anyTextStorage: AnyTextStorage(content: content))
+        self.storage = .anyTextStorage(AnyTextStorage(content: content))
         self.modifiers = []
     }
 
     public init(verbatim content: String) {
-        self.storage = Storage(anyTextStorage: AnyTextStorage(content: content))
+        self.storage = .verbatim(content)
         self.modifiers = []
     }
 
@@ -132,6 +148,16 @@ extension Text {
     }
     
     var ellipsis: String { "..." }
+}
+
+extension Text: View {
+    public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        let view = TextContext(view: view, inputs: inputs)
+        return _ViewOutputs(item: .view(view))
+    }
+}
+
+extension Text: _PrimitiveView {
 }
 
 class TextContext: ViewProxy {
@@ -201,12 +227,5 @@ class TextContext: ViewProxy {
     func updateEnvironment(_ environmentValues: EnvironmentValues) {
         //self.environmentValues = environmentValues._resolve(modifiers: modifiers)
         // TODO: redraw
-    }
-}
-
-extension Text: _PrimitiveView {
-    public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let view = TextContext(view: view, inputs: inputs)
-        return _ViewOutputs(item: .view(view))
     }
 }

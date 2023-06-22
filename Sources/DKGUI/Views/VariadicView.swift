@@ -77,6 +77,9 @@ extension _VariadicView_Children: RandomAccessCollection {
     }
 }
 
+extension _VariadicView_Children.Element: _PrimitiveView {
+}
+
 public protocol _VariadicView_ViewRoot: _VariadicView_Root {
     associatedtype Body: View
     @ViewBuilder func body(children: _VariadicView.Children) -> Self.Body
@@ -177,4 +180,7 @@ extension _VariadicView.Tree: View where Root: _VariadicView_ViewRoot, Content: 
             Content._makeViewList(view: view[\.content], inputs: inputs)
         }
     }
+}
+
+extension _VariadicView.Tree: _PrimitiveView where Self: View {
 }

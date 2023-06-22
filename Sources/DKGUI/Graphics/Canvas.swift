@@ -49,6 +49,17 @@ extension Canvas where Symbols == EmptyView {
     }
 }
 
+extension Canvas {
+    public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        let view = CanvasContext(view: view, inputs: inputs)
+        return _ViewOutputs(item: .view(view))
+    }
+}
+
+extension Canvas: _PrimitiveView {
+}
+
+
 class CanvasContext<Symbols>: ViewProxy where Symbols: View {
 
     typealias Content = Canvas<Symbols>
@@ -89,12 +100,5 @@ class CanvasContext<Symbols>: ViewProxy where Symbols: View {
     func updateEnvironment(_ environmentValues: EnvironmentValues) {
         //self.environmentValues = environmentValues._resolve(modifiers: modifiers)
         // TODO: redraw!
-    }
-}
-
-extension Canvas: _PrimitiveView {
-    public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let view = CanvasContext(view: view, inputs: inputs)
-        return _ViewOutputs(item: .view(view))
     }
 }

@@ -45,7 +45,6 @@ extension ViewModifier {
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
         var inputs = inputs
         inputs.modifiers[ObjectIdentifier(Self.self)] = modifier.value
-
         let body = modifier.value.body(content: Content(makeView: body))
         return Self.Body._makeView(view: _GraphValue(body), inputs: inputs)
     }

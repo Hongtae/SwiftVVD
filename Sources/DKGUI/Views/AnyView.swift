@@ -94,3 +94,6 @@ public struct AnyView: View {
         return storage.makeViewList(graph: _Graph(), inputs: inputs)
     }
 }
+
+extension AnyView: _PrimitiveView {
+}

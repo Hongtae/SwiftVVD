@@ -15,5 +15,8 @@ public struct EmptyView: View {
         _ViewListOutputs(item: .viewList([]))
     }
 
-    public typealias Body = Swift.Never
+    public typealias Body = Never
+}
+
+extension EmptyView: _PrimitiveView {
 }

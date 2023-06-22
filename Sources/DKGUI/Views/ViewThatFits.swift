@@ -10,12 +10,15 @@ public struct ViewThatFits<Content>: View where Content: View {
     public init(in axes: Axis.Set = [.horizontal, .vertical], @ViewBuilder content: () -> Content) {
         _tree = .init(root: _SizeFittingRoot(axes: axes), content: content())
     }
-}
 
-extension ViewThatFits: _PrimitiveView {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         _VariadicView.Tree<_SizeFittingRoot, Content>._makeView(view: view[\._tree], inputs: inputs)
     }
+
+    public typealias Body = Never
+}
+
+extension ViewThatFits: _PrimitiveView {
 }
 
 public struct _SizeFittingRoot: _VariadicView.UnaryViewRoot {

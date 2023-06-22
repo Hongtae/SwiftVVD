@@ -8,23 +8,26 @@
 import Foundation
 
 public struct Spacer: View {
-    public var body: Never { neverBody() }
-
     public var minLength: CGFloat?
     public init(minLength: CGFloat? = nil) {
         self.minLength = minLength
     }
+
+    public typealias Body = Never
+}
+
+extension Spacer: _PrimitiveView {
 }
 
 public struct Divider: View {
-    public var body: Never { neverBody() }
-
     public init() {
     }
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         fatalError()
     }
+
+    public typealias Body = Never
 }
 
 extension Divider: _PrimitiveView {

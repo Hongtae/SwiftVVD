@@ -23,3 +23,6 @@ extension _ConditionalContent: View where TrueContent: View, FalseContent: View 
         fatalError()
     }
 }
+
+extension _ConditionalContent: _PrimitiveView where Self: View {
+}
