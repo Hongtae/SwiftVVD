@@ -47,6 +47,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
             var contentBounds: CGRect = .null
             var contentScaleFactor: CGFloat = 1
             var renderTargets: GraphicsContext.RenderTargets? = nil
+            var viewLoaded = false
 
             mainLoop: while true {
                 guard let self = self else { break }
@@ -69,6 +70,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                         sharedContext.contentScaleFactor = state.contentScaleFactor
                         self.environmentValues.displayScale = state.contentScaleFactor
                         view.updateEnvironment(self.environmentValues)
+                        viewLoaded = false
                     }
 
                     contentBounds = state.bounds
@@ -78,8 +80,30 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                     sharedContext.contentBounds = bounds
                     sharedContext.contentScaleFactor = state.contentScaleFactor
 
+                    if viewLoaded == false {
+                        if let commandBuffer = appContext?.graphicsDeviceContext?.renderQueue()?.makeCommandBuffer() {
+                            let width = 4, height = 4
+                            if var context = GraphicsContext(sharedContext: sharedContext,
+                                                          environment: environmentValues,
+                                                          viewport: CGRect(x: 0, y: 0, width: width, height: height),
+                                                          contentOffset: .zero,
+                                                          contentScaleFactor: contentScaleFactor,
+                                                          resolution: CGSize(width: width, height: height),
+                                                          commandBuffer: commandBuffer) {
+                                context.environment = view.environmentValues
+                                view.loadView(context: context)
+                                //commandBuffer.commit()
+                            } else {
+                                Log.error("GraphicsContext failed.")
+                            }
+                        } else {
+                            Log.error("GraphicsDeviceContext.makeCommandBuffer failed.")
+                        }
+                        viewLoaded = true
+                    }
                     view.place(at: bounds.origin, anchor: .topLeading, proposal: ProposedViewSize(bounds.size))
                 }
+                assert(viewLoaded)
                 if sharedContext.needsLayout {
                     sharedContext.needsLayout = false
                     view.layoutSubviews()

@@ -178,6 +178,12 @@ class TextContext: ViewProxy {
         }
     }
 
+    override func loadView(context: GraphicsContext) {
+        self.resolvedText = context.resolve(self.view)
+        self.sharedContext.needsLayout = true
+        super.loadView(context: context)
+    }
+
     override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
         if let resolvedText {
             if proposal == .zero {

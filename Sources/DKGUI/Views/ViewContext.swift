@@ -113,6 +113,14 @@ class ViewProxy {
         self.spacing = .init()
     }
 
+    func loadView(context: GraphicsContext) {
+        self.subviews.forEach {
+            var context = context
+            context.environment = $0.environmentValues
+            $0.loadView(context: context)
+        }
+    }
+
     func modifier<K>(key: K.Type) -> K? where K: ViewModifier {
         modifiers[ObjectIdentifier(key)] as? K
     }
