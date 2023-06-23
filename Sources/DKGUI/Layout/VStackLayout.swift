@@ -34,14 +34,14 @@ public struct VStackLayout: Layout {
         cache.minSizes = subviews.map { $0.sizeThatFits(.zero) }
         cache.maxSizes = subviews.map { $0.sizeThatFits(.infinity) }
 
-        let defaultSpacing: CGFloat = max(self.spacing ?? 0, 0)
+        let layoutSpacing: CGFloat = self.spacing ?? 0
         var spacing = ViewSpacing()
         var subviewSpacings = CGFloat.zero
         for index in cache.spacings.indices {
             let s = cache.spacings[index]
-            if index > 0 && index < cache.spacings.count - 1 {
-                let space = max(s.top, spacing.bottom)
-                subviewSpacings += max(space, defaultSpacing)
+            if index > 0 {
+                let space = spacing.distance(to: s, along: .vertical)
+                subviewSpacings += space + layoutSpacing
             }
             spacing = s
         }
@@ -78,7 +78,7 @@ public struct VStackLayout: Layout {
             result + size.height
         }
 
-        let height = min(max(size.height, fitHeight), maxHeight)
+        let height = min(max(size.height - spacing, fitHeight), maxHeight)
         return CGSize(width: size.width, height: height + spacing)
     }
 
@@ -128,16 +128,16 @@ public struct VStackLayout: Layout {
             count, sizes in
             count + ((sizes.0.height < sizes.1.height) ? 1 : 0)
         }
-        let defaultSpacing: CGFloat = self.spacing ?? 0
+        let layoutSpacing: CGFloat = self.spacing ?? 0
         var spacing1 = ViewSpacing()
         for index in subviews.indices {
             let maxHeight = cache.maxSizes[index].height
             let fitHeight = proposedSizes[index].height
 
             let spacing2 = cache.spacings[index]
-            if index > 0 && index < subviews.count - 1 {
-                let space = max(spacing1.bottom, spacing2.top)
-                offset.y += max(space, defaultSpacing)
+            if index > 0 {
+                let space = spacing1.distance(to: spacing2, along: .vertical)
+                offset.y += space + layoutSpacing
             }
             spacing1 = spacing2
 
