@@ -138,6 +138,7 @@ class ViewProxy {
     }
 
     func place(at position: CGPoint, anchor: UnitPoint, proposal: ProposedViewSize) {
+        //let size = proposal.replacingUnspecifiedDimensions()
         let size = sizeThatFits(proposal)
         let offset = CGPoint(x: position.x - size.width * anchor.x,
                              y: position.y - size.height * anchor.y)
@@ -237,8 +238,7 @@ class ViewGroupProxy<Content>: ViewProxy where Content: View {
     }
 
     override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
-        if self.subviews.count > 1 {
-
+        if self.subviews.isEmpty == false {
             let subviews: [LayoutSubview] = self.subviews.map {
                 LayoutSubview(view: $0)
             }
@@ -257,8 +257,6 @@ class ViewGroupProxy<Content>: ViewProxy where Content: View {
                 self.layoutCache = cache
                 return ret
             }
-        } else if let first = self.subviews.first {
-            return first.sizeThatFits(proposal)
         }
         return proposal.replacingUnspecifiedDimensions()
     }
@@ -267,7 +265,7 @@ class ViewGroupProxy<Content>: ViewProxy where Content: View {
         let frame = self.frame.standardized
         guard frame.width > 0 && frame.height > 0 else { return }
 
-        if self.subviews.count > 1 {
+        if self.subviews.isEmpty == false {
             let subviews: [LayoutSubview] = self.subviews.map {
                 LayoutSubview(view: $0)
             }
@@ -303,11 +301,6 @@ class ViewGroupProxy<Content>: ViewProxy where Content: View {
             } else {
                 Log.error("Invalid layout cache")
             }
-        } else if let first = self.subviews.first {
-            first.place(at: .zero,
-                        anchor: .topLeading,
-                        proposal: ProposedViewSize(width: self.frame.width,
-                                                   height: self.frame.height))
         }
     }
 }

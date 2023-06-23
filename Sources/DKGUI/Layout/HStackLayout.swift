@@ -104,13 +104,13 @@ public struct HStackLayout: Layout {
         var anchor: UnitPoint
         switch self.alignment {
         case .top:
-            offset.y = bounds.origin.y
+            offset.y = bounds.minY
             anchor = .topLeading
         case .bottom:
-            offset.y = bounds.origin.y + height
+            offset.y = bounds.maxY
             anchor = .bottomLeading
         default:
-            offset.y = bounds.origin.y + height * 0.5
+            offset.y = bounds.midY
             anchor = .leading
         }
 

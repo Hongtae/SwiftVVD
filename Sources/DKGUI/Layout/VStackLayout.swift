@@ -104,13 +104,13 @@ public struct VStackLayout: Layout {
         var anchor: UnitPoint
         switch self.alignment {
         case .leading:
-            offset.x = bounds.origin.x
+            offset.x = bounds.minX
             anchor = .topLeading
         case .trailing:
-            offset.x = bounds.origin.x + width
+            offset.x = bounds.maxX
             anchor = .topTrailing
         default:
-            offset.x = bounds.origin.x + width * 0.5
+            offset.x = bounds.midX
             anchor = .top
         }
 
