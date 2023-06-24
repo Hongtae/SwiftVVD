@@ -12,10 +12,9 @@ public struct _FixedSizeLayout: ViewModifier, Animatable {
         self.horizontal = horizontal
         self.vertical = vertical
     }
-    @usableFromInline
-    internal var horizontal: Bool
-    @usableFromInline
-    internal var vertical: Bool
+
+    @usableFromInline var horizontal: Bool
+    @usableFromInline var vertical: Bool
 
     public typealias AnimatableData = EmptyAnimatableData
     public typealias Body = Never
