@@ -7,19 +7,27 @@
 
 import Foundation
 
-public struct _FrameLayout: ViewModifier {
-    public typealias Body = Never
-
+public struct _FrameLayout: ViewModifier, Animatable {
     var width: CGFloat?
     var height: CGFloat?
     var alignment: Alignment
+
+    @usableFromInline
+    init(width: CGFloat?, height: CGFloat?, alignment: Alignment) {
+        self.width = width
+        self.height = height
+        self.alignment = alignment
+    }
+
+    public typealias AnimatableData = EmptyAnimatableData
+    public typealias Body = Never
 }
 
 extension View {
-    public func frame(width: CGFloat? = nil,
-                      height: CGFloat? = nil,
-                      alignment: Alignment = .center) -> some View {
-        let modifier = _FrameLayout(width: width, height: height, alignment: alignment)
-        return self.modifier(modifier)
+    @inlinable public func frame(width: CGFloat? = nil,
+                                 height: CGFloat? = nil,
+                                 alignment: Alignment = .center) -> some View {
+        return modifier(
+            _FrameLayout(width: width, height: height, alignment: alignment))
     }
 }

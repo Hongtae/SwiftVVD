@@ -1,5 +1,5 @@
 //
-//  File: Rectangle.swift
+//  File: Ellipse.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
 //  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
@@ -7,37 +7,34 @@
 
 import Foundation
 
-public struct Rectangle: Shape {
+public struct Ellipse: Shape {
     public func path(in rect: CGRect) -> Path {
-        var path = Path()
-        path.addRect(rect)
-        return path
+        Path(ellipseIn: rect)
     }
 
     @inlinable public init() {
     }
 
     public typealias AnimatableData = EmptyAnimatableData
-    public typealias Body = _ShapeView<Rectangle, ForegroundStyle>
+    public typealias Body = _ShapeView<Ellipse, ForegroundStyle>
 }
 
-extension Rectangle: InsettableShape {
+extension Ellipse: InsettableShape {
     @inlinable public func inset(by amount: CGFloat) -> some InsettableShape {
         return _Inset(amount: amount)
     }
 
     @usableFromInline
-    struct _Inset: InsettableShape {
+    @frozen struct _Inset: InsettableShape {
         @usableFromInline
         var amount: CGFloat
 
         @inlinable init(amount: CGFloat) {
             self.amount = amount
         }
-
         @usableFromInline
         func path(in rect: CGRect) -> Path {
-            Rectangle().path(in: rect.insetBy(dx: self.amount, dy: self.amount))
+            Ellipse().path(in: rect.insetBy(dx: self.amount, dy: self.amount))
         }
 
         @usableFromInline
@@ -46,7 +43,7 @@ extension Rectangle: InsettableShape {
             set { amount = newValue }
         }
 
-        @inlinable func inset(by amount: CGFloat) -> Rectangle._Inset {
+        @inlinable func inset(by amount: CGFloat) -> Ellipse._Inset {
             var copy = self
             copy.amount += amount
             return copy
@@ -55,8 +52,8 @@ extension Rectangle: InsettableShape {
         @usableFromInline
         typealias AnimatableData = CGFloat
         @usableFromInline
-        typealias Body = _ShapeView<_Inset, ForegroundStyle>
+        typealias Body = _ShapeView<Ellipse._Inset, ForegroundStyle>
         @usableFromInline
-        typealias InsetShape = Rectangle._Inset
+        typealias InsetShape = Ellipse._Inset
     }
 }

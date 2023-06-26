@@ -1,5 +1,5 @@
 //
-//  File: Rectangle.swift
+//  File: Capsule.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
 //  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
@@ -7,27 +7,31 @@
 
 import Foundation
 
-public struct Rectangle: Shape {
-    public func path(in rect: CGRect) -> Path {
-        var path = Path()
-        path.addRect(rect)
-        return path
+public struct Capsule: Shape {
+    public var style: RoundedCornerStyle
+
+    @inlinable public init(style: RoundedCornerStyle = .circular) {
+        self.style = style
     }
 
-    @inlinable public init() {
+    public func path(in r: CGRect) -> Path {
+        let radius = min(r.width, r.height) * 0.5
+        return Path(roundedRect: r,
+                    cornerRadius: radius,
+                    style: self.style)
     }
 
     public typealias AnimatableData = EmptyAnimatableData
-    public typealias Body = _ShapeView<Rectangle, ForegroundStyle>
+    public typealias Body = _ShapeView<Capsule, ForegroundStyle>
 }
 
-extension Rectangle: InsettableShape {
+extension Capsule: InsettableShape {
     @inlinable public func inset(by amount: CGFloat) -> some InsettableShape {
         return _Inset(amount: amount)
     }
 
     @usableFromInline
-    struct _Inset: InsettableShape {
+    @frozen struct _Inset: InsettableShape {
         @usableFromInline
         var amount: CGFloat
 
@@ -37,7 +41,7 @@ extension Rectangle: InsettableShape {
 
         @usableFromInline
         func path(in rect: CGRect) -> Path {
-            Rectangle().path(in: rect.insetBy(dx: self.amount, dy: self.amount))
+            Capsule().path(in: rect.insetBy(dx: self.amount, dy: self.amount))
         }
 
         @usableFromInline
@@ -46,17 +50,17 @@ extension Rectangle: InsettableShape {
             set { amount = newValue }
         }
 
-        @inlinable func inset(by amount: CGFloat) -> Rectangle._Inset {
+        @inlinable func inset(by amount: CGFloat) -> Capsule._Inset {
             var copy = self
             copy.amount += amount
             return copy
         }
-        
+
         @usableFromInline
         typealias AnimatableData = CGFloat
         @usableFromInline
-        typealias Body = _ShapeView<_Inset, ForegroundStyle>
+        typealias Body = _ShapeView<Capsule._Inset, ForegroundStyle>
         @usableFromInline
-        typealias InsetShape = Rectangle._Inset
+        typealias InsetShape = Capsule._Inset
     }
 }

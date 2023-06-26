@@ -53,7 +53,7 @@ public struct AnimatablePair<First, Second>: VectorArithmetic where First: Vecto
         self.second = second
     }
 
-    @inlinable internal subscript() -> (First, Second) {
+    @inlinable subscript() -> (First, Second) {
       get { return (first, second) }
       set { (first, second) = newValue }
     }

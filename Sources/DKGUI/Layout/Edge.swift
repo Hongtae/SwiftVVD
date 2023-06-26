@@ -45,24 +45,34 @@ public struct EdgeInsets : Equatable, Animatable, _VectorMath {
     public var bottom: CGFloat
     public var trailing: CGFloat
 
-    public init(top: CGFloat, leading: CGFloat, bottom: CGFloat, trailing: CGFloat) {
+    @inlinable public init(top: CGFloat, leading: CGFloat, bottom: CGFloat, trailing: CGFloat) {
         self.top = top
         self.leading = leading
         self.bottom = bottom
         self.trailing = trailing
     }
 
-    public init() {
+    @inlinable public init() {
         self.top = 0
         self.leading = 0
         self.bottom = 0
         self.trailing = 0
     }
 
+    @usableFromInline
+    init(_all: CGFloat) {
+        self.top = _all
+        self.leading = _all
+        self.bottom = _all
+        self.trailing = _all
+    }
+
     public typealias AnimatableData = AnimatablePair<CGFloat, AnimatablePair<CGFloat, AnimatablePair<CGFloat, CGFloat>>>
     public var animatableData: AnimatableData {
-        get { .init(top, .init(leading, .init(bottom, trailing))) }
-        set {
+        @inlinable get {
+            .init(top, .init(leading, .init(bottom, trailing)))
+        }
+        @inlinable set {
             let top = newValue[].0
             let leading = newValue[].1[].0
             let (bottom, trailing) = newValue[].1[].1[]

@@ -88,7 +88,7 @@ private struct ResourceBundleKey: EnvironmentKey {
 }
 
 extension EnvironmentValues {
-    var resourceBundle: Bundle? {
+    public var resourceBundle: Bundle? {
         get { self[ResourceBundleKey.self] }
         set { self[ResourceBundleKey.self] = newValue }
     }

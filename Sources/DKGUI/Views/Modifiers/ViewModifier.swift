@@ -97,13 +97,21 @@ extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         Modifier._makeView(modifier: view[\.modifier], inputs: inputs) {
             graph, inputs in
-            Content._makeView(view: view[\.content], inputs: inputs)
+            let content = inputs.environmentValues._resolve(view[\.content])
+            return Content._makeView(view: content, inputs: inputs)
         }
     }
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
         Modifier._makeViewList(modifier: view[\.modifier], inputs: inputs) {
             graph, inputs in
-            Content._makeViewList(view: view[\.content], inputs: inputs)
+
+            let content = view[\.content]
+            if content.value is ViewProxyProvider {
+                let inputs: _ViewInputs = inputs.inputs
+                return _ViewListOutputs(item: .view(.init(view: AnyView(content.value), inputs: inputs)))
+            }
+            let view = inputs.inputs.environmentValues._resolve(content)
+            return Content._makeViewList(view: view, inputs: inputs)
         }
     }
 }
