@@ -7,15 +7,51 @@
 
 import Foundation
 
-class AnyTextStorage: Equatable {
+class AnyTextStorage {
     let content: any StringProtocol
 
     init(content: any StringProtocol) {
         self.content = content
     }
 
-    static func == (lhs: AnyTextStorage, rhs: AnyTextStorage) -> Bool {
-        String(lhs.content) == String(rhs.content)
+    func isEqual(to other: AnyTextStorage) -> Bool {
+        String(self.content) == String(other.content)
+    }
+}
+
+struct FormatArgument {
+}
+
+struct LocalizedStringKey {
+    let key: String
+    let hasFormatting: Bool
+    let arguments: [FormatArgument]
+}
+
+class LocalizedTextStorage /* : AnyTextStorage */ {
+    let key: LocalizedStringKey
+    let table: String?
+    let bundle: Bundle?
+    init(key: LocalizedStringKey, table: String?, bundle: Bundle?) {
+        self.key = key
+        self.table = table
+        self.bundle = bundle
+    }
+}
+
+class ConcatenatedTextStorage /* : AnyTextStorage */  {
+    let first: Text
+    let second: Text
+    init(first: Text, second: Text) {
+        self.first = first
+        self.second = second
+    }
+}
+
+class AttachmentTextStorage /* : AnyTextStorage */  {
+    let image: Image
+    init(image: Image) {
+        self.image = image
     }
 }
 
@@ -23,6 +59,16 @@ public struct Text: Equatable {
     enum Storage: Equatable {
         case verbatim(String)
         case anyTextStorage(AnyTextStorage)
+
+        static func == (lhs: Text.Storage, rhs: Text.Storage) -> Bool {
+            if case let .verbatim(s1) = lhs, case let .verbatim(s2) = rhs {
+                return s1 == s2
+            }
+            if case let .anyTextStorage(s1) = lhs, case let .anyTextStorage(s2) = rhs {
+                return s1.isEqual(to: s2)
+            }
+            return false
+        }
     }
 
     let storage: Storage
@@ -161,16 +207,16 @@ extension Text: PrimitiveView {
 
 extension Text: ViewProxyProvider {
     func makeViewProxy(inputs: _ViewInputs) -> ViewProxy {
-        return TextContext(view: self, inputs: inputs)
+        return TextContext(text: self, inputs: inputs)
     }
 }
 
 class TextContext: ViewProxy {
-    var view: Text
+    var text: Text
     var resolvedText: GraphicsContext.ResolvedText?
 
-    init(view: Text, inputs: _ViewInputs) {
-        self.view = inputs.environmentValues._resolve(view)
+    init(text: Text, inputs: _ViewInputs) {
+        self.text = inputs.environmentValues._resolve(text)
         super.init(inputs: inputs)
 
         if self.environmentValues.font == nil {
@@ -179,7 +225,7 @@ class TextContext: ViewProxy {
     }
 
     override func loadView(context: GraphicsContext) {
-        self.resolvedText = context.resolve(self.view)
+        self.resolvedText = context.resolve(self.text)
         self.sharedContext.needsLayout = true
         super.loadView(context: context)
     }
@@ -208,7 +254,7 @@ class TextContext: ViewProxy {
     override func draw(frame: CGRect, context: GraphicsContext) {
         if self.frame.width > 0 && self.frame.height > 0 {
             if self.resolvedText == nil {
-                self.resolvedText = context.resolve(self.view)
+                self.resolvedText = context.resolve(self.text)
                 self.sharedContext.needsLayout = true
             }
             if let resolvedText {

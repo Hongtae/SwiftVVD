@@ -6,25 +6,259 @@
 //
 
 import Foundation
+import DKGame
 
-public struct Image: Equatable {
-    public init() {
+class AnyImageProviderBox {
+    func makeTexture(_ context: GraphicsContext) -> Texture? {
+        nil
     }
 
+    var scaleFactor: CGFloat { 1 }
+
+    func isEqual(to other: AnyImageProviderBox) -> Bool {
+        return self === other
+    }
+}
+
+class NamedImageProvider: AnyImageProviderBox {
+    let name: String
+    let value: Float?
+    let location: Bundle?
+    let label: Text?
+    init(name: String, value: Float?, location: Bundle?, label: Text?) {
+        self.name = name
+        self.value = value
+        self.location = location
+        self.label = label
+    }
+
+    override func makeTexture(_ context: GraphicsContext) -> Texture? {
+        let bundle = self.location ?? .main
+        if let url = bundle.url(forResource: self.name,
+                                withExtension: nil,
+                                subdirectory: nil) {
+
+            let sharedContext = context.sharedContext
+            if let texture = sharedContext.resourceObjects[url.absoluteString] as? Texture {
+                return texture
+            }
+
+            var image: DKGame.Image?
+            do {
+                Log.debug("url: \(url)")
+                let data = try Data(contentsOf: url, options: [])
+                image = data.withUnsafeBytes { ptr in
+                    DKGame.Image(data: ptr)
+                }
+            } catch {
+                Log.error("Error on loading data: \(error)")
+            }
+            if let image {
+                if let texture = context.makeTexture(from: image) {
+                    // cache
+                    sharedContext.resourceObjects[url.absoluteString] = texture
+                    return texture
+                }
+            }
+        }
+        return nil
+    }
+
+    override func isEqual(to other: AnyImageProviderBox) -> Bool {
+        if let other = other as? Self {
+            return self.name == other.name &&
+            self.value == other.value &&
+            self.location == other.location &&
+            self.label == other.label
+        }
+        return false
+    }
+}
+
+class RenderedImageProviderBox: AnyImageProviderBox {
+    let size: CGSize
+    let label: Text?
+    let opaque: Bool
+    let colorMode: ColorRenderingMode
+    let renderer: (inout GraphicsContext)->Void
+    init(size: CGSize, label: Text?, opaque: Bool, colorMode: ColorRenderingMode, renderer: @escaping (inout GraphicsContext) -> Void) {
+        self.size = size
+        self.label = label
+        self.opaque = opaque
+        self.colorMode = colorMode
+        self.renderer = renderer
+    }
+
+    override func makeTexture(_ context: GraphicsContext) -> Texture? {
+        if var context = context.makeLayerContext(self.size) {
+            renderer(&context)
+            return context.backdrop
+        }
+        return nil
+    }
+}
+
+class TextureImageProvider: AnyImageProviderBox {
+    let texture: Texture
+    let scale: CGFloat
+    let orientation: Image.Orientation
+    let label: Text?
+
+    init(texture: Texture, scale: CGFloat, orientation: Image.Orientation, label: Text?) {
+        self.texture = texture
+        self.scale = scale
+        self.orientation = orientation
+        self.label = label
+    }
+
+    override func makeTexture(_ context: GraphicsContext) -> Texture? {
+        self.texture
+    }
+
+    override var scaleFactor: CGFloat {
+        self.scale
+    }
+
+    override func isEqual(to: AnyImageProviderBox) -> Bool {
+        if let other = to as? Self {
+            return self.texture === other.texture &&
+            self.scale == other.scale &&
+            orientation == other.orientation &&
+            label == other.label
+        }
+        return false
+    }
+}
+
+class SymbolImageProvider: AnyImageProviderBox {
+    let name: String
+    let variableValue: Double?
+    let bundle: Bundle?
+    let label: Text?
+
+    init(name: String, variableValue: Double?, bundle: Bundle?, label: Text?) {
+        self.name = name
+        self.variableValue = variableValue
+        self.bundle = bundle
+        self.label = label
+    }
+}
+
+public struct Image: Equatable {
+    var provider: AnyImageProviderBox
+
+    init(provider: AnyImageProviderBox) {
+        self.provider = provider
+    }
+
+    public init(size: CGSize, label: Text? = nil, opaque: Bool = false, colorMode: ColorRenderingMode = .nonLinear, renderer: @escaping (inout GraphicsContext) -> Void) {
+        self.provider = RenderedImageProviderBox(size: size,
+                                                 label: label,
+                                                 opaque: opaque,
+                                                 colorMode: colorMode,
+                                                 renderer: renderer)
+    }
+    
     public init(_ name: String, bundle: Bundle? = nil) {
+        let bundle = bundle ?? .main
+        self.provider = NamedImageProvider(name: name, value: nil, location: bundle, label: nil)
     }
 
     public init(_ name: String, bundle: Bundle? = nil, label: Text) {
+        let bundle = bundle ?? .main
+        self.provider = NamedImageProvider(name: name, value: nil, location: bundle, label: label)
+    }
+
+    public static func == (lhs: Image, rhs: Image) -> Bool {
+        lhs.provider.isEqual(to: rhs.provider)
+    }
+}
+
+extension Image {
+    public enum Orientation: UInt8, CaseIterable, Hashable {
+        case up
+        case upMirrored
+        case down
+        case downMirrored
+        case left
+        case leftMirrored
+        case right
+        case rightMirrored
+    }
+}
+
+extension Image {
+    public init(_ texture: Texture, scale: CGFloat, orientation: Image.Orientation = .up, label: Text) {
+        self.provider = TextureImageProvider(texture: texture, scale: scale, orientation: orientation, label: label)
+    }
+    public init(decorative texture: Texture, scale: CGFloat, orientation: Image.Orientation = .up) {
+        self.provider = TextureImageProvider(texture: texture, scale: scale, orientation: orientation, label: nil)
+    }
+}
+
+extension Image {
+    public init(systemName: String, variableValue: Double?) {
+        self.provider = SymbolImageProvider(name: systemName, variableValue: variableValue, bundle: nil, label: nil)
+    }
+    public init(_ name: String, variableValue: Double?, bundle: Bundle? = nil) {
+        self.provider = SymbolImageProvider(name: name, variableValue: variableValue, bundle: bundle, label: nil)
+    }
+    public init(_ name: String, variableValue: Double?, bundle: Bundle? = nil, label: Text) {
+        self.provider = SymbolImageProvider(name: name, variableValue: variableValue, bundle: bundle, label: label)
+    }
+    public init(decorative name: String, variableValue: Double?, bundle: Bundle? = nil) {
+        self.provider = SymbolImageProvider(name: name, variableValue: variableValue, bundle: bundle, label: nil)
     }
 }
 
 extension Image: View {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        fatalError()
+        let view = view.value.makeViewProxy(inputs: inputs)
+        return _ViewOutputs(item: .view(view))
     }
-
     public typealias Body = Never
 }
 
 extension Image: PrimitiveView {
+}
+
+extension Image: ViewProxyProvider {
+    func makeViewProxy(inputs: _ViewInputs) -> ViewProxy {
+        ImageViewProxy(image: self, inputs: inputs)
+    }
+}
+
+class ImageViewProxy: ViewProxy {
+    let image: Image
+    var resolvedImage: GraphicsContext.ResolvedImage?
+
+    init(image: Image, inputs: _ViewInputs) {
+        self.image = image
+        super.init(inputs: inputs)
+    }
+
+    override func loadView(context: GraphicsContext) {
+        self.resolvedImage = context.resolve(self.image)
+        self.sharedContext.needsLayout = true
+        super.loadView(context: context)
+    }
+
+    override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
+        if let resolvedImage {
+            return resolvedImage.size
+        }
+        return super.sizeThatFits(proposal)
+    }
+
+    override func draw(frame: CGRect, context: GraphicsContext) {
+        if self.frame.width > 0 && self.frame.height > 0 {
+            if self.resolvedImage == nil {
+                self.resolvedImage = context.resolve(self.image)
+                self.sharedContext.needsLayout = true
+            }
+            if let resolvedImage {
+                context.draw(resolvedImage, in: frame)
+            }
+        }
+    }
 }

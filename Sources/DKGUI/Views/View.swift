@@ -25,11 +25,7 @@ extension View {
         let view = inputs.environmentValues._resolve(view)
         let listOutputs = Self._makeViewList(view: view, inputs: listInputs)
         let subviews = listOutputs.viewProxies
-        if subviews.count > 1 {
-            let viewProxy = ViewGroupProxy(view: view.value, inputs: inputs, subviews: subviews, layout: VStackLayout())
-            return _ViewOutputs(item: .view(viewProxy))
-        }
-        let viewProxy = ViewProxy(inputs: inputs, subviews: subviews)
+        let viewProxy = ViewGroupProxy(view: view.value, inputs: inputs, subviews: subviews, layout: VStackLayout())
         return _ViewOutputs(item: .view(viewProxy))
     }
 

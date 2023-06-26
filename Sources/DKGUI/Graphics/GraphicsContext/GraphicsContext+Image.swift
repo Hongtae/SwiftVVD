@@ -10,19 +10,54 @@ import DKGame
 
 extension GraphicsContext {
     public struct ResolvedImage {
-        public var size: CGSize { .zero }
+
+        public var size: CGSize {
+            if let texture {
+                let width = CGFloat(texture.width) * self.scaleFactor
+                let height = CGFloat(texture.height) * self.scaleFactor
+                return CGSize(width: width, height: height)
+            }
+            return .zero
+        }
         public let baseline: CGFloat
         public var shading: Shading?
+
+        let texture: Texture?
+        let textureTransform: CGAffineTransform
+        let scaleFactor: CGFloat
     }
 
     public func resolve(_ image: Image) -> ResolvedImage {
-        fatalError()
+        let texture = image.provider.makeTexture(self)
+        let displayScale = self.sharedContext.contentScaleFactor
+        let scaleFactor = image.provider.scaleFactor / displayScale
+        return ResolvedImage(baseline: 0, shading: nil, texture: texture, textureTransform: .identity, scaleFactor: scaleFactor)
     }
     public func draw(_ image: ResolvedImage, in rect: CGRect, style: FillStyle = FillStyle()) {
-        fatalError()
+        if let texture = image.texture, (rect.width > 0 && rect.height > 0) {
+            let textureFrame = CGRect(x: 0, y: 0, width: texture.width, height: texture.height)
+            let textureTransform = image.textureTransform
+
+            if let renderPass = self.beginRenderPass(enableStencil: false) {
+                self.encodeDrawTextureCommand(renderPass: renderPass,
+                                              texture: texture,
+                                              frame: rect,
+                                              transform: .identity,
+                                              textureFrame: textureFrame,
+                                              textureTransform: textureTransform,
+                                              blendState: .opaque,
+                                              color: .white)
+                renderPass.end()
+                self.drawSource()
+            }
+        }
     }
     public func draw(_ image: ResolvedImage, at point: CGPoint, anchor: UnitPoint = .center) {
-        fatalError()
+        let size = image.size
+        let x = point.x - anchor.x * size.width
+        let y = point.y - anchor.y * size.height
+        let rect = CGRect(x: x, y: y, width: size.width, height: size.height)
+        return draw(image, in: rect, style: FillStyle())
     }
     public func draw(_ image: Image, in rect: CGRect, style: FillStyle = FillStyle()) {
         draw(resolve(image), in: rect, style: style)
