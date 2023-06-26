@@ -12,7 +12,6 @@ public protocol _VariadicView_Root {
 
 public struct _VariadicView_Children: View {
     public typealias Body = Never
-    public var body: Never { neverBody() }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
         fatalError()
@@ -75,6 +74,9 @@ extension _VariadicView_Children: RandomAccessCollection {
             return element
         }
     }
+}
+
+extension _VariadicView_Children: PrimitiveView {
 }
 
 extension _VariadicView_Children.Element: PrimitiveView {
@@ -165,6 +167,7 @@ extension _VariadicView.Tree: View where Root: _VariadicView_ViewRoot, Content: 
             if content.value is ViewProxyProvider {
                 return _ViewListOutputs(item: .view(.init(view: AnyView(content.value), inputs: inputs)))
             }
+            let content = inputs.environmentValues._resolve(content)
             return Content._makeViewList(view: content, inputs: _ViewListInputs(inputs: inputs))
         }
 

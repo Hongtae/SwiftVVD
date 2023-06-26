@@ -22,23 +22,21 @@ extension View {
             let proxy = provider.makeViewProxy(inputs: inputs)
             return _ViewOutputs(item: .view(proxy))
         }
-        if view.value is PrimitiveView {
-            return Self.Body._makeView(view: view[\.body], inputs: inputs)
-        }
+        let view = inputs.environmentValues._resolve(view)
         let listOutputs = Self._makeViewList(view: view, inputs: listInputs)
         let subviews = listOutputs.viewProxies
-        let view = ViewProxy(inputs: inputs, subviews: subviews)
-        return _ViewOutputs(item: .view(view))
+        if subviews.count > 1 {
+            let viewProxy = ViewGroupProxy(view: view.value, inputs: inputs, subviews: subviews, layout: VStackLayout())
+            return _ViewOutputs(item: .view(viewProxy))
+        }
+        let viewProxy = ViewProxy(inputs: inputs, subviews: subviews)
+        return _ViewOutputs(item: .view(viewProxy))
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        let body = view[\.body]
+        let body = inputs.inputs.environmentValues._resolve(view[\.body])
         if body.value is ViewProxyProvider {
-//            let inputs: _ViewInputs = inputs.inputs
-//            return _ViewListOutputs(item: .view(.init(view: AnyView(body.value), inputs: inputs)))
-//        }
-//        if body.value is PrimitiveView {
-            let inputs: _ViewInputs = inputs.inputs
+            let inputs = inputs.inputs
             return _ViewListOutputs(item: .view(.init(view: AnyView(body.value), inputs: inputs)))
         }
         return Self.Body._makeViewList(view: body, inputs: inputs)
