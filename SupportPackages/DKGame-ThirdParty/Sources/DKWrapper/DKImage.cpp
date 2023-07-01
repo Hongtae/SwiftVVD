@@ -231,43 +231,51 @@ static DKImageDecodeContext DecodePng(const void* p, size_t s)
     image.version = PNG_IMAGE_VERSION;
     if (png_image_begin_read_from_memory(&image, p, s))
     {
-        DKImagePixelFormat pixelFormat = DKImagePixelFormat_RGBA8;
-        switch (image.format)
+        DKImagePixelFormat pixelFormat = DKImagePixelFormat_Invalid;
+        bool rgb = image.format & PNG_FORMAT_FLAG_COLOR;
+        bool alpha = image.format & (PNG_FORMAT_FLAG_ALPHA | PNG_FORMAT_FLAG_AFIRST);
+        bool linear = image.format & PNG_FORMAT_FLAG_LINEAR;
+
+        if (linear)
         {
-        case PNG_FORMAT_GRAY:
-            pixelFormat = DKImagePixelFormat_R8;
-            break;
-        case PNG_FORMAT_AG:
-            image.format = PNG_FORMAT_GA;
-        case PNG_FORMAT_GA:
-            pixelFormat = DKImagePixelFormat_RG8;
-            break;
-        case PNG_FORMAT_BGR:
-            image.format = PNG_FORMAT_RGB;
-        case PNG_FORMAT_RGB:
-            pixelFormat = DKImagePixelFormat_RGB8;
-            break;
-        case PNG_FORMAT_ARGB:
-        case PNG_FORMAT_BGRA:
-        case PNG_FORMAT_ABGR:
+            if (alpha)
+            {
+                image.format = PNG_FORMAT_LINEAR_RGB_ALPHA;
+                pixelFormat = DKImagePixelFormat_RGBA16;
+            }
+            else if (rgb)
+            {
+                image.format = PNG_FORMAT_LINEAR_RGB;
+                pixelFormat = DKImagePixelFormat_RGB16;
+            }
+            else // gray
+            {
+                image.format = PNG_FORMAT_LINEAR_Y;
+                pixelFormat = DKImagePixelFormat_R16;
+            }
+        }
+        else
+        {
+            if (alpha)
+            {
+                image.format = PNG_FORMAT_RGBA;
+                pixelFormat = DKImagePixelFormat_RGBA8;
+            }
+            else if (rgb)
+            {
+                image.format = PNG_FORMAT_RGB;
+                pixelFormat = DKImagePixelFormat_RGB8;
+            }
+            else // gray
+            {
+                image.format = PNG_FORMAT_GRAY;
+                pixelFormat = DKImagePixelFormat_R8;
+            }
+        }
+        if (pixelFormat == DKImagePixelFormat_Invalid)
+        {
             image.format = PNG_FORMAT_RGBA;
-        case PNG_FORMAT_RGBA:
             pixelFormat = DKImagePixelFormat_RGBA8;
-            break;
-        case PNG_FORMAT_LINEAR_Y:
-            pixelFormat = DKImagePixelFormat_R16;
-            break;
-        case PNG_FORMAT_LINEAR_Y_ALPHA:
-            pixelFormat = DKImagePixelFormat_RG16;
-            break;
-        case PNG_FORMAT_LINEAR_RGB:
-            pixelFormat = DKImagePixelFormat_RGB16;
-            break;
-        case PNG_FORMAT_LINEAR_RGB_ALPHA:
-            pixelFormat = DKImagePixelFormat_RGBA16;
-            break;
-        default:
-            image.format = PNG_FORMAT_RGBA;
         }
 
         // bytes per channel
