@@ -398,6 +398,7 @@ static DKImageDecodeContext DecodeJpeg(const void* p, size_t s)
     uint8_t* data = (uint8_t*)DKMalloc(imageSize);
     if (data)
     {
+        uint8_t* ptr = data;
         if (cinfo.out_color_space == JCS_RGB)
         {
             JSAMPARRAY buffer = (*cinfo.mem->alloc_sarray)
@@ -405,8 +406,8 @@ static DKImageDecodeContext DecodeJpeg(const void* p, size_t s)
             while (cinfo.output_scanline < cinfo.output_height)
             {
                 jpeg_read_scanlines(&cinfo, buffer, 1);
-                memcpy(data, buffer[0], rowStride);
-                data += rowStride;
+                memcpy(ptr, buffer[0], rowStride);
+                ptr += rowStride;
             }
         }
         else
@@ -429,8 +430,8 @@ static DKImageDecodeContext DecodeJpeg(const void* p, size_t s)
                 uint8_t* input = (uint8_t*)buffer[0];
                 for (size_t i = 0; i < cinfo.output_width; ++i)
                 {
-                    CmykToRgb(data, input);
-                    data += 3;
+                    CmykToRgb(ptr, input);
+                    ptr += 3;
                     input += 4;
                 }
             }
