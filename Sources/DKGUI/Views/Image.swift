@@ -53,12 +53,10 @@ class NamedImageProvider: AnyImageProviderBox {
             } catch {
                 Log.error("Error on loading data: \(error)")
             }
-            if let image {
-                if let texture = context.makeTexture(from: image) {
-                    // cache
-                    sharedContext.resourceObjects[url.absoluteString] = texture
-                    return texture
-                }
+            if let texture = image?.makeTexture(commandQueue: context.commandQueue) {
+                // cache
+                sharedContext.resourceObjects[url.absoluteString] = texture
+                return texture
             }
         }
         return nil

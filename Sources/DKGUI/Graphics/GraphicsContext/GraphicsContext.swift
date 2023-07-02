@@ -119,6 +119,8 @@ public struct GraphicsContext {
     var resolution: CGSize {
         CGSize(width: renderTargets.width, height: renderTargets.height)
     }
+
+    var commandQueue: CommandQueue { commandBuffer.commandQueue }
 }
 
 extension GraphicsContext {

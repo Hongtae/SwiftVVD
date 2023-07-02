@@ -578,3 +578,55 @@ public class Image {
                                 deallocator: .free))
     }
 }
+
+extension Image {
+    public func makeTexture(commandQueue: CommandQueue) -> Texture? {
+        if self.pixelFormat != .rgba8 {
+            return self.resample(format: .rgba8)?.makeTexture(commandQueue: commandQueue)
+        }
+
+        let device = commandQueue.device
+
+        // create texture.
+        guard let texture = device.makeTexture(
+            descriptor: TextureDescriptor(textureType: .type2D,
+                                          pixelFormat: .rgba8Unorm,
+                                          width: width,
+                                          height: height,
+                                          usage: [.copyDestination, .sampled]))
+        else { return nil }
+
+        // create buffer for staging
+        guard let stgBuffer = self.data.withUnsafeBytes({ src in
+            if let buffer = device.makeBuffer(length: src.count,
+                                              storageMode: .shared,
+                                              cpuCacheMode: .writeCombined) {
+                if let dest = buffer.contents() {
+                    dest.copyMemory(from: src.baseAddress!, byteCount: src.count)
+                    buffer.flush()
+                    return buffer
+                }
+            }
+            return nil
+        }) else { return nil }
+
+        guard let commandBuffer = commandQueue.makeCommandBuffer() else {
+            return nil
+        }
+        guard let encoder = commandBuffer.makeCopyCommandEncoder() else {
+            return nil
+        }
+        encoder.copy(from: stgBuffer,
+                     sourceOffset: BufferImageOrigin(offset: 0,
+                                                     imageWidth: width,
+                                                     imageHeight: height),
+                     to: texture,
+                     destinationOffset: TextureOrigin(layer: 0, level: 0,
+                                                      x: 0, y: 0, z: 0),
+                     size: TextureSize(width: width, height: height, depth: 1))
+
+        encoder.endEncoding()
+        commandBuffer.commit()
+        return texture
+    }
+}
