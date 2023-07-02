@@ -92,7 +92,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                                                           commandBuffer: commandBuffer) {
                                 context.environment = view.environmentValues
                                 view.loadView(context: context)
-                                //commandBuffer.commit()
+                                commandBuffer.commit()
                             } else {
                                 Log.error("GraphicsContext failed.")
                             }

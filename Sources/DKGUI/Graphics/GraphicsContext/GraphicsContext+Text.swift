@@ -318,10 +318,16 @@ extension GraphicsContext {
                                           y: rect.origin.y)
         let measure = text.measure(in: rect.size)
 
+        let x1 = max(x, Int(self.viewport.minX))
+        let x2 = min(x + width, Int(self.viewport.maxX))
+        let y1 = max(y, Int(self.viewport.minY))
+        let y2 = min(y + height, Int(self.viewport.maxY))
+        if x1 >= x2 || y1 >= y2 { return }
+
         if let renderPass = self.beginRenderPass(enableStencil: false) {
-            renderPass.encoder.setScissorRect(ScissorRect(x: x, y: y,
-                                                          width: width,
-                                                          height: height))
+            renderPass.encoder.setScissorRect(ScissorRect(x: x1, y: y1,
+                                                          width: x2 - x1,
+                                                          height: y2 - y1))
             self.encodeDrawTextCommand(renderPass: renderPass,
                                        text: lines,
                                        transform: transform,

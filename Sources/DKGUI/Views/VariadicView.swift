@@ -181,7 +181,8 @@ extension _VariadicView.Tree: View where Root: _VariadicView_ViewRoot, Content: 
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
         Root._makeViewList(root: view[\.root], inputs: inputs) { graph, inputs in
-            Content._makeViewList(view: view[\.content], inputs: inputs)
+            let content = inputs.inputs.environmentValues._resolve(view[\.content])
+            return Content._makeViewList(view: content, inputs: inputs)
         }
     }
 }

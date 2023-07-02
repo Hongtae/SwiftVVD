@@ -636,4 +636,58 @@ extension GraphicsContext {
         }
         return nil
     }
+
+    func makeBuffer(_ data: UnsafeRawBufferPointer) -> Buffer? {
+        if data.count > 0 && data.baseAddress != nil {
+            let length = data.count
+            let device = self.commandBuffer.device
+            if let buffer = device.makeBuffer(length: length,
+                                              storageMode: .shared,
+                                              cpuCacheMode: .writeCombined) {
+                if let ptr = buffer.contents() {
+                    ptr.copyMemory(from: data.baseAddress!, byteCount: data.count)
+                    buffer.flush()
+                    return buffer
+                }
+            }
+        }
+        return nil
+    }
+
+    func makeTexture(from image: DKGame.Image) -> Texture? {
+        guard let image = image.resample(format: .rgba8) else { return nil }
+
+        let device = self.commandBuffer.device
+        let width = image.width
+        let height = image.height
+
+        // create texture.
+        guard let texture = device.makeTexture(
+            descriptor: TextureDescriptor(textureType: .type2D,
+                                          pixelFormat: .rgba8Unorm,
+                                          width: width,
+                                          height: height,
+                                          usage: [.copyDestination, .sampled]))
+        else { return nil }
+
+        guard let stgBuffer = image.data.withUnsafeBytes({ ptr in
+            self.makeBuffer(ptr)
+        }) else { return nil }
+
+        guard let encoder = commandBuffer.makeCopyCommandEncoder() else {
+            return nil
+        }
+
+        encoder.copy(from: stgBuffer,
+                     sourceOffset: BufferImageOrigin(offset: 0,
+                                                     imageWidth: width,
+                                                     imageHeight: height),
+                     to: texture,
+                     destinationOffset: TextureOrigin(layer: 0, level: 0,
+                                                      x: 0, y: 0, z: 0),
+                     size: TextureSize(width: width, height: height, depth: 1))
+
+        encoder.endEncoding()
+        return texture
+    }
 }
