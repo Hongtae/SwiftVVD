@@ -581,8 +581,36 @@ public class Image {
 
 extension Image {
     public func makeTexture(commandQueue: CommandQueue) -> Texture? {
-        if self.pixelFormat != .rgba8 {
-            return self.resample(format: .rgba8)?.makeTexture(commandQueue: commandQueue)
+
+        var textureFormat: PixelFormat = .invalid
+        var imageFormat: ImagePixelFormat = self.pixelFormat
+
+        switch self.pixelFormat {
+        case .r8:               textureFormat = .r8Unorm
+        case .rg8:              textureFormat = .rg8Unorm
+        case .rgb8, .rgba8:     textureFormat = .rgba8Unorm
+                                imageFormat = .rgba8
+        case .r16:              textureFormat = .r16Unorm
+        case .rg16:             textureFormat = .rg16Unorm
+        case .rgb16, .rgba16:   textureFormat = .rgba16Unorm
+                                imageFormat = .rgba16
+        case .r32:              textureFormat = .r32Uint
+        case .rg32:             textureFormat = .rg32Uint
+        case .rgb32, .rgba32:   textureFormat = .rgba32Uint
+                                imageFormat = .rgba32
+        case .r32f:             textureFormat = .r32Float
+        case .rg32f:            textureFormat = .rg32Float
+        case .rgb32f, .rgba32f: textureFormat = .rgba32Float
+                                imageFormat = .rgba32f
+        default:
+            textureFormat = .invalid
+        }
+        if textureFormat == .invalid {
+            Log.error("Invalid pixel format")
+            return nil
+        }
+        if imageFormat != self.pixelFormat {
+            return self.resample(format: imageFormat)?.makeTexture(commandQueue: commandQueue)
         }
 
         let device = commandQueue.device
@@ -590,7 +618,7 @@ extension Image {
         // create texture.
         guard let texture = device.makeTexture(
             descriptor: TextureDescriptor(textureType: .type2D,
-                                          pixelFormat: .rgba8Unorm,
+                                          pixelFormat: textureFormat,
                                           width: width,
                                           height: height,
                                           usage: [.copyDestination, .sampled]))
