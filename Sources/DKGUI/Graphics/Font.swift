@@ -123,13 +123,13 @@ struct SystemFontProvider: TypeFaceProvider {
                 } catch {
                     Log.error("Error on loading data: \(error)")
                 }
-                if let data, let device = context.graphicsDeviceContext {
-                    let dpi = CGFloat(defaultDPI) * displayScale
-                    let font = DKGame.Font(deviceContext: device, data: data)
-                    font?.setStyle(pointSize: self.size,
-                                   dpi: (UInt32(dpi), UInt32(dpi)))
-                    return font
-                }
+            }
+            if let data, let device = context.graphicsDeviceContext {
+                let dpi = CGFloat(defaultDPI) * displayScale
+                let font = DKGame.Font(deviceContext: device, data: data)
+                font?.setStyle(pointSize: self.size,
+                               dpi: (UInt32(dpi), UInt32(dpi)))
+                return font
             }
         }
         return nil
@@ -289,11 +289,11 @@ extension Font {
 
     static func pointSize(for style: TextStyle) -> CGFloat {
         switch style {
-        case .largeTitle:   return 28
+        case .largeTitle:   return 26
         case .title:        return 24
         case .headline:     return 21
         case .subheadline:  return 18
-        case .body:         return 16
+        case .body:         return 14
         case .callout:      return 12
         case .footnote:     return 8
         case .caption:      return 8

@@ -12,21 +12,23 @@ import FreeType_static
 // The coordinate system of the font is the same as the texture UV coordinate
 // system in OpenGL (this means that the Y value must be flipped in Vulkan
 // and Metal).
-//
-//   +Y
-//    |
+//                                         +-------+ extent
+//                                         | Glyph |
+//   +Y                                    | frame |
+//    |    |< advance >|            origin +-------+
+//    |    |           |
 //    |    ooooooooooooo  - - - - - - - - - - - - - - - - - - - ascender (+y)
 //    |    8'   888   `8
 //    |         888      oooo    ooo oo.ooooo.   .ooooo.
 //    |         888       `88.  .8'   888' `88b d88' `88b
 //    |         888        `88..8'    888   888 888ooo888
 //    |         888         `888'     888   888 888    .o
-// ---+--------o888o---------.8'------888bod8P'-`Y8bod8P'------ baseline
-//    | origin            .o..P'      888
-//    |                   `Y8P'      o888o  _ _ _ _ _ _ _ _ _ _ descender (-y)
+// ___|________o888o_________.8'______888bod8P'_`Y8bod8P'______ baseline
+//  origin                .o..P'      888
+//    |                   `Y8P'      o888o _ _ _ _ _ _ _ _ _ _ descender (-y)
 //    |
 //   -Y
-// (The ASCII font design is taken from FIGlet)
+//                               (The ASCII font design is taken from FIGlet)
 
 private class FTLibrary {
     var library: FT_Library?

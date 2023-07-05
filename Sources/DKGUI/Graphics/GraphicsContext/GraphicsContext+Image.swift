@@ -31,7 +31,8 @@ extension GraphicsContext {
         let texture = image.provider.makeTexture(self)
         let displayScale = self.sharedContext.contentScaleFactor
         let scaleFactor = image.provider.scaleFactor / displayScale
-        return ResolvedImage(baseline: 0, shading: nil, texture: texture, textureTransform: .identity, scaleFactor: scaleFactor)
+        let baseline = CGFloat(texture?.height ?? 0) * scaleFactor
+        return ResolvedImage(baseline: baseline, shading: nil, texture: texture, textureTransform: .identity, scaleFactor: scaleFactor)
     }
     public func draw(_ image: ResolvedImage, in rect: CGRect, style: FillStyle = FillStyle()) {
         if let texture = image.texture, (rect.width > 0 && rect.height > 0) {
