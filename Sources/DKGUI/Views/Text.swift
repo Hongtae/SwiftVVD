@@ -6,29 +6,23 @@
 //
 
 import Foundation
+import DKGame
 
 class AnyTextStorage {
-    let content: any StringProtocol
-
-    init(content: any StringProtocol) {
-        self.content = content
+    func resolve(typeFaces: [TypeFace], context: GraphicsContext) -> GraphicsContext.ResolvedText {
+        fatalError()
     }
-
+    func resolveText(in environment: EnvironmentValues) -> String {
+        fatalError()
+    }
     func isEqual(to other: AnyTextStorage) -> Bool {
-        String(self.content) == String(other.content)
+        self === other
     }
 }
 
-struct FormatArgument {
-}
+typealias LocalizedStringKey = String.LocalizationValue
 
-struct LocalizedStringKey {
-    let key: String
-    let hasFormatting: Bool
-    let arguments: [FormatArgument]
-}
-
-class LocalizedTextStorage /* : AnyTextStorage */ {
+class LocalizedTextStorage: AnyTextStorage {
     let key: LocalizedStringKey
     let table: String?
     let bundle: Bundle?
@@ -37,21 +31,70 @@ class LocalizedTextStorage /* : AnyTextStorage */ {
         self.table = table
         self.bundle = bundle
     }
+
+    override func resolve(typeFaces: [TypeFace], context: GraphicsContext) -> GraphicsContext.ResolvedText {
+        let text = String(localized: self.key)
+        return .init(storage: [.text(typeFaces, text)], scaleFactor: context.contentScaleFactor)
+    }
+
+    override func resolveText(in environment: EnvironmentValues) -> String {
+        String(localized: key)
+    }
+
+    override func isEqual(to other: AnyTextStorage) -> Bool {
+        if let other = other as? Self {
+            return self.key == other.key && self.table == other.table && self.bundle == other.bundle
+        }
+        return false
+    }
 }
 
-class ConcatenatedTextStorage /* : AnyTextStorage */  {
+class ConcatenatedTextStorage: AnyTextStorage {
     let first: Text
     let second: Text
     init(first: Text, second: Text) {
         self.first = first
         self.second = second
     }
+
+    override func resolve(typeFaces: [TypeFace], context: GraphicsContext) -> GraphicsContext.ResolvedText {
+        let first = first._resolve(context: context)
+        let second = second._resolve(context: context)
+        return .init(storage: first.storage + second.storage, scaleFactor: context.contentScaleFactor)
+    }
+
+    override func resolveText(in environment: EnvironmentValues) -> String {
+        first._resolveText(in: environment) + second._resolveText(in: environment)
+    }
+
+    override func isEqual(to other: AnyTextStorage) -> Bool {
+        if let other = other as? Self {
+            return self.first == other.first && self.second == other.second
+        }
+        return false
+    }
 }
 
-class AttachmentTextStorage /* : AnyTextStorage */  {
+class AttachmentTextStorage : AnyTextStorage {
     let image: Image
-    init(image: Image) {
+    init(_ image: Image) {
         self.image = image
+    }
+
+    override func resolve(typeFaces: [TypeFace], context: GraphicsContext) -> GraphicsContext.ResolvedText {
+        let image = context.resolve(self.image)
+        return .init(storage: [.attachment(typeFaces, image)], scaleFactor: context.contentScaleFactor)
+    }
+
+    override func resolveText(in environment: EnvironmentValues) -> String {
+        String()
+    }
+
+    override func isEqual(to other: AnyTextStorage) -> Bool {
+        if let other = other as? Self {
+            return self.image == other.image
+        }
+        return false
     }
 }
 
@@ -72,15 +115,6 @@ public struct Text: Equatable {
     }
 
     let storage: Storage
-
-    var unicodeScalars: any BidirectionalCollection {
-        switch self.storage {
-        case let .verbatim(text):
-            return text
-        case let .anyTextStorage(anyTextStorage):
-            return anyTextStorage.content.unicodeScalars as any BidirectionalCollection
-        }
-    }
 
     public enum Case: Hashable {
         case lowercase
@@ -136,7 +170,8 @@ public struct Text: Equatable {
     let modifiers: [Modifier]
 
     public init<S>(_ content: S) where S : StringProtocol {
-        self.storage = .anyTextStorage(AnyTextStorage(content: content))
+        let key = LocalizedStringKey(String(content))
+        self.storage = .anyTextStorage(LocalizedTextStorage(key: key, table: nil, bundle: nil))
         self.modifiers = []
     }
 
@@ -145,9 +180,48 @@ public struct Text: Equatable {
         self.modifiers = []
     }
 
+    public init(_ image: Image) {
+        self.storage = .anyTextStorage(AttachmentTextStorage(image))
+        self.modifiers = []
+    }
+
     init(storage: Storage, modifiers: [Modifier]) {
         self.storage = storage
         self.modifiers = modifiers
+    }
+
+    public func _resolveText(in environment: EnvironmentValues) -> String {
+        if case let .verbatim(text) = self.storage {
+            return text
+        }
+        if case let .anyTextStorage(storage) = self.storage {
+            return storage.resolveText(in: environment)
+        }
+        return String()
+    }
+
+    func _resolve(context: GraphicsContext) -> GraphicsContext.ResolvedText {
+        let displayScale = context.sharedContext.contentScaleFactor
+        var font = self.font ?? context.environment.font
+        if font == nil {
+            font = .system(.body)
+        }
+        font = font?.displayScale(displayScale)
+        let defaultFace = font?.typeFace(forContext: context.sharedContext)
+        let fallbackFaces = font?.fallbackTypeFaces ?? []
+        let faces = ([defaultFace] + fallbackFaces).compactMap {$0 }
+
+        if faces.isEmpty == false {
+            var storage: [GraphicsContext.ResolvedText.Storage] = []
+            if case let .verbatim(text) = self.storage {
+                storage = [.text(faces, text)]
+                return GraphicsContext.ResolvedText(storage: storage, scaleFactor: context.contentScaleFactor)
+            }
+            else if case let .anyTextStorage(text) = self.storage {
+                return text.resolve(typeFaces: faces, context: context)
+            }
+        }
+        return .init(storage: [], scaleFactor: context.contentScaleFactor)
     }
 }
 
@@ -191,8 +265,14 @@ extension Text {
             return nil
         }.first
     }
-    
-    var ellipsis: String { "..." }
+}
+
+extension Text {
+    public static func + (lhs: Text, rhs: Text) -> Text {
+        .init(storage: .anyTextStorage(ConcatenatedTextStorage(first: lhs,
+                                                               second: rhs)),
+              modifiers: [])
+    }
 }
 
 extension Text: View {
@@ -233,19 +313,22 @@ class TextContext: ViewProxy {
     override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
         if let resolvedText {
             if proposal == .zero {
-                if let glyph = resolvedText.lines.first?.glyphs.first {
-                    let bounds = GraphicsContext.ResolvedText.Glyph.bounds([glyph])
-                    return CGSize(width: bounds.width, height: bounds.height)
-                } else {
-                    let proposed = proposal.replacingUnspecifiedDimensions()
-                    return resolvedText.measure(in: proposed)
+                let lineGlyphs = resolvedText.makeGlyphs(maxWidth: 0, maxHeight: 0)
+                if let glyph = lineGlyphs.first?.glyphs.first {
+                    return glyph.advance / resolvedText.scaleFactor
                 }
             } else if proposal == .infinity {
-                let frame = resolvedText.frame
-                return CGSize(width: frame.maxX, height: frame.maxY)
+                return resolvedText.size()
             } else {
-                let frame = resolvedText.frame
-                return CGSize(width: frame.maxX, height: frame.maxY)
+                var width: Int = .max
+                var height: Int = .max
+                if let pw = proposal.width, pw != .infinity {
+                    width = Int(pw * resolvedText.scaleFactor)
+                }
+                if let ph = proposal.height, ph != .infinity {
+                    height = Int(ph * resolvedText.scaleFactor)
+                }
+                return resolvedText.size(maxWidth: width, maxHeight: height)
             }
         }
         return proposal.replacingUnspecifiedDimensions()
