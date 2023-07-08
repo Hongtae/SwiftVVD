@@ -22,13 +22,35 @@ extension GraphicsContext {
         public var shading: Shading = .foreground
 
         public func measure(in size: CGSize) -> CGSize {
-            .zero
+            let width = max(size.width, 0)
+            let height = max(size.height, 0)
+            let maxWidth: Int = (width > CGFloat(Int.max)) ? .max : Int(width)
+            let maxHeight: Int = (height > CGFloat(Int.max)) ? .max : Int(height)
+            return self.size(maxWidth: maxWidth, maxHeight: maxHeight)
         }
         public func firstBaseline(in size: CGSize) -> CGFloat {
-            .zero
+            let width = max(size.width, 0)
+            let height = max(size.height, 0)
+            let maxWidth: Int = (width > CGFloat(Int.max)) ? .max : Int(width)
+            let maxHeight: Int = (height > CGFloat(Int.max)) ? .max : Int(height)
+
+            let scale = 1.0 / self.scaleFactor
+            let glyphs = makeGlyphs(maxWidth: maxWidth, maxHeight: maxHeight)
+            if let first = glyphs.first {
+                return first.ascender * scale
+            }
+            return .zero
         }
         public func lastBaseline(in size: CGSize) -> CGFloat {
-            .zero
+            let width = max(size.width, 0)
+            let height = max(size.height, 0)
+            let maxWidth: Int = (width > CGFloat(Int.max)) ? .max : Int(width)
+            let maxHeight: Int = (height > CGFloat(Int.max)) ? .max : Int(height)
+
+            let scale = 1.0 / self.scaleFactor
+            let glyphs = makeGlyphs(maxWidth: maxWidth, maxHeight: maxHeight)
+            let lastDescender = glyphs.last?.descender ?? 0
+            return glyphs.reduce(.zero) { $0 + $1.height * scale } - lastDescender
         }
 
         struct Glyph {  // glyph that baseline aligned. (baseline is 0)
@@ -55,9 +77,8 @@ extension GraphicsContext {
             let scale = 1.0 / self.scaleFactor
             return makeGlyphs(maxWidth: maxWidth, maxHeight: maxHeight)
                 .reduce(CGSize.zero) { result, line in
-                    let lineHeight = line.ascender - line.descender
-                    return CGSize(width: max(result.width, line.width * scale),
-                                  height: result.height + lineHeight * scale)
+                    CGSize(width: max(result.width, line.width * scale),
+                           height: result.height + line.height * scale)
                 }
         }
 
