@@ -23,7 +23,7 @@ Cross-Platform Game Engine for swift programming language.
   * [Xcode 13 or later](https://developer.apple.com/xcode/)
  
     > **Note**  
-    > You need a GIT client that supports LFS.
+    > When cloning this project, you must use a **GIT client that supports LFS.**
 
 * Linux / WSL2
   * [Vulkan SDK](https://vulkan.lunarg.com/doc/sdk/latest/linux/getting_started.html)
