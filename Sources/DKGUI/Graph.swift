@@ -36,8 +36,8 @@ public struct _ViewOutputs {
     var preferences: [String?: Any] = [:]
 
     enum Item {
-        case view(_: ViewProxy)
-        case layout(_: any Layout, _: _ViewListOutputs)
+        case view(ViewProxy)
+        case layout(any Layout, _ViewListOutputs)
     }
     let item: Item
     var view: ViewProxy {
@@ -59,8 +59,8 @@ public struct _ViewListOutputs {
     }
 
     enum Item {
-        case view(_: ViewInfo)
-        case viewList(_: [_ViewListOutputs])
+        case view(ViewInfo)
+        case viewList([_ViewListOutputs])
     }
     var item: Item
 

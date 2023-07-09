@@ -19,7 +19,9 @@ public struct _OverlayModifier<Overlay>: ViewModifier where Overlay: View {
     }
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        fatalError()
+        var inputs = inputs
+        inputs.modifiers[ObjectIdentifier(Self.self)] = modifier.value
+        return body(_Graph(), inputs)
     }
 }
 

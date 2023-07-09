@@ -23,7 +23,7 @@ extension View {
             return _ViewOutputs(item: .view(proxy))
         }
         let view = inputs.environmentValues._resolve(view)
-        let listOutputs = Self._makeViewList(view: view, inputs: listInputs)
+        let listOutputs = Self.Body._makeViewList(view: view[\.body], inputs: listInputs)
         let subviews = listOutputs.viewProxies
         let viewProxy = ViewGroupProxy(view: view.value, inputs: inputs, subviews: subviews, layout: VStackLayout())
         return _ViewOutputs(item: .view(viewProxy))

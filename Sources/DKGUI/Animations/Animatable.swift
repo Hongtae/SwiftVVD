@@ -2,8 +2,11 @@
 //  File: Animatable.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
+
+import Foundation
+import DKGame
 
 public protocol VectorArithmetic: AdditiveArithmetic {
     mutating func scale(by rhs: Double)
@@ -27,11 +30,15 @@ extension Animatable where Self.AnimatableData == EmptyAnimatableData {
         @inlinable set {}
     }
     public static func _makeAnimatable(value: inout _GraphValue<Self>, inputs: _GraphInputs) {
+        //fatalError()
+        Log.error("Implement this")
     }
 }
 
 extension Animatable {
     public static func _makeAnimatable(value: inout _GraphValue<Self>, inputs: _GraphInputs) {
+        //fatalError()
+        Log.error("Implement this")
     }
 }
 

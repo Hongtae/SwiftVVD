@@ -111,6 +111,8 @@ class ViewProxy {
         self.sharedContext = inputs.sharedContext
         self.frame = .zero
         self.spacing = .init()
+
+        Log.debug("ViewProxy initialized with modifiers: \(self.modifiers), traits: \(self.traits)")
     }
 
     func loadView(context: GraphicsContext) {

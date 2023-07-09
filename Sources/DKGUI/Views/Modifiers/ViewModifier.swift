@@ -78,10 +78,21 @@ extension ViewModifier where Self: _GraphInputsModifier, Self.Body == Never {
 
 extension ViewModifier where Self: Animatable {
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        fatalError()
+
+        var modifier = modifier
+        let graphInputs = _GraphInputs(environmentValues: inputs.environmentValues)
+        Self._makeAnimatable(value: &modifier, inputs: graphInputs)
+
+        return body(_Graph(), inputs)
     }
     public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        fatalError()
+
+        var modifier = modifier
+        let graphInputs = _GraphInputs(environmentValues: inputs.inputs.environmentValues)
+        Self._makeAnimatable(value: &modifier, inputs: graphInputs)
+
+        let outputs = body(_Graph(), inputs)
+        return _ViewListOutputs(item: .viewList([outputs]))
     }
 }
 
@@ -102,6 +113,8 @@ extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
         }
     }
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
+        _ViewListOutputs(item: .view(.init(view: AnyView(view.value), inputs: inputs.inputs)))
+/*
         Modifier._makeViewList(modifier: view[\.modifier], inputs: inputs) {
             graph, inputs in
 
@@ -113,6 +126,7 @@ extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
             let view = inputs.inputs.environmentValues._resolve(content)
             return Content._makeViewList(view: view, inputs: inputs)
         }
+ */
     }
 }
 
