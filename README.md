@@ -1,4 +1,4 @@
-# Swift-VV&D
+# Swift-VVD
 
 Cross-Platform Game Engine for swift programming language.
 
@@ -7,7 +7,9 @@ Cross-Platform Game Engine for swift programming language.
 - Declarative UI framework similar to SwiftUI
 - Tools and Utilities
 
-**Still in development, not recommended for product.**
+
+> **Warning**  
+> ***It is not recommended for products as it is still in a very early stage in development and many features have not been implemented yet.***
 
 ---
 ### Things that require pre-installation
@@ -19,6 +21,9 @@ Cross-Platform Game Engine for swift programming language.
 
 * macOS 12.0 (Monterey) or later
   * [Xcode 13 or later](https://developer.apple.com/xcode/)
+ 
+    > **Note**  
+    > You need a GIT client that supports LFS.
 
 * Linux / WSL2
   * [Vulkan SDK](https://vulkan.lunarg.com/doc/sdk/latest/linux/getting_started.html)
