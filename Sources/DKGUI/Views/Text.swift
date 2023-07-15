@@ -282,10 +282,10 @@ extension Text: View {
     }
 }
 
-extension Text: PrimitiveView {
+extension Text: _PrimitiveView {
 }
 
-extension Text: ViewProxyProvider {
+extension Text: _ViewProxyProvider {
     func makeViewProxy(inputs: _ViewInputs) -> ViewProxy {
         return TextContext(text: self, inputs: inputs)
     }

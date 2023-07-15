@@ -768,6 +768,33 @@ extension GraphicsContext {
                     makeVertex(-1, -1), makeVertex(-1, 1), makeVertex(1, -1),
                     makeVertex(1, -1), makeVertex(-1, 1), makeVertex(1, 1)
                 ]
+            case let .style(style):
+                // Temporary
+                var color: Color = .black
+                if style is ForegroundStyle {
+                    //TODO: resolve in environmentValues
+                    color = .black
+                } else if style is BackgroundStyle {
+                    //TODO: resolve in environmentValues
+                    color = .white
+                } else if style is SeparatorShapeStyle {
+                    //TODO: resolve in environmentValues
+                    color = .gray
+                } else if let c = style as? Color {
+                    color = c
+                } else {
+                    fatalError()
+                }
+                shader = .vertexColor
+                let makeVertex = { x, y in
+                    _Vertex(position: Vector2(x, y).float2,
+                            texcoord: Vector2.zero.float2,
+                            color: color.dkColor.float4)
+                }
+                vertices = [
+                    makeVertex(-1, -1), makeVertex(-1, 1), makeVertex(1, -1),
+                    makeVertex(1, -1), makeVertex(-1, 1), makeVertex(1, 1)
+                ]
             case let .linearGradient(gradient, startPoint, endPoint, options):
                 let stops = gradient.normalized().stops
                 if stops.isEmpty { return }
@@ -1096,7 +1123,8 @@ extension GraphicsContext {
                     progress += step
                 }
             default:
-                Log.err("Not implemented yet")
+                Log.err("Not implemented yet (\(property))")
+                fatalError("Not implemented yet")
                 return
             }
         }

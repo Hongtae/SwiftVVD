@@ -12,9 +12,13 @@ public struct EmptyModifier: ViewModifier {
     public init() {}
 
     public static func _makeView(modifier: _GraphValue<EmptyModifier>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        fatalError()
+        body(_Graph(), inputs)
     }
     public static func _makeViewList(modifier: _GraphValue<EmptyModifier>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        fatalError()
+        body(_Graph(), inputs)
+    }
+
+    public func body(content: Self.Content) -> Never {
+        fatalError("\(Self.self) may not have Body == Never")
     }
 }

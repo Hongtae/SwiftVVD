@@ -41,5 +41,5 @@ public struct TupleView<T>: View {
     }
 }
 
-extension TupleView: PrimitiveView {
+extension TupleView: _PrimitiveView {
 }

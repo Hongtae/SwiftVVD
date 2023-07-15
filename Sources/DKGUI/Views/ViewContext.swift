@@ -94,14 +94,32 @@ extension EnvironmentValues {
     }
 }
 
+protocol ViewLayer {
+    func load(context: GraphicsContext)
+    func layout(frame: CGRect)
+    func draw(frame: CGRect, context: GraphicsContext)
+}
+
+extension ViewLayer {
+    func load(context: GraphicsContext) {
+    }
+    func layout(frame: CGRect) {
+    }
+    func draw(frame: CGRect, context: GraphicsContext) {
+    }
+}
+
 class ViewProxy {
-    var modifiers: [ObjectIdentifier: any ViewModifier]
+    var modifiers: [any ViewModifier]
     var traits: [ObjectIdentifier: Any]
     var environmentValues: EnvironmentValues
     var sharedContext: SharedContext
     var frame: CGRect
     var spacing: ViewSpacing
     var subviews: [ViewProxy]
+
+    var backgroundLayers: [ViewLayer]
+    var overlayLayers: [ViewLayer]
 
     init(inputs: _ViewInputs, subviews: [ViewProxy] = []) {
         self.subviews = subviews
@@ -112,19 +130,24 @@ class ViewProxy {
         self.frame = .zero
         self.spacing = .init()
 
+        self.backgroundLayers = inputs.backgroundLayers
+        self.overlayLayers = inputs.overlayLayers
+
         Log.debug("ViewProxy initialized with modifiers: \(self.modifiers), traits: \(self.traits)")
     }
 
     func loadView(context: GraphicsContext) {
+        self.overlayLayers.forEach {
+            $0.load(context: context)
+        }
+        self.backgroundLayers.forEach {
+            $0.load(context: context)
+        }
         self.subviews.forEach {
             var context = context
             context.environment = $0.environmentValues
             $0.loadView(context: context)
         }
-    }
-
-    func modifier<K>(key: K.Type) -> K? where K: ViewModifier {
-        modifiers[ObjectIdentifier(key)] as? K
     }
 
     func trait<Trait>(key: Trait.Type) -> Trait.Value where Trait: _ViewTraitKey {
@@ -147,6 +170,8 @@ class ViewProxy {
 
         self.frame = CGRect(origin: offset, size: size)
         self.layoutSubviews()
+        self.overlayLayers.forEach { $0.layout(frame: self.frame) }
+        self.backgroundLayers.forEach { $0.layout(frame: self.frame) }
     }
 
     func setLayoutProperties(_: LayoutProperties) {
@@ -167,9 +192,15 @@ class ViewProxy {
     }
 
     func drawBackground(frame: CGRect, context: GraphicsContext) {
+        self.backgroundLayers.forEach { layer in
+            layer.draw(frame: frame, context: context)
+        }
     }
 
     func drawOverlay(frame: CGRect, context: GraphicsContext){
+        self.overlayLayers.forEach { layer in
+            layer.draw(frame: frame, context: context)
+        }
     }
 
     func drawView(frame: CGRect, context: GraphicsContext) {
@@ -186,9 +217,9 @@ class ViewProxy {
             if frame.intersection(view.frame).isNull {
                 return
             }
-            var graphicsContext = context
-            graphicsContext.environment = view.environmentValues
-            view.drawView(frame: view.frame, context: graphicsContext)
+            var context = context
+            context.environment = view.environmentValues
+            view.drawView(frame: view.frame, context: context)
         }
         self.drawOverlay(frame: frame, context: context)
     }
@@ -208,12 +239,12 @@ class ViewProxy {
     }
 }
 
-// View must provide its own proxy instance.
-protocol ViewProxyProvider {
+// _ViewProxyProvider is a View type that provides its own proxy instance.
+protocol _ViewProxyProvider {
     func makeViewProxy(inputs: _ViewInputs) -> ViewProxy
 }
 
-extension ViewProxyProvider {
+extension _ViewProxyProvider {
     func makeViewProxy(inputs: _ViewInputs) -> ViewProxy {
         fatalError("ViewProxy for \(Self.self) must be provided.")
     }

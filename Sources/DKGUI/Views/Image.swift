@@ -217,10 +217,10 @@ extension Image: View {
     public typealias Body = Never
 }
 
-extension Image: PrimitiveView {
+extension Image: _PrimitiveView {
 }
 
-extension Image: ViewProxyProvider {
+extension Image: _ViewProxyProvider {
     func makeViewProxy(inputs: _ViewInputs) -> ViewProxy {
         ImageViewProxy(image: self, inputs: inputs)
     }

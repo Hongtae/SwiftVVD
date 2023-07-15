@@ -20,12 +20,11 @@ public protocol Shape: Animatable, View {
 }
 
 extension Shape {
-    public func path(in rect: CGRect) -> Path {
-        fatalError()
-    }
-    public static var role: ShapeRole { fatalError() }
+    public static var role: ShapeRole { .fill }
     public func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
-        fatalError()
+        let size = proposal.replacingUnspecifiedDimensions()
+        let path = self.path(in: CGRect(origin: .zero, size: size))
+        return path.boundingRect.standardized.size
     }
 }
 

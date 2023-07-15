@@ -18,5 +18,5 @@ public struct EmptyView: View {
     public typealias Body = Never
 }
 
-extension EmptyView: PrimitiveView {
+extension EmptyView: _PrimitiveView {
 }

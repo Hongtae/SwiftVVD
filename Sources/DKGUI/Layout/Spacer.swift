@@ -16,10 +16,10 @@ public struct Spacer: View {
     public typealias Body = Never
 }
 
-extension Spacer: PrimitiveView {
+extension Spacer: _PrimitiveView {
 }
 
-extension Spacer: ViewProxyProvider {
+extension Spacer: _ViewProxyProvider {
     func makeViewProxy(inputs: _ViewInputs) -> ViewProxy {
         SpacerProxy(view: self, inputs: inputs)
     }
@@ -57,10 +57,10 @@ public struct Divider: View {
     public typealias Body = Never
 }
 
-extension Divider: PrimitiveView {
+extension Divider: _PrimitiveView {
 }
 
-extension Divider: ViewProxyProvider {
+extension Divider: _ViewProxyProvider {
     func makeViewProxy(inputs: _ViewInputs) -> ViewProxy {
         DividerProxy(view: self, inputs: inputs)
     }

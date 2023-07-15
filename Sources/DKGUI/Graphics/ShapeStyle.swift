@@ -17,18 +17,61 @@ extension ShapeStyle {
     }
 }
 
+public struct _ShapeStyle_Shape {
+}
+
+public struct _ShapeStyle_ShapeType {
+    enum ShapeType {
+
+    }
+}
+
 public struct ForegroundStyle: ShapeStyle {
-    public init() {
+    @inlinable public init() {}
+    public static func _makeView<S>(view: _GraphValue<_ShapeView<S, ForegroundStyle>>, inputs: _ViewInputs) -> _ViewOutputs where S: Shape {
+        fatalError()
+    }
+    public func _apply(to shape: inout _ShapeStyle_Shape) {
+        fatalError()
+    }
+    public static func _apply(to type: inout _ShapeStyle_ShapeType) {
+        fatalError()
+    }
+}
+
+public struct BackgroundStyle: ShapeStyle {
+    @inlinable public init() {}
+    public static func _makeView<S>(view: _GraphValue<_ShapeView<S, BackgroundStyle>>, inputs: _ViewInputs) -> _ViewOutputs where S: Shape {
+        fatalError()
+    }
+    public func _apply(to shape: inout _ShapeStyle_Shape) {
+        fatalError()
+    }
+    public static func _apply(to type: inout _ShapeStyle_ShapeType) {
+        fatalError()
     }
 }
 
 public struct SeparatorShapeStyle: ShapeStyle {
     public init() {
     }
+    public static func _makeView<S>(view: _GraphValue<_ShapeView<S, SeparatorShapeStyle>>, inputs: _ViewInputs) -> _ViewOutputs where S: Shape {
+        fatalError()
+    }
+    public func _apply(to shape: inout _ShapeStyle_Shape) {
+        fatalError()
+    }
+    public static func _apply(to type: inout _ShapeStyle_ShapeType) {
+        fatalError()
+    }
 }
 
 extension ShapeStyle where Self == ForegroundStyle {
     public static var foreground: ForegroundStyle { .init() }
+}
+
+extension ShapeStyle where Self == BackgroundStyle {
+    public static var background: BackgroundStyle { .init() }
 }
 
 extension ShapeStyle where Self == SeparatorShapeStyle {
@@ -54,10 +97,10 @@ extension ShapeStyle where Self == Color {
     public static var clear: Color  { .clear }
 }
 
-public struct _ShapeStyle_Shape {
-}
-
-public struct _ShapeStyle_ShapeType {
+extension ShapeStyle where Self: View, Self.Body == _ShapeView<Rectangle, Self> {
+    public var body: _ShapeView<Rectangle, Self> {
+        .init(shape: Rectangle(), style: self)
+    }
 }
 
 public struct AnyShapeStyle: ShapeStyle {

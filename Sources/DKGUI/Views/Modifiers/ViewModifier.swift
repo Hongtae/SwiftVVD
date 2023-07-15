@@ -38,19 +38,21 @@ public protocol ViewModifier {
 }
 
 extension ViewModifier where Self.Body == Never {
-    public func body(content: Self.Content) -> Self.Body { neverBody() }
+    public func body(content: Self.Content) -> Self.Body {
+        fatalError("\(Self.self) may not have Body == Never")
+    }
 }
 
 extension ViewModifier {
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
         var inputs = inputs
-        inputs.modifiers[ObjectIdentifier(Self.self)] = modifier.value
+        inputs.modifiers.append(modifier.value)
         let body = modifier.value.body(content: Content(makeView: body))
         return Self.Body._makeView(view: _GraphValue(body), inputs: inputs)
     }
     public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
         var inputs = inputs
-        inputs.inputs.modifiers[ObjectIdentifier(Self.self)] = modifier.value
+        inputs.inputs.modifiers.append(modifier.value)
         let body = modifier.value.body(content: Content(makeViewList: body))
         let outputs = Self.Body._makeViewList(view: _GraphValue(body), inputs: inputs)
         return _ViewListOutputs(item: .viewList([outputs]))
@@ -102,6 +104,20 @@ extension ViewModifier {
       }
 }
 
+// _GraphInputsModifier is a type of modifier that modifies _GraphInputs.
+public protocol _GraphInputsModifier {
+    static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GraphInputs)
+}
+
+// _ViewInputsModifier is a type of modifier that modifies _ViewInputs.
+protocol _ViewInputsModifier {
+    static func _makeViewInputs(modifier: _GraphValue<Self>, inputs: inout _ViewInputs)
+}
+
+// _UnaryViewModifier is for View-Modifiers with Body = Never without _makeViewList.
+protocol _UnaryViewModifier {
+}
+
 extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
     public var body: Never { neverBody() }
 
@@ -113,20 +129,20 @@ extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
         }
     }
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        _ViewListOutputs(item: .view(.init(view: AnyView(view.value), inputs: inputs.inputs)))
-/*
-        Modifier._makeViewList(modifier: view[\.modifier], inputs: inputs) {
+        let modifier = view[\.modifier]
+        if modifier.value is _UnaryViewModifier {
+            return _ViewListOutputs(item: .view(.init(view: AnyView(view.value), inputs: inputs.inputs)))
+        }
+        return Modifier._makeViewList(modifier: modifier, inputs: inputs) {
             graph, inputs in
-
             let content = view[\.content]
-            if content.value is ViewProxyProvider {
+            if content.value is _ViewProxyProvider {
                 let inputs: _ViewInputs = inputs.inputs
                 return _ViewListOutputs(item: .view(.init(view: AnyView(content.value), inputs: inputs)))
             }
             let view = inputs.inputs.environmentValues._resolve(content)
             return Content._makeViewList(view: view, inputs: inputs)
         }
- */
     }
 }
 
