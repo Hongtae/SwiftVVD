@@ -8,7 +8,6 @@
 public struct _ShapeView<Content, Style>: View where Content: Shape, Style: ShapeStyle {
 
     public typealias Body = Never
-    public var body: Never { neverBody() }
 
     public var shape: Content
     public var style: Style
@@ -19,4 +18,11 @@ public struct _ShapeView<Content, Style>: View where Content: Shape, Style: Shap
         self.style = style
         self.fillStyle = fillStyle
     }
+
+    public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        fatalError()
+    }
+}
+
+extension _ShapeView: PrimitiveView {
 }

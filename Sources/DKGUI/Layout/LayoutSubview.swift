@@ -7,37 +7,43 @@
 
 import Foundation
 
-public protocol LayoutValueKey {
-    associatedtype Value
-    static var defaultValue: Self.Value { get }
-}
-
 public struct LayoutSubview: Equatable {
 
-    public subscript<K>(key: K.Type) -> K.Value where K : LayoutValueKey {
-        K.defaultValue
+    public func _trait<K>(key: K.Type) -> K.Value where K : _ViewTraitKey {
+        view.trait(key: key)
     }
 
-    public var priority: Double { 0 }
+    public subscript<K>(key: K.Type) -> K.Value where K: LayoutValueKey {
+        _trait(key: _LayoutTrait<K>.self)
+    }
+
+    public var priority: Double {
+        _trait(key: LayoutPriorityTraitKey.self)
+    }
 
     public func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
-        proposal.replacingUnspecifiedDimensions()
+        view.sizeThatFits(proposal)
     }
 
     public func dimensions(in proposal: ProposedViewSize) -> ViewDimensions {
-        let size = proposal.replacingUnspecifiedDimensions()
-        return .init(height: size.width, width: size.height)
+        view.dimensions(in: proposal)
     }
 
     public var spacing: ViewSpacing {
-        .init()
+        view.spacing
     }
 
     public func place(at position: CGPoint, anchor: UnitPoint = .topLeading, proposal: ProposedViewSize) {
+        view.place(at: position, anchor: anchor, proposal: proposal)
     }
 
     public static func == (a: LayoutSubview, b: LayoutSubview) -> Bool {
-        return false
+        a.view === b.view
+    }
+
+    let view: ViewProxy
+    init(view: ViewProxy) {
+        self.view = view
     }
 }
 
@@ -66,7 +72,7 @@ public struct LayoutSubviews: Equatable, RandomAccessCollection {
         .init(subviews: subviews[bounds], layoutDirection: layoutDirection)
     }
 
-    public subscript<S>(indices: S) -> LayoutSubviews where S : Sequence, S.Element == Int {
+    public subscript<S>(indices: S) -> LayoutSubviews where S: Sequence, S.Element == Int {
         var items: [LayoutSubview] = []
         for i in indices {
             items.append(self.subviews[i])

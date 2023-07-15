@@ -9,33 +9,54 @@ import Foundation
 
 public struct Rectangle: Shape {
     public func path(in rect: CGRect) -> Path {
-        fatalError()
+        var path = Path()
+        path.addRect(rect)
+        return path
     }
 
-    public init() {
+    @inlinable public init() {
     }
 
     public typealias AnimatableData = EmptyAnimatableData
     public typealias Body = _ShapeView<Rectangle, ForegroundStyle>
-
-    public var animatableData = EmptyAnimatableData()
-
-    public var body: Body {
-        _ShapeView<Rectangle, ForegroundStyle>(shape: self, style: .init())
-    }
 }
 
-extension Rectangle {
-    struct _Inset: Shape {
-        typealias AnimatableData = EmptyAnimatableData
-        typealias Body = Never
+extension Rectangle: InsettableShape {
+    @inlinable public func inset(by amount: CGFloat) -> some InsettableShape {
+        return _Inset(amount: amount)
+    }
 
-        let amount: CGFloat
+    @usableFromInline
+    struct _Inset: InsettableShape {
+        @usableFromInline
+        var amount: CGFloat
 
-        var animatableData: AnimatableData {
-            get { .init() }
-            set { }
+        @inlinable init(amount: CGFloat) {
+            self.amount = amount
         }
-        var body: Never { neverBody() }
+
+        @usableFromInline
+        func path(in rect: CGRect) -> Path {
+            Rectangle().path(in: rect.insetBy(dx: self.amount, dy: self.amount))
+        }
+
+        @usableFromInline
+        var animatableData: CGFloat {
+            get { amount }
+            set { amount = newValue }
+        }
+
+        @inlinable func inset(by amount: CGFloat) -> Rectangle._Inset {
+            var copy = self
+            copy.amount += amount
+            return copy
+        }
+        
+        @usableFromInline
+        typealias AnimatableData = CGFloat
+        @usableFromInline
+        typealias Body = _ShapeView<_Inset, ForegroundStyle>
+        @usableFromInline
+        typealias InsetShape = Rectangle._Inset
     }
 }

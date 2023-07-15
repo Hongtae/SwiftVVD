@@ -6,15 +6,17 @@
 //
 
 public struct EmptyView: View {
+    public init() {}
+
+    public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        _ViewOutputs(item: .view(ViewProxy(inputs: inputs)))
+    }
+    public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
+        _ViewListOutputs(item: .viewList([]))
+    }
+
+    public typealias Body = Never
 }
 
-extension EmptyView: _PrimitiveView {
-    func makeViewProxy(modifiers: [any ViewModifier],
-                       environmentValues: EnvironmentValues,
-                       sharedContext: SharedContext) -> any ViewProxy {
-        ViewContext(view: self,
-                    modifiers: modifiers,
-                    environmentValues: environmentValues,
-                    sharedContext: sharedContext)
-    }
+extension EmptyView: PrimitiveView {
 }

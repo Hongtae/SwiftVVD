@@ -17,7 +17,8 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
     private(set) var swapChain: SwapChain?
     private(set) var window: Window?
 
-    var viewProxy: any ViewProxy
+    var modifiers: [any _SceneModifier] = []
+    var viewProxy: ViewProxy
     var environmentValues: EnvironmentValues
     var sharedContext: SharedContext
 
@@ -46,6 +47,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
             var contentBounds: CGRect = .null
             var contentScaleFactor: CGFloat = 1
             var renderTargets: GraphicsContext.RenderTargets? = nil
+            var viewLoaded = false
 
             mainLoop: while true {
                 guard let self = self else { break }
@@ -65,15 +67,46 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                 if state.bounds != contentBounds || state.contentScaleFactor != contentScaleFactor {
 
                     if state.contentScaleFactor != contentScaleFactor {
+                        sharedContext.contentScaleFactor = state.contentScaleFactor
                         self.environmentValues.displayScale = state.contentScaleFactor
                         view.updateEnvironment(self.environmentValues)
+                        viewLoaded = false
                     }
 
-                    view.layout(offset: state.bounds.origin,
-                                size: state.bounds.size,
-                                scaleFactor: state.contentScaleFactor)
                     contentBounds = state.bounds
                     contentScaleFactor = state.contentScaleFactor
+
+                    let bounds = state.bounds.standardized
+                    sharedContext.contentBounds = bounds
+                    sharedContext.contentScaleFactor = state.contentScaleFactor
+
+                    if viewLoaded == false {
+                        if let commandBuffer = appContext?.graphicsDeviceContext?.renderQueue()?.makeCommandBuffer() {
+                            let width = 4, height = 4
+                            if var context = GraphicsContext(sharedContext: sharedContext,
+                                                          environment: environmentValues,
+                                                          viewport: CGRect(x: 0, y: 0, width: width, height: height),
+                                                          contentOffset: .zero,
+                                                          contentScaleFactor: contentScaleFactor,
+                                                          resolution: CGSize(width: width, height: height),
+                                                          commandBuffer: commandBuffer) {
+                                context.environment = view.environmentValues
+                                view.loadView(context: context)
+                                commandBuffer.commit()
+                            } else {
+                                Log.error("GraphicsContext failed.")
+                            }
+                        } else {
+                            Log.error("GraphicsDeviceContext.makeCommandBuffer failed.")
+                        }
+                        viewLoaded = true
+                    }
+                    view.place(at: bounds.origin, anchor: .topLeading, proposal: ProposedViewSize(bounds.size))
+                }
+                assert(viewLoaded)
+                if sharedContext.needsLayout {
+                    sharedContext.needsLayout = false
+                    view.layoutSubviews()
                 }
                 view.update(tick: tick, delta: delta, date: date)
 
@@ -105,23 +138,18 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                                              width: backBuffer.width,
                                              height: backBuffer.height),
                             contentOffset: contentBounds.origin,
-                            contentScaleFactor: state.contentScaleFactor,
+                            contentScaleFactor: contentScaleFactor,
                             renderTargets: renderTargets,
                             commandBuffer: commandBuffer) {
 
                             context.clear(with: clearColor)
-                            view.draw(frame: contentBounds, context: context)
+                            view.drawView(frame: contentBounds, context: context)
 
-                            let backdrop = renderTargets.backdrop
-                            renderTargets.backdrop = backBuffer
-                            defer {
-                                renderTargets.backdrop = backdrop
-                            }
                             if let rp = context.beginRenderPass(descriptor: renderPass,
                                                                 viewport: context.viewport) {
                                 context.encodeDrawTextureCommand(
                                     renderPass: rp,
-                                    texture: backdrop,
+                                    texture: context.backdrop,
                                     frame: contentBounds,
                                     textureFrame: context.viewport,
                                     blendState: .opaque,
@@ -161,10 +189,16 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
 
         self.environmentValues = EnvironmentValues()
         self.sharedContext = SharedContext(appContext: appContext!)
-        self.viewProxy = _makeViewProxy(content,
-                                        modifiers: [],
-                                        environmentValues: self.environmentValues,
-                                        sharedContext: self.sharedContext)
+
+        let graph = _GraphValue(content)
+        let viewInputs = _ViewInputs(sharedContext: self.sharedContext,
+                                     environmentValues: self.environmentValues,
+                                     transform: .identity,
+                                     position: .zero,
+                                     size: self.state.bounds.size,
+                                     safeAreaInsets: EdgeInsets())
+        let viewOutputs = Content._makeView(view: graph, inputs: viewInputs)
+        self.viewProxy = viewOutputs.view
     }
 
     deinit {
@@ -221,11 +255,21 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                 }
             }
         }
+        self.applyModifiers()
         return self.window
     }
 
-    func makeSceneProxy() -> any SceneProxy {
-        SceneContext(scene: self, window: self)
+    @MainActor
+    func applyModifiers() {
+        if let frameRate = self.modifiers.first(where: { $0 is _UpdateFrameRate }) as? _UpdateFrameRate {
+            self.config.activeFrameInterval = frameRate.activeFrameRate
+            self.config.inactiveFrameInterval = frameRate.inactiveFrameRate
+        }
+    }
+
+    func makeSceneProxy(modifiers: [any _SceneModifier]) -> any SceneProxy {
+        self.modifiers = modifiers
+        return SceneContext(scene: self, modifiers: modifiers, window: self)
     }
 
     @MainActor

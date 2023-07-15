@@ -22,11 +22,11 @@ extension GraphicsContext {
         return context
     }
 
-    func makeRegionLayerContext(_ frame: CGRect) -> Self? {
-        let frame = frame.standardized
+    func makeLayerContext(_ size: CGSize) -> Self? {
+        let width = size.width * self.contentScaleFactor
+        let height = size.height * self.contentScaleFactor
 
-        let width = frame.width * self.contentScaleFactor
-        let height = frame.height * self.contentScaleFactor
+        guard width > 0 && height > 0 else { return nil }
 
         let context = GraphicsContext(
             sharedContext: self.sharedContext,
@@ -41,7 +41,12 @@ extension GraphicsContext {
     }
 
     func drawLayer(in frame: CGRect, content: (inout GraphicsContext, CGSize) throws -> Void) rethrows {
-        if var context = self.makeRegionLayerContext(frame) {
+        if frame.minX > self.viewport.maxX * self.contentScaleFactor ||
+            frame.minY > self.viewport.maxY * self.contentScaleFactor {
+            return
+        }
+
+        if var context = self.makeLayerContext(frame.size) {
             let size = context.resolution / context.contentScaleFactor
             try content(&context, size)
             let texture = context.backdrop

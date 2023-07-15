@@ -5,7 +5,7 @@
 //  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
-public struct Angle: Sendable {
+public struct Angle {
     public var radians: Double
     public var degrees: Double {
         get { radians * 180.0 / .pi }
@@ -30,22 +30,12 @@ extension Angle: Comparable {
     }
 }
 
-extension Double: VectorArithmetic {
-    public mutating func scale(by rhs: Double) {
-        self = self * rhs
-    }
-
-    public var magnitudeSquared: Double {
-        self * self
-    }
-}
-
-extension Angle: Animatable {
+extension Angle: Animatable, _VectorMath {
     public typealias AnimatableData = Double
 
     public var animatableData: Double {
-        get { 0.0 }
-        set { _ = newValue }
+        get { radians }
+        set { radians = newValue }
     }
 
     public static var zero: Angle { .init(radians: 0) }

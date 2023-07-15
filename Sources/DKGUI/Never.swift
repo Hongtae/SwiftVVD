@@ -9,7 +9,7 @@ func neverBody(_ s: String = "") -> Never{
     fatalError(s)
 }
 
-extension Never: Scene, View {
+extension Never {
     public typealias Body = Never
     public var body: Never { neverBody() }
 }

@@ -16,6 +16,10 @@ public struct _StrokedShape<S>: Shape where S: Shape {
         self.style = style
     }
 
+    public func path(in rect: CGRect) -> Path {
+        fatalError()
+    }
+
     public typealias AnimatableData = AnimatablePair<EmptyAnimatableData, StrokeStyle.AnimatableData>
     public typealias Body = _ShapeView<Self, ForegroundStyle>
 
@@ -26,5 +30,15 @@ public struct _StrokedShape<S>: Shape where S: Shape {
 
     public var body: Body {
         _ShapeView(shape: self, style: ForegroundStyle())
+    }
+}
+
+extension Shape {
+    @inlinable public func stroke(style: StrokeStyle) -> some Shape {
+        return _StrokedShape(shape: self, style: style)
+    }
+
+    @inlinable public func stroke(lineWidth: CGFloat = 1) -> some Shape {
+        return stroke(style: StrokeStyle(lineWidth: lineWidth))
     }
 }

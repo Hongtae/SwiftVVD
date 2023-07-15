@@ -8,6 +8,28 @@
 import Foundation
 import FreeType_static
 
+//////////////////////////////////////////////////////////////////////////////
+// The coordinate system of the font is the same as the texture UV coordinate
+// system in OpenGL (this means that the Y value must be flipped in Vulkan
+// and Metal).
+//                                         +-------+ extent
+//                                         | Glyph |
+//   +Y                                    | frame |
+//    |    |< advance >|            origin +-------+
+//    |    |           |
+//    |    ooooooooooooo  - - - - - - - - - - - - - - - - - - - ascender (+y)
+//    |    8'   888   `8
+//    |         888      oooo    ooo oo.ooooo.   .ooooo.
+//    |         888       `88.  .8'   888' `88b d88' `88b
+//    |         888        `88..8'    888   888 888ooo888
+//    |         888         `888'     888   888 888    .o
+// ___|________o888o_________.8'______888bod8P'_`Y8bod8P'______ baseline
+//  origin                .o..P'      888
+//    |                   `Y8P'      o888o _ _ _ _ _ _ _ _ _ _ descender (-y)
+//    |
+//   -Y
+//                               (The ASCII font design is taken from FIGlet)
+
 private class FTLibrary {
     var library: FT_Library?
 
@@ -37,8 +59,28 @@ private func ft26d6ToFloat(_ value: FT_F26Dot6) -> CGFloat {
     CGFloat(value >> 6) + CGFloat(value & 63) / 64.0
 }
 
+private func ft26d6(_ value: CGFloat) -> FT_F26Dot6 {
+    FT_F26Dot6(value * 64.0)
+}
+
+private func ft26d6Floor(_ value: FT_F26Dot6) -> FT_F26Dot6 {
+    value & ~63
+}
+
+private func ft26d6Round(_ value: FT_F26Dot6) -> FT_F26Dot6 {
+    ft26d6Floor(value + 32)
+}
+
+private func ft26d6Ceil(_ value: FT_F26Dot6) -> FT_F26Dot6 {
+    ft26d6Floor(value + 63)
+}
+
 private func ft16d16ToFloat(_ value: FT_Fixed) -> CGFloat {
     CGFloat(value >> 16) + CGFloat(value & 65535) / 65536.0
+}
+
+private func ft16d16(_ value: CGFloat) -> FT_Fixed {
+    FT_Fixed(value * 65536.0)
 }
 
 private func FT_HAS_KERNING(_ face: FT_Face) -> Bool {
@@ -155,11 +197,11 @@ public class Font {
 
     public struct GlyphData {
         public let texture: Texture?
-        public let position: CGPoint
-        public let advance: CGSize
-        public let frame: CGRect
-        public let ascender: CGFloat
-        public let descender: CGFloat
+        public let position: CGPoint    // glyph offset from baseline
+        public let advance: CGSize      // distance to next glyph
+        public let frame: CGRect        // texture uv frame
+        public let ascender: CGFloat    // upper distance from baseline
+        public let descender: CGFloat   // lower distance from baseline (negative direction)
     }
 
     private struct GlyphTextureAtlas {
@@ -324,7 +366,7 @@ public class Font {
         return length
     }
 
-    /// pixel-height from baseline. not includes outline.
+    /// pixel-height of text. not includes outline.
     public func lineHeight() -> CGFloat {
         let metrics = self.face.pointee.size.pointee.metrics
         return ft26d6ToFloat(metrics.height) + ceil(_embolden) * 2.0
@@ -357,7 +399,10 @@ public class Font {
             c1 = c2
         }
         let size = CGSize(width: ceil(bboxMax.x - bboxMin.x), height: ceil(bboxMax.y - bboxMin.y))
-        return CGRect(origin: bboxMin, size: size)
+        return CGRect(x: bboxMin.x,
+                      y: self.ascender - bboxMin.y, // adjust coordinates from baseline to bitmap
+                      width: size.width,
+                      height: size.height)
     }
 
     /// The distance from the baseline to the highest or upper grid coordinate used to place an outline point.
@@ -369,7 +414,7 @@ public class Font {
     /// The distance from the baseline to the lowest grid coordinate used to place an outline point.
     public var descender: CGFloat {
         let metrics = self.face.pointee.size.pointee.metrics
-        return ft26d6ToFloat(metrics.descender) + _embolden
+        return ft26d6ToFloat(metrics.descender) - _embolden
     }
 
     public var maxAdvance: CGFloat  {
@@ -445,12 +490,9 @@ public class Font {
             return nil
         }
 
-        let ascender = self.ascender
-        let boldStrength = FT_Pos(_embolden * 64.0)
-        var outlineWidth = FT_Pos(_outline * 64.0)
-
-        let advance = CGSize(width: CGFloat(face.pointee.glyph.pointee.advance.x + boldStrength) / 64.0,
-                             height: CGFloat(face.pointee.glyph.pointee.advance.y + boldStrength) / 64.0)
+        let boldStrength = ft26d6(_embolden)
+        let advance = CGSize(width: ft26d6Ceil(face.pointee.glyph.pointee.advance.x + boldStrength) >> 6,
+                             height: ft26d6Ceil(face.pointee.glyph.pointee.advance.y + boldStrength) >> 6)
         var position: CGPoint = .zero
         var frame: CGRect = .zero
         var texture: Texture? = nil
@@ -463,7 +505,7 @@ public class Font {
                 FT_Outline_Embolden(&face.pointee.glyph.pointee.outline, boldStrength)
                 var stroker: FT_Stroker? = nil
                 FT_Stroker_New(library.library, &stroker)
-                FT_Stroker_Set(stroker, outlineWidth, FT_STROKER_LINECAP_ROUND, FT_STROKER_LINEJOIN_ROUND, 0)
+                FT_Stroker_Set(stroker, ft16d16(_outline), FT_STROKER_LINECAP_ROUND, FT_STROKER_LINEJOIN_ROUND, 0)
                 FT_Stroker_ParseOutline(stroker, &face.pointee.glyph.pointee.outline, 0)
                 var ftOutline = FT_Outline()
                 var points: FT_UInt = 0
@@ -491,8 +533,8 @@ public class Font {
 
                 let xShift = FT_Pos(cbox.xMin) 
                 let yShift = FT_Pos(cbox.yMin) 
-                let left  = CGFloat(cbox.xMin >> 6)  // left offset of glyph
-                let top   = CGFloat(cbox.yMax >> 6)  // upper of offset of glyph (height for origin)
+                let left  = Int(cbox.xMin >> 6)  // left offset of glyph
+                let top   = Int(cbox.yMax >> 6)  // upper of offset of glyph (height for origin)
 
                 ftBitmap.width = width
                 ftBitmap.rows = height
@@ -508,8 +550,7 @@ public class Font {
                 if FT_Outline_Get_Bitmap(library.library, &ftOutline, &ftBitmap) == 0 {
                     // left: bitmap starting point from origin
                     // top: height from origin
-                    position.x = left
-                    position.y = ascender - top
+                    position = CGPoint(x: left, y: top - Int(ftBitmap.rows))
                     texture = self.cacheGlyphTexture(width: ftBitmap.width,
                                                      height: ftBitmap.rows,
                                                      data: ftBitmap.buffer,
@@ -532,8 +573,8 @@ public class Font {
                     }
                     // bitmap.left: bitmap offset from origin
                     // bitmap.top: height from origin
-                    position.x = CGFloat(glyphBitmap.pointee.left)
-                    position.y = ascender - CGFloat(glyphBitmap.pointee.top)
+                    position = CGPoint(x: Int(glyphBitmap.pointee.left),
+                                       y: Int(glyphBitmap.pointee.top) - Int(glyphBitmap.pointee.bitmap.rows))
                     texture = self.cacheGlyphTexture(width: glyphBitmap.pointee.bitmap.width,
                                                      height: glyphBitmap.pointee.bitmap.rows,
                                                      data: glyphBitmap.pointee.bitmap.buffer,
@@ -543,10 +584,10 @@ public class Font {
             }
         } else {
             if FT_Render_Glyph(face.pointee.glyph, FT_RENDER_MODE_NORMAL) == 0 {
-                if _outline > 0.0 {
-                    outlineWidth = outlineWidth * 2
-                    let outerSize = boldStrength + outlineWidth
-                    let innerSize = boldStrength - outlineWidth
+                let outline = _outline.rounded()
+                if outline > 0.0 {
+                    let outerSize = ft26d6(_embolden + (outline * 2))
+                    let innerSize = ft26d6(_embolden - (outline * 2))
                     // create two bitmaps, generate outline from bigger subtract smaller
                     var inner = FT_Bitmap()
                     var outer = FT_Bitmap()
@@ -568,8 +609,8 @@ public class Font {
                             outer.buffer[ Int((y + offsetY) * outer.width + x + offsetX) ] = max(value1 - value2, 0)
                         }
                     }
-                    position.x = CGFloat(face.pointee.glyph.pointee.bitmap_left) - _outline
-                    position.y = ascender - (CGFloat(face.pointee.glyph.pointee.bitmap_top) + _outline)
+                    position = CGPoint(x: CGFloat(face.pointee.glyph.pointee.bitmap_left) - outline,
+                                       y: CGFloat(face.pointee.glyph.pointee.bitmap_top) - CGFloat(face.pointee.glyph.pointee.bitmap.rows) - outline)
                     texture = self.cacheGlyphTexture(width: outer.width,
                                                      height: outer.rows,
                                                      data: outer.buffer,
@@ -579,8 +620,8 @@ public class Font {
                     FT_Bitmap_Done(library.library, &outer)
                 } else {
                     FT_Bitmap_Embolden(library.library, &(face.pointee.glyph.pointee.bitmap), boldStrength, boldStrength)
-                    position.x = CGFloat(face.pointee.glyph.pointee.bitmap_left)
-                    position.y = ascender - CGFloat(face.pointee.glyph.pointee.bitmap_top) + _embolden
+                    position = CGPoint(x: Int(face.pointee.glyph.pointee.bitmap_left),
+                                       y: Int(face.pointee.glyph.pointee.bitmap_top) - Int(face.pointee.glyph.pointee.bitmap.rows) + Int(_embolden.rounded()))
                     texture = self.cacheGlyphTexture(width: face.pointee.glyph.pointee.bitmap.width,
                                                      height: face.pointee.glyph.pointee.bitmap.rows,
                                                      data: face.pointee.glyph.pointee.bitmap.buffer,
@@ -729,20 +770,23 @@ public class Font {
             Log.info("Create new texture atlas with resolution: \(desiredWidth) x \(desiredHeight)")
         
             // create texture object..
-            let desc = TextureDescriptor(
-                textureType: .type2D,
-                pixelFormat: .r8Unorm,
-                width: desiredWidth,
-                height: desiredHeight,
-                depth: 1,
-                mipmapLevels: 1,
-                sampleCount: 1,
-                arrayLength: 1,
-                usage: [.copyDestination, .sampled]
-            )
+            let desc = TextureDescriptor(textureType: .type2D,
+                                         pixelFormat: .r8Unorm,
+                                         width: desiredWidth,
+                                         height: desiredHeight,
+                                         depth: 1,
+                                         mipmapLevels: 1,
+                                         sampleCount: 1,
+                                         arrayLength: 1,
+                                         usage: [.copyDestination, .sampled])
             texture = device.makeTexture(descriptor: desc)
 
             if let texture = texture {
+                // Array<UInt8>(repeating: 0, count: desc.width * desc.height).withUnsafeBytes {
+                //     let ptr = $0.baseAddress!.assumingMemoryBound(to: UInt8.self)
+                //     updateTexture(queue, texture, CGRect(x: 0, y: 0, width: desc.width, height: desc.height),ptr)
+                // }
+
                 frame = CGRect(x: CGFloat(leftMargin),
                                y: CGFloat(topMargin),
                                width: CGFloat(width),

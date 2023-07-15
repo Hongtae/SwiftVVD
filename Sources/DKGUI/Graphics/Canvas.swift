@@ -49,57 +49,37 @@ extension Canvas where Symbols == EmptyView {
     }
 }
 
-class CanvasContext<Symbols>: ViewProxy where Symbols: View {
-    typealias Content = Canvas<Symbols>
-    var view: Content
-
-    var modifiers: [any ViewModifier]
-    var environmentValues: EnvironmentValues
-    var sharedContext: SharedContext
-    var layoutOffset: CGPoint
-    var layoutSize: CGSize
-    var contentScaleFactor: CGFloat
-
-    init(view: Content,
-         modifiers: [any ViewModifier],
-         environmentValues: EnvironmentValues,
-         sharedContext: SharedContext) {
-        self.modifiers = modifiers
-        self.environmentValues = environmentValues._resolve(modifiers: modifiers)
-        self.view = self.environmentValues._resolve(view)
-        self.sharedContext = sharedContext
-        self.layoutOffset = .zero
-        self.layoutSize = .zero
-        self.contentScaleFactor = 1
-    }
-
-    func layout(offset: CGPoint, size: CGSize, scaleFactor: CGFloat) {
-        self.layoutOffset = offset
-        self.layoutSize = size
-        self.contentScaleFactor = scaleFactor
-    }
-
-    func draw(frame: CGRect, context: GraphicsContext) {
-        if self.layoutSize.width > 0 && self.layoutSize.height > 0 {
-            context.drawLayer(in: frame) { context, size in
-                self.view.renderer(&context, size)
-            }
-        }
-    }
-
-    func updateEnvironment(_ environmentValues: EnvironmentValues) {
-        self.environmentValues = environmentValues._resolve(modifiers: modifiers)
-        // TODO: redraw!
+extension Canvas {
+    public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        let view = view.value.makeViewProxy(inputs: inputs)
+        return _ViewOutputs(item: .view(view))
     }
 }
 
-extension Canvas: _PrimitiveView {
-    func makeViewProxy(modifiers: [any ViewModifier],
-                       environmentValues: EnvironmentValues,
-                       sharedContext: SharedContext) -> any ViewProxy {
-        CanvasContext(view: self,
-                      modifiers: modifiers,
-                      environmentValues: environmentValues,
-                      sharedContext: sharedContext)
+extension Canvas: PrimitiveView {
+}
+
+extension Canvas: ViewProxyProvider {
+    func makeViewProxy(inputs: _ViewInputs) -> ViewProxy {
+        CanvasProxy(view: self, inputs: inputs)
+    }
+}
+
+class CanvasProxy<Symbols>: ViewProxy where Symbols: View {
+    typealias Content = Canvas<Symbols>
+    var view: Content
+    
+    init(view: Content, inputs: _ViewInputs) {
+        self.view = inputs.environmentValues._resolve(view)
+        super.init(inputs: inputs)
+    }
+
+    override func draw(frame: CGRect, context: GraphicsContext) {
+        if self.frame.width > 0 && self.frame.height > 0 {
+            context.drawLayer(in: frame) { context, size in
+                let renderer = self.view.renderer
+                renderer(&context, size)
+            }
+        }
     }
 }

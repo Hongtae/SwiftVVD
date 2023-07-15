@@ -405,10 +405,11 @@ extension GraphicsContext {
         encoder.setCullMode(.none)
         encoder.setFrontFacing(.clockwise)
         encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
-        encoder.draw(vertexStart: 0,
-                     vertexCount: vertices.count,
-                     instanceCount: 1,
-                     baseInstance: 0)
+        encoder.drawPrimitives(type: .triangle,
+                               vertexStart: 0,
+                               vertexCount: vertices.count,
+                               instanceCount: 1,
+                               baseInstance: 0)
         return true
     }
 
@@ -471,10 +472,11 @@ extension GraphicsContext {
         encoder.setCullMode(.none)
         encoder.setFrontFacing(.clockwise)
         encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
-        encoder.draw(vertexStart: 0,
-                     vertexCount: vertices.count,
-                     instanceCount: 1,
-                     baseInstance: 0)
+        encoder.drawPrimitives(type: .triangle,
+                               vertexStart: 0,
+                               vertexCount: vertices.count,
+                               instanceCount: 1,
+                               baseInstance: 0)
         return true
     }
 
@@ -546,10 +548,11 @@ extension GraphicsContext {
         encoder.setCullMode(.none)
         encoder.setFrontFacing(.clockwise)
         encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
-        encoder.draw(vertexStart: 0,
-                     vertexCount: vertices.count,
-                     instanceCount: 1,
-                     baseInstance: 0)
+        encoder.drawPrimitives(type: .triangle,
+                               vertexStart: 0,
+                               vertexCount: vertices.count,
+                               instanceCount: 1,
+                               baseInstance: 0)
         return true
     }
 }

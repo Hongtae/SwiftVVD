@@ -20,6 +20,7 @@ protocol WindowProxy: AnyObject {
 protocol SceneProxy: AnyObject {
     associatedtype Content: Scene
     var scene: Content { get }
+//    var modifiers: [any _SceneModifier] { get }
     var children: [any SceneProxy] { get }
     var windows: [any WindowProxy] { get }
 }
@@ -46,24 +47,28 @@ extension SceneProxy {
 
 class SceneContext<Content>: SceneProxy where Content: Scene {
     var scene: Content
+    var modifiers: [any _SceneModifier]
     var children: [any SceneProxy]
     var windows: [any WindowProxy]
-    init(scene: Content, children: [any SceneProxy]) {
+    init(scene: Content, modifiers: [any _SceneModifier], children: [any SceneProxy]) {
         self.scene = scene
+        self.modifiers = modifiers
         self.children = children
         self.windows = children.flatMap { $0.windows }
     }
-    init(scene: Content, window: any WindowProxy) {
+    init(scene: Content, modifiers: [any _SceneModifier], window: any WindowProxy) {
         self.scene = scene
+        self.modifiers = modifiers
         self.children = []
         self.windows = [window]
     }
 }
 
-func _makeSceneProxy<Content>(_ scene: Content) -> any SceneProxy where Content: Scene {
+func _makeSceneProxy<Content>(_ scene: Content,
+                              modifiers: [any _SceneModifier]) -> any SceneProxy where Content: Scene {
     if let prim = scene as? (any _PrimitiveScene) {
-        return prim.makeSceneProxy()
+        return prim.makeSceneProxy(modifiers: modifiers)
     }
-    let child = _makeSceneProxy(scene.body)
-    return SceneContext(scene: scene, children: [child])
+    let child = _makeSceneProxy(scene.body, modifiers: modifiers)
+    return SceneContext(scene: scene, modifiers: modifiers, children: [child])
 }

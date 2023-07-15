@@ -8,8 +8,8 @@
 import Foundation
 
 public struct ViewDimensions: Equatable {
-    var height: CGFloat
     var width: CGFloat
+    var height: CGFloat
 
     subscript(guide: HorizontalAlignment) -> CGFloat {
         0

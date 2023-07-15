@@ -32,3 +32,11 @@ public struct UnitPoint : Hashable, Sendable {
     public static let bottomLeading     = UnitPoint(x: 0.0, y: 1.0)
     public static let bottomTrailing    = UnitPoint(x: 1.0, y: 1.0)
 }
+
+extension UnitPoint: Animatable {
+    public typealias AnimatableData = AnimatablePair<CGFloat, CGFloat>
+    public var animatableData: AnimatableData {
+        get { .init(x, y) }
+        set { (x, y) = newValue[] }
+    }
+}
