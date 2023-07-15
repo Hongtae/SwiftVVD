@@ -289,6 +289,8 @@ public class VulkanInstance {
 #if VK_USE_PLATFORM_WAYLAND_KHR
         requiredExtensions.append(VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME)
 #endif
+        // support headless mode
+        optionalExtensions.append(VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME)
 
         // add layers for required extensions
         for ext in requiredExtensions {
