@@ -15,9 +15,9 @@ public struct _BackgroundModifier<Background>: ViewModifier where Background: Vi
         self.alignment = alignment
     }
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        let layerOutputs = Background._makeView(view: modifier[\.background],
-                                            inputs: inputs)
-        let layer = ViewProxyLayer(view: layerOutputs.view, alignment: modifier.value.alignment)
+        let layer = ViewProxyLayer(view: modifier[\.background],
+                                   inputs: inputs,
+                                   alignment: modifier.value.alignment)
         let viewOutputs = body(_Graph(), inputs)
         viewOutputs.view.backgroundLayers.append(layer)
         return viewOutputs
@@ -33,10 +33,11 @@ extension _BackgroundModifier: _UnaryViewModifier {
 
 extension _BackgroundModifier {
     struct ViewProxyLayer: ViewLayer {
-        let view: ViewProxy
-        let alignment: Alignment
-        init(view: ViewProxy, alignment: Alignment) {
-            self.view = view
+        private let view: ViewProxy
+        private let alignment: Alignment
+        init<V>(view: _GraphValue<V>, inputs: _ViewInputs, alignment: Alignment) where V: View {
+            let outputs = V._makeView(view: view, inputs: inputs)
+            self.view = outputs.view
             self.alignment = alignment
         }
         func load(context: GraphicsContext) {
@@ -81,8 +82,7 @@ extension _BackgroundModifier {
             }
             var context = context
             context.environment = self.view.environmentValues
-//            self.view.draw(frame: view.frame, context: context)
-            self.view.draw(frame: frame, context: context)
+            self.view.draw(frame: view.frame, context: context)
         }
     }
 }

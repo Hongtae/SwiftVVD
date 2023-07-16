@@ -17,9 +17,9 @@ public struct _OverlayModifier<Overlay>: ViewModifier where Overlay: View {
     }
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        let layerOutputs = Overlay._makeView(view: modifier[\.overlay],
-                                            inputs: inputs)
-        let layer = ViewProxyLayer(view: layerOutputs.view, alignment: modifier.value.alignment)
+        let layer = ViewProxyLayer(view: modifier[\.overlay],
+                                   inputs: inputs,
+                                   alignment: modifier.value.alignment)
         let viewOutputs = body(_Graph(), inputs)
         viewOutputs.view.overlayLayers.append(layer)
         return viewOutputs
@@ -35,10 +35,11 @@ extension _OverlayModifier: _UnaryViewModifier {
 
 extension _OverlayModifier {
     struct ViewProxyLayer: ViewLayer {
-        let view: ViewProxy
-        let alignment: Alignment
-        init(view: ViewProxy, alignment: Alignment) {
-            self.view = view
+        private let view: ViewProxy
+        private let alignment: Alignment
+        init<V>(view: _GraphValue<V>, inputs: _ViewInputs, alignment: Alignment) where V: View {
+            let outputs = V._makeView(view: view, inputs: inputs)
+            self.view = outputs.view
             self.alignment = alignment
         }
         func load(context: GraphicsContext) {
@@ -84,7 +85,6 @@ extension _OverlayModifier {
             var context = context
             context.environment = self.view.environmentValues
             self.view.draw(frame: view.frame, context: context)
-//            self.view.draw(frame: frame, context: context)
         }
     }
 }
