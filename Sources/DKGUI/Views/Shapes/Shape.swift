@@ -23,6 +23,9 @@ extension Shape {
     public static var role: ShapeRole { .fill }
     public func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
         let size = proposal.replacingUnspecifiedDimensions()
+        if size.width == .infinity || size.height == .infinity {
+            return size
+        }
         let path = self.path(in: CGRect(origin: .zero, size: size))
         return path.boundingRect.standardized.size
     }
@@ -54,9 +57,11 @@ extension Shape {
 
 extension Shape {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        fatalError()
+        Body._makeView(view: view[\.body], inputs: inputs)
     }
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        fatalError()
+        let body = view[\.body]
+        let inputs = inputs.inputs
+        return _ViewListOutputs(item: .view(.init(view: AnyView(body.value), inputs: inputs)))
     }
 }

@@ -15,7 +15,12 @@ public struct _BackgroundModifier<Background>: ViewModifier where Background: Vi
         self.alignment = alignment
     }
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        fatalError()
+        let layerOutputs = Background._makeView(view: modifier[\.background],
+                                            inputs: inputs)
+        let layer = ViewProxyLayer(view: layerOutputs.view, alignment: modifier.value.alignment)
+        let viewOutputs = body(_Graph(), inputs)
+        viewOutputs.view.backgroundLayers.append(layer)
+        return viewOutputs
     }
     public typealias Body = Never
 }
@@ -24,6 +29,62 @@ extension _BackgroundModifier: Equatable where Background: Equatable {
 }
 
 extension _BackgroundModifier: _UnaryViewModifier {
+}
+
+extension _BackgroundModifier {
+    struct ViewProxyLayer: ViewLayer {
+        let view: ViewProxy
+        let alignment: Alignment
+        init(view: ViewProxy, alignment: Alignment) {
+            self.view = view
+            self.alignment = alignment
+        }
+        func load(context: GraphicsContext) {
+            self.view.loadView(context: context)
+        }
+        func layout(frame: CGRect) {
+            var position = frame.origin
+            var anchor = UnitPoint()
+            switch self.alignment.horizontal {
+            case .leading:      position.x = frame.minX
+                                anchor.x = 0
+            case .center:       position.x = frame.midX
+                                anchor.x = 0.5
+            case .trailing:     position.x = frame.maxX
+                                anchor.x = 1
+            default:            position.x = frame.midX
+                                anchor.x = 0.5
+            }
+            switch self.alignment.vertical {
+            case .top:          position.y = frame.minY
+                                anchor.y = 0
+            case .center:       position.y = frame.midY
+                                anchor.y = 0.5
+            case .bottom:       position.y = frame.maxY
+                                anchor.y = 1
+            default:            position.y = frame.midY
+                                anchor.y = 0.5
+            }
+            let proposal = ProposedViewSize(width: frame.width, height: frame.height)
+            self.view.place(at: position,
+                            anchor: anchor,
+                            proposal: proposal)
+        }
+        func draw(frame: CGRect, context: GraphicsContext) {
+            let width = view.frame.width
+            let height = view.frame.height
+            guard width > 0 && height > 0 else {
+                return
+            }
+            if frame.intersection(view.frame).isNull {
+                return
+            }
+            var context = context
+            context.environment = self.view.environmentValues
+//            self.view.draw(frame: view.frame, context: context)
+            self.view.draw(frame: frame, context: context)
+        }
+    }
 }
 
 public struct _BackgroundStyleModifier<Style>: ViewModifier where Style: ShapeStyle {

@@ -6,11 +6,9 @@
 //
 
 import Foundation
-import DKGame
 
 public struct TupleView<T>: View {
     public var value: T
-    public typealias Body = Never
 
     public init(_ value: T) {
         self.value = value
@@ -39,6 +37,8 @@ public struct TupleView<T>: View {
         }
         return _ViewListOutputs(item: .viewList(viewList))
     }
+
+    public typealias Body = Never
 }
 
 extension TupleView: _PrimitiveView {

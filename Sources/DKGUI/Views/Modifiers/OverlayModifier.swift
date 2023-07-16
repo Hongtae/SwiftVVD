@@ -17,12 +17,12 @@ public struct _OverlayModifier<Overlay>: ViewModifier where Overlay: View {
     }
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        var inputs = inputs
-        let viewOutputs = Overlay._makeView(view: _GraphValue(modifier.value.overlay),
+        let layerOutputs = Overlay._makeView(view: modifier[\.overlay],
                                             inputs: inputs)
-        let layer = ViewProxyLayer(view: viewOutputs.view, alignment: modifier.value.alignment)
-        inputs.overlayLayers.append(layer)
-        return body(_Graph(), inputs)
+        let layer = ViewProxyLayer(view: layerOutputs.view, alignment: modifier.value.alignment)
+        let viewOutputs = body(_Graph(), inputs)
+        viewOutputs.view.overlayLayers.append(layer)
+        return viewOutputs
     }
     public typealias Body = Never
 }
@@ -83,8 +83,8 @@ extension _OverlayModifier {
             }
             var context = context
             context.environment = self.view.environmentValues
-            //self.view.draw(frame: view.frame, context: context)
-            self.view.draw(frame: frame, context: context)
+            self.view.draw(frame: view.frame, context: context)
+//            self.view.draw(frame: frame, context: context)
         }
     }
 }
