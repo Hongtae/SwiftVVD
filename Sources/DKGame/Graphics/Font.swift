@@ -491,8 +491,8 @@ public class Font {
         }
 
         let boldStrength = ft26d6(_embolden)
-        let advance = CGSize(width: ft26d6Ceil(face.pointee.glyph.pointee.advance.x + boldStrength) >> 6,
-                             height: ft26d6Ceil(face.pointee.glyph.pointee.advance.y + boldStrength) >> 6)
+        let advance = CGSize(width: Int(ft26d6Ceil(face.pointee.glyph.pointee.advance.x + boldStrength)) >> 6,
+                             height: Int(ft26d6Ceil(face.pointee.glyph.pointee.advance.y + boldStrength)) >> 6)
         var position: CGPoint = .zero
         var frame: CGRect = .zero
         var texture: Texture? = nil
