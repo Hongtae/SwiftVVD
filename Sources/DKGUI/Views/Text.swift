@@ -20,7 +20,9 @@ class AnyTextStorage {
     }
 }
 
-typealias LocalizedStringKey = String.LocalizationValue
+// NOTE: No String.LocalizationValue for non-Apple platforms.
+//typealias LocalizedStringKey = String.LocalizationValue
+typealias LocalizedStringKey = String
 
 class LocalizedTextStorage: AnyTextStorage {
     let key: LocalizedStringKey
@@ -33,12 +35,14 @@ class LocalizedTextStorage: AnyTextStorage {
     }
 
     override func resolve(typeFaces: [TypeFace], context: GraphicsContext) -> GraphicsContext.ResolvedText {
-        let text = String(localized: self.key)
+        //let text = String(localized: self.key)
+        let text = self.key
         return .init(storage: [.text(typeFaces, text)], scaleFactor: context.contentScaleFactor)
     }
 
     override func resolveText(in environment: EnvironmentValues) -> String {
-        String(localized: key)
+        //String(localized: key)
+        self.key
     }
 
     override func isEqual(to other: AnyTextStorage) -> Bool {
