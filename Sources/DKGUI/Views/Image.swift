@@ -25,11 +25,17 @@ class NamedImageProvider: AnyImageProviderBox {
     let value: Float?
     let location: Bundle?
     let label: Text?
+    var scale: CGFloat = 1.0
+
     init(name: String, value: Float?, location: Bundle?, label: Text?) {
         self.name = name
         self.value = value
         self.location = location
         self.label = label
+    }
+
+    override var scaleFactor: CGFloat {
+        self.scale
     }
 
     override func makeTexture(_ context: GraphicsContext) -> Texture? {
@@ -40,6 +46,7 @@ class NamedImageProvider: AnyImageProviderBox {
 
             let sharedContext = context.sharedContext
             if let texture = sharedContext.resourceObjects[url.absoluteString] as? Texture {
+                self.scale = sharedContext.contentScaleFactor
                 return texture
             }
 
@@ -56,6 +63,7 @@ class NamedImageProvider: AnyImageProviderBox {
             if let texture = image?.makeTexture(commandQueue: context.commandQueue) {
                 // cache
                 sharedContext.resourceObjects[url.absoluteString] = texture
+                self.scale = sharedContext.contentScaleFactor
                 return texture
             }
         }
