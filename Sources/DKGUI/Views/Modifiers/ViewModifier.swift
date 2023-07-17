@@ -84,6 +84,10 @@ protocol _ViewInputsModifier {
 protocol _UnaryViewModifier {
 }
 
+protocol _ViewLayoutModifier: _UnaryViewModifier {
+    func makeLayoutViewProxy(content view: ViewProxy, inputs: _ViewInputs) -> ViewProxy
+}
+
 extension ViewModifier where Self: _GraphInputsModifier, Self.Body == Never {
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
         var inputs = inputs
@@ -110,7 +114,12 @@ extension ViewModifier where Self: Animatable {
         let graphInputs = _GraphInputs(environmentValues: inputs.environmentValues)
         Self._makeAnimatable(value: &modifier, inputs: graphInputs)
 
-        return body(_Graph(), inputs)
+        let viewOutputs = body(_Graph(), inputs)
+        if let layoutModifier = modifier.value as? _ViewLayoutModifier {
+            let viewProxy = layoutModifier.makeLayoutViewProxy(content: viewOutputs.view, inputs: inputs)
+            return _ViewOutputs(item: .view(viewProxy))
+        }
+        return viewOutputs
     }
     public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
 

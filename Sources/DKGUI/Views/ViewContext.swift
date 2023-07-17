@@ -100,15 +100,6 @@ protocol ViewLayer {
     func draw(frame: CGRect, context: GraphicsContext)
 }
 
-extension ViewLayer {
-    func load(context: GraphicsContext) {
-    }
-    func layout(frame: CGRect) {
-    }
-    func draw(frame: CGRect, context: GraphicsContext) {
-    }
-}
-
 class ViewProxy {
     var modifiers: [any ViewModifier]
     var traits: [ObjectIdentifier: Any]
@@ -155,7 +146,12 @@ class ViewProxy {
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
-        proposal.replacingUnspecifiedDimensions()
+        let proposed =  proposal.replacingUnspecifiedDimensions()
+        return subviews.reduce(proposed) {
+            let size = $1.sizeThatFits(proposal)
+            return CGSize(width: max($0.width, size.width),
+                          height: max($0.height, size.height))
+        }
     }
 
     func dimensions(in proposal: ProposedViewSize) -> ViewDimensions {
@@ -180,7 +176,7 @@ class ViewProxy {
     func layoutSubviews() {
         let proposal = ProposedViewSize(width: self.frame.width,
                                         height: self.frame.height)
-        self.subviews.first?.place(at: .zero,
+        self.subviews.first?.place(at: self.frame.origin,
                                    anchor: .topLeading,
                                    proposal: proposal)
     }
@@ -192,7 +188,7 @@ class ViewProxy {
     }
 
     func drawBackground(frame: CGRect, context: GraphicsContext) {
-        self.backgroundLayers.forEach { layer in
+        self.backgroundLayers.reversed().forEach { layer in
             layer.draw(frame: frame, context: context)
         }
     }

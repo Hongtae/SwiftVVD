@@ -30,15 +30,11 @@ extension Animatable where Self.AnimatableData == EmptyAnimatableData {
         @inlinable set {}
     }
     public static func _makeAnimatable(value: inout _GraphValue<Self>, inputs: _GraphInputs) {
-        //fatalError()
-        Log.error("Implement this")
     }
 }
 
 extension Animatable {
     public static func _makeAnimatable(value: inout _GraphValue<Self>, inputs: _GraphInputs) {
-        //fatalError()
-        Log.error("Implement this")
     }
 }
 
