@@ -30,22 +30,32 @@ extension _PaddingLayout: _ViewLayoutModifier {
         }
 
         override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
-            var size = self.view.sizeThatFits(proposal)
+            var paddingH: CGFloat = .zero
+            var paddingV: CGFloat = .zero
             if let insets = self.layout.insets {
                 if self.layout.edges.contains(.leading) {
-                    size.width += insets.leading
+                    paddingH += insets.leading
                 }
                 if self.layout.edges.contains(.trailing) {
-                    size.width += insets.trailing
+                    paddingH += insets.trailing
                 }
                 if self.layout.edges.contains(.top) {
-                    size.height += insets.top
+                    paddingV += insets.top
                 }
                 if self.layout.edges.contains(.bottom) {
-                    size.height += insets.bottom
+                    paddingV += insets.bottom
                 }
             }
-            return size
+            var proposal = proposal
+            if let w = proposal.width {
+                proposal.width = max(w - paddingH, 0)
+            }
+            if let h = proposal.height {
+                proposal.height = max(h - paddingV, 0)
+            }
+            let size = self.view.sizeThatFits(proposal)
+            return CGSize(width: max(size.width + paddingH, 0),
+                          height: max(size.height + paddingV, 0))
         }
 
         override func layoutSubviews() {
