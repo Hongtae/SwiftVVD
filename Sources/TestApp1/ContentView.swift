@@ -55,12 +55,21 @@ struct OutlineCircle: ViewModifier {
 struct ContentView: View {
     var body: some View {
         VStack {
-            Text("TestApp1").font(.largeTitle)
-                .modifier(TitleModifier())
-                .padding([.top, .bottom], 5)
-            Text("This is a temporary UI-Framework demo.")
-                .font(.title)
+            HStack {
+                Spacer()
+                Text("TestApp1").font(.largeTitle)
+                Spacer()
+                Divider().frame(height: 40)
+                Spacer()
+                Text("Declarative UI, Shapes Demo")
+                Spacer()
+            }.background {
+                RoundedRectangle(cornerRadius: 20)
+                    .stroke(style: StrokeStyle(lineWidth: 10, dash: [12, 4]))
+                    .fill(.cyan)
+            }.padding(20)
             Divider()
+            Text("Text and Image")
             HStack {
                 Spacer()
                 Text(verbatim: """
@@ -70,7 +79,14 @@ struct ContentView: View {
                     nisi ut aliquip ex ea commodo consequat.
                     """)
                     .frame(width: 200)
-                    .border(.blue)
+                    .padding(5)
+                    .background {
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(.white)
+                        RoundedRectangle(cornerRadius: 4)
+                            .stroke(lineWidth: 2)
+                            .fill(.black)
+                    }
                 Spacer()
                 VStack {
                     Image("Meisje_met_de_parel.jpg", bundle: .module)
@@ -80,11 +96,21 @@ struct ContentView: View {
                 Spacer()
             }
             Divider()
-            HStack {
-                Text("SwiftVVD").modifier(OutlineCircle())
-                Text("DKGUI").modifier(OutlineCircle())
-                Text("DKGame").modifier(OutlineCircle())
-            }.frame(height: 130)
+            VStack {
+                Text("Views with background shapes")
+                HStack {
+                    Text("SwiftVVD").modifier(OutlineCircle())
+                    Text("DKGUI").modifier(OutlineCircle())
+                    Text("DKGame").modifier(OutlineCircle())
+                }.frame(height: 130)
+            }
+            .padding(10)
+            .background {
+                RoundedRectangle(cornerRadius: 20).fill(.white)
+                RoundedRectangle(cornerRadius: 20).strokeBorder(.green, lineWidth: 2)
+            }
+            .padding(10)
+            Spacer()
         }
     }
 }
