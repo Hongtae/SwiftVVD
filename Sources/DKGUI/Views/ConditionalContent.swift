@@ -24,5 +24,5 @@ extension _ConditionalContent: View where TrueContent: View, FalseContent: View 
     }
 }
 
-extension _ConditionalContent: PrimitiveView where Self: View {
+extension _ConditionalContent: _PrimitiveView where Self: View {
 }

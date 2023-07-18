@@ -196,7 +196,8 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                                      transform: .identity,
                                      position: .zero,
                                      size: self.state.bounds.size,
-                                     safeAreaInsets: EdgeInsets())
+                                     safeAreaInsets: EdgeInsets(),
+                                     defaultLayout: VStackLayout())
         let viewOutputs = Content._makeView(view: graph, inputs: viewInputs)
         self.viewProxy = viewOutputs.view
     }

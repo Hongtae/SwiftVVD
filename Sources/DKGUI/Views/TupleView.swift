@@ -6,22 +6,28 @@
 //
 
 import Foundation
-import DKGame
 
 public struct TupleView<T>: View {
     public var value: T
-    public typealias Body = Never
 
     public init(_ value: T) {
         self.value = value
     }
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        let defaultLayout = inputs.defaultLayout
+        var inputs = inputs
+        inputs.defaultLayout = nil
         let listInputs = _ViewListInputs(inputs: inputs)
         let listOutputs = Self._makeViewList(view: view, inputs: listInputs)
         let subviews = listOutputs.viewProxies
-        let view = ViewGroupProxy(view: view.value, inputs: inputs, subviews: subviews, layout: VStackLayout())
-        return _ViewOutputs(item: .view(view))
+        let viewProxy: ViewProxy
+        if let defaultLayout {
+            viewProxy = ViewGroupProxy(view: view.value, inputs: inputs, subviews: subviews, layout: defaultLayout)
+        } else {
+            viewProxy = ViewProxy(inputs: inputs, subviews: subviews)
+        }
+        return _ViewOutputs(item: .view(viewProxy))
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
@@ -39,7 +45,9 @@ public struct TupleView<T>: View {
         }
         return _ViewListOutputs(item: .viewList(viewList))
     }
+
+    public typealias Body = Never
 }
 
-extension TupleView: PrimitiveView {
+extension TupleView: _PrimitiveView {
 }

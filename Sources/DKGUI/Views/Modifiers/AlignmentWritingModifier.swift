@@ -24,6 +24,9 @@ public struct _AlignmentWritingModifier: ViewModifier {
     public typealias Body = Never
 }
 
+extension _AlignmentWritingModifier: _UnaryViewModifier {
+}
+
 extension View {
     @inlinable public func alignmentGuide(_ g: HorizontalAlignment, computeValue: @escaping (ViewDimensions) -> CGFloat) -> some View {
         return modifier(

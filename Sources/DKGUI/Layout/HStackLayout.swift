@@ -69,6 +69,9 @@ public struct HStackLayout: Layout {
         let fitWidth = proposedSizes.reduce(CGFloat.zero) { result, size in
             result + size.width
         }
+        let fitHeight = proposedSizes.reduce(CGFloat.zero) { result, size in
+            max(result, size.height)
+        }
 
         if proposal.width == nil {
             return CGSize(width: fitWidth + spacing, height: size.height)
@@ -79,7 +82,7 @@ public struct HStackLayout: Layout {
         }
 
         let width = min(max(size.width - spacing, fitWidth), maxWidth)
-        return CGSize(width: width + spacing, height: size.height)
+        return CGSize(width: width + spacing, height: fitHeight)
     }
 
     public func spacing(subviews: Self.Subviews,

@@ -17,21 +17,36 @@ public protocol View {
 
 extension View {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let listInputs = _ViewListInputs(inputs: inputs)
-        if let provider = view.value as? ViewProxyProvider {
+        let view = inputs.environmentValues._resolve(view)
+        if let provider = view.value as? _ViewProxyProvider {
             let proxy = provider.makeViewProxy(inputs: inputs)
             return _ViewOutputs(item: .view(proxy))
         }
-        let view = inputs.environmentValues._resolve(view)
-        let listOutputs = Self.Body._makeViewList(view: view[\.body], inputs: listInputs)
+        let body = view[\.body]
+        if body.value is _ViewProxyProvider {
+            return Self.Body._makeView(view: body, inputs: inputs)
+        }
+
+        let defaultLayout = inputs.defaultLayout
+        var inputs = inputs
+        inputs.defaultLayout = nil
+
+        let listInputs = _ViewListInputs(inputs: inputs)
+        let listOutputs = Self.Body._makeViewList(view: body, inputs: listInputs)
         let subviews = listOutputs.viewProxies
-        let viewProxy = ViewGroupProxy(view: view.value, inputs: inputs, subviews: subviews, layout: VStackLayout())
+        let viewProxy: ViewProxy
+        if let defaultLayout {
+            viewProxy = ViewGroupProxy(view: view.value, inputs: inputs, subviews: subviews, layout: defaultLayout)
+        } else {
+            viewProxy = ViewProxy(inputs: inputs, subviews: subviews)
+        }
         return _ViewOutputs(item: .view(viewProxy))
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        let body = inputs.inputs.environmentValues._resolve(view[\.body])
-        if body.value is ViewProxyProvider {
+        let view = inputs.inputs.environmentValues._resolve(view)
+        let body = view[\.body]
+        if body.value is _ViewProxyProvider {
             let inputs = inputs.inputs
             return _ViewListOutputs(item: .view(.init(view: AnyView(body.value), inputs: inputs)))
         }
@@ -55,11 +70,11 @@ extension View where Body == Never {
 }
 */
 
-// PrimitiveView cannot have a body. (body = Never)
-protocol PrimitiveView {
+// _PrimitiveView is a View type that does not have a body. (body = Never)
+protocol _PrimitiveView {
 }
 
-extension PrimitiveView {
+extension _PrimitiveView {
     public var body: Never {
         fatalError("\(Self.self) may not have Body == Never")
     }
@@ -84,7 +99,7 @@ extension Optional: View where Wrapped: View {
     }
 }
 
-extension Optional: PrimitiveView where Self: View {
+extension Optional: _PrimitiveView where Self: View {
 }
 
 //MARK: - View with ID

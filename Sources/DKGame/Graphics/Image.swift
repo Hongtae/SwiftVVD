@@ -575,7 +575,8 @@ public class Image {
                      pixelFormat: format,
                      data: Data(bytesNoCopy: buffer.baseAddress!,
                                 count: buffer.count,
-                                deallocator: .free))
+                                deallocator: .custom({ p,_ in p.deallocate()})
+                                ))
     }
 }
 
