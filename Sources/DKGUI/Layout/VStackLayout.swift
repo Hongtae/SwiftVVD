@@ -69,6 +69,9 @@ public struct VStackLayout: Layout {
         let fitHeight = proposedSizes.reduce(CGFloat.zero) { result, size in
             result + size.height
         }
+        let fitWidth = proposedSizes.reduce(CGFloat.zero) { result, size in
+            max(result, size.width)
+        }
 
         if proposal.height == nil {
             return CGSize(width: size.width, height: fitHeight + spacing)
@@ -79,7 +82,7 @@ public struct VStackLayout: Layout {
         }
 
         let height = min(max(size.height - spacing, fitHeight), maxHeight)
-        return CGSize(width: size.width, height: height + spacing)
+        return CGSize(width: fitWidth, height: height + spacing)
     }
 
     public func spacing(subviews: Self.Subviews,

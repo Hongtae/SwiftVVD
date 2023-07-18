@@ -27,21 +27,35 @@ extension Spacer: _ViewProxyProvider {
 
 class SpacerProxy: ViewProxy {
     var view: Spacer
+    var stackOrientation: Axis = .vertical
+
     init(view: Spacer, inputs: _ViewInputs) {
         self.view = inputs.environmentValues._resolve(view)
         super.init(inputs: inputs)
     }
 
+    override func setLayoutProperties(_ prop: LayoutProperties) {
+        self.stackOrientation = prop.stackOrientation ?? .vertical
+    }
+
     override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
         if proposal == .zero { return .zero }
 
+        var size: CGSize = .zero
         if let minLength = view.minLength {
-            var size = proposal.replacingUnspecifiedDimensions(by: CGSize(width: minLength, height: minLength))
+            size = proposal.replacingUnspecifiedDimensions(by: CGSize(width: minLength, height: minLength))
             size.width = max(size.width, minLength)
             size.height = max(size.height, minLength)
-            return size
+        } else {
+            size = proposal.replacingUnspecifiedDimensions()
         }
-        return proposal.replacingUnspecifiedDimensions()
+
+        if self.stackOrientation == .horizontal {
+            size.height = 0
+        } else {
+            size.width = 0
+        }
+        return size
     }
 }
 
