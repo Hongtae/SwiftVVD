@@ -81,11 +81,8 @@ struct ContentView: View {
                     .frame(width: 200)
                     .padding(5)
                     .background {
-                        RoundedRectangle(cornerRadius: 4)
-                            .fill(.white)
-                        RoundedRectangle(cornerRadius: 4)
-                            .stroke(lineWidth: 2)
-                            .fill(.black)
+                        RoundedRectangle(cornerRadius: 4).fill(.white)
+                        RoundedRectangle(cornerRadius: 4).stroke(lineWidth: 2).fill(.black)
                     }
                 Spacer()
                 VStack {
@@ -102,6 +99,9 @@ struct ContentView: View {
                     Text("SwiftVVD").modifier(OutlineCircle())
                     Text("DKGUI").modifier(OutlineCircle())
                     Text("DKGame").modifier(OutlineCircle())
+                    Star()
+                        .fill(.purple)
+                        .frame(width: 100, height: 100)
                 }.frame(height: 130)
             }
             .padding(10)
