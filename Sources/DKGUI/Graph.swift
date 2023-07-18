@@ -30,6 +30,7 @@ public struct _ViewInputs {
     var position: CGPoint
     var size: CGSize
     var safeAreaInsets: EdgeInsets
+    var defaultLayout: (any Layout)?
 }
 
 public struct _ViewOutputs {

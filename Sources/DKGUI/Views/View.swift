@@ -26,10 +26,20 @@ extension View {
         if body.value is _ViewProxyProvider {
             return Self.Body._makeView(view: body, inputs: inputs)
         }
+
+        let defaultLayout = inputs.defaultLayout
+        var inputs = inputs
+        inputs.defaultLayout = nil
+
         let listInputs = _ViewListInputs(inputs: inputs)
         let listOutputs = Self.Body._makeViewList(view: body, inputs: listInputs)
         let subviews = listOutputs.viewProxies
-        let viewProxy = ViewGroupProxy(view: view.value, inputs: inputs, subviews: subviews, layout: VStackLayout())
+        let viewProxy: ViewProxy
+        if let defaultLayout {
+            viewProxy = ViewGroupProxy(view: view.value, inputs: inputs, subviews: subviews, layout: defaultLayout)
+        } else {
+            viewProxy = ViewProxy(inputs: inputs, subviews: subviews)
+        }
         return _ViewOutputs(item: .view(viewProxy))
     }
 

@@ -15,11 +15,19 @@ public struct TupleView<T>: View {
     }
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        let defaultLayout = inputs.defaultLayout
+        var inputs = inputs
+        inputs.defaultLayout = nil
         let listInputs = _ViewListInputs(inputs: inputs)
         let listOutputs = Self._makeViewList(view: view, inputs: listInputs)
         let subviews = listOutputs.viewProxies
-        let view = ViewGroupProxy(view: view.value, inputs: inputs, subviews: subviews, layout: VStackLayout())
-        return _ViewOutputs(item: .view(view))
+        let viewProxy: ViewProxy
+        if let defaultLayout {
+            viewProxy = ViewGroupProxy(view: view.value, inputs: inputs, subviews: subviews, layout: defaultLayout)
+        } else {
+            viewProxy = ViewProxy(inputs: inputs, subviews: subviews)
+        }
+        return _ViewOutputs(item: .view(viewProxy))
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {

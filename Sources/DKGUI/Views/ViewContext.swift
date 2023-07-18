@@ -170,15 +170,21 @@ class ViewProxy {
         self.backgroundLayers.forEach { $0.layout(frame: self.frame) }
     }
 
-    func setLayoutProperties(_: LayoutProperties) {
+    func setLayoutProperties(_ properties: LayoutProperties) {
+        self.subviews.forEach {
+            $0.setLayoutProperties(properties)
+        }
     }
 
     func layoutSubviews() {
-        let proposal = ProposedViewSize(width: self.frame.width,
-                                        height: self.frame.height)
-        self.subviews.first?.place(at: self.frame.origin,
-                                   anchor: .topLeading,
-                                   proposal: proposal)
+        let center = CGPoint(x: frame.midX, y: frame.midY)
+        let proposal = ProposedViewSize(width: frame.width,
+                                        height: frame.height)
+        self.subviews.forEach {
+            $0.place(at: center,
+                     anchor: .center,
+                     proposal: proposal)
+        }
     }
 
     func update(tick: UInt64, delta: Double, date: Date) {
@@ -264,6 +270,9 @@ class ViewGroupProxy<Content>: ViewProxy where Content: View {
                 $0.setLayoutProperties(self.layoutProperties)
             }
         }
+    }
+
+    override func setLayoutProperties(_ properties: LayoutProperties) {
     }
 
     override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {

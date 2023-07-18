@@ -15,8 +15,10 @@ public struct _BackgroundModifier<Background>: ViewModifier where Background: Vi
         self.alignment = alignment
     }
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
+        var layerInputs = inputs
+        layerInputs.defaultLayout = nil
         let layer = ViewProxyLayer(view: modifier[\.background],
-                                   inputs: inputs,
+                                   inputs: layerInputs,
                                    alignment: modifier.value.alignment)
         let viewOutputs = body(_Graph(), inputs)
         viewOutputs.view.backgroundLayers.append(layer)
@@ -82,7 +84,7 @@ extension _BackgroundModifier {
             }
             var context = context
             context.environment = self.view.environmentValues
-            self.view.draw(frame: view.frame, context: context)
+            self.view.drawView(frame: view.frame, context: context)
         }
     }
 }
