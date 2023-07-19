@@ -33,7 +33,7 @@ public struct Transform: VectorTransformer, Interpolatable, Hashable {
     }
 
     public func inverted() -> Self {
-        let r = orientation.conjugate
+        let r = orientation.conjugated()
         let p = -position * r
         return Self(orientation: r, position: p)
     }

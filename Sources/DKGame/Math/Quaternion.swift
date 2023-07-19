@@ -138,8 +138,6 @@ public struct Quaternion: Vector, Hashable {
         return Vector3(x: 1.0, y: 0.0, z: 0.0)
     }
 
-    public var conjugate: Self { Self(-x, -y, -z, w) }
-
     public var vector4: Vector4 { Vector4(x, y, z, w) }
 
     public var matrix3: Matrix3 {
@@ -245,6 +243,14 @@ public struct Quaternion: Vector, Hashable {
                                    _ q2: Quaternion,
                                    _ t: any BinaryFloatingPoint) -> Quaternion {
         return slerp(q1, q2, t: t)
+    }
+
+    public func conjugated() -> Quaternion {
+        Quaternion(-x, -y, -z, w)
+    }
+
+    public mutating func conjugate() {
+        self = self.conjugated()
     }
 
     public func inverted() -> Quaternion? {
