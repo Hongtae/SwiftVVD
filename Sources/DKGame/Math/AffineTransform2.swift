@@ -99,21 +99,21 @@ public struct AffineTransform2: VectorTransformer, Hashable {
         self = self.translated(x: x, y: y)
     }
 
-    public func transformed(by t: LinearTransform2) -> Self {
+    public func concatenating(_ t: LinearTransform2) -> Self {
         return Self(linear: matrix2 * t.matrix2, origin: translation * t.matrix2)
     }
 
-    public mutating func transform(by t: LinearTransform2) {
-        self = self.transformed(by: t)
+    public mutating func concatenate(_ t: LinearTransform2) {
+        self = self.concatenating(t)
     }
 
-    public func transformed(by t: AffineTransform2) -> Self {
+    public func concatenating(_ t: Self) -> Self {
         return Self(linear: matrix2 * t.matrix2,
                     origin: translation * t.matrix2 + t.translation)
     }
 
-    public mutating func transform(by t: AffineTransform2) {
-        self = self.transformed(by: t)
+    public mutating func concatenate(_ t: Self) {
+        self = self.concatenating(t)
     }
 
     public static func == (lhs: Self, rhs: Self) -> Bool {
@@ -121,7 +121,7 @@ public struct AffineTransform2: VectorTransformer, Hashable {
     }
 
     public static func * (lhs: Self, rhs: Self) -> Self {
-        return lhs.transformed(by: rhs)
+        return lhs.concatenating(rhs)
     }
 
     public static func *= (lhs: inout Self, rhs: Self) {
@@ -129,7 +129,7 @@ public struct AffineTransform2: VectorTransformer, Hashable {
     }
 
     public static func * (lhs: Self, rhs: LinearTransform2) -> Self {
-        return lhs.transformed(by: rhs)
+        return lhs.concatenating(rhs)
     }
 
     public static func *= (lhs: inout Self, rhs: LinearTransform2) {
@@ -137,7 +137,7 @@ public struct AffineTransform2: VectorTransformer, Hashable {
     }
 
     public static func * (lhs: Vector2, rhs: Self) -> Vector2 {
-        return lhs.transformed(by: rhs.matrix2) + rhs.translation
+        return lhs.applying(rhs.matrix2) + rhs.translation
     }
 
     public static func *= (lhs: inout Vector2, rhs: Self) {

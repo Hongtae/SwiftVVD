@@ -207,18 +207,18 @@ public extension Matrix2 {
 }
 
 public extension Vector2 {
-    func transformed(by m: Matrix2) -> Self {
+    func applying(_ m: Matrix2) -> Self {
         let x = Self.dot(self, m.column1)
         let y = Self.dot(self, m.column2)
         return Self(x, y)
     }
 
-    mutating func transform(by: Matrix2) {
-        self = self.transformed(by: by)
+    mutating func apply(_ m: Matrix2) {
+        self = self.applying(m)
     }
 
     static func * (lhs: Self, rhs: Matrix2) -> Self {
-        return lhs.transformed(by: rhs)
+        return lhs.applying(rhs)
     }
 
     static func *= (lhs: inout Self, rhs: Matrix2) { lhs = lhs * rhs }

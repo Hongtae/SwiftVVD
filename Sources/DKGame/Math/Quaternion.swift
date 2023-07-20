@@ -302,16 +302,16 @@ public extension Vector3 {
         self = self.rotated(by: q)
     }
 
-    func transformed(by q: Quaternion) -> Vector3 {
+    func applying(_ q: Quaternion) -> Vector3 {
         return self.rotated(by: q)
     }
 
-    mutating func transform(by q: Quaternion) {
+    mutating func apply(_ q: Quaternion) {
         self.rotate(by: q)
     }
 
     // static func * (lhs: Vector3, rhs: Quaternion) -> Vector3 {
-    //     return lhs.transformed(by: rhs)
+    //     return lhs.applying(rhs)
     // }
 
     // static func *= (lhs: inout Vector3, rhs: Quaternion) { lhs = lhs * rhs }
@@ -324,6 +324,6 @@ extension Quaternion: VectorTransformer {
 
     public typealias Vector = Vector3
     public static func * (_ lhs: Vector3, _ rhs: Self) -> Vector3 {
-        return lhs.transformed(by: rhs)
+        return lhs.applying(rhs)
     }
 }

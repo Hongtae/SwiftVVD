@@ -160,20 +160,20 @@ public struct LinearTransform2: VectorTransformer, Hashable {
         self = self.inverted()
     }
 
-    public func transformed(by m: Matrix2) -> Self {
+    public func concatenating(_ m: Matrix2) -> Self {
         return Self(self.matrix2 * m)
     }
 
-    public mutating func transform(by m: Matrix2) {
-        self = self.transformed(by: m)
+    public mutating func concatenate(_ m: Matrix2) {
+        self = self.concatenating(m)
     }
 
-    public func transformed(by t: LinearTransform2) -> Self {
+    public func concatenating(_ t: LinearTransform2) -> Self {
         return Self(self.matrix2 * t.matrix2)
     }
 
-    public mutating func transform(by t: LinearTransform2) {
-        self = self.transformed(by: t)
+    public mutating func concatenate(_ t: LinearTransform2) {
+        self = self.concatenating(t)
     }
 
     public static func == (lhs: Self, rhs: Self) -> Bool {
@@ -181,11 +181,11 @@ public struct LinearTransform2: VectorTransformer, Hashable {
     }
 
     public static func * (lhs: Self, rhs: Self) -> Self {
-        return lhs.transformed(by: rhs)
+        return lhs.concatenating(rhs)
     }
 
     public static func * (lhs: Self, rhs: Matrix2) -> Self {
-        return lhs.transformed(by: rhs)
+        return lhs.concatenating(rhs)
     }
 
     public static func *= (lhs: inout Self, rhs: Self) {
