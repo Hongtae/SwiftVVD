@@ -145,7 +145,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                             commandBuffer: commandBuffer) {
 
                             context.clear(with: clearColor)
-                            view.drawView(frame: contentBounds, context: context)
+                            view.drawView(frame: view.frame, context: context)
 
                             if let rp = context.beginRenderPass(descriptor: renderPass,
                                                                 viewport: context.viewport) {

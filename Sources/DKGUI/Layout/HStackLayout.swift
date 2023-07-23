@@ -73,7 +73,7 @@ public struct HStackLayout: Layout {
         }
 
         if proposal.width == nil {
-            return CGSize(width: fitWidth + spacing, height: size.height)
+            return CGSize(width: fitWidth + spacing, height: fitHeight)
         }
 
         let maxWidth = cache.maxSizes.reduce(CGFloat.zero) { result, size in

@@ -15,10 +15,10 @@ public struct _BackgroundModifier<Background>: ViewModifier where Background: Vi
         self.alignment = alignment
     }
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        var layerInputs = inputs
-        layerInputs.defaultLayout = nil
+        var inputs = inputs
+        inputs.defaultLayout = ZStackLayout()
         let layer = ViewProxyLayer(view: modifier[\.background],
-                                   inputs: layerInputs,
+                                   inputs: inputs,
                                    alignment: modifier.value.alignment,
                                    ignoresSafeAreaEdges: .all)
         let viewOutputs = body(_Graph(), inputs)
@@ -44,10 +44,8 @@ public struct _BackgroundStyleModifier<Style>: ViewModifier where Style: ShapeSt
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
         let shapeView = _ShapeView(shape: Rectangle(),
                                    style: modifier[\.style].value)
-        var layerInputs = inputs
-        layerInputs.defaultLayout = nil
         let layer = ViewProxyLayer(view: _GraphValue(shapeView),
-                                   inputs: layerInputs,
+                                   inputs: inputs,
                                    alignment: .center,
                                    ignoresSafeAreaEdges: modifier[\.ignoresSafeAreaEdges].value)
         let viewOutputs = body(_Graph(), inputs)
@@ -73,10 +71,8 @@ public struct _BackgroundShapeModifier<Style, Bounds>: ViewModifier where Style:
         let shapeView = _ShapeView(shape: modifier[\.shape].value,
                                    style: modifier[\.style].value,
                                    fillStyle: modifier[\.fillStyle].value)
-        var layerInputs = inputs
-        layerInputs.defaultLayout = nil
         let layer = ViewProxyLayer(view: _GraphValue(shapeView),
-                                   inputs: layerInputs,
+                                   inputs: inputs,
                                    alignment: .center,
                                    ignoresSafeAreaEdges: .all)
         let viewOutputs = body(_Graph(), inputs)
@@ -102,10 +98,8 @@ public struct _InsettableBackgroundShapeModifier<Style, Bounds>: ViewModifier wh
         let shapeView = _ShapeView(shape: modifier[\.shape].value,
                                    style: modifier[\.style].value,
                                    fillStyle: modifier[\.fillStyle].value)
-        var layerInputs = inputs
-        layerInputs.defaultLayout = nil
         let layer = ViewProxyLayer(view: _GraphValue(shapeView),
-                                   inputs: layerInputs,
+                                   inputs: inputs,
                                    alignment: .center,
                                    ignoresSafeAreaEdges: .all)
         let viewOutputs = body(_Graph(), inputs)

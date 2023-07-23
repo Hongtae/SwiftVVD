@@ -17,10 +17,6 @@ public protocol View {
 
 extension View {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let defaultLayout = inputs.defaultLayout
-        var inputs = inputs
-        inputs.defaultLayout = nil
-
         let view = inputs.environmentValues._resolve(view)
         if let provider = view.value as? _ViewProxyProvider {
             let proxy = provider.makeViewProxy(inputs: inputs)
@@ -28,30 +24,22 @@ extension View {
         }
         let body = view[\.body]
         if body.value is _ViewProxyProvider {
-            let outputs = Self.Body._makeView(view: body, inputs: inputs)
-            if let defaultLayout {
-                let subview = outputs.view
-                let viewProxy = ViewGroupProxy(view: view.value,
-                                               inputs: inputs,
-                                               subviews: [subview],
-                                               layout: defaultLayout)
-                return _ViewOutputs(item: .view(viewProxy))
-            }
-            return outputs
+            return Self.Body._makeView(view: body, inputs: inputs)
+//            let subview = outputs.view
+//            let viewProxy = ViewGroupProxy(view: view.value,
+//                                           inputs: inputs,
+//                                           subviews: [subview],
+//                                           layout: inputs.defaultLayout)
+//            return _ViewOutputs(item: .view(viewProxy))
         }
 
         let listInputs = _ViewListInputs(inputs: inputs)
         let listOutputs = Self.Body._makeViewList(view: body, inputs: listInputs)
         let subviews = listOutputs.viewProxies
-        let viewProxy: ViewProxy
-        if let defaultLayout {
-            viewProxy = ViewGroupProxy(view: view.value,
+        let viewProxy = ViewGroupProxy(view: view.value,
                                        inputs: inputs,
                                        subviews: subviews,
-                                       layout: defaultLayout)
-        } else {
-            viewProxy = ViewProxy(inputs: inputs, subviews: subviews)
-        }
+                                       layout: inputs.defaultLayout)
         return _ViewOutputs(item: .view(viewProxy))
     }
 
