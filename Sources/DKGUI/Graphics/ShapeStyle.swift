@@ -29,7 +29,7 @@ public struct _ShapeStyle_ShapeType {
 public struct ForegroundStyle: ShapeStyle {
     @inlinable public init() {}
     public static func _makeView<S>(view: _GraphValue<_ShapeView<S, ForegroundStyle>>, inputs: _ViewInputs) -> _ViewOutputs where S: Shape {
-        fatalError()
+        _ShapeView<S, ForegroundStyle>._makeView(view: view, inputs: inputs)
     }
     public func _apply(to shape: inout _ShapeStyle_Shape) {
         fatalError()
@@ -42,7 +42,7 @@ public struct ForegroundStyle: ShapeStyle {
 public struct BackgroundStyle: ShapeStyle {
     @inlinable public init() {}
     public static func _makeView<S>(view: _GraphValue<_ShapeView<S, BackgroundStyle>>, inputs: _ViewInputs) -> _ViewOutputs where S: Shape {
-        fatalError()
+        _ShapeView<S, BackgroundStyle>._makeView(view: view, inputs: inputs)
     }
     public func _apply(to shape: inout _ShapeStyle_Shape) {
         fatalError()
@@ -56,7 +56,7 @@ public struct SeparatorShapeStyle: ShapeStyle {
     public init() {
     }
     public static func _makeView<S>(view: _GraphValue<_ShapeView<S, SeparatorShapeStyle>>, inputs: _ViewInputs) -> _ViewOutputs where S: Shape {
-        fatalError()
+        _ShapeView<S, SeparatorShapeStyle>._makeView(view: view, inputs: inputs)
     }
     public func _apply(to shape: inout _ShapeStyle_Shape) {
         fatalError()

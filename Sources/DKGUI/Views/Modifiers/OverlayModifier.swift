@@ -21,7 +21,8 @@ public struct _OverlayModifier<Overlay>: ViewModifier where Overlay: View {
         layerInputs.defaultLayout = nil
         let layer = ViewProxyLayer(view: modifier[\.overlay],
                                    inputs: layerInputs,
-                                   alignment: modifier.value.alignment)
+                                   alignment: modifier.value.alignment,
+                                   ignoresSafeAreaEdges: .all)
         let viewOutputs = body(_Graph(), inputs)
         viewOutputs.view.overlayLayers.append(layer)
         return viewOutputs
@@ -35,62 +36,6 @@ extension _OverlayModifier: Equatable where Overlay: Equatable {
 extension _OverlayModifier: _UnaryViewModifier {
 }
 
-extension _OverlayModifier {
-    struct ViewProxyLayer: ViewLayer {
-        private let view: ViewProxy
-        private let alignment: Alignment
-        init<V>(view: _GraphValue<V>, inputs: _ViewInputs, alignment: Alignment) where V: View {
-            let outputs = V._makeView(view: view, inputs: inputs)
-            self.view = outputs.view
-            self.alignment = alignment
-        }
-        func load(context: GraphicsContext) {
-            self.view.loadView(context: context)
-        }
-        func layout(frame: CGRect) {
-            var position = frame.origin
-            var anchor = UnitPoint()
-            switch self.alignment.horizontal {
-            case .leading:      position.x = frame.minX
-                                anchor.x = 0
-            case .center:       position.x = frame.midX
-                                anchor.x = 0.5
-            case .trailing:     position.x = frame.maxX
-                                anchor.x = 1
-            default:            position.x = frame.midX
-                                anchor.x = 0.5
-            }
-            switch self.alignment.vertical {
-            case .top:          position.y = frame.minY
-                                anchor.y = 0
-            case .center:       position.y = frame.midY
-                                anchor.y = 0.5
-            case .bottom:       position.y = frame.maxY
-                                anchor.y = 1
-            default:            position.y = frame.midY
-                                anchor.y = 0.5
-            }
-            let proposal = ProposedViewSize(width: frame.width, height: frame.height)
-            self.view.place(at: position,
-                            anchor: anchor,
-                            proposal: proposal)
-        }
-        func draw(frame: CGRect, context: GraphicsContext) {
-            let width = view.frame.width
-            let height = view.frame.height
-            guard width > 0 && height > 0 else {
-                return
-            }
-            if frame.intersection(view.frame).isNull {
-                return
-            }
-            var context = context
-            context.environment = self.view.environmentValues
-            self.view.draw(frame: view.frame, context: context)
-        }
-    }
-}
-
 public struct _OverlayStyleModifier<Style>: ViewModifier where Style: ShapeStyle {
     public var style: Style
     public var ignoresSafeAreaEdges: Edge.Set
@@ -101,9 +46,22 @@ public struct _OverlayStyleModifier<Style>: ViewModifier where Style: ShapeStyle
     }
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        fatalError()
+        let shapeView = _ShapeView(shape: Rectangle(),
+                                   style: modifier[\.style].value)
+        var layerInputs = inputs
+        layerInputs.defaultLayout = nil
+        let layer = ViewProxyLayer(view: _GraphValue(shapeView),
+                                   inputs: layerInputs,
+                                   alignment: .center,
+                                   ignoresSafeAreaEdges: modifier[\.ignoresSafeAreaEdges].value)
+        let viewOutputs = body(_Graph(), inputs)
+        viewOutputs.view.backgroundLayers.append(layer)
+        return viewOutputs
     }
     public typealias Body = Never
+}
+
+extension _OverlayStyleModifier: _UnaryViewModifier {
 }
 
 public struct _OverlayShapeModifier<Style, Bounds>: ViewModifier where Style: ShapeStyle, Bounds: Shape {
@@ -118,9 +76,23 @@ public struct _OverlayShapeModifier<Style, Bounds>: ViewModifier where Style: Sh
     }
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        fatalError()
+        let shapeView = _ShapeView(shape: modifier[\.shape].value,
+                                   style: modifier[\.style].value,
+                                   fillStyle: modifier[\.fillStyle].value)
+        var layerInputs = inputs
+        layerInputs.defaultLayout = nil
+        let layer = ViewProxyLayer(view: _GraphValue(shapeView),
+                                   inputs: layerInputs,
+                                   alignment: .center,
+                                   ignoresSafeAreaEdges: .all)
+        let viewOutputs = body(_Graph(), inputs)
+        viewOutputs.view.backgroundLayers.append(layer)
+        return viewOutputs
     }
     public typealias Body = Never
+}
+
+extension _OverlayShapeModifier: _UnaryViewModifier {
 }
 
 extension View {
@@ -144,3 +116,60 @@ extension View {
         }
     }
 }
+
+fileprivate struct ViewProxyLayer: ViewLayer {
+    private let view: ViewProxy
+    private let alignment: Alignment
+    private let ignoresSafeAreaEdges: Edge.Set
+    init<V>(view: _GraphValue<V>, inputs: _ViewInputs, alignment: Alignment, ignoresSafeAreaEdges: Edge.Set) where V: View {
+        let outputs = V._makeView(view: view, inputs: inputs)
+        self.view = outputs.view
+        self.alignment = alignment
+        self.ignoresSafeAreaEdges = ignoresSafeAreaEdges
+    }
+    func load(context: GraphicsContext) {
+        self.view.loadView(context: context)
+    }
+    func layout(frame: CGRect) {
+        var position = frame.origin
+        var anchor = UnitPoint()
+        switch self.alignment.horizontal {
+        case .leading:      position.x = frame.minX
+            anchor.x = 0
+        case .center:       position.x = frame.midX
+            anchor.x = 0.5
+        case .trailing:     position.x = frame.maxX
+            anchor.x = 1
+        default:            position.x = frame.midX
+            anchor.x = 0.5
+        }
+        switch self.alignment.vertical {
+        case .top:          position.y = frame.minY
+            anchor.y = 0
+        case .center:       position.y = frame.midY
+            anchor.y = 0.5
+        case .bottom:       position.y = frame.maxY
+            anchor.y = 1
+        default:            position.y = frame.midY
+            anchor.y = 0.5
+        }
+        let proposal = ProposedViewSize(width: frame.width, height: frame.height)
+        self.view.place(at: position,
+                        anchor: anchor,
+                        proposal: proposal)
+    }
+    func draw(frame: CGRect, context: GraphicsContext) {
+        let width = view.frame.width
+        let height = view.frame.height
+        guard width > 0 && height > 0 else {
+            return
+        }
+        if frame.intersection(view.frame).isNull {
+            return
+        }
+        var context = context
+        context.environment = self.view.environmentValues
+        self.view.draw(frame: view.frame, context: context)
+    }
+}
+
