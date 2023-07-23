@@ -101,7 +101,9 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                         }
                         viewLoaded = true
                     }
-                    view.place(at: bounds.origin, anchor: .topLeading, proposal: ProposedViewSize(bounds.size))
+                    view.place(at: CGPoint(x: bounds.midX, y: bounds.midY),
+                               anchor: .center,
+                               proposal: ProposedViewSize(bounds.size))
                 }
                 assert(viewLoaded)
                 if sharedContext.needsLayout {

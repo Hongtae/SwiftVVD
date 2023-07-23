@@ -35,24 +35,23 @@ public struct VStackLayout: Layout {
         cache.maxSizes = subviews.map { $0.sizeThatFits(.infinity) }
 
         let layoutSpacing: CGFloat = self.spacing ?? 0
-        var spacing = ViewSpacing()
-        var subviewSpacings = CGFloat.zero
-        for index in cache.spacings.indices {
-            let s = cache.spacings[index]
+
+        cache.subviewSpacings = cache.spacings.indices.map { index in
             if index > 0 {
-                let space = spacing.distance(to: s, along: .vertical)
-                subviewSpacings += space + layoutSpacing
+                let spacing1 = cache.spacings[index-1]
+                let spacing2 = cache.spacings[index]
+                let space = spacing2.distance(to: spacing1, along: .vertical)
+                return max(space, layoutSpacing)
             }
-            spacing = s
+            return 0
         }
-        cache.subviewSpacings = subviewSpacings
     }
 
     public func sizeThatFits(proposal: ProposedViewSize,
                              subviews: Subviews,
                              cache: inout Self.Cache) -> CGSize {
         let size = proposal.replacingUnspecifiedDimensions()
-        let spacing = cache.subviewSpacings
+        let spacing = cache.subviewSpacings.reduce(.zero, +)
 
         let minHeight = cache.minSizes.reduce(CGFloat.zero) { result, size in
             result + size.height
@@ -62,14 +61,14 @@ public struct VStackLayout: Layout {
             return CGSize(width: size.width, height: minHeight + spacing)
         }
 
-        let proposedSizes = subviews.map {
+        let fitSizes = subviews.map {
             $0.sizeThatFits(ProposedViewSize(width: size.width))
         }
 
-        let fitHeight = proposedSizes.reduce(CGFloat.zero) { result, size in
+        let fitHeight = fitSizes.reduce(CGFloat.zero) { result, size in
             result + size.height
         }
-        let fitWidth = proposedSizes.reduce(CGFloat.zero) { result, size in
+        let fitWidth = fitSizes.reduce(CGFloat.zero) { result, size in
             max(result, size.width)
         }
 
@@ -118,48 +117,48 @@ public struct VStackLayout: Layout {
         }
 
         let proposalSize = proposal.replacingUnspecifiedDimensions()
-        let proposedSizes = subviews.map {
+        let fitSizes = subviews.map {
             $0.sizeThatFits(ProposedViewSize(width: proposalSize.width))
         }
 
-        let fitHeight = proposedSizes.reduce(CGFloat.zero, { result, size in
+        let fitHeight = fitSizes.reduce(CGFloat.zero) { result, size in
             result + size.height
-        })
-
-        var freeSpace = height - fitHeight - cache.subviewSpacings
-        var numFlexibleViews = zip(proposedSizes, cache.maxSizes).reduce(Int.zero) {
-            count, sizes in
-            count + ((sizes.0.height < sizes.1.height) ? 1 : 0)
         }
-        let layoutSpacing: CGFloat = self.spacing ?? 0
-        var spacing1 = ViewSpacing()
-        for index in subviews.indices {
+        let maxHeight = cache.maxSizes.reduce(CGFloat.zero) { result, size in
+            result + size.height
+        }
+        let totalSpacing = cache.subviewSpacings.reduce(.zero, +)
+
+        let layoutHeight = min(maxHeight + totalSpacing, height)
+        offset.y += (height - layoutHeight) * 0.5    // center layout
+
+        var restOfFlexibleViews = zip(cache.maxSizes, fitSizes).reduce(Int.zero) {
+            count, sizes in
+            count + (sizes.0.height > sizes.1.height ? 1 : 0)
+        }
+        var flexibleSpaces = max(layoutHeight - fitHeight - totalSpacing, 0)
+
+        subviews.indices.forEach { index in
+            var fitHeight = fitSizes[index].height
             let maxHeight = cache.maxSizes[index].height
-            let fitHeight = proposedSizes[index].height
 
-            let spacing2 = cache.spacings[index]
-            if index > 0 {
-                let space = spacing1.distance(to: spacing2, along: .vertical)
-                offset.y += space + layoutSpacing
+            let flexible = maxHeight > fitHeight
+            if flexible && restOfFlexibleViews > 0 {
+                let s = max(flexibleSpaces, 0) / CGFloat(restOfFlexibleViews)
+                fitHeight += s
+                flexibleSpaces -= s
+                restOfFlexibleViews -= 1
             }
-            spacing1 = spacing2
+            offset.y += cache.subviewSpacings[index]
 
-            var proposal = ProposedViewSize(width: width, height: fitHeight)
-            var flexibleSize = false
-            if maxHeight > fitHeight && numFlexibleViews > 0 {  // flexible
-                if freeSpace > 0 {
-                    let f = freeSpace / CGFloat(numFlexibleViews)
-                    proposal.height = fitHeight + f
-                }
-                flexibleSize = true
-                numFlexibleViews -= 1
-            }
+            let proposal = ProposedViewSize(width: width, height: fitHeight)
             subviews[index].place(at: offset,
                                   anchor: anchor,
                                   proposal: proposal)
             let placed = subviews[index].dimensions(in: proposal)
-            if flexibleSize {
-                freeSpace = freeSpace - (placed.height - fitHeight)
+
+            if flexible {
+                flexibleSpaces = flexibleSpaces - (placed.height - fitHeight)
             }
             offset.y += placed.height
         }
