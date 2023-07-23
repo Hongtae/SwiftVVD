@@ -183,57 +183,15 @@ public class VulkanInstance {
         self.layers = .init(minimumCapacity: availableLayers.count)
         self.extensionSupportLayers = [:]
 
-        for layer in availableLayers {
-            let extensions = layer.name.withCString { cname -> [String: UInt32] in
-                var extensions: [String: UInt32] = [:]
-                var extCount: UInt32 = 0
-                let err = vkEnumerateInstanceExtensionProperties(cname, &extCount, nil)
-                if err == VK_SUCCESS {
-                    if extCount > 0 {
-                        let rawExtensions: [VkExtensionProperties] = .init(unsafeUninitializedCapacity: Int(extCount)) {
-                            buffer, initializedCount in
-                            vkEnumerateInstanceExtensionProperties(cname, &extCount, buffer.baseAddress)
-                            initializedCount = Int(extCount)
-                        }
-                        for ext in rawExtensions {
-                            let extensionName = withUnsafeBytes(of: ext.extensionName) {
-                                String(cString: $0.baseAddress!.assumingMemoryBound(to: CChar.self))
-                            }
-                            extensions[extensionName] = ext.specVersion
-                        }
-                    }
-                } else {
-                    Log.err("vkEnumerateInstanceExtensionProperties failed: \(err)")
-                }
-                return extensions
-            }            
-            for ext in extensions.keys {
-                if var extLayers = self.extensionSupportLayers[ext] {
-                    extLayers.append(layer.name)
-                } else {
-                    self.extensionSupportLayers[ext] = [layer.name]
-                }
-            }
-
-            let prop = VulkanLayerProperties(
-                name: layer.name,
-                specVersion: layer.specVersion,
-                implementationVersion: layer.implementationVersion,
-                description: layer.description,
-                extensions: extensions)
-
-            self.layers[prop.name] = prop
-        }
-        // default ext
-        self.extensions = { () -> [String: UInt32] in
+        let layerExtensionSpecMap = { (name: UnsafePointer<Int8>?)-> [String: UInt32] in
             var extensions: [String: UInt32] = [:]
             var extCount: UInt32 = 0
-            let err = vkEnumerateInstanceExtensionProperties(nil, &extCount, nil)
+            let err = vkEnumerateInstanceExtensionProperties(name, &extCount, nil)
             if err == VK_SUCCESS {
                 if extCount > 0 {
                     let rawExtensions: [VkExtensionProperties] = .init(unsafeUninitializedCapacity: Int(extCount)) {
                         buffer, initializedCount in
-                        vkEnumerateInstanceExtensionProperties(nil, &extCount, buffer.baseAddress)
+                        vkEnumerateInstanceExtensionProperties(name, &extCount, buffer.baseAddress)
                         initializedCount = Int(extCount)
                     }
                     for ext in rawExtensions {
@@ -244,10 +202,30 @@ public class VulkanInstance {
                     }
                 }
             } else {
-                Log.err("vkEnumerateInstanceExtensionProperties failed:\(err)")
+                Log.err("vkEnumerateInstanceExtensionProperties failed: \(err)")
             }
             return extensions
-        }()
+        }
+
+        for layer in availableLayers {
+            let extensions = layer.name.withCString { layerExtensionSpecMap($0) }
+            for ext in extensions.keys {
+                if self.extensionSupportLayers[ext] == nil {
+                    self.extensionSupportLayers[ext] = [layer.name]
+                } else {
+                    self.extensionSupportLayers[ext]?.append(layer.name)
+                }
+            }
+            
+            self.layers[layer.name] = VulkanLayerProperties(
+                name: layer.name,
+                specVersion: layer.specVersion,
+                implementationVersion: layer.implementationVersion,
+                description: layer.description,
+                extensions: extensions)
+        }
+        // default ext
+        self.extensions = layerExtensionSpecMap(nil)
         for ext in self.extensions.keys {
             if self.extensionSupportLayers[ext] == nil {
                 self.extensionSupportLayers[ext] = []

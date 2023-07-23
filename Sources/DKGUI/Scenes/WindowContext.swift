@@ -101,7 +101,9 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                         }
                         viewLoaded = true
                     }
-                    view.place(at: bounds.origin, anchor: .topLeading, proposal: ProposedViewSize(bounds.size))
+                    view.place(at: CGPoint(x: bounds.midX, y: bounds.midY),
+                               anchor: .center,
+                               proposal: ProposedViewSize(bounds.size))
                 }
                 assert(viewLoaded)
                 if sharedContext.needsLayout {
@@ -196,7 +198,8 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                                      transform: .identity,
                                      position: .zero,
                                      size: self.state.bounds.size,
-                                     safeAreaInsets: EdgeInsets())
+                                     safeAreaInsets: EdgeInsets(),
+                                     defaultLayout: VStackLayout())
         let viewOutputs = Content._makeView(view: graph, inputs: viewInputs)
         self.viewProxy = viewOutputs.view
     }

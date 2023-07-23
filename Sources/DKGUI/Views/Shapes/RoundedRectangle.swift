@@ -22,14 +22,12 @@ public struct RoundedRectangle: Shape {
     }
 
     public func path(in rect: CGRect) -> Path {
-        var path = Path()
-        path.addRoundedRect(in: rect, cornerSize: self.cornerSize, style: self.style)
-        return path
+        Path(roundedRect: rect, cornerSize: self.cornerSize, style: self.style)
     }
 
     public var animatableData: CGSize.AnimatableData {
-        get { fatalError() }
-        set { fatalError() }
+        get { .init(cornerSize.width, cornerSize.height) }
+        set { (cornerSize.width, cornerSize.height) = newValue[] }
     }
 
     public typealias AnimatableData = CGSize.AnimatableData

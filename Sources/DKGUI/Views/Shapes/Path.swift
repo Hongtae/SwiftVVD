@@ -132,7 +132,7 @@ public struct Path: Equatable {
     // but not including control points for Bézier and quadratic curves.
     var boundingBoxOfPath: CGRect = .null
 
-    public var boundingRect: CGRect { boundingBox }
+    public var boundingRect: CGRect { boundingBoxOfPath }
 
     public private(set) var initialPoint: CGPoint? = nil
     public private(set) var currentPoint: CGPoint? = nil

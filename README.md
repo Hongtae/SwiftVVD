@@ -35,3 +35,7 @@ Cross-Platform Game Engine for swift programming language.
 swift build
 swift run TestApp1
 ```
+---
+#### Sample screenshot
+  Sources/TestApp1/ContentView.swift
+  ![image](https://github.com/Hongtae/SwiftVVD/assets/7553135/faaea185-f2cd-4a07-8154-d991660a69c0)

@@ -295,31 +295,31 @@ public extension Matrix3 {
 
 public extension Vector2 {
     // homogeneous transform
-    func transformed(by m: Matrix3) -> Self {
-        let v = Vector3(self.x, self.y, 1.0).transformed(by: m)
+    func applying(_ m: Matrix3) -> Self {
+        let v = Vector3(self.x, self.y, 1.0).applying(m)
         assert(abs(v.z) > .leastNonzeroMagnitude)
         return Self(v.x, v.y) * (1.0 / v.z)
     }
 
-    mutating func transform(by: Matrix3) {
-        self = self.transformed(by: by)
+    mutating func apply(_ m: Matrix3) {
+        self = self.applying(m)
     }
 }
 
 public extension Vector3 {
-    func transformed(by m: Matrix3) -> Self {
+    func applying(_ m: Matrix3) -> Self {
         let x = Self.dot(self, m.column1)
         let y = Self.dot(self, m.column2)
         let z = Self.dot(self, m.column3)
         return Self(x, y, z) 
     }
 
-    mutating func transform(by: Matrix3) {
-        self = self.transformed(by: by)
+    mutating func apply(_ m: Matrix3) {
+        self = self.applying(m)
     }
 
     static func * (lhs: Self, rhs: Matrix3) -> Self {
-        return lhs.transformed(by: rhs)
+        return lhs.applying(rhs)
     }
 
     static func *= (lhs: inout Self, rhs: Matrix3) { lhs = lhs * rhs }

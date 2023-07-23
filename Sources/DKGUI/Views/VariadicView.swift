@@ -41,7 +41,7 @@ extension _VariadicView_Children: RandomAccessCollection {
         }
         public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
             var inputs = inputs
-            inputs.modifiers.merge(view.value.modifiers) { $1 }
+            inputs.modifiers.append(contentsOf: view.value.modifiers)
             inputs.traits.merge(view.value.traits) { $1 }
             return view.value.view.makeView(graph: _Graph(), inputs: inputs)
         }
@@ -50,7 +50,7 @@ extension _VariadicView_Children: RandomAccessCollection {
         public typealias Body = Never
 
         let view: AnyView
-        var modifiers: [ObjectIdentifier: any ViewModifier]
+        var modifiers: [any ViewModifier]
         var traits: [ObjectIdentifier: Any]
         var viewID: AnyHashable
     }
@@ -76,10 +76,10 @@ extension _VariadicView_Children: RandomAccessCollection {
     }
 }
 
-extension _VariadicView_Children: PrimitiveView {
+extension _VariadicView_Children: _PrimitiveView {
 }
 
-extension _VariadicView_Children.Element: PrimitiveView {
+extension _VariadicView_Children.Element: _PrimitiveView {
 }
 
 public protocol _VariadicView_ViewRoot: _VariadicView_Root {
@@ -164,7 +164,7 @@ extension _VariadicView.Tree: View where Root: _VariadicView_ViewRoot, Content: 
 
         let outputs = Root._makeView(root: root, inputs: inputs) {
             graph, inputs in
-            if content.value is ViewProxyProvider {
+            if content.value is _ViewProxyProvider {
                 return _ViewListOutputs(item: .view(.init(view: AnyView(content.value), inputs: inputs)))
             }
             let content = inputs.environmentValues._resolve(content)
@@ -187,5 +187,5 @@ extension _VariadicView.Tree: View where Root: _VariadicView_ViewRoot, Content: 
     }
 }
 
-extension _VariadicView.Tree: PrimitiveView where Self: View {
+extension _VariadicView.Tree: _PrimitiveView where Self: View {
 }

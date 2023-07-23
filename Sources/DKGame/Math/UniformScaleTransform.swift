@@ -31,7 +31,7 @@ public struct UniformScaleTransform: VectorTransformer, Interpolatable, Hashable
 
     public func inverted() -> Self {
         let s = 1.0 / self.scale
-        let r = orientation.conjugate
+        let r = orientation.conjugated()
         let p = (-position * scale) * r
         return Self(scale: s, orientation: r, position: p)
     }

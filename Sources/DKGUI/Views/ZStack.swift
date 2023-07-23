@@ -22,8 +22,8 @@ public struct ZStack<Content>: View where Content: View {
     public typealias Body = Never
 }
 
-extension ZStack: PrimitiveView {
+extension ZStack: _PrimitiveView {
 }
 
-extension ZStack: ViewProxyProvider {
+extension ZStack: _ViewProxyProvider {
 }

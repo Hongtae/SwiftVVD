@@ -124,8 +124,8 @@ public class AudioSource {
         alSourcei(sourceID, AL_BUFFER, 0)
         alSourceRewind(sourceID)
 
-        for buffer in buffers {
-            var bufferID = buffer.bufferID
+        buffers.forEach {
+            var bufferID = $0.bufferID
             alDeleteBuffers(1, &bufferID)
         }
         buffers.removeAll()
@@ -135,7 +135,6 @@ public class AudioSource {
         if err != AL_NO_ERROR {
             Log.err("AudioSource Error: \(String(format: "0x%x (%s)", err, alGetString(err)))")
         }
-
     }
 
     public func numberOfBuffersInQueue() -> Int {
@@ -163,11 +162,10 @@ public class AudioSource {
             var bufferID: ALuint = 0
             alSourceUnqueueBuffers(sourceID, 1, &bufferID)
             if bufferID != 0 {
-                for i in 0..<buffers.count {
-                    if buffers[i].bufferID == bufferID {
-                        buffers.remove(at: i)
-                        break
-                    }
+                if let index = buffers.firstIndex(where: {
+                    $0.bufferID == bufferID
+                }) {
+                    buffers.remove(at: index)
                 }
                 alDeleteBuffers(1, &bufferID)
             } else {
@@ -214,12 +212,11 @@ public class AudioSource {
 
                 var bufferID: ALuint = 0
                 if finishedBuffers.isEmpty == false {
-                    for buffID in finishedBuffers {
-                        for i in 0..<self.buffers.count {
-                            if self.buffers[i].bufferID == buffID {
-                                self.buffers.remove(at: i)
-                                break
-                            }
+                    finishedBuffers.forEach { buffID in
+                        if let index = self.buffers.firstIndex(where: {
+                            $0.bufferID == buffID
+                        }) {
+                            self.buffers.remove(at: index);
                         }
                     }
 

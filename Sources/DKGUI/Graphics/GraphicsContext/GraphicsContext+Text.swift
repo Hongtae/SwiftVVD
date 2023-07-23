@@ -423,9 +423,11 @@ extension GraphicsContext {
         }
 
         let scale = 1.0 / text.scaleFactor
+        let pixelAlignedX = ceil(rect.minX * text.scaleFactor) * scale
+        let pixelAlignedY = ceil(rect.minY * text.scaleFactor) * scale
         let transform = CGAffineTransform(scaleX: scale, y: scale)
-            .concatenating(CGAffineTransform(translationX: rect.origin.x,
-                                             y: rect.origin.y))
+            .concatenating(CGAffineTransform(translationX: pixelAlignedX,
+                                             y: pixelAlignedY))
 
         //let measure = text.measure(in: rect.size)
 

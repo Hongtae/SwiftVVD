@@ -82,36 +82,36 @@ public struct LinearTransform3: VectorTransformer, Hashable {
         self = self.inverted()
     }
 
-    public func transformed(by t: LinearTransform3) -> Self {
+    public func concatenating(_ t: LinearTransform3) -> Self {
         return Self(self.matrix3 * t.matrix3)
     }
 
-    public func transformed(by m: Matrix3) -> Self {
+    public func concatenating(_ m: Matrix3) -> Self {
         return Self(self.matrix3 * m)
     }
 
-    public func transformed(by q: Quaternion) -> Self {
+    public func concatenating(_ q: Quaternion) -> Self {
         return Self(self.matrix3 * q.matrix3)
     }
 
-    public mutating func transform(by t: LinearTransform3) {
-        self = self.transformed(by: t)
+    public mutating func concatenate(_ t: LinearTransform3) {
+        self = self.concatenating(t)
     }
 
-    public mutating func transform(by m: Matrix3) {
-        self = self.transformed(by: m)
+    public mutating func concatenate(_ m: Matrix3) {
+        self = self.concatenating(m)
     }
 
-    public mutating func transform(by q: Quaternion) {
-        self = self.transformed(by: q)
+    public mutating func concatenate(_ q: Quaternion) {
+        self = self.concatenating(q)
     }
 
     public func rotated(by q: Quaternion) -> Self {
-        self.transformed(by: q)
+        self.concatenating(q)
     }
 
     public mutating func rotate(by q: Quaternion) {
-        self.transform(by: q)
+        self.concatenate(q)
     }
 
     public func rotated(angle: any BinaryFloatingPoint, axis: Vector3) -> Self {
@@ -193,15 +193,15 @@ public struct LinearTransform3: VectorTransformer, Hashable {
     }
 
     public static func * (lhs: Self, rhs: Self) -> Self {
-        return lhs.transformed(by: rhs)
+        return lhs.concatenating(rhs)
     }
 
     public static func * (lhs: Self, rhs: Matrix3) -> Self {
-        return lhs.transformed(by: rhs)
+        return lhs.concatenating(rhs)
     }
 
     public static func * (lhs: Self, rhs: Quaternion) -> Self {
-        return lhs.transformed(by: rhs)
+        return lhs.concatenating(rhs)
     }
 
     public static func *= (lhs: inout Self, rhs: Self) {

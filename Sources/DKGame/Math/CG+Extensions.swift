@@ -61,17 +61,17 @@ public extension CGPoint {
         a * (1.0 - t) + b * t
     }
 
-    func transformed(by m: Matrix2) -> Self {
+    func applying(_ m: Matrix2) -> Self {
         let x = self.x * CGFloat(m.m11) + self.y * CGFloat(m.m21)
         let y = self.x * CGFloat(m.m12) + self.y * CGFloat(m.m22)
         return Self(x: x, y: y)
     }
 
-    mutating func transform(by: Matrix2) {
-        self = self.transformed(by: by)
+    mutating func apply(_ m: Matrix2) {
+        self = self.applying(m)
     }
 
-    func transformed(by m: Matrix3) -> Self {
+    func applying(_ m: Matrix3) -> Self {
         let x = self.x * CGFloat(m.m11) + self.y * CGFloat(m.m21) + CGFloat(m.m31)
         let y = self.x * CGFloat(m.m12) + self.y * CGFloat(m.m22) + CGFloat(m.m32)
         var w = self.x * CGFloat(m.m13) + self.y * CGFloat(m.m23) + CGFloat(m.m33)
@@ -80,8 +80,8 @@ public extension CGPoint {
         return Self(x: x * w, y: y * w)
     }
 
-    mutating func transform(by: Matrix3) {
-        self = self.transformed(by: by)
+    mutating func apply(_ m: Matrix3) {
+        self = self.applying(m)
     }
 
     static func + (lhs: Self, rhs: Self) -> Self {

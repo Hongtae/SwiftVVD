@@ -36,53 +36,39 @@ public struct ZStackLayout: Layout {
         }
     }
 
-    public func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) {
-        var offset = bounds.origin
-        let width = bounds.width
-        let height = bounds.height
+    public func placeSubviews(in bounds: CGRect,
+                              proposal: ProposedViewSize,
+                              subviews: Subviews,
+                              cache: inout Cache) {
         var anchor: UnitPoint
         switch self.alignment {
-        case .leading:
-            offset.x = bounds.minX
-            offset.y = bounds.midY
-            anchor = .leading
-        case .trailing:
-            offset.x = bounds.maxX
-            offset.y = bounds.midY
-            anchor = .trailing
-        case .top:
-            offset.x = bounds.midX
-            offset.y = bounds.minY
-            anchor = .top
-        case .bottom:
-            offset.x = bounds.midX
-            offset.y = bounds.maxY
-            anchor = .bottom
-        case .topLeading:
-            offset.x = bounds.minX
-            offset.y = bounds.minY
-            anchor = .topLeading
-        case .topTrailing:
-            offset.x = bounds.maxX
-            offset.y = bounds.minY
-            anchor = .topTrailing
-        case .bottomLeading:
-            offset.x = bounds.minX
-            offset.y = bounds.maxY
-            anchor = .bottomLeading
-        case .bottomTrailing:
-            offset.x = bounds.maxX
-            offset.y = bounds.maxY
-            anchor = .bottomTrailing
+        case .leading:          anchor = .leading
+        case .trailing:         anchor = .trailing
+        case .top:              anchor = .top
+        case .bottom:           anchor = .bottom
+        case .topLeading:       anchor = .topLeading
+        case .topTrailing:      anchor = .topTrailing
+        case .bottomLeading:    anchor = .bottomLeading
+        case .bottomTrailing:   anchor = .bottomTrailing
         default:
-            offset.x = bounds.midX
-            offset.y = bounds.midY
             anchor = .center
         }
 
-        let proposal = ProposedViewSize(width: width, height: height)
-        subviews.forEach {
-            $0.place(at: offset, anchor: anchor, proposal: proposal)
+        let (minX, minY) = (bounds.minX, bounds.minY)
+        let (width, height) = (bounds.width, bounds.height)
+
+        let offset = CGPoint(x: minX + width * anchor.x,
+                             y: minY + height * anchor.y)
+
+        subviews.forEach { view in
+            let maxSize = view.sizeThatFits(proposal)
+            let minSize = view.sizeThatFits(.unspecified)
+
+            let fitWidth = min(width, max(maxSize.width, minSize.width))
+            let fitHeight = min(height, max(maxSize.height, minSize.height))
+
+            let proposal = ProposedViewSize(width: fitWidth, height: fitHeight)
+            view.place(at: offset, anchor: anchor, proposal: proposal)
         }
     }
 }

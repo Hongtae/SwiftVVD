@@ -114,9 +114,10 @@ let package = Package(
             name: "TestApp1",
             dependencies: [
                 .target(name: "DKGame"),
+                .target(name: "DKGUI")
             ],
             resources: [
-                .copy("Resources")
+                .process("Resources")
             ],
             linkerSettings: []),
     ],

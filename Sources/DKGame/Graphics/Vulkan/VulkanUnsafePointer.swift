@@ -54,23 +54,25 @@ func unsafePointerCopy<C>(collection source: C, holder: TemporaryBufferHolder) -
     return ptr
 }
 
-typealias VulkanNextChain = (sType: VkStructureType, pNext: UnsafeMutableRawPointer?)
-
-func enumerateNextChain(_ pNext: UnsafeMutableRawPointer?, callback: (VkStructureType, UnsafeRawPointer)->Void) {
-    var ptr: UnsafeMutablePointer<VulkanNextChain>? = pNext?.bindMemory(to: VulkanNextChain.self, capacity: 1)
+func enumerateNextChain(_ pNext: UnsafeRawPointer?,
+                        callback: (VkStructureType, UnsafeRawPointer)->Void) {
+    var ptr: UnsafePointer<VkBaseInStructure>? = pNext?
+        .assumingMemoryBound(to: VkBaseInStructure.self)
     while ptr != nil {
         if let ptr { callback(ptr.pointee.sType, UnsafeRawPointer(ptr)) }
-        ptr = ptr?.pointee.pNext?.bindMemory(to: VulkanNextChain.self, capacity: 1)
+        ptr = ptr?.pointee.pNext
     }
 }
 
 func appendNextChain<T>(_ s: inout T, _ pNext: UnsafeRawPointer) {
     withUnsafeMutablePointer(to: &s) {
-        var ptr = UnsafeMutableRawPointer($0).bindMemory(to: VulkanNextChain.self, capacity: 1)
+        var ptr = UnsafeMutableRawPointer($0)
+            .assumingMemoryBound(to: VkBaseOutStructure.self)
         while ptr.pointee.pNext != nil {
-            ptr = ptr.pointee.pNext!.bindMemory(to: VulkanNextChain.self, capacity: 1)
+            ptr = ptr.pointee.pNext!
         }
         ptr.pointee.pNext = UnsafeMutableRawPointer(mutating: pNext)
+            .assumingMemoryBound(to: VkBaseOutStructure.self)
     }
 }
 

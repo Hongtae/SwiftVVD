@@ -56,10 +56,10 @@ extension Canvas {
     }
 }
 
-extension Canvas: PrimitiveView {
+extension Canvas: _PrimitiveView {
 }
 
-extension Canvas: ViewProxyProvider {
+extension Canvas: _ViewProxyProvider {
     func makeViewProxy(inputs: _ViewInputs) -> ViewProxy {
         CanvasProxy(view: self, inputs: inputs)
     }

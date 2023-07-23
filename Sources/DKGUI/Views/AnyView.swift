@@ -12,7 +12,7 @@ class AnyViewStorageBase {
     func makeViewList(graph: _Graph, inputs: _ViewListInputs)->_ViewListOutputs {
         fatalError()
     }
-    var viewProxyProvider: ViewProxyProvider? { nil }
+    var viewProxyProvider: _ViewProxyProvider? { nil }
 }
 
 private struct _MakeViewFromAnyView {
@@ -41,8 +41,8 @@ class AnyViewBox: AnyViewStorageBase {
         self.view = view
     }
 
-    override var viewProxyProvider: ViewProxyProvider? {
-        view as? ViewProxyProvider
+    override var viewProxyProvider: _ViewProxyProvider? {
+        view as? _ViewProxyProvider
     }
 }
 
@@ -59,8 +59,8 @@ class AnyViewBoxType<T>: AnyViewStorageBase where T: View {
         self.view = view
     }
 
-    override var viewProxyProvider: ViewProxyProvider? {
-        view as? ViewProxyProvider
+    override var viewProxyProvider: _ViewProxyProvider? {
+        view as? _ViewProxyProvider
     }
 }
 
@@ -109,11 +109,11 @@ public struct AnyView: View {
     public typealias Body = Never
 }
 
-extension AnyView: PrimitiveView {
+extension AnyView: _PrimitiveView {
 }
 
 extension AnyView {
-    var viewProxyProvider: ViewProxyProvider? {
+    var viewProxyProvider: _ViewProxyProvider? {
         self.storage.viewProxyProvider
     }
 }

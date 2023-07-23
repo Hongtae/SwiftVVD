@@ -31,20 +31,7 @@ struct ContentView: View {
                 path,
                 with: .color(.red),
                 style: FillStyle(eoFill: true, antialiased: false))
-
-            let gradient = Gradient(colors: [.red, .black, .white])
-
-            let text = Text("ABCD EFGHIJ K...LMN OPQRSTUVW XYZ 123456 7890")
-                .font(.title)
-
-            var rt = context.resolve(text)
-            rt.shading = .color(.white)
-            let rect = CGRect(x: 20, y: 20, width: 100, height: 150)
-            context.draw(rt,
-                         in: rect)
-
         }
-        .frame(width: 220, height: 220)
         .border(.white)
     }
 }

@@ -164,9 +164,14 @@ extension Color {
 }
 
 extension Color: ShapeStyle {
+    public func _apply(to shape: inout _ShapeStyle_Shape) {
+
+    }
 }
 
 extension Color: View {
     public typealias Body = Never
-    public var body: Never { neverBody() }
+}
+
+extension Color: _PrimitiveView {
 }

@@ -138,8 +138,6 @@ public struct Quaternion: Vector, Hashable {
         return Vector3(x: 1.0, y: 0.0, z: 0.0)
     }
 
-    public var conjugate: Self { Self(-x, -y, -z, w) }
-
     public var vector4: Vector4 { Vector4(x, y, z, w) }
 
     public var matrix3: Matrix3 {
@@ -247,6 +245,14 @@ public struct Quaternion: Vector, Hashable {
         return slerp(q1, q2, t: t)
     }
 
+    public func conjugated() -> Quaternion {
+        Quaternion(-x, -y, -z, w)
+    }
+
+    public mutating func conjugate() {
+        self = self.conjugated()
+    }
+
     public func inverted() -> Quaternion? {
         let n = self.lengthSquared
         if n > 0.0 {
@@ -296,16 +302,16 @@ public extension Vector3 {
         self = self.rotated(by: q)
     }
 
-    func transformed(by q: Quaternion) -> Vector3 {
+    func applying(_ q: Quaternion) -> Vector3 {
         return self.rotated(by: q)
     }
 
-    mutating func transform(by q: Quaternion) {
+    mutating func apply(_ q: Quaternion) {
         self.rotate(by: q)
     }
 
     // static func * (lhs: Vector3, rhs: Quaternion) -> Vector3 {
-    //     return lhs.transformed(by: rhs)
+    //     return lhs.applying(rhs)
     // }
 
     // static func *= (lhs: inout Vector3, rhs: Quaternion) { lhs = lhs * rhs }
@@ -318,6 +324,6 @@ extension Quaternion: VectorTransformer {
 
     public typealias Vector = Vector3
     public static func * (_ lhs: Vector3, _ rhs: Self) -> Vector3 {
-        return lhs.transformed(by: rhs)
+        return lhs.applying(rhs)
     }
 }

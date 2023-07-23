@@ -14,22 +14,23 @@ public struct _GraphInputs {
     var environmentValues: EnvironmentValues
 }
 
-public protocol _GraphInputsModifier {
-    static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GraphInputs)
-}
-
 public struct _ViewInputs {
     let sharedContext: SharedContext
 
     var preferences: [String?: Any] = [:]
-    var modifiers: [ObjectIdentifier: any ViewModifier] = [:]
+
+    var modifiers: [any ViewModifier] = []
+    var backgroundLayers: [ViewLayer] = []
+    var overlayLayers: [ViewLayer] = []
     var traits: [ObjectIdentifier: Any] = [:]
+
     var environmentValues: EnvironmentValues
 
     var transform: CGAffineTransform
     var position: CGPoint
     var size: CGSize
     var safeAreaInsets: EdgeInsets
+    var defaultLayout: (any Layout)?
 }
 
 public struct _ViewOutputs {

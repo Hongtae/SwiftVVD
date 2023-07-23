@@ -190,7 +190,7 @@ public struct Camera {
         mat = mat.inverted() ?? .identity
 
         for i in 0..<8 {
-            vec[i].transform(by: mat)
+            vec[i].apply(mat)
         }
         // far      (4,5,6,7)
         // near     (0,1,2,3)
