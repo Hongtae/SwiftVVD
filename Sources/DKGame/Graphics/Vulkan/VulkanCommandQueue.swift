@@ -58,7 +58,7 @@ public class VulkanCommandQueue: CommandQueue {
         var commandPool: VkCommandPool? = nil
         let err = vkCreateCommandPool(device.device, &commandPoolCreateInfo, device.allocationCallbacks, &commandPool)
         if err == VK_SUCCESS {
-            return VulkanCommandBuffer(pool: commandPool!, queue: self)
+            return VulkanCommandBuffer(queue: self, pool: commandPool!)
         }
         Log.err("vkCreateCommandPool failed: \(err)")
         return nil 
