@@ -48,7 +48,7 @@ public class VulkanShaderModule: ShaderModule {
         // TODO: verify spir-v specialization constant
 
         if self.functionNames.contains(name) {
-            return VulkanShaderFunction(module: self, name: name, constantValues:[])
+            return VulkanShaderFunction(module: self, name: name, constantValues: constantValues)
         }
         return nil
     }
