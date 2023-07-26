@@ -74,7 +74,7 @@ public struct Camera {
             viewMatrix.m11, viewMatrix.m12, viewMatrix.m13,
             viewMatrix.m21, viewMatrix.m22, viewMatrix.m23,
             viewMatrix.m31, viewMatrix.m32, viewMatrix.m33)
-        return Vector3(-v.x, -v.y, -v.z) * (m.inverted() ?? Matrix3.identity)
+        return Vector3(-v.x, -v.y, -v.z).applying((m.inverted() ?? Matrix3.identity))
     }
 
     public var viewDirection: Vector3 {

@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct LinearTransform2: VectorTransformer, Hashable {
+public struct LinearTransform2: Hashable {
     public typealias Vector = Vector2
 
     public var matrix2: Matrix2
@@ -168,16 +168,12 @@ public struct LinearTransform2: VectorTransformer, Hashable {
         self = self.concatenating(m)
     }
 
-    public func concatenating(_ t: LinearTransform2) -> Self {
+    public func concatenating(_ t: Self) -> Self {
         return Self(self.matrix2 * t.matrix2)
     }
 
-    public mutating func concatenate(_ t: LinearTransform2) {
+    public mutating func concatenate(_ t: Self) {
         self = self.concatenating(t)
-    }
-
-    public static func == (lhs: Self, rhs: Self) -> Bool {
-        return lhs.matrix2 == rhs.matrix2
     }
 
     public static func * (lhs: Self, rhs: Self) -> Self {
@@ -195,12 +191,14 @@ public struct LinearTransform2: VectorTransformer, Hashable {
     public static func *= (lhs: inout Self, rhs: Matrix2) {
         lhs = lhs * rhs
     }
+}
 
-    public static func * (lhs: Vector2, rhs: Self) -> Vector2 {
-        return lhs * rhs.matrix2
+public extension Vector2 {
+    func applying(_ t: LinearTransform2) -> Vector2 {
+        self.applying(t.matrix2)
     }
 
-    public static func *= (lhs: inout Vector2, rhs: Self) {
-        lhs = lhs * rhs
+    mutating func apply(_ t: LinearTransform2) {
+        self.apply(t.matrix2)
     }
 }

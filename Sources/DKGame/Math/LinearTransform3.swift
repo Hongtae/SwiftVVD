@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct LinearTransform3: VectorTransformer, Hashable {
+public struct LinearTransform3: Hashable {
     public typealias Vector = Vector3
 
     public var matrix3: Matrix3
@@ -82,7 +82,7 @@ public struct LinearTransform3: VectorTransformer, Hashable {
         self = self.inverted()
     }
 
-    public func concatenating(_ t: LinearTransform3) -> Self {
+    public func concatenating(_ t: Self) -> Self {
         return Self(self.matrix3 * t.matrix3)
     }
 
@@ -94,7 +94,7 @@ public struct LinearTransform3: VectorTransformer, Hashable {
         return Self(self.matrix3 * q.matrix3)
     }
 
-    public mutating func concatenate(_ t: LinearTransform3) {
+    public mutating func concatenate(_ t: Self) {
         self = self.concatenating(t)
     }
 
@@ -188,10 +188,6 @@ public struct LinearTransform3: VectorTransformer, Hashable {
         self.matrix3.column3 *= z
     }
 
-    public static func == (lhs: Self, rhs: Self) -> Bool {
-        return lhs.matrix3 == rhs.matrix3
-    }
-
     public static func * (lhs: Self, rhs: Self) -> Self {
         return lhs.concatenating(rhs)
     }
@@ -215,12 +211,14 @@ public struct LinearTransform3: VectorTransformer, Hashable {
     public static func *= (lhs: inout Self, rhs: Quaternion) {
         lhs = lhs * rhs
     }
+}
 
-    public static func * (lhs: Vector3, rhs: Self) -> Vector3 {
-        return lhs * rhs.matrix3
+public extension Vector3 {
+    func applying(_ t: LinearTransform3) -> Vector3 {
+        self.applying(t.matrix3)
     }
 
-    public static func *= (lhs: inout Vector3, rhs: Self) {
-        lhs = lhs * rhs
+    mutating func apply(_ t: LinearTransform3) {
+        self = self.applying(t)
     }
 }

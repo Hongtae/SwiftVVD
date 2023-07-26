@@ -303,12 +303,16 @@ public struct Matrix4: Matrix, Hashable {
                        row4: self.column4)
     }
 
-    public static func == (lhs: Self, rhs: Self) -> Bool {
-        return lhs.row1 == rhs.row1 &&
-               lhs.row2 == rhs.row2 &&
-               lhs.row3 == rhs.row3 &&
-               lhs.row4 == rhs.row4
-    } 
+    public func concatenating(_ m: Self) -> Self {
+        let (row1, row2, row3, row4) = (self.row1, self.row2, self.row3, self.row4)
+        let (col1, col2, col3, col4) = (m.column1, m.column2, m.column3, m.column4)
+        let dot = Vector4.dot
+        return Matrix4(dot(row1, col1), dot(row1, col2), dot(row1, col3), dot(row1, col4),
+                       dot(row2, col1), dot(row2, col2), dot(row2, col3), dot(row2, col4),
+                       dot(row3, col1), dot(row3, col2), dot(row3, col3), dot(row3, col4),
+                       dot(row4, col1), dot(row4, col2), dot(row4, col3), dot(row4, col4))
+
+    }
 
     public static func + (lhs: Self, rhs: Self) -> Self {
         return Matrix4(row1: lhs.row1 + rhs.row1,
@@ -322,16 +326,6 @@ public struct Matrix4: Matrix, Hashable {
                        row2: lhs.row2 - rhs.row2,
                        row3: lhs.row3 - rhs.row3,
                        row4: lhs.row4 - rhs.row4)
-    }
-
-    public static func * (lhs: Self, rhs: Self) -> Self {
-        let row1 = lhs.row1, row2 = lhs.row2, row3 = lhs.row3, row4 = lhs.row4
-        let col1 = rhs.column1, col2 = rhs.column2, col3 = rhs.column3, col4 = rhs.column4
-        let dot = Vector4.dot
-        return Matrix4(dot(row1, col1), dot(row1, col2), dot(row1, col3), dot(row1, col4),
-                       dot(row2, col1), dot(row2, col2), dot(row2, col3), dot(row2, col4),
-                       dot(row3, col1), dot(row3, col2), dot(row3, col3), dot(row3, col4),
-                       dot(row4, col1), dot(row4, col2), dot(row4, col3), dot(row4, col4))
     }
 
     public static func * (lhs: Self, rhs: any BinaryFloatingPoint) -> Self {
@@ -418,10 +412,4 @@ public extension Vector4 {
     mutating func apply(_ m: Matrix4) {
         self = self.applying(m)
     }
-
-    static func * (lhs: Self, rhs: Matrix4) -> Self {
-        return lhs.applying(rhs)
-    }
-
-    static func *= (lhs: inout Self, rhs: Matrix4) { lhs = lhs * rhs }
 }

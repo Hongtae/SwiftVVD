@@ -112,10 +112,6 @@ public struct Vector3: Vector, Hashable {
         self = self.rotated(z: radian)
     }
 
-    public static func == (lhs: Self, rhs: Self) -> Bool {
-        return lhs.x == rhs.x && lhs.y == rhs.y && lhs.z == rhs.z
-    }
-
     public static func + (lhs: Self, rhs: Self) -> Self {
         return Self(lhs.x + rhs.x, lhs.y + rhs.y, lhs.z + rhs.z)
     }

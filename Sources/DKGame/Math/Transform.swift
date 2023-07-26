@@ -5,7 +5,7 @@
 //  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
-public struct Transform: VectorTransformer, Interpolatable, Hashable {
+public struct Transform: Hashable {
     public typealias Vector = Vector3
     
     public var orientation: Quaternion
@@ -34,7 +34,7 @@ public struct Transform: VectorTransformer, Interpolatable, Hashable {
 
     public func inverted() -> Self {
         let r = orientation.conjugated()
-        let p = -position * r
+        let p = (-position).applying(r)
         return Self(orientation: r, position: p)
     }
 
@@ -42,24 +42,35 @@ public struct Transform: VectorTransformer, Interpolatable, Hashable {
         self = self.inverted()
     }
 
+    public func concatenating(_ t: Self) -> Self {
+        return Self(orientation: self.orientation.concatenating(t.orientation),
+                    position: self.position.applying(t.orientation) + t.position)
+    }
+
+    public mutating func concatenate(_ t: Self) {
+        self = self.concatenating(t)
+    }
+
     public static func interpolate(_ t1: Self, _ t2: Self, t: any BinaryFloatingPoint) -> Self {
         return Self(orientation: Quaternion.slerp(t1.orientation, t2.orientation, t:t),
                     position: t1.position + ((t2.position - t1.position) * t))
     }
 
-    public static func == (lhs: Self, rhs: Self) -> Bool {
-        return lhs.orientation == rhs.orientation &&
-               lhs.position == rhs.position
-    }
-
-    public static func * (v: Vector3, t: Self) -> Vector3 {
-        return v * t.orientation + t.position
-    }
-
     public static func * (lhs: Self, rhs: Self) -> Self {
-        return Self(orientation: lhs.orientation * rhs.orientation,
-                    position: lhs.position * rhs.orientation + lhs.position)
+        lhs.concatenating(rhs)
     }
 
-    public static func *= (lhs: inout Self, rhs: Self) { lhs = lhs * rhs }
+    public static func *= (lhs: inout Self, rhs: Self) {
+        lhs = lhs * rhs
+    }
+}
+
+public extension Vector3 {
+    func applying(_ t: Transform) -> Vector3 {
+        self.applying(t.orientation) + t.position
+    }
+
+    mutating func apply(_ t: Transform) {
+        self = self.applying(t)
+    }
 }

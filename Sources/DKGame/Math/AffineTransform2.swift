@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct AffineTransform2: VectorTransformer, Hashable {
+public struct AffineTransform2: Hashable {
     public typealias Vector = Vector2
 
     public var matrix2: Matrix2
@@ -69,7 +69,7 @@ public struct AffineTransform2: VectorTransformer, Hashable {
 
     public func inverted() -> Self {
         let matrix = self.matrix2.inverted() ?? .identity
-        let origin = -translation * matrix
+        let origin = (-translation).applying(matrix)
         return Self(linear: matrix2, origin: origin)
     }
 
@@ -100,7 +100,8 @@ public struct AffineTransform2: VectorTransformer, Hashable {
     }
 
     public func concatenating(_ t: LinearTransform2) -> Self {
-        return Self(linear: matrix2 * t.matrix2, origin: translation * t.matrix2)
+        return Self(linear: matrix2.concatenating(t.matrix2),
+                    origin: translation.applying(t.matrix2))
     }
 
     public mutating func concatenate(_ t: LinearTransform2) {
@@ -108,16 +109,12 @@ public struct AffineTransform2: VectorTransformer, Hashable {
     }
 
     public func concatenating(_ t: Self) -> Self {
-        return Self(linear: matrix2 * t.matrix2,
-                    origin: translation * t.matrix2 + t.translation)
+        return Self(linear: matrix2.concatenating(t.matrix2),
+                    origin: translation.applying(t.matrix2) + t.translation)
     }
 
     public mutating func concatenate(_ t: Self) {
         self = self.concatenating(t)
-    }
-
-    public static func == (lhs: Self, rhs: Self) -> Bool {
-        return lhs.matrix2 == rhs.matrix2 && lhs.translation == rhs.translation
     }
 
     public static func * (lhs: Self, rhs: Self) -> Self {
@@ -135,12 +132,14 @@ public struct AffineTransform2: VectorTransformer, Hashable {
     public static func *= (lhs: inout Self, rhs: LinearTransform2) {
         lhs = lhs * rhs
     }
+}
 
-    public static func * (lhs: Vector2, rhs: Self) -> Vector2 {
-        return lhs.applying(rhs.matrix2) + rhs.translation
+public extension Vector2 {
+    func applying(_ t: AffineTransform2) -> Vector2 {
+        self.applying(t.matrix2) + t.translation
     }
 
-    public static func *= (lhs: inout Vector2, rhs: Self) {
-        lhs = lhs * rhs
+    mutating func apply(_ t: AffineTransform2) {
+        self = self.applying(t)
     }
 }
