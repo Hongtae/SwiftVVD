@@ -43,42 +43,6 @@ public class HeadlessWindow: Window {
 
     }
 
-    public func showMouse(_: Bool, forDeviceID: Int) {
-
-    }
-
-    public func isMouseVisible(forDeviceID: Int) -> Bool {
-        false 
-    }
-
-    public func holdMouse(_: Bool, forDeviceID: Int) {
-
-    }
-
-    public func isMouseHeld(forDeviceID: Int) -> Bool {
-        false
-    }
-
-    public func setMousePosition(_: CGPoint, forDeviceID: Int) {
-
-    }
-
-    public func mousePosition(forDeviceID: Int) -> CGPoint? {
-        nil
-    }
-
-    public func enableTextInput(_ enable: Bool, forDeviceID deviceID: Int) {
-        if deviceID == 0 {            
-        }
-    }
-
-    public func isTextInputEnabled(forDeviceID deviceID: Int) -> Bool {
-        if deviceID == 0 {
-            return false
-        }
-        return false
-    }
-
     func postWindowEvent(type: WindowEventType) {
         self.postWindowEvent(
             WindowEvent(type: type,

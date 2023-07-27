@@ -93,7 +93,7 @@ public class Win32Window : Window {
     private var mousePosition: CGPoint = .zero
     private var holdingMousePosition: CGPoint = .zero
     private var mouseButtonDownMask: MouseButtonDownMask = []
-    private var holdMouse: Bool = false
+    private var mouseLocked: Bool = false
     private var textCompositionMode: Bool = false
     private var keyboardStates: [UInt8] = [UInt8](repeating: 0, count: 256)
 
@@ -381,9 +381,9 @@ public class Win32Window : Window {
         return false
     }
 
-    public func holdMouse(_ hold: Bool, forDeviceID deviceID: Int) {
+    public func lockMouse(_ lock: Bool, forDeviceID deviceID: Int) {
         if deviceID == 0 {
-            self.holdMouse = hold
+            self.mouseLocked = lock
 
             self.mousePosition = self.mousePosition(forDeviceID: 0)!
             self.holdingMousePosition = mousePosition
@@ -392,9 +392,9 @@ public class Win32Window : Window {
         }
     }
 
-    public func isMouseHeld(forDeviceID deviceID: Int) -> Bool {
+    public func isMouseLocked(forDeviceID deviceID: Int) -> Bool {
         if deviceID == 0 {
-            return self.holdMouse
+            return self.mouseLocked
         }
         return false
     }
@@ -845,7 +845,7 @@ public class Win32Window : Window {
                                                      y: CGFloat(pt.y) - window.mousePosition.y) * (1.0 / window.contentScaleFactor)
 
                         var postEvent = true
-                        if window.holdMouse {
+                        if window.mouseLocked {
                             let holdPtX = LONG((window.holdingMousePosition.x * window.contentScaleFactor).rounded())
                             let holdPtY = LONG((window.holdingMousePosition.y * window.contentScaleFactor).rounded())
                             if pt.x == holdPtX && pt.y == holdPtY {
@@ -1130,11 +1130,11 @@ public class Win32Window : Window {
                 return 0
             case UINT(WM_DKWINDOW_UPDATEMOUSECAPTURE):
                 if GetCapture() == hWnd {
-                    if window.mouseButtonDownMask.rawValue == 0 && !window.holdMouse {
+                    if window.mouseButtonDownMask.rawValue == 0 && !window.mouseLocked {
                         ReleaseCapture()
                     }
                 } else {
-                    if window.mouseButtonDownMask.rawValue != 0 && window.holdMouse {
+                    if window.mouseButtonDownMask.rawValue != 0 && window.mouseLocked {
                         SetCapture(hWnd)
                     }
                 }
