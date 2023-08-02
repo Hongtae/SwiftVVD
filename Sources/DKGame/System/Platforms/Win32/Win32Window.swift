@@ -91,7 +91,7 @@ public class Win32Window : Window {
     public private(set) var minimized: Bool = false
     
     private var mousePosition: CGPoint = .zero
-    private var holdingMousePosition: CGPoint = .zero
+    private var lockedMousePosition: CGPoint = .zero
     private var mouseButtonDownMask: MouseButtonDownMask = []
     private var mouseLocked: Bool = false
     private var textCompositionMode: Bool = false
@@ -386,7 +386,7 @@ public class Win32Window : Window {
             self.mouseLocked = lock
 
             self.mousePosition = self.mousePosition(forDeviceID: 0)!
-            self.holdingMousePosition = mousePosition
+            self.lockedMousePosition = mousePosition
 
             PostMessageW(hWnd, UINT(WM_DKWINDOW_UPDATEMOUSECAPTURE), 0, 0)
         }
@@ -846,15 +846,15 @@ public class Win32Window : Window {
 
                         var postEvent = true
                         if window.mouseLocked {
-                            let holdPtX = LONG((window.holdingMousePosition.x * window.contentScaleFactor).rounded())
-                            let holdPtY = LONG((window.holdingMousePosition.y * window.contentScaleFactor).rounded())
-                            if pt.x == holdPtX && pt.y == holdPtY {
+                            let lockedPtX = LONG((window.lockedMousePosition.x * window.contentScaleFactor).rounded())
+                            let lockedPtY = LONG((window.lockedMousePosition.y * window.contentScaleFactor).rounded())
+                            if pt.x == lockedPtX && pt.y == lockedPtY {
                                 postEvent = false
                             } else {
                                 window.setMousePosition(window.mousePosition, forDeviceID: 0)
                                 // In Windows8 (or later) with scaled-DPI mode, setting mouse position generate inaccurate result.
-                                // We need to keep new position in hold-mouse state. (non-movable mouse)
-                                window.holdingMousePosition = window.mousePosition(forDeviceID: 0)!
+                                // We need to keep new position in locked-mouse state. (non-movable mouse)
+                                window.lockedMousePosition = window.mousePosition(forDeviceID: 0)!
                             }
                         } else {
                             window.mousePosition = CGPoint(x: Int(pt.x), y: Int(pt.y)) * (1.0 / window.contentScaleFactor)
@@ -1134,7 +1134,7 @@ public class Win32Window : Window {
                         ReleaseCapture()
                     }
                 } else {
-                    if window.mouseButtonDownMask.rawValue != 0 && window.mouseLocked {
+                    if window.mouseButtonDownMask.rawValue != 0 || window.mouseLocked {
                         SetCapture(hWnd)
                     }
                 }
