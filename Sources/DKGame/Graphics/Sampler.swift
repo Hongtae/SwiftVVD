@@ -32,8 +32,8 @@ public struct SamplerDescriptor {
     public var magFilter: SamplerMinMagFilter
     public var mipFilter: SamplerMipFilter
 
-    public var minLod: Float
-    public var maxLod: Float
+    public var lodMinClamp: Float
+    public var lodMaxClamp: Float
 
     public var maxAnisotropy: Int
     public var normalizedCoordinates: Bool
@@ -47,8 +47,8 @@ public struct SamplerDescriptor {
                 minFilter: SamplerMinMagFilter = .nearest,
                 magFilter: SamplerMinMagFilter = .nearest,
                 mipFilter: SamplerMipFilter = .notMipmapped,
-                minLod: Float = 0.0,
-                maxLod: Float = .greatestFiniteMagnitude, // 3.402823466e+38 // FLT_MAX
+                lodMinClamp: Float = 0.0,
+                lodMaxClamp: Float = .greatestFiniteMagnitude, // 3.402823466e+38 // FLT_MAX
                 maxAnisotropy: Int = 1,
                 normalizedCoordinates: Bool = true,
                 compareFunction: CompareFunction = .never) {
@@ -58,8 +58,8 @@ public struct SamplerDescriptor {
         self.minFilter = minFilter
         self.magFilter = magFilter
         self.mipFilter = mipFilter
-        self.minLod = minLod
-        self.maxLod = maxLod
+        self.lodMinClamp = lodMinClamp
+        self.lodMaxClamp = lodMaxClamp
         self.maxAnisotropy = maxAnisotropy
         self.normalizedCoordinates = normalizedCoordinates
         self.compareFunction = compareFunction

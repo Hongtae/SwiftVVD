@@ -879,8 +879,8 @@ public class MetalGraphicsDevice: GraphicsDevice {
         desc.minFilter = minMagFilter(descriptor.minFilter)
         desc.magFilter = minMagFilter(descriptor.magFilter)
         desc.mipFilter = mipFilter(descriptor.mipFilter)
-        desc.lodMinClamp = descriptor.minLod
-        desc.lodMaxClamp = descriptor.maxLod
+        desc.lodMinClamp = descriptor.lodMinClamp
+        desc.lodMaxClamp = descriptor.lodMaxClamp
         desc.maxAnisotropy = descriptor.maxAnisotropy
         desc.normalizedCoordinates = descriptor.normalizedCoordinates
         if descriptor.normalizedCoordinates == false {

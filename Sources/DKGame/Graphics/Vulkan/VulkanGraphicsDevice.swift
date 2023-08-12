@@ -1697,8 +1697,8 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         createInfo.maxAnisotropy = Float(desc.maxAnisotropy)
         createInfo.compareOp = compareOp(desc.compareFunction)
         createInfo.compareEnable = createInfo.compareOp != VK_COMPARE_OP_NEVER ? VK_TRUE : VK_FALSE
-        createInfo.minLod = desc.minLod
-        createInfo.maxLod = desc.maxLod
+        createInfo.minLod = desc.lodMinClamp
+        createInfo.maxLod = desc.lodMaxClamp
 
         createInfo.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK
 
