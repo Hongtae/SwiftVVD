@@ -73,7 +73,7 @@ public struct VStackLayout: Layout {
         }
 
         if proposal.height == nil {
-            return CGSize(width: size.width, height: fitHeight + spacing)
+            return CGSize(width: fitWidth, height: fitHeight + spacing)
         }
 
         let maxHeight = cache.maxSizes.reduce(CGFloat.zero) { result, size in

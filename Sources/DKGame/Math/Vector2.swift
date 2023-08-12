@@ -71,10 +71,6 @@ public struct Vector2: Vector, Hashable {
         self = self.rotated(by: angle)
     }
 
-    public static func == (lhs: Self, rhs: Self) -> Bool {
-        return lhs.x == rhs.x && lhs.y == rhs.y
-    }
-
     public static func + (lhs: Self, rhs: Self) -> Self {
         return Self(lhs.x + rhs.x, lhs.y + rhs.y)
     }

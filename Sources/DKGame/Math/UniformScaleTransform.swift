@@ -5,7 +5,7 @@
 //  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
-public struct UniformScaleTransform: VectorTransformer, Interpolatable, Hashable {
+public struct UniformScaleTransform: Hashable {
     public typealias Vector = Vector3
 
     public var scale: Scalar
@@ -32,7 +32,7 @@ public struct UniformScaleTransform: VectorTransformer, Interpolatable, Hashable
     public func inverted() -> Self {
         let s = 1.0 / self.scale
         let r = orientation.conjugated()
-        let p = (-position * scale) * r
+        let p = (-position * scale).applying(r)
         return Self(scale: s, orientation: r, position: p)
     }
 
@@ -47,21 +47,31 @@ public struct UniformScaleTransform: VectorTransformer, Interpolatable, Hashable
                     position: t1.position + ((t2.position - t1.position) * t))
     }   
 
-    public static func == (lhs:Self, rhs:Self) -> Bool {
-        return lhs.scale == rhs.scale &&
-               lhs.orientation == rhs.orientation &&
-               lhs.position == rhs.position
+    public func concatenating(_ t: Self) -> Self {
+        Self(scale: self.scale * t.scale,
+             orientation: self.orientation.concatenating(t.orientation),
+             position: self.position.applying(t.matrix3) + t.position)
     }
 
-    public static func * (lhs: Vector3, rhs: Self) -> Vector3 {
-        return lhs * rhs.scale * rhs.orientation + rhs.position
+    public mutating func concatenate(_ t: Self) {
+        self = self.concatenating(t)
     }
 
     public static func * (lhs: Self, rhs: Self) -> Self {
-        return Self(scale: lhs.scale * rhs.scale,
-                    orientation: lhs.orientation * rhs.orientation,
-                    position: lhs.position * rhs.matrix3 + rhs.position)
+        lhs.concatenating(rhs)
     }
 
-    public static func *= (lhs: inout Self, rhs: Self) { lhs = lhs * rhs }
+    public static func *= (lhs: inout Self, rhs: Self) {
+        lhs = lhs * rhs
+    }
+}
+
+public extension Vector3 {
+    func applying(_ t: UniformScaleTransform) -> Vector3 {
+        (self * t.scale).applying(t.orientation) + t.position
+    }
+
+    mutating func apply(_ t: UniformScaleTransform) {
+        self = self.applying(t)
+    }
 }

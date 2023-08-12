@@ -188,15 +188,15 @@ public class AppKitWindow: Window {
         return false
     }
 
-    public func holdMouse(_ hold: Bool, forDeviceID deviceID: Int) {
+    public func lockMouse(_ hold: Bool, forDeviceID deviceID: Int) {
         if deviceID == 0 {
-            self.view.holdMouse = hold
+            self.view.mouseLocked = hold
         }
     }
 
-    public func isMouseHeld(forDeviceID deviceID: Int) -> Bool {
+    public func isMouseLocked(forDeviceID deviceID: Int) -> Bool {
         if deviceID == 0 {
-            return self.view.holdMouse
+            return self.view.mouseLocked
         }
         return false
     }

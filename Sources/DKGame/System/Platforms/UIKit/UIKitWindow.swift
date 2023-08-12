@@ -111,10 +111,10 @@ public class UIKitWindow: Window {
         return false
     }
 
-    public func holdMouse(_ hold: Bool, forDeviceID deviceID: Int) {
+    public func lockMouse(_ hold: Bool, forDeviceID deviceID: Int) {
     }
 
-    public func isMouseHeld(forDeviceID deviceID: Int) -> Bool {
+    public func isMouseLocked(forDeviceID deviceID: Int) -> Bool {
         return false
     }
 

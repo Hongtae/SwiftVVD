@@ -22,9 +22,9 @@ private let RIGHT_COMMAND_BIT = UInt(0x100010)
 
 class AppKitView: NSView, NSTextInputClient, NSWindowDelegate {
 
-    var holdMouse: Bool = false {
+    var mouseLocked: Bool = false {
         didSet {
-            CGAssociateMouseAndMouseCursorPosition( (!holdMouse) ? 1 : 0 );
+            CGAssociateMouseAndMouseCursorPosition( (!mouseLocked) ? 1 : 0 );
         }
     }
 

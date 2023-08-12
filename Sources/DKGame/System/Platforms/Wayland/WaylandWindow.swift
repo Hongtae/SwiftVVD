@@ -162,11 +162,11 @@ public class WaylandWindow: Window {
         false 
     }
 
-    public func holdMouse(_: Bool, forDeviceID: Int) {
+    public func lockMouse(_: Bool, forDeviceID: Int) {
 
     }
 
-    public func isMouseHeld(forDeviceID: Int) -> Bool {
+    public func isMouseLocked(forDeviceID: Int) -> Bool {
         false
     }
 

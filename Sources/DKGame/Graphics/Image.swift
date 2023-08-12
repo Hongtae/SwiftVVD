@@ -117,10 +117,107 @@ public enum ImageInterpolation {
     case quadratic
 }
 
+
+private typealias RawColorValue = (r: Double, g: Double, b: Double, a: Double)
+// write fixed width integer
+@inline(__always) private func writePixelR<T: FixedWidthInteger>(_ buffer: UnsafeMutableRawBufferPointer, offset: Int, color: RawColorValue, cType: T.Type)
+{
+    let q = Double(T.max)
+    let value = T(color.r * q)
+    buffer.storeBytes(of: value, toByteOffset: offset, as: type(of: value))
+}
+@inline(__always) private func writePixelRG<T: FixedWidthInteger>(_ buffer: UnsafeMutableRawBufferPointer, offset: Int, color: RawColorValue, cType: T.Type)
+{
+    let q = Double(T.max)
+    let value = (T(color.r * q), T(color.g * q))
+    buffer.storeBytes(of: value, toByteOffset: offset, as: type(of: value))
+}
+@inline(__always) private func writePixelRGB<T: FixedWidthInteger>(_ buffer: UnsafeMutableRawBufferPointer, offset: Int, color: RawColorValue, cType: T.Type)
+{
+    let q = Double(T.max)
+    let value = (T(color.r * q), T(color.g * q), T(color.b * q))
+    buffer.storeBytes(of: value, toByteOffset: offset, as: type(of: value))
+}
+@inline(__always) private func writePixelRGBA<T: FixedWidthInteger>(_ buffer: UnsafeMutableRawBufferPointer, offset: Int, color: RawColorValue, cType: T.Type)
+{
+    let q = Double(T.max)
+    let value = (T(color.r * q), T(color.g * q), T(color.b * q), T(color.a * q))
+    buffer.storeBytes(of: value, toByteOffset: offset, as: type(of: value))
+}
+
+// write floating point
+@inline(__always) private func writePixelR<T: BinaryFloatingPoint>(_ buffer: UnsafeMutableRawBufferPointer, offset: Int, color: RawColorValue, cType: T.Type)
+{
+    let value = T(color.r)
+    buffer.storeBytes(of: value, toByteOffset: offset, as: type(of: value))
+}
+@inline(__always) private func writePixelRG<T: BinaryFloatingPoint>(_ buffer: UnsafeMutableRawBufferPointer, offset: Int, color: RawColorValue, cType: T.Type)
+{
+    let value = (T(color.r), T(color.g))
+    buffer.storeBytes(of: value, toByteOffset: offset, as: type(of: value))
+}
+@inline(__always) private func writePixelRGB<T: BinaryFloatingPoint>(_ buffer: UnsafeMutableRawBufferPointer, offset: Int, color: RawColorValue, cType: T.Type)
+{
+    let value = (T(color.r), T(color.g), T(color.b))
+    buffer.storeBytes(of: value, toByteOffset: offset, as: type(of: value))
+}
+@inline(__always) private func writePixelRGBA<T: BinaryFloatingPoint>(_ buffer: UnsafeMutableRawBufferPointer, offset: Int, color: RawColorValue, cType: T.Type)
+{
+    let value = (T(color.r), T(color.g), T(color.b), T(color.a))
+    buffer.storeBytes(of: value, toByteOffset: offset, as: type(of: value))
+}
+
+// read fixed width integer
+@inline(__always) private func readPixelR<T: FixedWidthInteger>(_ data: UnsafeRawPointer, offset: Int, cType: T.Type) -> RawColorValue
+{
+    let norm = 1.0 / Double(T.max)
+    let value = data.load(fromByteOffset: offset, as: T.self)
+    return (Double(value) * norm, 0, 0, 1)
+}
+@inline(__always) private func readPixelRG<T: FixedWidthInteger>(_ data: UnsafeRawPointer, offset: Int, cType: T.Type) -> RawColorValue
+{
+    let norm = 1.0 / Double(T.max)
+    let value = data.load(fromByteOffset: offset, as: (T, T).self)
+    return (Double(value.0) * norm, Double(value.1) * norm, 0, 1)
+}
+@inline(__always) private func readPixelRGB<T: FixedWidthInteger>(_ data: UnsafeRawPointer, offset: Int, cType: T.Type) -> RawColorValue
+{
+    let norm = 1.0 / Double(T.max)
+    let value = data.load(fromByteOffset: offset, as: (T, T, T).self)
+    return (Double(value.0) * norm, Double(value.1) * norm, Double(value.2) * norm, 1)
+}
+@inline(__always) private func readPixelRGBA<T: FixedWidthInteger>(_ data: UnsafeRawPointer, offset: Int, cType: T.Type) -> RawColorValue
+{
+    let norm = 1.0 / Double(T.max)
+    let value = data.load(fromByteOffset: offset, as: (T, T, T, T).self)
+    return (Double(value.0) * norm, Double(value.1) * norm, Double(value.2) * norm, Double(value.3) * norm)
+}
+
+// read floating point
+@inline(__always) private func readPixelR<T: BinaryFloatingPoint>(_ data: UnsafeRawPointer, offset: Int, cType: T.Type) -> RawColorValue
+{
+    let value = data.load(fromByteOffset: offset, as: T.self)
+    return (Double(value), 0, 0, 1)
+}
+@inline(__always) private func readPixelRG<T: BinaryFloatingPoint>(_ data: UnsafeRawPointer, offset: Int, cType: T.Type) -> RawColorValue
+{
+    let value = data.load(fromByteOffset: offset, as: (T, T).self)
+    return (Double(value.0), Double(value.1), 0, 1)
+}
+@inline(__always) private func readPixelRGB<T: BinaryFloatingPoint>(_ data: UnsafeRawPointer, offset: Int, cType: T.Type) -> RawColorValue
+{
+    let value = data.load(fromByteOffset: offset, as: (T, T, T).self)
+    return (Double(value.0), Double(value.1), Double(value.2), 1)
+}
+@inline(__always) private func readPixelRGBA<T: BinaryFloatingPoint>(_ data: UnsafeRawPointer, offset: Int, cType: T.Type) -> RawColorValue
+{
+    let value = data.load(fromByteOffset: offset, as: (T, T, T, T).self)
+    return (Double(value.0), Double(value.1), Double(value.2), Double(value.3))
+}
+
 public class Image {
     public let width: Int
     public let height: Int
-    public let depth: Int
 
     public let pixelFormat: ImagePixelFormat
     public var bytesPerPixel: Int { pixelFormat.bytesPerPixel() }
@@ -133,7 +230,6 @@ public class Image {
         if result.error == DKImageDecodeError_Success {
             self.width = Int(result.width)
             self.height = Int(result.height)
-            self.depth = 1
             self.pixelFormat = .from(dkImagePixelFormat: result.pixelFormat)
             let bytesPerPixel = self.pixelFormat.bytesPerPixel()
             assert(bytesPerPixel > 0)
@@ -147,10 +243,9 @@ public class Image {
         }
     }
 
-    init(width: Int, height: Int, depth: Int, pixelFormat: ImagePixelFormat, data: Data) {
+    init(width: Int, height: Int, pixelFormat: ImagePixelFormat, data: Data) {
         self.width = width
         self.height = height
-        self.depth = depth
         self.pixelFormat = pixelFormat
         self.data = data
     }
@@ -202,226 +297,47 @@ public class Image {
         let rowStride = bpp * width
         let bufferLength = rowStride * height
         let buffer = UnsafeMutableRawBufferPointer.allocate(byteCount: bufferLength, alignment: 1)
-        //defer { buffer.deallocate() }
 
-        typealias RawColorValue = (r: Double, g: Double, b: Double, a: Double)
-
-        let writePixel: (_:RawColorValue, _:Int)->Void
+        let writePixel: (_: UnsafeMutableRawBufferPointer, _: Int, _: RawColorValue)->Void
         switch format {
-        case .r8:
-            writePixel = { color, offset in
-                let value = UInt8(color.r * 255.0)
-                buffer.storeBytes(of: value, toByteOffset: offset, as: type(of: value))
-            }
-        case .rg8:
-            writePixel = { color, offset in
-                let value = (UInt8(color.r * 255.0),
-                             UInt8(color.g * 255.0))
-                buffer.storeBytes(of: value, toByteOffset: offset, as: type(of: value))
-            }
-        case .rgb8:
-            writePixel = { color, offset in
-                let value = (UInt8(color.r * 255.0),
-                             UInt8(color.g * 255.0),
-                             UInt8(color.b * 255.0))
-                buffer.storeBytes(of: value, toByteOffset: offset, as: type(of: value))
-            }
-        case .rgba8:
-            writePixel = { color, offset in
-                let value = (UInt8(color.r * 255.0),
-                             UInt8(color.g * 255.0),
-                             UInt8(color.b * 255.0),
-                             UInt8(color.a * 255.0))
-                buffer.storeBytes(of: value, toByteOffset: offset, as: type(of: value))
-            }
-        case .r16:
-            writePixel = { color, offset in
-                let value = UInt16(color.r * Double(UInt16.max))
-                buffer.storeBytes(of: value, toByteOffset: offset, as: type(of: value))
-            }
-        case .rg16:
-            writePixel = { color, offset in
-                let value = (UInt16(color.r * Double(UInt16.max)),
-                             UInt16(color.g * Double(UInt16.max)))
-                buffer.storeBytes(of: value, toByteOffset: offset, as: type(of: value))
-            }
-        case .rgb16:
-            writePixel = { color, offset in
-                let value = (UInt16(color.r * Double(UInt16.max)),
-                             UInt16(color.g * Double(UInt16.max)),
-                             UInt16(color.b * Double(UInt16.max)))
-                buffer.storeBytes(of: value, toByteOffset: offset, as: type(of: value))
-            }
-        case .rgba16:
-            writePixel = { color, offset in
-                let value = (UInt16(color.r * Double(UInt16.max)),
-                             UInt16(color.g * Double(UInt16.max)),
-                             UInt16(color.b * Double(UInt16.max)),
-                             UInt16(color.a * Double(UInt16.max)))
-                buffer.storeBytes(of: value, toByteOffset: offset, as: type(of: value))
-            }
-        case .r32:
-            writePixel = { color, offset in
-                let value = UInt32(color.r * Double(UInt32.max))
-                buffer.storeBytes(of: value, toByteOffset: offset, as: type(of: value))
-            }
-        case .rg32:
-            writePixel = { color, offset in
-                let value = (UInt32(color.r * Double(UInt32.max)),
-                             UInt32(color.g * Double(UInt32.max)))
-                buffer.storeBytes(of: value, toByteOffset: offset, as: type(of: value))
-            }
-        case .rgb32:
-            writePixel = { color, offset in
-                let value = (UInt32(color.r * Double(UInt32.max)),
-                             UInt32(color.g * Double(UInt32.max)),
-                             UInt32(color.a * Double(UInt32.max)))
-                buffer.storeBytes(of: value, toByteOffset: offset, as: type(of: value))
-            }
-        case .rgba32:
-            writePixel = { color, offset in
-                let value = (UInt32(color.r * Double(UInt32.max)),
-                             UInt32(color.g * Double(UInt32.max)),
-                             UInt32(color.a * Double(UInt32.max)),
-                             UInt32(color.a * Double(UInt32.max)))
-                buffer.storeBytes(of: value, toByteOffset: offset, as: type(of: value))
-            }
-        case .r32f:
-            writePixel = { color, offset in
-                let value = Float(color.r)
-                buffer.storeBytes(of: value, toByteOffset: offset, as: type(of: value))
-            }
-        case .rg32f:
-            writePixel = { color, offset in
-                let value = (Float(color.r), Float(color.g))
-                buffer.storeBytes(of: value, toByteOffset: offset, as: type(of: value))
-            }
-        case .rgb32f:
-            writePixel = { color, offset in
-                let value = (Float(color.r), Float(color.g), Float(color.b))
-                buffer.storeBytes(of: value, toByteOffset: offset, as: type(of: value))
-            }
-        case .rgba32f:
-            writePixel = { color, offset in
-                let value = (Float(color.r), Float(color.g), Float(color.b), Float(color.a))
-                buffer.storeBytes(of: value, toByteOffset: offset, as: type(of: value))
-            }
+        case .r8:      writePixel = { writePixelR($0, offset: $1, color: $2, cType: UInt8.self) }
+        case .rg8:     writePixel = { writePixelRG($0, offset: $1, color: $2, cType: UInt8.self) }
+        case .rgb8:    writePixel = { writePixelRGB($0, offset: $1, color: $2, cType: UInt8.self) }
+        case .rgba8:   writePixel = { writePixelRGBA($0, offset: $1, color: $2, cType: UInt8.self) }
+        case .r16:     writePixel = { writePixelR($0, offset: $1, color: $2, cType: UInt16.self) }
+        case .rg16:    writePixel = { writePixelRG($0, offset: $1, color: $2, cType: UInt16.self) }
+        case .rgb16:   writePixel = { writePixelRGB($0, offset: $1, color: $2, cType: UInt16.self) }
+        case .rgba16:  writePixel = { writePixelRGBA($0, offset: $1, color: $2, cType: UInt16.self) }
+        case .r32:     writePixel = { writePixelR($0, offset: $1, color: $2, cType: UInt32.self) }
+        case .rg32:    writePixel = { writePixelRG($0, offset: $1, color: $2, cType: UInt16.self) }
+        case .rgb32:   writePixel = { writePixelRGB($0, offset: $1, color: $2, cType: UInt16.self) }
+        case .rgba32:  writePixel = { writePixelRGBA($0, offset: $1, color: $2, cType: UInt16.self) }
+        case .r32f:    writePixel = { writePixelR($0, offset: $1, color: $2, cType: Float.self) }
+        case .rg32f:   writePixel = { writePixelRG($0, offset: $1, color: $2, cType: Float.self) }
+        case .rgb32f:  writePixel = { writePixelRGB($0, offset: $1, color: $2, cType: Float.self) }
+        case .rgba32f: writePixel = { writePixelRGBA($0, offset: $1, color: $2, cType: Float.self) }
         default:
             fatalError("Invalid format")
         }
 
         let readPixel: (_:UnsafeRawPointer, _:Int)->RawColorValue
         switch self.pixelFormat {
-        case .r8:
-            let norm = 1.0 / 255.0
-            readPixel = { data, offset in
-                let value = data.load(fromByteOffset: offset, as: UInt8.self)
-                return (Double(value) * norm, 0, 0, 1)
-            }
-        case .rg8:
-            let norm = 1.0 / 255.0
-            readPixel = { data, offset in
-                let value = data.load(fromByteOffset: offset, as: (UInt8, UInt8).self)
-                return (Double(value.0) * norm,
-                        Double(value.1) * norm, 0, 1)
-            }
-        case .rgb8:
-            let norm = 1.0 / 255.0
-            readPixel = { data, offset in
-                let value = data.load(fromByteOffset: offset, as: (UInt8, UInt8, UInt8).self)
-                return (Double(value.0) * norm,
-                        Double(value.1) * norm,
-                        Double(value.2) * norm, 1)
-            }
-        case .rgba8:
-            let norm = 1.0 / 255.0
-            readPixel = { data, offset in
-                let value = data.load(fromByteOffset: offset, as: (UInt8, UInt8, UInt8, UInt8).self)
-                return (Double(value.0) * norm,
-                        Double(value.1) * norm,
-                        Double(value.2) * norm,
-                        Double(value.3) * norm)
-            }
-        case .r16:
-            let norm = 1.0 / Double(UInt16.max)
-            readPixel = { data, offset in
-                let value = data.load(fromByteOffset: offset, as: UInt16.self)
-                return (Double(value) * norm, 0, 0, 1)
-            }
-        case .rg16:
-            let norm = 1.0 / Double(UInt16.max)
-            readPixel = { data, offset in
-                let value = data.load(fromByteOffset: offset, as: (UInt16, UInt16).self)
-                return (Double(value.0) * norm,
-                        Double(value.1) * norm, 0, 1)
-            }
-        case .rgb16:
-            let norm = 1.0 / Double(UInt16.max)
-            readPixel = { data, offset in
-                let value = data.load(fromByteOffset: offset, as: (UInt16, UInt16, UInt16).self)
-                return (Double(value.0) * norm,
-                        Double(value.1) * norm,
-                        Double(value.2) * norm, 1)
-            }
-        case .rgba16:
-            let norm = 1.0 / Double(UInt16.max)
-            readPixel = { data, offset in
-                let value = data.load(fromByteOffset: offset, as: (UInt16, UInt16, UInt16, UInt16).self)
-                return (Double(value.0) * norm,
-                        Double(value.1) * norm,
-                        Double(value.2) * norm,
-                        Double(value.3) * norm)
-            }
-        case .r32:
-            let norm = 1.0 / Double(UInt32.max)
-            readPixel = { data, offset in
-                let value = data.load(fromByteOffset: offset, as: UInt32.self)
-                return (Double(value) * norm, 0, 0, 1)
-            }
-        case .rg32:
-            let norm = 1.0 / Double(UInt32.max)
-            readPixel = { data, offset in
-                let value = data.load(fromByteOffset: offset, as: (UInt32, UInt32).self)
-                return (Double(value.0) * norm,
-                        Double(value.1) * norm, 0, 1)
-            }
-        case .rgb32:
-            let norm = 1.0 / Double(UInt32.max)
-            readPixel = { data, offset in
-                let value = data.load(fromByteOffset: offset, as: (UInt32, UInt32, UInt32).self)
-                return (Double(value.0) * norm,
-                        Double(value.1) * norm,
-                        Double(value.2) * norm, 1)
-            }
-        case .rgba32:
-            let norm = 1.0 / Double(UInt32.max)
-            readPixel = { data, offset in
-                let value = data.load(fromByteOffset: offset, as: (UInt32, UInt32, UInt32, UInt32).self)
-                return (Double(value.0) * norm,
-                        Double(value.1) * norm,
-                        Double(value.2) * norm,
-                        Double(value.3) * norm)
-            }
-        case .r32f:
-            readPixel = { data, offset in
-                let value = data.load(fromByteOffset: offset, as: Float.self)
-                return (Double(value), 0, 0, 1)
-            }
-        case .rg32f:
-            readPixel = { data, offset in
-                let value = data.load(fromByteOffset: offset, as: (Float, Float).self)
-                return (Double(value.0), Double(value.1), 0, 1)
-            }
-        case .rgb32f:
-            readPixel = { data, offset in
-                let value = data.load(fromByteOffset: offset, as: (Float, Float, Float).self)
-                return (Double(value.0), Double(value.1), Double(value.2), 1)
-            }
-        case .rgba32f:
-            readPixel = { data, offset in
-                let value = data.load(fromByteOffset: offset, as: (Float, Float, Float, Float).self)
-                return (Double(value.0), Double(value.1), Double(value.2), Double(value.3))
-            }
+        case .r8:      readPixel = { readPixelR($0, offset: $1, cType: UInt8.self) }
+        case .rg8:     readPixel = { readPixelRG($0, offset: $1, cType: UInt8.self) }
+        case .rgb8:    readPixel = { readPixelRGB($0, offset: $1, cType: UInt8.self) }
+        case .rgba8:   readPixel = { readPixelRGBA($0, offset: $1, cType: UInt8.self) }
+        case .r16:     readPixel = { readPixelR($0, offset: $1, cType: UInt16.self) }
+        case .rg16:    readPixel = { readPixelRG($0, offset: $1, cType: UInt16.self) }
+        case .rgb16:   readPixel = { readPixelRGB($0, offset: $1, cType: UInt16.self) }
+        case .rgba16:  readPixel = { readPixelRGBA($0, offset: $1, cType: UInt16.self) }
+        case .r32:     readPixel = { readPixelR($0, offset: $1, cType: UInt32.self) }
+        case .rg32:    readPixel = { readPixelRG($0, offset: $1, cType: UInt32.self) }
+        case .rgb32:   readPixel = { readPixelRGB($0, offset: $1, cType: UInt32.self) }
+        case .rgba32:  readPixel = { readPixelRGBA($0, offset: $1, cType: UInt32.self) }
+        case .r32f:    readPixel = { readPixelR($0, offset: $1, cType: Float.self) }
+        case .rg32f:   readPixel = { readPixelRG($0, offset: $1, cType: Float.self) }
+        case .rgb32f:  readPixel = { readPixelRGB($0, offset: $1, cType: Float.self) }
+        case .rgba32f: readPixel = { readPixelRGBA($0, offset: $1, cType: Float.self) }
         default:
             fatalError("Invalid format")
         }
@@ -439,8 +355,10 @@ public class Image {
                 return readPixel(sourceData, offset)
             }
             let interpKernel = { (kernel: (Float)->Double, x: Float, y: Float) -> RawColorValue in
-                let px = (-1...2).map { floor(x) + .init($0) }
-                let py = (-1...2).map { floor(y) + .init($0) }
+                let fx = floor(x)
+                let fy = floor(y)
+                let px = (-1...2).map { fx + .init($0) }
+                let py = (-1...2).map { fy + .init($0) }
                 let kx = px.map { kernel($0 - x) }
                 let ky = py.map { kernel($0 - y) }
 
@@ -567,11 +485,11 @@ public class Image {
                     color.b = color.b.clamp(min: 0, max: 1)
                     color.a = color.a.clamp(min: 0, max: 1)
                     let offset = ny * rowStride + nx * bpp
-                    writePixel(color, offset)
+                    writePixel(buffer, offset, color)
                 }
             }
         }
-        return .init(width: width, height: height, depth: 1,
+        return .init(width: width, height: height,
                      pixelFormat: format,
                      data: Data(bytesNoCopy: buffer.baseAddress!,
                                 count: buffer.count,
@@ -582,7 +500,6 @@ public class Image {
 
 extension Image {
     public func makeTexture(commandQueue: CommandQueue) -> Texture? {
-
         var textureFormat: PixelFormat = .invalid
         var imageFormat: ImagePixelFormat = self.pixelFormat
 
@@ -653,7 +570,6 @@ extension Image {
                      destinationOffset: TextureOrigin(layer: 0, level: 0,
                                                       x: 0, y: 0, z: 0),
                      size: TextureSize(width: width, height: height, depth: 1))
-
         encoder.endEncoding()
         commandBuffer.commit()
         return texture

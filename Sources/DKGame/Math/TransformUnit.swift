@@ -5,7 +5,7 @@
 //  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
-public struct TransformUnit: VectorTransformer, Interpolatable, Hashable {
+public struct TransformUnit: Hashable {
     public typealias Vector = Vector3
 
     public var scale: Vector3
@@ -59,14 +59,14 @@ public struct TransformUnit: VectorTransformer, Interpolatable, Hashable {
         let t = t1.translation + ((t2.translation - t1.translation) * t)
         return Self(scale: s, rotation: r, translation: t)
     }
+}
 
-    public static func * (v: Vector3, t: Self) -> Vector3 {
-        return (v * t.scale) * t.rotation + t.translation
+public extension Vector3 {
+    func applying(_ t: TransformUnit) -> Vector3 {
+        (self * t.scale).applying(t.rotation) + t.translation
     }
 
-    public static func == (lhs:Self, rhs:Self) -> Bool {
-        return lhs.scale == rhs.scale &&
-               lhs.rotation == rhs.rotation &&
-               lhs.translation == rhs.translation
+    mutating func apply(_ t: TransformUnit) {
+        self = self.applying(t)
     }
 }

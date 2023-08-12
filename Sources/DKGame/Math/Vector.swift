@@ -37,9 +37,6 @@ public protocol Vector: Equatable {
     static func /= (_: inout Self, _: Self)
     static func /= (_: inout Self, _: any BinaryFloatingPoint)
 
-    static func == (_: Self, _: Self) -> Bool
-    static func != (_: Self, _: Self) -> Bool
-
     static func minimum(_: Self, _: Self) -> Self
     static func maximum(_: Self, _: Self) -> Self
 

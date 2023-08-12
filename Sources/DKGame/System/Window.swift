@@ -143,8 +143,8 @@ public protocol Window: AnyObject {
 
     func showMouse(_: Bool, forDeviceID: Int)
     func isMouseVisible(forDeviceID: Int) -> Bool
-    func holdMouse(_: Bool, forDeviceID: Int)
-    func isMouseHeld(forDeviceID: Int) -> Bool
+    func lockMouse(_: Bool, forDeviceID: Int)
+    func isMouseLocked(forDeviceID: Int) -> Bool
     func setMousePosition(_: CGPoint, forDeviceID: Int)
     func mousePosition(forDeviceID: Int) -> CGPoint?
 
@@ -160,8 +160,8 @@ public protocol Window: AnyObject {
 extension Window {
     public func showMouse(_: Bool, forDeviceID: Int) {}
     public func isMouseVisible(forDeviceID: Int) -> Bool { false }
-    public func holdMouse(_: Bool, forDeviceID: Int) {}
-    public func isMouseHeld(forDeviceID: Int) -> Bool { false }
+    public func lockMouse(_: Bool, forDeviceID: Int) {}
+    public func isMouseLocked(forDeviceID: Int) -> Bool { false }
     public func setMousePosition(_: CGPoint, forDeviceID: Int) {}
     public func mousePosition(forDeviceID: Int) -> CGPoint? { nil }
 

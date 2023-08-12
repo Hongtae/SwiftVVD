@@ -61,7 +61,7 @@ public class VulkanCommandBuffer: CommandBuffer {
 
     private var completedHandlers: [CommandBufferHandler] = []
 
-    public init(pool: VkCommandPool, queue: VulkanCommandQueue) {
+    public init(queue: VulkanCommandQueue, pool: VkCommandPool) {
         self.commandQueue = queue
         self.device = queue.device
         self.commandPool = pool

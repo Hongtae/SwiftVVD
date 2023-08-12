@@ -75,10 +75,6 @@ public struct Vector4: Vector, Hashable {
         return Vector4(x, y, z, w)
     }
 
-    public static func == (lhs: Self, rhs: Self) -> Bool {
-        return lhs.x == rhs.x && lhs.y == rhs.y && lhs.z == rhs.z && lhs.w == rhs.w
-    }
-
     public static func + (lhs: Self, rhs: Self) -> Self {
         return Self(lhs.x + rhs.x, lhs.y + rhs.y, lhs.z + rhs.z, lhs.w + rhs.w)
     }

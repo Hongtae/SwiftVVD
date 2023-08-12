@@ -176,10 +176,6 @@ public struct Quaternion: Vector, Hashable {
         return q1.x * q2.x + q1.y * q2.y + q1.z * q2.z + q1.w * q2.w
     }
 
-    public static func == (lhs: Self, rhs: Self) -> Bool {
-        return lhs.x == rhs.x && lhs.y == rhs.y && lhs.z == rhs.z && lhs.w == rhs.w
-    }
-
     public static func + (lhs: Self, rhs: Self) -> Self {
         return Self(lhs.x + rhs.x, lhs.y + rhs.y, lhs.z + rhs.z, lhs.w + rhs.w)
     }
@@ -201,11 +197,7 @@ public struct Quaternion: Vector, Hashable {
     }
 
     public static func * (lhs: Quaternion, rhs: Quaternion) -> Quaternion {
-        let x = rhs.w * lhs.x + rhs.x * lhs.w + rhs.y * lhs.z - rhs.z * lhs.y
-        let y = rhs.w * lhs.y + rhs.y * lhs.w + rhs.z * lhs.x - rhs.x * lhs.z
-        let z = rhs.w * lhs.z + rhs.z * lhs.w + rhs.x * lhs.y - rhs.y * lhs.x
-        let w = rhs.w * lhs.w - rhs.x * lhs.x - rhs.y * lhs.y - rhs.z * lhs.z
-        return Quaternion(x, y, z, w)
+        lhs.concatenating(rhs)
     }
 
     public static func / (lhs: Self, rhs: Self) -> Self {
@@ -253,21 +245,28 @@ public struct Quaternion: Vector, Hashable {
         self = self.conjugated()
     }
 
-    public func inverted() -> Quaternion? {
+    public func inverted() -> Quaternion {
         let n = self.lengthSquared
         if n > 0.0 {
-            let inv = 1.0 / n
-            let x = self.x * -inv
-            let y = self.y * -inv
-            let z = self.z * -inv
-            let w = self.w * inv
-            return Quaternion(x, y, z, w)
+            return self.conjugated() / n
         }
-        return nil
+        return self
     }
 
     public mutating func invert() {
-        self = self.inverted() ?? self
+        self = self.inverted()
+    }
+
+    public func concatenating(_ q: Quaternion) -> Quaternion {
+        let x = q.w * self.x + q.x * self.w + q.y * self.z - q.z * self.y
+        let y = q.w * self.y + q.y * self.w + q.z * self.x - q.x * self.z
+        let z = q.w * self.z + q.z * self.w + q.x * self.y - q.y * self.x
+        let w = q.w * self.w - q.x * self.x - q.y * self.y - q.z * self.z
+        return Quaternion(x, y, z, w)
+    }
+
+    public mutating func concatenate(_ q: Quaternion) {
+        self = self.concatenating(q)
     }
 
     public static func minimum(_ lhs: Self, _ rhs: Self) -> Self {
@@ -308,22 +307,5 @@ public extension Vector3 {
 
     mutating func apply(_ q: Quaternion) {
         self.rotate(by: q)
-    }
-
-    // static func * (lhs: Vector3, rhs: Quaternion) -> Vector3 {
-    //     return lhs.applying(rhs)
-    // }
-
-    // static func *= (lhs: inout Vector3, rhs: Quaternion) { lhs = lhs * rhs }
-}
-
-extension Quaternion: VectorTransformer {
-    public static func != (lhs: Self, rhs: Self) -> Bool {
-        return !(lhs == rhs)
-    }
-
-    public typealias Vector = Vector3
-    public static func * (_ lhs: Vector3, _ rhs: Self) -> Vector3 {
-        return lhs.applying(rhs)
     }
 }

@@ -139,8 +139,11 @@ public struct Matrix2: Matrix, Hashable {
         return Matrix2(row1: self.column1, row2: self.column2)
     }
 
-    public static func == (lhs: Self, rhs: Self) -> Bool {
-        return lhs.row1 == rhs.row1 && lhs.row2 == rhs.row2
+    public func concatenating(_ m: Self) -> Self {
+        let (row1, row2) = (self.row1, self.row2)
+        let (col1, col2) = (m.column1, m.column2)
+        return Matrix2(Vector2.dot(row1, col1), Vector2.dot(row1, col2),
+                       Vector2.dot(row2, col1), Vector2.dot(row2, col2))
     }
 
     public static func + (lhs: Self, rhs: Self) -> Self {
@@ -149,14 +152,6 @@ public struct Matrix2: Matrix, Hashable {
 
     public static func - (lhs: Self, rhs: Self) -> Self {
         return Matrix2(row1: lhs.row1 - rhs.row1, row2: lhs.row2 - rhs.row2)
-    }
-
-    public static func * (lhs: Self, rhs: Self) -> Self {
-        let row1 = lhs.row1,    row2 = lhs.row2
-        let col1 = rhs.column1, col2 = rhs.column2
-
-        return Matrix2(Vector2.dot(row1, col1), Vector2.dot(row1, col2),
-                       Vector2.dot(row2, col1), Vector2.dot(row2, col2))
     }
 
     public static func * (lhs:Self, rhs: any BinaryFloatingPoint) -> Self {
@@ -216,10 +211,4 @@ public extension Vector2 {
     mutating func apply(_ m: Matrix2) {
         self = self.applying(m)
     }
-
-    static func * (lhs: Self, rhs: Matrix2) -> Self {
-        return lhs.applying(rhs)
-    }
-
-    static func *= (lhs: inout Self, rhs: Matrix2) { lhs = lhs * rhs }
 }
