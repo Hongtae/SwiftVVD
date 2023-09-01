@@ -2,58 +2,72 @@
 //  File: Mesh.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
-public struct VertexStreamDeclaration {
-    let semantic: VertexStreamSemantic
-    let format: VertexFormat
-    let offset: Int // where the data begins, in bytes
-    let name: String
-}
-
-public struct VertexBuffer {
-    let declarations: [VertexStreamDeclaration]
-    let buffer: Buffer
-    let offset: Int // first vertex offset (bytes)
-    let vertexSize: Int
-    let vertexCount: Int
-}
-
-public class Mesh {
-    public var vertexBuffers: [VertexBuffer] = []
-    public var indexBuffer: Buffer?
+public class Submesh {
     public var material: Material?
 
-    public var primitiveType: PrimitiveType = .triangle
-    public var cullMode: CullMode = .back
-    public var frontFace: Winding = .counterClockwise
-
-    public var vertexStart: Int = 0
-    public var vertexCount: Int = 0
-    public var indexBufferByteOffset: Int = 0
-    public var indexCount: Int = 0
-    public var indexOffset: Int = 0
-    public var vertexOffset: Int = 0
-    public var indexType: IndexType = .uint16
-
-    public enum BufferUsagePolicy {
-        case useExternalBufferManually  // don't alloc buffer, use external resources manually.
-        case singleBuffer               // single buffer per mesh
-        case singleBufferPerSet         // single buffer per descriptor-set
-        case singleBufferPerResource    // separated buffers for each resources
+    public struct VertexAttribute {
+        let semantic: VertexAttributeSemantic
+        let format: VertexFormat
+        let offset: Int
+        let name: String
     }
-
-    public var bufferProperties: [String: [Material.BufferInfo]] = [:]
-    public var textureProperties: [String: [Texture]] = [:]
-    public var samplerProperties: [String: [SamplerState]] = [:]
-    public var structProperties: [String: [Material.StructProperty]] = [:]
-
-    var pipelineReflection: PipelineReflection?
-    var resourceBindings: [Material.ResourceBinding] = []
-    var pushConstants: [Material.PushConstantData] = []
+    public struct VertexBuffer {
+        let byteOffset: Int
+        let byteStride: Int
+        let vertexCount: Int
+        let buffer: Buffer
+        let attributes: [VertexAttribute]
+    }
+    public var vertexBuffers: [VertexBuffer]
+    public var indexBuffer: Buffer?
+    public var indexBufferByteOffset: Int = 0
+    public var indexBufferBaseVertexIndex: Int = 0
+    public var vertexStart: Int = 0
+    public var indexCount: Int
+    public var indexType: IndexType
+    public var primitiveType: PrimitiveType
+    
+    public enum BufferUsagePolicy {
+        case useExternalBufferManually
+        case singleBuffer
+        case singleBufferPerSet
+        case singleBufferPerResource
+    }
 
     public init() {
+        self.indexCount = 0
+        self.indexType = .uint16
+        self.vertexBuffers = []
+        self.primitiveType = .triangle
+    }
+
+    var vertexDescriptor: VertexDescriptor {
+        fatalError()
+    }
+
+    func initResources(device: GraphicsDevice, bufferPolicy: BufferUsagePolicy) -> Bool {
+        false
+    }
+
+    func buildPipelineState(device: GraphicsDevice, reflection: UnsafeMutablePointer<PipelineReflection>? = nil) -> Bool {
+        false
+    }
+    func updateShadingProperties(sceneState: SceneState) {
+    }
+
+    func encodeRenderCommand(encoder: RenderCommandEncoder, numInstances: Int, baseInstance: Int) -> Bool {
+        false
+    }
+    func enumerateVertexBufferContent(semantic: VertexAttributeSemantic, queue: CommandQueue,
+                                      handler: (_:UnsafeRawBufferPointer, _:VertexFormat, Int)->Void) {
 
     }
+}
+
+public struct Mesh {
+
+    var submeshes: [Submesh] = []
 }
