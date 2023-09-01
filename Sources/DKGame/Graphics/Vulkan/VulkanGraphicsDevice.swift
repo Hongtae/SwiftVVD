@@ -1883,8 +1883,18 @@ public class VulkanGraphicsDevice : GraphicsDevice {
                 if layout.size > 0 {
                     var range = VkPushConstantRange()
                     range.stageFlags = module.stage.vkFlags()
-                    range.offset = UInt32(layout.offset)
-                    range.size = UInt32(layout.size)
+
+                    // VUID-VkGraphicsPipelineCreateInfo-layout-07987                
+                    let begin = layout.members.reduce(layout.offset) {
+                        (result, member) in
+                        min(result, member.offset)
+                    }
+                    let end = layout.members.reduce(layout.offset + layout.size) {
+                        (result, member) in
+                        max(result, member.offset + member.size)
+                    }
+                    range.offset = UInt32(begin)
+                    range.size = UInt32(end - begin)
                     pushConstantRanges.append(range)
                 }
             }

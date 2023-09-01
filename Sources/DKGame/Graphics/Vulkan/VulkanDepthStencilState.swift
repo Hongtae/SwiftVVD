@@ -56,19 +56,19 @@ public class VulkanDepthStencilState: DepthStencilState {
         vkCmdSetStencilTestEnable(commandBuffer, self.stencilTestEnable) 
         vkCmdSetDepthBoundsTestEnable(commandBuffer, self.depthBoundsTestEnable)
 
-        if self.depthTestEnable != VK_FALSE {
-            vkCmdSetDepthCompareOp(commandBuffer, self.depthCompareOp)
-            vkCmdSetDepthWriteEnable(commandBuffer, self.depthWriteEnable)
-        }
+        // VUID-vkCmdDraw-None-07845, VUID-vkCmdDrawIndexed-None-07845
+        vkCmdSetDepthCompareOp(commandBuffer, self.depthCompareOp)
+        // VUID-vkCmdDraw-None-07844, VUID-vkCmdDrawIndexed-None-07844
+        vkCmdSetDepthWriteEnable(commandBuffer, self.depthWriteEnable)
         
         if self.depthBoundsTestEnable != VK_FALSE {
             vkCmdSetDepthBounds(commandBuffer, self.minDepthBounds, self.maxDepthBounds)
         }
 
-        if self.stencilTestEnable != VK_FALSE {
-            let frontFaceFlags = VkStencilFaceFlags(VK_STENCIL_FACE_FRONT_BIT.rawValue)
-            let backFaceFlags = VkStencilFaceFlags(VK_STENCIL_FACE_BACK_BIT.rawValue)
+        let frontFaceFlags = VkStencilFaceFlags(VK_STENCIL_FACE_FRONT_BIT.rawValue)
+        let backFaceFlags = VkStencilFaceFlags(VK_STENCIL_FACE_BACK_BIT.rawValue)
 
+        if self.stencilTestEnable != VK_FALSE {
             // front face stencil
             vkCmdSetStencilCompareMask(commandBuffer,
                                        frontFaceFlags,
@@ -76,12 +76,6 @@ public class VulkanDepthStencilState: DepthStencilState {
             vkCmdSetStencilWriteMask(commandBuffer,
                                      frontFaceFlags,
                                      self.front.writeMask)
-            vkCmdSetStencilOp(commandBuffer,
-                              frontFaceFlags,
-                              self.front.failOp,
-                              self.front.passOp,
-                              self.front.depthFailOp,
-                              self.front.compareOp)
             // back face stencil
             vkCmdSetStencilCompareMask(commandBuffer,
                                        backFaceFlags,
@@ -89,13 +83,20 @@ public class VulkanDepthStencilState: DepthStencilState {
             vkCmdSetStencilWriteMask(commandBuffer,
                                      backFaceFlags,
                                      self.back.writeMask)
-            vkCmdSetStencilOp(commandBuffer,
-                              backFaceFlags,
-                              self.back.failOp,
-                              self.back.passOp,
-                              self.back.depthFailOp,
-                              self.back.compareOp)
         }
+        // VUID-vkCmdDrawIndexed-None-07848
+        vkCmdSetStencilOp(commandBuffer,
+                            frontFaceFlags,
+                            self.front.failOp,
+                            self.front.passOp,
+                            self.front.depthFailOp,
+                            self.front.compareOp)
+        vkCmdSetStencilOp(commandBuffer,
+                            backFaceFlags,
+                            self.back.failOp,
+                            self.back.passOp,
+                            self.back.depthFailOp,
+                            self.back.compareOp)
     }
 }
 
