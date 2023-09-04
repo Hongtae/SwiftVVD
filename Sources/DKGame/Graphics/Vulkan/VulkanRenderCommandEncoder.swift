@@ -300,8 +300,20 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
             // VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE
             vkCmdSetDepthTestEnable(commandBuffer, VK_FALSE)
 
+            // VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE
+            vkCmdSetDepthWriteEnable(commandBuffer, VK_FALSE)
+
+            // VK_DYNAMIC_STATE_DEPTH_COMPARE_OP
+            vkCmdSetDepthCompareOp(commandBuffer, VK_COMPARE_OP_ALWAYS)
+
             // VK_DYNAMIC_STATE_STENCIL_TEST_ENABLE
             vkCmdSetStencilTestEnable(commandBuffer, VK_FALSE)
+
+            // VK_DYNAMIC_STATE_STENCIL_OP
+            vkCmdSetStencilOp(commandBuffer, VkStencilFaceFlags(VK_STENCIL_FACE_FRONT_BIT.rawValue),
+                              VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP, VK_COMPARE_OP_ALWAYS)
+            vkCmdSetStencilOp(commandBuffer, VkStencilFaceFlags(VK_STENCIL_FACE_BACK_BIT.rawValue),
+                              VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP, VK_COMPARE_OP_ALWAYS)
 
             // VK_DYNAMIC_STATE_DEPTH_BOUNDS_TEST_ENABLE
             vkCmdSetDepthBoundsTestEnable(commandBuffer, VK_FALSE)
