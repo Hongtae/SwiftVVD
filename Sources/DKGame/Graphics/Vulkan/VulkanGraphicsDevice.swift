@@ -95,6 +95,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         requiredExtensions.append(VK_KHR_SWAPCHAIN_EXTENSION_NAME)
         requiredExtensions.append(VK_KHR_MAINTENANCE1_EXTENSION_NAME)
         requiredExtensions.append(VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME)
+        requiredExtensions.append(VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME)
         requiredExtensions.append(VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME)
         requiredExtensions.append(VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME)
         // requiredExtensions.append(VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME)
@@ -128,13 +129,20 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         deviceCreateInfo.pQueueCreateInfos = unsafePointerCopy(collection: queueCreateInfos, holder: tempHolder)
         deviceCreateInfo.pEnabledFeatures = unsafePointerCopy(from: enabledFeatures, holder: tempHolder)
 
-        if deviceExtensions.count > 0 {
+        if deviceExtensions.isEmpty == false {
             deviceCreateInfo.enabledExtensionCount = UInt32(deviceExtensions.count)
             deviceCreateInfo.ppEnabledExtensionNames = unsafePointerCopy(collection: deviceExtensions.map {
                 unsafePointerCopy(string: $0, holder: tempHolder)
             }, holder: tempHolder)
         }
 
+        if deviceExtensions.contains(VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME) {
+            // VK_KHR_synchronization2
+            var features = VkPhysicalDeviceSynchronization2Features()
+            features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES
+            features.synchronization2 = VK_TRUE
+            appendNextChain(&deviceCreateInfo, unsafePointerCopy(from: features, holder: tempHolder))
+        }
         if deviceExtensions.contains(VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME) {
             // VK_EXT_extended_dynamic_state
             var features = VkPhysicalDeviceExtendedDynamicStateFeaturesEXT()
@@ -1696,7 +1704,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         createInfo.anisotropyEnable = VK_TRUE
         createInfo.maxAnisotropy = Float(desc.maxAnisotropy)
         createInfo.compareOp = compareOp(desc.compareFunction)
-        createInfo.compareEnable = createInfo.compareOp != VK_COMPARE_OP_NEVER ? VK_TRUE : VK_FALSE
+        createInfo.compareEnable = desc.compareFunction == .always ? VK_FALSE : VK_TRUE
         createInfo.minLod = desc.lodMinClamp
         createInfo.maxLod = desc.lodMaxClamp
 
@@ -1998,7 +2006,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         }
     }
 
-    public func fence(device: VulkanGraphicsDevice) -> VkFence {
+    public func fence() -> VkFence {
         var fence: VkFence? = synchronizedBy(locking: self.fenceCompletionLock) {
             if self.reusableFences.count > 0 {
                 return self.reusableFences.removeFirst()
@@ -2009,7 +2017,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             var fenceCreateInfo = VkFenceCreateInfo()
             fenceCreateInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO
 
-            let err = vkCreateFence(device.device, &fenceCreateInfo, device.allocationCallbacks, &fence)
+            let err = vkCreateFence(self.device, &fenceCreateInfo, self.allocationCallbacks, &fence)
             if err != VK_SUCCESS {
                 Log.err("vkCreateFence failed: \(err)")
                 assertionFailure("vkCreateFence failed: \(err)")

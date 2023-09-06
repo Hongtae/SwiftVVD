@@ -52,19 +52,19 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
             for colorAttachment in renderPassDescriptor.colorAttachments {
                 if let rt = colorAttachment.renderTarget as? VulkanImageView, rt.image != nil {
                     if let semaphore = rt.waitSemaphore {
-                        self.addWaitSemaphore(semaphore, value: 0, flags: UInt32(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT.rawValue))
+                        self.addWaitSemaphore(semaphore, value: 0, flags: VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT)
                     }
                     if let semaphore = rt.signalSemaphore {
-                        self.addSignalSemaphore(semaphore, value: 0)
+                        self.addSignalSemaphore(semaphore, value: 0, flags: VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT)
                     }
                 }
             }
             if let rt = renderPassDescriptor.depthStencilAttachment.renderTarget as? VulkanImageView, rt.image != nil {
                 if let semaphore = rt.waitSemaphore {
-                    self.addWaitSemaphore(semaphore, value: 0, flags: UInt32(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT.rawValue))
+                    self.addWaitSemaphore(semaphore, value: 0, flags: VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT)
                 }
                 if let semaphore = rt.signalSemaphore {
-                    self.addSignalSemaphore(semaphore, value: 0)
+                    self.addSignalSemaphore(semaphore, value: 0, flags: VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT)
                 }
             }
         }
@@ -119,9 +119,10 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
                     attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
                     attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
                     let currentLayout = image.setLayout(attachment.finalLayout,
-                        accessMask: VkAccessFlags(VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT.rawValue),
-                        stageBegin: UInt32(VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT.rawValue),
-                        stageEnd: UInt32(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT.rawValue))
+                        accessMask: VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                        stageBegin: VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                        stageEnd: VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT)
+                        
                     if attachment.loadOp == VK_ATTACHMENT_LOAD_OP_LOAD {
                         attachment.initialLayout = currentLayout
                     }
@@ -175,9 +176,9 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
                 attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
                 attachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
                 let currentLayout = image.setLayout(attachment.finalLayout,
-                    accessMask: VkAccessFlags(VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT.rawValue),
-                    stageBegin: UInt32(VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT.rawValue),
-                    stageEnd: UInt32(VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT.rawValue))
+                    accessMask: VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                    stageBegin: VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
+                    stageEnd: VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT)
 
                 if attachment.loadOp == VK_ATTACHMENT_LOAD_OP_LOAD {
                     attachment.initialLayout = currentLayout
@@ -246,14 +247,14 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
             }
             // Set image layout transition
             state.imageLayouts.forEach { (key, value) in
-                let image: VulkanImage = value.image
-                let layout: VkImageLayout = value.layout
-                let accessMask: VkAccessFlags = VulkanImage.commonAccessMask(forLayout: layout)
+                let image = value.image
+                let layout = value.layout
+                let accessMask = VulkanImage.commonAccessMask(forLayout: layout)
 
                 image.setLayout(layout,
                                 accessMask: accessMask,
-                                stageBegin: UInt32(VK_PIPELINE_STAGE_VERTEX_SHADER_BIT.rawValue),
-                                stageEnd: UInt32(VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT.rawValue),
+                                stageBegin: VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT,
+                                stageEnd: VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT,
                                 queueFamilyIndex: self.commandBuffer.queueFamily.familyIndex,
                                 commandBuffer: commandBuffer)
             }
@@ -362,7 +363,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
     public func waitEvent(_ event: Event) {
         assert(event is VulkanSemaphore)
         if let semaphore = event as? VulkanSemaphore {
-            let pipelineStages: VkPipelineStageFlags = VkPipelineStageFlags(VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT.rawValue)
+            let pipelineStages = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT
             self.encoder!.addWaitSemaphore(semaphore.semaphore, value: semaphore.nextWaitValue, flags: pipelineStages)
             self.encoder!.events.append(event)
         }
@@ -370,7 +371,8 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
     public func signalEvent(_ event: Event) {
         assert(event is VulkanSemaphore)
         if let semaphore = event as? VulkanSemaphore {
-            self.encoder!.addSignalSemaphore(semaphore.semaphore, value: semaphore.nextWaitValue)
+            let pipelineStages = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT 
+            self.encoder!.addSignalSemaphore(semaphore.semaphore, value: semaphore.nextWaitValue, flags: pipelineStages)
             self.encoder!.events.append(event)
         }
     }
@@ -378,7 +380,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
     public func waitSemaphoreValue(_ sema: Semaphore, value: UInt64) {
         assert(sema is VulkanTimelineSemaphore)
         if let semaphore = sema as? VulkanTimelineSemaphore {
-            let pipelineStages: VkPipelineStageFlags = VkPipelineStageFlags(VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT.rawValue)
+            let pipelineStages = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT
             self.encoder!.addWaitSemaphore(semaphore.semaphore, value: value, flags: pipelineStages)
             self.encoder!.semaphores.append(sema)
         }
@@ -386,7 +388,8 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
     public func signalSemaphoreValue(_ sema: Semaphore, value: UInt64) {
         assert(sema is VulkanTimelineSemaphore)
         if let semaphore = sema as? VulkanTimelineSemaphore {
-            self.encoder!.addSignalSemaphore(semaphore.semaphore, value: value)
+            let pipelineStages = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT
+            self.encoder!.addSignalSemaphore(semaphore.semaphore, value: value, flags: pipelineStages)
             self.encoder!.semaphores.append(sema)
         }
     }

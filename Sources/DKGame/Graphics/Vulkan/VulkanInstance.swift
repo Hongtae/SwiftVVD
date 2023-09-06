@@ -86,6 +86,10 @@ private func debugUtilsMessengerCallback(messageSeverity: VkDebugUtilsMessageSev
         Log.log(level: logLevel, "[VULKAN \(type)\(prefix)] [\(mesgId)](\(mesgIdNum)) \(mesg)")
     }
 
+    if logLevel == .error {
+        // fatalError(mesg)
+    }
+
     return VkBool32(VK_FALSE)
 }
 

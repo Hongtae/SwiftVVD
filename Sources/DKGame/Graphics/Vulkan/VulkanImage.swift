@@ -23,11 +23,11 @@ public class VulkanImage {
     public let device: GraphicsDevice
 
     private struct LayoutAccessInfo {
-        var layout: VkImageLayout = VkImageLayout(0)
-        var accessMask: VkAccessFlags = VkAccessFlags(0)
-        var stageMaskBegin: VkPipelineStageFlags = VkPipelineStageFlags(0)
-        var stageMaskEnd: VkPipelineStageFlags = 0
-        var queueFamilyIndex: UInt32 = 0
+        var layout: VkImageLayout
+        var accessMask: VkAccessFlags2
+        var stageMaskBegin: VkPipelineStageFlags2
+        var stageMaskEnd: VkPipelineStageFlags2
+        var queueFamilyIndex: UInt32
     }
     private let layoutLock = SpinLock()
     private var layoutInfo: LayoutAccessInfo
@@ -44,15 +44,14 @@ public class VulkanImage {
         self.arrayLayers = imageCreateInfo.arrayLayers
         self.usage = imageCreateInfo.usage
 
-        self.layoutInfo = LayoutAccessInfo()
-        self.layoutInfo.layout = imageCreateInfo.initialLayout
-        self.layoutInfo.accessMask = 0
-        self.layoutInfo.stageMaskBegin = VkPipelineStageFlags(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT.rawValue)
-        self.layoutInfo.stageMaskEnd = VkPipelineStageFlags(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT.rawValue)
-        self.layoutInfo.queueFamilyIndex = VK_QUEUE_FAMILY_IGNORED
+        self.layoutInfo = LayoutAccessInfo(layout: imageCreateInfo.initialLayout,
+                                           accessMask: VK_ACCESS_2_NONE,
+                                           stageMaskBegin: VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                                           stageMaskEnd: VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                                           queueFamilyIndex: VK_QUEUE_FAMILY_IGNORED)
 
         if layoutInfo.layout == VK_IMAGE_LAYOUT_UNDEFINED || layoutInfo.layout == VK_IMAGE_LAYOUT_PREINITIALIZED {
-            layoutInfo.stageMaskEnd = VkPipelineStageFlags(VK_PIPELINE_STAGE_HOST_BIT.rawValue)
+            layoutInfo.stageMaskEnd = VK_PIPELINE_STAGE_2_HOST_BIT
         }
 
         assert(extent.width > 0)
@@ -76,12 +75,11 @@ public class VulkanImage {
         self.arrayLayers = 1
         self.usage = 0
 
-        self.layoutInfo = LayoutAccessInfo()
-        self.layoutInfo.layout = VK_IMAGE_LAYOUT_UNDEFINED
-        self.layoutInfo.accessMask = 0
-        self.layoutInfo.stageMaskBegin = VkPipelineStageFlags(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT.rawValue)
-        self.layoutInfo.stageMaskEnd = VkPipelineStageFlags(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT.rawValue)
-        self.layoutInfo.queueFamilyIndex = VK_QUEUE_FAMILY_IGNORED
+        self.layoutInfo = LayoutAccessInfo(layout: VK_IMAGE_LAYOUT_UNDEFINED,
+                                           accessMask: VK_ACCESS_2_NONE,
+                                           stageMaskBegin: VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                                           stageMaskEnd: VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                                           queueFamilyIndex: VK_QUEUE_FAMILY_IGNORED)
     }
 
     deinit {
@@ -93,9 +91,9 @@ public class VulkanImage {
 
     @discardableResult
     public func setLayout(_ layout: VkImageLayout,
-                          accessMask: VkAccessFlags,
-                          stageBegin: UInt32,
-                          stageEnd: UInt32,
+                          accessMask: VkAccessFlags2,
+                          stageBegin: VkPipelineStageFlags2, // this barrier's dst-stage
+                          stageEnd: VkPipelineStageFlags2,   // next barrier's src-stage
                           queueFamilyIndex: UInt32 = VK_QUEUE_FAMILY_IGNORED,
                           commandBuffer: VkCommandBuffer? = nil) -> VkImageLayout {
         assert(layout != VK_IMAGE_LAYOUT_UNDEFINED)
@@ -105,8 +103,8 @@ public class VulkanImage {
         defer { self.layoutLock.unlock() }
 
         if let commandBuffer = commandBuffer {
-            var barrier = VkImageMemoryBarrier()
-            barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER
+            var barrier = VkImageMemoryBarrier2()
+            barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2
             barrier.srcAccessMask = layoutInfo.accessMask
             barrier.dstAccessMask = accessMask
             barrier.oldLayout = layoutInfo.layout
@@ -131,27 +129,31 @@ public class VulkanImage {
             barrier.subresourceRange.baseArrayLayer = 0
             barrier.subresourceRange.layerCount = VK_REMAINING_ARRAY_LAYERS
 
-            var srcStageMask:VkPipelineStageFlags = self.layoutInfo.stageMaskEnd
+            barrier.srcStageMask = self.layoutInfo.stageMaskEnd
 
             if self.layoutInfo.queueFamilyIndex != queueFamilyIndex {
-                srcStageMask = VkPipelineStageFlags(VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT.rawValue)
-                barrier.srcAccessMask = 0
+                if self.layoutInfo.queueFamilyIndex == VK_QUEUE_FAMILY_IGNORED || queueFamilyIndex == VK_QUEUE_FAMILY_IGNORED {
+                    barrier.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT
+                } else {
+                    barrier.srcQueueFamilyIndex = self.layoutInfo.queueFamilyIndex
+                    barrier.dstQueueFamilyIndex = queueFamilyIndex
+                }
             }
-            if srcStageMask == VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT.rawValue {
-                srcStageMask = VkPipelineStageFlags(VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT.rawValue)
-                barrier.srcAccessMask = 0
+            if barrier.srcStageMask == VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT  {
+                barrier.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT
             }
+            barrier.dstStageMask = stageBegin
 
-            vkCmdPipelineBarrier(commandBuffer,
-                                 srcStageMask,
-                                 stageBegin,
-                                 0,         //dependencyFlags
-                                 0,         //pMemoryBarriers
-                                 nil,       //pMemoryBarriers
-                                 0,         //bufferMemoryBarrierCount
-                                 nil,       //pBufferMemoryBarriers
-                                 1,         //imageMemoryBarrierCount
-                                 &barrier)  //pImageMemoryBarriers
+            withUnsafePointer(to: barrier) { pImageMemoryBarriers in
+                var dependencyInfo = VkDependencyInfo()
+                dependencyInfo.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO
+                dependencyInfo.imageMemoryBarrierCount = 1
+                dependencyInfo.pImageMemoryBarriers = pImageMemoryBarriers
+
+                withUnsafePointer(to: dependencyInfo) { pDependencyInfo in
+                    vkCmdPipelineBarrier2(commandBuffer, pDependencyInfo)
+                }
+            }
         }
 
         let oldLayout = self.layoutInfo.layout
@@ -183,33 +185,33 @@ public class VulkanImage {
     }
     public var pixelFormat: PixelFormat { .from(vkFormat: self.format) }
 
-    public static func commonAccessMask(forLayout layout: VkImageLayout) -> VkAccessFlags {
-        var accessMask: VkAccessFlags = 0
+    public static func commonAccessMask(forLayout layout: VkImageLayout) -> VkAccessFlags2 {
+        var accessMask = VK_ACCESS_2_NONE 
         switch layout {
         case VK_IMAGE_LAYOUT_UNDEFINED:
-            accessMask = 0
+            accessMask = VK_ACCESS_2_NONE
         case VK_IMAGE_LAYOUT_GENERAL:
-            accessMask = UInt32(VK_ACCESS_SHADER_READ_BIT.rawValue) | UInt32(VK_ACCESS_SHADER_WRITE_BIT.rawValue)
+            accessMask = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT
         case VK_IMAGE_LAYOUT_PREINITIALIZED:
-            accessMask = UInt32(VK_ACCESS_HOST_WRITE_BIT.rawValue)
+            accessMask = VK_ACCESS_2_HOST_WRITE_BIT
         case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
-            accessMask = UInt32(VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT.rawValue)
+            accessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT
         case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
-            accessMask = UInt32(VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT.rawValue)
+            accessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT
         case VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
              VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_STENCIL_ATTACHMENT_OPTIMAL,
              VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_STENCIL_READ_ONLY_OPTIMAL:
-            accessMask = UInt32(VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT.rawValue)
+            accessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT
         case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
-            accessMask = UInt32(VK_ACCESS_SHADER_READ_BIT.rawValue)
+            accessMask = VK_ACCESS_2_SHADER_READ_BIT
         case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
-            accessMask = UInt32(VK_ACCESS_TRANSFER_READ_BIT.rawValue)
+            accessMask = VK_ACCESS_2_TRANSFER_READ_BIT
         case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
-            accessMask = UInt32(VK_ACCESS_TRANSFER_WRITE_BIT.rawValue)
+            accessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT
         case VK_IMAGE_LAYOUT_PRESENT_SRC_KHR:
-            accessMask = 0
+            accessMask = VK_ACCESS_2_NONE
         default:
-            accessMask = 0
+            accessMask = VK_ACCESS_2_NONE
         }
         return accessMask
     }

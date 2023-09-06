@@ -389,8 +389,8 @@ public class VulkanSwapChain: SwapChain {
             swapchainImage.usage = swapchainCreateInfo.imageUsage
             swapchainImage.setLayout(VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
                                      accessMask: 0,
-                                     stageBegin: UInt32(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT.rawValue),
-                                     stageEnd: UInt32(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT.rawValue))
+                                     stageBegin: VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                                     stageEnd: VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT)
 
             let swapchainImageView = VulkanImageView(device: device, imageView: imageView!)
             swapchainImageView.image = swapchainImage

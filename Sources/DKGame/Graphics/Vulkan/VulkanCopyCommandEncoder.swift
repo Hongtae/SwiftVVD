@@ -2,7 +2,7 @@
 //  File: VulkanCopyCommandEncoder.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
@@ -75,7 +75,7 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
     public func waitEvent(_ event: Event) {
         assert(event is VulkanSemaphore)
         if let semaphore = event as? VulkanSemaphore {
-            let pipelineStages: VkPipelineStageFlags = VkPipelineStageFlags(VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT.rawValue)
+            let pipelineStages = VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT
             self.encoder!.addWaitSemaphore(semaphore.semaphore, value: semaphore.nextWaitValue, flags: pipelineStages)
             self.encoder!.events.append(event)
         }
@@ -83,7 +83,8 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
     public func signalEvent(_ event: Event) {
         assert(event is VulkanSemaphore)
         if let semaphore = event as? VulkanSemaphore {
-            self.encoder!.addSignalSemaphore(semaphore.semaphore, value: semaphore.nextWaitValue)
+            let pipelineStages = VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT 
+            self.encoder!.addSignalSemaphore(semaphore.semaphore, value: semaphore.nextWaitValue, flags: pipelineStages)
             self.encoder!.events.append(event)
         }
     }
@@ -91,7 +92,7 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
     public func waitSemaphoreValue(_ sema: Semaphore, value: UInt64) {
         assert(sema is VulkanTimelineSemaphore)
         if let semaphore = sema as? VulkanTimelineSemaphore {
-            let pipelineStages: VkPipelineStageFlags = VkPipelineStageFlags(VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT.rawValue)
+            let pipelineStages = VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT
             self.encoder!.addWaitSemaphore(semaphore.semaphore, value: value, flags: pipelineStages)
             self.encoder!.semaphores.append(sema)
         }
@@ -99,7 +100,8 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
     public func signalSemaphoreValue(_ sema: Semaphore, value: UInt64) {
         assert(sema is VulkanTimelineSemaphore)
         if let semaphore = sema as? VulkanTimelineSemaphore {
-            self.encoder!.addSignalSemaphore(semaphore.semaphore, value: value)
+            let pipelineStages = VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT 
+            self.encoder!.addSignalSemaphore(semaphore.semaphore, value: value, flags: pipelineStages)
             self.encoder!.semaphores.append(sema)
         }
     }
@@ -188,9 +190,9 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
         let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
 
             image.setLayout(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                            accessMask: VkAccessFlags(VK_ACCESS_TRANSFER_WRITE_BIT.rawValue),
-                            stageBegin: UInt32(VK_PIPELINE_STAGE_TRANSFER_BIT.rawValue),
-                            stageEnd: UInt32(VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT.rawValue),
+                            accessMask: VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                            stageBegin: VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                            stageEnd: VK_PIPELINE_STAGE_2_TRANSFER_BIT,
                             queueFamilyIndex: queueFamilyIndex,
                             commandBuffer: commandBuffer)
 
@@ -258,9 +260,9 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
         let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
 
             image.setLayout(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                            accessMask: VkAccessFlags(VK_ACCESS_TRANSFER_READ_BIT.rawValue),
-                            stageBegin: UInt32(VK_PIPELINE_STAGE_TRANSFER_BIT.rawValue),
-                            stageEnd: UInt32(VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT.rawValue),
+                            accessMask: VK_ACCESS_2_TRANSFER_READ_BIT,
+                            stageBegin: VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                            stageEnd: VK_PIPELINE_STAGE_2_TRANSFER_BIT,
                             queueFamilyIndex: queueFamilyIndex,
                             commandBuffer: commandBuffer)
 
@@ -337,16 +339,16 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
         let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
 
             srcImage.setLayout(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                               accessMask: VkAccessFlags(VK_ACCESS_TRANSFER_READ_BIT.rawValue),
-                               stageBegin: UInt32(VK_PIPELINE_STAGE_TRANSFER_BIT.rawValue),
-                               stageEnd: UInt32(VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT.rawValue),
+                               accessMask: VK_ACCESS_2_TRANSFER_READ_BIT,
+                               stageBegin: VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                               stageEnd: VK_PIPELINE_STAGE_2_TRANSFER_BIT,
                                queueFamilyIndex: queueFamilyIndex,
                                commandBuffer: commandBuffer)
 
             dstImage.setLayout(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                               accessMask: VkAccessFlags(VK_ACCESS_TRANSFER_WRITE_BIT.rawValue),
-                               stageBegin: UInt32(VK_PIPELINE_STAGE_TRANSFER_BIT.rawValue),
-                               stageEnd: UInt32(VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT.rawValue),
+                               accessMask: VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                               stageBegin: VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                               stageEnd: VK_PIPELINE_STAGE_2_TRANSFER_BIT,
                                queueFamilyIndex: queueFamilyIndex,
                                commandBuffer: commandBuffer)
 

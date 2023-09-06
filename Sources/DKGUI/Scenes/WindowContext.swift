@@ -34,8 +34,9 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
         var activeFrameInterval = 1.0 / 60.0
         var inactiveFrameInterval = 1.0 / 30.0
     }
-    @MainActor var state = State()
-    @MainActor var config = Configuration()
+    private let stateLock = SpinLock()
+    private var state = State()
+    private var config = Configuration()
 
     private var task: Task<Void, Never>?
 
@@ -56,7 +57,9 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                 let view = self.viewProxy
 
                 let swapChain = self.swapChain
-                let (state, config) = { (self.state, self.config) }()
+                let (state, config) = synchronizedBy(locking: self.stateLock) {
+                    (self.state, self.config)
+                }
 
                 let frameInterval = state.activated ? config.activeFrameInterval : config.inactiveFrameInterval
 
@@ -171,10 +174,24 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                     }
                 }
 
-                let t = frameInterval - tickCounter.elapsed
+                // Since the sleep resolution of the Task is not constant, it's hard to keep the frame rate constant.
+                // It looks like we need to switch to a traditional threaded approach.
+
+                // while tickCounter.elapsed < frameInterval {
+                //     if Task.isCancelled {
+                //         break mainLoop
+                //     } else {
+                //         threadYield()
+                //     }
+                // }
+
+                let elapsed = tickCounter.elapsed
+                let t = frameInterval - elapsed
                 if t > 0 {
                     do {
-                        try await Task.sleep(until: .now + .seconds(t), clock: .suspending)
+                        let ms = Int(floor(t * 1000))
+                        //try await Task.sleep(for: .milliseconds(ms), tolerance: .microseconds(100))
+                        try await Task.sleep(for: .milliseconds(ms))
                     } catch {
                         break mainLoop
                     }
@@ -279,6 +296,9 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
     func onWindowEvent(event: WindowEvent) {
         if event.window !== self.window { return }
         Log.debug("WindowContext.onWindowEvent: \(event)")
+        self.stateLock.lock()
+        defer { self.stateLock.unlock() }
+
         switch event.type {
         case .closed:
             self.sharedContext.window = nil
