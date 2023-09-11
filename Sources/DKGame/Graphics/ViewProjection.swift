@@ -30,8 +30,8 @@ public struct ViewTransform {
     }
 
     public init(position pos: Vector3, direction dir: Vector3, up: Vector3) {
-        assert(dir.length > 0.0)
-        assert(up.length > 0.0)
+        assert(dir.length > .zero)
+        assert(up.length > .zero)
 
         let axisZ = -dir.normalized()
         let axisX = Vector3.cross(up, axisZ).normalized()
@@ -58,10 +58,9 @@ public struct ProjectionTransform {
                                    fov: Scalar,
                                    near nz: Scalar,
                                    far fz: Scalar) -> ProjectionTransform {
-        assert(aspect > 0.0)
-        assert(fov > 0.0)
-        assert(nz > 0.0)
-        assert(fz > 0.0)
+        assert(aspect > .zero)
+        assert(fov > .zero)
+        assert(nz > .zero)
         assert(fz > nz)
 
         let f = 1.0 / tan(fov * 0.5)
@@ -77,8 +76,8 @@ public struct ProjectionTransform {
                                        height: Scalar,
                                        near nz: Scalar,
                                        far fz: Scalar) -> ProjectionTransform {
-        assert(width > 0.0)
-        assert(height > 0.0)
+        assert(width > .zero)
+        assert(height > .zero)
         assert(fz > nz)
 
         return ProjectionTransform(
