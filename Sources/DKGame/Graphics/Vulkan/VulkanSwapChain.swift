@@ -387,10 +387,6 @@ public class VulkanSwapChain: SwapChain {
             swapchainImage.mipLevels = 1
             swapchainImage.arrayLayers = swapchainCreateInfo.imageArrayLayers
             swapchainImage.usage = swapchainCreateInfo.imageUsage
-            swapchainImage.setLayout(VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-                                     accessMask: 0,
-                                     stageBegin: VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                                     stageEnd: VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT)
 
             let swapchainImageView = VulkanImageView(device: device, imageView: imageView!)
             swapchainImageView.image = swapchainImage
@@ -479,6 +475,23 @@ public class VulkanSwapChain: SwapChain {
 
     @discardableResult
     public func present(waitEvents: [Event]) async -> Bool {
+
+        let presentSrc = self.imageViews[Int(self.frameIndex)]
+        if let image = presentSrc.image, let buffer = self.queue.makeCommandBuffer() {
+            if let encoder = buffer.makeCopyCommandEncoder() as? VulkanCopyCommandEncoder {
+                encoder.callback { commandBuffer in
+                    image.setLayout(VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                                    accessMask: VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT,
+                                    stageBegin: VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                                    stageEnd: VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                                    queueFamilyIndex: self.queue.family.familyIndex,
+                                    commandBuffer: commandBuffer)
+                }
+                encoder.endEncoding()
+                buffer.commit()
+            }
+        }
+
         var waitSemaphores: [VkSemaphore?] = []
         waitSemaphores.reserveCapacity(waitEvents.count + 1)
 

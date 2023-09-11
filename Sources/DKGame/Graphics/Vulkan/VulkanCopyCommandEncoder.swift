@@ -387,6 +387,13 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
         self.encoder!.buffers.append(buffer)
     }
 
+    public func callback(_ fn: @escaping (_:VkCommandBuffer)->Void) {
+        let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
+            fn(commandBuffer)
+        }
+        self.encoder!.commands.append(command)
+    }
+
     private func setupSubresource(_ subresource: inout VkImageSubresourceLayers,
                                   origin: TextureOrigin,
                                   layerCount: Int, 
