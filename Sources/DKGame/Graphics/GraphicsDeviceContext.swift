@@ -78,6 +78,50 @@ public class GraphicsDeviceContext {
         return copyQueues.first
     }
 
+    public func makeCPUAccessible(buffer: Buffer) -> Buffer? {
+        if buffer.contents() != nil {
+            return buffer
+        }
+        guard let queue = copyQueue() else {
+            fatalError("Unable to make command queue")
+        }
+
+        if let stgBuffer = device.makeBuffer(length: buffer.length,
+                                             storageMode: .shared,
+                                             cpuCacheMode: .defaultCache) {
+            if let cbuffer = queue.makeCommandBuffer(),
+               let encoder = cbuffer.makeCopyCommandEncoder() {
+
+                let cond = NSCondition()
+                let timeout = 2.0
+
+                encoder.copy(from: buffer, sourceOffset: 0,
+                             to: stgBuffer, destinationOffset: 0,
+                             size: buffer.length)
+                encoder.endEncoding()
+                cbuffer.addCompletedHandler { _ in
+                    cond.lock()
+                    defer { cond.unlock() }
+                    cond.broadcast()
+                }
+                cbuffer.commit()
+
+                cond.lock()
+                defer { cond.unlock() }
+
+                if cond.wait(until: Date(timeIntervalSinceNow: timeout)) == false {
+                    // timeout
+                    Log.error("The operation timed out. Device did not respond to the command.")
+                    return nil                    
+                }
+                if stgBuffer.contents() != nil {
+                    return stgBuffer
+                }
+            }
+        }
+        return nil
+    }
+
     private var renderQueues: [CommandQueue] = []
     private var computeQueues: [CommandQueue] = []
     private var copyQueues: [CommandQueue] = []

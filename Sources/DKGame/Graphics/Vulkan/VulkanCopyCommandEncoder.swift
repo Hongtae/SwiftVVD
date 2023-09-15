@@ -117,9 +117,6 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
         let srcBuffer = (src as! VulkanBufferView).buffer!
         let dstBuffer = (dst as! VulkanBufferView).buffer!
 
-        assert(srcBuffer.buffer != nil)
-        assert(dstBuffer.buffer != nil)
-
         if srcOffset + size > srcBuffer.length || dstOffset + size > dstBuffer.length {
             Log.err("VulkanCopyCommandEncoder.\(#function) failed: Invalid buffer region")
             return
