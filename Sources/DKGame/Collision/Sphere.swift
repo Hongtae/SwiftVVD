@@ -77,7 +77,7 @@ public struct Sphere {
         return 0.0
     }
 
-    public func rayTest(start: Vector3, direction dir: Vector3) -> Vector3? {
+    public func rayTest(rayOrigin start: Vector3, direction dir: Vector3) -> Vector3? {
         if self.isValid {
             let l = self.center - start  // from ray begin to sphere center
             let d = dir.normalized()
