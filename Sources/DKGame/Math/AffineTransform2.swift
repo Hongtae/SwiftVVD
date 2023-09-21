@@ -57,7 +57,7 @@ public struct AffineTransform2: Hashable {
         self.translation = origin
     }
 
-    public init(x: any BinaryFloatingPoint, y: any BinaryFloatingPoint) {
+    public init<T: BinaryFloatingPoint>(x: T, y: T) {
         self.matrix2 = .identity
         self.translation = .init(x, y)
     }
@@ -89,13 +89,11 @@ public struct AffineTransform2: Hashable {
         self = self.translated(by: offset)
     }
 
-    public func translated(x: any BinaryFloatingPoint,
-                           y: any BinaryFloatingPoint) -> Self {
+    public func translated<T: BinaryFloatingPoint>(x: T, y: T) -> Self {
         return self.translated(by: Vector2(x, y))
     }
 
-    public mutating func translate(x: any BinaryFloatingPoint,
-                                   y: any BinaryFloatingPoint) {
+    public mutating func translate<T: BinaryFloatingPoint>(x: T, y: T) {
         self = self.translated(x: x, y: y)
     }
 

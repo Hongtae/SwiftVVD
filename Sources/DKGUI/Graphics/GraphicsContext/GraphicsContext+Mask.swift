@@ -37,7 +37,7 @@ extension GraphicsContext {
                                                      clearColor: .clear) {
                 if self.encodeStencilPathFillCommand(renderPass: renderPass,
                                                      path: path) {
-                    let makeVertex = { x, y in
+                    let makeVertex = { (x: Scalar, y: Scalar) in
                         _Vertex(position: Vector2(x, y).float2,
                                 texcoord: Vector2.zero.float2,
                                 color: DKGame.Color.white.float4)

@@ -53,7 +53,7 @@ public struct TransformUnit: Hashable {
         self.translation = t.translation
     }
 
-    public static func interpolate(_ t1: Self, _ t2: Self, t: any BinaryFloatingPoint) -> Self {
+    public static func interpolate(_ t1: Self, _ t2: Self, t: some BinaryFloatingPoint) -> Self {
         let s = t1.scale + ((t2.scale - t1.scale) * t)
         let r = Quaternion.slerp(t1.rotation, t2.rotation, t: t)
         let t = t1.translation + ((t2.translation - t1.translation) * t)

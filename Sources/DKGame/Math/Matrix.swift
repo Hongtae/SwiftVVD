@@ -27,15 +27,15 @@ public protocol Matrix: Equatable {
     static func + (_: Self, _: Self) -> Self
     static func - (_: Self, _: Self) -> Self
     static func * (_: Self, _: Self) -> Self
-    static func * (_: Self, _: any BinaryFloatingPoint) -> Self
-    static func / (_: any BinaryFloatingPoint, _: Self) -> Self
-    static func / (_: Self, _: any BinaryFloatingPoint) -> Self
+    static func * (_: Self, _: some BinaryFloatingPoint) -> Self
+    static func / (_: some BinaryFloatingPoint, _: Self) -> Self
+    static func / (_: Self, _: some BinaryFloatingPoint) -> Self
 
     static func += (_: inout Self, _: Self)
     static func -= (_: inout Self, _: Self)
     static func *= (_: inout Self, _: Self)
-    static func *= (_: inout Self, _: any BinaryFloatingPoint)
-    static func /= (_: inout Self, _: any BinaryFloatingPoint)
+    static func *= (_: inout Self, _: some BinaryFloatingPoint)
+    static func /= (_: inout Self, _: some BinaryFloatingPoint)
 }
 
 public extension Matrix {
@@ -45,7 +45,7 @@ public extension Matrix {
 
     static func != (lhs: Self, rhs: Self) -> Bool { return !(lhs == rhs) }
 
-    static func / (lhs: Self, rhs: any BinaryFloatingPoint) -> Self {
+    static func / (lhs: Self, rhs: some BinaryFloatingPoint) -> Self {
         lhs * (Scalar(1) / Scalar(rhs))
     }
     static func * (lhs : Self, rhs: Self) -> Self {
@@ -54,10 +54,10 @@ public extension Matrix {
     static func += (lhs: inout Self, rhs: Self)       { lhs = lhs + rhs }
     static func -= (lhs: inout Self, rhs: Self)       { lhs = lhs - rhs }
     static func *= (lhs: inout Self, rhs: Self)       { lhs = lhs * rhs }
-    static func *= (lhs: inout Self, rhs: any BinaryFloatingPoint) {
+    static func *= (lhs: inout Self, rhs: some BinaryFloatingPoint) {
         lhs = lhs * rhs
     }
-    static func /= (lhs: inout Self, rhs: any BinaryFloatingPoint) {
+    static func /= (lhs: inout Self, rhs: some BinaryFloatingPoint) {
         lhs = lhs / rhs
     }
 }

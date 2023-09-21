@@ -132,15 +132,9 @@ public struct Matrix3: Matrix, Hashable {
         self = matrix
     }
 
-    public init(_ m11: any BinaryFloatingPoint,
-                _ m12: any BinaryFloatingPoint,
-                _ m13: any BinaryFloatingPoint,
-                _ m21: any BinaryFloatingPoint,
-                _ m22: any BinaryFloatingPoint,
-                _ m23: any BinaryFloatingPoint,
-                _ m31: any BinaryFloatingPoint,
-                _ m32: any BinaryFloatingPoint,
-                _ m33: any BinaryFloatingPoint) {
+    public init<T: BinaryFloatingPoint>(_ m11: T, _ m12: T, _ m13: T,
+                                        _ m21: T, _ m22: T, _ m23: T,
+                                        _ m31: T, _ m32: T, _ m33: T) {
         self.m11 = Scalar(m11)
         self.m12 = Scalar(m12)
         self.m13 = Scalar(m13)
@@ -152,15 +146,9 @@ public struct Matrix3: Matrix, Hashable {
         self.m33 = Scalar(m33)
     }
 
-    public init(m11: any BinaryFloatingPoint,
-                m12: any BinaryFloatingPoint,
-                m13: any BinaryFloatingPoint,
-                m21: any BinaryFloatingPoint,
-                m22: any BinaryFloatingPoint,
-                m23: any BinaryFloatingPoint,
-                m31: any BinaryFloatingPoint,
-                m32: any BinaryFloatingPoint,
-                m33: any BinaryFloatingPoint) {
+    public init<T: BinaryFloatingPoint>(m11: T, m12: T, m13: T,
+                                        m21: T, m22: T, m23: T,
+                                        m31: T, m32: T, m33: T) {
         self.init(m11, m12, m13, m21, m22, m23, m31, m32, m33)
     }
 
@@ -235,11 +223,11 @@ public struct Matrix3: Matrix, Hashable {
                        row3: lhs.row3 - rhs.row3)
     }
 
-    public static func * (lhs: Self, rhs: any BinaryFloatingPoint) -> Self {
+    public static func * (lhs: Self, rhs: some BinaryFloatingPoint) -> Self {
         return Matrix3(row1: lhs.row1 * rhs, row2: lhs.row2 * rhs, row3: lhs.row3 * rhs)
     }
 
-    public static func / (lhs: any BinaryFloatingPoint, rhs: Self) -> Self {
+    public static func / (lhs: some BinaryFloatingPoint, rhs: Self) -> Self {
         return Matrix3(row1: Scalar(lhs) / rhs.row1,
                        row2: Scalar(lhs) / rhs.row2,
                        row3: Scalar(lhs) / rhs.row3)

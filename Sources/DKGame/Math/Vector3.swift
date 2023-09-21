@@ -15,7 +15,7 @@ public struct Vector3: Vector, Hashable {
 
     public static let zero = Vector3(0.0, 0.0, 0.0)
 
-    subscript(index: Int) -> Scalar {
+    public subscript(index: Int) -> Scalar {
         get {
             switch index {
             case 0: return self.x
@@ -43,17 +43,13 @@ public struct Vector3: Vector, Hashable {
         self = vector
     }
 
-    public init(_ x: any BinaryFloatingPoint,
-                _ y: any BinaryFloatingPoint,
-                _ z: any BinaryFloatingPoint) {
+    public init<T: BinaryFloatingPoint>(_ x: T, _ y: T, _ z: T) {
         self.x = Scalar(x)
         self.y = Scalar(y)
         self.z = Scalar(z)
     }
 
-    public init(x: any BinaryFloatingPoint,
-                y: any BinaryFloatingPoint,
-                z: any BinaryFloatingPoint) {
+    public init<T: BinaryFloatingPoint>(x: T, y: T, z: T) {
         self.init(x, y, z)
     }
 
@@ -67,7 +63,7 @@ public struct Vector3: Vector, Hashable {
                        z: v1.x * v2.y - v1.y * v2.x)
     }
 
-    public func rotated(x radian: any BinaryFloatingPoint) -> Vector3 {
+    public func rotated(x radian: some BinaryFloatingPoint) -> Vector3 {
         if radian.isZero  { return self }
         let r = Scalar(radian)
         let c = cos(r)
@@ -78,7 +74,7 @@ public struct Vector3: Vector, Hashable {
         return Vector3(self.x, y, z)
     }
 
-    public func rotated(y radian: any BinaryFloatingPoint) -> Vector3 {
+    public func rotated(y radian: some BinaryFloatingPoint) -> Vector3 {
         if radian.isZero { return self }
         let r = Scalar(radian)
         let c = cos(r)
@@ -89,7 +85,7 @@ public struct Vector3: Vector, Hashable {
         return Vector3(x, self.y, z)
     }
 
-    public func rotated(z radian: any BinaryFloatingPoint) -> Vector3 {
+    public func rotated(z radian: some BinaryFloatingPoint) -> Vector3 {
         if radian.isZero { return self }
         let r = Scalar(radian)
         let c = cos(r)
@@ -100,15 +96,15 @@ public struct Vector3: Vector, Hashable {
         return Vector3(x, y, self.z)
     }
 
-    public mutating func rotate(x radian: any BinaryFloatingPoint) {
+    public mutating func rotate(x radian: some BinaryFloatingPoint) {
         self = self.rotated(x: radian)
     }
 
-    public mutating func rotate(y radian: any BinaryFloatingPoint) {
+    public mutating func rotate(y radian: some BinaryFloatingPoint) {
         self = self.rotated(y: radian)
     }
 
-    public mutating func rotate(z radian: any BinaryFloatingPoint) {
+    public mutating func rotate(z radian: some BinaryFloatingPoint) {
         self = self.rotated(z: radian)
     }
 
@@ -124,11 +120,11 @@ public struct Vector3: Vector, Hashable {
         return Self(lhs.x - rhs.x, lhs.y - rhs.y, lhs.z - rhs.z)
     }
 
-    public static func * (lhs: Self, rhs: any BinaryFloatingPoint) -> Self {
+    public static func * (lhs: Self, rhs: some BinaryFloatingPoint) -> Self {
         return Self(lhs.x * Scalar(rhs), lhs.y * Scalar(rhs), lhs.z * Scalar(rhs))
     }
 
-    public static func * (lhs: any BinaryFloatingPoint, rhs: Self) -> Self {
+    public static func * (lhs: some BinaryFloatingPoint, rhs: Self) -> Self {
         return Self(Scalar(lhs) * rhs.x, Scalar(lhs) * rhs.y, Scalar(lhs) * rhs.z)
     }
 
@@ -140,7 +136,7 @@ public struct Vector3: Vector, Hashable {
         return Self(lhs.x / rhs.x, lhs.y / rhs.y, lhs.z / rhs.z)
     }
 
-    public static func / (lhs: any BinaryFloatingPoint, rhs: Self) -> Self {
+    public static func / (lhs: some BinaryFloatingPoint, rhs: Self) -> Self {
         return Self(Scalar(lhs) / rhs.x, Scalar(lhs) / rhs.y, Scalar(lhs) / rhs.z)
     }
 

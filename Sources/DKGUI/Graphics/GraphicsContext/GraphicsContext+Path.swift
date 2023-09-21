@@ -759,7 +759,7 @@ extension GraphicsContext {
             switch property {
             case let .color(c):
                 shader = .vertexColor
-                let makeVertex = { x, y in
+                let makeVertex = { (x: Scalar, y: Scalar) in
                     _Vertex(position: Vector2(x, y).float2,
                             texcoord: Vector2.zero.float2,
                             color: c.dkColor.float4)
@@ -786,7 +786,7 @@ extension GraphicsContext {
                     fatalError()
                 }
                 shader = .vertexColor
-                let makeVertex = { x, y in
+                let makeVertex = { (x: Scalar, y: Scalar) in
                     _Vertex(position: Vector2(x, y).float2,
                             texcoord: Vector2.zero.float2,
                             color: color.dkColor.float4)
