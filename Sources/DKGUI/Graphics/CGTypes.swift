@@ -11,6 +11,11 @@ import DKGame
 #if canImport(CoreGraphics)
 import CoreGraphics
 
+public typealias CGFloat = CoreGraphics.CGFloat
+public typealias CGPoint = CoreGraphics.CGPoint
+public typealias CGSize = CoreGraphics.CGSize
+public typealias CGRect = CoreGraphics.CGRect
+
 public typealias CGAffineTransform = CoreGraphics.CGAffineTransform
 public typealias CGLineCap = CoreGraphics.CGLineCap
 public typealias CGLineJoin = CoreGraphics.CGLineJoin
