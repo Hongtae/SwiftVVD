@@ -262,8 +262,10 @@ let package = Package(
                 .headerSearchPath("include"),
                 .unsafeFlags([
                     "-Wno-enum-conversion",
+                    "-Wno-int-conversion",
                     "-Wno-tautological-constant-out-of-range-compare",
                     "-Wno-sizeof-pointer-memaccess",
+                    "-Wno-implicit-function-declaration",
                 ])
             ]),
         .target(
