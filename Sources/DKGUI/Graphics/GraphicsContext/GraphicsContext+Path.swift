@@ -1125,7 +1125,6 @@ extension GraphicsContext {
             default:
                 Log.err("Not implemented yet (\(property))")
                 fatalError("Not implemented yet")
-                return
             }
         }
 

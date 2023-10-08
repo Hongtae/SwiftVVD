@@ -352,6 +352,7 @@ let package = Package(
                 .define("_CRT_NONSTDC_NO_WARNINGS", .when(platforms: [.windows])),
                 .unsafeFlags([
                     "-Wno-shift-negative-value",
+                    "-Wno-deprecated-non-prototype",
                 ])
             ]),
         .target(

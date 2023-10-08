@@ -17,17 +17,17 @@ Cross-Platform Game Engine for swift programming language.
   * [Microsoft Visual Studio 2022](https://visualstudio.microsoft.com/vs/)
   * [GIT (with LFS)](https://git-scm.com/)
   * [Vulkan SDK](https://vulkan.lunarg.com/sdk/home)
-  * [Swift 5.8 or later](https://www.swift.org/download/)
+  * [Swift 5.9 or later](https://www.swift.org/download/)
 
 * macOS 12.0 (Monterey) or later
-  * [Xcode 13 or later](https://developer.apple.com/xcode/)
+  * [Xcode 15 or later](https://developer.apple.com/xcode/)
  
     > **Note**  
     > When cloning this project, you must use a **GIT client that supports LFS.**
 
 * Linux / WSL2
   * [Vulkan SDK](https://vulkan.lunarg.com/doc/sdk/latest/linux/getting_started.html)
-  * [Swift 5.8 or later](https://www.swift.org/getting-started/#installing-swift)
+  * [Swift 5.9 or later](https://www.swift.org/getting-started/#installing-swift)
   * [Wayland-1.20 or later (libwayland-dev)](https://wayland.freedesktop.org)
   
 ### Build & Run

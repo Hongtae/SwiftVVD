@@ -474,7 +474,7 @@ public class VulkanSwapChain: SwapChain {
     }
 
     @discardableResult
-    public func present(waitEvents: [Event]) async -> Bool {
+    public func present(waitEvents: [Event]) -> Bool {
         let presentSrc = self.imageViews[Int(self.frameIndex)]
         if let image = presentSrc.image, image.layout() != VK_IMAGE_LAYOUT_PRESENT_SRC_KHR {
             if let buffer = self.queue.makeCommandBuffer() {
@@ -542,7 +542,19 @@ public class VulkanSwapChain: SwapChain {
             let device = self.queue.device as! VulkanGraphicsDevice
             vkDeviceWaitIdle(device.device)
             synchronizedBy(locking: self.lock) { self.deviceReset = false }
-            if await self.updateDevice() == false {
+
+            let updated = if Thread.isMainThread {
+                MainActor.assumeIsolated {
+                    self.updateDevice()
+                }
+            } else {
+                DispatchQueue.main.sync {
+                    MainActor.assumeIsolated {
+                        self.updateDevice()
+                    }
+                }
+            }
+            if updated == false {
                 Log.error("VulkanSwapChain.updateDevice() failed.")
             }
         }

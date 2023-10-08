@@ -41,7 +41,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
     private var task: Task<Void, Never>?
 
     private func runWindowUpdateTask() -> Task<Void, Never> {
-        Task.detached(priority: .userInitiated) { @MainActor [weak self] in
+        Task.detached(priority: .userInitiated) { [weak self] in
             Log.info("WindowContext<\(Content.self)> update task is started.")
             var tickCounter = TickCounter()
 
@@ -170,31 +170,19 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                         }
 
                         commandBuffer.commit()
-                        await swapChain.present()
+                        _=swapChain.present()
                     }
                 }
 
-                // Since the sleep resolution of the Task is not constant, it's hard to keep the frame rate constant.
-                // It looks like we need to switch to a traditional threaded approach.
-
-                // while tickCounter.elapsed < frameInterval {
-                //     if Task.isCancelled {
-                //         break mainLoop
-                //     } else {
-                //         threadYield()
-                //     }
-                // }
-
-                let elapsed = tickCounter.elapsed
-                let t = frameInterval - elapsed
-                if t > 0 {
-                    do {
-                        let ms = Int(floor(t * 1000))
-                        //try await Task.sleep(for: .milliseconds(ms), tolerance: .microseconds(100))
-                        try await Task.sleep(for: .milliseconds(ms))
-                    } catch {
-                        break mainLoop
-                    }
+                let tickGranularity = 0.012
+                while tickCounter.elapsed < frameInterval - tickGranularity {
+                    if Task.isCancelled { break mainLoop }
+                    await Task.yield()
+                }
+                // It's less than the tick granularity, so we can't call sleep.
+                while tickCounter.elapsed < frameInterval {
+                    if Task.isCancelled { break mainLoop }
+                    threadYield()
                 }
             }
             Log.info("WindowContext<\(Content.self)> update task is finished.")
