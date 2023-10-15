@@ -1035,6 +1035,8 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         self.savePipelineCache()
 
         if let reflection = reflection {
+            reflection.pointee.inputAttributes = module.inputAttributes
+            reflection.pointee.pushConstantLayouts = module.pushConstantLayouts
             reflection.pointee.resources = module.resources
         }
 
