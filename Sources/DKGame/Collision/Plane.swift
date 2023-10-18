@@ -2,20 +2,53 @@
 //  File: Plane.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 public struct Plane {
-    public let a: Scalar
-    public let b: Scalar
-    public let c: Scalar
-    public let d: Scalar
+    public var a: Scalar
+    public var b: Scalar
+    public var c: Scalar
+    public var d: Scalar
+
+    public subscript(index: Int) -> Scalar {
+        get {
+            switch index {
+            case 0: return self.a
+            case 1: return self.b
+            case 2: return self.c
+            case 3: return self.d
+            default:
+                assertionFailure("Index out of range")
+                break
+            }
+            return .zero
+        }
+        set (value) {
+            switch index {
+            case 0: self.a = value
+            case 1: self.b = value
+            case 2: self.c = value
+            case 3: self.d = value
+            default:
+                assertionFailure("Index out of range")
+                break
+            }
+        }
+    }
 
     public init() {
         self.a = 0.0
         self.b = 0.0
         self.c = 0.0
         self.d = 0.0
+    }
+
+    public init(_ a: Scalar, _ b: Scalar, _ c: Scalar, _ d: Scalar) {
+        self.a = a
+        self.b = b
+        self.c = c
+        self.d = d
     }
 
     // plane from triangle
@@ -36,26 +69,27 @@ public struct Plane {
     }
 
     public func dot(_ v: Vector3) -> Scalar {
-        return a * v.x + b * v.y + c * v.z + d
+        Vector4.dot(self.vector4, Vector4(v.x, v.y, v.z, 1))
     }
 
     public func dot(_ v: Vector4) -> Scalar {
-        return a * v.x + b * v.y + c * v.z + d * v.w
+        Vector4.dot(self.vector4, v)
     }
 
     public var normal: Vector3 { Vector3(a, b, c) }
+    public var vector4: Vector4 { Vector4(a, b, c, d) }
 
-    public func rayTest(start rayBegin: Vector3, direction: Vector3) -> Vector3? {
-        let len = self.dot(rayBegin)
-        if len == 0 { return rayBegin } // connected to the plane.
+    public func rayTest(rayOrigin origin: Vector3, direction: Vector3) -> Vector3? {
+        let distance = self.dot(origin)
+        if distance == 0 { return origin } // connected to the plane.
 
         let dir = direction.normalized()
         let denom = Vector3.dot(self.normal, dir)
 
         if abs(denom) > .ulpOfOne { // epsilon
-            let t = -len / denom
+            let t = -distance / denom
             if t >= 0.0 {
-                return rayBegin + dir * t
+                return origin + dir * t
             }
         }
         return nil

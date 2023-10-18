@@ -2,7 +2,7 @@
 //  File: SwapChain.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 public protocol SwapChain {
@@ -10,14 +10,14 @@ public protocol SwapChain {
     var maximumBufferCount: Int { get }
 
     func currentRenderPassDescriptor() -> RenderPassDescriptor
-    func present(waitEvents: [Event]) async -> Bool
+    func present(waitEvents: [Event]) -> Bool
+    func present() -> Bool
 
     var commandQueue: CommandQueue { get }
 }
 
 extension SwapChain {
-    @discardableResult
-    public func present() async -> Bool {
-        return await present(waitEvents:[])
+    public func present() -> Bool {
+        return present(waitEvents:[])
     }
 }

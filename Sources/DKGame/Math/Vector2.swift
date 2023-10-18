@@ -14,7 +14,7 @@ public struct Vector2: Vector, Hashable {
 
     public static let zero = Vector2(0.0, 0.0)
 
-    subscript(index: Int) -> Scalar {
+    public subscript(index: Int) -> Scalar {
         get {
             switch index {
             case 0: return self.x
@@ -39,13 +39,13 @@ public struct Vector2: Vector, Hashable {
     public init(_ vector: Self = .zero) {
         self = vector
     }
-
-    public init(_ x: any BinaryFloatingPoint, _ y: any BinaryFloatingPoint) {
+    
+    public init<T: BinaryFloatingPoint>(_ x: T, _ y: T) {
         self.x = Scalar(x)
         self.y = Scalar(y)
     }
 
-    public init(x: any BinaryFloatingPoint, y: any BinaryFloatingPoint) {
+    public init<T: BinaryFloatingPoint>(x: T, y: T) {
         self.init(x, y)
     }
 
@@ -57,7 +57,7 @@ public struct Vector2: Vector, Hashable {
         return v1.x * v2.y - v1.y * v2.x
     }
 
-    public func rotated(by angle: any BinaryFloatingPoint) -> Self {
+    public func rotated(by angle: some BinaryFloatingPoint) -> Self {
         // Rotate
         // | cos  sin|
         // |-sin  cos|
@@ -67,7 +67,7 @@ public struct Vector2: Vector, Hashable {
         return Self(x * cosR - y * sinR, x * sinR + y * cosR)
     }
 
-    public mutating func rotate(by angle: any BinaryFloatingPoint) {
+    public mutating func rotate(by angle: some BinaryFloatingPoint) {
         self = self.rotated(by: angle)
     }
 
@@ -83,11 +83,11 @@ public struct Vector2: Vector, Hashable {
         return Self(lhs.x - rhs.x, lhs.y - rhs.y)
     }
 
-    public static func * (lhs: Self, rhs: any BinaryFloatingPoint) -> Self {
+    public static func * (lhs: Self, rhs: some BinaryFloatingPoint) -> Self {
         return Self(lhs.x * Scalar(rhs), lhs.y * Scalar(rhs))
     }
 
-    public static func * (lhs: any BinaryFloatingPoint, rhs: Self) -> Self {
+    public static func * (lhs: some BinaryFloatingPoint, rhs: Self) -> Self {
         return Self(Scalar(lhs) * rhs.x, Scalar(lhs) * rhs.y)
     }
 
@@ -99,7 +99,7 @@ public struct Vector2: Vector, Hashable {
         return Self(lhs.x / rhs.x, lhs.y / rhs.y)
     }
 
-    public static func / (lhs: any BinaryFloatingPoint, rhs: Self) -> Self {
+    public static func / (lhs: some BinaryFloatingPoint, rhs: Self) -> Self {
         return Self(Scalar(lhs) / rhs.x, Scalar(lhs) / rhs.y)
     }
 

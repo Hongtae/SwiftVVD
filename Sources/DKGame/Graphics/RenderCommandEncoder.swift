@@ -77,8 +77,8 @@ public protocol RenderCommandEncoder: CommandEncoder {
 
 public extension RenderCommandEncoder {
     func setViewport(frame: CGRect,
-                     near: any BinaryFloatingPoint,
-                     far: any BinaryFloatingPoint) {
+                     near: some BinaryFloatingPoint,
+                     far: some BinaryFloatingPoint) {
         let frame = frame.standardized
         self.setViewport(Viewport(x: Double(frame.origin.x),
                                   y: Double(frame.origin.y),

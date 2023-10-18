@@ -41,7 +41,9 @@ public class VulkanPhysicalDeviceDescription: CustomStringConvertible {
     public private(set) var extendedDynamicState3Properties: VkPhysicalDeviceExtendedDynamicState3PropertiesEXT 
 
     public private(set) var features: VkPhysicalDeviceFeatures
-    public private(set) var timelineSemaphoreFeatures: VkPhysicalDeviceTimelineSemaphoreFeatures
+    public private(set) var v11Features: VkPhysicalDeviceVulkan11Features 
+    public private(set) var v12Features: VkPhysicalDeviceVulkan12Features 
+    public private(set) var v13Features: VkPhysicalDeviceVulkan13Features
     public private(set) var extendedDynamicStateFeatures: VkPhysicalDeviceExtendedDynamicStateFeaturesEXT
     public private(set) var extendedDynamicState2Features: VkPhysicalDeviceExtendedDynamicState2FeaturesEXT
     public private(set) var extendedDynamicState3Features: VkPhysicalDeviceExtendedDynamicState3FeaturesEXT
@@ -64,8 +66,13 @@ public class VulkanPhysicalDeviceDescription: CustomStringConvertible {
         self.extendedDynamicState3Properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_3_PROPERTIES_EXT
 
         self.features = VkPhysicalDeviceFeatures()
-        self.timelineSemaphoreFeatures = VkPhysicalDeviceTimelineSemaphoreFeatures()
-        self.timelineSemaphoreFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES
+        self.v11Features = VkPhysicalDeviceVulkan11Features()
+        self.v11Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES
+        self.v12Features = VkPhysicalDeviceVulkan12Features()
+        self.v12Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES
+        self.v13Features = VkPhysicalDeviceVulkan13Features()
+        self.v13Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES
+
         self.extendedDynamicStateFeatures = VkPhysicalDeviceExtendedDynamicStateFeaturesEXT()
         self.extendedDynamicStateFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT
         self.extendedDynamicState2Features = VkPhysicalDeviceExtendedDynamicState2FeaturesEXT()
@@ -117,7 +124,9 @@ public class VulkanPhysicalDeviceDescription: CustomStringConvertible {
         var features = VkPhysicalDeviceFeatures2()
         features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2
 
-        appendNextChain(&features, unsafePointerCopy(from: self.timelineSemaphoreFeatures, holder: tempHolder))
+        appendNextChain(&features, unsafePointerCopy(from: self.v11Features, holder: tempHolder))
+        appendNextChain(&features, unsafePointerCopy(from: self.v12Features, holder: tempHolder))
+        appendNextChain(&features, unsafePointerCopy(from: self.v13Features, holder: tempHolder))
         appendNextChain(&features, unsafePointerCopy(from: self.extendedDynamicStateFeatures, holder: tempHolder))
         appendNextChain(&features, unsafePointerCopy(from: self.extendedDynamicState2Features, holder: tempHolder))
         appendNextChain(&features, unsafePointerCopy(from: self.extendedDynamicState3Features, holder: tempHolder))
@@ -128,18 +137,24 @@ public class VulkanPhysicalDeviceDescription: CustomStringConvertible {
 
         enumerateNextChain(features.pNext) { sType, ptr in
             switch sType {
-            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES:
-                self.timelineSemaphoreFeatures =
-                    ptr.bindMemory(to: VkPhysicalDeviceTimelineSemaphoreFeatures.self, capacity: 1).pointee
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES:
+                self.v11Features = ptr.bindMemory(to: VkPhysicalDeviceVulkan11Features.self, capacity: 1).pointee
+                self.v11Features.pNext = nil
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES:
+                self.v12Features = ptr.bindMemory(to: VkPhysicalDeviceVulkan12Features.self, capacity: 1).pointee
+                self.v12Features.pNext = nil
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES:
+                self.v13Features = ptr.bindMemory(to: VkPhysicalDeviceVulkan13Features.self, capacity: 1).pointee
+                self.v13Features.pNext = nil
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT:
-                self.extendedDynamicStateFeatures =
-                    ptr.bindMemory(to: VkPhysicalDeviceExtendedDynamicStateFeaturesEXT.self, capacity: 1).pointee
+                self.extendedDynamicStateFeatures = ptr.bindMemory(to: VkPhysicalDeviceExtendedDynamicStateFeaturesEXT.self, capacity: 1).pointee
+                self.extendedDynamicStateFeatures.pNext = nil
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_2_FEATURES_EXT:
-                self.extendedDynamicState2Features =
-                    ptr.bindMemory(to: VkPhysicalDeviceExtendedDynamicState2FeaturesEXT.self, capacity: 1).pointee
+                self.extendedDynamicState2Features = ptr.bindMemory(to: VkPhysicalDeviceExtendedDynamicState2FeaturesEXT.self, capacity: 1).pointee
+                self.extendedDynamicState2Features.pNext = nil
             case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_3_FEATURES_EXT:
-                self.extendedDynamicState3Features =
-                    ptr.bindMemory(to: VkPhysicalDeviceExtendedDynamicState3FeaturesEXT.self, capacity: 1).pointee
+                self.extendedDynamicState3Features = ptr.bindMemory(to: VkPhysicalDeviceExtendedDynamicState3FeaturesEXT.self, capacity: 1).pointee
+                self.extendedDynamicState3Features.pNext = nil
             default:
                 break
             }

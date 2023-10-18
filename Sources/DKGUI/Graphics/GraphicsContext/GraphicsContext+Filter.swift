@@ -426,7 +426,7 @@ extension GraphicsContext {
         let uvMinY = Float(textureFrame.minY * invH)
         let uvMaxY = Float(textureFrame.maxY * invH)
 
-        let makeVertex = { x, y, u, v in
+        let makeVertex = { (x: Scalar, y: Scalar, u: Float, v: Float) in
             _Vertex(position: Vector2(x, y).applying(self.viewTransform).float2,
                     texcoord: (u, v), color: color.float4)
         }

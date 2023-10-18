@@ -23,24 +23,24 @@ public protocol Vector: Equatable {
     static func + (_: Self, _: Self) -> Self
     static func - (_: Self, _: Self) -> Self
     static func * (_: Self, _: Self) -> Self
-    static func * (_: Self, _: any BinaryFloatingPoint) -> Self
-    static func * (_: any BinaryFloatingPoint, _: Self) -> Self
+    static func * (_: Self, _: some BinaryFloatingPoint) -> Self
+    static func * (_: some BinaryFloatingPoint, _: Self) -> Self
 
     static func += (_: inout Self, _: Self)
     static func -= (_: inout Self, _: Self)
     static func *= (_: inout Self, _: Self)
-    static func *= (_: inout Self, _: any BinaryFloatingPoint)
+    static func *= (_: inout Self, _: some BinaryFloatingPoint)
 
     static func / (_: Self, _: Self) -> Self
-    static func / (_: any BinaryFloatingPoint, _: Self) -> Self
-    static func / (_: Self, _: any BinaryFloatingPoint) -> Self
+    static func / (_: some BinaryFloatingPoint, _: Self) -> Self
+    static func / (_: Self, _: some BinaryFloatingPoint) -> Self
     static func /= (_: inout Self, _: Self)
-    static func /= (_: inout Self, _: any BinaryFloatingPoint)
+    static func /= (_: inout Self, _: some BinaryFloatingPoint)
 
     static func minimum(_: Self, _: Self) -> Self
     static func maximum(_: Self, _: Self) -> Self
 
-    static func interpolate(_: Self, _: Self, _: any BinaryFloatingPoint) -> Self
+    static func interpolate(_: Self, _: Self, _: some BinaryFloatingPoint) -> Self
 }
 
 public extension Vector {
@@ -64,26 +64,26 @@ public extension Vector {
         self = self.normalized()
     }
 
-    static func lerp(_ lhs: Self, _ rhs: Self, _ t: any BinaryFloatingPoint) -> Self {
+    static func lerp(_ lhs: Self, _ rhs: Self, _ t: some BinaryFloatingPoint) -> Self {
         let t = Scalar(t)
         return lhs * (1.0 - t) + rhs * t
     }
 
-    static func interpolate(_ lhs: Self, _ rhs: Self, _ t: any BinaryFloatingPoint) -> Self {
+    static func interpolate(_ lhs: Self, _ rhs: Self, _ t: some BinaryFloatingPoint) -> Self {
         lerp(lhs, rhs, t)
     }
 
     static func += (lhs: inout Self, rhs: Self) { lhs = lhs + rhs }
     static func -= (lhs: inout Self, rhs: Self) { lhs = lhs - rhs }
     static func *= (lhs: inout Self, rhs: Self) { lhs = lhs * rhs }
-    static func *= (lhs: inout Self, rhs: any BinaryFloatingPoint) { lhs = lhs * rhs }
-    static func / (lhs: Self, rhs: any BinaryFloatingPoint) -> Self { lhs * (Scalar(1) / Scalar(rhs)) }
+    static func *= (lhs: inout Self, rhs: some BinaryFloatingPoint) { lhs = lhs * rhs }
+    static func / (lhs: Self, rhs: some BinaryFloatingPoint) -> Self { lhs * (Scalar(1) / Scalar(rhs)) }
     static func /= (lhs: inout Self, rhs: Self) { lhs = lhs / rhs }
-    static func /= (lhs: inout Self, rhs: any BinaryFloatingPoint) { lhs = lhs / rhs }
+    static func /= (lhs: inout Self, rhs: some BinaryFloatingPoint) { lhs = lhs / rhs }
 
     static func != (lhs: Self, rhs: Self) -> Bool { return !(lhs == rhs) }
 }
 
-public func lerp<V>(_ lhs: V, _ rhs: V, _ t: any BinaryFloatingPoint) -> V where V: Vector {
+public func lerp<V>(_ lhs: V, _ rhs: V, _ t: some BinaryFloatingPoint) -> V where V: Vector {
     return V.lerp(lhs, rhs, t)
 }

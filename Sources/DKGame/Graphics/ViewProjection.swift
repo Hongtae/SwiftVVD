@@ -30,8 +30,8 @@ public struct ViewTransform {
     }
 
     public init(position pos: Vector3, direction dir: Vector3, up: Vector3) {
-        assert(dir.length > 0.0)
-        assert(up.length > 0.0)
+        assert(dir.length > .zero)
+        assert(up.length > .zero)
 
         let axisZ = -dir.normalized()
         let axisX = Vector3.cross(up, axisZ).normalized()
@@ -54,14 +54,15 @@ public struct ProjectionTransform {
     public var isPerspective: Bool  { matrix.m44 != 1.0 }
     public var isOrthographic: Bool { matrix.m44 == 1.0 }
 
-    public static func perspective(aspect: Scalar,
-                                   fov: Scalar,
-                                   near nz: Scalar,
-                                   far fz: Scalar) -> ProjectionTransform {
-        assert(aspect > 0.0)
-        assert(fov > 0.0)
-        assert(nz > 0.0)
-        assert(fz > 0.0)
+    static let leftHanded = false
+
+    public static func perspectiveLH(aspect: Scalar,
+                                     fov: Scalar,
+                                     near nz: Scalar,
+                                     far fz: Scalar) -> ProjectionTransform {
+        assert(aspect > .zero)
+        assert(fov > .zero)
+        assert(nz > .zero)
         assert(fz > nz)
 
         let f = 1.0 / tan(fov * 0.5)
@@ -69,42 +70,77 @@ public struct ProjectionTransform {
         return ProjectionTransform(
             matrix: Matrix4(f / aspect, 0.0, 0.0, 0.0,
                             0.0, f, 0.0, 0.0,
-                            0.0, 0.0, (fz + nz) / (nz - fz), -1.0,
-                            0.0, 0.0, (2.0 * fz * nz) / (nz - fz), 0.0))
+                            0.0, 0.0, fz / (fz - nz), 1.0,
+                            0.0, 0.0, -(fz * nz) / (fz - nz), 0.0))
     }
 
-    public static func setOrthographic(width: Scalar,
-                                       height: Scalar,
-                                       near nz: Scalar,
-                                       far fz: Scalar) -> ProjectionTransform {
-        assert(width > 0.0)
-        assert(height > 0.0)
+    public static func perspectiveRH(aspect: Scalar,
+                                     fov: Scalar,
+                                     near nz: Scalar,
+                                     far fz: Scalar) -> ProjectionTransform {
+        assert(aspect > .zero)
+        assert(fov > .zero)
+        assert(nz > .zero)
         assert(fz > nz)
 
+        let f = 1.0 / tan(fov * 0.5)
+
         return ProjectionTransform(
-            matrix: Matrix4(2.0 / width, 0.0, 0.0, 0.0,
-                            0.0, 2.0 / height, 0.0, 0.0,
-                            0.0, 0.0, 2.0 / (nz - fz), 0.0,
-                            0.0, 0.0, (fz + nz) / (nz - fz), 1.0))
+            matrix: Matrix4(f / aspect, 0.0, 0.0, 0.0,
+                            0.0, f, 0.0, 0.0,
+                            0.0, 0.0, fz / (nz - fz), -1.0,
+                            0.0, 0.0, -(fz * nz) / (fz - nz), 0.0))
+    }
+
+    public static func perspective(aspect: Scalar,
+                                   fov: Scalar,
+                                   near nz: Scalar,
+                                   far fz: Scalar) -> ProjectionTransform {
+        if leftHanded {
+            return perspectiveLH(aspect: aspect, fov: fov, near: nz, far: fz)
+        }
+        return perspectiveRH(aspect: aspect, fov: fov, near: nz, far: fz)
+    }
+
+    public static func setOrthographicLH(left l: Scalar,
+                                         right r: Scalar,
+                                         bottom b: Scalar,
+                                         top t: Scalar,
+                                         near n: Scalar,
+                                         far f: Scalar) -> ProjectionTransform {
+        return ProjectionTransform(
+            matrix: Matrix4(2.0 / (r - l), 0.0, 0.0, 0.0,
+                            0.0, 2.0 / (t - b), 0.0, 0.0,
+                            0.0, 0.0, 1.0 / (f - n), 0.0,
+                            -(r + l) / (r - l), -(t + b) / (t - b), -n / (f - n), 1.0))
+    }
+
+    public static func setOrthographicRH(left l: Scalar,
+                                         right r: Scalar,
+                                         bottom b: Scalar,
+                                         top t: Scalar,
+                                         near n: Scalar,
+                                         far f: Scalar) -> ProjectionTransform {
+        return ProjectionTransform(
+            matrix: Matrix4(2.0 / (r - l), 0.0, 0.0, 0.0,
+                            0.0, 2.0 / (t - b), 0.0, 0.0,
+                            0.0, 0.0, -1.0 / (f - n), 0.0,
+                            -(r + l) / (r - l), -(t + b) / (t - b), -n / (f - n), 1.0))
+    }
+
+    public static func setOrthographic(left l: Scalar,
+                                       right r: Scalar,
+                                       bottom b: Scalar,
+                                       top t: Scalar,
+                                       near n: Scalar,
+                                       far f: Scalar) -> ProjectionTransform {
+        if leftHanded {
+            return setOrthographicLH(left: l, right: r, bottom: b, top: t, near: n, far: f)
+        }
+        return setOrthographicRH(left: l, right: r, bottom: b, top: t, near: n, far: f)
     }
 }
 
-//  +z is inner direction of actual frustum, (-1:front, +1:back)
-//  but this class set up -z is inner. (right handed)
-//  coordinate system will be converted as right-handed after
-//  transform applied. CCW (counter-clock-wise) is front-face.
-//
-//  coordinates transformed as below:
-//
-//       +Y
-//        |
-//        |
-//        |_______ +X
-//        /
-//       /
-//      /
-//     +Z
-//
 public struct ViewFrustum {
 
     public let view: ViewTransform
@@ -129,26 +165,26 @@ public struct ViewFrustum {
         //
         //         7+-------+4
         //         /|  far /|
-        //        / |     / |
+        //        / |     / | (z: 1.0)
         //       /  |    /  |
         //      /  6+---/---+5
         //     /   /   /   /
         //   3+-------+0  /
         //    |  /    |  /
         //    | /     | /
-        //    |/ near |/
+        //    |/ near |/ (z: 0.0)
         //   2+-------+1
         //
 
         var vec: [Vector3] = [
-            Vector3( 1,  1, -1),    // near right top
-            Vector3( 1, -1, -1),    // near right bottom
-            Vector3(-1, -1, -1),    // near left bottom
-            Vector3(-1,  1, -1),    // near left top
-            Vector3( 1,  1,  1),    // far right top
-            Vector3( 1, -1,  1),    // far right bottom
-            Vector3(-1, -1,  1),    // far left bottom
-            Vector3(-1,  1,  1),    // far left top
+            Vector3( 1, 1, 0),  // near right top
+            Vector3( 1,-1, 0),  // near right bottom
+            Vector3(-1,-1, 0),  // near left bottom
+            Vector3(-1, 1, 0),  // near left top
+            Vector3( 1, 1, 1),  // far right top
+            Vector3( 1,-1, 1),  // far right bottom
+            Vector3(-1,-1, 1),  // far left bottom
+            Vector3(-1, 1, 1),  // far left top
         ]
 
         let matrix = view.matrix4.concatenating(projection.matrix)
@@ -165,15 +201,24 @@ public struct ViewFrustum {
         // near     (0,1,2,3)
         // top      (0,4,7,3)
         // bottom   (1,5,6,2)
-        // right    (0,1,5,4)
         // left     (2,3,7,6)
+        // right    (0,1,5,4)
 
-        self.far = makePlane(vec[4], vec[7], vec[5])
-        self.near = makePlane(vec[3], vec[0], vec[2])
-        self.top = makePlane(vec[3], vec[7], vec[0])
-        self.bottom = makePlane(vec[1], vec[5], vec[2])
-        self.left = makePlane(vec[2], vec[6], vec[3])
-        self.right = makePlane(vec[0], vec[4], vec[1])
+        if ProjectionTransform.leftHanded {
+            self.far = makePlane(vec[5], vec[7], vec[4])
+            self.near = makePlane(vec[2], vec[0], vec[3])
+            self.top = makePlane(vec[0], vec[7], vec[3])
+            self.bottom = makePlane(vec[2], vec[5], vec[1])
+            self.left = makePlane(vec[3], vec[6], vec[2])
+            self.right = makePlane(vec[1], vec[4], vec[0])
+        } else {
+            self.far = makePlane(vec[4], vec[7], vec[5])
+            self.near = makePlane(vec[3], vec[0], vec[2])
+            self.top = makePlane(vec[3], vec[7], vec[0])
+            self.bottom = makePlane(vec[1], vec[5], vec[2])
+            self.left = makePlane(vec[2], vec[6], vec[3])
+            self.right = makePlane(vec[0], vec[4], vec[1])
+        }
     }
 
     public func isSphereInside(center: Vector3, radius: Scalar) -> Bool {

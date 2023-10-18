@@ -27,8 +27,7 @@ public struct LinearTransform2: Hashable {
         self = self.rotated(by: r)
     }
 
-    public init(scaleX x: any BinaryFloatingPoint,
-                y: any BinaryFloatingPoint) {
+    public init<T: BinaryFloatingPoint>(scaleX x: T, y: T) {
         self.matrix2 = .init(x, 0.0, 0.0, y)
     }
 
@@ -36,7 +35,7 @@ public struct LinearTransform2: Hashable {
         self.matrix2 = .init(row1: x, row2: y)
     }
 
-    public func rotated(by angle: any BinaryFloatingPoint) -> Self {
+    public func rotated(by angle: some BinaryFloatingPoint) -> Self {
         // Rotate
         // | cos  sin|
         // |-sin  cos|
@@ -45,15 +44,14 @@ public struct LinearTransform2: Hashable {
         let sinR = sin(a)
 
         let matrix = Matrix2(cosR, sinR, -sinR, cosR)
-        return Self(self.matrix2 * matrix)
+        return Self(self.matrix2.concatenating(matrix))
     }
 
-    public mutating func rotate(by angle: any BinaryFloatingPoint) {
+    public mutating func rotate(by angle: some BinaryFloatingPoint) {
         self = self.rotated(by: angle)
     }
 
-    public func scaled(x: any BinaryFloatingPoint,
-                       y: any BinaryFloatingPoint) -> Self {
+    public func scaled<T: BinaryFloatingPoint>(x: T, y: T) -> Self {
         // Scale
         // |X  0|
         // |0  Y|
@@ -63,16 +61,15 @@ public struct LinearTransform2: Hashable {
         return Self(matrix)
     }
 
-    public mutating func scale(x: any BinaryFloatingPoint,
-                               y: any BinaryFloatingPoint) {
+    public mutating func scale<T: BinaryFloatingPoint>(x: T, y: T) {
         self = self.scaled(x: x, y: y)
     }
 
-    public func scaled(by s: any BinaryFloatingPoint) -> Self {
+    public func scaled(by s: some BinaryFloatingPoint) -> Self {
         return self.scaled(x: s, y: s)
     }
 
-    public mutating func scale(by s: any BinaryFloatingPoint) {
+    public mutating func scale(by s: some BinaryFloatingPoint) {
         self = self.scaled(by: s)
     }
 
@@ -84,7 +81,7 @@ public struct LinearTransform2: Hashable {
         self = self.scaled(by: v)
     }
 
-    public func squeezed(by s: any BinaryFloatingPoint) -> Self {
+    public func squeezed(by s: some BinaryFloatingPoint) -> Self {
         // Squeeze
         // |S  0  |
         // |0  1/S|
@@ -95,7 +92,7 @@ public struct LinearTransform2: Hashable {
         return Self(matrix)
     }
 
-    public mutating func squeeze(by s: any BinaryFloatingPoint) {
+    public mutating func squeeze(by s: some BinaryFloatingPoint) {
         self = self.squeezed(by: s)
     }
 
@@ -125,7 +122,7 @@ public struct LinearTransform2: Hashable {
         self = self.horizontalFlipped()
     }
 
-    public func verticalSheared(by s: any BinaryFloatingPoint) -> Self {
+    public func verticalSheared(by s: some BinaryFloatingPoint) -> Self {
         // Vertical Shear
         // |1  0|
         // |S  1|
@@ -134,11 +131,11 @@ public struct LinearTransform2: Hashable {
         return Self(matrix)
     }
 
-    public mutating func verticalShear(by s: any BinaryFloatingPoint) {
+    public mutating func verticalShear(by s: some BinaryFloatingPoint) {
         self = self.verticalSheared(by: s)
     }
 
-    public func horizontalSheared(by s: any BinaryFloatingPoint) -> Self {
+    public func horizontalSheared(by s: some BinaryFloatingPoint) -> Self {
         // Horizontal Shear
         // |1  S|
         // |0  1|
@@ -147,7 +144,7 @@ public struct LinearTransform2: Hashable {
         return Self(matrix)
     }
 
-    public mutating func horizontalShear(by s: any BinaryFloatingPoint) {
+    public mutating func horizontalShear(by s: some BinaryFloatingPoint) {
         self = self.horizontalSheared(by: s)
     }
 
@@ -161,7 +158,7 @@ public struct LinearTransform2: Hashable {
     }
 
     public func concatenating(_ m: Matrix2) -> Self {
-        return Self(self.matrix2 * m)
+        return Self(self.matrix2.concatenating(m))
     }
 
     public mutating func concatenate(_ m: Matrix2) {
@@ -169,7 +166,7 @@ public struct LinearTransform2: Hashable {
     }
 
     public func concatenating(_ t: Self) -> Self {
-        return Self(self.matrix2 * t.matrix2)
+        return Self(self.matrix2.concatenating(t.matrix2))
     }
 
     public mutating func concatenate(_ t: Self) {

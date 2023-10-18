@@ -34,13 +34,14 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
         var activeFrameInterval = 1.0 / 60.0
         var inactiveFrameInterval = 1.0 / 30.0
     }
-    @MainActor var state = State()
-    @MainActor var config = Configuration()
+    private let stateLock = SpinLock()
+    private var state = State()
+    private var config = Configuration()
 
     private var task: Task<Void, Never>?
 
     private func runWindowUpdateTask() -> Task<Void, Never> {
-        Task.detached(priority: .userInitiated) { @MainActor [weak self] in
+        Task.detached(priority: .userInitiated) { [weak self] in
             Log.info("WindowContext<\(Content.self)> update task is started.")
             var tickCounter = TickCounter()
 
@@ -56,7 +57,9 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                 let view = self.viewProxy
 
                 let swapChain = self.swapChain
-                let (state, config) = { (self.state, self.config) }()
+                let (state, config) = synchronizedBy(locking: self.stateLock) {
+                    (self.state, self.config)
+                }
 
                 let frameInterval = state.activated ? config.activeFrameInterval : config.inactiveFrameInterval
 
@@ -167,17 +170,19 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                         }
 
                         commandBuffer.commit()
-                        await swapChain.present()
+                        _=swapChain.present()
                     }
                 }
 
-                let t = frameInterval - tickCounter.elapsed
-                if t > 0 {
-                    do {
-                        try await Task.sleep(until: .now + .seconds(t), clock: .suspending)
-                    } catch {
-                        break mainLoop
-                    }
+                let tickGranularity = 0.012
+                while tickCounter.elapsed < frameInterval - tickGranularity {
+                    if Task.isCancelled { break mainLoop }
+                    await Task.yield()
+                }
+                // It's less than the tick granularity, so we can't call sleep.
+                while tickCounter.elapsed < frameInterval {
+                    if Task.isCancelled { break mainLoop }
+                    threadYield()
                 }
             }
             Log.info("WindowContext<\(Content.self)> update task is finished.")
@@ -279,6 +284,9 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
     func onWindowEvent(event: WindowEvent) {
         if event.window !== self.window { return }
         Log.debug("WindowContext.onWindowEvent: \(event)")
+        self.stateLock.lock()
+        defer { self.stateLock.unlock() }
+
         switch event.type {
         case .closed:
             self.sharedContext.window = nil

@@ -387,10 +387,6 @@ public class VulkanSwapChain: SwapChain {
             swapchainImage.mipLevels = 1
             swapchainImage.arrayLayers = swapchainCreateInfo.imageArrayLayers
             swapchainImage.usage = swapchainCreateInfo.imageUsage
-            swapchainImage.setLayout(VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-                                     accessMask: 0,
-                                     stageBegin: UInt32(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT.rawValue),
-                                     stageEnd: UInt32(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT.rawValue))
 
             let swapchainImageView = VulkanImageView(device: device, imageView: imageView!)
             swapchainImageView.image = swapchainImage
@@ -478,7 +474,25 @@ public class VulkanSwapChain: SwapChain {
     }
 
     @discardableResult
-    public func present(waitEvents: [Event]) async -> Bool {
+    public func present(waitEvents: [Event]) -> Bool {
+        let presentSrc = self.imageViews[Int(self.frameIndex)]
+        if let image = presentSrc.image, image.layout() != VK_IMAGE_LAYOUT_PRESENT_SRC_KHR {
+            if let buffer = self.queue.makeCommandBuffer() {
+                if let encoder = buffer.makeCopyCommandEncoder() as? VulkanCopyCommandEncoder {
+                    encoder.callback { commandBuffer in
+                        image.setLayout(VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                                        accessMask: VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT,
+                                        stageBegin: VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                                        stageEnd: VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                                        queueFamilyIndex: self.queue.family.familyIndex,
+                                        commandBuffer: commandBuffer)
+                    }
+                    encoder.endEncoding()
+                    buffer.commit()
+                }
+            }
+        }
+
         var waitSemaphores: [VkSemaphore?] = []
         waitSemaphores.reserveCapacity(waitEvents.count + 1)
 
@@ -519,14 +533,29 @@ public class VulkanSwapChain: SwapChain {
 
         renderPassDescriptor.colorAttachments.removeAll(keepingCapacity: true)
 
+        var resetSwapchain = err == VK_ERROR_OUT_OF_DATE_KHR
         // Check if a device reset is requested and update the device if necessary.
-        let resetSwapchain = synchronizedBy(locking: self.lock) { self.deviceReset }
+        if resetSwapchain == false {
+            resetSwapchain = synchronizedBy(locking: self.lock) { self.deviceReset }
+        }
         if resetSwapchain {
             let device = self.queue.device as! VulkanGraphicsDevice
             vkDeviceWaitIdle(device.device)
             synchronizedBy(locking: self.lock) { self.deviceReset = false }
-            if await self.updateDevice() == false {
-                Log.warn("VulkanSwapChain.updateDevice() failed.")
+
+            let updated = if Thread.isMainThread {
+                MainActor.assumeIsolated {
+                    self.updateDevice()
+                }
+            } else {
+                DispatchQueue.main.sync {
+                    MainActor.assumeIsolated {
+                        self.updateDevice()
+                    }
+                }
+            }
+            if updated == false {
+                Log.error("VulkanSwapChain.updateDevice() failed.")
             }
         }
         return err == VK_SUCCESS

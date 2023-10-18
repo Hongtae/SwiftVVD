@@ -499,7 +499,7 @@ public class Image {
 }
 
 extension Image {
-    public func makeTexture(commandQueue: CommandQueue) -> Texture? {
+    public func makeTexture(commandQueue: CommandQueue, usage: TextureUsage = .sampled) -> Texture? {
         var textureFormat: PixelFormat = .invalid
         var imageFormat: ImagePixelFormat = self.pixelFormat
 
@@ -539,7 +539,7 @@ extension Image {
                                           pixelFormat: textureFormat,
                                           width: width,
                                           height: height,
-                                          usage: [.copyDestination, .sampled]))
+                                          usage: usage.union(.copyDestination)))
         else { return nil }
 
         // create buffer for staging

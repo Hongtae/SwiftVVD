@@ -95,20 +95,14 @@ public struct Matrix2: Matrix, Hashable {
         self = matrix
     }
 
-    public init(_ m11: any BinaryFloatingPoint,
-                _ m12: any BinaryFloatingPoint,
-                _ m21: any BinaryFloatingPoint,
-                _ m22: any BinaryFloatingPoint) {
+    public init<T: BinaryFloatingPoint>(_ m11: T, _ m12: T, _ m21: T, _ m22: T) {
         self.m11 = Scalar(m11)
         self.m12 = Scalar(m12)
         self.m21 = Scalar(m21)
         self.m22 = Scalar(m22)
     }
 
-    public init(m11: any BinaryFloatingPoint,
-                m12: any BinaryFloatingPoint,
-                m21: any BinaryFloatingPoint,
-                m22: any BinaryFloatingPoint) {
+    public init<T: BinaryFloatingPoint>(m11: T, m12: T, m21: T, m22: T) {
         self.init(m11, m12, m21, m22)
     }
 
@@ -154,11 +148,11 @@ public struct Matrix2: Matrix, Hashable {
         return Matrix2(row1: lhs.row1 - rhs.row1, row2: lhs.row2 - rhs.row2)
     }
 
-    public static func * (lhs:Self, rhs: any BinaryFloatingPoint) -> Self {
+    public static func * (lhs:Self, rhs: some BinaryFloatingPoint) -> Self {
         return Matrix2(row1: lhs.row1 * rhs, row2: lhs.row2 * rhs)
     }
 
-    public static func / (lhs: any BinaryFloatingPoint, rhs: Self) -> Self {
+    public static func / (lhs: some BinaryFloatingPoint, rhs: Self) -> Self {
         return Matrix2(row1: Scalar(lhs) / rhs.row1, row2: Scalar(lhs) / rhs.row2)
     }
 }

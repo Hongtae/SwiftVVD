@@ -118,7 +118,6 @@ public class Win32Application : Application {
         mainLoopTimerId = SetTimer(nil, 0, mainLoopMaxInterval, mainLoopTimerProc)
 
         var msg = MSG()
-        PostMessageW(nil, UINT(WM_NULL), 0, 0) // To process first enqueued events.
         mainLoop: while true {
             while PeekMessageW(&msg, nil, 0, 0, UINT(PM_REMOVE)) {
                 if msg.message == UINT(WM_QUIT) {

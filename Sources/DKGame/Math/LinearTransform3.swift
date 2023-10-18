@@ -44,9 +44,7 @@ public struct LinearTransform3: Hashable {
         self.matrix3 = m
     }
  
-    public init(scaleX x: any BinaryFloatingPoint,
-                y: any BinaryFloatingPoint,
-                z: any BinaryFloatingPoint) {
+    public init<T: BinaryFloatingPoint>(scaleX x: T, y: T, z: T) {
         self.matrix3 = .init(x, 0.0, 0.0,
                              0.0, y, 0.0,
                              0.0, 0.0, z)
@@ -83,15 +81,15 @@ public struct LinearTransform3: Hashable {
     }
 
     public func concatenating(_ t: Self) -> Self {
-        return Self(self.matrix3 * t.matrix3)
+        return Self(self.matrix3.concatenating(t.matrix3))
     }
 
     public func concatenating(_ m: Matrix3) -> Self {
-        return Self(self.matrix3 * m)
+        return Self(self.matrix3.concatenating(m))
     }
 
     public func concatenating(_ q: Quaternion) -> Self {
-        return Self(self.matrix3 * q.matrix3)
+        return Self(self.matrix3.concatenating(q.matrix3))
     }
 
     public mutating func concatenate(_ t: Self) {
@@ -114,20 +112,20 @@ public struct LinearTransform3: Hashable {
         self.concatenate(q)
     }
 
-    public func rotated(angle: any BinaryFloatingPoint, axis: Vector3) -> Self {
+    public func rotated(angle: some BinaryFloatingPoint, axis: Vector3) -> Self {
         if angle.isZero == false {
             return self.rotated(by: Quaternion(angle: angle, axis: axis))
         }
         return self
     }
 
-    public mutating func rotate(angle: any BinaryFloatingPoint, axis: Vector3) {
+    public mutating func rotate(angle: some BinaryFloatingPoint, axis: Vector3) {
         if angle.isZero == false {
             self.rotate(by: Quaternion(angle: angle, axis: axis))
         }
     }
 
-    public mutating func rotateX(_ r: any BinaryFloatingPoint) {
+    public mutating func rotateX(_ r: some BinaryFloatingPoint) {
         // X - Axis:
         // |1  0    0   |
         // |0  cos  sin |
@@ -141,7 +139,7 @@ public struct LinearTransform3: Hashable {
         self.matrix3 *= m
     }
 
-    public mutating func rotateY(_ r: any BinaryFloatingPoint) {
+    public mutating func rotateY(_ r: some BinaryFloatingPoint) {
         // Y - Axis:
         // |cos  0 -sin |
         // |0    1  0   |
@@ -155,7 +153,7 @@ public struct LinearTransform3: Hashable {
         self.matrix3 *= m
     }
 
-    public mutating func rotateZ(_ r: any BinaryFloatingPoint) {
+    public mutating func rotateZ(_ r: some BinaryFloatingPoint) {
         // Z - Axis:
         // |cos  sin 0  |
         // |-sin cos 0  |
@@ -173,13 +171,11 @@ public struct LinearTransform3: Hashable {
         self.scale(x: v.x, y: v.y, z: v.z)
     }
 
-    public mutating func scale(uniform s: any BinaryFloatingPoint) {
+    public mutating func scale(uniform s: some BinaryFloatingPoint) {
         self.scale(x: s, y: s, z: s)
     }
 
-    public mutating func scale(x: any BinaryFloatingPoint,
-                               y: any BinaryFloatingPoint,
-                               z: any BinaryFloatingPoint) {
+    public mutating func scale<T: BinaryFloatingPoint>(x: T, y: T, z: T) {
         // | X 0 0 |
         // | 0 Y 0 |
         // | 0 0 Z |

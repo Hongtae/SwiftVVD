@@ -93,15 +93,17 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         var optionalExtensions = optionalExtensions
 
         requiredExtensions.append(VK_KHR_SWAPCHAIN_EXTENSION_NAME)
-        requiredExtensions.append(VK_KHR_MAINTENANCE1_EXTENSION_NAME)
-        requiredExtensions.append(VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME)
-        requiredExtensions.append(VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME)
-        requiredExtensions.append(VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME)
-        // requiredExtensions.append(VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME)
+        // requiredExtensions.append(VK_KHR_MAINTENANCE1_EXTENSION_NAME)                // vulkan 1.1
+        // requiredExtensions.append(VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME)          // vulkan 1.2
+        // requiredExtensions.append(VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME)           // vulkan 1.3
+        // requiredExtensions.append(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME)           // vulkan 1.3
+        // requiredExtensions.append(VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME)      // vulkan 1.3
+        // requiredExtensions.append(VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME)    // vulkan 1.3
+        // requiredExtensions.append(VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME)    
 
-        optionalExtensions.append(VK_KHR_MAINTENANCE_2_EXTENSION_NAME)
-        optionalExtensions.append(VK_KHR_MAINTENANCE_3_EXTENSION_NAME)
-        optionalExtensions.append(VK_KHR_MAINTENANCE_4_EXTENSION_NAME)
+        // optionalExtensions.append(VK_KHR_MAINTENANCE_2_EXTENSION_NAME)   // vulkan 1.1
+        // optionalExtensions.append(VK_KHR_MAINTENANCE_3_EXTENSION_NAME)   // vulkan 1.1
+        // optionalExtensions.append(VK_KHR_MAINTENANCE_4_EXTENSION_NAME)   // vulkan 1.1
 
         // setup extensions
         var deviceExtensions: [String] = []
@@ -128,27 +130,20 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         deviceCreateInfo.pQueueCreateInfos = unsafePointerCopy(collection: queueCreateInfos, holder: tempHolder)
         deviceCreateInfo.pEnabledFeatures = unsafePointerCopy(from: enabledFeatures, holder: tempHolder)
 
-        if deviceExtensions.count > 0 {
+        if deviceExtensions.isEmpty == false {
             deviceCreateInfo.enabledExtensionCount = UInt32(deviceExtensions.count)
             deviceCreateInfo.ppEnabledExtensionNames = unsafePointerCopy(collection: deviceExtensions.map {
                 unsafePointerCopy(string: $0, holder: tempHolder)
             }, holder: tempHolder)
         }
 
-        if deviceExtensions.contains(VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME) {
-            // VK_EXT_extended_dynamic_state
-            var features = VkPhysicalDeviceExtendedDynamicStateFeaturesEXT()
-            features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT
-            features.extendedDynamicState = VK_TRUE
-            appendNextChain(&deviceCreateInfo, unsafePointerCopy(from: features, holder: tempHolder))
-        }
-        if deviceExtensions.contains(VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME) {
-            // VK_EXT_extended_dynamic_state
-            var features = VkPhysicalDeviceExtendedDynamicState2FeaturesEXT()
-            features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_2_FEATURES_EXT
-            features.extendedDynamicState2 = VK_TRUE
-            appendNextChain(&deviceCreateInfo, unsafePointerCopy(from: features, holder: tempHolder))
-        }
+        let v11Features = physicalDevice.v11Features
+        let v12Features = physicalDevice.v12Features
+        let v13Features = physicalDevice.v13Features
+        appendNextChain(&deviceCreateInfo, unsafePointerCopy(from: v11Features, holder: tempHolder))
+        appendNextChain(&deviceCreateInfo, unsafePointerCopy(from: v12Features, holder: tempHolder))
+        appendNextChain(&deviceCreateInfo, unsafePointerCopy(from: v13Features, holder: tempHolder))
+
         if deviceExtensions.contains(VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME) {
             // VK_EXT_extended_dynamic_state
             var features = VkPhysicalDeviceExtendedDynamicState3FeaturesEXT()
@@ -156,13 +151,6 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             features.extendedDynamicState3DepthClampEnable = VK_TRUE
             features.extendedDynamicState3PolygonMode = VK_TRUE
             features.extendedDynamicState3DepthClipEnable = VK_TRUE
-            appendNextChain(&deviceCreateInfo, unsafePointerCopy(from: features, holder: tempHolder))
-        }
-        if deviceExtensions.contains(VK_KHR_MAINTENANCE_4_EXTENSION_NAME) {
-            // VK_KHR_maintenance4
-            var features = VkPhysicalDeviceMaintenance4Features()
-            features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES
-            features.maintenance4 = VK_TRUE
             appendNextChain(&deviceCreateInfo, unsafePointerCopy(from: features, holder: tempHolder))
         }
 
@@ -588,7 +576,6 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         var result: VkResult = VK_SUCCESS
 
         var pipelineLayout: VkPipelineLayout? = nil
-        var renderPass: VkRenderPass? = nil
         var pipeline: VkPipeline? = nil
         var pipelineState: RenderPipelineState? = nil
 
@@ -597,13 +584,24 @@ public class VulkanGraphicsDevice : GraphicsDevice {
                 if let pipelineLayout = pipelineLayout {
                     vkDestroyPipelineLayout(self.device, pipelineLayout, self.allocationCallbacks)
                 }
-                if let renderPass = renderPass {
-                    vkDestroyRenderPass(self.device, renderPass, self.allocationCallbacks)
-                }
                 if let pipeline = pipeline {
                     vkDestroyPipeline(self.device, pipeline, self.allocationCallbacks)
                 }
             }
+        }
+
+        for attachment in desc.colorAttachments {
+            if attachment.pixelFormat.isColorFormat() == false {
+                Log.err("Invalid attachment pixel format: \(attachment.pixelFormat)")
+                return nil
+            }
+        }
+        let colorAttachmentCount = desc.colorAttachments.reduce(0) {
+            max($0, $1.index + 1)            
+        }
+        if colorAttachmentCount > self.properties.limits.maxColorAttachments {
+            Log.err("The number of colors attached exceeds the device limit. (\(colorAttachmentCount) > \(self.properties.limits.maxColorAttachments))")
+            return nil
         }
 
         if let vs = desc.vertexFunction {
@@ -791,19 +789,28 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         dynamicState.dynamicStateCount = UInt32(dynamicStateEnables.count)
         pipelineCreateInfo.pDynamicState = unsafePointerCopy(from: dynamicState, holder: tempHolder)
 
-        // render pass
-        var renderPassCreateInfo = VkRenderPassCreateInfo()
-        renderPassCreateInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO
-        var subpassDesc = VkSubpassDescription()
-        subpassDesc.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS
-        var attachmentDescriptions: [VkAttachmentDescription] = []
-        let subpassInputAttachmentRefs: [VkAttachmentReference] = []
-        var subpassColorAttachmentRefs: [VkAttachmentReference] = []
-        let subpassResolveAttachmentRefs: [VkAttachmentReference] = []
-        var colorBlendAttachmentStates: [VkPipelineColorBlendAttachmentState] = []
+        // VK_KHR_dynamic_rendering
+        var pipelineRenderingCreateInfo = VkPipelineRenderingCreateInfo()
+        pipelineRenderingCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO
+        if desc.colorAttachments.isEmpty == false {
+            pipelineRenderingCreateInfo.colorAttachmentCount = UInt32(desc.colorAttachments.count)
+            pipelineRenderingCreateInfo.pColorAttachmentFormats = unsafePointerCopy(
+                collection: desc.colorAttachments.map {
+                    $0.pixelFormat.vkFormat()
+                }, holder: tempHolder)
+        }
+        pipelineRenderingCreateInfo.depthAttachmentFormat = VK_FORMAT_UNDEFINED
+        pipelineRenderingCreateInfo.stencilAttachmentFormat = VK_FORMAT_UNDEFINED
+        // VUID-VkGraphicsPipelineCreateInfo-renderPass-06589
+        if desc.depthStencilAttachmentPixelFormat.isDepthFormat() {
+            pipelineRenderingCreateInfo.depthAttachmentFormat = desc.depthStencilAttachmentPixelFormat.vkFormat()
+        }
+        if desc.depthStencilAttachmentPixelFormat.isStencilFormat() {
+            pipelineRenderingCreateInfo.stencilAttachmentFormat = desc.depthStencilAttachmentPixelFormat.vkFormat()
+        }
+        appendNextChain(&pipelineCreateInfo, unsafePointerCopy(from: pipelineRenderingCreateInfo, holder: tempHolder))
 
-        attachmentDescriptions.reserveCapacity(desc.colorAttachments.count + 1)
-        subpassColorAttachmentRefs.reserveCapacity(desc.colorAttachments.count)
+        var colorBlendAttachmentStates: [VkPipelineColorBlendAttachmentState] = []
         colorBlendAttachmentStates.reserveCapacity(desc.colorAttachments.count)
 
         let blendOperation = { (op: BlendOperation) -> VkBlendOp in
@@ -839,31 +846,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             }
         }
 
-        var colorAttachmentRefCount = 0
         for attachment in desc.colorAttachments {
-            assert(attachment.pixelFormat.isColorFormat())
-            colorAttachmentRefCount = max(colorAttachmentRefCount, attachment.index + 1)
-        }
-        if colorAttachmentRefCount > self.properties.limits.maxColorAttachments {
-            Log.err("The number of colors attached exceeds the device limit. (\(colorAttachmentRefCount) > \(self.properties.limits.maxColorAttachments))")
-            return nil
-        }
-        subpassColorAttachmentRefs.append(contentsOf: 
-            [VkAttachmentReference](repeating: VkAttachmentReference(attachment: VK_ATTACHMENT_UNUSED, layout: VK_IMAGE_LAYOUT_UNDEFINED),
-                                    count: Int(colorAttachmentRefCount)))
-
-        for (index, attachment) in desc.colorAttachments.enumerated() {
-            var attachmentDesc = VkAttachmentDescription()
-            attachmentDesc.format = attachment.pixelFormat.vkFormat()
-            attachmentDesc.samples = VK_SAMPLE_COUNT_1_BIT
-            attachmentDesc.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE
-            attachmentDesc.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE
-            attachmentDesc.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE
-            attachmentDesc.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE
-            attachmentDesc.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
-            attachmentDesc.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
-            attachmentDescriptions.append(attachmentDesc)
-
             var blendState = VkPipelineColorBlendAttachmentState()
             blendState.blendEnable = attachment.blendState.enabled ? VK_TRUE : VK_FALSE
             blendState.srcColorBlendFactor = blendFactor(attachment.blendState.sourceRGBBlendFactor)
@@ -887,48 +870,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
                 blendState.colorWriteMask |= VkColorComponentFlags(VK_COLOR_COMPONENT_A_BIT.rawValue)
             }
             colorBlendAttachmentStates.append(blendState)
-
-            assert(subpassColorAttachmentRefs.count > attachment.index)
-            subpassColorAttachmentRefs[Int(attachment.index)].attachment = UInt32(index) // index of render-pass-attachment 
-            subpassColorAttachmentRefs[Int(attachment.index)].layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
         }
-        subpassDesc.colorAttachmentCount = UInt32(subpassColorAttachmentRefs.count)
-        subpassDesc.pColorAttachments = unsafePointerCopy(collection: subpassColorAttachmentRefs, holder: tempHolder)
-        subpassDesc.pResolveAttachments = unsafePointerCopy(collection: subpassResolveAttachmentRefs, holder: tempHolder)
-        subpassDesc.inputAttachmentCount = UInt32(subpassInputAttachmentRefs.count)
-        subpassDesc.pInputAttachments = unsafePointerCopy(collection: subpassInputAttachmentRefs, holder: tempHolder)
-
-        if desc.depthStencilAttachmentPixelFormat.isDepthFormat() ||
-           desc.depthStencilAttachmentPixelFormat.isStencilFormat() {
-
-            var subpassDepthStencilAttachment = VkAttachmentReference()
-            subpassDepthStencilAttachment.attachment = UInt32(attachmentDescriptions.count) // attachment index
-            subpassDepthStencilAttachment.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
-            // add depth-stencil attachment description
-            var attachmentDesc = VkAttachmentDescription()
-            attachmentDesc.format = desc.depthStencilAttachmentPixelFormat.vkFormat()
-            attachmentDesc.samples = VK_SAMPLE_COUNT_1_BIT
-            attachmentDesc.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE
-            attachmentDesc.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE
-            attachmentDesc.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE
-            attachmentDesc.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE
-            attachmentDesc.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
-            attachmentDesc.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
-            attachmentDescriptions.append(attachmentDesc)
-            subpassDesc.pDepthStencilAttachment = unsafePointerCopy(from: subpassDepthStencilAttachment, holder: tempHolder)
-        }
-
-        renderPassCreateInfo.attachmentCount = UInt32(attachmentDescriptions.count)
-        renderPassCreateInfo.pAttachments = unsafePointerCopy(collection: attachmentDescriptions, holder: tempHolder)
-        renderPassCreateInfo.subpassCount = 1
-        renderPassCreateInfo.pSubpasses = unsafePointerCopy(from: subpassDesc, holder: tempHolder)
-
-        result = vkCreateRenderPass(self.device, &renderPassCreateInfo, self.allocationCallbacks, &renderPass)
-        if result != VK_SUCCESS {
-            Log.err("vkCreateRenderPass failed: \(result)")
-            return nil
-        }
-        pipelineCreateInfo.renderPass = renderPass
 
         // color blending
         var colorBlendState = VkPipelineColorBlendStateCreateInfo()
@@ -1020,8 +962,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
 
         pipelineState = VulkanRenderPipelineState(device: self,
                                                   pipeline: pipeline!,
-                                                  layout: pipelineLayout!,
-                                                  renderPass: renderPass!)
+                                                  layout: pipelineLayout!)
         return pipelineState
     }
 
@@ -1094,6 +1035,8 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         self.savePipelineCache()
 
         if let reflection = reflection {
+            reflection.pointee.inputAttributes = module.inputAttributes
+            reflection.pointee.pushConstantLayouts = module.pushConstantLayouts
             reflection.pointee.resources = module.resources
         }
 
@@ -1696,7 +1639,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         createInfo.anisotropyEnable = VK_TRUE
         createInfo.maxAnisotropy = Float(desc.maxAnisotropy)
         createInfo.compareOp = compareOp(desc.compareFunction)
-        createInfo.compareEnable = createInfo.compareOp != VK_COMPARE_OP_NEVER ? VK_TRUE : VK_FALSE
+        createInfo.compareEnable = desc.compareFunction == .always ? VK_FALSE : VK_TRUE
         createInfo.minLod = desc.lodMinClamp
         createInfo.maxLod = desc.lodMaxClamp
 
@@ -1998,7 +1941,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         }
     }
 
-    public func fence(device: VulkanGraphicsDevice) -> VkFence {
+    public func fence() -> VkFence {
         var fence: VkFence? = synchronizedBy(locking: self.fenceCompletionLock) {
             if self.reusableFences.count > 0 {
                 return self.reusableFences.removeFirst()
@@ -2009,7 +1952,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             var fenceCreateInfo = VkFenceCreateInfo()
             fenceCreateInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO
 
-            let err = vkCreateFence(device.device, &fenceCreateInfo, device.allocationCallbacks, &fence)
+            let err = vkCreateFence(self.device, &fenceCreateInfo, self.allocationCallbacks, &fence)
             if err != VK_SUCCESS {
                 Log.err("vkCreateFence failed: \(err)")
                 assertionFailure("vkCreateFence failed: \(err)")

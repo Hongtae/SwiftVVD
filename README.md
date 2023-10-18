@@ -14,28 +14,24 @@ Cross-Platform Game Engine for swift programming language.
 ---
 ### Things that require pre-installation
 * Windows 10/11 x64
-  * [Microsoft Visual Studio 2022](https://visualstudio.microsoft.com/vs/)
+  * [Microsoft Visual Studio 2022](https://visualstudio.microsoft.com/)
   * [GIT (with LFS)](https://git-scm.com/)
-  * [Vulkan SDK](https://vulkan.lunarg.com/sdk/home)
-  * [Swift 5.8 or later](https://www.swift.org/download/)
+  * [Vulkan SDK](https://vulkan.lunarg.com/)
+  * [Swift 5.9 or later](https://www.swift.org/)
 
 * macOS 12.0 (Monterey) or later
-  * [Xcode 13 or later](https://developer.apple.com/xcode/)
+  * [Xcode 15 or later](https://developer.apple.com/xcode/)
  
     > **Note**  
     > When cloning this project, you must use a **GIT client that supports LFS.**
 
 * Linux / WSL2
-  * [Vulkan SDK](https://vulkan.lunarg.com/doc/sdk/latest/linux/getting_started.html)
-  * [Swift 5.8 or later](https://www.swift.org/getting-started/#installing-swift)
-  * [Wayland-1.20 or later (libwayland-dev)](https://wayland.freedesktop.org)
+  * [Vulkan SDK](https://vulkan.lunarg.com/)
+  * [Swift 5.9 or later](https://www.swift.org/)
+  * [Wayland-1.20 or later (libwayland-dev)](https://wayland.freedesktop.org/)
   
 ### Build & Run
 ```
 swift build
 swift run TestApp1
 ```
----
-#### Sample screenshot
-  Sources/TestApp1/ContentView.swift
-  ![image](https://github.com/Hongtae/SwiftVVD/assets/7553135/faaea185-f2cd-4a07-8154-d991660a69c0)

@@ -40,7 +40,7 @@ public struct UniformScaleTransform: Hashable {
         self = self.inverted()
     }
 
-    public static func interpolate(_ t1: Self, _ t2: Self, t: any BinaryFloatingPoint) -> Self {
+    public static func interpolate(_ t1: Self, _ t2: Self, t: some BinaryFloatingPoint) -> Self {
         let t = Scalar(t)
         return Self(scale: t1.scale + ((t2.scale - t1.scale) * t),
                     orientation: Quaternion.slerp(t1.orientation, t2.orientation, t:t),

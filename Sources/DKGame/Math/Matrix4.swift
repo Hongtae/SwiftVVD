@@ -176,22 +176,11 @@ public struct Matrix4: Matrix, Hashable {
         self = matrix
     }
 
-    public init(_ m11: any BinaryFloatingPoint,
-                _ m12: any BinaryFloatingPoint,
-                _ m13: any BinaryFloatingPoint,
-                _ m14: any BinaryFloatingPoint,
-                _ m21: any BinaryFloatingPoint,
-                _ m22: any BinaryFloatingPoint,
-                _ m23: any BinaryFloatingPoint,
-                _ m24: any BinaryFloatingPoint,
-                _ m31: any BinaryFloatingPoint,
-                _ m32: any BinaryFloatingPoint,
-                _ m33: any BinaryFloatingPoint,
-                _ m34: any BinaryFloatingPoint,
-                _ m41: any BinaryFloatingPoint,
-                _ m42: any BinaryFloatingPoint,
-                _ m43: any BinaryFloatingPoint,
-                _ m44: any BinaryFloatingPoint) {
+    public init<T: BinaryFloatingPoint>(
+        _ m11: T, _ m12: T, _ m13: T, _ m14: T,
+        _ m21: T, _ m22: T, _ m23: T, _ m24: T,
+        _ m31: T, _ m32: T, _ m33: T, _ m34: T,
+        _ m41: T, _ m42: T, _ m43: T, _ m44: T) {
         self.m11 = Scalar(m11)
         self.m12 = Scalar(m12)
         self.m13 = Scalar(m13)
@@ -210,22 +199,10 @@ public struct Matrix4: Matrix, Hashable {
         self.m44 = Scalar(m44)
     }
 
-    public init(m11: any BinaryFloatingPoint,
-                m12: any BinaryFloatingPoint,
-                m13: any BinaryFloatingPoint,
-                m14: any BinaryFloatingPoint,
-                m21: any BinaryFloatingPoint,
-                m22: any BinaryFloatingPoint,
-                m23: any BinaryFloatingPoint,
-                m24: any BinaryFloatingPoint,
-                m31: any BinaryFloatingPoint,
-                m32: any BinaryFloatingPoint,
-                m33: any BinaryFloatingPoint,
-                m34: any BinaryFloatingPoint,
-                m41: any BinaryFloatingPoint,
-                m42: any BinaryFloatingPoint,
-                m43: any BinaryFloatingPoint,
-                m44: any BinaryFloatingPoint) {
+    public init<T: BinaryFloatingPoint>(m11: T, m12: T, m13: T, m14: T,
+                                        m21: T, m22: T, m23: T, m24: T,
+                                        m31: T, m32: T, m33: T, m34: T,
+                                        m41: T, m42: T, m43: T, m44: T) {
         self.init(m11, m12, m13, m14,
                   m21, m22, m23, m24,
                   m31, m32, m33, m34,
@@ -328,14 +305,14 @@ public struct Matrix4: Matrix, Hashable {
                        row4: lhs.row4 - rhs.row4)
     }
 
-    public static func * (lhs: Self, rhs: any BinaryFloatingPoint) -> Self {
+    public static func * (lhs: Self, rhs: some BinaryFloatingPoint) -> Self {
         return Matrix4(row1: lhs.row1 * rhs,
                        row2: lhs.row2 * rhs,
                        row3: lhs.row3 * rhs,
                        row4: lhs.row4 * rhs)
     }
 
-    public static func / (lhs: any BinaryFloatingPoint, rhs: Self) -> Self {
+    public static func / (lhs: some BinaryFloatingPoint, rhs: Self) -> Self {
         return Matrix4(row1: Scalar(lhs) / rhs.row1,
                        row2: Scalar(lhs) / rhs.row2,
                        row3: Scalar(lhs) / rhs.row3,

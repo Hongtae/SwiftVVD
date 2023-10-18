@@ -128,7 +128,7 @@ extension GraphicsContext {
         }
 
         let color = color.float4
-        let makeVertex = { x, y, u, v in
+        let makeVertex = { (x: Scalar, y: Scalar, u: Scalar, v: Scalar) in
             _Vertex(position: Vector2(x, y).float2,
                     texcoord: Vector2(u, v).float2,
                     color: color)

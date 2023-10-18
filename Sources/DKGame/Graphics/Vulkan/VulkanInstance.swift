@@ -86,6 +86,10 @@ private func debugUtilsMessengerCallback(messageSeverity: VkDebugUtilsMessageSev
         Log.log(level: logLevel, "[VULKAN \(type)\(prefix)] [\(mesgId)](\(mesgIdNum)) \(mesg)")
     }
 
+    if logLevel == .error {
+        // fatalError(mesg)
+    }
+
     return VkBool32(VK_FALSE)
 }
 
@@ -328,7 +332,9 @@ public class VulkanInstance {
         if enableValidation {
             let enabledFeatures: [VkValidationFeatureEnableEXT] = [
                 VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_EXT,
-                VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_RESERVE_BINDING_SLOT_EXT]
+                VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_RESERVE_BINDING_SLOT_EXT,
+                VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT,
+            ]
 
             var validationFeatures = VkValidationFeaturesEXT()
             validationFeatures.sType = VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT

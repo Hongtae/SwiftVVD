@@ -46,24 +46,18 @@ public struct Quaternion: Vector, Hashable {
         self = quat
     }
 
-    public init(_ x: any BinaryFloatingPoint,
-                _ y: any BinaryFloatingPoint,
-                _ z: any BinaryFloatingPoint,
-                _ w: any BinaryFloatingPoint) {
+    public init<T: BinaryFloatingPoint>(_ x: T, _ y: T, _ z: T, _ w: T) {
         self.x = Scalar(x)
         self.y = Scalar(y)
         self.z = Scalar(z)
         self.w = Scalar(w)
     }
 
-    public init(x: any BinaryFloatingPoint,
-                y: any BinaryFloatingPoint,
-                z: any BinaryFloatingPoint,
-                w: any BinaryFloatingPoint) {
+    public init<T: BinaryFloatingPoint>(x: T, y: T, z: T, w: T) {
         self.init(x, y, z, w)
     }
 
-    public init(angle: any BinaryFloatingPoint, axis: Vector3) {
+    public init(angle: some BinaryFloatingPoint, axis: Vector3) {
         self.init(0, 0, 0, 1)
         if axis.length > 0.0 {
             let u = axis.normalized()
@@ -77,9 +71,7 @@ public struct Quaternion: Vector, Hashable {
         }
     }
 
-    public init(pitch: any BinaryFloatingPoint,
-                yaw: any BinaryFloatingPoint,
-                roll: any BinaryFloatingPoint) {
+    public init<T: BinaryFloatingPoint>(pitch: T, yaw: T, roll: T) {
         let p = Scalar(pitch) * 0.5
         let y = Scalar(yaw) * 0.5
         let r = Scalar(roll) * 0.5
@@ -99,7 +91,7 @@ public struct Quaternion: Vector, Hashable {
         self.normalize()
     }
 
-    public init(from: Vector3, to: Vector3, t: any BinaryFloatingPoint) {
+    public init(from: Vector3, to: Vector3, t: some BinaryFloatingPoint) {
         self.init(0, 0, 0, 1)
         let len1 = from.length
         let len2 = to.length
@@ -188,11 +180,11 @@ public struct Quaternion: Vector, Hashable {
         return Self(rhs.x - rhs.x, lhs.y - rhs.y, lhs.z - rhs.z, lhs.w - rhs.w)
     }
 
-    public static func * (lhs: Self, rhs: any BinaryFloatingPoint) -> Self {
+    public static func * (lhs: Self, rhs: some BinaryFloatingPoint) -> Self {
         return Self(lhs.x * Scalar(rhs), lhs.y * Scalar(rhs), lhs.z * Scalar(rhs), lhs.w * Scalar(rhs))
     }
 
-    public static func * (lhs: any BinaryFloatingPoint, rhs: Self) -> Self {
+    public static func * (lhs: some BinaryFloatingPoint, rhs: Self) -> Self {
         return Self(Scalar(lhs) * rhs.x, Scalar(lhs) * rhs.y, Scalar(lhs) * rhs.z, Scalar(lhs) * rhs.w)
     }
 
@@ -204,13 +196,13 @@ public struct Quaternion: Vector, Hashable {
         return Self(lhs.x / rhs.x, lhs.y / rhs.y, lhs.z / rhs.z, lhs.w / rhs.w)
     }
 
-    public static func / (lhs: any BinaryFloatingPoint, rhs: Self) -> Self {
+    public static func / (lhs: some BinaryFloatingPoint, rhs: Self) -> Self {
         return Self(Scalar(lhs) / rhs.x, Scalar(lhs) / rhs.y, Scalar(lhs) / rhs.z, Scalar(lhs) / rhs.w)
     }
 
     public static func slerp(_ q1: Quaternion,
                              _ q2: Quaternion,
-                             t: any BinaryFloatingPoint) -> Quaternion {
+                             t: some BinaryFloatingPoint) -> Quaternion {
         var cosHalfTheta = Self.dot(q1, q2)
         let flip = cosHalfTheta < 0.0
         if flip { cosHalfTheta = -cosHalfTheta }
@@ -233,7 +225,7 @@ public struct Quaternion: Vector, Hashable {
 
     public static func interpolate(_ q1: Quaternion,
                                    _ q2: Quaternion,
-                                   _ t: any BinaryFloatingPoint) -> Quaternion {
+                                   _ t: some BinaryFloatingPoint) -> Quaternion {
         return slerp(q1, q2, t: t)
     }
 
@@ -279,12 +271,12 @@ public struct Quaternion: Vector, Hashable {
 }
 
 public extension Vector3 {
-    func rotated(angle: any BinaryFloatingPoint, axis: Vector3) -> Vector3 {
+    func rotated(angle: some BinaryFloatingPoint, axis: Vector3) -> Vector3 {
         if angle.isZero { return self }
         return self.rotated(by: Quaternion(angle: angle, axis: axis))
     }
 
-    mutating func rotate(angle: any BinaryFloatingPoint, axis: Vector3) {
+    mutating func rotate(angle: some BinaryFloatingPoint, axis: Vector3) {
         self = self.rotated(angle: angle, axis: axis)
     }
 

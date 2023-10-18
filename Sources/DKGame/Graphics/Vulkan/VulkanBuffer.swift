@@ -10,9 +10,10 @@ import Foundation
 import Vulkan
 
 public class VulkanBuffer {
-    public var buffer: VkBuffer?
+    public var buffer: VkBuffer
     public var usage: VkBufferUsageFlags
     public var sharingMode: VkSharingMode
+    public var size: VkDeviceSize
 
     public let deviceMemory: VulkanDeviceMemory?
     public let device: GraphicsDevice
@@ -23,39 +24,43 @@ public class VulkanBuffer {
         self.buffer = buffer
         self.usage = bufferCreateInfo.usage
         self.sharingMode = bufferCreateInfo.sharingMode
+        self.size = bufferCreateInfo.size
 
-        assert(self.deviceMemory!.length > 0)
+        assert(self.deviceMemory!.length >= self.size)
     }
 
-    public init(device: VulkanGraphicsDevice, buffer: VkBuffer) {
+    public init(device: VulkanGraphicsDevice, buffer: VkBuffer, size: VkDeviceSize) {
         self.device = device
         self.deviceMemory = nil
         self.buffer = buffer
         self.usage = 0
         self.sharingMode = VK_SHARING_MODE_EXCLUSIVE
+        self.size = size
+
+        assert(self.size > 0)
     }
 
     deinit {
-        if let buffer = self.buffer {
-            let device = self.device as! VulkanGraphicsDevice
-            vkDestroyBuffer(device.device, buffer, device.allocationCallbacks)
-        }
+        let device = self.device as! VulkanGraphicsDevice
+        vkDestroyBuffer(device.device, buffer, device.allocationCallbacks)
     }
 
-    public var length: Int { Int(self.deviceMemory!.length) }
+    public var length: Int { Int(self.size) }
 
     public func contents() -> UnsafeMutableRawPointer? {
-        return self.deviceMemory!.mapped
+        return self.deviceMemory?.mapped
     }
 
     public func flush(offset: UInt, size: UInt) {
-        let length = self.deviceMemory!.length
-        if offset < length {
-            if size > 0 {
-                self.deviceMemory!.flush(offset: UInt64(offset), size: UInt64(size))
+        if let deviceMemory = self.deviceMemory {
+            let length = deviceMemory.length
+            if offset < length {
+                if size > 0 {
+                    deviceMemory.flush(offset: UInt64(offset), size: UInt64(size))
+                }
             }
+            deviceMemory.invalidate(offset: 0, size: VK_WHOLE_SIZE)
         }
-        self.deviceMemory!.invalidate(offset: 0, size: VK_WHOLE_SIZE)
     }
 
     public func makeBufferView(pixelFormat: PixelFormat, offset: UInt, range: UInt) -> VulkanBufferView? {
