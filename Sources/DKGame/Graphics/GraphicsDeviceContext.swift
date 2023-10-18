@@ -10,72 +10,41 @@ import Foundation
 public class GraphicsDeviceContext {
     public let device: GraphicsDevice
     public var cachedDeviceResources: [String: AnyObject] = [:]
+    public var cachedQueues: [CommandQueue] = []
 
     public init(device: GraphicsDevice) {
         self.device = device
     }
 
     deinit {
-        self.cachedDeviceResources.removeAll()        
-        self.renderQueues.removeAll()
-        self.computeQueues.removeAll()
-        self.copyQueues.removeAll()
+        self.cachedDeviceResources.removeAll()     
+        self.cachedQueues.removeAll()
     }
 
-    // cached command queue.
-    public func renderQueue() -> CommandQueue? {
-        if renderQueues.isEmpty {
-            if let queue = device.makeCommandQueue(flags: .render) {
-                if queue.flags.contains(.render) {
-                    renderQueues.append(queue)
-                }
-                if queue.flags.contains(.compute) {
-                    computeQueues.append(queue)
-                }
-                copyQueues.append(queue)
-
-                if queue.flags.contains(.render) {
-                    return queue
-                }
-            }
+    public func commandQueue(flags: CommandQueueFlags = []) -> CommandQueue? {
+        if let queue = self.cachedQueues.first(where: {
+            $0.flags.intersection(flags) == flags
+        }) {
+            return queue;
         }
-        return renderQueues.first
+
+        if let queue = device.makeCommandQueue(flags: flags) {
+            cachedQueues.append(queue)
+            return queue
+        }
+        return nil
+    }
+
+    public func renderQueue() -> CommandQueue? {
+        commandQueue(flags: .render) 
     }
 
     public func computeQueue() -> CommandQueue? {
-        if computeQueues.isEmpty {
-            if let queue = device.makeCommandQueue(flags: .compute) {
-                if queue.flags.contains(.render) {
-                    renderQueues.append(queue)
-                }
-                if queue.flags.contains(.compute) {
-                    computeQueues.append(queue)
-                }
-                copyQueues.append(queue)
-
-                if queue.flags.contains(.compute) {
-                    return queue
-                }
-            }                        
-        }
-        return computeQueues.first
+        commandQueue(flags: .compute)
     }
 
     public func copyQueue() -> CommandQueue? {
-        if copyQueues.isEmpty {
-            if let queue = device.makeCommandQueue(flags: .copy) {
-                if queue.flags.contains(.render) {
-                    renderQueues.append(queue)
-                }
-                if queue.flags.contains(.compute) {
-                    computeQueues.append(queue)
-                }
-                copyQueues.append(queue)
-
-                return queue
-            }                        
-        }
-        return copyQueues.first
+        commandQueue(flags: .copy)
     }
 
     public func makeCPUAccessible(buffer: Buffer) -> Buffer? {
@@ -121,10 +90,6 @@ public class GraphicsDeviceContext {
         }
         return nil
     }
-
-    private var renderQueues: [CommandQueue] = []
-    private var computeQueues: [CommandQueue] = []
-    private var copyQueues: [CommandQueue] = []
 }
 
 public enum GraphicsAPI {
