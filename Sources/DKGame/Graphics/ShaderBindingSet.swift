@@ -2,7 +2,7 @@
 //  File: ShaderBindingSet.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 public struct ShaderBinding {
@@ -31,7 +31,7 @@ public struct ShaderBindingSetLayout {
     }
 }
 
-public struct GPUBufferBindingInfo {
+public struct BufferBindingInfo {
     public var buffer: Buffer
     public var offset: Int
     public var length: Int
@@ -48,7 +48,7 @@ public struct GPUBufferBindingInfo {
 public protocol ShaderBindingSet {
     // bind buffers
     func setBuffer(_: Buffer, offset: Int, length: Int, binding: Int)
-    func setBufferArray(_ : [GPUBufferBindingInfo], binding: Int)
+    func setBufferArray(_ : [BufferBindingInfo], binding: Int)
 
     // bind textures
     func setTexture(_: Texture, binding: Int)

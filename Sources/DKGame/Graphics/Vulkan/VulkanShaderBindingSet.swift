@@ -43,13 +43,13 @@ public class VulkanShaderBindingSet: ShaderBindingSet {
     }
 
     public func setBuffer(_ buffer: Buffer, offset: Int, length: Int, binding: Int) {
-        self.setBufferArray([GPUBufferBindingInfo(buffer: buffer,
-                                                  offset: offset,
-                                                  length: length)],
+        self.setBufferArray([BufferBindingInfo(buffer: buffer,
+                                               offset: offset,
+                                               length: length)],
                             binding:binding)
     }
 
-    public func setBufferArray(_ buffers: [GPUBufferBindingInfo], binding: Int) {
+    public func setBufferArray(_ buffers: [BufferBindingInfo], binding: Int) {
         if var descriptorBinding = self.findDescriptorBinding(binding) {
             descriptorBinding.valueSet = false
             descriptorBinding.bufferInfos = []
