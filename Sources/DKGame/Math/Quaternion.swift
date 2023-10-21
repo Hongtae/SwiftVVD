@@ -13,6 +13,7 @@ public struct Quaternion: Vector, Hashable {
     public var z: Scalar
     public var w: Scalar
 
+    public static var components: Int { 4 }
     public subscript(index: Int) -> Scalar {
         get {
             switch index {

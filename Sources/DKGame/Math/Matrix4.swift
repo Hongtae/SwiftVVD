@@ -91,6 +91,8 @@ public struct Matrix4: Matrix, Hashable {
         }
     }
 
+    public static var numRows: Int { 4 }
+
     public subscript(row: Int) -> Vector4 {
         get {
             switch row {

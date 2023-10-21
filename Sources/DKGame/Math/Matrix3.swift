@@ -64,6 +64,8 @@ public struct Matrix3: Matrix, Hashable {
         }
     }
 
+    public static var numRows: Int { 3 }
+
     public subscript(row: Int) -> Vector3 {
         get {
             switch row {

@@ -19,6 +19,8 @@ public protocol Matrix: Equatable {
 
     var determinant: Scalar { get }
 
+    static var numRows: Int { get }
+    static var numCols: Int { get }
     subscript(row: Int, column: Int) -> Scalar { get set }
     subscript(row: Int) -> Self.Vector { get set }
 
@@ -60,4 +62,8 @@ public extension Matrix {
     static func /= (lhs: inout Self, rhs: some BinaryFloatingPoint) {
         lhs = lhs / rhs
     }
+}
+
+public extension Matrix where Self.Vector: DKGame.Vector {
+    static var numCols: Int { Vector.components }
 }

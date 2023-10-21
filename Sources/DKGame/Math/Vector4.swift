@@ -8,7 +8,6 @@
 import Foundation
 
 public struct Vector4: Vector, Hashable {
-
     public var x : Scalar
     public var y : Scalar
     public var z : Scalar
@@ -16,6 +15,8 @@ public struct Vector4: Vector, Hashable {
 
     public static let zero = Vector4(0.0, 0.0, 0.0, 0.0)
 
+    public static var components: Int { 4 }
+    
     public subscript(index: Int) -> Scalar {
         get {
             switch index {

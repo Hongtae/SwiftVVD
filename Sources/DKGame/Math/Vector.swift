@@ -7,7 +7,10 @@
 
 public protocol Vector: Equatable {
     associatedtype Scalar: BinaryFloatingPoint
-    
+
+    static var components: Int { get }
+    subscript(index: Int) -> Scalar { get set }
+
     var length: Scalar { get }
     var lengthSquared: Scalar { get }
 
@@ -19,7 +22,7 @@ public protocol Vector: Equatable {
     static func dot(_:Self, _:Self) -> Scalar
 
     static prefix func - (_: Self) -> Self
- 
+
     static func + (_: Self, _: Self) -> Self
     static func - (_: Self, _: Self) -> Self
     static func * (_: Self, _: Self) -> Self
