@@ -2,7 +2,7 @@
 //  File: Sphere.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -77,41 +77,18 @@ public struct Sphere {
         return 0.0
     }
 
-    public func rayTest(rayOrigin start: Vector3, direction dir: Vector3) -> Vector3? {
+    public func rayTest(rayOrigin origin: Vector3, direction dir: Vector3) -> Scalar {
         if self.isValid {
-            let l = self.center - start  // from ray begin to sphere center
             let d = dir.normalized()
-            
-            let s = Vector3.dot(l, d)
-            let s2 = s * s
-            let l2 = Vector3.dot(l, l)  // l-vector length^2
-            let r2 = self.radius * self.radius
-
-            if s < 0 && l2 > r2 {
-                // sphere located behind of ray-begin, no-intersection
-                return nil
+            let oc = origin - center
+            let b = 2.0 * Vector3.dot(oc, d)
+            let c = oc.magnitudeSquared - radius * radius
+            let discriminant = b * b - 4 * c
+            if discriminant < .zero {
+                return -1.0
             }
-
-            let m2 = l2 - s2  // calculate intersect length
-            if m2 > r2 {
-                // intersect length^2 is bigger than radius^2, no-intersection
-                return nil
-            }
-
-            var t: Scalar = 0.0
-            let q = sqrt(r2 - m2)
-            if l2 > r2 {
-                // ray begins outside of sphere, length of intersection (t = s-q)
-                t = s - q
-            } else {
-                // ray begins inside of sphere, length of intersection (t = s+q)
-                t = s + q
-            }
-
-            if t >= 0.0 {
-                return start + d * t
-            }
+            return (-b - sqrt(discriminant)) * 0.5
         }
-        return nil
+        return -1.0
     }
 }

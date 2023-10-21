@@ -82,7 +82,7 @@ public struct AABB {
         intersection(other).isNull == false
     }
 
-    public func rayTest(rayOrigin origin: Vector3, direction dir: Vector3) -> Vector3? {
+    public func rayTest(rayOrigin origin: Vector3, direction dir: Vector3) -> Scalar {
         // algorithm based on: http://www.codercorner.com/RayAABB.cpp
         // Original code by Andrew Woo, from "Graphics Gems", Academic Press, 1990
 
@@ -106,7 +106,7 @@ public struct AABB {
             }
         }
         if inside {
-            return origin
+            return .zero
         }
         // calculate maxT to find intersection point.
         var plane = 0
@@ -114,7 +114,7 @@ public struct AABB {
         if maxT.z > maxT[plane] { plane = 2 }   // plane of axis Z
 
         if maxT[plane] < .zero {
-            return nil
+            return -1.0
         }
 
         for i in 0...2 {
@@ -122,15 +122,15 @@ public struct AABB {
                 coord[i] = origin[i] + maxT[plane] * dir[i]
 
                 // if coord[i] < self.min[i] - .ulpOfOne || coord[i] > self.max[i] + .ulpOfOne {
-                //     return nil
+                //     return -1.0
                 // }
 
                 if coord[i] < self.min[i] || coord[i] > self.max[i] {
-                    return nil
+                    return -1.0
                 }
             }
         }
-        return coord
+        return (coord - origin).magnitude
     }
 
     public func overlapTest(_ plane: Plane) -> Bool {

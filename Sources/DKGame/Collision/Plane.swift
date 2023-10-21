@@ -79,19 +79,19 @@ public struct Plane {
     public var normal: Vector3 { Vector3(a, b, c) }
     public var vector4: Vector4 { Vector4(a, b, c, d) }
 
-    public func rayTest(rayOrigin origin: Vector3, direction: Vector3) -> Vector3? {
+    public func rayTest(rayOrigin origin: Vector3, direction: Vector3) -> Scalar {
         let distance = self.dot(origin)
-        if distance == 0 { return origin } // connected to the plane.
+        if distance == .zero { return .zero } // connected to the plane.
 
         let dir = direction.normalized()
         let denom = Vector3.dot(self.normal, dir)
 
         if abs(denom) > .ulpOfOne { // epsilon
             let t = -distance / denom
-            if t >= 0.0 {
-                return origin + dir * t
+            if t >= .zero {
+                return t
             }
         }
-        return nil
+        return -1.0
     }
 }
