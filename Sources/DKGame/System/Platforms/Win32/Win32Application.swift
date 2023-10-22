@@ -79,7 +79,7 @@ public class Win32Application : Application {
         }
     }
 
-    static public func run(delegate: ApplicationDelegate?) -> Int{
+    public static func run(delegate: ApplicationDelegate?) -> Int{
 
         let app: Win32Application = Win32Application()
         self.shared = app

@@ -164,7 +164,7 @@ public struct VStackLayout: Layout {
         }
     }
 
-    static public var layoutProperties: LayoutProperties {
+    public static var layoutProperties: LayoutProperties {
         LayoutProperties(stackOrientation: .vertical)
     }
 }
