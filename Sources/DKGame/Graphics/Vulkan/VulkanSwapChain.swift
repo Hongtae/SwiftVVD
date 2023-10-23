@@ -431,7 +431,7 @@ public class VulkanSwapChain: SwapChain {
             synchronizedBy(locking: self.lock) {
                 let format = value.vkFormat()
                 if format != self.surfaceFormat.format {
-                    if value.isColorFormat() {
+                    if value.isColorFormat {
                         var formatChanged = false
                         if self.availableSurfaceFormats.count == 1 &&
                            self.availableSurfaceFormats[0].format == VK_FORMAT_UNDEFINED {

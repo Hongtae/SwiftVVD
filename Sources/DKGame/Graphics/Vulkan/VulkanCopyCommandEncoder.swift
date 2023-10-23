@@ -165,7 +165,7 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
 
         let pixelFormat = image.pixelFormat
         let bufferLength = buffer.length
-        let bytesPerPixel = pixelFormat.bytesPerPixel()
+        let bytesPerPixel = pixelFormat.bytesPerPixel
         assert(bytesPerPixel > 0)
 
         let requiredBufferLengthForCopy = srcOffset.imageWidth * srcOffset.imageHeight * size.depth * bytesPerPixel + srcOffset.offset
@@ -235,7 +235,7 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
 
         let pixelFormat = image.pixelFormat
         let bufferLength = buffer.length
-        let bytesPerPixel = pixelFormat.bytesPerPixel()
+        let bytesPerPixel = pixelFormat.bytesPerPixel
         assert(bytesPerPixel > 0)   // Unsupported texture format!
 
         let requiredBufferLengthForCopy = dstOffset.imageWidth * dstOffset.imageHeight * size.depth * bytesPerPixel + dstOffset.offset
@@ -311,8 +311,8 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
 
         let srcPixelFormat = srcImage.pixelFormat
         let dstPixelFormat = dstImage.pixelFormat
-        let srcBytesPerPixel = srcPixelFormat.bytesPerPixel()
-        let dstBytesPerPixel = dstPixelFormat.bytesPerPixel()
+        let srcBytesPerPixel = srcPixelFormat.bytesPerPixel
+        let dstBytesPerPixel = dstPixelFormat.bytesPerPixel
         assert(srcBytesPerPixel > 0)    // Unsupported texture format!
         assert(dstBytesPerPixel > 0)    // Unsupported texture format!
 
@@ -395,14 +395,14 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
                                   origin: TextureOrigin,
                                   layerCount: Int, 
                                   pixelFormat: PixelFormat) {
-        if pixelFormat.isColorFormat() {
+        if pixelFormat.isColorFormat {
             subresource.aspectMask = VkImageAspectFlags(VK_IMAGE_ASPECT_COLOR_BIT.rawValue)
         } else {
             subresource.aspectMask = 0
-            if pixelFormat.isDepthFormat() {
+            if pixelFormat.isDepthFormat {
                 subresource.aspectMask |= VkImageAspectFlags(VK_IMAGE_ASPECT_DEPTH_BIT.rawValue)
             }
-            if pixelFormat.isStencilFormat() {
+            if pixelFormat.isStencilFormat {
                 subresource.aspectMask |= VkImageAspectFlags(VK_IMAGE_ASPECT_STENCIL_BIT.rawValue)
             }
         }
@@ -416,14 +416,14 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
                                   layerCount: Int,
                                   levelCount: Int,
                                   pixelFormat: PixelFormat) {
-        if pixelFormat.isColorFormat() {
+        if pixelFormat.isColorFormat {
             subresource.aspectMask = VkImageAspectFlags(VK_IMAGE_ASPECT_COLOR_BIT.rawValue)
         } else {
             subresource.aspectMask = 0
-            if pixelFormat.isDepthFormat() {
+            if pixelFormat.isDepthFormat {
                 subresource.aspectMask |= VkImageAspectFlags(VK_IMAGE_ASPECT_DEPTH_BIT.rawValue)
             }
-            if pixelFormat.isStencilFormat() {
+            if pixelFormat.isStencilFormat {
                 subresource.aspectMask |= VkImageAspectFlags(VK_IMAGE_ASPECT_STENCIL_BIT.rawValue)
             }
         }

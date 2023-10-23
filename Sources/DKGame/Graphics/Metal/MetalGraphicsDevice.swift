@@ -443,10 +443,10 @@ public class MetalGraphicsDevice: GraphicsDevice {
         // setup depth attachment.
         desc.depthAttachmentPixelFormat = .invalid
         desc.stencilAttachmentPixelFormat = .invalid
-        if descriptor.depthStencilAttachmentPixelFormat.isDepthFormat() {
+        if descriptor.depthStencilAttachmentPixelFormat.isDepthFormat {
             desc.depthAttachmentPixelFormat = descriptor.depthStencilAttachmentPixelFormat.mtlPixelFormat()
         }
-        if descriptor.depthStencilAttachmentPixelFormat.isStencilFormat() {
+        if descriptor.depthStencilAttachmentPixelFormat.isStencilFormat {
             desc.stencilAttachmentPixelFormat = descriptor.depthStencilAttachmentPixelFormat.mtlPixelFormat()
         }
 

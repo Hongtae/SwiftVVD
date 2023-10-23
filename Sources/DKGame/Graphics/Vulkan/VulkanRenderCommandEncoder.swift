@@ -151,7 +151,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
                     attachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
 
                     if let image = imageView.image {
-                        assert(image.pixelFormat.isColorFormat())
+                        assert(image.pixelFormat.isColorFormat)
 
                         frameWidth = (frameWidth > 0) ? min(frameWidth, image.width) : image.width
                         frameHeight = (frameHeight > 0) ? min(frameHeight, image.height) : image.height
@@ -204,13 +204,13 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
                 depthStencilAttachment.clearValue.depthStencil.stencil = self.renderPassDescriptor.depthStencilAttachment.clearStencil
 
                 if let image = imageView.image {
-                    assert(image.pixelFormat.isDepthFormat() || image.pixelFormat.isStencilFormat())
+                    assert(image.pixelFormat.isDepthFormat || image.pixelFormat.isStencilFormat)
 
                     let p = unsafePointerCopy(from: depthStencilAttachment, holder: tempHolder)
-                    if image.pixelFormat.isDepthFormat() {
+                    if image.pixelFormat.isDepthFormat {
                         renderingInfo.pDepthAttachment = p
                     }
-                    if image.pixelFormat.isStencilFormat() {
+                    if image.pixelFormat.isStencilFormat {
                         renderingInfo.pStencilAttachment = p
                     }
 

@@ -114,13 +114,13 @@ public class VulkanImage {
             barrier.image = image
 
             let pixelFormat = self.pixelFormat
-            if pixelFormat.isColorFormat() {
+            if pixelFormat.isColorFormat {
                 barrier.subresourceRange.aspectMask = VkImageAspectFlags(VK_IMAGE_ASPECT_COLOR_BIT.rawValue)
             } else {
-                if pixelFormat.isDepthFormat() {
+                if pixelFormat.isDepthFormat {
                     barrier.subresourceRange.aspectMask |= UInt32(VK_IMAGE_ASPECT_DEPTH_BIT.rawValue)
                 }
-                if pixelFormat.isStencilFormat() {
+                if pixelFormat.isStencilFormat {
                     barrier.subresourceRange.aspectMask |= UInt32(VK_IMAGE_ASPECT_STENCIL_BIT.rawValue)
                 }
             }

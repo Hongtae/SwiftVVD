@@ -2,7 +2,7 @@
 //  File: MetalCopyCommandEncoder.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_METAL
@@ -105,7 +105,7 @@ public class MetalCopyCommandEncoder: CopyCommandEncoder {
                 let buffer = src.buffer
                 let texture = dst.texture
 
-                let bytesPerPixel = dst.pixelFormat.bytesPerPixel()
+                let bytesPerPixel = dst.pixelFormat.bytesPerPixel
                 assert(bytesPerPixel > 0)
                 let bytesPerRow = sourceOffset.imageWidth * bytesPerPixel
                 assert(bytesPerRow > 0)
@@ -143,7 +143,7 @@ public class MetalCopyCommandEncoder: CopyCommandEncoder {
                 let texture = src.texture
                 let buffer = dst.buffer
 
-                let bytesPerPixel = src.pixelFormat.bytesPerPixel()
+                let bytesPerPixel = src.pixelFormat.bytesPerPixel
                 assert(bytesPerPixel > 0)
                 let bytesPerRow = destinationOffset.imageWidth * bytesPerPixel
                 assert(bytesPerRow > 0)

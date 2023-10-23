@@ -591,7 +591,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         }
 
         for attachment in desc.colorAttachments {
-            if attachment.pixelFormat.isColorFormat() == false {
+            if attachment.pixelFormat.isColorFormat == false {
                 Log.err("Invalid attachment pixel format: \(attachment.pixelFormat)")
                 return nil
             }
@@ -802,10 +802,10 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         pipelineRenderingCreateInfo.depthAttachmentFormat = VK_FORMAT_UNDEFINED
         pipelineRenderingCreateInfo.stencilAttachmentFormat = VK_FORMAT_UNDEFINED
         // VUID-VkGraphicsPipelineCreateInfo-renderPass-06589
-        if desc.depthStencilAttachmentPixelFormat.isDepthFormat() {
+        if desc.depthStencilAttachmentPixelFormat.isDepthFormat {
             pipelineRenderingCreateInfo.depthAttachmentFormat = desc.depthStencilAttachmentPixelFormat.vkFormat()
         }
-        if desc.depthStencilAttachmentPixelFormat.isStencilFormat() {
+        if desc.depthStencilAttachmentPixelFormat.isStencilFormat {
             pipelineRenderingCreateInfo.stencilAttachmentFormat = desc.depthStencilAttachmentPixelFormat.vkFormat()
         }
         appendNextChain(&pipelineCreateInfo, unsafePointerCopy(from: pipelineRenderingCreateInfo, holder: tempHolder))
@@ -1267,7 +1267,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         }
         if desc.usage.contains(.renderTarget) {
             imageCreateInfo.usage |= UInt32(VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT.rawValue)
-            if desc.pixelFormat.isDepthFormat() || desc.pixelFormat.isStencilFormat() {
+            if desc.pixelFormat.isDepthFormat || desc.pixelFormat.isStencilFormat {
                 imageCreateInfo.usage |= UInt32(VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT.rawValue)
             } else {
                 imageCreateInfo.usage |= UInt32(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT.rawValue)
@@ -1381,13 +1381,13 @@ public class VulkanGraphicsDevice : GraphicsDevice {
                 b: VK_COMPONENT_SWIZZLE_B,
                 a: VK_COMPONENT_SWIZZLE_A)
             
-            if desc.pixelFormat.isColorFormat() {
+            if desc.pixelFormat.isColorFormat {
                 imageViewCreateInfo.subresourceRange.aspectMask |= UInt32(VK_IMAGE_ASPECT_COLOR_BIT.rawValue)
             }
-            if desc.pixelFormat.isDepthFormat() {
+            if desc.pixelFormat.isDepthFormat {
                 imageViewCreateInfo.subresourceRange.aspectMask |= UInt32(VK_IMAGE_ASPECT_DEPTH_BIT.rawValue)
             }
-            if desc.pixelFormat.isStencilFormat() {
+            if desc.pixelFormat.isStencilFormat {
                 imageViewCreateInfo.subresourceRange.aspectMask |= UInt32(VK_IMAGE_ASPECT_STENCIL_BIT.rawValue)
             }
 
@@ -1460,7 +1460,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         imageCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL
         imageCreateInfo.usage = UInt32(VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT.rawValue |
                                        VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT.rawValue)
-        if pixelFormat.isDepthFormat() || pixelFormat.isStencilFormat() {
+        if pixelFormat.isDepthFormat || pixelFormat.isStencilFormat {
             imageCreateInfo.usage |= UInt32(VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT.rawValue)
         } else {
             imageCreateInfo.usage |= UInt32(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT.rawValue)
@@ -1566,13 +1566,13 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             b: VK_COMPONENT_SWIZZLE_B,
             a: VK_COMPONENT_SWIZZLE_A)
         
-        if pixelFormat.isColorFormat() {
+        if pixelFormat.isColorFormat {
             imageViewCreateInfo.subresourceRange.aspectMask |= UInt32(VK_IMAGE_ASPECT_COLOR_BIT.rawValue)
         }
-        if pixelFormat.isDepthFormat() {
+        if pixelFormat.isDepthFormat {
             imageViewCreateInfo.subresourceRange.aspectMask |= UInt32(VK_IMAGE_ASPECT_DEPTH_BIT.rawValue)
         }
-        if pixelFormat.isStencilFormat() {
+        if pixelFormat.isStencilFormat {
             imageViewCreateInfo.subresourceRange.aspectMask |= UInt32(VK_IMAGE_ASPECT_STENCIL_BIT.rawValue)
         }
 
