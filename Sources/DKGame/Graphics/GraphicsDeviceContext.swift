@@ -2,7 +2,7 @@
 //  File: GraphicsDeviceContext.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -47,6 +47,8 @@ public class GraphicsDeviceContext {
         commandQueue(flags: .copy)
     }
 
+    let deviceWaitTimeout = 2.0
+
     public func makeCPUAccessible(buffer: Buffer) -> Buffer? {
         if buffer.contents() != nil {
             return buffer
@@ -62,7 +64,6 @@ public class GraphicsDeviceContext {
                let encoder = cbuffer.makeCopyCommandEncoder() {
 
                 let cond = NSCondition()
-                let timeout = 2.0
 
                 encoder.copy(from: buffer, sourceOffset: 0,
                              to: stgBuffer, destinationOffset: 0,
@@ -73,12 +74,62 @@ public class GraphicsDeviceContext {
                     defer { cond.unlock() }
                     cond.broadcast()
                 }
-                cbuffer.commit()
 
                 cond.lock()
                 defer { cond.unlock() }
 
-                if cond.wait(until: Date(timeIntervalSinceNow: timeout)) == false {
+                cbuffer.commit()
+
+                if cond.wait(until: Date(timeIntervalSinceNow: deviceWaitTimeout)) == false {
+                    // timeout
+                    Log.error("The operation timed out. Device did not respond to the command.")
+                    return nil                    
+                }
+                if stgBuffer.contents() != nil {
+                    return stgBuffer
+                }
+            }
+        }
+        return nil
+    }
+
+    public func makeCPUAccessible(texture: Texture) -> Buffer? {
+        guard let queue = copyQueue() else {
+            fatalError("Unable to make command queue")
+        }
+
+        let pixelFormat = texture.pixelFormat
+        let bpp = pixelFormat.bytesPerPixel
+        let width = texture.width
+        let height = texture.height
+        let bufferLength = width * height * bpp
+
+        if let stgBuffer = device.makeBuffer(length: bufferLength,
+                                             storageMode: .shared,
+                                             cpuCacheMode: .defaultCache) {
+            if let cbuffer = queue.makeCommandBuffer(),
+               let encoder = cbuffer.makeCopyCommandEncoder() {
+
+                let cond = NSCondition()
+
+                encoder.copy(from: texture,
+                             sourceOffset: TextureOrigin(layer: 0, level: 0, x: 0, y: 0, z: 0),
+                             to: stgBuffer, 
+                             destinationOffset: BufferImageOrigin(offset: 0, imageWidth: width, imageHeight: height),
+                             size: TextureSize(width: width, height: height, depth: 1))
+                encoder.endEncoding()
+                cbuffer.addCompletedHandler { _ in
+                    cond.lock()
+                    defer { cond.unlock() }
+                    cond.broadcast()
+                }
+
+                cond.lock()
+                defer { cond.unlock() }
+
+                cbuffer.commit()
+
+                if cond.wait(until: Date(timeIntervalSinceNow: deviceWaitTimeout)) == false {
                     // timeout
                     Log.error("The operation timed out. Device did not respond to the command.")
                     return nil                    
