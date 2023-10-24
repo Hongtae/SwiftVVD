@@ -420,8 +420,6 @@ extension GraphicsContext {
                     }
                     vertexData.append(contentsOf: triangles)
                 }
-            default:
-                return
             }
         }
 

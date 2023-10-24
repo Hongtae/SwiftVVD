@@ -2,7 +2,7 @@
 //  File: Image.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -74,8 +74,10 @@ fileprivate extension ImagePixelFormat {
             return DKImagePixelFormat_Invalid
         }
     }
+}
 
-    func bytesPerPixel() -> Int {
+public extension ImagePixelFormat {
+    var bytesPerPixel: Int {
         Int(DKImagePixelFormatBytesPerPixel(dkImagePixelFormat()))
     }
 }
@@ -215,14 +217,66 @@ private typealias RawColorValue = (r: Double, g: Double, b: Double, a: Double)
     return (Double(value.0), Double(value.1), Double(value.2), Double(value.3))
 }
 
-public class Image {
+private typealias ReadFunction = (_:UnsafeRawPointer, _:Int)->RawColorValue
+private typealias WriteFunction = (_: UnsafeMutableRawBufferPointer, _: Int, _: RawColorValue)->Void
+@inline(__always) private func getReadFunction(_ format: ImagePixelFormat)->ReadFunction? {
+    let readPixel: ReadFunction? = 
+    switch format {
+    case .r8:      { readPixelR($0, offset: $1, cType: UInt8.self) }
+    case .rg8:     { readPixelRG($0, offset: $1, cType: UInt8.self) }
+    case .rgb8:    { readPixelRGB($0, offset: $1, cType: UInt8.self) }
+    case .rgba8:   { readPixelRGBA($0, offset: $1, cType: UInt8.self) }
+    case .r16:     { readPixelR($0, offset: $1, cType: UInt16.self) }
+    case .rg16:    { readPixelRG($0, offset: $1, cType: UInt16.self) }
+    case .rgb16:   { readPixelRGB($0, offset: $1, cType: UInt16.self) }
+    case .rgba16:  { readPixelRGBA($0, offset: $1, cType: UInt16.self) }
+    case .r32:     { readPixelR($0, offset: $1, cType: UInt32.self) }
+    case .rg32:    { readPixelRG($0, offset: $1, cType: UInt32.self) }
+    case .rgb32:   { readPixelRGB($0, offset: $1, cType: UInt32.self) }
+    case .rgba32:  { readPixelRGBA($0, offset: $1, cType: UInt32.self) }
+    case .r32f:    { readPixelR($0, offset: $1, cType: Float.self) }
+    case .rg32f:   { readPixelRG($0, offset: $1, cType: Float.self) }
+    case .rgb32f:  { readPixelRGB($0, offset: $1, cType: Float.self) }
+    case .rgba32f: { readPixelRGBA($0, offset: $1, cType: Float.self) }
+    default:
+        nil
+    }
+    return readPixel
+}
+@inline(__always) private func getWriteFunction(_ format: ImagePixelFormat)->WriteFunction? {
+    let writePixel: WriteFunction? =
+    switch format {
+    case .r8:      { writePixelR($0, offset: $1, color: $2, cType: UInt8.self) }
+    case .rg8:     { writePixelRG($0, offset: $1, color: $2, cType: UInt8.self) }
+    case .rgb8:    { writePixelRGB($0, offset: $1, color: $2, cType: UInt8.self) }
+    case .rgba8:   { writePixelRGBA($0, offset: $1, color: $2, cType: UInt8.self) }
+    case .r16:     { writePixelR($0, offset: $1, color: $2, cType: UInt16.self) }
+    case .rg16:    { writePixelRG($0, offset: $1, color: $2, cType: UInt16.self) }
+    case .rgb16:   { writePixelRGB($0, offset: $1, color: $2, cType: UInt16.self) }
+    case .rgba16:  { writePixelRGBA($0, offset: $1, color: $2, cType: UInt16.self) }
+    case .r32:     { writePixelR($0, offset: $1, color: $2, cType: UInt32.self) }
+    case .rg32:    { writePixelRG($0, offset: $1, color: $2, cType: UInt16.self) }
+    case .rgb32:   { writePixelRGB($0, offset: $1, color: $2, cType: UInt16.self) }
+    case .rgba32:  { writePixelRGBA($0, offset: $1, color: $2, cType: UInt16.self) }
+    case .r32f:    { writePixelR($0, offset: $1, color: $2, cType: Float.self) }
+    case .rg32f:   { writePixelRG($0, offset: $1, color: $2, cType: Float.self) }
+    case .rgb32f:  { writePixelRGB($0, offset: $1, color: $2, cType: Float.self) }
+    case .rgba32f: { writePixelRGBA($0, offset: $1, color: $2, cType: Float.self) }
+    default:
+        nil
+    }
+    return writePixel
+}
+
+
+public struct Image {
     public let width: Int
     public let height: Int
 
     public let pixelFormat: ImagePixelFormat
-    public var bytesPerPixel: Int { pixelFormat.bytesPerPixel() }
+    public var bytesPerPixel: Int { pixelFormat.bytesPerPixel }
 
-    public let data: Data
+    internal var data: Data
 
     public init?(data: UnsafeRawBufferPointer) {
         var result = DKImageDecodeFromMemory(data.baseAddress, data.count)
@@ -231,7 +285,7 @@ public class Image {
             self.width = Int(result.width)
             self.height = Int(result.height)
             self.pixelFormat = .from(dkImagePixelFormat: result.pixelFormat)
-            let bytesPerPixel = self.pixelFormat.bytesPerPixel()
+            let bytesPerPixel = self.pixelFormat.bytesPerPixel
             assert(bytesPerPixel > 0)
 
             let byteCount = Int(result.decodedDataLength)
@@ -243,11 +297,20 @@ public class Image {
         }
     }
 
-    init(width: Int, height: Int, pixelFormat: ImagePixelFormat, data: Data) {
+    init(width: Int, height: Int, pixelFormat: ImagePixelFormat, data: Data? = nil) {
+        assert(width > 0)
+        assert(height > 0)
+        assert(pixelFormat != .invalid)
+
         self.width = width
         self.height = height
         self.pixelFormat = pixelFormat
-        self.data = data
+        if let data {
+            self.data = data
+        } else {
+            let length = pixelFormat.bytesPerPixel * width * height
+            self.data = Data(count: length)
+        }
     }
 
     public func canEncode(toImageFormat imageFormat: ImageFormat) -> Bool {
@@ -293,185 +356,36 @@ public class Image {
             return self
         }
 
-        let bpp = format.bytesPerPixel()
+        if getWriteFunction(format) == nil {
+            Log.error("Invalid output format!")
+            return nil
+        }
+        if getReadFunction(self.pixelFormat) == nil {
+            Log.error("Invalid input format!")
+            return nil
+        }
+
+        let bpp = format.bytesPerPixel
         let rowStride = bpp * width
         let bufferLength = rowStride * height
         let buffer = UnsafeMutableRawBufferPointer.allocate(byteCount: bufferLength, alignment: 1)
 
-        let writePixel: (_: UnsafeMutableRawBufferPointer, _: Int, _: RawColorValue)->Void
-        switch format {
-        case .r8:      writePixel = { writePixelR($0, offset: $1, color: $2, cType: UInt8.self) }
-        case .rg8:     writePixel = { writePixelRG($0, offset: $1, color: $2, cType: UInt8.self) }
-        case .rgb8:    writePixel = { writePixelRGB($0, offset: $1, color: $2, cType: UInt8.self) }
-        case .rgba8:   writePixel = { writePixelRGBA($0, offset: $1, color: $2, cType: UInt8.self) }
-        case .r16:     writePixel = { writePixelR($0, offset: $1, color: $2, cType: UInt16.self) }
-        case .rg16:    writePixel = { writePixelRG($0, offset: $1, color: $2, cType: UInt16.self) }
-        case .rgb16:   writePixel = { writePixelRGB($0, offset: $1, color: $2, cType: UInt16.self) }
-        case .rgba16:  writePixel = { writePixelRGBA($0, offset: $1, color: $2, cType: UInt16.self) }
-        case .r32:     writePixel = { writePixelR($0, offset: $1, color: $2, cType: UInt32.self) }
-        case .rg32:    writePixel = { writePixelRG($0, offset: $1, color: $2, cType: UInt16.self) }
-        case .rgb32:   writePixel = { writePixelRGB($0, offset: $1, color: $2, cType: UInt16.self) }
-        case .rgba32:  writePixel = { writePixelRGBA($0, offset: $1, color: $2, cType: UInt16.self) }
-        case .r32f:    writePixel = { writePixelR($0, offset: $1, color: $2, cType: Float.self) }
-        case .rg32f:   writePixel = { writePixelRG($0, offset: $1, color: $2, cType: Float.self) }
-        case .rgb32f:  writePixel = { writePixelRGB($0, offset: $1, color: $2, cType: Float.self) }
-        case .rgba32f: writePixel = { writePixelRGBA($0, offset: $1, color: $2, cType: Float.self) }
-        default:
-            fatalError("Invalid format")
-        }
+        var image = Image(width: width, height: height,
+                          pixelFormat: format,
+                          data: Data(bytesNoCopy: buffer.baseAddress!,
+                                     count: buffer.count,
+                                     deallocator: .custom({ p,_ in p.deallocate()})))
 
-        let readPixel: (_:UnsafeRawPointer, _:Int)->RawColorValue
-        switch self.pixelFormat {
-        case .r8:      readPixel = { readPixelR($0, offset: $1, cType: UInt8.self) }
-        case .rg8:     readPixel = { readPixelRG($0, offset: $1, cType: UInt8.self) }
-        case .rgb8:    readPixel = { readPixelRGB($0, offset: $1, cType: UInt8.self) }
-        case .rgba8:   readPixel = { readPixelRGBA($0, offset: $1, cType: UInt8.self) }
-        case .r16:     readPixel = { readPixelR($0, offset: $1, cType: UInt16.self) }
-        case .rg16:    readPixel = { readPixelRG($0, offset: $1, cType: UInt16.self) }
-        case .rgb16:   readPixel = { readPixelRGB($0, offset: $1, cType: UInt16.self) }
-        case .rgba16:  readPixel = { readPixelRGBA($0, offset: $1, cType: UInt16.self) }
-        case .r32:     readPixel = { readPixelR($0, offset: $1, cType: UInt32.self) }
-        case .rg32:    readPixel = { readPixelRG($0, offset: $1, cType: UInt32.self) }
-        case .rgb32:   readPixel = { readPixelRGB($0, offset: $1, cType: UInt32.self) }
-        case .rgba32:  readPixel = { readPixelRGBA($0, offset: $1, cType: UInt32.self) }
-        case .r32f:    readPixel = { readPixelR($0, offset: $1, cType: Float.self) }
-        case .rg32f:   readPixel = { readPixelRG($0, offset: $1, cType: Float.self) }
-        case .rgb32f:  readPixel = { readPixelRGB($0, offset: $1, cType: Float.self) }
-        case .rgba32f: readPixel = { readPixelRGBA($0, offset: $1, cType: Float.self) }
-        default:
-            fatalError("Invalid format")
-        }
-
-        self.data.withUnsafeBytes { ptr in
+        if self.width == width && self.height == height {
+            for ny in 0..<height {
+                for nx in 0..<width {
+                    let color = readPixel(x: nx, y: ny)
+                    image.writePixel(x: nx, y: ny, value: color)
+                }
+            }
+        } else {
             let scaleX = Float(self.width) / Float(width)
             let scaleY = Float(self.height) / Float(height)
-
-            let sourceBpp = self.pixelFormat.bytesPerPixel()
-            let sourceData = UnsafeRawPointer(ptr.baseAddress)!
-            let getPixel = { (x: Float, y: Float) -> RawColorValue in
-                let x = clamp(Int(x), min: 0, max: self.width - 1)
-                let y = clamp(Int(y), min: 0, max: self.height - 1)
-                let offset = (y * self.width + x) * sourceBpp
-                return readPixel(sourceData, offset)
-            }
-            let interpKernel = { (kernel: (Float)->Double, x: Float, y: Float) -> RawColorValue in
-                let fx = floor(x)
-                let fy = floor(y)
-                let px = (-1...2).map { fx + .init($0) }
-                let py = (-1...2).map { fy + .init($0) }
-                let kx = px.map { kernel($0 - x) }
-                let ky = py.map { kernel($0 - y) }
-
-                var color: RawColorValue = (0, 0, 0, 0)
-                py.indices.forEach { yIndex in
-                    px.indices.forEach { xIndex in
-                        let k = kx[xIndex] * ky[yIndex]
-                        let c = getPixel(px[xIndex], py[yIndex])
-                        color = (color.r + c.r * k, color.g + c.g * k, color.b + c.b * k, color.a + c.a * k)
-                    }
-                }
-                return color
-            }
-            let interpolatePoint: (_: Float, _: Float)->RawColorValue
-            switch interpolation {
-            case .nearest:
-                interpolatePoint = { x, y in
-                    getPixel(x.rounded(), y.rounded())
-                }
-            case .bilinear:
-                interpolatePoint = { x, y in
-                    let x1 = floor(x)
-                    let x2 = floor(x + 1)
-                    let y1 = floor(y)
-                    let y2 = floor(y + 1)
-                    let t1 = Double(x - x1)
-                    let t2 = Double(y - y1)
-                    let d = t1 * t2
-                    let b = t1 - d
-                    let c = t2 - d
-                    let a = 1.0 - t1 - c
-                    let p1 = getPixel(x1, y1)
-                    let p2 = getPixel(x2, y1)
-                    let p3 = getPixel(x1, y2)
-                    let p4 = getPixel(x2, y2)
-                    return (p1.r * a + p2.r * b + p3.r * c + p4.r * d,
-                            p1.g * a + p2.g * b + p3.g * c + p4.g * d,
-                            p1.b * a + p2.b * b + p3.b * c + p4.b * d,
-                            p1.a * a + p2.a * b + p3.a * c + p4.a * d)
-                }
-            case .bicubic:
-                interpolatePoint = { x, y in
-                    let kernelCubic = { (t: Float) -> Double in
-                        let t1 = abs(t)
-                        let t2 = t1 * t1
-                        if t1 < 1 { return .init(1 - 2 * t2 + t2 * t1) }
-                        if t1 < 2 { return .init(4 - 8 * t1 + 5 * t2 - t2 * t1) }
-                        return 0.0
-                    }
-                    return interpKernel(kernelCubic, x, y)
-                }
-            case .spline:
-                interpolatePoint = { x, y in
-                    let kernelSpline = { (t: Float) -> Double in
-                        let t = Double(t)
-                        if t < -2.0 { return 0.0 }
-                        if t < -1.0 { return (2.0 + t) * (2.0 + t) * (2.0 + t) * 0.16666666666666666667 }
-                        if t < 0.0  { return (4.0 + t * t * (-6.0 - 3.0 * t)) * 0.16666666666666666667 }
-                        if t < 1.0  { return (4.0 + t * t * (-6.0 + 3.0 * t)) * 0.16666666666666666667 }
-                        if t < 2.0  { return (2.0 - t) * (2.0 - t) * (2.0 - t) * 0.16666666666666666667 }
-                        return 0.0
-                    }
-                    return interpKernel(kernelSpline, x, y)
-                }
-            case .gaussian:
-                interpolatePoint = { x, y in
-                    let kernelGaussian = { (t: Float) -> Double in
-                        return exp(-2.0 * Double(t * t)) * 0.79788456080287
-                    }
-                    return interpKernel(kernelGaussian, x, y)
-                }
-            case .quadratic:
-                interpolatePoint = { x, y in
-                    let kernelQuadratic = { (t: Float) -> Double in
-                        if t < -1.5 { return 0 }
-                        if t < -0.5 { return .init(0.5 * (t + 1.5) * (t + 1.5)) }
-                        if t < 0.5 { return .init(0.75 - t * t) }
-                        if t < 1.5 { return .init(0.5 * (t - 1.5) * (t - 1.5)) }
-                        return 0.0
-                    }
-                    return interpKernel(kernelQuadratic, x, y)
-                }
-            }
-
-            let interpolateBox = { (x: Float, y: Float)->RawColorValue in
-                let x1 = x - scaleX * 0.5
-                let x2 = x + scaleX * 0.5
-                let y1 = y - scaleY * 0.5
-                let y2 = y + scaleY * 0.5
-
-                var color: RawColorValue = (0, 0, 0, 0)
-                for y in Int(y1.rounded())...Int(y2.rounded()) {
-                    for x in Int(x1.rounded())...Int(x2.rounded()) {
-                        let xMin = max(Float(x)-0.5, x1)
-                        let xMax = min(Float(x)+0.5, x2)
-                        let yMin = max(Float(y)-0.5, y1)
-                        let yMax = min(Float(y)+0.5, y2)
-                        let k = Double((xMax - xMin) * (yMax - yMin))
-                        let c = interpolatePoint((xMin + xMax) * 0.5, (yMin + yMax) * 0.5)
-                        color = (color.r + c.r * k, color.g + c.g * k, color.b + c.b * k, color.a + c.a * k)
-                    }
-                }
-                let area = 1.0 / Double((x2 - x1) * (y2 - y1))
-                return (color.r * area, color.g * area, color.b * area, color.a * area)
-            }
-            var sample: (_:Float, _:Float)->RawColorValue = { getPixel($0, $1) }
-            if self.width != width || self.height != height {
-                if scaleX <= 1 && scaleY <= 1 { // enlarge
-                    sample = interpolatePoint
-                } else {
-                    sample = interpolateBox
-                }
-            }
 
             for ny in 0..<height {
                 for nx in 0..<width {
@@ -479,23 +393,236 @@ public class Image {
                     let x = (Float(nx) + 0.5) * scaleX - 0.5
                     let y = (Float(ny) + 0.5) * scaleY - 0.5
 
-                    var color = sample(x, y)
-                    color.r = color.r.clamp(min: 0, max: 1)
-                    color.g = color.g.clamp(min: 0, max: 1)
-                    color.b = color.b.clamp(min: 0, max: 1)
-                    color.a = color.a.clamp(min: 0, max: 1)
-                    let offset = ny * rowStride + nx * bpp
-                    writePixel(buffer, offset, color)
+                    let x1 = x - scaleX * 0.5
+                    let x2 = x + scaleX * 0.5
+                    let y1 = y - scaleY * 0.5
+                    let y2 = y + scaleY * 0.5
+
+                    let color = _interpolate(x1, x2, y1, y2, interpolation)
+                    image.writePixel(x: nx, y: ny, value: color)
                 }
             }
         }
-        return .init(width: width, height: height,
-                     pixelFormat: format,
-                     data: Data(bytesNoCopy: buffer.baseAddress!,
-                                count: buffer.count,
-                                deallocator: .custom({ p,_ in p.deallocate()})
-                                ))
+        return image
     }
+
+    public typealias Pixel = (r: Double, g: Double, b: Double, a: Double)
+
+    public func readPixel(x: Int, y: Int) -> Pixel {
+        if let fn = getReadFunction(self.pixelFormat) {
+            let bpp = self.bytesPerPixel
+            let x = clamp(x, min: 0, max: self.width - 1)
+            let y = clamp(y, min: 0, max: self.height - 1)
+            let offset = (y * self.width + x) * bpp
+            let value = self.data.withUnsafeBytes {
+                fn($0.baseAddress!, offset)
+            }
+            return Pixel(r: value.r, g: value.g, b: value.b, a: value.a)
+        } else {
+            Log.error("Invalid pixel format")
+        }
+        return Pixel(r: 0, g: 0, b: 0, a: 0)
+    }
+
+    public mutating func writePixel(x: Int, y: Int, value: Pixel) {
+        if let fn = getWriteFunction(self.pixelFormat) {
+            let bpp = self.bytesPerPixel
+            let x = clamp(x, min: 0, max: self.width - 1)
+            let y = clamp(y, min: 0, max: self.height - 1)
+            let offset = (y * self.width + x) * bpp
+
+            let color = RawColorValue(r: clamp(value.r, min: 0, max: 1),
+                                      g: clamp(value.g, min: 0, max: 1),
+                                      b: clamp(value.b, min: 0, max: 1),
+                                      a: clamp(value.a, min: 0, max: 1))
+            self.data.withUnsafeMutableBytes { fn($0, offset, color) }
+        } else {
+            Log.error("Invalid pixel format")
+        }
+    }
+
+    public func interpolate(_ rect: CGRect, interpolate interp: ImageInterpolation) -> Pixel {
+        if rect.isNull { return Pixel(r: 0, g: 0, b: 0, a: 0) }
+        if rect.isInfinite {
+            return _interpolate(0, Float(self.width), 0, Float(self.height), interp)
+        }
+        return _interpolate(Float(rect.minX), Float(rect.maxX), Float(rect.minY), Float(rect.maxY), interp)
+    }
+
+    private func _interpolate(_ _x1: Float, _ _x2: Float, _ _y1: Float, _ _y2: Float, _ interp: ImageInterpolation) -> Pixel {
+        guard let readPixel = getReadFunction(self.pixelFormat) else {
+            Log.error("Invalid pixel format")
+            return Pixel(r: 0, g: 0, b: 0, a: 0)
+        }
+
+        let bpp = self.bytesPerPixel
+        let getPixel = { (x: Float, y: Float) -> RawColorValue in
+            let nx = clamp(Int(x), min: 0, max: self.width - 1)
+            let ny = clamp(Int(y), min: 0, max: self.height - 1)
+            let offset = (ny * self.width + nx) * bpp
+            return self.data.withUnsafeBytes {
+                readPixel($0.baseAddress!, offset)
+            }
+        }
+        let interpKernel = { (kernel: (Float)->Double, x: Float, y: Float) -> RawColorValue in
+            let fx = floor(x)
+            let fy = floor(y)
+            let px = (-1...2).map { fx + .init($0) }
+            let py = (-1...2).map { fy + .init($0) }
+            let kx = px.map { kernel($0 - x) }
+            let ky = py.map { kernel($0 - y) }
+
+            var color: RawColorValue = (0, 0, 0, 0)
+            py.indices.forEach { yIndex in
+                px.indices.forEach { xIndex in
+                    let k = kx[xIndex] * ky[yIndex]
+                    let c = getPixel(px[xIndex], py[yIndex])
+                    color = (color.r + c.r * k, color.g + c.g * k, color.b + c.b * k, color.a + c.a * k)
+                }
+            }
+            return color
+        }
+        let interpolatePoint: (_: Float, _: Float)->RawColorValue
+        switch interp {
+        case .nearest:
+            interpolatePoint = { x, y in
+                getPixel(x.rounded(), y.rounded())
+            }
+        case .bilinear:
+            interpolatePoint = { x, y in
+                let x1 = floor(x)
+                let x2 = floor(x + 1)
+                let y1 = floor(y)
+                let y2 = floor(y + 1)
+                let t1 = Double(x - x1)
+                let t2 = Double(y - y1)
+                let d = t1 * t2
+                let b = t1 - d
+                let c = t2 - d
+                let a = 1.0 - t1 - c
+                let p1 = getPixel(x1, y1)
+                let p2 = getPixel(x2, y1)
+                let p3 = getPixel(x1, y2)
+                let p4 = getPixel(x2, y2)
+                return (p1.r * a + p2.r * b + p3.r * c + p4.r * d,
+                        p1.g * a + p2.g * b + p3.g * c + p4.g * d,
+                        p1.b * a + p2.b * b + p3.b * c + p4.b * d,
+                        p1.a * a + p2.a * b + p3.a * c + p4.a * d)
+            }
+        case .bicubic:
+            interpolatePoint = { x, y in
+                let kernelCubic = { (t: Float) -> Double in
+                    let t1 = abs(t)
+                    let t2 = t1 * t1
+                    if t1 < 1 { return .init(1 - 2 * t2 + t2 * t1) }
+                    if t1 < 2 { return .init(4 - 8 * t1 + 5 * t2 - t2 * t1) }
+                    return 0.0
+                }
+                return interpKernel(kernelCubic, x, y)
+            }
+        case .spline:
+            interpolatePoint = { x, y in
+                let kernelSpline = { (t: Float) -> Double in
+                    let f: Double = 1.0 / 6.0
+                    let t = Double(t)
+                    if t < -2.0 { return 0.0 }
+                    if t < -1.0 { return (2.0 + t) * (2.0 + t) * (2.0 + t) * f }
+                    if t < 0.0  { return (4.0 + t * t * (-6.0 - 3.0 * t)) * f }
+                    if t < 1.0  { return (4.0 + t * t * (-6.0 + 3.0 * t)) * f }
+                    if t < 2.0  { return (2.0 - t) * (2.0 - t) * (2.0 - t) * f }
+                    return 0.0
+                }
+                return interpKernel(kernelSpline, x, y)
+            }
+        case .gaussian:
+            interpolatePoint = { x, y in
+                let kernelGaussian = { (t: Float) -> Double in
+                    return exp(-2.0 * Double(t * t)) * 0.79788456080287
+                }
+                return interpKernel(kernelGaussian, x, y)
+            }
+        case .quadratic:
+            interpolatePoint = { x, y in
+                let kernelQuadratic = { (t: Float) -> Double in
+                    if t < -1.5 { return 0 }
+                    if t < -0.5 { return .init(0.5 * (t + 1.5) * (t + 1.5)) }
+                    if t < 0.5 { return .init(0.75 - t * t) }
+                    if t < 1.5 { return .init(0.5 * (t - 1.5) * (t - 1.5)) }
+                    return 0.0
+                }
+                return interpKernel(kernelQuadratic, x, y)
+            }
+        }
+
+        let scaleX = abs(_x1 - _x2)
+        let scaleY = abs(_y1 - _y2)
+
+        let interpolateBox = { (x: Float, y: Float)->RawColorValue in
+            let x1 = x - scaleX * 0.5
+            let x2 = x + scaleX * 0.5
+            let y1 = y - scaleY * 0.5
+            let y2 = y + scaleY * 0.5
+
+            var color: RawColorValue = (0, 0, 0, 0)
+            for ny in Int(y1.rounded())...Int(y2.rounded()) {
+                for nx in Int(x1.rounded())...Int(x2.rounded()) {
+                    let xMin = max(Float(nx)-0.5, x1)
+                    let xMax = min(Float(nx)+0.5, x2)
+                    let yMin = max(Float(ny)-0.5, y1)
+                    let yMax = min(Float(ny)+0.5, y2)
+                    let k = Double((xMax - xMin) * (yMax - yMin))
+                    let c = interpolatePoint((xMin + xMax) * 0.5, (yMin + yMax) * 0.5)
+                    color = (color.r + c.r * k, color.g + c.g * k, color.b + c.b * k, color.a + c.a * k)
+                }
+            }
+            let area = 1.0 / Double((x2 - x1) * (y2 - y1))
+            return (color.r * area, color.g * area, color.b * area, color.a * area)
+        }
+
+        let sample: (_:Float, _:Float)->RawColorValue
+        if scaleX < 1.0 && scaleY < 1.0 {
+            sample = interpolatePoint // enlarge
+        } else {
+            sample = interpolateBox
+        }
+
+        let x = min(_x1, _x2)
+        let y = min(_y1, _y2)
+        let color = sample(x, y)
+        return Pixel(r: color.r, g: color.g, b: color.b, a: color.a)        
+    }
+}
+
+
+@inline(__always) private func fixedToDouble<T>(_ value: T) -> Double where T: FixedWidthInteger, T: SignedInteger {
+    return max(Double(value) / Double(T.max - 1), -1.0)
+}
+@inline(__always) private func fixedToDouble<T>(_ value: T) -> Double where T: FixedWidthInteger, T: UnsignedInteger {
+    return Double(value) / Double(T.max - 1)
+}
+@inline(__always) private func ufloatToDouble(eBits: UInt, mBits: UInt, exponent: UInt32, mantissa: UInt32) -> Double {
+    let expUpper: UInt32 = (1 << eBits) - 1
+    let expLower: UInt32 = expUpper >> 1
+    let manUpper = Double(1 << mBits)
+
+    let m = mantissa & ((1 << mBits) - 1)
+    let e = exponent & ((1 << eBits) - 1)
+
+    if e == 0 {
+        if m == 0 { return .zero }
+        return (1.0 / Double(1 << (expLower - 1))) * (Double(m) / manUpper)
+    }
+    if e < expUpper {
+        if e > expLower {
+            return Double(1 << (e - expLower)) * (1.0 + Double(m) / manUpper)
+        }
+        return (1.0 / Double(1 << (expLower - e))) * (1.0 + Double(m) / manUpper)
+    }
+    if m == 0 { return .infinity }
+    return .nan
+}
+@inline(__always) private func ufloatToDouble(eBits: UInt, mBits: UInt, value: UInt32) -> Double {
+    ufloatToDouble(eBits: eBits, mBits: mBits, exponent: value >> mBits, mantissa: value)
 }
 
 extension Image {
@@ -539,7 +666,7 @@ extension Image {
                                           pixelFormat: textureFormat,
                                           width: width,
                                           height: height,
-                                          usage: usage.union(.copyDestination)))
+                                          usage: usage.union([.copySource, .copyDestination])))
         else { return nil }
 
         // create buffer for staging
@@ -573,5 +700,224 @@ extension Image {
         encoder.endEncoding()
         commandBuffer.commit()
         return texture
+    }
+
+    public static func fromTexture(buffer: Buffer,
+                                   width: Int, height: Int,
+                                   pixelFormat: PixelFormat) -> Image? {
+        if (width < 1 || height < 1) {
+            Log.error("Invalid texture dimensions")
+            return nil
+        }
+        var imageFormat: ImagePixelFormat = .invalid
+        var getPixel: ((_:UnsafeRawPointer)->RawColorValue)?
+        switch pixelFormat {
+        case .r8Unorm, .r8Uint:
+            imageFormat = .r8
+            getPixel = { data in
+                let p = data.assumingMemoryBound(to: UInt8.self).pointee
+                return (fixedToDouble(p), 0, 0, 1)
+            }
+        case .r8Snorm, .r8Sint:
+            imageFormat = .r8
+            getPixel = { data in
+                let p = data.assumingMemoryBound(to: Int8.self).pointee
+                return (fixedToDouble(p), 0, 0, 1)
+            }
+        case .r16Unorm, .r16Uint:
+            imageFormat = .r16
+            getPixel = { data in
+                let p = data.assumingMemoryBound(to: UInt16.self).pointee
+                return (fixedToDouble(p), 0, 0, 1)
+            }
+        case .r16Snorm, .r16Sint:
+            imageFormat = .r16
+            getPixel = { data in
+                let p = data.assumingMemoryBound(to: Int16.self).pointee
+                return (fixedToDouble(p), 0, 0, 1)
+            }
+        case .r16Float:
+            imageFormat = .r16
+            getPixel = { data in
+                let p = data.assumingMemoryBound(to: Float16.self).pointee
+                return (Double(p), 0, 0, 1)
+            }
+        case .rg8Unorm, .rg8Uint:
+            imageFormat = .rg8
+            getPixel = { data in
+                let p = data.assumingMemoryBound(to: (UInt8, UInt8).self).pointee
+                return (fixedToDouble(p.0), fixedToDouble(p.1), 0, 1)
+            }
+        case .rg8Snorm, .rg8Sint:
+            imageFormat = .rg8
+            getPixel = { data in
+                let p = data.assumingMemoryBound(to: (Int8, Int8).self).pointee
+                return (fixedToDouble(p.0), fixedToDouble(p.1), 0, 1)
+            }
+        case .r32Uint:
+            imageFormat = .r32
+            getPixel = { data in
+                let p = data.assumingMemoryBound(to: UInt32.self).pointee
+                return (fixedToDouble(p), 0, 0, 1)
+            }
+        case .r32Sint:
+            imageFormat = .r32
+            getPixel = { data in
+                let p = data.assumingMemoryBound(to: Int32.self).pointee
+                return (fixedToDouble(p), 0, 0, 1)
+            }
+        case .r32Float:
+            imageFormat = .r32f
+            getPixel = { data in
+                let p = data.assumingMemoryBound(to: Float32.self).pointee
+                return (Double(p), 0, 0, 1)
+            }
+        case .rg16Unorm, .rg16Uint:
+            imageFormat = .rg16
+            getPixel = { data in
+                let p = data.assumingMemoryBound(to: (UInt16, UInt16).self).pointee
+                return (fixedToDouble(p.0), fixedToDouble(p.1), 0, 1)
+            }
+        case .rg16Snorm, .rg16Sint:
+            imageFormat = .rg16
+            getPixel = { data in
+                let p = data.assumingMemoryBound(to: (Int16, Int16).self).pointee
+                return (fixedToDouble(p.0), fixedToDouble(p.1), 0, 1)
+            }
+        case .rg16Float:
+            imageFormat = .rg16
+            getPixel = { data in
+                let p = data.assumingMemoryBound(to: (Float16, Float16).self).pointee
+                return (Double(p.0), Double(p.1), 0, 1)
+            }
+        case .rgba8Unorm, .rgba8Unorm_srgb, .rgba8Uint:
+            imageFormat = .rgba8
+            getPixel = { data in
+                let p = data.assumingMemoryBound(to: (UInt8, UInt8, UInt8, UInt8).self).pointee
+                return (fixedToDouble(p.0), fixedToDouble(p.1), fixedToDouble(p.2), fixedToDouble(p.3))
+            }
+        case .rgba8Snorm, .rgba8Sint:
+            imageFormat = .rgba8
+            getPixel = { data in
+                let p = data.assumingMemoryBound(to: (Int8, Int8, Int8, Int8).self).pointee
+                return (fixedToDouble(p.0), fixedToDouble(p.1), fixedToDouble(p.2), fixedToDouble(p.3))
+            }
+        case .bgra8Unorm, .bgra8Unorm_srgb:
+            imageFormat = .rgba8
+            getPixel = { data in
+                let p = data.assumingMemoryBound(to: (UInt8, UInt8, UInt8, UInt8).self).pointee
+                return (fixedToDouble(p.2), fixedToDouble(p.1), fixedToDouble(p.0), fixedToDouble(p.3))
+            }
+        case .rgb10a2Unorm, .rgb10a2Uint:
+            imageFormat = .rgba16
+            getPixel = { data in
+                let p = data.assumingMemoryBound(to: UInt32.self).pointee
+                return (Double((p >> 22) & 1023) / 1023.0,
+                        Double((p >> 12) & 1023) / 1023.0,
+                        Double((p >> 2) & 1023) / 1023.0,
+                        Double(p & 3) / 3.0)
+            }
+        case .rg11b10Float:
+            imageFormat = .rgb16
+            getPixel = { data in
+                let p = data.assumingMemoryBound(to: UInt32.self).pointee
+                return (ufloatToDouble(eBits: 5, mBits: 6, value: p >> 21),
+                        ufloatToDouble(eBits: 5, mBits: 6, value: p >> 10),
+                        ufloatToDouble(eBits: 5, mBits: 5, value: p),
+                        1.0)
+            }
+        case .rgb9e5Float:
+            imageFormat = .rgb16
+            getPixel = { data in
+                let p = data.assumingMemoryBound(to: UInt32.self).pointee
+                let exp = p & 31
+                return (ufloatToDouble(eBits: 5, mBits: 9, exponent: exp, mantissa: p >> 23),
+                        ufloatToDouble(eBits: 5, mBits: 9, exponent: exp, mantissa: p >> 14),
+                        ufloatToDouble(eBits: 5, mBits: 9, exponent: exp, mantissa: p >> 5),
+                        1.0)
+            }
+        case .rg32Uint:
+            imageFormat = .rg32
+            getPixel = { data in
+                let p = data.assumingMemoryBound(to: (UInt32, UInt32).self).pointee
+                return (fixedToDouble(p.0), fixedToDouble(p.1), 0.0, 1.0)
+            }
+        case .rg32Sint:
+            imageFormat = .rg32
+            getPixel = { data in
+                let p = data.assumingMemoryBound(to: (Int32, Int32).self).pointee
+                return (fixedToDouble(p.0), fixedToDouble(p.1), 0.0, 1.0)
+            }
+        case .rg32Float:
+            imageFormat = .rg32f
+            getPixel = { data in
+                let p = data.assumingMemoryBound(to: (Float32, Float32).self).pointee
+                return (Double(p.0), Double(p.1), 0.0, 1.0)
+            }
+        case .rgba16Unorm, .rgba16Uint:
+            imageFormat = .rgba16
+            getPixel = { data in
+                let p = data.assumingMemoryBound(to: (UInt16, UInt16, UInt16, UInt16).self).pointee
+                return (fixedToDouble(p.0), fixedToDouble(p.1), fixedToDouble(p.2), fixedToDouble(p.3))
+            }
+        case .rgba16Snorm, .rgba16Sint:
+            imageFormat = .rgba16
+            getPixel = { data in
+                let p = data.assumingMemoryBound(to: (Int16, Int16, Int16, Int16).self).pointee
+                return (fixedToDouble(p.0), fixedToDouble(p.1), fixedToDouble(p.2), fixedToDouble(p.3))
+            }
+        case .rgba16Float:
+            imageFormat = .rgba16
+            getPixel = { data in
+                let p = data.assumingMemoryBound(to: (Float16, Float16, Float16, Float16).self).pointee
+                return (Double(p.0), Double(p.1), Double(p.2), Double(p.3))
+            }
+        case .rgba32Uint:
+            imageFormat = .rgba32
+            getPixel = { data in
+                let p = data.assumingMemoryBound(to: (UInt32, UInt32, UInt32, UInt32).self).pointee
+                return (fixedToDouble(p.0), fixedToDouble(p.1), fixedToDouble(p.2), fixedToDouble(p.3))
+            }
+        case .rgba32Sint:
+            imageFormat = .rgba32
+            getPixel = { data in
+                let p = data.assumingMemoryBound(to: (Int32, Int32, Int32, Int32).self).pointee
+                return (fixedToDouble(p.0), fixedToDouble(p.1), fixedToDouble(p.2), fixedToDouble(p.3))
+            }
+        case .rgba32Float:
+            imageFormat = .rgba32f
+            getPixel = { data in
+                let p = data.assumingMemoryBound(to: (Float32, Float32, Float32, Float32).self).pointee
+                return (Double(p.0), Double(p.1), Double(p.2), Double(p.3))
+            }
+        default:
+            break
+        }
+
+        guard let getPixel else {
+            Log.error("Unsupported texture format: \(pixelFormat)")
+            return nil
+        }
+        assert(imageFormat != .invalid)
+
+        let bpp = pixelFormat.bytesPerPixel
+        let bufferLength = width * height * bpp
+
+        if buffer.length >= bufferLength {
+            if var ptr = buffer.contents() {
+                var image = Image(width: width, height: height, pixelFormat: imageFormat)
+                for y in 0..<height {
+                    for x in 0..<width {
+                        let c = getPixel(ptr)
+                        ptr = ptr + bpp
+                        image.writePixel(x: x, y: y, value: (c.r, c.g, c.b, c.a))
+                    }
+                }
+                return image
+            } else {
+                Log.error("Buffer is not accessible!")
+            }
+        }
+        return nil
     }
 }
