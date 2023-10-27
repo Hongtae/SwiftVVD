@@ -330,30 +330,39 @@ public class MetalGraphicsDevice: GraphicsDevice {
 
         let vertexFormat = { (f: VertexFormat) -> MTLVertexFormat in
             switch f {
+            case .uchar:                    return .uchar
             case .uchar2:                   return .uchar2
             case .uchar3:                   return .uchar3
             case .uchar4:                   return .uchar4
+            case .char:                     return .char
             case .char2:                    return .char2
             case .char3:                    return .char3
             case .char4:                    return .char4
+            case .ucharNormalized:          return .ucharNormalized
             case .uchar2Normalized:         return .uchar2Normalized
             case .uchar3Normalized:         return .uchar3Normalized
             case .uchar4Normalized:         return .uchar4Normalized
+            case .charNormalized:           return .charNormalized
             case .char2Normalized:          return .char2Normalized
             case .char3Normalized:          return .char3Normalized
             case .char4Normalized:          return .char4Normalized
+            case .ushort:                   return .ushort
             case .ushort2:                  return .ushort2
             case .ushort3:                  return .ushort3
             case .ushort4:                  return .ushort4
+            case .short:                    return .short
             case .short2:                   return .short2
             case .short3:                   return .short3
             case .short4:                   return .short4
+            case .ushortNormalized:         return .ushortNormalized
             case .ushort2Normalized:        return .ushort2Normalized
             case .ushort3Normalized:        return .ushort3Normalized
             case .ushort4Normalized:        return .ushort4Normalized
+            case .shortNormalized:          return .shortNormalized
             case .short2Normalized:         return .short2Normalized
             case .short3Normalized:         return .short3Normalized
             case .short4Normalized:         return .short4Normalized
+            case .half:                     return .half
             case .half2:                    return .half2
             case .half3:                    return .half3
             case .half4:                    return .half4

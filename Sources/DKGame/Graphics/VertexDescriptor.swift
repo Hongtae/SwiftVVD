@@ -8,38 +8,47 @@
 public enum VertexFormat {
     case invalid
     
+    case uchar
     case uchar2
     case uchar3
     case uchar4
     
+    case char
     case char2
     case char3
     case char4
     
+    case ucharNormalized
     case uchar2Normalized
     case uchar3Normalized
     case uchar4Normalized
     
+    case charNormalized
     case char2Normalized
     case char3Normalized
     case char4Normalized
     
+    case ushort
     case ushort2
     case ushort3
     case ushort4
     
+    case short
     case short2
     case short3
     case short4
     
+    case ushortNormalized
     case ushort2Normalized
     case ushort3Normalized
     case ushort4Normalized
     
+    case shortNormalized
     case short2Normalized
     case short3Normalized
     case short4Normalized
     
+    case half
     case half2
     case half3
     case half4

@@ -254,7 +254,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
             vkCmdSetScissor(commandBuffer, 0, 1, &scissorRect)
 
             // VK_DYNAMIC_STATE_LINE_WIDTH
-            // vkCmdSetLineWidth(commandBuffer, 1.0)
+            vkCmdSetLineWidth(commandBuffer, 1.0)
 
             // VK_DYNAMIC_STATE_DEPTH_BIAS
             // note: VkPipelineRasterizationStateCreateInfo.depthBiasEnable must be enabled.
