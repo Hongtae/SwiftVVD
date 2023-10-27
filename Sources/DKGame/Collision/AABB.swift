@@ -36,7 +36,7 @@ public struct AABB {
         self.max = center + halfExtents
     }
 
-    mutating func expand(_ point: Vector3) {
+    public mutating func expand(_ point: Vector3) {
         if self.isNull {
             min = Vector3.minimum(min, point)
             max = Vector3.maximum(max, point)
@@ -46,13 +46,55 @@ public struct AABB {
         }
     }
 
-    mutating func expand(_ points: Vector3...) {
+    public mutating func expand(_ points: Vector3...) {
         for pt in points {
             self.expand(pt)
         }
     }
 
-    func intersection(_ other: AABB) -> AABB {
+    public func applying(_ transform: Matrix3) -> AABB {
+        if self.isNull { return .null }
+        var aabb = AABB()
+        let verts: [Vector3] = [
+            Vector3(self.min.x, self.min.y, self.min.z),
+            Vector3(self.max.x, self.min.y, self.min.z),
+            Vector3(self.min.x, self.max.y, self.min.z),
+            Vector3(self.max.x, self.max.y, self.min.z),
+            Vector3(self.min.x, self.min.y, self.max.z),
+            Vector3(self.max.x, self.min.y, self.max.z),
+            Vector3(self.min.x, self.max.y, self.max.z),
+            Vector3(self.max.x, self.max.y, self.max.z),
+        ]
+        verts.forEach { aabb.expand($0.applying(transform)) }
+        return aabb
+    }
+
+    public func applying(_ transform: Matrix4) -> AABB {
+        if self.isNull { return .null }
+        var aabb = AABB()
+        let verts: [Vector3] = [
+            Vector3(self.min.x, self.min.y, self.min.z),
+            Vector3(self.max.x, self.min.y, self.min.z),
+            Vector3(self.min.x, self.max.y, self.min.z),
+            Vector3(self.max.x, self.max.y, self.min.z),
+            Vector3(self.min.x, self.min.y, self.max.z),
+            Vector3(self.max.x, self.min.y, self.max.z),
+            Vector3(self.min.x, self.max.y, self.max.z),
+            Vector3(self.max.x, self.max.y, self.max.z),
+        ]
+        verts.forEach { aabb.expand($0.applying(transform, w: 1.0)) }
+        return aabb
+    }
+
+    public mutating func apply(_ transform: Matrix3) {
+        self = self.applying(transform)
+    }
+
+    public mutating func apply(_ transform: Matrix4) {
+        self = self.applying(transform)
+    }
+
+    public func intersection(_ other: AABB) -> AABB {
         if self.isNull || other.isNull {
             return .null
         }
@@ -60,13 +102,13 @@ public struct AABB {
                      max: Vector3.minimum(self.max, other.max))
     }
 
-    func combining(_ other: AABB) -> AABB {
+    public func combining(_ other: AABB) -> AABB {
         var aabb = self
         aabb.combine(other)
         return aabb
     }
 
-    mutating func combine(_ other: AABB) {
+    public mutating func combine(_ other: AABB) {
         if other.isNull == false {
             if self.isNull {
                 self.min = other.min
@@ -78,7 +120,7 @@ public struct AABB {
         }
     }
 
-    func intersects(_ other: AABB) -> Bool {
+    public func intersects(_ other: AABB) -> Bool {
         intersection(other).isNull == false
     }
 

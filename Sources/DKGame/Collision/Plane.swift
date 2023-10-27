@@ -69,7 +69,7 @@ public struct Plane {
     }
 
     public func dot(_ v: Vector3) -> Scalar {
-        Vector4.dot(self.vector4, Vector4(v.x, v.y, v.z, 1))
+        Vector4.dot(self.vector4, Vector4(v, 1))
     }
 
     public func dot(_ v: Vector4) -> Scalar {

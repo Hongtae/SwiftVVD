@@ -47,7 +47,7 @@ public struct Vector4: Vector, Hashable {
         self = vector
     }
 
-    public init(_ v: Vector3, w: some BinaryFloatingPoint) {
+    public init(_ v: Vector3, _ w: some BinaryFloatingPoint) {
         self.init(v.x, v.y, v.z, Scalar(w))
     }
 

@@ -368,14 +368,14 @@ public extension Matrix4 {
 
 public extension Vector3 {
     // homogeneous transform
-    func applying(_ m: Matrix4) -> Self {
-        let v = Vector4(self.x, self.y, self.z, 1.0).applying(m)
-        assert(abs(v.w) > .leastNonzeroMagnitude)
-        return Self(v.x, v.y, v.z) * (1.0 / v.w)
+    func applying(_ m: Matrix4, w: Scalar = 1.0) -> Self {
+        let v = Vector4(self.x, self.y, self.z, w).applying(m)
+        if w == .zero { return Self(v.x, v.y, v.z) }
+        return Self(v.x, v.y, v.z) / v.w
     }
 
-    mutating func apply(_ m: Matrix4) {
-        self = self.applying(m)
+    mutating func apply(_ m: Matrix4, w: Scalar = 1.0) {
+        self = self.applying(m, w: w)
     }
 }
 

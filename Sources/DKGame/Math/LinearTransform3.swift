@@ -27,9 +27,9 @@ public struct LinearTransform3: Hashable {
     }
 
     public var scale: Vector3 {
-        Vector3(Vector3(matrix3.m11, matrix3.m12, matrix3.m13).length,
-                Vector3(matrix3.m21, matrix3.m22, matrix3.m23).length,
-                Vector3(matrix3.m31, matrix3.m32, matrix3.m33).length)
+        Vector3(matrix3.row1.magnitude,
+                matrix3.row2.magnitude,
+                matrix3.row3.magnitude)
     }
 
     public init(_ t: Self = .identity) {
@@ -59,12 +59,9 @@ public struct LinearTransform3: Hashable {
         let s = self.scale
         if s.x * s.y * s.z == 0.0 { return false }
 
-        let x = 1.0 / s.x
-        let y = 1.0 / s.y
-        let z = 1.0 / s.z
-        let normalized = Matrix3(row1: self.matrix3.row1 * x,
-                                 row2: self.matrix3.row2 * y,
-                                 row3: self.matrix3.row3 * z)
+        let normalized = Matrix3(row1: self.matrix3.row1 / s.x,
+                                 row2: self.matrix3.row2 / s.y,
+                                 row3: self.matrix3.row3 / s.z)
         
         rotation = LinearTransform3(normalized).rotation
         scale = s

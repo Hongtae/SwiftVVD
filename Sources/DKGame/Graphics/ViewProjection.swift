@@ -194,7 +194,7 @@ public struct ViewFrustum {
 
         let makePlane = { (v1: Vector3, v2: Vector3, v3: Vector3)->Vector4 in
             let n = Vector3.cross(v2 - v1, v3 - v1).normalized()
-            return Vector4(n.x, n.y, n.z, -Vector3.dot(n, v1))
+            return Vector4(n, -Vector3.dot(n, v1))
         }
 
         // far      (4,5,6,7)
@@ -223,7 +223,7 @@ public struct ViewFrustum {
 
     public func isSphereInside(center: Vector3, radius: Scalar) -> Bool {
         if radius < 0  { return false }
-        let center = Vector4(center.x, center.y, center.z, 1)
+        let center = Vector4(center, 1)
         if Vector4.dot(self.near, center)   < -radius { return false }
         if Vector4.dot(self.far, center)    < -radius { return false }
         if Vector4.dot(self.left, center)   < -radius { return false }
