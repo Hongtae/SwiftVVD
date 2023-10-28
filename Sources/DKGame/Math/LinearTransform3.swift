@@ -55,16 +55,73 @@ public struct LinearTransform3: Hashable {
     }
 
     // Decompose by scale, rotate order.
+    // See the following sources:
+    //  https://opensource.apple.com/source/WebCore/WebCore-514/platform/graphics/transforms/TransformationMatrix.cpp
+    //  https://github.com/g-truc/glm/blob/master/glm/gtx/matrix_decompose.inl
     public func decompose(scale: inout Vector3, rotation: inout Quaternion) -> Bool {
-        let s = self.scale
-        if s.x * s.y * s.z == 0.0 { return false }
+        if abs(matrix3.determinant) < .ulpOfOne { return false }
 
-        let normalized = Matrix3(row1: self.matrix3.row1 / s.x,
-                                 row2: self.matrix3.row2 / s.y,
-                                 row3: self.matrix3.row3 / s.z)
-        
-        rotation = LinearTransform3(normalized).rotation
-        scale = s
+        var row = [matrix3.row1, matrix3.row2, matrix3.row3]
+        var skewYZ, skewXZ, skewXY: Scalar
+
+        // get scale-x and normalize row-1
+        scale.x = row[0].magnitude
+        row[0] = row[0] / scale.x
+
+        // xy shear
+        skewXY = Vector3.dot(row[0], row[1])
+        row[1] = row[1] + row[0] * -skewXY
+
+        // get scale-y, normalize row-2
+        scale.y = row[1].magnitude
+        row[1] = row[1] / scale.y
+        skewXY /= scale.y
+
+        // xz, yz shear
+        skewXZ = Vector3.dot(row[0], row[2])
+        row[2] = row[2] + row[0] * -skewXZ
+        skewYZ = Vector3.dot(row[1], row[2])
+        row[2] = row[2] + row[1] * -skewYZ
+
+        // get scale-z, normalize row-3
+        scale.z = row[2].magnitude
+        row[2] = row[2] / scale.z
+        skewXZ /= scale.z
+        skewYZ /= scale.z
+
+        //let shear = Vector3(skewYZ, skewXZ, skewXY)
+
+        // check coordindate system flip
+        let pdum3 = Vector3.cross(row[1], row[2])
+        if Vector3.dot(row[0], pdum3) < .zero {
+            scale *= -1.0
+            row[0] *= -1.0
+            row[1] *= -1.0
+            row[2] *= -1.0
+        }
+
+        let t = row[0].x + row[1].y + row[2].z
+        if t > .zero {
+            var root = sqrt(t + 1.0)
+            rotation.w = 0.5 * root
+            root = 0.5 / root
+            rotation.x = root * (row[1].z - row[2].y)
+            rotation.y = root * (row[2].x - row[0].z)
+            rotation.z = root * (row[0].y - row[1].x)
+        } else {
+            var i = 0
+            if row[1].y > row[0].x { i = 1 }
+            if row[2].z > row[i][i] { i = 2 }
+            let j = (i + 1) % 3
+            let k = (j + 1) % 3
+
+            var root = sqrt(row[i][i] - row[j][j] - row[k][k] + 1.0)
+            rotation[i] = 0.5 * root
+            root = 0.5 / root
+            rotation[j] = root * (row[i][j] + row[j][i])
+            rotation[k] = root * (row[i][k] + row[k][i])
+            rotation.w = root * (row[j][k] - row[k][j])
+        }
         return true
     }
 
