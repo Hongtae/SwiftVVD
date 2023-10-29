@@ -125,7 +125,7 @@ public class VulkanComputeCommandEncoder: VulkanCommandEncoder, ComputeCommandEn
         }
     }
     
-    public func setResource(_ set: ShaderBindingSet, atIndex index: Int) {
+    public func setResource(_ set: ShaderBindingSet, index: Int) {
         assert(set is VulkanShaderBindingSet)
         var descriptorSet: VulkanDescriptorSet? = nil
         if let bindingSet = set as? VulkanShaderBindingSet {

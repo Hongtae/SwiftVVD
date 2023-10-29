@@ -173,7 +173,7 @@ extension GraphicsContext {
         pipeline.defaultBindingSet2.setTexture(backdrop, binding: 1)
         pipeline.defaultBindingSet2.setSamplerState(pipeline.defaultSampler, binding: 0)
         pipeline.defaultBindingSet2.setSamplerState(pipeline.defaultSampler, binding: 1)
-        encoder.setResource(pipeline.defaultBindingSet2, atIndex: 0)
+        encoder.setResource(pipeline.defaultBindingSet2, index: 0)
 
         encoder.setCullMode(.none)
         encoder.setFrontFacing(.clockwise)

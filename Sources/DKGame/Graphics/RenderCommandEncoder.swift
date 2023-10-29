@@ -51,7 +51,7 @@ public struct ScissorRect {
 }
 
 public protocol RenderCommandEncoder: CommandEncoder {
-    func setResource(_: ShaderBindingSet, atIndex: Int)
+    func setResource(_: ShaderBindingSet, index: Int)
     func setViewport(_: Viewport)
     func setScissorRect(_: ScissorRect)
     func setRenderPipelineState(_: RenderPipelineState)

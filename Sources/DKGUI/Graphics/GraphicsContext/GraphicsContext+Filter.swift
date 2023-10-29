@@ -397,7 +397,7 @@ extension GraphicsContext {
 
         pipeline.defaultBindingSet1.setTexture(texture, binding: 0)
         pipeline.defaultBindingSet1.setSamplerState(pipeline.defaultSampler, binding: 0)
-        encoder.setResource(pipeline.defaultBindingSet1, atIndex: 0)
+        encoder.setResource(pipeline.defaultBindingSet1, index: 0)
 
         withUnsafeBytes(of: projectionTransform) {
             encoder.pushConstant(stages: .fragment, offset: 0, data: $0)
@@ -463,7 +463,7 @@ extension GraphicsContext {
 
         pipeline.defaultBindingSet1.setTexture(texture, binding: 0)
         pipeline.defaultBindingSet1.setSamplerState(pipeline.defaultSampler, binding: 0)
-        encoder.setResource(pipeline.defaultBindingSet1, atIndex: 0)
+        encoder.setResource(pipeline.defaultBindingSet1, index: 0)
 
         withUnsafeBytes(of: colorMatrix) {
             encoder.pushConstant(stages: .fragment, offset: 0, data: $0)
@@ -538,7 +538,7 @@ extension GraphicsContext {
 
         pipeline.defaultBindingSet1.setTexture(texture, binding: 0)
         pipeline.defaultBindingSet1.setSamplerState(pipeline.defaultSampler, binding: 0)
-        encoder.setResource(pipeline.defaultBindingSet1, atIndex: 0)
+        encoder.setResource(pipeline.defaultBindingSet1, index: 0)
 
         withUnsafeBytes(of: blurParameters) {
             encoder.pushConstant(stages: .fragment, offset: 0, data: $0)

@@ -2,7 +2,7 @@
 //  File: MetalComputeCommandEncoder.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_METAL
@@ -74,7 +74,7 @@ public class MetalComputeCommandEncoder: ComputeCommandEncoder {
         self.encoder = Encoder()
     }
 
-    public func setResource(_ bindingSet: ShaderBindingSet, atIndex index: Int) {
+    public func setResource(_ bindingSet: ShaderBindingSet, index: Int) {
         assert(self.encoder != nil)
         assert(bindingSet is MetalShaderBindingSet)
 

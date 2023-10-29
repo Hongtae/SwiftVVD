@@ -604,7 +604,7 @@ extension GraphicsContext {
         if let texture {
             pipeline.defaultBindingSet1.setTexture(texture, binding: 0)
             pipeline.defaultBindingSet1.setSamplerState(pipeline.defaultSampler, binding: 0)
-            encoder.setResource(pipeline.defaultBindingSet1, atIndex: 0)
+            encoder.setResource(pipeline.defaultBindingSet1, index: 0)
         }
 
         encoder.setCullMode(.none)

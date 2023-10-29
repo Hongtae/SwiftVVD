@@ -77,7 +77,7 @@ public class MetalRenderCommandEncoder: RenderCommandEncoder {
         self.encoder = Encoder(descriptor: descriptor)
     }
 
-    public func setResource(_ bindingSet: ShaderBindingSet, atIndex index: Int) {
+    public func setResource(_ bindingSet: ShaderBindingSet, index: Int) {
         assert(self.encoder != nil)
         assert(bindingSet is MetalShaderBindingSet)
 
