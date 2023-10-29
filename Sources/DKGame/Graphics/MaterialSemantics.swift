@@ -24,9 +24,14 @@ public enum ShaderUniformSemantic {
     case modelMatrix
     case viewMatrix
     case projectionMatrix
+    case viewProjectionMatrix
     case modelViewProjectionMatrix
+    case inverseModelMatrix
+    case inverseViewMatrix
+    case inverseProjectionMatrix
+    case inverseViewProjectionMatrix
     case inverseModelViewProjectionMatrix
-    case skeletalNodeTransformArray
+    case transformMatrixArray
     case directionalLightIndex
     case directionalLightDirection
     case directionalLightDiffuseColor
@@ -49,15 +54,15 @@ public enum VertexAttributeSemantic {
 }
 
 public struct ShaderBindingLocation: Hashable {
-    let set: Int
-    let binding: Int
-    let offset: Int
+    public let set: Int
+    public let binding: Int
+    public let offset: Int
 
-    var isPushConstant: Bool { 
+    public var isPushConstant: Bool {
         self.set == -1 && self.binding == -1
     }
 
-    static func pushConstant(offset: Int) -> Self {
+    public static func pushConstant(offset: Int) -> Self {
         .init(set: -1, binding: -1, offset: offset)
     }
 }
