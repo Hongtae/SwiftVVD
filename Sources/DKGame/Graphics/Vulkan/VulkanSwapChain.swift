@@ -474,7 +474,7 @@ public class VulkanSwapChain: SwapChain {
     }
 
     @discardableResult
-    public func present(waitEvents: [Event]) -> Bool {
+    public func present(waitEvents: [GPUEvent]) -> Bool {
         let presentSrc = self.imageViews[Int(self.frameIndex)]
         if let image = presentSrc.image, image.layout() != VK_IMAGE_LAYOUT_PRESENT_SRC_KHR {
             if let buffer = self.queue.makeCommandBuffer() {

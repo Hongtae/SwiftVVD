@@ -2,7 +2,7 @@
 //  File: CopyCommandEncoder.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 public struct TextureSize {
@@ -47,10 +47,10 @@ public struct BufferImageOrigin {
 }
 
 public protocol CopyCommandEncoder: CommandEncoder {
-    func copy(from: Buffer, sourceOffset: Int, to: Buffer, destinationOffset: Int, size: Int)
-    func copy(from: Buffer, sourceOffset: BufferImageOrigin, to: Texture, destinationOffset: TextureOrigin, size: TextureSize)
-    func copy(from: Texture, sourceOffset: TextureOrigin, to: Buffer, destinationOffset: BufferImageOrigin, size: TextureSize)
+    func copy(from: GPUBuffer, sourceOffset: Int, to: GPUBuffer, destinationOffset: Int, size: Int)
+    func copy(from: GPUBuffer, sourceOffset: BufferImageOrigin, to: Texture, destinationOffset: TextureOrigin, size: TextureSize)
+    func copy(from: Texture, sourceOffset: TextureOrigin, to: GPUBuffer, destinationOffset: BufferImageOrigin, size: TextureSize)
     func copy(from: Texture, sourceOffset: TextureOrigin, to: Texture, destinationOffset: TextureOrigin, size: TextureSize)
 
-    func fill(buffer: Buffer, offset: Int, length: Int, value: UInt8)
+    func fill(buffer: GPUBuffer, offset: Int, length: Int, value: UInt8)
 }

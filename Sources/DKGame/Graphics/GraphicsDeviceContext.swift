@@ -49,7 +49,7 @@ public class GraphicsDeviceContext {
 
     let deviceWaitTimeout = 2.0
 
-    public func makeCPUAccessible(buffer: Buffer) -> Buffer? {
+    public func makeCPUAccessible(buffer: GPUBuffer) -> GPUBuffer? {
         if buffer.contents() != nil {
             return buffer
         }
@@ -93,7 +93,7 @@ public class GraphicsDeviceContext {
         return nil
     }
 
-    public func makeCPUAccessible(texture: Texture) -> Buffer? {
+    public func makeCPUAccessible(texture: Texture) -> GPUBuffer? {
         guard let queue = copyQueue() else {
             fatalError("Unable to make command queue")
         }

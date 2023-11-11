@@ -5,19 +5,6 @@
 //  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
-public enum CPUCacheMode: UInt {
-    case defaultCache   // read write
-    case writeCombined  // write only
-}
-
-public protocol Event {
-    var device: GraphicsDevice { get }
-}
-
-public protocol Semaphore {
-    var device: GraphicsDevice { get }
-}
-
 public protocol GraphicsDevice {
     var name: String { get }
 
@@ -33,13 +20,13 @@ public protocol GraphicsDevice {
 
     func makeDepthStencilState(descriptor: DepthStencilDescriptor) -> DepthStencilState?
 
-    func makeBuffer(length: Int, storageMode: StorageMode, cpuCacheMode: CPUCacheMode) -> Buffer?
+    func makeBuffer(length: Int, storageMode: StorageMode, cpuCacheMode: CPUCacheMode) -> GPUBuffer?
     func makeTexture(descriptor: TextureDescriptor) -> Texture?
     func makeTransientRenderTarget(type: TextureType, pixelFormat: PixelFormat, width: Int, height: Int, depth: Int) -> Texture?
     func makeSamplerState(descriptor: SamplerDescriptor) -> SamplerState?
 
-    func makeEvent() -> Event?
-    func makeSemaphore() -> Semaphore?
+    func makeEvent() -> GPUEvent?
+    func makeSemaphore() -> GPUSemaphore?
 }
 
 public extension GraphicsDevice {

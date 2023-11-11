@@ -2,7 +2,7 @@
 //  File: MetalSwapChain.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_METAL
@@ -129,7 +129,7 @@ public class MetalSwapChain: SwapChain {
         }
     }
 
-    public func present(waitEvents: [Event]) -> Bool {
+    public func present(waitEvents: [GPUEvent]) -> Bool {
         if waitEvents.isEmpty {
             if let drawable = drawable {
                 drawable.present()

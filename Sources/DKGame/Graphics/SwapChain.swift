@@ -10,7 +10,7 @@ public protocol SwapChain {
     var maximumBufferCount: Int { get }
 
     func currentRenderPassDescriptor() -> RenderPassDescriptor
-    func present(waitEvents: [Event]) -> Bool
+    func present(waitEvents: [GPUEvent]) -> Bool
     func present() -> Bool
 
     var commandQueue: CommandQueue { get }

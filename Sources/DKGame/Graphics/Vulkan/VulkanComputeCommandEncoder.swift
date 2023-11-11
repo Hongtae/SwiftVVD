@@ -22,9 +22,9 @@ public class VulkanComputeCommandEncoder: VulkanCommandEncoder, ComputeCommandEn
 
         var pipelineStateObjects: [VulkanComputePipelineState] = []
         var descriptorSets: [VulkanDescriptorSet] = []
-        var buffers: [Buffer] = []
-        var events: [Event] = []
-        var semaphores: [Semaphore] = []
+        var buffers: [GPUBuffer] = []
+        var events: [GPUEvent] = []
+        var semaphores: [GPUSemaphore] = []
 
         typealias Command = (VkCommandBuffer, inout EncodingState)->Void
         var commands: [Command] = []
@@ -91,7 +91,7 @@ public class VulkanComputeCommandEncoder: VulkanCommandEncoder, ComputeCommandEn
 
     public var isCompleted: Bool { self.encoder == nil }
 
-    public func waitEvent(_ event: Event) {
+    public func waitEvent(_ event: GPUEvent) {
         assert(event is VulkanSemaphore)
         if let semaphore = event as? VulkanSemaphore {
             let pipelineStages = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT
@@ -99,7 +99,7 @@ public class VulkanComputeCommandEncoder: VulkanCommandEncoder, ComputeCommandEn
             self.encoder!.events.append(event)
         }
     }
-    public func signalEvent(_ event: Event) {
+    public func signalEvent(_ event: GPUEvent) {
         assert(event is VulkanSemaphore)
         if let semaphore = event as? VulkanSemaphore {
             let pipelineStages = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT 
@@ -108,7 +108,7 @@ public class VulkanComputeCommandEncoder: VulkanCommandEncoder, ComputeCommandEn
         }
     }
 
-    public func waitSemaphoreValue(_ sema: Semaphore, value: UInt64) {
+    public func waitSemaphoreValue(_ sema: GPUSemaphore, value: UInt64) {
         assert(sema is VulkanTimelineSemaphore)
         if let semaphore = sema as? VulkanTimelineSemaphore {
             let pipelineStages = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT 
@@ -116,7 +116,7 @@ public class VulkanComputeCommandEncoder: VulkanCommandEncoder, ComputeCommandEn
             self.encoder!.semaphores.append(sema)
         }
     }
-    public func signalSemaphoreValue(_ sema: Semaphore, value: UInt64) {
+    public func signalSemaphoreValue(_ sema: GPUSemaphore, value: UInt64) {
         assert(sema is VulkanTimelineSemaphore)
         if let semaphore = sema as? VulkanTimelineSemaphore {
             let pipelineStages = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT 

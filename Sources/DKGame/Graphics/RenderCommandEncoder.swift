@@ -56,8 +56,8 @@ public protocol RenderCommandEncoder: CommandEncoder {
     func setScissorRect(_: ScissorRect)
     func setRenderPipelineState(_: RenderPipelineState)
 
-    func setVertexBuffer(_: Buffer, offset: Int, index: Int)
-    func setVertexBuffers(_: [Buffer], offsets: [Int], index: Int)
+    func setVertexBuffer(_: GPUBuffer, offset: Int, index: Int)
+    func setVertexBuffers(_: [GPUBuffer], offsets: [Int], index: Int)
 
     func setDepthStencilState(_: DepthStencilState?)
     func setDepthClipMode(_: DepthClipMode)
@@ -72,7 +72,7 @@ public protocol RenderCommandEncoder: CommandEncoder {
     func pushConstant<D: DataProtocol>(stages: ShaderStageFlags, offset: Int, data: D)
 
     func draw(vertexStart: Int, vertexCount: Int, instanceCount: Int, baseInstance: Int)
-    func drawIndexed(indexCount: Int, indexType: IndexType, indexBuffer: Buffer, indexBufferOffset: Int, instanceCount: Int, baseVertex: Int, baseInstance: Int)
+    func drawIndexed(indexCount: Int, indexType: IndexType, indexBuffer: GPUBuffer, indexBufferOffset: Int, instanceCount: Int, baseVertex: Int, baseInstance: Int)
 }
 
 public extension RenderCommandEncoder {

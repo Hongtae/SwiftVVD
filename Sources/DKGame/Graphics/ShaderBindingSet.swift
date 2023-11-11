@@ -32,11 +32,11 @@ public struct ShaderBindingSetLayout {
 }
 
 public struct BufferBindingInfo {
-    public var buffer: Buffer
+    public var buffer: GPUBuffer
     public var offset: Int
     public var length: Int
 
-    public init(buffer: Buffer,
+    public init(buffer: GPUBuffer,
                 offset: Int,
                 length: Int) {
         self.buffer = buffer
@@ -47,7 +47,7 @@ public struct BufferBindingInfo {
 
 public protocol ShaderBindingSet {
     // bind buffers
-    func setBuffer(_: Buffer, offset: Int, length: Int, binding: Int)
+    func setBuffer(_: GPUBuffer, offset: Int, length: Int, binding: Int)
     func setBufferArray(_ : [BufferBindingInfo], binding: Int)
 
     // bind textures

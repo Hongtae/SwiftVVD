@@ -23,7 +23,7 @@ public class MetalShaderBindingSet: ShaderBindingSet {
         self.layout = layout
     }
 
-    public func setBuffer(_ buffer: Buffer, offset: Int, length: Int, binding: Int) {
+    public func setBuffer(_ buffer: GPUBuffer, offset: Int, length: Int, binding: Int) {
         self.setBufferArray([BufferBindingInfo(buffer: buffer,
                                                offset: offset,
                                                length: length)],

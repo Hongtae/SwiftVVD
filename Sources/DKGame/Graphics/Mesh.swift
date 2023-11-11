@@ -18,11 +18,11 @@ public class Mesh {
         public let byteOffset: Int
         public let byteStride: Int
         public let vertexCount: Int
-        public let buffer: Buffer
+        public let buffer: GPUBuffer
         public let attributes: [VertexAttribute]
     }
     public var vertexBuffers: [VertexBuffer]
-    public var indexBuffer: Buffer?
+    public var indexBuffer: GPUBuffer?
     public var indexBufferByteOffset: Int = 0
     public var indexBufferBaseVertexIndex: Int = 0
     public var vertexStart: Int = 0
@@ -158,14 +158,14 @@ public class Mesh {
         struct OptBufferInfo {
             var offset: Int
             var length: Int
-            func bindingInfo(with buffer: Buffer) -> BufferBindingInfo {
+            func bindingInfo(with buffer: GPUBuffer) -> BufferBindingInfo {
                 BufferBindingInfo(buffer: buffer, offset: offset, length: length)
             }
         }
         struct OptBufferResource {
             var name: String
             var buffers: [OptBufferInfo]
-            func bufferResource(with buffer: Buffer) -> BufferResource {
+            func bufferResource(with buffer: GPUBuffer) -> BufferResource {
                 BufferResource(name: name, buffers: buffers.map {
                     $0.bindingInfo(with: buffer)
                 })
@@ -652,7 +652,7 @@ public class Mesh {
                                     Log.error("Failed to map buffer for resource set:\(res.set), binding:\(res.binding), name:\"\(res.name)\"")
                                 }
                             } else {
-                                Log.error("Buffer is too small for resource set:\(res.set), binding:\(res.binding), name:\"\(res.name)\"")
+                                Log.error("buffer is too small for resource set:\(res.set), binding:\(res.binding), name:\"\(res.name)\"")
                                 updatedBuffers.removeAll()
                                 break
                             }

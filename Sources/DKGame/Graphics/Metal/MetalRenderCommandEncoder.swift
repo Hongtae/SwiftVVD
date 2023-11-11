@@ -19,8 +19,8 @@ public class MetalRenderCommandEncoder: RenderCommandEncoder {
     class Encoder: MetalCommandEncoder {
         typealias Command = (MTLRenderCommandEncoder, inout EncodingState)->Void
         var commands: [Command] = []
-        var events: [Event] = []
-        var semaphores: [Semaphore] = []
+        var events: [GPUEvent] = []
+        var semaphores: [GPUSemaphore] = []
 
         var waitEvents: Set<MetalHashable<MetalEvent>> = []
         var signalEvents: Set<MetalHashable<MetalEvent>> = []
@@ -221,7 +221,7 @@ public class MetalRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func setVertexBuffer(_ buffer: Buffer, offset: Int, index: Int) {
+    public func setVertexBuffer(_ buffer: GPUBuffer, offset: Int, index: Int) {
         assert(self.encoder != nil)
         assert(buffer is MetalBuffer)
 
@@ -240,7 +240,7 @@ public class MetalRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func setVertexBuffers(_ buffers: [Buffer], offsets: [Int], index: Int) {
+    public func setVertexBuffers(_ buffers: [GPUBuffer], offsets: [Int], index: Int) {
         assert(self.encoder != nil)
         let count = min(buffers.count, offsets.count)
         if count > 0, let encoder = self.encoder {
@@ -412,7 +412,7 @@ public class MetalRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func drawIndexed(indexCount: Int, indexType: IndexType, indexBuffer: Buffer, indexBufferOffset: Int, instanceCount: Int, baseVertex: Int, baseInstance: Int) {
+    public func drawIndexed(indexCount: Int, indexType: IndexType, indexBuffer: GPUBuffer, indexBufferOffset: Int, instanceCount: Int, baseVertex: Int, baseInstance: Int) {
         assert(self.encoder != nil)
         assert(indexBuffer is MetalBuffer)
 
@@ -461,7 +461,7 @@ public class MetalRenderCommandEncoder: RenderCommandEncoder {
         return self.encoder == nil
     }
 
-    public func waitEvent(_ event: Event) {
+    public func waitEvent(_ event: GPUEvent) {
         assert(event is MetalEvent)
         assert(self.encoder != nil)
         if let event = event as? MetalEvent, let encoder = self.encoder {
@@ -470,7 +470,7 @@ public class MetalRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func signalEvent(_ event: Event) {
+    public func signalEvent(_ event: GPUEvent) {
         assert(event is MetalEvent)
         assert(self.encoder != nil)
         if let event = event as? MetalEvent, let encoder = self.encoder {
@@ -479,7 +479,7 @@ public class MetalRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func waitSemaphoreValue(_ semaphore: Semaphore, value: UInt64) {
+    public func waitSemaphoreValue(_ semaphore: GPUSemaphore, value: UInt64) {
         assert(semaphore is MetalSemaphore)
         assert(self.encoder != nil)
         if let semaphore = semaphore as? MetalSemaphore,
@@ -496,7 +496,7 @@ public class MetalRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func signalSemaphoreValue(_ semaphore: Semaphore, value: UInt64) {
+    public func signalSemaphoreValue(_ semaphore: GPUSemaphore, value: UInt64) {
         assert(semaphore is MetalSemaphore)
         assert(self.encoder != nil)
         if let semaphore = semaphore as? MetalSemaphore,

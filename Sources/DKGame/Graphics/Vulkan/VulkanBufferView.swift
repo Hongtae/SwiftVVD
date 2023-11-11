@@ -2,14 +2,14 @@
 //  File: VulkanBufferView.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
 import Foundation
 import Vulkan
 
-public class VulkanBufferView: Buffer {
+public class VulkanBufferView: GPUBuffer {
     public let device: GraphicsDevice
     public let bufferView: VkBufferView?
     public let buffer: VulkanBuffer?

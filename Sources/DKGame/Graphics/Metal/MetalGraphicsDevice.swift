@@ -708,7 +708,7 @@ public class MetalGraphicsDevice: GraphicsDevice {
         return nil
     }
 
-    public func makeBuffer(length: Int, storageMode: StorageMode, cpuCacheMode: CPUCacheMode) -> Buffer? {
+    public func makeBuffer(length: Int, storageMode: StorageMode, cpuCacheMode: CPUCacheMode) -> GPUBuffer? {
         if length > 0 {
             var options: MTLResourceOptions = []
             switch storageMode {
@@ -910,14 +910,14 @@ public class MetalGraphicsDevice: GraphicsDevice {
         return nil
     }
 
-    public func makeEvent() -> Event? {
+    public func makeEvent() -> GPUEvent? {
         if let event = device.makeEvent() {
             return MetalEvent(device: self, event: event)
         }
         return nil
     }
 
-    public func makeSemaphore() -> Semaphore? {
+    public func makeSemaphore() -> GPUSemaphore? {
         if let event = device.makeEvent() {
             return MetalSemaphore(device: self, event: event)
         }

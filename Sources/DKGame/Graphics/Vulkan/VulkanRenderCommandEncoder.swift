@@ -27,9 +27,9 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
 
         var pipelineStateObjects: [VulkanRenderPipelineState] = []
         var descriptorSets: [VulkanDescriptorSet] = []
-        var buffers: [Buffer] = []
-        var events: [Event] = []
-        var semaphores: [Semaphore] = []
+        var buffers: [GPUBuffer] = []
+        var events: [GPUEvent] = []
+        var semaphores: [GPUSemaphore] = []
 
         var framebuffer: VkFramebuffer?
         var renderPass: VkRenderPass?
@@ -323,7 +323,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
 
     public var isCompleted: Bool { self.encoder == nil }
 
-    public func waitEvent(_ event: Event) {
+    public func waitEvent(_ event: GPUEvent) {
         assert(event is VulkanSemaphore)
         if let semaphore = event as? VulkanSemaphore {
             let pipelineStages = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT
@@ -331,7 +331,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
             self.encoder!.events.append(event)
         }
     }
-    public func signalEvent(_ event: Event) {
+    public func signalEvent(_ event: GPUEvent) {
         assert(event is VulkanSemaphore)
         if let semaphore = event as? VulkanSemaphore {
             let pipelineStages = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT 
@@ -340,7 +340,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func waitSemaphoreValue(_ sema: Semaphore, value: UInt64) {
+    public func waitSemaphoreValue(_ sema: GPUSemaphore, value: UInt64) {
         assert(sema is VulkanTimelineSemaphore)
         if let semaphore = sema as? VulkanTimelineSemaphore {
             let pipelineStages = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT
@@ -348,7 +348,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
             self.encoder!.semaphores.append(sema)
         }
     }
-    public func signalSemaphoreValue(_ sema: Semaphore, value: UInt64) {
+    public func signalSemaphoreValue(_ sema: GPUSemaphore, value: UInt64) {
         assert(sema is VulkanTimelineSemaphore)
         if let semaphore = sema as? VulkanTimelineSemaphore {
             let pipelineStages = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT
@@ -427,11 +427,11 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
         self.encoder!.commands.append(command)
     }
 
-    public func setVertexBuffer(_ buffer: Buffer, offset: Int, index: Int) {
+    public func setVertexBuffer(_ buffer: GPUBuffer, offset: Int, index: Int) {
         setVertexBuffers([buffer], offsets: [offset], index: index)
     }
 
-    public func setVertexBuffers(_ buffers: [Buffer], offsets: [Int], index: Int) {
+    public func setVertexBuffers(_ buffers: [GPUBuffer], offsets: [Int], index: Int) {
         assert(buffers.count == offsets.count)
         let count = min(buffers.count, offsets.count)
         if count > 0 {
@@ -605,7 +605,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func drawIndexed(indexCount: Int, indexType: IndexType, indexBuffer: Buffer, indexBufferOffset: Int, instanceCount: Int, baseVertex: Int, baseInstance: Int) {
+    public func drawIndexed(indexCount: Int, indexType: IndexType, indexBuffer: GPUBuffer, indexBufferOffset: Int, instanceCount: Int, baseVertex: Int, baseInstance: Int) {
         if indexCount > 0 && instanceCount > 0 {
             assert(indexBufferOffset >= 0)
             assert(baseVertex >= 0)

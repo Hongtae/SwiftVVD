@@ -1109,7 +1109,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         return depthStencilState
     }
 
-    public func makeBuffer(length: Int, storageMode: StorageMode, cpuCacheMode: CPUCacheMode) -> Buffer? {
+    public func makeBuffer(length: Int, storageMode: StorageMode, cpuCacheMode: CPUCacheMode) -> GPUBuffer? {
         guard length > 0 else { return nil }
 
         var buffer: VkBuffer? = nil
@@ -1667,7 +1667,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         return VulkanSampler(device: self, sampler: sampler!)
     }
 
-    public func makeEvent() -> Event? {
+    public func makeEvent() -> GPUEvent? {
         var createInfo = VkSemaphoreCreateInfo()
         createInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO
 
@@ -1696,7 +1696,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         return VulkanSemaphore(device: self, semaphore: semaphore!)
     }
 
-    public func makeSemaphore() -> Semaphore? {
+    public func makeSemaphore() -> GPUSemaphore? {
         var createInfo = VkSemaphoreCreateInfo()
         createInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO
 

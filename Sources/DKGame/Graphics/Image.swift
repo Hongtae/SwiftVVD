@@ -702,7 +702,7 @@ extension Image {
         return texture
     }
 
-    public static func fromTexture(buffer: Buffer,
+    public static func fromTexture(buffer: GPUBuffer,
                                    width: Int, height: Int,
                                    pixelFormat: PixelFormat) -> Image? {
         if (width < 1 || height < 1) {
@@ -915,7 +915,7 @@ extension Image {
                 }
                 return image
             } else {
-                Log.error("Buffer is not accessible!")
+                Log.error("buffer is not accessible!")
             }
         }
         return nil

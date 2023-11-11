@@ -8,7 +8,7 @@
 #if ENABLE_VULKAN
 import Vulkan
 
-public class VulkanTimelineSemaphore: Semaphore {
+public class VulkanTimelineSemaphore: GPUSemaphore {
     public let device: GraphicsDevice
     public let semaphore: VkSemaphore
 

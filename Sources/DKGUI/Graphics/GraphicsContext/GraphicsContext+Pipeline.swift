@@ -617,7 +617,7 @@ extension GraphicsContext {
                      baseInstance: 0)
     }
 
-    func makeBuffer<T>(_ data: [T]) -> Buffer? {
+    func makeBuffer<T>(_ data: [T]) -> GPUBuffer? {
         if data.isEmpty { return nil }
 
         let device = self.commandBuffer.device
@@ -637,7 +637,7 @@ extension GraphicsContext {
         return nil
     }
 
-    func makeBuffer(_ data: UnsafeRawBufferPointer) -> Buffer? {
+    func makeBuffer(_ data: UnsafeRawBufferPointer) -> GPUBuffer? {
         if data.count > 0 && data.baseAddress != nil {
             let length = data.count
             let device = self.commandBuffer.device

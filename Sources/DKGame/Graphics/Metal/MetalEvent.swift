@@ -2,14 +2,14 @@
 //  File: MetalEvent.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_METAL
 import Foundation
 import Metal
 
-public class MetalEvent: Event {
+public class MetalEvent: GPUEvent {
     public let device: GraphicsDevice
     let event: MTLEvent
 
