@@ -19,7 +19,7 @@ public class VulkanImage {
     public var arrayLayers: UInt32
     public var usage: VkImageUsageFlags
  
-    public let deviceMemory: VulkanDeviceMemory?
+    public let memory: VulkanMemoryBlock?
     public let device: GraphicsDevice
 
     private struct LayoutAccessInfo {
@@ -32,9 +32,9 @@ public class VulkanImage {
     private let layoutLock = SpinLock()
     private var layoutInfo: LayoutAccessInfo
 
-    public init(memory: VulkanDeviceMemory, image: VkImage, imageCreateInfo: VkImageCreateInfo) {
-        self.device = memory.device
-        self.deviceMemory = memory
+    public init(device: VulkanGraphicsDevice, memory: VulkanMemoryBlock, image: VkImage, imageCreateInfo: VkImageCreateInfo) {
+        self.device = device
+        self.memory = memory
 
         self.image = image
         self.imageType = imageCreateInfo.imageType
@@ -64,7 +64,7 @@ public class VulkanImage {
 
     public init(device: VulkanGraphicsDevice, image: VkImage) {
         self.device = device
-        self.deviceMemory = nil
+        self.memory = nil
         
         self.image = image
 
@@ -86,6 +86,9 @@ public class VulkanImage {
         if let image = self.image {
             let device = self.device as! VulkanGraphicsDevice
             vkDestroyImage(device.device, image, device.allocationCallbacks)
+        }
+        if var memory = self.memory {
+            memory.chunk!.pool.dealloc(&memory)
         }
     }
 

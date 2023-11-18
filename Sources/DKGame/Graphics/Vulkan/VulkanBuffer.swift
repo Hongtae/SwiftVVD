@@ -2,7 +2,7 @@
 //  File: VulkanBuffer.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
@@ -15,23 +15,23 @@ public class VulkanBuffer {
     public var sharingMode: VkSharingMode
     public var size: VkDeviceSize
 
-    public let deviceMemory: VulkanDeviceMemory?
+    let memory: VulkanMemoryBlock?
     public let device: GraphicsDevice
 
-    public init(memory: VulkanDeviceMemory, buffer: VkBuffer, bufferCreateInfo: VkBufferCreateInfo) {
-        self.device = memory.device
-        self.deviceMemory = memory
+    public init(device: VulkanGraphicsDevice, memory: VulkanMemoryBlock, buffer: VkBuffer, bufferCreateInfo: VkBufferCreateInfo) {
+        self.device = device
+        self.memory = memory
         self.buffer = buffer
         self.usage = bufferCreateInfo.usage
         self.sharingMode = bufferCreateInfo.sharingMode
         self.size = bufferCreateInfo.size
 
-        assert(self.deviceMemory!.length >= self.size)
+        assert(self.memory!.size >= self.size)
     }
 
     public init(device: VulkanGraphicsDevice, buffer: VkBuffer, size: VkDeviceSize) {
         self.device = device
-        self.deviceMemory = nil
+        self.memory = nil
         self.buffer = buffer
         self.usage = 0
         self.sharingMode = VK_SHARING_MODE_EXCLUSIVE
@@ -43,23 +43,30 @@ public class VulkanBuffer {
     deinit {
         let device = self.device as! VulkanGraphicsDevice
         vkDestroyBuffer(device.device, buffer, device.allocationCallbacks)
+        if var memory = self.memory {
+            memory.chunk!.pool.dealloc(&memory)
+        }
     }
 
     public var length: Int { Int(self.size) }
 
     public func contents() -> UnsafeMutableRawPointer? {
-        return self.deviceMemory?.mapped
+        if let memory = self.memory {
+            assert(memory.chunk != nil)
+            if let mapped = memory.chunk!.mapped {
+                return mapped + Int(memory.offset)
+            }
+        }
+        return nil
     }
 
     public func flush(offset: UInt, size: UInt) {
-        if let deviceMemory = self.deviceMemory {
-            let length = deviceMemory.length
-            if offset < length {
-                if size > 0 {
-                    deviceMemory.flush(offset: UInt64(offset), size: UInt64(size))
-                }
+        if let memory = self.memory {
+            assert(memory.chunk != nil)
+            if (offset < memory.size) {
+                let s = min(memory.size - UInt64(offset), UInt64(size))
+                memory.chunk!.flush(offset: memory.offset + UInt64(offset), size: s)
             }
-            deviceMemory.invalidate(offset: 0, size: VK_WHOLE_SIZE)
         }
     }
 

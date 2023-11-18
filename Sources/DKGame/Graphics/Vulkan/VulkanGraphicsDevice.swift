@@ -29,6 +29,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
     public let queueFamilies: [VulkanQueueFamily]
     public let deviceMemoryTypes: [VkMemoryType]
     public let deviceMemoryHeaps: [VkMemoryHeap]
+    private var memoryPools: [VulkanMemoryPool]
 
     private var pipelineCache: VkPipelineCache?
 
@@ -185,6 +186,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
                 initializedCount = count
             }
         }
+        self.memoryPools = []
         
         self.queueFamilies = queueCreateInfos.map {
             var supportPresentation = false
@@ -225,6 +227,17 @@ public class VulkanGraphicsDevice : GraphicsDevice {
                 return lhs.familyIndex < rhs.familyIndex  // smaller index first
             }
             return lp > rp
+        }
+
+        // init memory pools
+        let memoryAllocationContext = VulkanMemoryAllocationContext(device: self.device) {
+            instance.allocationCallbacks
+        }
+        self.memoryPools = self.deviceMemoryTypes.enumerated().map { index, type in
+            VulkanMemoryPool(context: memoryAllocationContext,
+                             typeIndex: UInt32(index),
+                             flags: type.propertyFlags,
+                             heap: self.deviceMemoryHeaps[Int(type.heapIndex)])
         }
 
         self.loadPipelineCache()
@@ -346,10 +359,14 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             vkDestroyFence(self.device, fence, self.allocationCallbacks)
         }
 
+        // destroy pipeline cache
         if let pipelineCache = self.pipelineCache {
             vkDestroyPipelineCache(self.device, pipelineCache, self.allocationCallbacks)
             self.pipelineCache = nil
         }
+        // destroy memory pools
+        self.memoryPools.removeAll()
+
         vkDestroyDevice(self.device, self.allocationCallbacks)
         Log.debug("VulkanGraphicsDevice destroyed.")
     }
@@ -423,10 +440,10 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         }
     }
 
-    private func indexOfMemoryType(typeBits: UInt32, properties: VkMemoryPropertyFlags) -> UInt32? {
+    private func indexOfMemoryType(typeBits: UInt32, properties: VkMemoryPropertyFlags) -> Int? {
         for i in 0..<self.deviceMemoryTypes.count {
             if (typeBits & (1 << i)) != 0 && (self.deviceMemoryTypes[i].propertyFlags & properties) == properties {
-                    return UInt32(i)
+                    return i
             }
         }
         // assertionFailure("VulkanGraphicsDevice error: Unknown memory type!")
@@ -464,6 +481,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         }
         return nil
     }
+
     public func makeShaderModule(from shader: Shader) -> ShaderModule? {
         if shader.validate() == false { return nil }
 
@@ -1113,14 +1131,14 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         guard length > 0 else { return nil }
 
         var buffer: VkBuffer? = nil
-        var memory: VkDeviceMemory? = nil
+        var memory: VulkanMemoryBlock? = nil
 
         defer {
             if buffer != nil {
                 vkDestroyBuffer(self.device, buffer, self.allocationCallbacks)
             }
-            if memory != nil {
-                vkFreeMemory(self.device, memory, self.allocationCallbacks)
+            if var memory {
+                memory.chunk!.pool.dealloc(&memory)
             }
         }
 
@@ -1157,59 +1175,44 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         }
 
         let memReqs = memoryRequirements.memoryRequirements
-        var memAllocInfo = VkMemoryAllocateInfo()
-        memAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO
-        memAllocInfo.allocationSize = memReqs.size
-        if let memoryTypeIndex = self.indexOfMemoryType(typeBits: memReqs.memoryTypeBits, properties: memProperties) {
-            memAllocInfo.memoryTypeIndex = memoryTypeIndex
-        } else {
+        assert(memReqs.size >= bufferCreateInfo.size)
+        guard let memoryTypeIndex = self.indexOfMemoryType(typeBits: memReqs.memoryTypeBits, properties: memProperties)
+        else {
             fatalError("VulkanGraphicsDevice error: Unknown memory type!")
         }
-        assert(memAllocInfo.allocationSize >= bufferCreateInfo.size)
 
         if dedicatedRequirements.prefersDedicatedAllocation != 0 {
-            // bind resource to a dedicated allocation.
-            var memoryDedicatedAllocateInfo = VkMemoryDedicatedAllocateInfo()
-            memoryDedicatedAllocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO
-            memoryDedicatedAllocateInfo.buffer = buffer
-            result = withUnsafePointer(to: memoryDedicatedAllocateInfo) {
-                memAllocInfo.pNext = UnsafeRawPointer($0)
-                return vkAllocateMemory(self.device, &memAllocInfo, self.allocationCallbacks, &memory)
-            }
+            memory = self.memoryPools[memoryTypeIndex].allocDedicated(size: memReqs.size, image: nil, buffer: buffer)
         } else {
-            result = vkAllocateMemory(self.device, &memAllocInfo, self.allocationCallbacks, &memory)
+            memory = self.memoryPools[memoryTypeIndex].alloc(size: memReqs.size)
         }
-        
-        if result != VK_SUCCESS {
-            Log.err("vkAllocateMemory failed: \(result)")
+        guard let mem = memory else {
+            Log.error("Memory allocation failed.")
             return nil
         }
-        result = vkBindBufferMemory(self.device, buffer, memory, 0)
+        result = vkBindBufferMemory(self.device, buffer, mem.chunk!.memory, mem.offset)
         if result != VK_SUCCESS {
             Log.err("vkBindBufferMemory failed: \(result)")
             return nil
         }
 
-        let memoryType: VkMemoryType = self.deviceMemoryTypes[Int(memAllocInfo.memoryTypeIndex)]
-        let deviceMemory = VulkanDeviceMemory(device: self, memory: memory!, type: memoryType, size: memAllocInfo.allocationSize)
-        memory = nil
-
-        let bufferObject = VulkanBuffer(memory: deviceMemory, buffer: buffer!, bufferCreateInfo: bufferCreateInfo)
+        let bufferObject = VulkanBuffer(device: self, memory: mem, buffer: buffer!, bufferCreateInfo: bufferCreateInfo)
         buffer = nil
+        memory = nil
 
         return VulkanBufferView(buffer: bufferObject)
     }
 
     public func makeTexture(descriptor desc: TextureDescriptor) -> Texture? {
         var image: VkImage? = nil
-        var memory: VkDeviceMemory? = nil
+        var memory: VulkanMemoryBlock? = nil
 
         defer {
             if image != nil {
                 vkDestroyImage(self.device, image, self.allocationCallbacks)
             }
-            if memory != nil {
-                vkFreeMemory(self.device, memory, self.allocationCallbacks)
+            if var memory {
+                memory.chunk!.pool.dealloc(&memory)
             }
         }
 
@@ -1298,46 +1301,30 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         }
 
         let memReqs = memoryRequirements.memoryRequirements
-        var memAllocInfo = VkMemoryAllocateInfo()
-        memAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO
         let memProperties = VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT.rawValue)
-        memAllocInfo.allocationSize = memReqs.size
-
-        if let memoryTypeIndex = self.indexOfMemoryType(typeBits: memReqs.memoryTypeBits, properties: memProperties) {
-            memAllocInfo.memoryTypeIndex = memoryTypeIndex
-        } else {
+        guard let memoryTypeIndex = self.indexOfMemoryType(typeBits: memReqs.memoryTypeBits, properties: memProperties)
+        else {
             fatalError("VulkanGraphicsDevice error: Unknown memory type!")
         }
 
         if dedicatedRequirements.prefersDedicatedAllocation != 0 {
-            // bind resource to a dedicated allocation.
-            var memoryDedicatedAllocateInfo = VkMemoryDedicatedAllocateInfo()
-            memoryDedicatedAllocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO
-            memoryDedicatedAllocateInfo.image = image
-            result = withUnsafePointer(to: memoryDedicatedAllocateInfo) {
-                memAllocInfo.pNext = UnsafeRawPointer($0)
-                return vkAllocateMemory(self.device, &memAllocInfo, self.allocationCallbacks, &memory)
-            }
+            memory = self.memoryPools[memoryTypeIndex].allocDedicated(size: memReqs.size, image: image, buffer: nil)
         } else {
-            result = vkAllocateMemory(self.device, &memAllocInfo, self.allocationCallbacks, &memory)
+            memory = self.memoryPools[memoryTypeIndex].alloc(size: memReqs.size)
         }
-
-        if result != VK_SUCCESS {
-            Log.err("vkAllocateMemory failed: \(result)")
+        guard let mem = memory else {
+            Log.error("Memory allocation failed.")
             return nil
         }
-        result = vkBindImageMemory(self.device, image, memory, 0)
+        result = vkBindImageMemory(self.device, image, mem.chunk!.memory, mem.offset)
         if result != VK_SUCCESS {
             Log.err("vkBindBufferMemory failed: \(result)")
             return nil
         }
 
-        let memoryType = self.deviceMemoryTypes[Int(memAllocInfo.memoryTypeIndex)]
-        let deviceMemory = VulkanDeviceMemory(device: self, memory: memory!, type: memoryType, size: memAllocInfo.allocationSize)
-        memory = nil
-
-        let imageObject = VulkanImage(memory: deviceMemory, image: image!, imageCreateInfo: imageCreateInfo)
+        let imageObject = VulkanImage(device: self, memory: mem, image: image!, imageCreateInfo: imageCreateInfo)
         image = nil
+        memory = nil
 
         if imageCreateInfo.usage & (UInt32(VK_IMAGE_USAGE_SAMPLED_BIT.rawValue) |
                                     UInt32(VK_IMAGE_USAGE_STORAGE_BIT.rawValue) |
@@ -1414,14 +1401,14 @@ public class VulkanGraphicsDevice : GraphicsDevice {
                                           height: Int,
                                           depth: Int) -> Texture? {
         var image: VkImage? = nil
-        var memory: VkDeviceMemory? = nil
+        var memory: VulkanMemoryBlock? = nil
 
         defer {
             if image != nil {
                 vkDestroyImage(self.device, image, self.allocationCallbacks)
             }
-            if memory != nil {
-                vkFreeMemory(self.device, memory, self.allocationCallbacks)
+            if var memory {
+                memory.chunk!.pool.dealloc(&memory)
             }
         }
 
@@ -1490,55 +1477,37 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         }
 
         let memReqs = memoryRequirements.memoryRequirements
-        var memAllocInfo = VkMemoryAllocateInfo()
-        memAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO
-        memAllocInfo.allocationSize = memReqs.size
-
         // try lazily allocated memory type
-        if let memoryTypeIndex = self.indexOfMemoryType(
-            typeBits: memReqs.memoryTypeBits,
-            properties: VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT.rawValue)) {
-            memAllocInfo.memoryTypeIndex = memoryTypeIndex
-        } else {
-            // Not supported, fall back to device local memory
-            if let memoryTypeIndex = self.indexOfMemoryType(
-                typeBits: memReqs.memoryTypeBits,
-                properties: VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT.rawValue)) {
-                memAllocInfo.memoryTypeIndex = memoryTypeIndex
-            } else {
-                fatalError("VulkanGraphicsDevice error: Unknown memory type!")
-            }
+        var memoryTypeIndex = self.indexOfMemoryType(
+            typeBits: memReqs.memoryTypeBits, 
+            properties: VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT.rawValue))
+        if memoryTypeIndex == nil { // not supported.
+            memoryTypeIndex = self.indexOfMemoryType(
+                typeBits: memReqs.memoryTypeBits, 
+                properties: VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT.rawValue))
+        }
+        guard let memoryTypeIndex else {
+            fatalError("VulkanGraphicsDevice error: Unknown memory type!")
         }
 
         if dedicatedRequirements.prefersDedicatedAllocation != 0 {
-            // bind resource to a dedicated allocation.
-            var memoryDedicatedAllocateInfo = VkMemoryDedicatedAllocateInfo()
-            memoryDedicatedAllocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO
-            memoryDedicatedAllocateInfo.image = image
-            result = withUnsafePointer(to: memoryDedicatedAllocateInfo) {
-                memAllocInfo.pNext = UnsafeRawPointer($0)
-                return vkAllocateMemory(self.device, &memAllocInfo, self.allocationCallbacks, &memory)
-            }
+            memory = self.memoryPools[memoryTypeIndex].allocDedicated(size: memReqs.size, image: image, buffer: nil)
         } else {
-            result = vkAllocateMemory(self.device, &memAllocInfo, self.allocationCallbacks, &memory)
+            memory = self.memoryPools[memoryTypeIndex].alloc(size: memReqs.size)
         }
-
-        if result != VK_SUCCESS {
-            Log.err("vkAllocateMemory failed: \(result)")
+        guard let mem = memory else {
+            Log.error("Memory allocation failed.")
             return nil
         }
-        result = vkBindImageMemory(self.device, image, memory, 0)
+        result = vkBindImageMemory(self.device, image, mem.chunk!.memory, mem.offset)
         if result != VK_SUCCESS {
             Log.err("vkBindBufferMemory failed: \(result)")
             return nil
         }
 
-        let memoryType = self.deviceMemoryTypes[Int(memAllocInfo.memoryTypeIndex)]
-        let deviceMemory = VulkanDeviceMemory(device: self, memory: memory!, type: memoryType, size: memAllocInfo.allocationSize)
-        memory = nil
-
-        let imageObject = VulkanImage(memory: deviceMemory, image: image!, imageCreateInfo: imageCreateInfo)
+        let imageObject = VulkanImage(device: self, memory: mem, image: image!, imageCreateInfo: imageCreateInfo)
         image = nil
+        memory = nil
 
         // create imageView
         var imageViewCreateInfo = VkImageViewCreateInfo()
