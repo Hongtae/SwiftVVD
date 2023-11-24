@@ -149,12 +149,12 @@ public struct ViewFrustum {
         view.matrix4.concatenating(projection.matrix)
     }
 
-    public let near: Vector4
-    public let far: Vector4
-    public let left: Vector4
-    public let right: Vector4
-    public let top: Vector4
-    public let bottom: Vector4
+    public let near: Plane
+    public let far: Plane
+    public let left: Plane
+    public let right: Plane
+    public let top: Plane
+    public let bottom: Plane
 
     public init(view: ViewTransform, projection: ProjectionTransform) {
         self.view = view
@@ -192,11 +192,6 @@ public struct ViewFrustum {
 
         vec = vec.map { $0.applying(matrix) }
 
-        let makePlane = { (v1: Vector3, v2: Vector3, v3: Vector3)->Vector4 in
-            let n = Vector3.cross(v2 - v1, v3 - v1).normalized()
-            return Vector4(n, -Vector3.dot(n, v1))
-        }
-
         // far      (4,5,6,7)
         // near     (0,1,2,3)
         // top      (0,4,7,3)
@@ -205,35 +200,72 @@ public struct ViewFrustum {
         // right    (0,1,5,4)
 
         if ProjectionTransform.leftHanded {
-            self.far = makePlane(vec[5], vec[7], vec[4])
-            self.near = makePlane(vec[2], vec[0], vec[3])
-            self.top = makePlane(vec[0], vec[7], vec[3])
-            self.bottom = makePlane(vec[2], vec[5], vec[1])
-            self.left = makePlane(vec[3], vec[6], vec[2])
-            self.right = makePlane(vec[1], vec[4], vec[0])
+            self.far = Plane(vec[5], vec[7], vec[4])
+            self.near = Plane(vec[2], vec[0], vec[3])
+            self.top = Plane(vec[0], vec[7], vec[3])
+            self.bottom = Plane(vec[2], vec[5], vec[1])
+            self.left = Plane(vec[3], vec[6], vec[2])
+            self.right = Plane(vec[1], vec[4], vec[0])
         } else {
-            self.far = makePlane(vec[4], vec[7], vec[5])
-            self.near = makePlane(vec[3], vec[0], vec[2])
-            self.top = makePlane(vec[3], vec[7], vec[0])
-            self.bottom = makePlane(vec[1], vec[5], vec[2])
-            self.left = makePlane(vec[2], vec[6], vec[3])
-            self.right = makePlane(vec[0], vec[4], vec[1])
+            self.far = Plane(vec[4], vec[7], vec[5])
+            self.near = Plane(vec[3], vec[0], vec[2])
+            self.top = Plane(vec[3], vec[7], vec[0])
+            self.bottom = Plane(vec[1], vec[5], vec[2])
+            self.left = Plane(vec[2], vec[6], vec[3])
+            self.right = Plane(vec[0], vec[4], vec[1])
         }
     }
 
-    public func isSphereInside(center: Vector3, radius: Scalar) -> Bool {
-        if radius < 0  { return false }
-        let center = Vector4(center, 1)
-        if Vector4.dot(self.near, center)   < -radius { return false }
-        if Vector4.dot(self.far, center)    < -radius { return false }
-        if Vector4.dot(self.left, center)   < -radius { return false }
-        if Vector4.dot(self.right, center)  < -radius { return false }
-        if Vector4.dot(self.top, center)    < -radius { return false }
-        if Vector4.dot(self.bottom, center) < -radius { return false }
+    public func isSphereInside(_ sphere: Sphere) -> Bool {
+        if sphere.radius < 0  { return false }
+        let center = Vector4(sphere.center, 1)
+        if self.near.dot(center)   < -sphere.radius { return false }
+        if self.far.dot(center)    < -sphere.radius { return false }
+        if self.left.dot(center)   < -sphere.radius { return false }
+        if self.right.dot(center)  < -sphere.radius { return false }
+        if self.top.dot(center)    < -sphere.radius { return false }
+        if self.bottom.dot(center) < -sphere.radius { return false }
         return true
     }
 
     public func isPointInside(_ point: Vector3) -> Bool {
-        isSphereInside(center: point, radius: 0)
+        isSphereInside(Sphere(center: point, radius: 0))
+    }
+
+    public func isAABBInside(_ aabb: AABB) -> Bool {
+        if aabb.isNull { return false }
+
+        let planes = [
+            self.near,
+            self.far,
+            self.left,
+            self.right,
+            self.top,
+            self.bottom
+        ]
+        let minMax = [
+            aabb.min, aabb.max
+        ]
+        for i in 0..<6 {
+            let plane = planes[i]
+            var bx = plane.a > .zero ? 1 : 0
+            var by = plane.b > .zero ? 1 : 0
+            var bz = plane.c > .zero ? 1 : 0
+
+            var d = plane.dot(Vector3(minMax[bx].x, minMax[by].y, minMax[bz].z))
+            if d < .zero {
+                return false
+            }
+
+            bx = 1 - bx
+            by = 1 - by
+            bz = 1 - bz
+            d = plane.dot(Vector3(minMax[bx].x, minMax[by].y, minMax[bz].z))
+            if d <= .zero {
+                return true  // intersects
+            }
+        }
+        // inside
+        return true
     }
 }
