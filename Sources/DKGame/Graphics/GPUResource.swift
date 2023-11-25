@@ -17,3 +17,8 @@ public protocol GPUEvent {
 public protocol GPUSemaphore {
     var device: GraphicsDevice { get }
 }
+
+public struct GPUResourceID {
+    public let size: Int
+    public let data: [UInt8]
+}

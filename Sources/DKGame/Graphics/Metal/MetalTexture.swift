@@ -38,6 +38,12 @@ public class MetalTexture: Texture {
         .from(mtlPixelFormat: texture.pixelFormat)
     }
 
+    public var gpuResourceID: GPUResourceID {
+        let res = self.texture.gpuResourceID
+        return GPUResourceID(size: MemoryLayout.size(ofValue: res),
+                             data: withUnsafeBytes(of: res) { .init($0) })
+    }
+
     init(device: MetalGraphicsDevice, texture: MTLTexture) {
         self.device = device
         self.texture = texture

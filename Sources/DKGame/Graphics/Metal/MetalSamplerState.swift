@@ -13,6 +13,12 @@ public class MetalSamplerState: SamplerState {
     public let device: GraphicsDevice
     let sampler: MTLSamplerState
 
+    public var gpuResourceID: GPUResourceID {
+        let res = self.sampler.gpuResourceID
+        return GPUResourceID(size: MemoryLayout.size(ofValue: res),
+                             data: withUnsafeBytes(of: res) { .init($0) })
+    }
+
     init(device: MetalGraphicsDevice, sampler: MTLSamplerState) {
         self.device = device
         self.sampler = sampler

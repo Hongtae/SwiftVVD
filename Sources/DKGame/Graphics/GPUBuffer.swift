@@ -15,4 +15,5 @@ public protocol GPUBuffer: AnyObject {
     func flush()
     var length: Int { get }
     var device: GraphicsDevice { get }
+    var gpuAddress: UInt64 { get }
 }

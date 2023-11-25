@@ -31,5 +31,9 @@ public class MetalBuffer: GPUBuffer {
         }
 #endif
     }
+
+    public var gpuAddress: UInt64 {
+        buffer.gpuAddress
+    }
 }
 #endif //if ENABLE_METAL

@@ -37,8 +37,11 @@ public protocol Texture: AnyObject {
 
     var type: TextureType { get }
     var pixelFormat: PixelFormat { get }
-
     var device: GraphicsDevice { get }
+
+    var gpuResourceID: GPUResourceID { get }        // ShaderDescriptorType.texture
+    var gpuStorageResourceID: GPUResourceID { get } // ShaderDescriptorType.storageTexture
+    func gpuResourceID(withSampler: SamplerState) -> GPUResourceID // ShaderDescriptorType.textureSampler
 }
 
 extension Texture {

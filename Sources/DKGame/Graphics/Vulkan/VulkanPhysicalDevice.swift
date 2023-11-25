@@ -37,9 +37,12 @@ public class VulkanPhysicalDeviceDescription: CustomStringConvertible {
     public private(set) var numGCQueues: UInt        // graphics | compute queue count.
     public private(set) var maxQueues: UInt
 
+    // properties
     public private(set) var properties: VkPhysicalDeviceProperties
     public private(set) var extendedDynamicState3Properties: VkPhysicalDeviceExtendedDynamicState3PropertiesEXT 
+    public private(set) var descriptorBufferProperties: VkPhysicalDeviceDescriptorBufferPropertiesEXT 
 
+    // features
     public private(set) var features: VkPhysicalDeviceFeatures
     public private(set) var v11Features: VkPhysicalDeviceVulkan11Features 
     public private(set) var v12Features: VkPhysicalDeviceVulkan12Features 
@@ -64,6 +67,8 @@ public class VulkanPhysicalDeviceDescription: CustomStringConvertible {
         self.properties = VkPhysicalDeviceProperties()
         self.extendedDynamicState3Properties = VkPhysicalDeviceExtendedDynamicState3PropertiesEXT()
         self.extendedDynamicState3Properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_3_PROPERTIES_EXT
+        self.descriptorBufferProperties = VkPhysicalDeviceDescriptorBufferPropertiesEXT()
+        self.descriptorBufferProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_PROPERTIES_EXT
 
         self.features = VkPhysicalDeviceFeatures()
         self.v11Features = VkPhysicalDeviceVulkan11Features()
@@ -105,15 +110,22 @@ public class VulkanPhysicalDeviceDescription: CustomStringConvertible {
 
         var properties = VkPhysicalDeviceProperties2()
         properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2
-        properties.pNext = UnsafeMutableRawPointer(mutating: unsafePointerCopy(from: self.extendedDynamicState3Properties, holder: tempHolder))
+        appendNextChain(&properties, unsafePointerCopy(from: self.extendedDynamicState3Properties, holder: tempHolder))
+        appendNextChain(&properties, unsafePointerCopy(from: self.descriptorBufferProperties, holder: tempHolder))
 
         vkGetPhysicalDeviceProperties2(device, &properties)
         self.properties = properties.properties
 
         enumerateNextChain(properties.pNext) { sType, ptr in
-            if sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_3_PROPERTIES_EXT {
-                self.extendedDynamicState3Properties =
-                    ptr.bindMemory(to: VkPhysicalDeviceExtendedDynamicState3PropertiesEXT.self, capacity: 1).pointee
+            switch sType {
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_3_PROPERTIES_EXT:
+                self.extendedDynamicState3Properties = ptr.bindMemory(to: VkPhysicalDeviceExtendedDynamicState3PropertiesEXT.self, capacity: 1).pointee
+                self.extendedDynamicState3Properties.pNext = nil
+            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_PROPERTIES_EXT:
+                self.descriptorBufferProperties = ptr.bindMemory(to: VkPhysicalDeviceDescriptorBufferPropertiesEXT.self, capacity: 1).pointee
+                self.descriptorBufferProperties.pNext = nil
+            default:
+                break
             }
         }
 

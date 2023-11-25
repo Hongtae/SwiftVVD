@@ -50,6 +50,71 @@ public class VulkanImageView: Texture {
 
     public var type: TextureType    { self.image!.type }
     public var pixelFormat: PixelFormat { self.image!.pixelFormat }
+
+    public var gpuResourceID: GPUResourceID {
+        let device = self.device as! VulkanGraphicsDevice
+        let size = device.physicalDevice.descriptorBufferProperties.sampledImageDescriptorSize
+
+        var descriptorImageInfo = VkDescriptorImageInfo()
+        descriptorImageInfo.imageView = imageView
+        descriptorImageInfo.imageLayout = self.image!.layout()
+
+        var descriptorGetInfo = VkDescriptorGetInfoEXT()
+        descriptorGetInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_GET_INFO_EXT
+        descriptorGetInfo.type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE
+        let data = withUnsafePointer(to: descriptorImageInfo) {
+            descriptorGetInfo.data.pSampledImage = $0
+            return Array<UInt8>(unsafeUninitializedCapacity: size) { ptr, count in
+                vkGetDescriptorEXT(device.device, &descriptorGetInfo, size, ptr.baseAddress)
+                count = size
+            }
+        }
+        return GPUResourceID(size: size, data: data)
+    }
+
+    public var gpuStorageResourceID: GPUResourceID {
+        let device = self.device as! VulkanGraphicsDevice
+        let size = device.physicalDevice.descriptorBufferProperties.storageImageDescriptorSize
+
+        var descriptorImageInfo = VkDescriptorImageInfo()
+        descriptorImageInfo.imageView = imageView
+        descriptorImageInfo.imageLayout = self.image!.layout()
+
+        var descriptorGetInfo = VkDescriptorGetInfoEXT()
+        descriptorGetInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_GET_INFO_EXT
+        descriptorGetInfo.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
+        let data = withUnsafePointer(to: descriptorImageInfo) {
+            descriptorGetInfo.data.pStorageImage = $0
+            return Array<UInt8>(unsafeUninitializedCapacity: size) { ptr, count in
+                vkGetDescriptorEXT(device.device, &descriptorGetInfo, size, ptr.baseAddress)
+                count = size
+            }
+        }
+        return GPUResourceID(size: size, data: data)
+    }
+
+    public func gpuResourceID(withSampler sampler: SamplerState) -> GPUResourceID {
+        let device = self.device as! VulkanGraphicsDevice
+        let sampler = sampler as! VulkanSampler
+        let size = device.physicalDevice.descriptorBufferProperties.combinedImageSamplerDescriptorSize
+
+        var descriptorImageInfo = VkDescriptorImageInfo()
+        descriptorImageInfo.imageView = imageView
+        descriptorImageInfo.imageLayout = self.image!.layout()
+        descriptorImageInfo.sampler = sampler.sampler
+
+        var descriptorGetInfo = VkDescriptorGetInfoEXT()
+        descriptorGetInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_GET_INFO_EXT
+        descriptorGetInfo.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+        let data = withUnsafePointer(to: descriptorImageInfo) {
+            descriptorGetInfo.data.pCombinedImageSampler = $0
+            return Array<UInt8>(unsafeUninitializedCapacity: size) { ptr, count in
+                vkGetDescriptorEXT(device.device, &descriptorGetInfo, size, ptr.baseAddress)
+                count = size
+            }
+        }
+        return GPUResourceID(size: size, data: data)
+    }
 }
 
 #endif //if ENABLE_VULKAN

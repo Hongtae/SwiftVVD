@@ -68,4 +68,5 @@ public struct SamplerDescriptor {
 
 public protocol SamplerState: AnyObject {
     var device: GraphicsDevice { get }
+    var gpuResourceID: GPUResourceID { get }
 }

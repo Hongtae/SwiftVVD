@@ -103,6 +103,14 @@ public class VulkanBuffer {
         }
         return nil
     }
+
+    public var gpuAddress: UInt64 {
+        let device = self.device as! VulkanGraphicsDevice
+        var bufferDeviceAddressInfo = VkBufferDeviceAddressInfoKHR()
+        bufferDeviceAddressInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO
+        bufferDeviceAddressInfo.buffer = buffer
+        return vkGetBufferDeviceAddressKHR(device.device, &bufferDeviceAddressInfo)
+    }
 }
 
 #endif //if ENABLE_VULKAN

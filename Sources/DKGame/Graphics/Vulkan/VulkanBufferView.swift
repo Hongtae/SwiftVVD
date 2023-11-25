@@ -48,6 +48,8 @@ public class VulkanBufferView: GPUBuffer {
     }
 
     public var length: Int { self.buffer?.length ?? 0 }
+
+    public var gpuAddress: UInt64 { self.buffer?.gpuAddress ?? 0 }
 }
 
 #endif //if ENABLE_VULKAN
