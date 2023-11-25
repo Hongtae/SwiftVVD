@@ -8,25 +8,27 @@
 import Foundation
 
 public struct ViewTransform {
-    public let matrix: Matrix3
-    public let position: Vector3
+    private let matrix: Matrix3
+    private let t: Vector3
 
     public var matrix3: Matrix3 { matrix }
     public var matrix4: Matrix4 {
         Matrix4(matrix.m11, matrix.m12, matrix.m13, 0.0,
                 matrix.m21, matrix.m22, matrix.m23, 0.0,
                 matrix.m31, matrix.m32, matrix.m33, 0.0,
-                position.x, position.y, position.z, 1.0)
+                t.x, t.y, t.z, 1.0)
     }
 
     public var direction: Vector3 {
-        let v = matrix.column3
-        return Vector3(-v.x, -v.y, -v.z).normalized()
+        (-matrix.column3).normalized()
     }
 
     public var up: Vector3 {
-        let v = matrix.column2
-        return Vector3(v.x, v.y, v.z).normalized()
+        matrix.column2.normalized()
+    }
+
+    public var position: Vector3 {
+        (-t).applying(matrix.inverted()!)
     }
 
     public init(position pos: Vector3, direction dir: Vector3, up: Vector3) {
@@ -44,7 +46,7 @@ public struct ViewTransform {
         self.matrix = Matrix3(axisX.x, axisY.x, axisZ.x,
                               axisX.y, axisY.y, axisZ.y,
                               axisX.z, axisY.z, axisZ.z)
-        self.position = Vector3(tX, tY, tZ)
+        self.t = Vector3(tX, tY, tZ)
     }
 }
 
