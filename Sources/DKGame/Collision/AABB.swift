@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct AABB {
+public struct AABB: Hashable {
     public var min: Vector3
     public var max: Vector3
 

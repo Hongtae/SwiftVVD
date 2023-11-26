@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct Sphere {
+public struct Sphere: Hashable {
     public let center: Vector3
     public let radius: Scalar
 

@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct ViewTransform {
+public struct ViewTransform: Hashable {
     private let matrix: Matrix3
     private let t: Vector3
 
@@ -31,6 +31,29 @@ public struct ViewTransform {
         (-t).applying(matrix.inverted()!)
     }
 
+    public var affineTransform: AffineTransform3 {
+        .init(linear: matrix, origin: t)
+    }
+
+    public func concatenating(_ other: Self) -> Self {
+        return Self(self.matrix.concatenating(other.matrix),
+                    self.t.applying(other.matrix) + other.t)
+    }
+
+    public mutating func concatenate(_ t: Self) {
+        self = self.concatenating(t)
+    }
+
+    public init(_ m: Matrix3, _ t: Vector3) {
+        self.matrix = m
+        self.t = t
+    }
+
+    public init(_ t: AffineTransform3) {
+        self.matrix = t.matrix3
+        self.t = t.translation
+    }
+
     public init(position pos: Vector3, direction dir: Vector3, up: Vector3) {
         assert(dir.length > .zero)
         assert(up.length > .zero)
@@ -50,7 +73,7 @@ public struct ViewTransform {
     }
 }
 
-public struct ProjectionTransform {
+public struct ProjectionTransform: Hashable {
     public let matrix: Matrix4
 
     public var isPerspective: Bool  { matrix.m44 != 1.0 }
@@ -104,12 +127,12 @@ public struct ProjectionTransform {
         return perspectiveRH(aspect: aspect, fov: fov, near: nz, far: fz)
     }
 
-    public static func setOrthographicLH(left l: Scalar,
-                                         right r: Scalar,
-                                         bottom b: Scalar,
-                                         top t: Scalar,
-                                         near n: Scalar,
-                                         far f: Scalar) -> ProjectionTransform {
+    public static func orthographicLH(left l: Scalar,
+                                      right r: Scalar,
+                                      bottom b: Scalar,
+                                      top t: Scalar,
+                                      near n: Scalar,
+                                      far f: Scalar) -> ProjectionTransform {
         return ProjectionTransform(
             matrix: Matrix4(2.0 / (r - l), 0.0, 0.0, 0.0,
                             0.0, 2.0 / (t - b), 0.0, 0.0,
@@ -117,12 +140,12 @@ public struct ProjectionTransform {
                             -(r + l) / (r - l), -(t + b) / (t - b), -n / (f - n), 1.0))
     }
 
-    public static func setOrthographicRH(left l: Scalar,
-                                         right r: Scalar,
-                                         bottom b: Scalar,
-                                         top t: Scalar,
-                                         near n: Scalar,
-                                         far f: Scalar) -> ProjectionTransform {
+    public static func orthographicRH(left l: Scalar,
+                                      right r: Scalar,
+                                      bottom b: Scalar,
+                                      top t: Scalar,
+                                      near n: Scalar,
+                                      far f: Scalar) -> ProjectionTransform {
         return ProjectionTransform(
             matrix: Matrix4(2.0 / (r - l), 0.0, 0.0, 0.0,
                             0.0, 2.0 / (t - b), 0.0, 0.0,
@@ -130,16 +153,20 @@ public struct ProjectionTransform {
                             -(r + l) / (r - l), -(t + b) / (t - b), -n / (f - n), 1.0))
     }
 
-    public static func setOrthographic(left l: Scalar,
-                                       right r: Scalar,
-                                       bottom b: Scalar,
-                                       top t: Scalar,
-                                       near n: Scalar,
-                                       far f: Scalar) -> ProjectionTransform {
+    public static func orthographic(left l: Scalar,
+                                    right r: Scalar,
+                                    bottom b: Scalar,
+                                    top t: Scalar,
+                                    near n: Scalar,
+                                    far f: Scalar) -> ProjectionTransform {
         if leftHanded {
-            return setOrthographicLH(left: l, right: r, bottom: b, top: t, near: n, far: f)
+            return orthographicLH(left: l, right: r, bottom: b, top: t, near: n, far: f)
         }
-        return setOrthographicRH(left: l, right: r, bottom: b, top: t, near: n, far: f)
+        return orthographicRH(left: l, right: r, bottom: b, top: t, near: n, far: f)
+    }
+
+    public init(matrix: Matrix4) {
+        self.matrix = matrix
     }
 }
 
@@ -269,5 +296,16 @@ public struct ViewFrustum {
         }
         // inside
         return true
+    }
+}
+
+extension ViewFrustum: Hashable {
+    public static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.view == rhs.view && lhs.projection == rhs.projection
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(view)
+        hasher.combine(projection)
     }
 }

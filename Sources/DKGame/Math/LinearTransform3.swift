@@ -238,6 +238,21 @@ public struct LinearTransform3: Hashable {
         self.matrix3.column3 *= z
     }
 
+    public func scaled(byVector v: Vector3) -> Self {
+        scaled(x: v.x, y: v.y, z: v.z)
+    }
+
+    public func scaled(uniform s: some BinaryFloatingPoint) -> Self {
+        scaled(x: s, y: s, z: s)
+    }
+
+    public func scaled<T: BinaryFloatingPoint>(x: T, y: T, z: T) -> Self {
+        let c1 = self.matrix3.column1 * x
+        let c2 = self.matrix3.column2 * y
+        let c3 = self.matrix3.column3 * z
+        return .init(Matrix3(column1: c1, column2: c2, column3: c3))
+    }
+
     public static func * (lhs: Self, rhs: Self) -> Self {
         return lhs.concatenating(rhs)
     }

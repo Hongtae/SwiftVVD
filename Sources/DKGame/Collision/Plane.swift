@@ -5,7 +5,7 @@
 //  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
-public struct Plane {
+public struct Plane: Hashable {
     public var a: Scalar
     public var b: Scalar
     public var c: Scalar
