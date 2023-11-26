@@ -11,6 +11,8 @@ import Metal
 
 public class MetalTexture: Texture {
     public let device: GraphicsDevice
+    public let parent: Texture?
+
     let texture: MTLTexture
 
     public var width: Int       { texture.width }
@@ -38,9 +40,19 @@ public class MetalTexture: Texture {
         .from(mtlPixelFormat: texture.pixelFormat)
     }
 
-    init(device: MetalGraphicsDevice, texture: MTLTexture) {
+    public func makeTextureView(pixelFormat: PixelFormat) -> Texture? {
+        if let texture = self.texture.makeTextureView(pixelFormat: pixelFormat.mtlPixelFormat()) {
+            return MetalTexture(device: self.device as! MetalGraphicsDevice,
+                                texture: texture,
+                                parent: self)
+        }
+        return nil
+    }
+
+    init(device: MetalGraphicsDevice, texture: MTLTexture, parent: Texture? = nil) {
         self.device = device
         self.texture = texture
+        self.parent = parent
     }
 }
 #endif //if ENABLE_METAL

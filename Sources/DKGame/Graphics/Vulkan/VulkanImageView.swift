@@ -18,16 +18,21 @@ public class VulkanImageView: Texture {
 
     public var image: VulkanImage?
     public let device: GraphicsDevice
+    public let parent: Texture?
 
-    public init(image: VulkanImage, imageView: VkImageView, imageViewCreateInfo: VkImageViewCreateInfo) {
+    public init(image: VulkanImage,
+                imageView: VkImageView,
+                parent: VulkanImageView? = nil) {
         self.image = image
         self.imageView = imageView
         self.device = image.device
+        self.parent = parent
     }
 
     public init(device: VulkanGraphicsDevice, imageView: VkImageView) {
         self.imageView = imageView
         self.device = device
+        self.parent = nil
     }
 
     deinit {
@@ -50,6 +55,10 @@ public class VulkanImageView: Texture {
 
     public var type: TextureType    { self.image!.type }
     public var pixelFormat: PixelFormat { self.image!.pixelFormat }
+
+    public func makeTextureView(pixelFormat: PixelFormat) -> Texture? {
+        self.image?.makeImageView(format: pixelFormat, parent: self)
+    }
 }
 
 #endif //if ENABLE_VULKAN
