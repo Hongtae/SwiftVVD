@@ -124,10 +124,11 @@ public struct AABB: Hashable {
         intersection(other).isNull == false
     }
 
-    public func rayTest(rayOrigin origin: Vector3, direction dir: Vector3) -> Scalar {
+    public func rayTest1(rayOrigin origin: Vector3, direction dir: Vector3) -> Scalar {
+        if self.isNull { return -1.0 }
+
         // algorithm based on: http://www.codercorner.com/RayAABB.cpp
         // Original code by Andrew Woo, from "Graphics Gems", Academic Press, 1990
-
         var inside = true
         var maxT = Vector3(-1, -1, -1)
         var coord = Vector3.zero
@@ -173,6 +174,37 @@ public struct AABB: Hashable {
             }
         }
         return (coord - origin).magnitude
+    }
+
+    public func rayTest2(rayOrigin origin: Vector3, direction dir: Vector3) -> Scalar {
+        if self.isNull { return -1.0 }
+
+        // https://gamedev.stackexchange.com/questions/18436/most-efficient-aabb-vs-ray-collision-algorithms
+        // faster, but introduces NaN, Inf.
+        let t1 = (self.min.x - origin.x) / dir.x
+        let t2 = (self.max.x - origin.x) / dir.x
+        let t3 = (self.min.y - origin.y) / dir.y
+        let t4 = (self.max.y - origin.y) / dir.y
+        let t5 = (self.min.z - origin.z) / dir.z
+        let t6 = (self.max.z - origin.z) / dir.z
+
+        let tmin = Swift.max(Swift.min(t1, t2), Swift.min(t3, t4), Swift.min(t5, t6))
+        let tmax = Swift.min(Swift.max(t1, t2), Swift.max(t3, t4), Swift.max(t5, t6))
+
+        if tmax < .zero {   // box on ray but behind ray origin
+            return -1.0
+        }
+        if tmin > tmax {  // ray doesn't intersect box
+            return -1.0
+        }
+        if tmin.isNaN {
+            return -1.0
+        }
+        return Swift.max(tmin, 0.0)
+    }
+
+    public func rayTest(rayOrigin origin: Vector3, direction dir: Vector3) -> Scalar {
+        rayTest2(rayOrigin: origin, direction: dir)
     }
 
     public func overlapTest(_ plane: Plane) -> Bool {
