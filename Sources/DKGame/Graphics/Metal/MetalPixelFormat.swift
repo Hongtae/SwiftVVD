@@ -44,6 +44,7 @@ extension PixelFormat {
         case .rgb10a2Uint:              return .rgb10a2Uint
         case .rg11b10Float:             return .rg11b10Float
         case .rgb9e5Float:              return .rgb9e5Float
+        case .bgr10a2Unorm:             return .bgr10a2Unorm
         case .rg32Uint:                 return .rg32Uint
         case .rg32Sint:                 return .rg32Sint
         case .rg32Float:                return .rg32Float
@@ -98,6 +99,7 @@ extension PixelFormat {
         case .rgb10a2Uint:              return .rgb10a2Uint
         case .rg11b10Float:             return .rg11b10Float
         case .rgb9e5Float:              return .rgb9e5Float
+        case .bgr10a2Unorm:             return .bgr10a2Unorm
         case .rg32Uint:                 return .rg32Uint
         case .rg32Sint:                 return .rg32Sint
         case .rg32Float:                return .rg32Float

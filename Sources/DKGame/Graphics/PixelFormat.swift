@@ -48,10 +48,10 @@ public enum PixelFormat {
 
     // packed 32 bit formats
     case rgb10a2Unorm
-    case rgb10a2Uint    
-
+    case rgb10a2Uint
     case rg11b10Float
     case rgb9e5Float    
+    case bgr10a2Unorm
 
     // 64 bit formats
     case rg32Uint
@@ -129,7 +129,9 @@ public extension PixelFormat {
 
         // packed 32 bit formats
         case .rgb10a2Unorm, .rgb10a2Uint,
-             .rg11b10Float, .rgb9e5Float:
+             .rg11b10Float,
+             .rgb9e5Float,
+             .bgr10a2Unorm:
             return 4
 
         // 64 bit formats
