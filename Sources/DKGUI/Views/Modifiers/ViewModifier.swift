@@ -76,7 +76,7 @@ public protocol _GraphInputsModifier {
 }
 
 // _ViewInputsModifier is a type of modifier that modifies _ViewInputs.
-protocol _ViewInputsModifier {
+public protocol _ViewInputsModifier {
     static func _makeViewInputs(modifier: _GraphValue<Self>, inputs: inout _ViewInputs)
 }
 
@@ -101,6 +101,21 @@ extension ViewModifier where Self: _GraphInputsModifier, Self.Body == Never {
         var graphInputs = _GraphInputs(environmentValues: inputs.inputs.environmentValues)
         Self._makeInputs(modifier: modifier, inputs: &graphInputs)
         inputs.inputs.environmentValues = graphInputs.environmentValues
+
+        let outputs = body(_Graph(), inputs)
+        return _ViewListOutputs(item: .viewList([outputs]))
+    }
+}
+
+extension ViewModifier where Self: _ViewInputsModifier, Self.Body == Never {
+    public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
+        var inputs = inputs
+        Self._makeViewInputs(modifier: modifier, inputs: &inputs)
+        return body(_Graph(), inputs)
+    }
+    public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
+        var inputs = inputs
+        Self._makeViewInputs(modifier: modifier, inputs: &inputs.inputs)
 
         let outputs = body(_Graph(), inputs)
         return _ViewListOutputs(item: .viewList([outputs]))
@@ -139,7 +154,9 @@ extension ViewModifier {
 }
 
 extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
-    public var body: Never { neverBody() }
+    public var body: Never {
+        fatalError("body() should not be called on \(Self.self).")
+    }
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         Modifier._makeView(modifier: view[\.modifier], inputs: inputs) {
@@ -148,6 +165,7 @@ extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
             return Content._makeView(view: content, inputs: inputs)
         }
     }
+
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
         let modifier = view[\.modifier]
         if modifier.value is _UnaryViewModifier {

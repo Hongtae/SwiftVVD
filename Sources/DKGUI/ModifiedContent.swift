@@ -18,7 +18,4 @@ public struct ModifiedContent<Content, Modifier> {
 }
 
 extension ModifiedContent: Equatable where Content: Equatable, Modifier: Equatable {
-    public static func == (a: ModifiedContent<Content, Modifier>, b: ModifiedContent<Content, Modifier>) -> Bool {
-        return a.content == b.content && a.modifier == b.modifier
-    }
 }

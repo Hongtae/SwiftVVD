@@ -166,12 +166,12 @@ public struct Image: Equatable {
     }
     
     public init(_ name: String, bundle: Bundle? = nil) {
-        let bundle = bundle ?? .main
+        let bundle = bundle ?? Image._mainNamedBundle ?? .main
         self.provider = NamedImageProvider(name: name, value: nil, location: bundle, label: nil)
     }
 
     public init(_ name: String, bundle: Bundle? = nil, label: Text) {
-        let bundle = bundle ?? .main
+        let bundle = bundle ?? Image._mainNamedBundle ?? .main
         self.provider = NamedImageProvider(name: name, value: nil, location: bundle, label: label)
     }
 
@@ -203,6 +203,9 @@ extension Image {
 }
 
 extension Image {
+    public init(systemName: Swift.String) {
+        self.provider = SymbolImageProvider(name: systemName, variableValue: nil, bundle: nil, label: nil)
+    }
     public init(systemName: String, variableValue: Double?) {
         self.provider = SymbolImageProvider(name: systemName, variableValue: variableValue, bundle: nil, label: nil)
     }
@@ -223,6 +226,10 @@ extension Image: View {
         return _ViewOutputs(item: .view(view))
     }
     public typealias Body = Never
+}
+
+extension Image {
+    public static var _mainNamedBundle: Bundle?
 }
 
 extension Image: _PrimitiveView {

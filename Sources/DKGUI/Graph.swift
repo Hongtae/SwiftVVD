@@ -23,7 +23,10 @@ public struct _ViewInputs {
     var backgroundLayers: [ViewLayer] = []
     var overlayLayers: [ViewLayer] = []
     var traits: [ObjectIdentifier: Any] = [:]
+    var sourceWrites: [ObjectIdentifier: Any] = [:]
 
+    var labelStyleModifiers: [any LabelStyle] = []
+    
     var environmentValues: EnvironmentValues
 
     var transform: CGAffineTransform
