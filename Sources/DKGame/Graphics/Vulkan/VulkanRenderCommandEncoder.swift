@@ -11,6 +11,8 @@ import Vulkan
 
 fileprivate let flipViewportY = true
 
+extension VkDynamicState: Hashable {}
+
 public class VulkanRenderCommandEncoder: RenderCommandEncoder {
 
     struct EncodingState {
@@ -38,6 +40,9 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
         var commands: [Command] = []
         var setupCommands: [Command] = []
         var cleanupCommands: [Command] = []
+
+        var drawCount = 0
+        var setDynamicStates: Set<VkDynamicState> = []
 
         init(commandBuffer: VulkanCommandBuffer, descriptor: RenderPassDescriptor) {   
             self.commandBuffer = commandBuffer
@@ -246,46 +251,49 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
                 viewport.y = viewport.y + viewport.height  // set origin to lower-left.
                 viewport.height = -(viewport.height) // negative height.
             }
-            vkCmdSetViewport(commandBuffer, 0, 1, &viewport)
-
-            // VK_DYNAMIC_STATE_SCISSOR
-            var scissorRect = VkRect2D(offset: VkOffset2D(x: 0, y: 0),
-                                       extent: VkExtent2D(width: UInt32(frameWidth), height: UInt32(frameHeight)))
-            vkCmdSetScissor(commandBuffer, 0, 1, &scissorRect)
-
-            // VK_DYNAMIC_STATE_LINE_WIDTH
-            vkCmdSetLineWidth(commandBuffer, 1.0)
-
-            // VK_DYNAMIC_STATE_DEPTH_BIAS
-            // note: VkPipelineRasterizationStateCreateInfo.depthBiasEnable must be enabled.
-            // vkCmdSetDepthBias(commandBuffer, 0, 0, 0)
-
-            // VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE
-            vkCmdSetDepthTestEnable(commandBuffer, VK_FALSE)
-
-            // VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE
-            vkCmdSetDepthWriteEnable(commandBuffer, VK_FALSE)
-
-            // VK_DYNAMIC_STATE_DEPTH_COMPARE_OP
-            vkCmdSetDepthCompareOp(commandBuffer, VK_COMPARE_OP_ALWAYS)
-
-            // VK_DYNAMIC_STATE_STENCIL_TEST_ENABLE
-            vkCmdSetStencilTestEnable(commandBuffer, VK_FALSE)
-
-            // VK_DYNAMIC_STATE_STENCIL_OP
-            vkCmdSetStencilOp(commandBuffer, VkStencilFaceFlags(VK_STENCIL_FACE_FRONT_BIT.rawValue),
-                              VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP, VK_COMPARE_OP_ALWAYS)
-            vkCmdSetStencilOp(commandBuffer, VkStencilFaceFlags(VK_STENCIL_FACE_BACK_BIT.rawValue),
-                              VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP, VK_COMPARE_OP_ALWAYS)
-
-            // VK_DYNAMIC_STATE_DEPTH_BOUNDS_TEST_ENABLE
-            vkCmdSetDepthBoundsTestEnable(commandBuffer, VK_FALSE)
-
-            // VK_DYNAMIC_STATE_CULL_MODE
-            // vkCmdSetCullMode(commandBuffer, VkCullModeFlags(VK_CULL_MODE_NONE.rawValue))
-
-            // VK_DYNAMIC_STATE_FRONT_FACE
-            // vkCmdSetFrontFace(commandBuffer, VK_FRONT_FACE_CLOCKWISE)
+            if setDynamicStates.contains(VK_DYNAMIC_STATE_VIEWPORT) == false {
+                vkCmdSetViewport(commandBuffer, 0, 1, &viewport)
+            }
+            if setDynamicStates.contains(VK_DYNAMIC_STATE_SCISSOR) == false {
+                var scissorRect = VkRect2D(offset: VkOffset2D(x: 0, y: 0),
+                                           extent: VkExtent2D(width: UInt32(frameWidth),
+                                                              height: UInt32(frameHeight)))
+                vkCmdSetScissor(commandBuffer, 0, 1, &scissorRect)
+            }
+            if setDynamicStates.contains(VK_DYNAMIC_STATE_LINE_WIDTH) == false {
+                vkCmdSetLineWidth(commandBuffer, 1.0)
+            }
+            if setDynamicStates.contains(VK_DYNAMIC_STATE_DEPTH_BIAS) == false {
+                // NOTE - VkPipelineRasterizationStateCreateInfo.depthBiasEnable must be enabled.
+                // vkCmdSetDepthBias(commandBuffer, 0, 0, 0)
+            }
+            if setDynamicStates.contains(VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE) == false {
+                vkCmdSetDepthTestEnable(commandBuffer, VK_FALSE)
+            }
+            if setDynamicStates.contains(VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE) == false {
+                vkCmdSetDepthWriteEnable(commandBuffer, VK_FALSE)
+            }
+            if setDynamicStates.contains(VK_DYNAMIC_STATE_DEPTH_COMPARE_OP) == false {
+                vkCmdSetDepthCompareOp(commandBuffer, VK_COMPARE_OP_ALWAYS)
+            }
+            if setDynamicStates.contains(VK_DYNAMIC_STATE_STENCIL_TEST_ENABLE) == false {
+                vkCmdSetStencilTestEnable(commandBuffer, VK_FALSE)
+            }
+            if setDynamicStates.contains(VK_DYNAMIC_STATE_STENCIL_OP) == false {
+                vkCmdSetStencilOp(commandBuffer,
+                                  VkStencilFaceFlags(VK_STENCIL_FACE_FRONT_AND_BACK.rawValue),
+                                  VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP,
+                                  VK_STENCIL_OP_KEEP, VK_COMPARE_OP_ALWAYS)
+            }
+            if setDynamicStates.contains(VK_DYNAMIC_STATE_DEPTH_BOUNDS_TEST_ENABLE) == false {
+                vkCmdSetDepthBoundsTestEnable(commandBuffer, VK_FALSE)
+            }
+            if setDynamicStates.contains(VK_DYNAMIC_STATE_CULL_MODE) == false {
+                vkCmdSetCullMode(commandBuffer, VkCullModeFlags(VK_CULL_MODE_NONE.rawValue))
+            }
+            if setDynamicStates.contains(VK_DYNAMIC_STATE_FRONT_FACE) == false {
+                vkCmdSetFrontFace(commandBuffer, VK_FRONT_FACE_CLOCKWISE)
+            }
 
             // recording commands
             for cmd in self.commands {
@@ -414,6 +422,9 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
             vkCmdSetViewport(commandBuffer, 0, 1, &viewport)
         }
         self.encoder!.commands.append(command)
+        if self.encoder!.drawCount == 0 {
+            self.encoder!.setDynamicStates.insert(VK_DYNAMIC_STATE_VIEWPORT)
+        }
     }
 
     public func setScissorRect(_ r: ScissorRect) {
@@ -425,6 +436,9 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
             vkCmdSetScissor(commandBuffer, 0, 1, &scissorRect)
         }
         self.encoder!.commands.append(command)
+        if self.encoder!.drawCount == 0 {
+            self.encoder!.setDynamicStates.insert(VK_DYNAMIC_STATE_SCISSOR)
+        }
     }
 
     public func setVertexBuffer(_ buffer: GPUBuffer, offset: Int, index: Int) {
@@ -474,16 +488,40 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
             if let depthStencilState = depthStencilState {
                 depthStencilState.bind(commandBuffer: commandBuffer)
             } else {
-                if state.depthStencilState != nil {
-                    // reset to default
-                    vkCmdSetDepthTestEnable(commandBuffer, VK_FALSE)
-                    vkCmdSetStencilTestEnable(commandBuffer, VK_FALSE)
-                    vkCmdSetDepthBoundsTestEnable(commandBuffer, VK_FALSE)
+                // reset to default
+                vkCmdSetDepthTestEnable(commandBuffer, VK_FALSE)
+                vkCmdSetStencilTestEnable(commandBuffer, VK_FALSE)
+                vkCmdSetDepthBoundsTestEnable(commandBuffer, VK_FALSE)
+                
+                if state.depthStencilState == nil {
+                    vkCmdSetDepthCompareOp(commandBuffer, VK_COMPARE_OP_ALWAYS)
+                    vkCmdSetDepthWriteEnable(commandBuffer, VK_FALSE)
+                    vkCmdSetDepthBounds(commandBuffer, 0.0, 1.0)
+
+                    let faceMask = VkStencilFaceFlags(VK_STENCIL_FACE_FRONT_AND_BACK.rawValue)
+                    vkCmdSetStencilCompareMask(commandBuffer, faceMask, 0xffffffff)
+                    vkCmdSetStencilWriteMask(commandBuffer, faceMask, 0xffffffff)
+                    vkCmdSetStencilOp(commandBuffer, faceMask,
+                                      VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP,
+                                      VK_STENCIL_OP_KEEP, VK_COMPARE_OP_ALWAYS)
                 }
             }
             state.depthStencilState = depthStencilState
         }
         self.encoder!.commands.append(command)
+        if self.encoder!.drawCount == 0 {
+            self.encoder!.setDynamicStates.insert(VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE)
+            self.encoder!.setDynamicStates.insert(VK_DYNAMIC_STATE_STENCIL_TEST_ENABLE)
+            self.encoder!.setDynamicStates.insert(VK_DYNAMIC_STATE_DEPTH_BOUNDS_TEST_ENABLE)
+
+            self.encoder!.setDynamicStates.insert(VK_DYNAMIC_STATE_DEPTH_COMPARE_OP)
+            self.encoder!.setDynamicStates.insert(VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE)
+            self.encoder!.setDynamicStates.insert(VK_DYNAMIC_STATE_DEPTH_BOUNDS)
+
+            self.encoder!.setDynamicStates.insert(VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK)
+            self.encoder!.setDynamicStates.insert(VK_DYNAMIC_STATE_STENCIL_WRITE_MASK)
+            self.encoder!.setDynamicStates.insert(VK_DYNAMIC_STATE_STENCIL_OP)
+        }
     }
 
     public func setDepthClipMode(_ mode: DepthClipMode) {
@@ -506,6 +544,10 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
             }
         }
         self.encoder!.commands.append(command)
+        if self.encoder!.drawCount == 0 {
+            self.encoder!.setDynamicStates.insert(VK_DYNAMIC_STATE_DEPTH_CLIP_ENABLE_EXT)
+            self.encoder!.setDynamicStates.insert(VK_DYNAMIC_STATE_DEPTH_CLAMP_ENABLE_EXT)
+        }
 #else
         if (mode == .clamp) {
             Log.err("\(#function) failed: VK_EXT_extended_dynamic_state3 is not supported.")
@@ -524,6 +566,9 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
             vkCmdSetCullMode(commandBuffer, flags)
         }
         self.encoder!.commands.append(command)
+        if self.encoder!.drawCount == 0 {
+            self.encoder!.setDynamicStates.insert(VK_DYNAMIC_STATE_CULL_MODE)
+        }
     }
 
     public func setFrontFacing(_ winding: Winding) {
@@ -535,7 +580,10 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
             }
             vkCmdSetFrontFace(commandBuffer, frontFace)
         }
-        self.encoder!.commands.append(command)     
+        self.encoder!.commands.append(command)
+        if self.encoder!.drawCount == 0 {
+            self.encoder!.setDynamicStates.insert(VK_DYNAMIC_STATE_FRONT_FACE)
+        }
     }
 
     public func setBlendColor(red: Float, green: Float, blue: Float, alpha: Float) {
@@ -546,6 +594,9 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
             }
         }
         self.encoder!.commands.append(command)
+        if self.encoder!.drawCount == 0 {
+            self.encoder!.setDynamicStates.insert(VK_DYNAMIC_STATE_BLEND_CONSTANTS)
+        }
     }
 
     public func setStencilReferenceValue(_ value: UInt32) {
@@ -553,6 +604,9 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
             vkCmdSetStencilReference(commandBuffer, VkStencilFaceFlags(VK_STENCIL_FACE_FRONT_AND_BACK.rawValue), value)
         }
         self.encoder!.commands.append(command)
+        if self.encoder!.drawCount == 0 {
+            self.encoder!.setDynamicStates.insert(VK_DYNAMIC_STATE_STENCIL_REFERENCE)
+        }
     }
 
     public func setStencilReferenceValues(front: UInt32, back: UInt32) {
@@ -561,6 +615,9 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
             vkCmdSetStencilReference(commandBuffer, VkStencilFaceFlags(VK_STENCIL_FACE_BACK_BIT.rawValue), back)
         }
         self.encoder!.commands.append(command)
+        if self.encoder!.drawCount == 0 {
+            self.encoder!.setDynamicStates.insert(VK_DYNAMIC_STATE_STENCIL_REFERENCE)
+        }
     }
 
     public func setDepthBias(_ depthBias: Float, slopeScale: Float, clamp: Float) {
@@ -568,6 +625,9 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
             vkCmdSetDepthBias(commandBuffer, depthBias, clamp, slopeScale)
         }
         self.encoder!.commands.append(command)
+        if self.encoder!.drawCount == 0 {
+            self.encoder!.setDynamicStates.insert(VK_DYNAMIC_STATE_DEPTH_BIAS)
+        }
     }
 
     public func pushConstant<D: DataProtocol>(stages: ShaderStageFlags, offset: Int, data: D) {
@@ -602,6 +662,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
                           UInt32(baseInstance))
             }
             self.encoder!.commands.append(command)
+            self.encoder!.drawCount += 1
         }
     }
 
@@ -633,6 +694,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
             }
             self.encoder!.buffers.append(bufferView)
             self.encoder!.commands.append(command)
+            self.encoder!.drawCount += 1
         }
     }
 }
