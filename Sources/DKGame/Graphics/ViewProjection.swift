@@ -31,7 +31,7 @@ public struct ViewTransform: Hashable {
         (-t).applying(matrix.inverted()!)
     }
 
-    public var affineTransform: AffineTransform3 {
+    public var transform: AffineTransform3 {
         .init(linear: matrix, origin: t)
     }
 
