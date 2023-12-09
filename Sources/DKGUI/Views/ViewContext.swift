@@ -19,6 +19,10 @@ extension EnvironmentValues {
     }
 }
 
+struct WeakObject<T: AnyObject> {
+    weak var value: T?
+}
+
 class SharedContext {
     var appContext: AppContext
 
@@ -33,6 +37,9 @@ class SharedContext {
     var resourceObjects: [String: AnyObject] = [:]
     var cachedTypeFaces: [Font: TypeFace] = [:]
 
+    var mouseCaptors: [Int: WeakObject<ViewProxy>] = [:]
+    var keyboardCaptors: [Int: WeakObject<ViewProxy>] = [:]
+
     init(appContext: AppContext) {
         self.appContext = appContext
         self.contentBounds = .zero
@@ -45,7 +52,7 @@ class SharedContext {
             weak var value: AnyObject?
         }
         let weakMap = resourceObjects.mapValues {
-            WeakWrapper(value: $0)
+            WeakObject<AnyObject>(value: $0)
         }
         resourceObjects.removeAll()
         resourceObjects = weakMap.compactMapValues {
@@ -224,6 +231,72 @@ class ViewProxy {
             view.drawView(frame: view.frame, context: context)
         }
         self.drawOverlay(frame: frame, context: context)
+    }
+
+    func captureMouse(withDeviceID deviceID: Int) -> ViewProxy? {
+        self.sharedContext.mouseCaptors.updateValue(WeakObject(value: self), 
+                                                    forKey: deviceID)?.value
+    }
+
+    @discardableResult
+    func releaseMouse(withDeviceID deviceID: Int) -> Bool {
+        if self.sharedContext.mouseCaptors[deviceID]?.value === self {
+            self.sharedContext.mouseCaptors[deviceID] = nil
+            return true
+        }
+        return false
+    }
+
+    func hasCapturedMouse(withDeviceID deviceID: Int) -> Bool {
+        self.sharedContext.mouseCaptors[deviceID]?.value === self
+    }
+
+    @discardableResult
+    func releaseKeyboard(withDeviceID deviceID: Int) -> Bool {
+        if self.sharedContext.keyboardCaptors[deviceID]?.value === self {
+            self.sharedContext.keyboardCaptors[deviceID] = nil
+            return true
+        }
+        return false
+    }
+
+    func captureKeyboard(withDeviceID deviceID: Int) -> ViewProxy? {
+        self.sharedContext.keyboardCaptors.updateValue(WeakObject(value: self),
+                                                       forKey: deviceID)?.value
+    }
+
+    func hasCapturedKeyboard(withDeviceID deviceID: Int) -> Bool {
+        self.sharedContext.keyboardCaptors[deviceID]?.value === self
+    }
+
+    func processMouseEvent(type: MouseEventType,
+                           deviceType: MouseEventDevice,
+                           deviceID: Int,
+                           buttonID: Int,
+                           location: CGPoint,
+                           dedicated: Bool) -> Bool {
+        if dedicated { return false }
+        for subview in self.subviews {
+            if subview.frame.contains(location) {
+                let loc = location + subview.frame.origin
+                if subview.processMouseEvent(type: type,
+                                             deviceType: deviceType,
+                                             deviceID: deviceID,
+                                             buttonID: buttonID,
+                                             location: loc,
+                                             dedicated: false) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    func processKeyboardEvent(type: KeyboardEventType,
+                              deviceID: Int,
+                              key: VirtualKey,
+                              text: String) -> Bool {
+        false
     }
 
     func updateEnvironment(_ environmentValues: EnvironmentValues) {

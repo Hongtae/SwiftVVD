@@ -5,6 +5,9 @@
 //  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
+import Foundation
+import DKGame
+
 public struct Button<Label> : View where Label : View {
     let role: ButtonRole?
     let action: ()->Void
@@ -127,5 +130,34 @@ class ButtonProxy: ViewProxy {
         if self.frame.width > 0 && self.frame.height > 0 {
             context.fill(Path(frame), with: .color(.red))
         }
+    }
+
+    override func processMouseEvent(type: MouseEventType,
+                                    deviceType: MouseEventDevice,
+                                    deviceID: Int,
+                                    buttonID: Int,
+                                    location: CGPoint,
+                                    dedicated: Bool) -> Bool {
+        if (super.processMouseEvent(type: type,
+                                    deviceType: deviceType,
+                                    deviceID: deviceID,
+                                    buttonID: buttonID,
+                                    location: location,
+                                    dedicated: dedicated)) {
+            return true
+        }
+        if type == .buttonDown {
+            _ = self.captureMouse(withDeviceID: deviceID)
+        } else if type == .buttonUp {
+            if self.hasCapturedMouse(withDeviceID: deviceID) {
+                if (self.frame.contains(location)) {
+                    Log.debug("Mouse Click: \(location)")
+                } else {
+                    Log.debug("Mouse Click: \(location) - Cancelled / Touch Up Outside")
+                }
+                self.releaseMouse(withDeviceID: deviceID)
+            }
+        }
+        return false
     }
 }

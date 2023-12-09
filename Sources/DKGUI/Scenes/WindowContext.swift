@@ -41,7 +41,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
     private var task: Task<Void, Never>?
 
     private func runWindowUpdateTask() -> Task<Void, Never> {
-        Task.detached(priority: .userInitiated) { [weak self] in
+        Task.detached(priority: .userInitiated) { @MainActor [weak self] in
             Log.info("WindowContext<\(Content.self)> update task is started.")
             var tickCounter = TickCounter()
 
@@ -87,12 +87,12 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                         if let commandBuffer = appContext?.graphicsDeviceContext?.renderQueue()?.makeCommandBuffer() {
                             let width = 4, height = 4
                             if var context = GraphicsContext(sharedContext: sharedContext,
-                                                          environment: environmentValues,
-                                                          viewport: CGRect(x: 0, y: 0, width: width, height: height),
-                                                          contentOffset: .zero,
-                                                          contentScaleFactor: contentScaleFactor,
-                                                          resolution: CGSize(width: width, height: height),
-                                                          commandBuffer: commandBuffer) {
+                                                             environment: environmentValues,
+                                                             viewport: CGRect(x: 0, y: 0, width: width, height: height),
+                                                             contentOffset: .zero,
+                                                             contentScaleFactor: contentScaleFactor,
+                                                             resolution: CGSize(width: width, height: height),
+                                                             commandBuffer: commandBuffer) {
                                 context.environment = view.environmentValues
                                 view.loadView(context: context)
                                 commandBuffer.commit()
@@ -332,13 +332,34 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
     func onKeyboardEvent(event: KeyboardEvent) {
         if event.window !== self.window { return }
         Log.debug("WindowContext.onKeyboardEvent: \(event)")
+        if let captor = self.sharedContext.keyboardCaptors[event.deviceID]?.value {
+            _ = captor.processKeyboardEvent(type: event.type,
+                                            deviceID: event.deviceID,
+                                            key: event.key,
+                                            text: event.text)
+        }
     }
 
     @MainActor
     func onMouseEvent(event: MouseEvent) {
         if event.window !== self.window { return }
-        if event.type != .move {
+        if event.type != .move && event.type != .pointing {
             Log.debug("WindowContext.onMouseEvent: \(event)")
+        }
+        if let captor = self.sharedContext.mouseCaptors[event.deviceID]?.value {
+            _ = captor.processMouseEvent(type: event.type,
+                                         deviceType: event.device,
+                                         deviceID: event.deviceID,
+                                         buttonID: event.buttonID,
+                                         location: event.location,
+                                         dedicated: true)
+        } else {
+            _ = self.viewProxy.processMouseEvent(type: event.type,
+                                                 deviceType: event.device,
+                                                 deviceID: event.deviceID,
+                                                 buttonID: event.buttonID,
+                                                 location: event.location,
+                                                 dedicated: false)
         }
     }
 }
