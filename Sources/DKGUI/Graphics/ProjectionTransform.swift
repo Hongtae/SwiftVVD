@@ -104,3 +104,16 @@ public struct ProjectionTransform: Equatable, Sendable {
         return mat
     }
 }
+
+extension CGPoint {
+    public func applying(_ m: ProjectionTransform) -> CGPoint {
+        let dot = { (x: CGFloat, y: CGFloat, z: CGFloat) -> CGFloat in
+            self.x * x + self.y * y + z
+        }
+        let x = dot(m.m11, m.m21, m.m31)
+        let y = dot(m.m12, m.m22, m.m32)
+        let z = dot(m.m13, m.m23, m.m33)
+        assert(abs(z) > CGFloat.leastNonzeroMagnitude)
+        return CGPoint(x: x / z, y: y / z )
+    }
+}
