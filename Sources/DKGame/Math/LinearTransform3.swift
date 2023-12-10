@@ -134,36 +134,28 @@ public struct LinearTransform3: Hashable {
         self = self.inverted()
     }
 
-    public func concatenating(_ t: Self) -> Self {
-        return Self(self.matrix3.concatenating(t.matrix3))
-    }
-
-    public func concatenating(_ m: Matrix3) -> Self {
+    public func applying(_ m: Matrix3) -> Self {
         return Self(self.matrix3.concatenating(m))
     }
 
-    public func concatenating(_ q: Quaternion) -> Self {
+    public func applying(_ q: Quaternion) -> Self {
         return Self(self.matrix3.concatenating(q.matrix3))
     }
 
-    public mutating func concatenate(_ t: Self) {
-        self = self.concatenating(t)
+    public mutating func apply(_ m: Matrix3) {
+        self.matrix3.concatenate(m)
     }
 
-    public mutating func concatenate(_ m: Matrix3) {
-        self = self.concatenating(m)
-    }
-
-    public mutating func concatenate(_ q: Quaternion) {
-        self = self.concatenating(q)
+    public mutating func apply(_ q: Quaternion) {
+        self.matrix3.concatenate(q.matrix3)
     }
 
     public func rotated(by q: Quaternion) -> Self {
-        self.concatenating(q)
+        self.applying(q)
     }
 
     public mutating func rotate(by q: Quaternion) {
-        self.concatenate(q)
+        self.apply(q)
     }
 
     public func rotated(angle: some BinaryFloatingPoint, axis: Vector3) -> Self {
@@ -253,28 +245,36 @@ public struct LinearTransform3: Hashable {
         return .init(Matrix3(column1: c1, column2: c2, column3: c3))
     }
 
+    public func concatenating(_ t: Self) -> Self {
+        return Self(self.matrix3.concatenating(t.matrix3))
+    }
+
+    public mutating func concatenate(_ t: Self) {
+        self.matrix3.concatenate(t.matrix3)
+    }
+
     public static func * (lhs: Self, rhs: Self) -> Self {
         return lhs.concatenating(rhs)
     }
 
     public static func * (lhs: Self, rhs: Matrix3) -> Self {
-        return lhs.concatenating(rhs)
+        return lhs.applying(rhs)
     }
 
     public static func * (lhs: Self, rhs: Quaternion) -> Self {
-        return lhs.concatenating(rhs)
+        return lhs.applying(rhs)
     }
 
     public static func *= (lhs: inout Self, rhs: Self) {
-        lhs = lhs * rhs
+        lhs.concatenate(rhs)
     }
 
     public static func *= (lhs: inout Self, rhs: Matrix3) {
-        lhs = lhs * rhs
+        lhs.apply(rhs)
     }
 
     public static func *= (lhs: inout Self, rhs: Quaternion) {
-        lhs = lhs * rhs
+        lhs.apply(rhs)
     }
 }
 

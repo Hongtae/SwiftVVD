@@ -157,36 +157,36 @@ public struct LinearTransform2: Hashable {
         self = self.inverted()
     }
 
-    public func concatenating(_ m: Matrix2) -> Self {
-        return Self(self.matrix2.concatenating(m))
+    public func applying(_ m: Matrix2) -> Self {
+        .init(self.matrix2.concatenating(m))
     }
 
-    public mutating func concatenate(_ m: Matrix2) {
-        self = self.concatenating(m)
+    public mutating func apply(_ m: Matrix2) {
+        self.matrix2.concatenate(m)
     }
 
     public func concatenating(_ t: Self) -> Self {
-        return Self(self.matrix2.concatenating(t.matrix2))
+        .init(self.matrix2.concatenating(t.matrix2))
     }
 
     public mutating func concatenate(_ t: Self) {
-        self = self.concatenating(t)
+        self.matrix2.concatenate(t.matrix2)
     }
 
     public static func * (lhs: Self, rhs: Self) -> Self {
-        return lhs.concatenating(rhs)
+        lhs.concatenating(rhs)
     }
 
     public static func * (lhs: Self, rhs: Matrix2) -> Self {
-        return lhs.concatenating(rhs)
+        lhs.applying(rhs)
     }
 
     public static func *= (lhs: inout Self, rhs: Self) {
-        lhs = lhs * rhs
+        lhs.concatenate(rhs)
     }
 
     public static func *= (lhs: inout Self, rhs: Matrix2) {
-        lhs = lhs * rhs
+        lhs.apply(rhs)
     }
 }
 

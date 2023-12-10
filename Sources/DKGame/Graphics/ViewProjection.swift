@@ -32,7 +32,7 @@ public struct ViewTransform: Hashable {
     }
 
     public var transform: AffineTransform3 {
-        .init(linear: matrix, origin: t)
+        .init(basis: matrix, origin: t)
     }
 
     public func concatenating(_ other: Self) -> Self {
