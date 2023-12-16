@@ -327,6 +327,8 @@ public class VulkanGraphicsDevice : GraphicsDevice {
                         }
                     }
                     timer.reset()
+                } else {
+                    await Task.yield()
                 }
             }
             assert(completionHandlers.isEmpty, "completionHandlers must be empty!")
