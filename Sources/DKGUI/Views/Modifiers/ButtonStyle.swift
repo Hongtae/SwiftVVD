@@ -27,6 +27,7 @@ typealias ButtonAction = ()->Void
 public struct PrimitiveButtonStyleConfiguration {
     public struct Label : View {
         public typealias Body = Never
+        let view: AnyView
     }
     public let role: ButtonRole?
     public let label: PrimitiveButtonStyleConfiguration.Label
@@ -37,6 +38,21 @@ public struct PrimitiveButtonStyleConfiguration {
 }
 
 extension PrimitiveButtonStyleConfiguration.Label : _PrimitiveView {}
+
+extension PrimitiveButtonStyleConfiguration.Label {
+    init() {
+        self.view = AnyView(EmptyView())
+    }
+    init(_ view: AnyView) {
+        self.view = view
+    }
+    public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        AnyView._makeView(view: view[\.view], inputs: inputs)
+    }
+    public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
+        AnyView._makeViewList(view: view[\.view], inputs: inputs)
+    }
+}
 
 public struct DefaultButtonStyle : PrimitiveButtonStyle {
     public init() {
@@ -111,6 +127,7 @@ public protocol ButtonStyle {
 public struct ButtonStyleConfiguration {
     public struct Label : View {
         public typealias Body = Never
+        let view: AnyView
     }
     public let role: ButtonRole?
     public let label: ButtonStyleConfiguration.Label
@@ -119,14 +136,53 @@ public struct ButtonStyleConfiguration {
 
 extension ButtonStyleConfiguration.Label : _PrimitiveView {}
 
+extension ButtonStyleConfiguration.Label {
+    init(_ view: AnyView) {
+        self.view = view
+    }
+    public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        AnyView._makeView(view: view[\.view], inputs: inputs)
+    }
+    public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
+        AnyView._makeViewList(view: view[\.view], inputs: inputs)
+    }
+}
+
+struct _DefaultButtonWithButtonStyle<Style> : PrimitiveButtonStyle where Style: ButtonStyle {
+    let style: Style
+    public init(style: Style) {
+        self.style = style
+    }
+    public func makeBody(configuration: Configuration) -> some View {
+        let btnConfig = ButtonStyleConfiguration(role: configuration.role,
+                                                 label: .init(configuration.label.view),
+                                                 isPressed: false)
+        return self.style.makeBody(configuration: btnConfig)._onButtonGesture {
+            configuration.trigger()
+        }
+    }
+}
+
 struct PrimitiveButtonStyleContainerModifier<Style> : ViewModifier where Style: PrimitiveButtonStyle {
     let style: Style
     typealias Body = Never
 }
 
+extension PrimitiveButtonStyleContainerModifier: _ViewInputsModifier {
+    static func _makeViewInputs(modifier: _GraphValue<Self>, inputs: inout _ViewInputs) {
+        inputs.primitiveButtonStyles.append(modifier[\.style].value)
+    }
+}
+
 struct ButtonStyleContainerModifier<Style> : ViewModifier where Style: ButtonStyle {
     let style: Style
     typealias Body = Never
+}
+
+extension ButtonStyleContainerModifier: _ViewInputsModifier {
+    static func _makeViewInputs(modifier: _GraphValue<Self>, inputs: inout _ViewInputs) {
+        inputs.primitiveButtonStyles.append(_DefaultButtonWithButtonStyle(style: modifier[\.style].value))
+    }
 }
 
 extension View {

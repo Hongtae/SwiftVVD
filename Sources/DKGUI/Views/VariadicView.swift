@@ -43,7 +43,7 @@ extension _VariadicView_Children: RandomAccessCollection {
             var inputs = inputs
             inputs.modifiers.append(contentsOf: view.value.modifiers)
             inputs.traits.merge(view.value.traits) { $1 }
-            return view.value.view.makeView(graph: _Graph(), inputs: inputs)
+            return AnyView._makeView(view: view[\.view], inputs: inputs)
         }
 
         public typealias ID = AnyHashable

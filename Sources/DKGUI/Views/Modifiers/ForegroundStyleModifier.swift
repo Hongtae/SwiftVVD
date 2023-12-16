@@ -13,7 +13,7 @@ public struct _ForegroundStyleModifier<Style>: ViewModifier where Style: ShapeSt
         self.style = style
     }
     public static func _makeViewInputs(modifier: _GraphValue<Self>, inputs: inout _ViewInputs) {
-        fatalError()
+        inputs.foregroundStyle.primary = AnyShapeStyle(modifier[\.style].value)
     }
     public typealias Body = Never
 }
@@ -29,7 +29,8 @@ public struct _ForegroundStyleModifier2<S1, S2>: ViewModifier where S1: ShapeSty
         self.secondary = secondary
     }
     public static func _makeViewInputs(modifier: _GraphValue<Self>, inputs: inout _ViewInputs) {
-        fatalError()
+        inputs.foregroundStyle.primary = AnyShapeStyle(modifier[\.primary].value)
+        inputs.foregroundStyle.secondary = AnyShapeStyle(modifier[\.secondary].value)
     }
     public typealias Body = Never
 }
@@ -47,7 +48,9 @@ public struct _ForegroundStyleModifier3<S1, S2, S3>: ViewModifier where S1: Shap
         self.tertiary = tertiary
     }
     public static func _makeViewInputs(modifier: _GraphValue<Self>, inputs: inout _ViewInputs) {
-        fatalError()
+        inputs.foregroundStyle.primary = AnyShapeStyle(modifier[\.primary].value)
+        inputs.foregroundStyle.secondary = AnyShapeStyle(modifier[\.secondary].value)
+        inputs.foregroundStyle.tertiary = AnyShapeStyle(modifier[\.tertiary].value)
     }
     public typealias Body = Never
 }

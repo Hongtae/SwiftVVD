@@ -19,6 +19,7 @@ struct ContentView: View {
             Button("Press Me") {
                 print("Button pressed!")
             }
+            .buttonStyle(BlueButton())
         }
     }
 }

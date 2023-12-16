@@ -20,7 +20,7 @@ public struct Button<Label> : View where Label : View {
     }
     public var body: some View {
         ResolvedButtonStyle(
-            configuration:PrimitiveButtonStyleConfiguration(
+            configuration: PrimitiveButtonStyleConfiguration(
                 role: nil,
                 label: PrimitiveButtonStyleConfiguration.Label(),
                 action: action))
@@ -98,66 +98,65 @@ extension Button where Label == DKGUI.Label<Text, Image> {
     }
 }
 
+extension PrimitiveButtonStyle {
+    func _makeBodyView(configuration: Configuration, inputs: _ViewInputs) -> _ViewOutputs {
+        let view = self.makeBody(configuration: configuration)
+        return Self.Body._makeView(view: _GraphValue(view), inputs: inputs)
+    }
+    func _makeBodyViewList(configuration: Configuration, inputs: _ViewListInputs) -> _ViewListOutputs {
+        let view = self.makeBody(configuration: configuration)
+        return Self.Body._makeViewList(view: _GraphValue(view), inputs: inputs)
+    }
+}
+
 struct ResolvedButtonStyle: View {
     typealias Body = Never
-    var body: Never {
-        fatalError()
+    let configuration: PrimitiveButtonStyleConfiguration
+    init(configuration: PrimitiveButtonStyleConfiguration) {
+        self.configuration = configuration
     }
 
-    init(configuration: PrimitiveButtonStyleConfiguration) {
+    static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        let lv = inputs.sourceWrites[ObjectIdentifier(PrimitiveButtonStyleConfiguration.Label.self)] as? AnyView
+        let config = view[\.configuration].value
+        let label: PrimitiveButtonStyleConfiguration.Label
+        if let lv {
+            label = .init(lv)
+        } else {
+            label = config.label
+        }
+        let configuration = PrimitiveButtonStyleConfiguration(role: config.role,
+                                                              label: label,
+                                                              action: config.action)
+        // resolve style
+        if let style = inputs.primitiveButtonStyles.last {
+            var inputs = inputs
+            inputs.primitiveButtonStyles.removeLast()
+            return style._makeBodyView(configuration: configuration, inputs: inputs)
+        }
+        return DefaultButtonStyle()._makeBodyView(configuration: configuration, inputs: inputs)
+    }
+    static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
+        let lv = inputs.inputs.sourceWrites[ObjectIdentifier(PrimitiveButtonStyleConfiguration.Label.self)] as? AnyView
+        let config = view[\.configuration].value
+        let label: PrimitiveButtonStyleConfiguration.Label
+        if let lv {
+            label = .init(lv)
+        } else {
+            label = config.label
+        }
+        let configuration = PrimitiveButtonStyleConfiguration(role: config.role,
+                                                              label: label,
+                                                              action: config.action)
+        // resolve style
+        if let style = inputs.inputs.primitiveButtonStyles.last {
+            var inputs = inputs
+            inputs.inputs.primitiveButtonStyles.removeLast()
+            return style._makeBodyViewList(configuration: configuration, inputs: inputs)
+        }
+        return DefaultButtonStyle()._makeBodyViewList(configuration: configuration, inputs: inputs)
     }
 }
 
 extension ResolvedButtonStyle: _PrimitiveView {
-}
-
-extension ResolvedButtonStyle: _ViewProxyProvider {
-    func makeViewProxy(inputs: _ViewInputs) -> ViewProxy {
-        ButtonProxy(inputs: inputs)
-    }
-}
-
-class ButtonProxy: ViewProxy {
-    init(inputs: _ViewInputs) {
-        super.init(inputs: inputs)
-    }
-
-    override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
-        CGSize(width: 100, height: 40)
-    }
-
-    override func draw(frame: CGRect, context: GraphicsContext) {
-        if self.frame.width > 0 && self.frame.height > 0 {
-            context.fill(Path(frame), with: .color(.red))
-        }
-    }
-
-    override func processMouseEvent(type: MouseEventType,
-                                    deviceType: MouseEventDevice,
-                                    deviceID: Int,
-                                    buttonID: Int,
-                                    location: CGPoint,
-                                    dedicated: Bool) -> Bool {
-        if (super.processMouseEvent(type: type,
-                                    deviceType: deviceType,
-                                    deviceID: deviceID,
-                                    buttonID: buttonID,
-                                    location: location,
-                                    dedicated: dedicated)) {
-            return true
-        }
-        if type == .buttonDown {
-            _ = self.captureMouse(withDeviceID: deviceID)
-        } else if type == .buttonUp {
-            if self.hasCapturedMouse(withDeviceID: deviceID) {
-                if (self.frame.contains(location)) {
-                    Log.debug("Mouse Click: \(location)")
-                } else {
-                    Log.debug("Mouse Click: \(location) - Cancelled / Touch Up Outside")
-                }
-                self.releaseMouse(withDeviceID: deviceID)
-            }
-        }
-        return false
-    }
 }

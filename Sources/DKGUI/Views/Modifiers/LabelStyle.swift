@@ -119,7 +119,7 @@ struct LabelStyleWritingModifier<Style>: ViewModifier where Style: LabelStyle {
 
 extension LabelStyleWritingModifier: _ViewInputsModifier {
     static func _makeViewInputs(modifier: _GraphValue<Self>, inputs: inout _ViewInputs) {
-        inputs.labelStyleModifiers.append(modifier[\.style].value)
+        inputs.labelStyles.append(modifier[\.style].value)
     }
 }
 

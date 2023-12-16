@@ -9,10 +9,10 @@ public struct _ViewModifier_Content<Modifier> where Modifier: ViewModifier {
     public typealias Body = Never
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        if let makeView = view.value.makeView {
+        if case let .makeView(makeView) = view.value.storage {
             return makeView(_Graph(), inputs)
         }
-        if let makeViewList = view.value.makeViewList {
+        if case let .makeViewList(makeViewList) = view.value.storage {
             let listInputs = _ViewListInputs(inputs: inputs)
             let listOutputs = makeViewList(_Graph(), listInputs)
 
@@ -26,13 +26,17 @@ public struct _ViewModifier_Content<Modifier> where Modifier: ViewModifier {
         fatalError()
     }
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        if let makeViewList = view.value.makeViewList {
+        if case let .makeViewList(makeViewList) = view.value.storage {
             return makeViewList(_Graph(), inputs)
         }
         fatalError()
     }
-    var makeView: ((_Graph, _ViewInputs)->_ViewOutputs)?
-    var makeViewList: ((_Graph, _ViewListInputs)->_ViewListOutputs)?
+
+    enum Storage {
+        case makeView((_Graph, _ViewInputs)->_ViewOutputs)
+        case makeViewList((_Graph, _ViewListInputs)->_ViewListOutputs)
+    }
+    let storage: Storage
 }
 
 extension _ViewModifier_Content: View {
@@ -58,13 +62,13 @@ extension ViewModifier {
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
         var inputs = inputs
         inputs.modifiers.append(modifier.value)
-        let body = modifier.value.body(content: Content(makeView: body))
+        let body = modifier.value.body(content: Content(storage: .makeView(body)))
         return Self.Body._makeView(view: _GraphValue(body), inputs: inputs)
     }
     public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
         var inputs = inputs
         inputs.inputs.modifiers.append(modifier.value)
-        let body = modifier.value.body(content: Content(makeViewList: body))
+        let body = modifier.value.body(content: Content(storage: .makeViewList(body)))
         let outputs = Self.Body._makeViewList(view: _GraphValue(body), inputs: inputs)
         return _ViewListOutputs(item: .viewList([outputs]))
     }

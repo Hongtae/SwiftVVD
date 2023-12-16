@@ -57,29 +57,29 @@ extension LabelStyle {
     }
 }
 
-public struct ResolvedLabelStyle: View {
-    public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+struct ResolvedLabelStyle: View {
+    static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         let title = inputs.sourceWrites[ObjectIdentifier(LabelStyleConfiguration.Title.self)] as? AnyView
         let icon = inputs.sourceWrites[ObjectIdentifier(LabelStyleConfiguration.Icon.self)] as? AnyView
         let configuration = LabelStyleConfiguration(title, icon)
 
         // resolve sytle
-        if let style = inputs.labelStyleModifiers.last {
+        if let style = inputs.labelStyles.last {
             var inputs = inputs
-            inputs.labelStyleModifiers.removeLast()
+            inputs.labelStyles.removeLast()
             return style._makeBodyView(configuration: configuration, inputs: inputs)
         }
         return DefaultLabelStyle.automatic._makeBodyView(configuration: configuration, inputs: inputs)
     }
-    public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
+    static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
         let title = inputs.inputs.sourceWrites[ObjectIdentifier(LabelStyleConfiguration.Title.self)] as? AnyView
         let icon = inputs.inputs.sourceWrites[ObjectIdentifier(LabelStyleConfiguration.Icon.self)] as? AnyView
         let configuration = LabelStyleConfiguration(title, icon)
 
         // resolve sytle
-        if let style = inputs.inputs.labelStyleModifiers.last {
+        if let style = inputs.inputs.labelStyles.last {
             var inputs = inputs
-            inputs.inputs.labelStyleModifiers.removeLast()
+            inputs.inputs.labelStyles.removeLast()
             return style._makeBodyViewList(configuration: configuration, inputs: inputs)
         }
         return DefaultLabelStyle.automatic._makeBodyViewList(configuration: configuration, inputs: inputs)

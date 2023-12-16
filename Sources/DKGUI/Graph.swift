@@ -25,8 +25,12 @@ public struct _ViewInputs {
     var traits: [ObjectIdentifier: Any] = [:]
     var sourceWrites: [ObjectIdentifier: Any] = [:]
 
-    var labelStyleModifiers: [any LabelStyle] = []
-    
+    var labelStyles: [any LabelStyle] = []
+    var primitiveButtonStyles: [any PrimitiveButtonStyle] = []
+    var foregroundStyle: (primary: AnyShapeStyle?,
+                          secondary: AnyShapeStyle?,
+                          tertiary: AnyShapeStyle?)
+
     var environmentValues: EnvironmentValues
 
     var transform: CGAffineTransform
@@ -34,6 +38,10 @@ public struct _ViewInputs {
     var size: CGSize
     var safeAreaInsets: EdgeInsets
     var defaultLayout: (any Layout)
+
+    var gestures: [any Gesture] = []
+    var simultaneousGestures: [any Gesture] = []
+    var highPriorityGestures: [any Gesture] = []
 }
 
 public struct _ViewOutputs {
@@ -81,7 +89,7 @@ public struct _ViewListOutputs {
 
     var viewProxies: [ViewProxy] {
         let viewOutputs = self.views.map {
-            $0.view.makeView(graph: _Graph(), inputs: $0.inputs)
+            AnyView._makeView(view: _GraphValue($0.view), inputs: $0.inputs)
         }
         return viewOutputs.compactMap {
             if case let .view(view) = $0.item { return view }

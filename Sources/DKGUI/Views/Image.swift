@@ -203,7 +203,7 @@ extension Image {
 }
 
 extension Image {
-    public init(systemName: Swift.String) {
+    public init(systemName: String) {
         self.provider = SymbolImageProvider(name: systemName, variableValue: nil, bundle: nil, label: nil)
     }
     public init(systemName: String, variableValue: Double?) {

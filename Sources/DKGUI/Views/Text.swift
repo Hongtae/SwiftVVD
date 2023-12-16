@@ -345,7 +345,11 @@ class TextViewProxy: ViewProxy {
                 self.sharedContext.needsLayout = true
             }
             if let resolvedText {
-                context.draw(resolvedText, in: frame)
+                if let style = foregroundStyle.primary {
+                    context.draw(resolvedText, in: frame, shading: .style(style))
+                } else {
+                    context.draw(resolvedText, in: frame)
+                }
             }
         }
     }
