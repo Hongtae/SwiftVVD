@@ -7,33 +7,40 @@
 
 import Foundation
 
-enum _PrimitiveGestureType {
-    case unknown
-    case tap
-    case longPress
-    case drag
-    case magnification
-    case rotation
-    case rotation3D
-    case button
+struct _PrimitiveGestureTypes : OptionSet {
+    let rawValue: UInt
+    static let tap              = Self(rawValue: 1 << 0)
+    static let longPress        = Self(rawValue: 1 << 1)
+    static let drag             = Self(rawValue: 1 << 2)
+    static let magnification    = Self(rawValue: 1 << 3)
+    static let rotation         = Self(rawValue: 1 << 4)
+    static let rotation3D       = Self(rawValue: 1 << 5)
+    static let button           = Self(rawValue: 1 << 6)
+
+    static let all = Self(rawValue: .max)
+    static let none: Self = []
 }
 
 class _GestureHandler {
     enum State: Int {
-        case possible
-        case began
-        case changed
-        case ended
+        case ready
+        case processing
         case cancelled
         case failed
+        case done
     }
-    var state: State { .possible }
+    var state: State = .ready
     weak var viewProxy: ViewProxy?
 
-    var type: _PrimitiveGestureType { .unknown }
+    func setTypeFilter(_ f: _PrimitiveGestureTypes) -> _PrimitiveGestureTypes {
+        f.subtracting(self.type)
+    }
+
+    var type: _PrimitiveGestureTypes { .none }
     var isValid: Bool { false }
 
     required init(inputs: _GestureInputs) {
+        self.viewProxy = inputs.viewProxy
     }
 
     func began(deviceID: Int, buttonID: Int, location: CGPoint) {
@@ -49,10 +56,6 @@ class _GestureHandler {
     }
 
     func reset() {
-    }
-
-    func shouldRequireFailure(of: _PrimitiveGestureType) -> Bool {
-        false
     }
 }
 

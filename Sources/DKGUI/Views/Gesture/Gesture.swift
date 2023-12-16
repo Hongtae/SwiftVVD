@@ -40,6 +40,7 @@ extension Optional : Gesture where Wrapped : Gesture {
 }
 
 public struct _GestureInputs {
+    weak var viewProxy: ViewProxy?
     var endedCallbacks: [Any] = []
     var changedCallbacks: [Any] = []
     var pressableGestureCallbacks: [Any] = []

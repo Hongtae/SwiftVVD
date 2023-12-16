@@ -29,8 +29,12 @@ extension View {
 }
 
 class _ButtonGestureRecognizer : _GestureRecognizer<_ButtonGesture.Value> {
-    override var type: _PrimitiveGestureType { .button }
-    override var isValid: Bool { true }
+    var typeFilter: _PrimitiveGestureTypes = .all
+
+    override var type: _PrimitiveGestureTypes { .button }
+    override var isValid: Bool {
+        typeFilter.contains(self.type) && viewProxy != nil 
+    }
 
     let gesture: _ButtonGesture
 
@@ -41,5 +45,63 @@ class _ButtonGestureRecognizer : _GestureRecognizer<_ButtonGesture.Value> {
 
     required init(inputs: _GestureInputs) {
         fatalError("init(inputs:) has not been implemented")
+    }
+
+    override func setTypeFilter(_ f: _PrimitiveGestureTypes) -> _PrimitiveGestureTypes {
+        self.typeFilter = f
+        return self.typeFilter
+    }
+
+    let buttonID: Int = 0
+    var deviceID: Int? = nil
+    var location: CGPoint = .zero
+    var hover: Bool = false
+    override func began(deviceID: Int, buttonID: Int, location: CGPoint) {
+        if self.deviceID == nil, self.buttonID == buttonID, let viewProxy {
+            self.deviceID = deviceID
+            self.location = location
+            self.hover = viewProxy.bounds.contains(location)
+            self.gesture.pressingAction?(self.hover)
+            self.state = .processing
+        }
+    }
+
+    override func moved(deviceID: Int, buttonID: Int, location: CGPoint) {
+        let h = self.hover
+        if self.deviceID == deviceID, self.buttonID == buttonID, let viewProxy {
+            self.location = location
+            self.hover = viewProxy.bounds.contains(location)
+            self.state = .processing
+        }
+        if h != self.hover {
+            self.gesture.pressingAction?(self.hover)
+        }
+    }
+
+    override func ended(deviceID: Int, buttonID: Int) {
+        var invokeAction = false
+        if self.deviceID == deviceID, self.buttonID == buttonID, viewProxy != nil {
+            invokeAction = self.hover
+            self.deviceID = nil
+            self.hover = false
+            self.state = .done
+        }
+        if invokeAction {
+            self.gesture.action()
+        }
+    }
+
+    override func cancelled(deviceID: Int, buttonID: Int) {
+        if self.deviceID == deviceID, self.buttonID == buttonID {
+            self.deviceID = nil
+            self.hover = false
+            self.state = .cancelled
+        }
+    }
+
+    override func reset() {
+        self.deviceID = nil
+        self.hover = false
+        self.state = .ready
     }
 }

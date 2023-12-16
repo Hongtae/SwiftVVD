@@ -132,6 +132,10 @@ class ViewProxy {
     var simultaneousGestures: [any Gesture]
     var highPriorityGestures: [any Gesture]
 
+    var bounds: CGRect {
+        CGRect(x: 0, y: 0, width: frame.width, height: frame.height)
+    }
+
     init(inputs: _ViewInputs, subviews: [ViewProxy] = []) {
         self.subviews = subviews
         self.superview = nil
@@ -270,19 +274,19 @@ class ViewProxy {
         }
 
         let hpGestures = self.highPriorityGestures.compactMap {
-            let handler = makeHandler($0, inputs: _GestureInputs())
+            let handler = makeHandler($0, inputs: _GestureInputs(viewProxy: self))
             if handler.isValid { return handler }
             return nil
         }
 
         let viewGestures = self.gestures.compactMap {
-            let handler = makeHandler($0, inputs: _GestureInputs())
+            let handler = makeHandler($0, inputs: _GestureInputs(viewProxy: self))
             if handler.isValid { return handler }
             return nil
         }
 
         let simGestures = self.simultaneousGestures.compactMap {
-            let handler = makeHandler($0, inputs: _GestureInputs())
+            let handler = makeHandler($0, inputs: _GestureInputs(viewProxy: self))
             if handler.isValid { return handler }
             return nil
         }
@@ -297,29 +301,19 @@ class ViewProxy {
         }
 
         var outputs: [_GestureHandler] = []
-        let isAcceptable = { type in
-            for g in outputs {
-                if g.shouldRequireFailure(of: type) == false {
-                    return false
-                }
-            }
-            return true
-        }
+        var filter: _PrimitiveGestureTypes = .all
 
         hpGestures.forEach {
-            if isAcceptable($0.type) {
-                outputs.append($0)
-            }
+            filter = $0.setTypeFilter(filter)
+            if $0.isValid { outputs.append($0) }
         }
         subviewGestures.forEach {
-            if isAcceptable($0.type) {
-                outputs.append($0)
-            }
+            filter = $0.setTypeFilter(filter)
+            if $0.isValid { outputs.append($0) }
         }
         viewGestures.forEach {
-            if isAcceptable($0.type) {
-                outputs.append($0)
-            }
+            filter = $0.setTypeFilter(filter)
+            if $0.isValid { outputs.append($0) }
         }
         outputs.append(contentsOf: simGestures)
         outputs.forEach { $0.viewProxy = self }
