@@ -19,6 +19,15 @@ extension EnvironmentValues {
     }
 }
 
+struct WeakObject<T: AnyObject> : Equatable {
+    weak var value: T?
+    static func == (a: Self, b: Self) -> Bool { a.value === b.value }
+
+    init(_ value: T?) {
+        self.value = value
+    }
+}
+
 class SharedContext {
     var appContext: AppContext
 
@@ -33,6 +42,8 @@ class SharedContext {
     var resourceObjects: [String: AnyObject] = [:]
     var cachedTypeFaces: [Font: TypeFace] = [:]
 
+    var focusedViews: [Int: WeakObject<ViewProxy>] = [:]
+
     init(appContext: AppContext) {
         self.appContext = appContext
         self.contentBounds = .zero
@@ -45,7 +56,7 @@ class SharedContext {
             weak var value: AnyObject?
         }
         let weakMap = resourceObjects.mapValues {
-            WeakWrapper(value: $0)
+            WeakObject<AnyObject>($0)
         }
         resourceObjects.removeAll()
         resourceObjects = weakMap.compactMapValues {
@@ -108,12 +119,26 @@ class ViewProxy {
     var frame: CGRect
     var spacing: ViewSpacing
     var subviews: [ViewProxy]
+    weak var superview: ViewProxy?
 
     var backgroundLayers: [ViewLayer]
     var overlayLayers: [ViewLayer]
 
+    var foregroundStyle: (primary: AnyShapeStyle?,
+                          secondary: AnyShapeStyle?,
+                          tertiary: AnyShapeStyle?)
+
+    var gestures: [any Gesture]
+    var simultaneousGestures: [any Gesture]
+    var highPriorityGestures: [any Gesture]
+
+    var bounds: CGRect {
+        CGRect(x: 0, y: 0, width: frame.width, height: frame.height)
+    }
+
     init(inputs: _ViewInputs, subviews: [ViewProxy] = []) {
         self.subviews = subviews
+        self.superview = nil
         self.modifiers = inputs.modifiers
         self.traits = inputs.traits
         self.environmentValues = inputs.environmentValues
@@ -124,7 +149,24 @@ class ViewProxy {
         self.backgroundLayers = inputs.backgroundLayers
         self.overlayLayers = inputs.overlayLayers
 
+        self.foregroundStyle.primary = inputs.foregroundStyle.primary
+        self.foregroundStyle.secondary = inputs.foregroundStyle.secondary
+        self.foregroundStyle.tertiary = inputs.foregroundStyle.tertiary
+
+        self.gestures = inputs.gestures
+        self.simultaneousGestures = inputs.simultaneousGestures
+        self.highPriorityGestures = inputs.highPriorityGestures
+
         Log.debug("ViewProxy initialized with modifiers: \(self.modifiers), traits: \(self.traits)")
+        self.subviews.forEach { $0.superview = self }
+    }
+
+    var transformByRoot: AffineTransform {
+        var t = AffineTransform(translationX: self.frame.minX, y: self.frame.minY)
+        if let t2 = superview?.transformByRoot {
+            t = t2.concatenating(t)
+        }
+        return t
     }
 
     func loadView(context: GraphicsContext) {
@@ -224,6 +266,104 @@ class ViewProxy {
             view.drawView(frame: view.frame, context: context)
         }
         self.drawOverlay(frame: frame, context: context)
+    }
+
+    func gestureHandlers(at location: CGPoint) -> [_GestureHandler] {
+        func makeHandler<T: Gesture>(_ gesture: T, inputs: _GestureInputs) -> _GestureHandler {
+            T._makeGesture(gesture: _GraphValue(gesture), inputs: inputs).recognizer
+        }
+
+        let hpGestures = self.highPriorityGestures.compactMap {
+            let handler = makeHandler($0, inputs: _GestureInputs(viewProxy: self))
+            if handler.isValid { return handler }
+            return nil
+        }
+
+        let viewGestures = self.gestures.compactMap {
+            let handler = makeHandler($0, inputs: _GestureInputs(viewProxy: self))
+            if handler.isValid { return handler }
+            return nil
+        }
+
+        let simGestures = self.simultaneousGestures.compactMap {
+            let handler = makeHandler($0, inputs: _GestureInputs(viewProxy: self))
+            if handler.isValid { return handler }
+            return nil
+        }
+
+        let subviewGestures = subviews.flatMap {
+            let frame = $0.frame.standardized
+            if frame.contains(location) {
+                let locationInView = location - frame.origin
+                return $0.gestureHandlers(at: locationInView)
+            }
+            return []
+        }
+
+        var outputs: [_GestureHandler] = []
+        var filter: _PrimitiveGestureTypes = .all
+
+        hpGestures.forEach {
+            filter = $0.setTypeFilter(filter)
+            if $0.isValid { outputs.append($0) }
+        }
+        subviewGestures.forEach {
+            filter = $0.setTypeFilter(filter)
+            if $0.isValid { outputs.append($0) }
+        }
+        viewGestures.forEach {
+            filter = $0.setTypeFilter(filter)
+            if $0.isValid { outputs.append($0) }
+        }
+        outputs.append(contentsOf: simGestures)
+        outputs.forEach { $0.viewProxy = self }
+        return outputs
+    }
+
+    func handleMouseWheel(at location: CGPoint, delta: CGPoint) -> Bool {
+        if self.frame.standardized.contains(location) {
+            for subview in subviews {
+                let frame = subview.frame.standardized
+                if frame.contains(location) {
+                    let loc = location - frame.origin
+                    if subview.handleMouseWheel(at: loc, delta: delta) {
+                        return true
+                    }
+                }
+            }
+        }
+        return false
+    }
+
+    func setFocus(for deviceID: Int) {
+        let vp = self.sharedContext.focusedViews.updateValue(WeakObject(self),
+                                                             forKey: deviceID)?.value
+        if let vp, vp !== self {
+            vp.onLostFocus(for: deviceID)
+        }
+    }
+
+    @discardableResult
+    func releaseFocus(for deviceID: Int) -> Bool {
+        if self.sharedContext.focusedViews[deviceID]?.value === self {
+            self.sharedContext.focusedViews[deviceID] = nil
+            return true
+        }
+        return false
+    }
+
+    func hasFocus(for deviceID: Int) -> Bool {
+        self.sharedContext.focusedViews[deviceID]?.value === self
+    }
+
+    func onLostFocus(for deviceID: Int) {
+    }
+
+    func processKeyboardEvent(type: KeyboardEventType,
+                              deviceID: Int,
+                              key: VirtualKey,
+                              text: String) -> Bool {
+        false
     }
 
     func updateEnvironment(_ environmentValues: EnvironmentValues) {

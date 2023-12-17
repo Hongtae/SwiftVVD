@@ -9,7 +9,7 @@ import Foundation
 import DKGame
 
 extension GraphicsContext {
-       public struct Shading {
+    public struct Shading {
         enum Property {
             case color(color: Color)
             case style(style: ShapeStyle)
@@ -27,7 +27,7 @@ extension GraphicsContext {
             self.properties = palette.flatMap { $0.properties }
         }
 
-        public static var backdrop: Shading     { fatalError() }
+        public static var backdrop: Shading     { .color(.black) }
         public static var foreground: Shading   { .color(.black) }
 
         public static func palette(_ array: [Shading]) -> Shading {
@@ -753,7 +753,14 @@ extension GraphicsContext {
         var vertices: [_Vertex] = []
         var shader: _Shader = .vertexColor
 
-        if let property = shading.properties.first {
+        var property = shading.properties.first
+        if case let .style(style) = property {
+            var shape = _ShapeStyle_Shape()
+            style._apply(to: &shape)
+            property = shape.shading?.properties.first
+        }
+
+        if let property {
             switch property {
             case let .color(c):
                 shader = .vertexColor
@@ -767,32 +774,8 @@ extension GraphicsContext {
                     makeVertex(1, -1), makeVertex(-1, 1), makeVertex(1, 1)
                 ]
             case let .style(style):
-                // Temporary
-                var color: Color = .black
-                if style is ForegroundStyle {
-                    //TODO: resolve in environmentValues
-                    color = .black
-                } else if style is BackgroundStyle {
-                    //TODO: resolve in environmentValues
-                    color = .white
-                } else if style is SeparatorShapeStyle {
-                    //TODO: resolve in environmentValues
-                    color = .gray
-                } else if let c = style as? Color {
-                    color = c
-                } else {
-                    fatalError()
-                }
-                shader = .vertexColor
-                let makeVertex = { (x: Scalar, y: Scalar) in
-                    _Vertex(position: Vector2(x, y).float2,
-                            texcoord: Vector2.zero.float2,
-                            color: color.dkColor.float4)
-                }
-                vertices = [
-                    makeVertex(-1, -1), makeVertex(-1, 1), makeVertex(1, -1),
-                    makeVertex(1, -1), makeVertex(-1, 1), makeVertex(1, 1)
-                ]
+                fatalError("ShapeStyle should be resolved to GraphicsContext.Shading")
+
             case let .linearGradient(gradient, startPoint, endPoint, options):
                 let stops = gradient.normalized().stops
                 if stops.isEmpty { return }

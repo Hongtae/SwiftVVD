@@ -22,6 +22,8 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
     var environmentValues: EnvironmentValues
     var sharedContext: SharedContext
 
+    var gestureHandlers: [_GestureHandler] = []
+
     struct State {
         var visible = false
         var activated = false
@@ -41,7 +43,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
     private var task: Task<Void, Never>?
 
     private func runWindowUpdateTask() -> Task<Void, Never> {
-        Task.detached(priority: .userInitiated) { [weak self] in
+        Task.detached(priority: .userInitiated) { @MainActor [weak self] in
             Log.info("WindowContext<\(Content.self)> update task is started.")
             var tickCounter = TickCounter()
 
@@ -87,12 +89,12 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                         if let commandBuffer = appContext?.graphicsDeviceContext?.renderQueue()?.makeCommandBuffer() {
                             let width = 4, height = 4
                             if var context = GraphicsContext(sharedContext: sharedContext,
-                                                          environment: environmentValues,
-                                                          viewport: CGRect(x: 0, y: 0, width: width, height: height),
-                                                          contentOffset: .zero,
-                                                          contentScaleFactor: contentScaleFactor,
-                                                          resolution: CGSize(width: width, height: height),
-                                                          commandBuffer: commandBuffer) {
+                                                             environment: environmentValues,
+                                                             viewport: CGRect(x: 0, y: 0, width: width, height: height),
+                                                             contentOffset: .zero,
+                                                             contentScaleFactor: contentScaleFactor,
+                                                             resolution: CGSize(width: width, height: height),
+                                                             commandBuffer: commandBuffer) {
                                 context.environment = view.environmentValues
                                 view.loadView(context: context)
                                 commandBuffer.commit()
@@ -173,6 +175,8 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                         _=swapChain.present()
                     }
                 }
+
+                await Task.yield() // unblock main thread
 
                 let tickGranularity = 0.012
                 while tickCounter.elapsed < frameInterval - tickGranularity {
@@ -287,8 +291,20 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
         self.stateLock.lock()
         defer { self.stateLock.unlock() }
 
+        let releaseEventHandlers = {
+            self.sharedContext.focusedViews.forEach {
+                (deviceID, weakViewProxy) in
+                weakViewProxy.value?.onLostFocus(for: deviceID)
+            }
+            self.sharedContext.focusedViews.removeAll()
+            self.gestureHandlers.forEach {
+                $0.reset()
+            }
+            self.gestureHandlers.removeAll()
+        }
+
         switch event.type {
-        case .closed:
+        case .closed:            
             self.sharedContext.window = nil
             self.sharedContext.commandQueue = nil
 
@@ -307,6 +323,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
             self.state.bounds = event.contentBounds.standardized
             self.state.contentScaleFactor = event.contentScaleFactor
         case .hidden:
+            releaseEventHandlers()
             self.state.visible = false
             self.state.activated = false
         case .shown:
@@ -315,8 +332,10 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
             self.state.visible = true
             self.state.activated = true
         case .inactivated:
+            releaseEventHandlers()
             self.state.activated = false
         case .minimized:
+            releaseEventHandlers()
             self.state.activated = false
             self.state.visible = false
         case .moved, .resized:
@@ -332,13 +351,61 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
     func onKeyboardEvent(event: KeyboardEvent) {
         if event.window !== self.window { return }
         Log.debug("WindowContext.onKeyboardEvent: \(event)")
+        if let focusedView = self.sharedContext.focusedViews[event.deviceID]?.value {
+            _ = focusedView.processKeyboardEvent(type: event.type,
+                                            deviceID: event.deviceID,
+                                            key: event.key,
+                                            text: event.text)
+        }
     }
 
     @MainActor
     func onMouseEvent(event: MouseEvent) {
         if event.window !== self.window { return }
-        if event.type != .move {
+        if event.type != .move && event.type != .pointing {
             Log.debug("WindowContext.onMouseEvent: \(event)")
+        }
+
+        if event.type == .wheel {
+            _ = self.viewProxy.handleMouseWheel(at: event.location,
+                                                delta: event.delta)
+            return
+        }
+        if self.gestureHandlers.isEmpty {
+            if event.type == .buttonDown {
+                self.gestureHandlers = self.viewProxy.gestureHandlers(at: event.location)
+            }
+        }
+        if self.gestureHandlers.isEmpty { return }
+        switch event.type {
+        case .buttonDown:
+            self.gestureHandlers.forEach {
+                if let viewProxy = $0.viewProxy {
+                    let transform = viewProxy.transformByRoot.inverted()
+                    let locationInView = event.location.applying(transform)
+                    $0.began(deviceID: event.deviceID, buttonID: event.buttonID, location: locationInView)
+                }
+            }
+        case .buttonUp:
+            self.gestureHandlers.forEach {
+                $0.ended(deviceID: event.deviceID, buttonID: event.buttonID)
+            }
+        case .move:
+            self.gestureHandlers.forEach {
+                if let viewProxy = $0.viewProxy {
+                    let transform = viewProxy.transformByRoot.inverted()
+                    let locationInView = event.location.applying(transform)
+                    $0.moved(deviceID: event.deviceID, buttonID: event.buttonID, location: locationInView)
+                }
+            }
+        default:
+            break
+        }
+        self.gestureHandlers = self.gestureHandlers.compactMap {
+            if $0.state == .ready || $0.state == .processing {
+                return $0
+            }
+            return nil
         }
     }
 }

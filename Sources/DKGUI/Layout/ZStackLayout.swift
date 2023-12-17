@@ -29,11 +29,16 @@ public struct ZStackLayout: Layout {
     }
 
     public func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) -> CGSize {
-        subviews.map {
+        let fitSizes = subviews.map {
             $0.sizeThatFits(proposal)
-        }.reduce(proposal.replacingUnspecifiedDimensions()) { result, size in
-            CGSize.maximum(result, size)
         }
+        let fitWidth = fitSizes.reduce(CGFloat.zero) { result, size in
+            max(result, size.width)
+        }
+        let fitHeight = fitSizes.reduce(CGFloat.zero) { result, size in
+            max(result, size.height)
+        }
+        return CGSize(width: fitWidth, height: fitHeight)
     }
 
     public func placeSubviews(in bounds: CGRect,

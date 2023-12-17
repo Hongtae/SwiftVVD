@@ -165,7 +165,7 @@ extension Color {
 
 extension Color: ShapeStyle {
     public func _apply(to shape: inout _ShapeStyle_Shape) {
-
+        shape.shading = .color(self)
     }
 }
 

@@ -406,6 +406,10 @@ extension GraphicsContext {
     }
 
     public func draw(_ text: ResolvedText, in rect: CGRect) {
+        draw(text, in: rect, shading: text.shading)
+    }
+
+    func draw(_ text: ResolvedText, in rect: CGRect, shading: Shading) {
         let rect = rect.standardized
         if rect.isEmpty { return }
 
@@ -418,7 +422,7 @@ extension GraphicsContext {
             return
         }
 
-        if text.shading.properties.isEmpty {
+        if shading.properties.isEmpty {
             fatalError("Invalid shading property!")
         }
 
@@ -456,7 +460,7 @@ extension GraphicsContext {
                                        blendState: .opaque)
             // applies shading to the RGB channels of the RenderTarget
             self.encodeShadingBoxCommand(renderPass: renderPass,
-                                         shading: text.shading,
+                                         shading: shading,
                                          stencil: .ignore,
                                          blendState: .multiply)
             // draw attachments (scalar = 0)
