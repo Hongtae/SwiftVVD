@@ -363,7 +363,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
     func onMouseEvent(event: MouseEvent) {
         if event.window !== self.window { return }
         if event.type != .move && event.type != .pointing {
-            Log.debug("WindowContext.onMouseEvent: \(event)")
+            //Log.debug("WindowContext.onMouseEvent: \(event)")
         }
 
         if event.type == .wheel {
