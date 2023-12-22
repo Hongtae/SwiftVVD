@@ -371,15 +371,33 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                                                 delta: event.delta)
             return
         }
-        if self.gestureHandlers.isEmpty {
+
+        var gestureHandlers = self.gestureHandlers
+        defer {
+            self.gestureHandlers = gestureHandlers
+        }
+
+        if gestureHandlers.isEmpty {
             if event.type == .buttonDown {
-                self.gestureHandlers = self.viewProxy.gestureHandlers(at: event.location)
+                gestureHandlers = self.viewProxy.gestureHandlers(at: event.location)
             }
         }
-        if self.gestureHandlers.isEmpty { return }
+
+        let activeHandlers = {
+            gestureHandlers.compactMap {
+                if $0.state == .ready || $0.state == .processing {
+                    return $0
+                }
+                return nil
+            }
+        }
+
+        gestureHandlers = activeHandlers()
+
+        if gestureHandlers.isEmpty { return }
         switch event.type {
         case .buttonDown:
-            self.gestureHandlers.forEach {
+            gestureHandlers.forEach {
                 if let viewProxy = $0.viewProxy {
                     let transform = viewProxy.transformByRoot.inverted()
                     let locationInView = event.location.applying(transform)
@@ -387,11 +405,11 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                 }
             }
         case .buttonUp:
-            self.gestureHandlers.forEach {
+            gestureHandlers.forEach {
                 $0.ended(deviceID: event.deviceID, buttonID: event.buttonID)
             }
         case .move:
-            self.gestureHandlers.forEach {
+            gestureHandlers.forEach {
                 if let viewProxy = $0.viewProxy {
                     let transform = viewProxy.transformByRoot.inverted()
                     let locationInView = event.location.applying(transform)
@@ -401,11 +419,6 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
         default:
             break
         }
-        self.gestureHandlers = self.gestureHandlers.compactMap {
-            if $0.state == .ready || $0.state == .processing {
-                return $0
-            }
-            return nil
-        }
+        gestureHandlers = activeHandlers()
     }
 }

@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import DKGame
 
 public struct LongPressGesture : Gesture {
     public var minimumDuration: Double
@@ -20,9 +21,10 @@ public struct LongPressGesture : Gesture {
         self._maximumDistance = maximumDistance
     }
 
-    public static func _makeGesture(gesture: _GraphValue<Self>, inputs: _GestureInputs) -> _GestureOutputs<Self.Value> {
-        fatalError()
+    public static func _makeGesture(gesture: _GraphValue<Self>, inputs: _GestureInputs) -> _GestureOutputs<Value> {
+        _GestureOutputs<Value>(recognizer: LongPressGestureRecognizer(gesture: gesture.value, inputs: inputs))
     }
+    
     public typealias Value = Bool
     public typealias Body = Never
 }
@@ -42,5 +44,111 @@ extension View {
                 )
             )
         )
+    }
+}
+
+class LongPressGestureRecognizer : _GestureRecognizer<LongPressGesture.Value> {
+    let gesture: LongPressGesture
+    var typeFilter: _PrimitiveGestureTypes = .all
+    let buttonID: Int
+    var deviceID: Int?
+    var location: CGPoint
+    let clock: ContinuousClock
+    var timestamp: ContinuousClock.Instant
+    var task: Task<Void, Never>?
+
+    init(gesture: LongPressGesture, inputs: _GestureInputs) {
+        self.gesture = gesture
+        self.buttonID = 0
+        self.location = .zero
+        self.clock = .continuous
+        self.timestamp = .now
+        super.init(inputs: inputs)
+    }
+
+    override var type: _PrimitiveGestureTypes { .longPress }
+    override var isValid: Bool {
+        typeFilter.contains(self.type) && viewProxy != nil
+    }
+
+    override func setTypeFilter(_ f: _PrimitiveGestureTypes) -> _PrimitiveGestureTypes {
+        self.typeFilter = f
+        return f.subtracting(.longPress)
+    }
+
+    override func began(deviceID: Int, buttonID: Int, location: CGPoint) {
+        if self.deviceID == nil, self.buttonID == buttonID {
+            self.deviceID = deviceID
+            self.location = location
+            self.state = .processing
+
+            let fire = clock.now + .seconds(self.gesture.minimumDuration)
+
+            self.pressableGestureCallbacks.forEach {
+                $0.pressing?(true)
+            }
+
+            self.task = Task { @MainActor in
+                try? await Task.sleep(until: fire, clock: self.clock)
+                if Task.isCancelled {
+                    self.state = .cancelled
+                } else {
+                    self.deviceID = nil
+                    self.state = .done
+                    self.pressableGestureCallbacks.forEach {
+                        $0.pressing?(false)
+                        $0.pressed?()
+                    }
+                    self.endedCallbacks.forEach {
+                        $0.ended(true)
+                    }
+                }
+            }
+        }
+    }
+
+    override func moved(deviceID: Int, buttonID: Int, location: CGPoint) {
+        if self.deviceID == deviceID, self.buttonID == buttonID {
+            let d = (self.location - location).magnitude
+            if d > self.gesture.maximumDistance {
+                self.task?.cancel()
+                self.task = nil
+                self.pressableGestureCallbacks.forEach {
+                    $0.pressing?(false)
+                }
+                self.state = .failed
+            }
+        }
+    }
+
+    override func ended(deviceID: Int, buttonID: Int) {
+        if self.deviceID == deviceID, self.buttonID == buttonID {
+            self.task?.cancel()
+            self.task = nil
+            self.deviceID = nil
+            self.state = .failed
+            self.pressableGestureCallbacks.forEach {
+                $0.pressing?(false)
+            }
+        }
+    }
+
+    override func cancelled(deviceID: Int, buttonID: Int) {
+        if self.deviceID == deviceID, self.buttonID == buttonID {
+            self.task?.cancel()
+            self.task = nil
+            self.deviceID = nil
+            self.state = .cancelled
+            self.pressableGestureCallbacks.forEach {
+                $0.pressing?(false)
+            }
+        }
+    }
+
+    override func reset() {
+        self.task?.cancel()
+        self.task = nil
+        self.deviceID = nil
+        self.state = .ready
     }
 }

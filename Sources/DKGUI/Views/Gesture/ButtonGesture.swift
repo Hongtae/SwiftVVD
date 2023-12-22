@@ -14,8 +14,8 @@ public struct _ButtonGesture : Gesture {
         self.pressingAction = pressing
     }
 
-    public static func _makeGesture(gesture: _GraphValue<Self>, inputs: _GestureInputs) -> _GestureOutputs<Void> {
-        _GestureOutputs<Void>(recognizer: _ButtonGestureRecognizer(gesture: gesture.value, inputs: inputs))
+    public static func _makeGesture(gesture: _GraphValue<Self>, inputs: _GestureInputs) -> _GestureOutputs<Value> {
+        _GestureOutputs<Value>(recognizer: _ButtonGestureRecognizer(gesture: gesture.value, inputs: inputs))
     }
 
     public typealias Body = Never
@@ -29,33 +29,31 @@ extension View {
 }
 
 class _ButtonGestureRecognizer : _GestureRecognizer<_ButtonGesture.Value> {
-    var typeFilter: _PrimitiveGestureTypes = .all
-
-    override var type: _PrimitiveGestureTypes { .button }
-    override var isValid: Bool {
-        typeFilter.contains(self.type) && viewProxy != nil 
-    }
-
     let gesture: _ButtonGesture
+    var typeFilter: _PrimitiveGestureTypes = .all
+    let buttonID: Int
+    var deviceID: Int?
+    var location: CGPoint
+    var hover: Bool
 
     init(gesture: _ButtonGesture, inputs: _GestureInputs) {
         self.gesture = gesture
+        self.location = .zero
+        self.hover = false
+        self.buttonID = 0
         super.init(inputs: inputs)
     }
 
-    required init(inputs: _GestureInputs) {
-        fatalError("init(inputs:) has not been implemented")
+    override var type: _PrimitiveGestureTypes { .button }
+    override var isValid: Bool {
+        typeFilter.contains(self.type) && viewProxy != nil
     }
 
     override func setTypeFilter(_ f: _PrimitiveGestureTypes) -> _PrimitiveGestureTypes {
         self.typeFilter = f
-        return self.typeFilter
+        return f.subtracting([.button, .tap, .longPress])
     }
 
-    let buttonID: Int = 0
-    var deviceID: Int? = nil
-    var location: CGPoint = .zero
-    var hover: Bool = false
     override func began(deviceID: Int, buttonID: Int, location: CGPoint) {
         if self.deviceID == nil, self.buttonID == buttonID, let viewProxy {
             self.deviceID = deviceID

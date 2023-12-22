@@ -39,22 +39,27 @@ class _GestureHandler {
     var type: _PrimitiveGestureTypes { .none }
     var isValid: Bool { false }
 
-    required init(inputs: _GestureInputs) {
+    init(inputs: _GestureInputs) {
         self.viewProxy = inputs.viewProxy
     }
 
+    @MainActor
     func began(deviceID: Int, buttonID: Int, location: CGPoint) {
     }
 
+    @MainActor
     func moved(deviceID: Int, buttonID: Int, location: CGPoint) {
     }
 
+    @MainActor
     func ended(deviceID: Int, buttonID: Int) {
     }
 
+    @MainActor
     func cancelled(deviceID: Int, buttonID: Int) {
     }
 
+    @MainActor
     func reset() {
     }
 }
@@ -64,7 +69,7 @@ class _GestureRecognizer<Value> : _GestureHandler {
     let changedCallbacks: [ChangedCallbacks<Value>]
     let pressableGestureCallbacks : [PressableGestureCallbacks<Value>]
 
-    required init(inputs: _GestureInputs) {
+    override init(inputs: _GestureInputs) {
         self.endedCallbacks = inputs.endedCallbacks.compactMap { $0 as? EndedCallbacks<Value> }
         self.changedCallbacks = inputs.changedCallbacks.compactMap { $0 as? ChangedCallbacks<Value> }
         self.pressableGestureCallbacks = inputs.pressableGestureCallbacks.compactMap { $0 as? PressableGestureCallbacks<Value> }
