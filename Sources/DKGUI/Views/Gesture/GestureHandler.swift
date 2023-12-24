@@ -43,6 +43,14 @@ class _GestureHandler {
         self.viewProxy = inputs.viewProxy
     }
 
+    func locationInView(_ location: CGPoint) -> CGPoint {
+        if let viewProxy {
+            let transform = viewProxy.transformByRoot.inverted()
+            return location.applying(transform)
+        }
+        return location
+    }
+
     @MainActor
     func began(deviceID: Int, buttonID: Int, location: CGPoint) {
     }

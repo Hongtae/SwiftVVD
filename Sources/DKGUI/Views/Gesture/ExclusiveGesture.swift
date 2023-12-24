@@ -26,6 +26,9 @@ public struct ExclusiveGesture<First, Second> : Gesture where First : Gesture, S
 extension ExclusiveGesture.Value : Equatable where First.Value : Equatable, Second.Value : Equatable {
 }
 
+extension ExclusiveGesture.Value : Sendable where First.Value : Sendable, Second.Value : Sendable {
+}
+
 extension Gesture {
     @inlinable public func exclusively<Other>(before other: Other) -> ExclusiveGesture<Self, Other> where Other : Gesture {
         return ExclusiveGesture(self, other)

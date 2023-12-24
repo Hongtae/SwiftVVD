@@ -78,6 +78,7 @@ class LongPressGestureRecognizer : _GestureRecognizer<LongPressGesture.Value> {
 
     override func began(deviceID: Int, buttonID: Int, location: CGPoint) {
         if self.deviceID == nil, self.buttonID == buttonID {
+            let location = self.locationInView(location)
             self.deviceID = deviceID
             self.location = location
             self.state = .processing
@@ -109,6 +110,7 @@ class LongPressGestureRecognizer : _GestureRecognizer<LongPressGesture.Value> {
 
     override func moved(deviceID: Int, buttonID: Int, location: CGPoint) {
         if self.deviceID == deviceID, self.buttonID == buttonID {
+            let location = self.locationInView(location)
             let d = (self.location - location).magnitude
             if d > self.gesture.maximumDistance {
                 self.task?.cancel()

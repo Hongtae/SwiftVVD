@@ -56,6 +56,7 @@ class _ButtonGestureRecognizer : _GestureRecognizer<_ButtonGesture.Value> {
 
     override func began(deviceID: Int, buttonID: Int, location: CGPoint) {
         if self.deviceID == nil, self.buttonID == buttonID, let viewProxy {
+            let location = self.locationInView(location)
             self.deviceID = deviceID
             self.location = location
             self.hover = viewProxy.bounds.contains(location)
@@ -67,6 +68,7 @@ class _ButtonGestureRecognizer : _GestureRecognizer<_ButtonGesture.Value> {
     override func moved(deviceID: Int, buttonID: Int, location: CGPoint) {
         let h = self.hover
         if self.deviceID == deviceID, self.buttonID == buttonID, let viewProxy {
+            let location = self.locationInView(location)
             self.location = location
             self.hover = viewProxy.bounds.contains(location)
             self.state = .processing

@@ -398,11 +398,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
         switch event.type {
         case .buttonDown:
             gestureHandlers.forEach {
-                if let viewProxy = $0.viewProxy {
-                    let transform = viewProxy.transformByRoot.inverted()
-                    let locationInView = event.location.applying(transform)
-                    $0.began(deviceID: event.deviceID, buttonID: event.buttonID, location: locationInView)
-                }
+                $0.began(deviceID: event.deviceID, buttonID: event.buttonID, location: event.location)
             }
         case .buttonUp:
             gestureHandlers.forEach {
@@ -410,11 +406,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
             }
         case .move:
             gestureHandlers.forEach {
-                if let viewProxy = $0.viewProxy {
-                    let transform = viewProxy.transformByRoot.inverted()
-                    let locationInView = event.location.applying(transform)
-                    $0.moved(deviceID: event.deviceID, buttonID: event.buttonID, location: locationInView)
-                }
+                $0.moved(deviceID: event.deviceID, buttonID: event.buttonID, location: event.location)
             }
         default:
             break
