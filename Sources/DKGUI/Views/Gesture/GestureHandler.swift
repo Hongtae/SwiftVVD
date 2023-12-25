@@ -38,6 +38,9 @@ class _GestureHandler {
 
     var type: _PrimitiveGestureTypes { .none }
     var isValid: Bool { false }
+    var isPossible: Bool {
+        self.isValid && (self.state == .ready || self.state == .processing)
+    }
 
     init(inputs: _GestureInputs) {
         self.viewProxy = inputs.viewProxy
@@ -51,23 +54,18 @@ class _GestureHandler {
         return location
     }
 
-    @MainActor
     func began(deviceID: Int, buttonID: Int, location: CGPoint) {
     }
 
-    @MainActor
     func moved(deviceID: Int, buttonID: Int, location: CGPoint) {
     }
 
-    @MainActor
     func ended(deviceID: Int, buttonID: Int) {
     }
 
-    @MainActor
     func cancelled(deviceID: Int, buttonID: Int) {
     }
 
-    @MainActor
     func reset() {
     }
 }

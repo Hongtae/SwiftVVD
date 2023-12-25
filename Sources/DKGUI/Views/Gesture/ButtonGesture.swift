@@ -60,8 +60,8 @@ class _ButtonGestureRecognizer : _GestureRecognizer<_ButtonGesture.Value> {
             self.deviceID = deviceID
             self.location = location
             self.hover = viewProxy.bounds.contains(location)
-            self.gesture.pressingAction?(self.hover)
             self.state = .processing
+            self.gesture.pressingAction?(self.hover)
         }
     }
 
@@ -70,8 +70,8 @@ class _ButtonGestureRecognizer : _GestureRecognizer<_ButtonGesture.Value> {
         if self.deviceID == deviceID, self.buttonID == buttonID, let viewProxy {
             let location = self.locationInView(location)
             self.location = location
-            self.hover = viewProxy.bounds.contains(location)
             self.state = .processing
+            self.hover = viewProxy.bounds.contains(location)
         }
         if h != self.hover {
             self.gesture.pressingAction?(self.hover)

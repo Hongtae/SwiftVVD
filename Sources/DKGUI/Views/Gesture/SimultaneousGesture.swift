@@ -48,6 +48,7 @@ class SimultaneousGestureRecognizer<First : Gesture, Second : Gesture> : _Gestur
             [weak self] in
             if let self {
                 let value = Value(first: $0, second: nil)
+                self.updateState()
                 self.endedCallbacks.forEach { $0.ended(value) }
             }
         })
@@ -76,6 +77,7 @@ class SimultaneousGestureRecognizer<First : Gesture, Second : Gesture> : _Gestur
             [weak self] in
             if let self {
                 let value = Value(first: nil, second: $0)
+                self.updateState()
                 self.endedCallbacks.forEach { $0.ended(value) }
             }
         })
@@ -112,40 +114,64 @@ class SimultaneousGestureRecognizer<First : Gesture, Second : Gesture> : _Gestur
         return f1.intersection(f2)
     }
 
+    func updateState() {
+        if self.first.state == .ready && self.second.state == .ready {
+            self.state = .ready
+            return
+        }
+        if self.first.state == .done && self.second.state == .done {
+            self.state = .done
+            return
+        }
+        if self.first.state == .cancelled && self.second.state == .cancelled {
+            self.state = .cancelled
+            return
+        }
+        if self.first.state == .failed && self.second.state == .failed {
+            self.state = .failed
+            return
+        }
+        self.state = .processing
+    }
+
     override func began(deviceID: Int, buttonID: Int, location: CGPoint) {
-        if self.first.isValid {
+        if self.first.isPossible {
             self.first.began(deviceID: deviceID, buttonID: buttonID, location: location)
         }
-        if self.second.isValid {
+        if self.second.isPossible {
             self.second.began(deviceID: deviceID, buttonID: buttonID, location: location)
         }
+        updateState()
     }
 
     override func moved(deviceID: Int, buttonID: Int, location: CGPoint) {
-        if self.first.isValid {
+        if self.first.isPossible {
             self.first.moved(deviceID: deviceID, buttonID: buttonID, location: location)
         }
-        if self.second.isValid {
+        if self.second.isPossible {
             self.second.moved(deviceID: deviceID, buttonID: buttonID, location: location)
         }
+        updateState()
     }
 
     override func ended(deviceID: Int, buttonID: Int) {
-        if self.first.isValid {
+        if self.first.isPossible {
             self.first.ended(deviceID: deviceID, buttonID: buttonID)
         }
-        if self.second.isValid {
+        if self.second.isPossible {
             self.second.ended(deviceID: deviceID, buttonID: buttonID)
         }
+        updateState()
     }
 
     override func cancelled(deviceID: Int, buttonID: Int) {
-        if self.first.isValid {
+        if self.first.isPossible {
             self.first.cancelled(deviceID: deviceID, buttonID: buttonID)
         }
-        if self.second.isValid {
+        if self.second.isPossible {
             self.second.cancelled(deviceID: deviceID, buttonID: buttonID)
         }
+        self.state = .cancelled
     }
 
     override func reset() {

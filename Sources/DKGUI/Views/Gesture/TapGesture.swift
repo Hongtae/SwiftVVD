@@ -81,6 +81,13 @@ class TapGestureRecognizer : _GestureRecognizer<TapGesture.Value> {
     }
 
     override func moved(deviceID: Int, buttonID: Int, location: CGPoint) {
+        if self.deviceID == deviceID, self.buttonID == buttonID {
+            let d = self.timestamp.duration(to: self.clock.now)
+            if d > self.maximumDuration {
+                self.deviceID = nil
+                self.state = .failed
+            }
+        }
     }
 
     override func ended(deviceID: Int, buttonID: Int) {

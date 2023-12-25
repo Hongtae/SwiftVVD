@@ -115,10 +115,10 @@ class LongPressGestureRecognizer : _GestureRecognizer<LongPressGesture.Value> {
             if d > self.gesture.maximumDistance {
                 self.task?.cancel()
                 self.task = nil
+                self.state = .failed
                 self.pressableGestureCallbacks.forEach {
                     $0.pressing?(false)
                 }
-                self.state = .failed
             }
         }
     }
