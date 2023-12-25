@@ -13,7 +13,7 @@ public struct TapGesture : Gesture {
         self.count = count
     }
     public static func _makeGesture(gesture: _GraphValue<TapGesture>, inputs: _GestureInputs) -> _GestureOutputs<Value> {
-        _GestureOutputs<Value>(recognizer: TapGestureRecognizer(gesture: gesture.value, inputs: inputs))
+        _GestureOutputs<Value>(recognizer: TapGestureRecognizer(gesture: gesture, inputs: inputs))
     }
 
     public typealias Body = Never
@@ -37,8 +37,8 @@ class TapGestureRecognizer : _GestureRecognizer<TapGesture.Value> {
     let clock: ContinuousClock
     var timestamp: ContinuousClock.Instant
 
-    init(gesture: TapGesture, inputs: _GestureInputs) {
-        self.gesture = gesture
+    init(gesture: _GraphValue<TapGesture>, inputs: _GestureInputs) {
+        self.gesture = gesture.value
         self.buttonID = 0
         self.count = 0
         self.maximumInterval = .seconds(0.5)

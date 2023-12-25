@@ -51,7 +51,7 @@ public struct DragGesture : Gesture {
     }
 
     public static func _makeGesture(gesture: _GraphValue<DragGesture>, inputs: _GestureInputs) -> _GestureOutputs<DragGesture.Value> {
-        _GestureOutputs<Value>(recognizer: DragGestureRecognizer(gesture: gesture.value, inputs: inputs))
+        _GestureOutputs<Value>(recognizer: DragGestureRecognizer(gesture: gesture, inputs: inputs))
     }
 
     public typealias Body = Never
@@ -65,8 +65,8 @@ class DragGestureRecognizer : _GestureRecognizer<DragGesture.Value> {
     var value: DragGesture.Value
     var dragging = false
 
-    init(gesture: DragGesture, inputs: _GestureInputs) {
-        self.gesture = gesture
+    init(gesture: _GraphValue<DragGesture>, inputs: _GestureInputs) {
+        self.gesture = gesture.value
         self.buttonID = 0
         self.value = .init(time: .now,
                            location: .zero,

@@ -22,7 +22,7 @@ public struct LongPressGesture : Gesture {
     }
 
     public static func _makeGesture(gesture: _GraphValue<Self>, inputs: _GestureInputs) -> _GestureOutputs<Value> {
-        _GestureOutputs<Value>(recognizer: LongPressGestureRecognizer(gesture: gesture.value, inputs: inputs))
+        _GestureOutputs<Value>(recognizer: LongPressGestureRecognizer(gesture: gesture, inputs: inputs))
     }
     
     public typealias Value = Bool
@@ -57,8 +57,8 @@ class LongPressGestureRecognizer : _GestureRecognizer<LongPressGesture.Value> {
     var timestamp: ContinuousClock.Instant
     var task: Task<Void, Never>?
 
-    init(gesture: LongPressGesture, inputs: _GestureInputs) {
-        self.gesture = gesture
+    init(gesture: _GraphValue<LongPressGesture>, inputs: _GestureInputs) {
+        self.gesture = gesture.value
         self.buttonID = 0
         self.location = .zero
         self.clock = .continuous

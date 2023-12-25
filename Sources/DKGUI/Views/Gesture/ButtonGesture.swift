@@ -15,7 +15,7 @@ public struct _ButtonGesture : Gesture {
     }
 
     public static func _makeGesture(gesture: _GraphValue<Self>, inputs: _GestureInputs) -> _GestureOutputs<Value> {
-        _GestureOutputs<Value>(recognizer: _ButtonGestureRecognizer(gesture: gesture.value, inputs: inputs))
+        _GestureOutputs<Value>(recognizer: _ButtonGestureRecognizer(gesture: gesture, inputs: inputs))
     }
 
     public typealias Body = Never
@@ -36,8 +36,8 @@ class _ButtonGestureRecognizer : _GestureRecognizer<_ButtonGesture.Value> {
     var location: CGPoint
     var hover: Bool
 
-    init(gesture: _ButtonGesture, inputs: _GestureInputs) {
-        self.gesture = gesture
+    init(gesture: _GraphValue<_ButtonGesture>, inputs: _GestureInputs) {
+        self.gesture = gesture.value
         self.location = .zero
         self.hover = false
         self.buttonID = 0

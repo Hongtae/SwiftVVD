@@ -73,9 +73,9 @@ class _GestureHandler {
 }
 
 class _GestureRecognizer<Value> : _GestureHandler {
-    let endedCallbacks: [EndedCallbacks<Value>]
-    let changedCallbacks: [ChangedCallbacks<Value>]
-    let pressableGestureCallbacks : [PressableGestureCallbacks<Value>]
+    var endedCallbacks: [EndedCallbacks<Value>]
+    var changedCallbacks: [ChangedCallbacks<Value>]
+    var pressableGestureCallbacks : [PressableGestureCallbacks<Value>]
 
     override init(inputs: _GestureInputs) {
         self.endedCallbacks = inputs.endedCallbacks.compactMap { $0 as? EndedCallbacks<Value> }
