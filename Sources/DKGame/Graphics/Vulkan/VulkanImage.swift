@@ -92,6 +92,78 @@ public class VulkanImage {
         }
     }
 
+    public func makeImageView(format: PixelFormat, parent: VulkanImageView? = nil)-> VulkanImageView? {
+        if self.usage & (UInt32(VK_IMAGE_USAGE_SAMPLED_BIT.rawValue) |
+                         UInt32(VK_IMAGE_USAGE_STORAGE_BIT.rawValue) |
+                         UInt32(VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT.rawValue) |
+                         UInt32(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT.rawValue) |
+                         UInt32(VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT.rawValue)) != 0 {
+
+            var imageViewCreateInfo = VkImageViewCreateInfo()
+            imageViewCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO
+            imageViewCreateInfo.image = self.image
+
+            switch self.type {
+            case .type1D:
+                if self.arrayLayers > 1 {
+                    imageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_1D_ARRAY
+                } else {
+                    imageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_1D
+                }
+            case .type2D:
+                if self.arrayLayers > 1 {
+                    imageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY
+                } else {
+                    imageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D
+                }
+            case .type3D:
+                imageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_3D
+            case .typeCube:
+                if self.arrayLayers > 1 {
+                    imageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_CUBE_ARRAY
+                } else {
+                    imageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_CUBE
+                }
+            default:
+                assertionFailure("Unknown texture type!")
+                return nil
+            }
+
+            imageViewCreateInfo.format = format.vkFormat()
+            imageViewCreateInfo.components = VkComponentMapping(
+                r: VK_COMPONENT_SWIZZLE_R,
+                g: VK_COMPONENT_SWIZZLE_G,
+                b: VK_COMPONENT_SWIZZLE_B,
+                a: VK_COMPONENT_SWIZZLE_A)
+
+            let pixelFormat = self.pixelFormat
+            if pixelFormat.isColorFormat {
+                imageViewCreateInfo.subresourceRange.aspectMask |= UInt32(VK_IMAGE_ASPECT_COLOR_BIT.rawValue)
+            }
+            if pixelFormat.isDepthFormat {
+                imageViewCreateInfo.subresourceRange.aspectMask |= UInt32(VK_IMAGE_ASPECT_DEPTH_BIT.rawValue)
+            }
+            if pixelFormat.isStencilFormat {
+                imageViewCreateInfo.subresourceRange.aspectMask |= UInt32(VK_IMAGE_ASPECT_STENCIL_BIT.rawValue)
+            }
+
+            imageViewCreateInfo.subresourceRange.baseMipLevel = 0
+            imageViewCreateInfo.subresourceRange.baseArrayLayer = 0
+            imageViewCreateInfo.subresourceRange.layerCount = self.arrayLayers
+            imageViewCreateInfo.subresourceRange.levelCount = self.mipLevels
+
+            var imageView: VkImageView? = nil
+            let device = self.device as! VulkanGraphicsDevice
+            let result = vkCreateImageView(device.device, &imageViewCreateInfo, device.allocationCallbacks, &imageView)
+            if result != VK_SUCCESS {
+               Log.err("vkCreateImageView failed: \(result)")
+               return nil
+            }
+            return VulkanImageView(image: self, imageView: imageView!, parent: parent)
+        }
+        return nil
+    }
+
     @discardableResult
     public func setLayout(_ layout: VkImageLayout,
                           accessMask: VkAccessFlags2,

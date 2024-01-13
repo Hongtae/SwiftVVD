@@ -5,7 +5,7 @@
 //  Copyright (c) 2022 Hongtae Kim. All rights reserved.
 //
 
-public struct Box {
+public struct Box: Hashable {
     let center: Vector3
     let u: Vector3  // unit vectors of each extent direction.
     let v: Vector3

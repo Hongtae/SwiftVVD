@@ -80,6 +80,10 @@ public struct LayoutProperties {
     }
 }
 
+internal extension Layout {
+    static var _defaultLayoutSpacing : CGFloat { 8 }
+}
+
 private extension Layout {
     @inline(__always)
     mutating func _setAnimatableData(_ data: AnyLayout.AnimatableData) {

@@ -45,6 +45,10 @@ extension View {
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
         let view = inputs.inputs.environmentValues._resolve(view)
+        if view.value is _ViewProxyProvider {
+            let inputs = inputs.inputs
+            return _ViewListOutputs(item: .view(.init(view: AnyView(view.value), inputs: inputs)))
+        }
         let body = view[\.body]
         if body.value is _ViewProxyProvider {
             let inputs = inputs.inputs

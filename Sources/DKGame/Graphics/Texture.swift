@@ -39,6 +39,8 @@ public protocol Texture: AnyObject {
     var pixelFormat: PixelFormat { get }
 
     var device: GraphicsDevice { get }
+
+    func makeTextureView(pixelFormat: PixelFormat) -> Texture?
 }
 
 extension Texture {

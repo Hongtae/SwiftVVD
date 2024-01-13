@@ -592,7 +592,7 @@ private enum _overlapTest {
     }
 }
 
-public struct Triangle {
+public struct Triangle: Hashable {
     public let p0: Vector3
     public let p1: Vector3
     public let p2: Vector3

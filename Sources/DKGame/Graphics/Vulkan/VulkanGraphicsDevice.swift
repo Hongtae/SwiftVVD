@@ -327,6 +327,8 @@ public class VulkanGraphicsDevice : GraphicsDevice {
                         }
                     }
                     timer.reset()
+                } else {
+                    await Task.yield()
                 }
             }
             assert(completionHandlers.isEmpty, "completionHandlers must be empty!")
@@ -1218,6 +1220,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
 
         var imageCreateInfo = VkImageCreateInfo()
         imageCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO
+        imageCreateInfo.flags = UInt32(VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT.rawValue)
         switch desc.textureType {
         case .type1D:
             imageCreateInfo.imageType = VK_IMAGE_TYPE_1D
@@ -1326,73 +1329,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         image = nil
         memory = nil
 
-        if imageCreateInfo.usage & (UInt32(VK_IMAGE_USAGE_SAMPLED_BIT.rawValue) |
-                                    UInt32(VK_IMAGE_USAGE_STORAGE_BIT.rawValue) |
-                                    UInt32(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT.rawValue) |
-                                    UInt32(VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT.rawValue)) != 0 {
-
-            var imageViewCreateInfo = VkImageViewCreateInfo()
-            imageViewCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO
-            imageViewCreateInfo.image = imageObject.image
-
-            switch desc.textureType {
-            case .type1D:
-                if desc.arrayLength > 1 {
-                    imageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_1D_ARRAY
-                } else {
-                    imageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_1D
-                }
-            case .type2D:
-                if desc.arrayLength > 1 {
-                    imageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY
-                } else {
-                    imageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D
-                }
-            case .type3D:
-                imageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_3D
-            case .typeCube:
-                if desc.arrayLength > 1 {
-                    imageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_CUBE_ARRAY
-                } else {
-                    imageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_CUBE
-                }
-            default:
-                assertionFailure("Unknown texture type!")
-                return nil
-            }
-
-            imageViewCreateInfo.format = imageCreateInfo.format
-            imageViewCreateInfo.components = VkComponentMapping(
-                r: VK_COMPONENT_SWIZZLE_R,
-                g: VK_COMPONENT_SWIZZLE_G,
-                b: VK_COMPONENT_SWIZZLE_B,
-                a: VK_COMPONENT_SWIZZLE_A)
-            
-            if desc.pixelFormat.isColorFormat {
-                imageViewCreateInfo.subresourceRange.aspectMask |= UInt32(VK_IMAGE_ASPECT_COLOR_BIT.rawValue)
-            }
-            if desc.pixelFormat.isDepthFormat {
-                imageViewCreateInfo.subresourceRange.aspectMask |= UInt32(VK_IMAGE_ASPECT_DEPTH_BIT.rawValue)
-            }
-            if desc.pixelFormat.isStencilFormat {
-                imageViewCreateInfo.subresourceRange.aspectMask |= UInt32(VK_IMAGE_ASPECT_STENCIL_BIT.rawValue)
-            }
-
-            imageViewCreateInfo.subresourceRange.baseMipLevel = 0
-            imageViewCreateInfo.subresourceRange.baseArrayLayer = 0
-            imageViewCreateInfo.subresourceRange.layerCount = imageCreateInfo.arrayLayers
-            imageViewCreateInfo.subresourceRange.levelCount = imageCreateInfo.mipLevels
-
-            var imageView: VkImageView? = nil
-            result = vkCreateImageView(self.device, &imageViewCreateInfo, self.allocationCallbacks, &imageView)
-            if result != VK_SUCCESS {
-               Log.err("vkCreateImageView failed: \(result)")
-               return nil
-            }
-
-            return VulkanImageView(image: imageObject, imageView: imageView!, imageViewCreateInfo: imageViewCreateInfo)
-        }
-        return nil
+        return imageObject.makeImageView(format: desc.pixelFormat)
     }
 
     public func makeTransientRenderTarget(type textureType: TextureType,
@@ -1509,54 +1446,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         image = nil
         memory = nil
 
-        // create imageView
-        var imageViewCreateInfo = VkImageViewCreateInfo()
-        imageViewCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO
-        imageViewCreateInfo.image = imageObject.image
-
-        switch textureType {
-        case .type1D:
-            imageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_1D
-        case .type2D:
-            imageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D
-        case .type3D:
-            imageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_3D
-        case .typeCube:
-            imageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_CUBE
-        default:
-            assertionFailure("Unknown texture type!")
-            return nil
-        }
-
-        imageViewCreateInfo.format = imageCreateInfo.format
-        imageViewCreateInfo.components = VkComponentMapping(
-            r: VK_COMPONENT_SWIZZLE_R,
-            g: VK_COMPONENT_SWIZZLE_G,
-            b: VK_COMPONENT_SWIZZLE_B,
-            a: VK_COMPONENT_SWIZZLE_A)
-        
-        if pixelFormat.isColorFormat {
-            imageViewCreateInfo.subresourceRange.aspectMask |= UInt32(VK_IMAGE_ASPECT_COLOR_BIT.rawValue)
-        }
-        if pixelFormat.isDepthFormat {
-            imageViewCreateInfo.subresourceRange.aspectMask |= UInt32(VK_IMAGE_ASPECT_DEPTH_BIT.rawValue)
-        }
-        if pixelFormat.isStencilFormat {
-            imageViewCreateInfo.subresourceRange.aspectMask |= UInt32(VK_IMAGE_ASPECT_STENCIL_BIT.rawValue)
-        }
-
-        imageViewCreateInfo.subresourceRange.baseMipLevel = 0
-        imageViewCreateInfo.subresourceRange.baseArrayLayer = 0
-        imageViewCreateInfo.subresourceRange.layerCount = imageCreateInfo.arrayLayers
-        imageViewCreateInfo.subresourceRange.levelCount = imageCreateInfo.mipLevels
-
-        var imageView: VkImageView? = nil
-        result = vkCreateImageView(self.device, &imageViewCreateInfo, self.allocationCallbacks, &imageView)
-        if result != VK_SUCCESS {
-            Log.err("vkCreateImageView failed: \(result)")
-            return nil
-        }
-        return VulkanImageView(image: imageObject, imageView: imageView!, imageViewCreateInfo: imageViewCreateInfo)
+        return imageObject.makeImageView(format: pixelFormat)
     }
 
 

@@ -812,10 +812,10 @@ extension Image {
             imageFormat = .rgba16
             getPixel = { data in
                 let p = data.assumingMemoryBound(to: UInt32.self).pointee
-                return (Double((p >> 22) & 1023) / 1023.0,
-                        Double((p >> 12) & 1023) / 1023.0,
-                        Double((p >> 2) & 1023) / 1023.0,
-                        Double(p & 3) / 3.0)
+                return (Double(p & 1023) / 1023.0,
+                        Double((p >> 10) & 1023) / 1023.0,
+                        Double((p >> 20) & 1023) / 1023.0,
+                        Double((p >> 30) & 3) / 3.0)
             }
         case .rg11b10Float:
             imageFormat = .rgb16
@@ -835,6 +835,15 @@ extension Image {
                         ufloatToDouble(eBits: 5, mBits: 9, exponent: exp, mantissa: p >> 14),
                         ufloatToDouble(eBits: 5, mBits: 9, exponent: exp, mantissa: p >> 5),
                         1.0)
+            }
+        case .bgr10a2Unorm:
+            imageFormat = .rgba16
+            getPixel = { data in
+                let p = data.assumingMemoryBound(to: UInt32.self).pointee
+                return (Double((p >> 20) & 1023) / 1023.0,
+                        Double((p >> 10) & 1023) / 1023.0,
+                        Double(p & 1023) / 1023.0,
+                        Double((p >> 30) & 3) / 3.0)
             }
         case .rg32Uint:
             imageFormat = .rg32

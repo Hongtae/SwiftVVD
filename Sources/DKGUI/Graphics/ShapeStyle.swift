@@ -18,11 +18,11 @@ extension ShapeStyle {
 }
 
 public struct _ShapeStyle_Shape {
+    var shading: GraphicsContext.Shading?
 }
 
 public struct _ShapeStyle_ShapeType {
     enum ShapeType {
-
     }
 }
 
@@ -122,7 +122,7 @@ public struct AnyShapeStyle: ShapeStyle {
     }
 
     public static func _apply(to type: inout _ShapeStyle_ShapeType) {
-
+        AnyShapeStyleBox._apply(to: &type)
     }
 }
 

@@ -48,9 +48,9 @@ public extension PixelFormat {
 
         case VK_FORMAT_A2B10G10R10_UNORM_PACK32:    return .rgb10a2Unorm
         case VK_FORMAT_A2B10G10R10_UINT_PACK32:     return .rgb10a2Uint
-
         case VK_FORMAT_B10G11R11_UFLOAT_PACK32:     return .rg11b10Float
         case VK_FORMAT_E5B9G9R9_UFLOAT_PACK32:      return .rgb9e5Float
+        case VK_FORMAT_A2R10G10B10_UNORM_PACK32:    return .bgr10a2Unorm
 
         case VK_FORMAT_R32G32_UINT:                 return .rg32Uint
         case VK_FORMAT_R32G32_SINT:                 return .rg32Sint
@@ -116,9 +116,9 @@ public extension PixelFormat {
 
         case .rgb10a2Unorm:     return VK_FORMAT_A2B10G10R10_UNORM_PACK32
         case .rgb10a2Uint:      return VK_FORMAT_A2B10G10R10_UINT_PACK32
-
         case .rg11b10Float:     return VK_FORMAT_B10G11R11_UFLOAT_PACK32
         case .rgb9e5Float:      return VK_FORMAT_E5B9G9R9_UFLOAT_PACK32
+        case .bgr10a2Unorm:     return VK_FORMAT_A2R10G10B10_UNORM_PACK32
 
         case .rg32Uint:         return VK_FORMAT_R32G32_UINT
         case .rg32Sint:         return VK_FORMAT_R32G32_SINT

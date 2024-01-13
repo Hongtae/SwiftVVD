@@ -37,31 +37,22 @@ private func keyboardHookProc(_ nCode: Int32, _ wParam: WPARAM, _ lParam: LPARAM
     return CallNextHookEx(keyboardHook, nCode, wParam, lParam)
 }
 
-private var mainLoopMaxInterval: UINT = 10
-private var mainLoopTimerId: UINT_PTR = 0
-
-private func processMainRunLoop(_ maxInterval: UINT = UINT(USER_TIMER_MAXIMUM)) -> UINT {
+private func processRunLoop() -> Int {
+    var processed = 0
     while true {
         let next = RunLoop.main.limitDate(forMode: .default)
         let s = next?.timeIntervalSinceNow ?? 1.0
         if s > 0.0 {
-            if s * 1000 > Double(USER_TIMER_MAXIMUM) {
-                return min(UINT(USER_TIMER_MAXIMUM), maxInterval)
-            }
-            return min(UINT(s * 1000), maxInterval)
+            break
         }
+        processed += 1
     }
-}
-
-private let mainLoopTimerProc: TIMERPROC = { (_: HWND?, elapse: UINT, timerId: UINT_PTR, _: DWORD) in
-    let next = processMainRunLoop(mainLoopMaxInterval)
-    mainLoopTimerId = SetTimer(nil, timerId, next, mainLoopTimerProc)
+    return processed
 }
 
 public class Win32Application : Application {
 
     let mainLoopMaximumInterval: Double = 0.01
-
     var running: Bool = false
     var threadId: DWORD = 0
     var exitCode: Int = 0
@@ -72,10 +63,9 @@ public class Win32Application : Application {
     }
 
     public func terminate(exitCode: Int) {
-        if self.running && threadId != 0 {
-            self.running = false
+        if self.running && self.threadId != 0 {
             self.exitCode = exitCode
-            PostThreadMessageW(threadId, UINT(WM_NULL), 0, 0)
+            PostThreadMessageW(threadId, UINT(WM_QUIT), 0, 0)
         }
     }
 
@@ -114,8 +104,11 @@ public class Win32Application : Application {
 
         delegate?.initialize(application: app)
 
-        mainLoopMaxInterval = UINT(app.mainLoopMaximumInterval * 1000)
-        mainLoopTimerId = SetTimer(nil, 0, mainLoopMaxInterval, mainLoopTimerProc)
+        let timerProc: TIMERPROC = {
+            (_: HWND?, elapse: UINT, timerId: UINT_PTR, _: DWORD) in
+            processRunLoop()
+        }
+        let timerID = SetTimer(nil, 0, UINT(USER_TIMER_MINIMUM), timerProc)
 
         var msg = MSG()
         mainLoop: while true {
@@ -126,27 +119,14 @@ public class Win32Application : Application {
                 TranslateMessage(&msg)
                 DispatchMessageW(&msg)
             }
-
-            if app.running {
-                mainLoopMaxInterval = UINT(app.mainLoopMaximumInterval * 1000)
-
-                let next = processMainRunLoop(mainLoopMaxInterval)
-                mainLoopTimerId = SetTimer(nil, mainLoopTimerId, next, mainLoopTimerProc)
-
-                WaitMessage()
-            } else {
-                PostQuitMessage(0)
-            }
-        }
-
-        if mainLoopTimerId != 0 {
-            KillTimer(nil, mainLoopTimerId)
-            mainLoopTimerId = 0
+            processRunLoop()
+            WaitMessage()
         }
 
         delegate?.finalize(application: app)
-
         appFinalize()
+
+        KillTimer(nil, timerID)
 
         if keyboardHook != nil {
             UnhookWindowsHookEx(keyboardHook)

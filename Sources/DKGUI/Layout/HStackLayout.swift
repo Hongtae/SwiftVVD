@@ -34,7 +34,7 @@ public struct HStackLayout: Layout {
         cache.minSizes = subviews.map { $0.sizeThatFits(.zero) }
         cache.maxSizes = subviews.map { $0.sizeThatFits(.infinity) }
 
-        let layoutSpacing: CGFloat = self.spacing ?? 0
+        let layoutSpacing: CGFloat = self.spacing ?? Self._defaultLayoutSpacing
 
         cache.subviewSpacings = cache.spacings.indices.map { index in
             if index > 0 {

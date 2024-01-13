@@ -25,11 +25,6 @@ public struct AffineTransform2: Hashable {
         }
     }
 
-    public var linearTransform: LinearTransform2 {
-        get { LinearTransform2(self.matrix2) }
-        set(t) { self.matrix2 = t.matrix2 }
-    }
-
     public static let identity: Self = .init(origin: .zero)
 
     public init(_ t: Self = .identity) {
@@ -42,13 +37,8 @@ public struct AffineTransform2: Hashable {
         self.translation = origin
     }
 
-    public init(linear: Matrix2, origin: Vector2 = .zero) {
-        self.matrix2 = linear
-        self.translation = origin
-    }
-
-    public init(linear: LinearTransform2, origin: Vector2 = .zero) {
-        self.matrix2 = linear.matrix2
+    public init(basis: Matrix2, origin: Vector2 = .zero) {
+        self.matrix2 = basis
         self.translation = origin
     }
 
@@ -70,7 +60,7 @@ public struct AffineTransform2: Hashable {
     public func inverted() -> Self {
         let matrix = self.matrix2.inverted() ?? .identity
         let origin = (-translation).applying(matrix)
-        return Self(linear: matrix2, origin: origin)
+        return Self(basis: matrix2, origin: origin)
     }
 
     public mutating func invert() {
@@ -78,11 +68,7 @@ public struct AffineTransform2: Hashable {
     }
 
     public func translated(by offset: Vector2) -> Self {
-        // Translate
-        // |1  0  0|
-        // |0  1  0|
-        // |X  Y  1|
-        return Self(linear: matrix2, origin: self.translation + offset)        
+        Self(basis: matrix2, origin: self.translation + offset)        
     }
 
     public mutating func translate(by offset: Vector2) {
@@ -90,45 +76,115 @@ public struct AffineTransform2: Hashable {
     }
 
     public func translated<T: BinaryFloatingPoint>(x: T, y: T) -> Self {
-        return self.translated(by: Vector2(x, y))
+        self.translated(by: Vector2(x, y))
     }
 
     public mutating func translate<T: BinaryFloatingPoint>(x: T, y: T) {
         self = self.translated(x: x, y: y)
     }
 
-    public func concatenating(_ t: LinearTransform2) -> Self {
-        return Self(linear: matrix2.concatenating(t.matrix2),
-                    origin: translation.applying(t.matrix2))
+    public func rotated(by angle: some BinaryFloatingPoint) -> Self {
+        let a = Scalar(angle)
+        let cosR = cos(a)
+        let sinR = sin(a)
+        let matrix = Matrix2(cosR, sinR, -sinR, cosR)
+        let t = translation.applying(matrix)
+        return Self(basis: self.matrix2.concatenating(matrix), origin: t)
     }
 
-    public mutating func concatenate(_ t: LinearTransform2) {
-        self = self.concatenating(t)
+    public mutating func rotate(by angle: some BinaryFloatingPoint) {
+        self = self.rotated(by: angle)
+    }
+
+    public func scaled<T: BinaryFloatingPoint>(x: T, y: T) -> Self {
+        var matrix = self.matrix2
+        matrix.column1 *= Scalar(x)
+        matrix.column2 *= Scalar(y)
+        let t = translation * Vector2(x, y)
+        return Self(basis: matrix, origin: t)
+    }
+
+    public mutating func scale<T: BinaryFloatingPoint>(x: T, y: T) {
+        self = self.scaled(x: x, y: y)
+    }
+
+    public func scaled(by s: some BinaryFloatingPoint) -> Self {
+        self.scaled(x: s, y: s)
+    }
+
+    public mutating func scale(by s: some BinaryFloatingPoint) {
+        self = self.scaled(by: s)
+    }
+
+    public func scaled(by v: Vector2) -> Self {
+        self.scaled(x: v.x, y: v.y)
+    }
+
+    public mutating func scale(by v: Vector2) {
+        self = self.scaled(by: v)
+    }
+
+    public func applying(_ m: Matrix2) -> Self {
+        Self(basis: matrix2.concatenating(m),
+             origin: translation.applying(m))
+    }
+
+    public mutating func apply(_ m: Matrix2) {
+        self = self.applying(m)
     }
 
     public func concatenating(_ t: Self) -> Self {
-        return Self(linear: matrix2.concatenating(t.matrix2),
-                    origin: translation.applying(t.matrix2) + t.translation)
+        Self(basis: matrix2.concatenating(t.matrix2),
+             origin: translation.applying(t.matrix2) + t.translation)
     }
 
     public mutating func concatenate(_ t: Self) {
-        self = self.concatenating(t)
+        self.matrix2.concatenate(t.matrix2)
+        self.translation = self.translation.applying(t.matrix2) + t.translation
     }
 
     public static func * (lhs: Self, rhs: Self) -> Self {
-        return lhs.concatenating(rhs)
+        lhs.concatenating(rhs)
     }
 
     public static func *= (lhs: inout Self, rhs: Self) {
-        lhs = lhs * rhs
+        lhs.concatenate(rhs)
     }
 
-    public static func * (lhs: Self, rhs: LinearTransform2) -> Self {
-        return lhs.concatenating(rhs)
+    public static func * (lhs: Self, rhs: Matrix2) -> Self {
+        lhs.applying(rhs)
     }
 
-    public static func *= (lhs: inout Self, rhs: LinearTransform2) {
-        lhs = lhs * rhs
+    public static func *= (lhs: inout Self, rhs: Matrix2) {
+        lhs.apply(rhs)
+    }
+}
+
+public extension AffineTransform2 {
+    var linearTransform: LinearTransform2 {
+        get { LinearTransform2(self.matrix2) }
+        set(t) { self.matrix2 = t.matrix2 }
+    }
+
+    init(linear: LinearTransform2, origin: Vector2 = .zero) {
+        self.matrix2 = linear.matrix2
+        self.translation = origin
+    }
+
+    func applying(_ t: LinearTransform2) -> Self {
+        self.applying(t.matrix2)
+    }
+
+    mutating func apply(_ t: LinearTransform2) {
+        self.apply(t.matrix2)
+    }
+
+    static func * (lhs: Self, rhs: LinearTransform2) -> Self {
+        lhs.applying(rhs)
+    }
+
+    static func *= (lhs: inout Self, rhs: LinearTransform2) {
+        lhs.apply(rhs)
     }
 }
 

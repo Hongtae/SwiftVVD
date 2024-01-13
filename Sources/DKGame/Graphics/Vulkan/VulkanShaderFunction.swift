@@ -45,6 +45,7 @@ public class VulkanShaderFunction: ShaderFunction {
                 self.specializationInfo.mapEntryCount = UInt32(constantValues.count)
                 self.specializationInfo.pMapEntries = UnsafePointer(mapEntry)
                 self.specializationInfo.pData = UnsafeRawPointer(data)
+                self.specializationInfo.dataSize = size
 
                 var offset = 0
                 for (i, sp) in constantValues.enumerated() {

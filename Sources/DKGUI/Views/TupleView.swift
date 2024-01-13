@@ -27,15 +27,15 @@ public struct TupleView<T>: View {
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
         var viewList: [_ViewListOutputs] = []
+
+        func makeOutput<V: View>(_ view: V, inputs: _ViewListInputs) -> _ViewListOutputs {
+            V._makeViewList(view: _GraphValue(view), inputs: inputs)
+        }
+
         Mirror(reflecting: view.value.value).children.forEach { label, value in
             if let v = value as? any View {
-                let view = AnyView(v)
-                if view.viewProxyProvider != nil {
-                    viewList.append(_ViewListOutputs(item: .view(.init(view: view, inputs: inputs.inputs))))
-                } else {
-                    let outputs = view.makeViewList(graph: _Graph(), inputs: inputs)
-                    viewList.append(outputs)
-                }
+                let output = makeOutput(v, inputs: inputs)
+                viewList.append(output)
             }
         }
         return _ViewListOutputs(item: .viewList(viewList))

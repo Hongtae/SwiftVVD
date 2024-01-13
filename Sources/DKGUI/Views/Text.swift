@@ -22,7 +22,7 @@ class AnyTextStorage {
 
 // NOTE: No String.LocalizationValue for non-Apple platforms.
 //typealias LocalizedStringKey = String.LocalizationValue
-typealias LocalizedStringKey = String
+public typealias LocalizedStringKey = String
 
 class LocalizedTextStorage: AnyTextStorage {
     let key: LocalizedStringKey
@@ -291,11 +291,11 @@ extension Text: _PrimitiveView {
 
 extension Text: _ViewProxyProvider {
     func makeViewProxy(inputs: _ViewInputs) -> ViewProxy {
-        return TextContext(text: self, inputs: inputs)
+        return TextViewProxy(text: self, inputs: inputs)
     }
 }
 
-class TextContext: ViewProxy {
+class TextViewProxy: ViewProxy {
     var text: Text
     var resolvedText: GraphicsContext.ResolvedText?
 
@@ -345,7 +345,11 @@ class TextContext: ViewProxy {
                 self.sharedContext.needsLayout = true
             }
             if let resolvedText {
-                context.draw(resolvedText, in: frame)
+                if let style = foregroundStyle.primary {
+                    context.draw(resolvedText, in: frame, shading: .style(style))
+                } else {
+                    context.draw(resolvedText, in: frame)
+                }
             }
         }
     }

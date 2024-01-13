@@ -410,8 +410,8 @@ public extension CGRect {
 #if os(macOS) || os(Linux) || os(Windows) || os(Android)
 public extension AffineTransform2 {
     init(_ t: AffineTransform) {
-        self.init(linear: Matrix2(Scalar(t.m11), Scalar(t.m12),
-                                  Scalar(t.m21), Scalar(t.m22)),
+        self.init(basis: Matrix2(Scalar(t.m11), Scalar(t.m12),
+                                 Scalar(t.m21), Scalar(t.m22)),
                   origin: Vector2(Scalar(t.tX), Scalar(t.tY)))
     }
 }
