@@ -1,8 +1,8 @@
 //
-//  File: Buffer.swift
+//  File: GPUBuffer.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 public enum StorageMode: UInt {
@@ -10,7 +10,7 @@ public enum StorageMode: UInt {
     case `private`  // only accessible to the GPU
 }
 
-public protocol Buffer: AnyObject {
+public protocol GPUBuffer: AnyObject {
     func contents() -> UnsafeMutableRawPointer?
     func flush()
     var length: Int { get }

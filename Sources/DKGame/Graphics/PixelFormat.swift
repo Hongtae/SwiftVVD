@@ -82,7 +82,7 @@ public enum PixelFormat {
 }    
 
 public extension PixelFormat {
-    func isColorFormat() -> Bool {
+    var isColorFormat: Bool {
         switch self {
         case .invalid,
              .depth16Unorm, .depth32Float, .stencil8,
@@ -92,7 +92,7 @@ public extension PixelFormat {
             return true
         }
     }
-    func isDepthFormat() -> Bool {
+    var isDepthFormat: Bool {
         switch self {
         case .depth16Unorm, .depth32Float,
              .depth24Unorm_stencil8, .depth32Float_stencil8:
@@ -101,7 +101,7 @@ public extension PixelFormat {
             return false
         }
     }
-    func isStencilFormat() -> Bool {
+    var isStencilFormat: Bool {
         switch self {
         case .stencil8, .depth24Unorm_stencil8, .depth32Float_stencil8:
             return true
@@ -109,7 +109,7 @@ public extension PixelFormat {
             return false
         }
     }
-    func bytesPerPixel() -> Int {
+    var bytesPerPixel: Int {
         switch self {
         // 8 bit formats
         case .r8Unorm, .r8Snorm, .r8Uint, .r8Sint:

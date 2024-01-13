@@ -238,17 +238,26 @@ private func resourceStructMembersFromSPVC(compiler: spvc_compiler,
         var size: Int = 0
         result = spvc_compiler_get_declared_struct_member_size(compiler, type, i, &size)
         if result != SPVC_SUCCESS { throw SPVCError.spvcResult(result) }
-        assert(size > 0)
+        if size == 0 {
+            // runtime array
+            let dim = spvc_type_get_num_array_dimensions(type)
+            var isRuntimeArray = false
+            if dim > 0 {
+                isRuntimeArray = spvc_type_array_dimension_is_literal(type, dim-1) == SPVC_TRUE &&
+                                 spvc_type_get_array_dimension(type, dim-1) == 0
+            }
+            assert(isRuntimeArray)
+        }
 
-        var count: UInt32 = 0
+        var count: UInt32 = 1
         for n in 0..<spvc_type_get_num_array_dimensions(type) {
             count = count * spvc_type_get_array_dimension(type, n)
         }
 
         var stride: UInt32 = 0
-        if count > 1 {
+        if spvc_type_get_num_array_dimensions(type) > 0 {
             result = spvc_compiler_type_struct_member_array_stride(compiler, type, i, &stride)
-            if result != SPVC_SUCCESS { throw SPVCError.spvcResult(result) }
+            if result != SPVC_SUCCESS { throw SPVCError.spvcResult(result) }            
         }
 
         var structMembers: [ShaderResourceStructMember] = []
@@ -637,7 +646,7 @@ public class Shader: CustomStringConvertible {
                     var numRanges: Int = 0
                     let result = spvc_compiler_get_active_buffer_ranges(compiler, ptr[i].id, &ranges, &numRanges)
                     if result != SPVC_SUCCESS { throw SPVCError.spvcResult(result) }
-                    assert(numRanges > 0)
+                    //assert(numRanges > 0)
                     if let ranges = ranges, numRanges > 0 {
                         var rangeBegin = ranges[0].offset
                         var rangeEnd = ranges[0].offset + ranges[0].range

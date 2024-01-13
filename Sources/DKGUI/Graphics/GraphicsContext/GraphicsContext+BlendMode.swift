@@ -128,7 +128,7 @@ extension GraphicsContext {
         }
 
         let color = color.float4
-        let makeVertex = { x, y, u, v in
+        let makeVertex = { (x: Scalar, y: Scalar, u: Scalar, v: Scalar) in
             _Vertex(position: Vector2(x, y).float2,
                     texcoord: Vector2(u, v).float2,
                     color: color)
@@ -173,7 +173,7 @@ extension GraphicsContext {
         pipeline.defaultBindingSet2.setTexture(backdrop, binding: 1)
         pipeline.defaultBindingSet2.setSamplerState(pipeline.defaultSampler, binding: 0)
         pipeline.defaultBindingSet2.setSamplerState(pipeline.defaultSampler, binding: 1)
-        encoder.setResource(pipeline.defaultBindingSet2, atIndex: 0)
+        encoder.setResource(pipeline.defaultBindingSet2, index: 0)
 
         encoder.setCullMode(.none)
         encoder.setFrontFacing(.clockwise)

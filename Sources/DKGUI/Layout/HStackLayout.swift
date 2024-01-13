@@ -164,7 +164,7 @@ public struct HStackLayout: Layout {
         }
     }
 
-    static public var layoutProperties: LayoutProperties {
+    public static var layoutProperties: LayoutProperties {
         LayoutProperties(stackOrientation: .horizontal)
     }
 }

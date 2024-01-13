@@ -33,20 +33,15 @@ public class VulkanDepthStencilState: DepthStencilState {
         self.minDepthBounds = 0.0
         self.maxDepthBounds = 1.0
 
-        self.front = VkStencilOpState(failOp: VK_STENCIL_OP_KEEP,
-                                      passOp: VK_STENCIL_OP_KEEP,
-                                      depthFailOp: VK_STENCIL_OP_KEEP,
-                                      compareOp: VK_COMPARE_OP_ALWAYS,
-                                      compareMask: 0xffffffff,
-                                      writeMask: 0xffffffff,
-                                      reference: 0)
-        self.back = VkStencilOpState(failOp: VK_STENCIL_OP_KEEP,
-                                     passOp: VK_STENCIL_OP_KEEP,
-                                     depthFailOp: VK_STENCIL_OP_KEEP,
-                                     compareOp: VK_COMPARE_OP_ALWAYS,
-                                     compareMask: 0xffffffff,
-                                     writeMask: 0xffffffff,
-                                     reference: 0)
+        let stencilOp = VkStencilOpState(failOp: VK_STENCIL_OP_KEEP,
+                                         passOp: VK_STENCIL_OP_KEEP,
+                                         depthFailOp: VK_STENCIL_OP_KEEP,
+                                         compareOp: VK_COMPARE_OP_ALWAYS,
+                                         compareMask: 0xffffffff,
+                                         writeMask: 0xffffffff,
+                                         reference: 0)
+        self.front = stencilOp
+        self.back = stencilOp
         self.stencilTestEnable = VK_FALSE
     }
 
@@ -62,39 +57,26 @@ public class VulkanDepthStencilState: DepthStencilState {
         }
         
         if self.depthBoundsTestEnable != VK_FALSE {
-            vkCmdSetDepthBounds(commandBuffer, self.minDepthBounds, self.maxDepthBounds)
+            vkCmdSetDepthBounds(commandBuffer,
+                                self.minDepthBounds,
+                                self.maxDepthBounds)
         }
 
         if self.stencilTestEnable != VK_FALSE {
-            let frontFaceFlags = VkStencilFaceFlags(VK_STENCIL_FACE_FRONT_BIT.rawValue)
-            let backFaceFlags = VkStencilFaceFlags(VK_STENCIL_FACE_BACK_BIT.rawValue)
+            let flags = [VkStencilFaceFlags(VK_STENCIL_FACE_FRONT_BIT.rawValue),
+                         VkStencilFaceFlags(VK_STENCIL_FACE_BACK_BIT.rawValue)]
+            let faces = [self.front, self.back]
 
-            // front face stencil
-            vkCmdSetStencilCompareMask(commandBuffer,
-                                       frontFaceFlags,
-                                       self.front.compareMask)
-            vkCmdSetStencilWriteMask(commandBuffer,
-                                     frontFaceFlags,
-                                     self.front.writeMask)
-            vkCmdSetStencilOp(commandBuffer,
-                              frontFaceFlags,
-                              self.front.failOp,
-                              self.front.passOp,
-                              self.front.depthFailOp,
-                              self.front.compareOp)
-            // back face stencil
-            vkCmdSetStencilCompareMask(commandBuffer,
-                                       backFaceFlags,
-                                       self.back.compareMask)
-            vkCmdSetStencilWriteMask(commandBuffer,
-                                     backFaceFlags,
-                                     self.back.writeMask)
-            vkCmdSetStencilOp(commandBuffer,
-                              backFaceFlags,
-                              self.back.failOp,
-                              self.back.passOp,
-                              self.back.depthFailOp,
-                              self.back.compareOp)
+            for (flag, face) in zip(flags, faces) {
+                vkCmdSetStencilCompareMask(commandBuffer, flag,
+                                           face.compareMask)
+                vkCmdSetStencilWriteMask(commandBuffer, flag, face.writeMask)
+                vkCmdSetStencilOp(commandBuffer, flag,
+                                  face.failOp,
+                                  face.passOp,
+                                  face.depthFailOp,
+                                  face.compareOp)
+            }
         }
     }
 }

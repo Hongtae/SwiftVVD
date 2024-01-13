@@ -51,7 +51,7 @@ public struct Transform: Hashable {
         self = self.concatenating(t)
     }
 
-    public static func interpolate(_ t1: Self, _ t2: Self, t: any BinaryFloatingPoint) -> Self {
+    public static func interpolate(_ t1: Self, _ t2: Self, t: some BinaryFloatingPoint) -> Self {
         return Self(orientation: Quaternion.slerp(t1.orientation, t2.orientation, t:t),
                     position: t1.position + ((t2.position - t1.position) * t))
     }

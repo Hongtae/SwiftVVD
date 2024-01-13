@@ -2,7 +2,7 @@
 //  File: VulkanCopyCommandEncoder.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
@@ -17,10 +17,10 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
     class Encoder: VulkanCommandEncoder {
         unowned let commandBuffer: VulkanCommandBuffer
 
-        var buffers: [Buffer] = []
+        var buffers: [GPUBuffer] = []
         var textures: [Texture] = []
-        var events: [Event] = []
-        var semaphores: [Semaphore] = []
+        var events: [GPUEvent] = []
+        var semaphores: [GPUSemaphore] = []
 
         typealias Command = (VkCommandBuffer, inout EncodingState)->Void
         var commands: [Command] = []
@@ -72,41 +72,43 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
 
     public var isCompleted: Bool { self.encoder == nil }
 
-    public func waitEvent(_ event: Event) {
+    public func waitEvent(_ event: GPUEvent) {
         assert(event is VulkanSemaphore)
         if let semaphore = event as? VulkanSemaphore {
-            let pipelineStages: VkPipelineStageFlags = VkPipelineStageFlags(VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT.rawValue)
+            let pipelineStages = VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT
             self.encoder!.addWaitSemaphore(semaphore.semaphore, value: semaphore.nextWaitValue, flags: pipelineStages)
             self.encoder!.events.append(event)
         }
     }
-    public func signalEvent(_ event: Event) {
+    public func signalEvent(_ event: GPUEvent) {
         assert(event is VulkanSemaphore)
         if let semaphore = event as? VulkanSemaphore {
-            self.encoder!.addSignalSemaphore(semaphore.semaphore, value: semaphore.nextWaitValue)
+            let pipelineStages = VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT 
+            self.encoder!.addSignalSemaphore(semaphore.semaphore, value: semaphore.nextWaitValue, flags: pipelineStages)
             self.encoder!.events.append(event)
         }
     }
 
-    public func waitSemaphoreValue(_ sema: Semaphore, value: UInt64) {
+    public func waitSemaphoreValue(_ sema: GPUSemaphore, value: UInt64) {
         assert(sema is VulkanTimelineSemaphore)
         if let semaphore = sema as? VulkanTimelineSemaphore {
-            let pipelineStages: VkPipelineStageFlags = VkPipelineStageFlags(VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT.rawValue)
+            let pipelineStages = VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT
             self.encoder!.addWaitSemaphore(semaphore.semaphore, value: value, flags: pipelineStages)
             self.encoder!.semaphores.append(sema)
         }
     }
-    public func signalSemaphoreValue(_ sema: Semaphore, value: UInt64) {
+    public func signalSemaphoreValue(_ sema: GPUSemaphore, value: UInt64) {
         assert(sema is VulkanTimelineSemaphore)
         if let semaphore = sema as? VulkanTimelineSemaphore {
-            self.encoder!.addSignalSemaphore(semaphore.semaphore, value: value)
+            let pipelineStages = VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT 
+            self.encoder!.addSignalSemaphore(semaphore.semaphore, value: value, flags: pipelineStages)
             self.encoder!.semaphores.append(sema)
         }
     }
     
-    public func copy(from src: Buffer,
+    public func copy(from src: GPUBuffer,
                      sourceOffset srcOffset: Int,
-                     to dst: Buffer,
+                     to dst: GPUBuffer,
                      destinationOffset dstOffset: Int,
                      size: Int) {
         assert(src is VulkanBufferView)
@@ -114,9 +116,6 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
 
         let srcBuffer = (src as! VulkanBufferView).buffer!
         let dstBuffer = (dst as! VulkanBufferView).buffer!
-
-        assert(srcBuffer.buffer != nil)
-        assert(dstBuffer.buffer != nil)
 
         if srcOffset + size > srcBuffer.length || dstOffset + size > dstBuffer.length {
             Log.err("VulkanCopyCommandEncoder.\(#function) failed: Invalid buffer region")
@@ -134,7 +133,7 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
         self.encoder!.buffers.append(dst)
     }
 
-    public func copy(from src: Buffer,
+    public func copy(from src: GPUBuffer,
                      sourceOffset srcOffset: BufferImageOrigin,
                      to dst: Texture,
                      destinationOffset dstOffset: TextureOrigin,
@@ -166,7 +165,7 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
 
         let pixelFormat = image.pixelFormat
         let bufferLength = buffer.length
-        let bytesPerPixel = pixelFormat.bytesPerPixel()
+        let bytesPerPixel = pixelFormat.bytesPerPixel
         assert(bytesPerPixel > 0)
 
         let requiredBufferLengthForCopy = srcOffset.imageWidth * srcOffset.imageHeight * size.depth * bytesPerPixel + srcOffset.offset
@@ -188,9 +187,9 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
         let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
 
             image.setLayout(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                            accessMask: VkAccessFlags(VK_ACCESS_TRANSFER_WRITE_BIT.rawValue),
-                            stageBegin: UInt32(VK_PIPELINE_STAGE_TRANSFER_BIT.rawValue),
-                            stageEnd: UInt32(VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT.rawValue),
+                            accessMask: VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                            stageBegin: VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                            stageEnd: VK_PIPELINE_STAGE_2_TRANSFER_BIT,
                             queueFamilyIndex: queueFamilyIndex,
                             commandBuffer: commandBuffer)
 
@@ -207,7 +206,7 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
 
     public func copy(from src: Texture,
                      sourceOffset srcOffset: TextureOrigin,
-                     to dst: Buffer,
+                     to dst: GPUBuffer,
                      destinationOffset dstOffset: BufferImageOrigin,
                      size: TextureSize) {
         assert(src is VulkanImageView)
@@ -236,7 +235,7 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
 
         let pixelFormat = image.pixelFormat
         let bufferLength = buffer.length
-        let bytesPerPixel = pixelFormat.bytesPerPixel()
+        let bytesPerPixel = pixelFormat.bytesPerPixel
         assert(bytesPerPixel > 0)   // Unsupported texture format!
 
         let requiredBufferLengthForCopy = dstOffset.imageWidth * dstOffset.imageHeight * size.depth * bytesPerPixel + dstOffset.offset
@@ -258,9 +257,9 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
         let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
 
             image.setLayout(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                            accessMask: VkAccessFlags(VK_ACCESS_TRANSFER_READ_BIT.rawValue),
-                            stageBegin: UInt32(VK_PIPELINE_STAGE_TRANSFER_BIT.rawValue),
-                            stageEnd: UInt32(VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT.rawValue),
+                            accessMask: VK_ACCESS_2_TRANSFER_READ_BIT,
+                            stageBegin: VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                            stageEnd: VK_PIPELINE_STAGE_2_TRANSFER_BIT,
                             queueFamilyIndex: queueFamilyIndex,
                             commandBuffer: commandBuffer)
 
@@ -312,8 +311,8 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
 
         let srcPixelFormat = srcImage.pixelFormat
         let dstPixelFormat = dstImage.pixelFormat
-        let srcBytesPerPixel = srcPixelFormat.bytesPerPixel()
-        let dstBytesPerPixel = dstPixelFormat.bytesPerPixel()
+        let srcBytesPerPixel = srcPixelFormat.bytesPerPixel
+        let dstBytesPerPixel = dstPixelFormat.bytesPerPixel
         assert(srcBytesPerPixel > 0)    // Unsupported texture format!
         assert(dstBytesPerPixel > 0)    // Unsupported texture format!
 
@@ -337,16 +336,16 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
         let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
 
             srcImage.setLayout(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                               accessMask: VkAccessFlags(VK_ACCESS_TRANSFER_READ_BIT.rawValue),
-                               stageBegin: UInt32(VK_PIPELINE_STAGE_TRANSFER_BIT.rawValue),
-                               stageEnd: UInt32(VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT.rawValue),
+                               accessMask: VK_ACCESS_2_TRANSFER_READ_BIT,
+                               stageBegin: VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                               stageEnd: VK_PIPELINE_STAGE_2_TRANSFER_BIT,
                                queueFamilyIndex: queueFamilyIndex,
                                commandBuffer: commandBuffer)
 
             dstImage.setLayout(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                               accessMask: VkAccessFlags(VK_ACCESS_TRANSFER_WRITE_BIT.rawValue),
-                               stageBegin: UInt32(VK_PIPELINE_STAGE_TRANSFER_BIT.rawValue),
-                               stageEnd: UInt32(VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT.rawValue),
+                               accessMask: VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                               stageBegin: VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                               stageEnd: VK_PIPELINE_STAGE_2_TRANSFER_BIT,
                                queueFamilyIndex: queueFamilyIndex,
                                commandBuffer: commandBuffer)
 
@@ -362,7 +361,7 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
         self.encoder!.textures.append(dst)
     }
 
-    public func fill(buffer: Buffer, offset: Int, length: Int, value: UInt8) {
+    public func fill(buffer: GPUBuffer, offset: Int, length: Int, value: UInt8) {
         assert(buffer is VulkanBufferView)
         let buf = (buffer as! VulkanBufferView).buffer!
 
@@ -385,18 +384,25 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
         self.encoder!.buffers.append(buffer)
     }
 
+    public func callback(_ fn: @escaping (_:VkCommandBuffer)->Void) {
+        let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
+            fn(commandBuffer)
+        }
+        self.encoder!.commands.append(command)
+    }
+
     private func setupSubresource(_ subresource: inout VkImageSubresourceLayers,
                                   origin: TextureOrigin,
                                   layerCount: Int, 
                                   pixelFormat: PixelFormat) {
-        if pixelFormat.isColorFormat() {
+        if pixelFormat.isColorFormat {
             subresource.aspectMask = VkImageAspectFlags(VK_IMAGE_ASPECT_COLOR_BIT.rawValue)
         } else {
             subresource.aspectMask = 0
-            if pixelFormat.isDepthFormat() {
+            if pixelFormat.isDepthFormat {
                 subresource.aspectMask |= VkImageAspectFlags(VK_IMAGE_ASPECT_DEPTH_BIT.rawValue)
             }
-            if pixelFormat.isStencilFormat() {
+            if pixelFormat.isStencilFormat {
                 subresource.aspectMask |= VkImageAspectFlags(VK_IMAGE_ASPECT_STENCIL_BIT.rawValue)
             }
         }
@@ -410,14 +416,14 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
                                   layerCount: Int,
                                   levelCount: Int,
                                   pixelFormat: PixelFormat) {
-        if pixelFormat.isColorFormat() {
+        if pixelFormat.isColorFormat {
             subresource.aspectMask = VkImageAspectFlags(VK_IMAGE_ASPECT_COLOR_BIT.rawValue)
         } else {
             subresource.aspectMask = 0
-            if pixelFormat.isDepthFormat() {
+            if pixelFormat.isDepthFormat {
                 subresource.aspectMask |= VkImageAspectFlags(VK_IMAGE_ASPECT_DEPTH_BIT.rawValue)
             }
-            if pixelFormat.isStencilFormat() {
+            if pixelFormat.isStencilFormat {
                 subresource.aspectMask |= VkImageAspectFlags(VK_IMAGE_ASPECT_STENCIL_BIT.rawValue)
             }
         }

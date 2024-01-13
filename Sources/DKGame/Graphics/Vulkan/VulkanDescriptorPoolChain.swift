@@ -2,7 +2,7 @@
 //  File: VulkanDescriptorPoolChain.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
@@ -10,7 +10,7 @@ import Foundation
 import Vulkan
 
 public class VulkanDescriptorPoolChain {
-    public unowned var device: VulkanGraphicsDevice
+    unowned let device: VulkanGraphicsDevice
     public let poolID: VulkanDescriptorPoolID
     
     public var maxSets: UInt32

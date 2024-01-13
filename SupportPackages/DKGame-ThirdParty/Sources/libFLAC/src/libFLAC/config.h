@@ -42,7 +42,9 @@
 #endif
 
 /* define if building for Linux */
-/* #undef FLAC__SYS_LINUX */
+#if defined(__linux__)
+#define FLAC__SYS_LINUX 1
+#endif
 
 /* define to enable use of 3Dnow! instructions */
 /* #define FLAC__USE_3DNOW 1 */
@@ -140,6 +142,7 @@
 
 /* Define to 1 to make fseeko visible on some hosts (e.g. glibc 2.2). */
 /* #undef _LARGEFILE_SOURCE */
+#define _LARGEFILE_SOURCE 1
 
 /* Define for large files, on AIX-style hosts. */
 /* #undef _LARGE_FILES */

@@ -2,7 +2,7 @@
 //  File: MetalShaderBindingSet.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_METAL
@@ -23,14 +23,14 @@ public class MetalShaderBindingSet: ShaderBindingSet {
         self.layout = layout
     }
 
-    public func setBuffer(_ buffer: Buffer, offset: Int, length: Int, binding: Int) {
-        self.setBufferArray([GPUBufferBindingInfo(buffer: buffer,
-                                                  offset: offset,
-                                                  length: length)],
+    public func setBuffer(_ buffer: GPUBuffer, offset: Int, length: Int, binding: Int) {
+        self.setBufferArray([BufferBindingInfo(buffer: buffer,
+                                               offset: offset,
+                                               length: length)],
                             binding:binding)
     }
 
-    public func setBufferArray(_ buffers: [GPUBufferBindingInfo], binding: Int) {
+    public func setBufferArray(_ buffers: [BufferBindingInfo], binding: Int) {
         if let descriptor = self.layout.first(where: { $0.binding == binding }) {
 
             let startingIndex = 0

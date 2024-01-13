@@ -52,20 +52,14 @@ public struct Color: Hashable {
         }
     }
 
-    public init(_ r: any BinaryFloatingPoint,
-                _ g: any BinaryFloatingPoint,
-                _ b: any BinaryFloatingPoint,
-                _ a: any BinaryFloatingPoint = 1) {
+    public init<T: BinaryFloatingPoint>(_ r: T, _ g: T, _ b: T, _ a: T = 1) {
         self.r = Scalar(r)
         self.g = Scalar(g)
         self.b = Scalar(b)
         self.a = Scalar(a)
     }
 
-    public init(r: any BinaryFloatingPoint,
-                g: any BinaryFloatingPoint,
-                b: any BinaryFloatingPoint,
-                a: any BinaryFloatingPoint = 1) {
+    public init<T: BinaryFloatingPoint>(r: T, g: T, b: T, a: T = 1) {
         self.init(r, g, b, a)
     }
 
@@ -77,15 +71,14 @@ public struct Color: Hashable {
         self.rgba8 = rgba8
     }
 
-    public init(white: any BinaryFloatingPoint,
-                opacity: any BinaryFloatingPoint = 1) {
+    public init<T: BinaryFloatingPoint>(white: T, opacity: T = 1) {
         self.init(white, white, white, opacity)
     }
 
-    public init(hue: any BinaryFloatingPoint,
-                saturation: any BinaryFloatingPoint,
-                brightness: any BinaryFloatingPoint,
-                opacity: any BinaryFloatingPoint = 1) {
+    public init<T: BinaryFloatingPoint>(hue: T,
+                                        saturation: T,
+                                        brightness: T,
+                                        opacity: T = 1) {
         let hue = Scalar(hue).clamp(min: 0.0, max: 1.0)
         let saturation = Scalar(saturation).clamp(min: 0.0, max: 1.0)
         let brightness = Scalar(brightness).clamp(min: 0.0, max: 1.0)
@@ -105,11 +98,19 @@ public struct Color: Hashable {
         default: // 0, 6
             (r, g, b) = (c, x, 0)
         }
-        self.init(r + m, g + m, b + m, opacity)
+        self.init(r + m, g + m, b + m, Scalar(opacity))
     }
 
-    public func opacity(_ opacity: Double) -> Color {
-        Color(self.r, self.g, self.b, opacity)
+    public init(rgbVector v: Vector3, alpha: some BinaryFloatingPoint = 1) {
+        self.init(v.x, v.y, v.z, Scalar(alpha))
+    }
+
+    public init(rgbaVector v: Vector4) {
+        self.init(v.x, v.y, v.z, v.w)
+    }
+
+    public func opacity(_ opacity: some BinaryFloatingPoint) -> Color {
+        Color(self.r, self.g, self.b, Scalar(opacity))
     }
 
     public static let black = Color(0.0, 0.0, 0.0)

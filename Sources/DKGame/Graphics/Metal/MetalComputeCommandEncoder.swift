@@ -2,7 +2,7 @@
 //  File: MetalComputeCommandEncoder.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_METAL
@@ -19,8 +19,8 @@ public class MetalComputeCommandEncoder: ComputeCommandEncoder {
     class Encoder: MetalCommandEncoder {
         typealias Command = (MTLComputeCommandEncoder, inout EncodingState)->Void
         var commands: [Command] = []
-        var events: [Event] = []
-        var semaphores: [Semaphore] = []
+        var events: [GPUEvent] = []
+        var semaphores: [GPUSemaphore] = []
 
         var waitEvents: Set<MetalHashable<MetalEvent>> = []
         var signalEvents: Set<MetalHashable<MetalEvent>> = []
@@ -74,7 +74,7 @@ public class MetalComputeCommandEncoder: ComputeCommandEncoder {
         self.encoder = Encoder()
     }
 
-    public func setResource(_ bindingSet: ShaderBindingSet, atIndex index: Int) {
+    public func setResource(_ bindingSet: ShaderBindingSet, index: Int) {
         assert(self.encoder != nil)
         assert(bindingSet is MetalShaderBindingSet)
 
@@ -210,7 +210,7 @@ public class MetalComputeCommandEncoder: ComputeCommandEncoder {
         return self.encoder == nil
     }
 
-    public func waitEvent(_ event: Event) {
+    public func waitEvent(_ event: GPUEvent) {
         assert(event is MetalEvent)
         assert(self.encoder != nil)
         if let event = event as? MetalEvent, let encoder = self.encoder {
@@ -219,7 +219,7 @@ public class MetalComputeCommandEncoder: ComputeCommandEncoder {
         }
     }
 
-    public func signalEvent(_ event: Event) {
+    public func signalEvent(_ event: GPUEvent) {
         assert(event is MetalEvent)
         assert(self.encoder != nil)
         if let event = event as? MetalEvent, let encoder = self.encoder {
@@ -228,7 +228,7 @@ public class MetalComputeCommandEncoder: ComputeCommandEncoder {
         }
     }
 
-    public func waitSemaphoreValue(_ semaphore: Semaphore, value: UInt64) {
+    public func waitSemaphoreValue(_ semaphore: GPUSemaphore, value: UInt64) {
         assert(semaphore is MetalSemaphore)
         assert(self.encoder != nil)
         if let semaphore = semaphore as? MetalSemaphore,
@@ -245,7 +245,7 @@ public class MetalComputeCommandEncoder: ComputeCommandEncoder {
         }
     }
 
-    public func signalSemaphoreValue(_ semaphore: Semaphore, value: UInt64) {
+    public func signalSemaphoreValue(_ semaphore: GPUSemaphore, value: UInt64) {
         assert(semaphore is MetalSemaphore)
         assert(self.encoder != nil)
         if let semaphore = semaphore as? MetalSemaphore,

@@ -42,14 +42,14 @@ public class VulkanShaderBindingSet: ShaderBindingSet {
         vkDestroyDescriptorSetLayout(device.device, descriptorSetLayout, device.allocationCallbacks)
     }
 
-    public func setBuffer(_ buffer: Buffer, offset: Int, length: Int, binding: Int) {
-        self.setBufferArray([GPUBufferBindingInfo(buffer: buffer,
-                                                  offset: offset,
-                                                  length: length)],
+    public func setBuffer(_ buffer: GPUBuffer, offset: Int, length: Int, binding: Int) {
+        self.setBufferArray([BufferBindingInfo(buffer: buffer,
+                                               offset: offset,
+                                               length: length)],
                             binding:binding)
     }
 
-    public func setBufferArray(_ buffers: [GPUBufferBindingInfo], binding: Int) {
+    public func setBufferArray(_ buffers: [BufferBindingInfo], binding: Int) {
         if var descriptorBinding = self.findDescriptorBinding(binding) {
             descriptorBinding.valueSet = false
             descriptorBinding.bufferInfos = []

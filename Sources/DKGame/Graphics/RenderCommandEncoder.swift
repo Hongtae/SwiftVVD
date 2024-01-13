@@ -51,13 +51,13 @@ public struct ScissorRect {
 }
 
 public protocol RenderCommandEncoder: CommandEncoder {
-    func setResource(_: ShaderBindingSet, atIndex: Int)
+    func setResource(_: ShaderBindingSet, index: Int)
     func setViewport(_: Viewport)
     func setScissorRect(_: ScissorRect)
     func setRenderPipelineState(_: RenderPipelineState)
 
-    func setVertexBuffer(_: Buffer, offset: Int, index: Int)
-    func setVertexBuffers(_: [Buffer], offsets: [Int], index: Int)
+    func setVertexBuffer(_: GPUBuffer, offset: Int, index: Int)
+    func setVertexBuffers(_: [GPUBuffer], offsets: [Int], index: Int)
 
     func setDepthStencilState(_: DepthStencilState?)
     func setDepthClipMode(_: DepthClipMode)
@@ -73,13 +73,13 @@ public protocol RenderCommandEncoder: CommandEncoder {
     func pushConstant<D: DataProtocol>(stages: ShaderStageFlags, offset: Int, data: D)
 
     func drawPrimitives(type: PrimitiveType, vertexStart: Int, vertexCount: Int, instanceCount: Int, baseInstance: Int)
-    func drawIndexedPrimitives(type: PrimitiveType, indexCount: Int, indexType: IndexType, indexBuffer: Buffer, indexBufferOffset: Int, instanceCount: Int, baseVertex: Int, baseInstance: Int)
+    func drawIndexedPrimitives(type: PrimitiveType, indexCount: Int, indexType: IndexType, indexBuffer: GPUBuffer, indexBufferOffset: Int, instanceCount: Int, baseVertex: Int, baseInstance: Int)
 }
 
 public extension RenderCommandEncoder {
     func setViewport(frame: CGRect,
-                     near: any BinaryFloatingPoint,
-                     far: any BinaryFloatingPoint) {
+                     near: some BinaryFloatingPoint,
+                     far: some BinaryFloatingPoint) {
         let frame = frame.standardized
         self.setViewport(Viewport(x: Double(frame.origin.x),
                                   y: Double(frame.origin.y),

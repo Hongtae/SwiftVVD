@@ -76,7 +76,7 @@ extension GraphicsContext {
                                   blendState: BlendState,
                                   color: DKGame.Color) {
         let trans = transform.concatenating(self.viewTransform)
-        let makeVertex = { x, y, u, v in
+        let makeVertex = { (x: Scalar, y: Scalar, u: Scalar, v: Scalar) in
             _Vertex(position: Vector2(x, y).applying(trans).float2,
                     texcoord: Vector2(u, v).applying(textureTransform).float2,
                     color: color.float4)

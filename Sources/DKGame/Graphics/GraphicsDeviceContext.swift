@@ -2,7 +2,7 @@
 //  File: GraphicsDeviceContext.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -10,77 +10,137 @@ import Foundation
 public class GraphicsDeviceContext {
     public let device: GraphicsDevice
     public var cachedDeviceResources: [String: AnyObject] = [:]
+    public var cachedQueues: [CommandQueue] = []
 
     public init(device: GraphicsDevice) {
         self.device = device
     }
 
     deinit {
-        self.cachedDeviceResources.removeAll()        
-        self.renderQueues.removeAll()
-        self.computeQueues.removeAll()
-        self.copyQueues.removeAll()
+        self.cachedDeviceResources.removeAll()     
+        self.cachedQueues.removeAll()
     }
 
-    // cached command queue.
-    public func renderQueue() -> CommandQueue? {
-        if renderQueues.isEmpty {
-            if let queue = device.makeCommandQueue(flags: .render) {
-                if queue.flags.contains(.render) {
-                    renderQueues.append(queue)
-                }
-                if queue.flags.contains(.compute) {
-                    computeQueues.append(queue)
-                }
-                copyQueues.append(queue)
-
-                if queue.flags.contains(.render) {
-                    return queue
-                }
-            }
+    public func commandQueue(flags: CommandQueueFlags = []) -> CommandQueue? {
+        if let queue = self.cachedQueues.first(where: {
+            $0.flags.intersection(flags) == flags
+        }) {
+            return queue;
         }
-        return renderQueues.first
+
+        if let queue = device.makeCommandQueue(flags: flags) {
+            cachedQueues.append(queue)
+            return queue
+        }
+        return nil
+    }
+
+    public func renderQueue() -> CommandQueue? {
+        commandQueue(flags: .render) 
     }
 
     public func computeQueue() -> CommandQueue? {
-        if computeQueues.isEmpty {
-            if let queue = device.makeCommandQueue(flags: .compute) {
-                if queue.flags.contains(.render) {
-                    renderQueues.append(queue)
-                }
-                if queue.flags.contains(.compute) {
-                    computeQueues.append(queue)
-                }
-                copyQueues.append(queue)
-
-                if queue.flags.contains(.compute) {
-                    return queue
-                }
-            }                        
-        }
-        return computeQueues.first
+        commandQueue(flags: .compute)
     }
 
     public func copyQueue() -> CommandQueue? {
-        if copyQueues.isEmpty {
-            if let queue = device.makeCommandQueue(flags: .copy) {
-                if queue.flags.contains(.render) {
-                    renderQueues.append(queue)
-                }
-                if queue.flags.contains(.compute) {
-                    computeQueues.append(queue)
-                }
-                copyQueues.append(queue)
-
-                return queue
-            }                        
-        }
-        return copyQueues.first
+        commandQueue(flags: .copy)
     }
 
-    private var renderQueues: [CommandQueue] = []
-    private var computeQueues: [CommandQueue] = []
-    private var copyQueues: [CommandQueue] = []
+    let deviceWaitTimeout = 2.0
+
+    public func makeCPUAccessible(buffer: GPUBuffer) -> GPUBuffer? {
+        if buffer.contents() != nil {
+            return buffer
+        }
+        guard let queue = copyQueue() else {
+            fatalError("Unable to make command queue")
+        }
+
+        if let stgBuffer = device.makeBuffer(length: buffer.length,
+                                             storageMode: .shared,
+                                             cpuCacheMode: .defaultCache) {
+            if let cbuffer = queue.makeCommandBuffer(),
+               let encoder = cbuffer.makeCopyCommandEncoder() {
+
+                let cond = NSCondition()
+
+                encoder.copy(from: buffer, sourceOffset: 0,
+                             to: stgBuffer, destinationOffset: 0,
+                             size: buffer.length)
+                encoder.endEncoding()
+                cbuffer.addCompletedHandler { _ in
+                    cond.lock()
+                    defer { cond.unlock() }
+                    cond.broadcast()
+                }
+
+                cond.lock()
+                defer { cond.unlock() }
+
+                cbuffer.commit()
+
+                if cond.wait(until: Date(timeIntervalSinceNow: deviceWaitTimeout)) == false {
+                    // timeout
+                    Log.error("The operation timed out. Device did not respond to the command.")
+                    return nil                    
+                }
+                if stgBuffer.contents() != nil {
+                    return stgBuffer
+                }
+            }
+        }
+        return nil
+    }
+
+    public func makeCPUAccessible(texture: Texture) -> GPUBuffer? {
+        guard let queue = copyQueue() else {
+            fatalError("Unable to make command queue")
+        }
+
+        let pixelFormat = texture.pixelFormat
+        let bpp = pixelFormat.bytesPerPixel
+        let width = texture.width
+        let height = texture.height
+        let bufferLength = width * height * bpp
+
+        if let stgBuffer = device.makeBuffer(length: bufferLength,
+                                             storageMode: .shared,
+                                             cpuCacheMode: .defaultCache) {
+            if let cbuffer = queue.makeCommandBuffer(),
+               let encoder = cbuffer.makeCopyCommandEncoder() {
+
+                let cond = NSCondition()
+
+                encoder.copy(from: texture,
+                             sourceOffset: TextureOrigin(layer: 0, level: 0, x: 0, y: 0, z: 0),
+                             to: stgBuffer, 
+                             destinationOffset: BufferImageOrigin(offset: 0, imageWidth: width, imageHeight: height),
+                             size: TextureSize(width: width, height: height, depth: 1))
+                encoder.endEncoding()
+                cbuffer.addCompletedHandler { _ in
+                    cond.lock()
+                    defer { cond.unlock() }
+                    cond.broadcast()
+                }
+
+                cond.lock()
+                defer { cond.unlock() }
+
+                cbuffer.commit()
+
+                if cond.wait(until: Date(timeIntervalSinceNow: deviceWaitTimeout)) == false {
+                    // timeout
+                    Log.error("The operation timed out. Device did not respond to the command.")
+                    return nil                    
+                }
+                if stgBuffer.contents() != nil {
+                    return stgBuffer
+                }
+            }
+        }
+        return nil
+    }
 }
 
 public enum GraphicsAPI {

@@ -29,6 +29,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
     public let queueFamilies: [VulkanQueueFamily]
     public let deviceMemoryTypes: [VkMemoryType]
     public let deviceMemoryHeaps: [VkMemoryHeap]
+    private var memoryPools: [VulkanMemoryPool]
 
     private var pipelineCache: VkPipelineCache?
 
@@ -93,15 +94,17 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         var optionalExtensions = optionalExtensions
 
         requiredExtensions.append(VK_KHR_SWAPCHAIN_EXTENSION_NAME)
-        requiredExtensions.append(VK_KHR_MAINTENANCE1_EXTENSION_NAME)
-        requiredExtensions.append(VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME)
-        requiredExtensions.append(VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME)
-        requiredExtensions.append(VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME)
-        requiredExtensions.append(VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME)
+        // requiredExtensions.append(VK_KHR_MAINTENANCE1_EXTENSION_NAME)                // vulkan 1.1
+        // requiredExtensions.append(VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME)          // vulkan 1.2
+        // requiredExtensions.append(VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME)           // vulkan 1.3
+        // requiredExtensions.append(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME)           // vulkan 1.3
+        // requiredExtensions.append(VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME)      // vulkan 1.3
+        // requiredExtensions.append(VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME)    // vulkan 1.3
+        requiredExtensions.append(VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME)    
 
-        optionalExtensions.append(VK_KHR_MAINTENANCE_2_EXTENSION_NAME)
-        optionalExtensions.append(VK_KHR_MAINTENANCE_3_EXTENSION_NAME)
-        optionalExtensions.append(VK_KHR_MAINTENANCE_4_EXTENSION_NAME)
+        // optionalExtensions.append(VK_KHR_MAINTENANCE_2_EXTENSION_NAME)   // vulkan 1.1
+        // optionalExtensions.append(VK_KHR_MAINTENANCE_3_EXTENSION_NAME)   // vulkan 1.1
+        // optionalExtensions.append(VK_KHR_MAINTENANCE_4_EXTENSION_NAME)   // vulkan 1.1
 
         // setup extensions
         var deviceExtensions: [String] = []
@@ -128,27 +131,20 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         deviceCreateInfo.pQueueCreateInfos = unsafePointerCopy(collection: queueCreateInfos, holder: tempHolder)
         deviceCreateInfo.pEnabledFeatures = unsafePointerCopy(from: enabledFeatures, holder: tempHolder)
 
-        if deviceExtensions.count > 0 {
+        if deviceExtensions.isEmpty == false {
             deviceCreateInfo.enabledExtensionCount = UInt32(deviceExtensions.count)
             deviceCreateInfo.ppEnabledExtensionNames = unsafePointerCopy(collection: deviceExtensions.map {
                 unsafePointerCopy(string: $0, holder: tempHolder)
             }, holder: tempHolder)
         }
 
-        if deviceExtensions.contains(VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME) {
-            // VK_EXT_extended_dynamic_state
-            var features = VkPhysicalDeviceExtendedDynamicStateFeaturesEXT()
-            features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT
-            features.extendedDynamicState = VK_TRUE
-            appendNextChain(&deviceCreateInfo, unsafePointerCopy(from: features, holder: tempHolder))
-        }
-        if deviceExtensions.contains(VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME) {
-            // VK_EXT_extended_dynamic_state2
-            var features = VkPhysicalDeviceExtendedDynamicState2FeaturesEXT()
-            features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_2_FEATURES_EXT
-            features.extendedDynamicState2 = VK_TRUE
-            appendNextChain(&deviceCreateInfo, unsafePointerCopy(from: features, holder: tempHolder))
-        }
+        let v11Features = physicalDevice.v11Features
+        let v12Features = physicalDevice.v12Features
+        let v13Features = physicalDevice.v13Features
+        appendNextChain(&deviceCreateInfo, unsafePointerCopy(from: v11Features, holder: tempHolder))
+        appendNextChain(&deviceCreateInfo, unsafePointerCopy(from: v12Features, holder: tempHolder))
+        appendNextChain(&deviceCreateInfo, unsafePointerCopy(from: v13Features, holder: tempHolder))
+
         if deviceExtensions.contains(VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME) {
             // VK_EXT_extended_dynamic_state3
             var features = VkPhysicalDeviceExtendedDynamicState3FeaturesEXT()
@@ -162,13 +158,6 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             // depthClipEnableFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_CLIP_ENABLE_FEATURES_EXT
             // depthClipEnableFeatures.depthClipEnable = VK_TRUE
             // appendNextChain(&deviceCreateInfo, unsafePointerCopy(from: depthClipEnableFeatures, holder: tempHolder))
-        }
-        if deviceExtensions.contains(VK_KHR_MAINTENANCE_4_EXTENSION_NAME) {
-            // VK_KHR_maintenance4
-            var features = VkPhysicalDeviceMaintenance4Features()
-            features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES
-            features.maintenance4 = VK_TRUE
-            appendNextChain(&deviceCreateInfo, unsafePointerCopy(from: features, holder: tempHolder))
         }
 
         // required for VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY, Unrestricted primitive topology
@@ -205,6 +194,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
                 initializedCount = count
             }
         }
+        self.memoryPools = []
         
         self.queueFamilies = queueCreateInfos.map {
             var supportPresentation = false
@@ -245,6 +235,17 @@ public class VulkanGraphicsDevice : GraphicsDevice {
                 return lhs.familyIndex < rhs.familyIndex  // smaller index first
             }
             return lp > rp
+        }
+
+        // init memory pools
+        let memoryAllocationContext = VulkanMemoryAllocationContext(device: self.device) {
+            instance.allocationCallbacks
+        }
+        self.memoryPools = self.deviceMemoryTypes.enumerated().map { index, type in
+            VulkanMemoryPool(context: memoryAllocationContext,
+                             typeIndex: UInt32(index),
+                             flags: type.propertyFlags,
+                             heap: self.deviceMemoryHeaps[Int(type.heapIndex)])
         }
 
         self.loadPipelineCache()
@@ -366,10 +367,14 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             vkDestroyFence(self.device, fence, self.allocationCallbacks)
         }
 
+        // destroy pipeline cache
         if let pipelineCache = self.pipelineCache {
             vkDestroyPipelineCache(self.device, pipelineCache, self.allocationCallbacks)
             self.pipelineCache = nil
         }
+        // destroy memory pools
+        self.memoryPools.removeAll()
+
         vkDestroyDevice(self.device, self.allocationCallbacks)
         Log.debug("VulkanGraphicsDevice destroyed.")
     }
@@ -443,10 +448,10 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         }
     }
 
-    private func indexOfMemoryType(typeBits: UInt32, properties: VkMemoryPropertyFlags) -> UInt32? {
+    private func indexOfMemoryType(typeBits: UInt32, properties: VkMemoryPropertyFlags) -> Int? {
         for i in 0..<self.deviceMemoryTypes.count {
             if (typeBits & (1 << i)) != 0 && (self.deviceMemoryTypes[i].propertyFlags & properties) == properties {
-                    return UInt32(i)
+                    return i
             }
         }
         // assertionFailure("VulkanGraphicsDevice error: Unknown memory type!")
@@ -484,6 +489,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         }
         return nil
     }
+
     public func makeShaderModule(from shader: Shader) -> ShaderModule? {
         if shader.validate() == false { return nil }
 
@@ -596,7 +602,6 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         var result: VkResult = VK_SUCCESS
 
         var pipelineLayout: VkPipelineLayout? = nil
-        var renderPass: VkRenderPass? = nil
         var pipeline: VkPipeline? = nil
         var pipelineState: RenderPipelineState? = nil
 
@@ -605,13 +610,24 @@ public class VulkanGraphicsDevice : GraphicsDevice {
                 if let pipelineLayout = pipelineLayout {
                     vkDestroyPipelineLayout(self.device, pipelineLayout, self.allocationCallbacks)
                 }
-                if let renderPass = renderPass {
-                    vkDestroyRenderPass(self.device, renderPass, self.allocationCallbacks)
-                }
                 if let pipeline = pipeline {
                     vkDestroyPipeline(self.device, pipeline, self.allocationCallbacks)
                 }
             }
+        }
+
+        for attachment in desc.colorAttachments {
+            if attachment.pixelFormat.isColorFormat == false {
+                Log.err("Invalid attachment pixel format: \(attachment.pixelFormat)")
+                return nil
+            }
+        }
+        let colorAttachmentCount = desc.colorAttachments.reduce(0) {
+            max($0, $1.index + 1)            
+        }
+        if colorAttachmentCount > self.properties.limits.maxColorAttachments {
+            Log.err("The number of colors attached exceeds the device limit. (\(colorAttachmentCount) > \(self.properties.limits.maxColorAttachments))")
+            return nil
         }
 
         if let vs = desc.vertexFunction {
@@ -786,19 +802,28 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         dynamicState.dynamicStateCount = UInt32(dynamicStateEnables.count)
         pipelineCreateInfo.pDynamicState = unsafePointerCopy(from: dynamicState, holder: tempHolder)
 
-        // render pass
-        var renderPassCreateInfo = VkRenderPassCreateInfo()
-        renderPassCreateInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO
-        var subpassDesc = VkSubpassDescription()
-        subpassDesc.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS
-        var attachmentDescriptions: [VkAttachmentDescription] = []
-        let subpassInputAttachmentRefs: [VkAttachmentReference] = []
-        var subpassColorAttachmentRefs: [VkAttachmentReference] = []
-        let subpassResolveAttachmentRefs: [VkAttachmentReference] = []
-        var colorBlendAttachmentStates: [VkPipelineColorBlendAttachmentState] = []
+        // VK_KHR_dynamic_rendering
+        var pipelineRenderingCreateInfo = VkPipelineRenderingCreateInfo()
+        pipelineRenderingCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO
+        if desc.colorAttachments.isEmpty == false {
+            pipelineRenderingCreateInfo.colorAttachmentCount = UInt32(desc.colorAttachments.count)
+            pipelineRenderingCreateInfo.pColorAttachmentFormats = unsafePointerCopy(
+                collection: desc.colorAttachments.map {
+                    $0.pixelFormat.vkFormat()
+                }, holder: tempHolder)
+        }
+        pipelineRenderingCreateInfo.depthAttachmentFormat = VK_FORMAT_UNDEFINED
+        pipelineRenderingCreateInfo.stencilAttachmentFormat = VK_FORMAT_UNDEFINED
+        // VUID-VkGraphicsPipelineCreateInfo-renderPass-06589
+        if desc.depthStencilAttachmentPixelFormat.isDepthFormat {
+            pipelineRenderingCreateInfo.depthAttachmentFormat = desc.depthStencilAttachmentPixelFormat.vkFormat()
+        }
+        if desc.depthStencilAttachmentPixelFormat.isStencilFormat {
+            pipelineRenderingCreateInfo.stencilAttachmentFormat = desc.depthStencilAttachmentPixelFormat.vkFormat()
+        }
+        appendNextChain(&pipelineCreateInfo, unsafePointerCopy(from: pipelineRenderingCreateInfo, holder: tempHolder))
 
-        attachmentDescriptions.reserveCapacity(desc.colorAttachments.count + 1)
-        subpassColorAttachmentRefs.reserveCapacity(desc.colorAttachments.count)
+        var colorBlendAttachmentStates: [VkPipelineColorBlendAttachmentState] = []
         colorBlendAttachmentStates.reserveCapacity(desc.colorAttachments.count)
 
         let blendOperation = { (op: BlendOperation) -> VkBlendOp in
@@ -834,31 +859,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             }
         }
 
-        var colorAttachmentRefCount = 0
         for attachment in desc.colorAttachments {
-            assert(attachment.pixelFormat.isColorFormat())
-            colorAttachmentRefCount = max(colorAttachmentRefCount, attachment.index + 1)
-        }
-        if colorAttachmentRefCount > self.properties.limits.maxColorAttachments {
-            Log.err("The number of colors attached exceeds the device limit. (\(colorAttachmentRefCount) > \(self.properties.limits.maxColorAttachments))")
-            return nil
-        }
-        subpassColorAttachmentRefs.append(contentsOf: 
-            [VkAttachmentReference](repeating: VkAttachmentReference(attachment: VK_ATTACHMENT_UNUSED, layout: VK_IMAGE_LAYOUT_UNDEFINED),
-                                    count: Int(colorAttachmentRefCount)))
-
-        for (index, attachment) in desc.colorAttachments.enumerated() {
-            var attachmentDesc = VkAttachmentDescription()
-            attachmentDesc.format = attachment.pixelFormat.vkFormat()
-            attachmentDesc.samples = VK_SAMPLE_COUNT_1_BIT
-            attachmentDesc.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE
-            attachmentDesc.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE
-            attachmentDesc.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE
-            attachmentDesc.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE
-            attachmentDesc.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
-            attachmentDesc.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
-            attachmentDescriptions.append(attachmentDesc)
-
             var blendState = VkPipelineColorBlendAttachmentState()
             blendState.blendEnable = attachment.blendState.enabled ? VK_TRUE : VK_FALSE
             blendState.srcColorBlendFactor = blendFactor(attachment.blendState.sourceRGBBlendFactor)
@@ -882,48 +883,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
                 blendState.colorWriteMask |= VkColorComponentFlags(VK_COLOR_COMPONENT_A_BIT.rawValue)
             }
             colorBlendAttachmentStates.append(blendState)
-
-            assert(subpassColorAttachmentRefs.count > attachment.index)
-            subpassColorAttachmentRefs[Int(attachment.index)].attachment = UInt32(index) // index of render-pass-attachment 
-            subpassColorAttachmentRefs[Int(attachment.index)].layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
         }
-        subpassDesc.colorAttachmentCount = UInt32(subpassColorAttachmentRefs.count)
-        subpassDesc.pColorAttachments = unsafePointerCopy(collection: subpassColorAttachmentRefs, holder: tempHolder)
-        subpassDesc.pResolveAttachments = unsafePointerCopy(collection: subpassResolveAttachmentRefs, holder: tempHolder)
-        subpassDesc.inputAttachmentCount = UInt32(subpassInputAttachmentRefs.count)
-        subpassDesc.pInputAttachments = unsafePointerCopy(collection: subpassInputAttachmentRefs, holder: tempHolder)
-
-        if desc.depthStencilAttachmentPixelFormat.isDepthFormat() ||
-           desc.depthStencilAttachmentPixelFormat.isStencilFormat() {
-
-            var subpassDepthStencilAttachment = VkAttachmentReference()
-            subpassDepthStencilAttachment.attachment = UInt32(attachmentDescriptions.count) // attachment index
-            subpassDepthStencilAttachment.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
-            // add depth-stencil attachment description
-            var attachmentDesc = VkAttachmentDescription()
-            attachmentDesc.format = desc.depthStencilAttachmentPixelFormat.vkFormat()
-            attachmentDesc.samples = VK_SAMPLE_COUNT_1_BIT
-            attachmentDesc.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE
-            attachmentDesc.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE
-            attachmentDesc.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE
-            attachmentDesc.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE
-            attachmentDesc.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
-            attachmentDesc.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
-            attachmentDescriptions.append(attachmentDesc)
-            subpassDesc.pDepthStencilAttachment = unsafePointerCopy(from: subpassDepthStencilAttachment, holder: tempHolder)
-        }
-
-        renderPassCreateInfo.attachmentCount = UInt32(attachmentDescriptions.count)
-        renderPassCreateInfo.pAttachments = unsafePointerCopy(collection: attachmentDescriptions, holder: tempHolder)
-        renderPassCreateInfo.subpassCount = 1
-        renderPassCreateInfo.pSubpasses = unsafePointerCopy(from: subpassDesc, holder: tempHolder)
-
-        result = vkCreateRenderPass(self.device, &renderPassCreateInfo, self.allocationCallbacks, &renderPass)
-        if result != VK_SUCCESS {
-            Log.err("vkCreateRenderPass failed: \(result)")
-            return nil
-        }
-        pipelineCreateInfo.renderPass = renderPass
 
         // color blending
         var colorBlendState = VkPipelineColorBlendStateCreateInfo()
@@ -1015,8 +975,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
 
         pipelineState = VulkanRenderPipelineState(device: self,
                                                   pipeline: pipeline!,
-                                                  layout: pipelineLayout!,
-                                                  renderPass: renderPass!)
+                                                  layout: pipelineLayout!)
         return pipelineState
     }
 
@@ -1089,6 +1048,8 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         self.savePipelineCache()
 
         if let reflection = reflection {
+            reflection.pointee.inputAttributes = module.inputAttributes
+            reflection.pointee.pushConstantLayouts = module.pushConstantLayouts
             reflection.pointee.resources = module.resources
         }
 
@@ -1161,18 +1122,18 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         return depthStencilState
     }
 
-    public func makeBuffer(length: Int, storageMode: StorageMode, cpuCacheMode: CPUCacheMode) -> Buffer? {
+    public func makeBuffer(length: Int, storageMode: StorageMode, cpuCacheMode: CPUCacheMode) -> GPUBuffer? {
         guard length > 0 else { return nil }
 
         var buffer: VkBuffer? = nil
-        var memory: VkDeviceMemory? = nil
+        var memory: VulkanMemoryBlock? = nil
 
         defer {
             if buffer != nil {
                 vkDestroyBuffer(self.device, buffer, self.allocationCallbacks)
             }
-            if memory != nil {
-                vkFreeMemory(self.device, memory, self.allocationCallbacks)
+            if var memory {
+                memory.chunk!.pool.dealloc(&memory)
             }
         }
 
@@ -1209,59 +1170,44 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         }
 
         let memReqs = memoryRequirements.memoryRequirements
-        var memAllocInfo = VkMemoryAllocateInfo()
-        memAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO
-        memAllocInfo.allocationSize = memReqs.size
-        if let memoryTypeIndex = self.indexOfMemoryType(typeBits: memReqs.memoryTypeBits, properties: memProperties) {
-            memAllocInfo.memoryTypeIndex = memoryTypeIndex
-        } else {
+        assert(memReqs.size >= bufferCreateInfo.size)
+        guard let memoryTypeIndex = self.indexOfMemoryType(typeBits: memReqs.memoryTypeBits, properties: memProperties)
+        else {
             fatalError("VulkanGraphicsDevice error: Unknown memory type!")
         }
-        assert(memAllocInfo.allocationSize >= bufferCreateInfo.size)
 
         if dedicatedRequirements.prefersDedicatedAllocation != 0 {
-            // bind resource to a dedicated allocation.
-            var memoryDedicatedAllocateInfo = VkMemoryDedicatedAllocateInfo()
-            memoryDedicatedAllocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO
-            memoryDedicatedAllocateInfo.buffer = buffer
-            result = withUnsafePointer(to: memoryDedicatedAllocateInfo) {
-                memAllocInfo.pNext = UnsafeRawPointer($0)
-                return vkAllocateMemory(self.device, &memAllocInfo, self.allocationCallbacks, &memory)
-            }
+            memory = self.memoryPools[memoryTypeIndex].allocDedicated(size: memReqs.size, image: nil, buffer: buffer)
         } else {
-            result = vkAllocateMemory(self.device, &memAllocInfo, self.allocationCallbacks, &memory)
+            memory = self.memoryPools[memoryTypeIndex].alloc(size: memReqs.size)
         }
-        
-        if result != VK_SUCCESS {
-            Log.err("vkAllocateMemory failed: \(result)")
+        guard let mem = memory else {
+            Log.error("Memory allocation failed.")
             return nil
         }
-        result = vkBindBufferMemory(self.device, buffer, memory, 0)
+        result = vkBindBufferMemory(self.device, buffer, mem.chunk!.memory, mem.offset)
         if result != VK_SUCCESS {
             Log.err("vkBindBufferMemory failed: \(result)")
             return nil
         }
 
-        let memoryType: VkMemoryType = self.deviceMemoryTypes[Int(memAllocInfo.memoryTypeIndex)]
-        let deviceMemory = VulkanDeviceMemory(device: self, memory: memory!, type: memoryType, size: memAllocInfo.allocationSize)
-        memory = nil
-
-        let bufferObject = VulkanBuffer(memory: deviceMemory, buffer: buffer!, bufferCreateInfo: bufferCreateInfo)
+        let bufferObject = VulkanBuffer(device: self, memory: mem, buffer: buffer!, bufferCreateInfo: bufferCreateInfo)
         buffer = nil
+        memory = nil
 
         return VulkanBufferView(buffer: bufferObject)
     }
 
     public func makeTexture(descriptor desc: TextureDescriptor) -> Texture? {
         var image: VkImage? = nil
-        var memory: VkDeviceMemory? = nil
+        var memory: VulkanMemoryBlock? = nil
 
         defer {
             if image != nil {
                 vkDestroyImage(self.device, image, self.allocationCallbacks)
             }
-            if memory != nil {
-                vkFreeMemory(self.device, memory, self.allocationCallbacks)
+            if var memory {
+                memory.chunk!.pool.dealloc(&memory)
             }
         }
 
@@ -1319,7 +1265,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         }
         if desc.usage.contains(.renderTarget) {
             imageCreateInfo.usage |= UInt32(VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT.rawValue)
-            if desc.pixelFormat.isDepthFormat() || desc.pixelFormat.isStencilFormat() {
+            if desc.pixelFormat.isDepthFormat || desc.pixelFormat.isStencilFormat {
                 imageCreateInfo.usage |= UInt32(VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT.rawValue)
             } else {
                 imageCreateInfo.usage |= UInt32(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT.rawValue)
@@ -1350,46 +1296,30 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         }
 
         let memReqs = memoryRequirements.memoryRequirements
-        var memAllocInfo = VkMemoryAllocateInfo()
-        memAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO
         let memProperties = VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT.rawValue)
-        memAllocInfo.allocationSize = memReqs.size
-
-        if let memoryTypeIndex = self.indexOfMemoryType(typeBits: memReqs.memoryTypeBits, properties: memProperties) {
-            memAllocInfo.memoryTypeIndex = memoryTypeIndex
-        } else {
+        guard let memoryTypeIndex = self.indexOfMemoryType(typeBits: memReqs.memoryTypeBits, properties: memProperties)
+        else {
             fatalError("VulkanGraphicsDevice error: Unknown memory type!")
         }
 
         if dedicatedRequirements.prefersDedicatedAllocation != 0 {
-            // bind resource to a dedicated allocation.
-            var memoryDedicatedAllocateInfo = VkMemoryDedicatedAllocateInfo()
-            memoryDedicatedAllocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO
-            memoryDedicatedAllocateInfo.image = image
-            result = withUnsafePointer(to: memoryDedicatedAllocateInfo) {
-                memAllocInfo.pNext = UnsafeRawPointer($0)
-                return vkAllocateMemory(self.device, &memAllocInfo, self.allocationCallbacks, &memory)
-            }
+            memory = self.memoryPools[memoryTypeIndex].allocDedicated(size: memReqs.size, image: image, buffer: nil)
         } else {
-            result = vkAllocateMemory(self.device, &memAllocInfo, self.allocationCallbacks, &memory)
+            memory = self.memoryPools[memoryTypeIndex].alloc(size: memReqs.size)
         }
-
-        if result != VK_SUCCESS {
-            Log.err("vkAllocateMemory failed: \(result)")
+        guard let mem = memory else {
+            Log.error("Memory allocation failed.")
             return nil
         }
-        result = vkBindImageMemory(self.device, image, memory, 0)
+        result = vkBindImageMemory(self.device, image, mem.chunk!.memory, mem.offset)
         if result != VK_SUCCESS {
             Log.err("vkBindBufferMemory failed: \(result)")
             return nil
         }
 
-        let memoryType = self.deviceMemoryTypes[Int(memAllocInfo.memoryTypeIndex)]
-        let deviceMemory = VulkanDeviceMemory(device: self, memory: memory!, type: memoryType, size: memAllocInfo.allocationSize)
-        memory = nil
-
-        let imageObject = VulkanImage(memory: deviceMemory, image: image!, imageCreateInfo: imageCreateInfo)
+        let imageObject = VulkanImage(device: self, memory: mem, image: image!, imageCreateInfo: imageCreateInfo)
         image = nil
+        memory = nil
 
         if imageCreateInfo.usage & (UInt32(VK_IMAGE_USAGE_SAMPLED_BIT.rawValue) |
                                     UInt32(VK_IMAGE_USAGE_STORAGE_BIT.rawValue) |
@@ -1433,13 +1363,13 @@ public class VulkanGraphicsDevice : GraphicsDevice {
                 b: VK_COMPONENT_SWIZZLE_B,
                 a: VK_COMPONENT_SWIZZLE_A)
             
-            if desc.pixelFormat.isColorFormat() {
+            if desc.pixelFormat.isColorFormat {
                 imageViewCreateInfo.subresourceRange.aspectMask |= UInt32(VK_IMAGE_ASPECT_COLOR_BIT.rawValue)
             }
-            if desc.pixelFormat.isDepthFormat() {
+            if desc.pixelFormat.isDepthFormat {
                 imageViewCreateInfo.subresourceRange.aspectMask |= UInt32(VK_IMAGE_ASPECT_DEPTH_BIT.rawValue)
             }
-            if desc.pixelFormat.isStencilFormat() {
+            if desc.pixelFormat.isStencilFormat {
                 imageViewCreateInfo.subresourceRange.aspectMask |= UInt32(VK_IMAGE_ASPECT_STENCIL_BIT.rawValue)
             }
 
@@ -1466,14 +1396,14 @@ public class VulkanGraphicsDevice : GraphicsDevice {
                                           height: Int,
                                           depth: Int) -> Texture? {
         var image: VkImage? = nil
-        var memory: VkDeviceMemory? = nil
+        var memory: VulkanMemoryBlock? = nil
 
         defer {
             if image != nil {
                 vkDestroyImage(self.device, image, self.allocationCallbacks)
             }
-            if memory != nil {
-                vkFreeMemory(self.device, memory, self.allocationCallbacks)
+            if var memory {
+                memory.chunk!.pool.dealloc(&memory)
             }
         }
 
@@ -1512,7 +1442,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         imageCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL
         imageCreateInfo.usage = UInt32(VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT.rawValue |
                                        VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT.rawValue)
-        if pixelFormat.isDepthFormat() || pixelFormat.isStencilFormat() {
+        if pixelFormat.isDepthFormat || pixelFormat.isStencilFormat {
             imageCreateInfo.usage |= UInt32(VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT.rawValue)
         } else {
             imageCreateInfo.usage |= UInt32(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT.rawValue)
@@ -1542,55 +1472,37 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         }
 
         let memReqs = memoryRequirements.memoryRequirements
-        var memAllocInfo = VkMemoryAllocateInfo()
-        memAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO
-        memAllocInfo.allocationSize = memReqs.size
-
         // try lazily allocated memory type
-        if let memoryTypeIndex = self.indexOfMemoryType(
-            typeBits: memReqs.memoryTypeBits,
-            properties: VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT.rawValue)) {
-            memAllocInfo.memoryTypeIndex = memoryTypeIndex
-        } else {
-            // Not supported, fall back to device local memory
-            if let memoryTypeIndex = self.indexOfMemoryType(
-                typeBits: memReqs.memoryTypeBits,
-                properties: VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT.rawValue)) {
-                memAllocInfo.memoryTypeIndex = memoryTypeIndex
-            } else {
-                fatalError("VulkanGraphicsDevice error: Unknown memory type!")
-            }
+        var memoryTypeIndex = self.indexOfMemoryType(
+            typeBits: memReqs.memoryTypeBits, 
+            properties: VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT.rawValue))
+        if memoryTypeIndex == nil { // not supported.
+            memoryTypeIndex = self.indexOfMemoryType(
+                typeBits: memReqs.memoryTypeBits, 
+                properties: VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT.rawValue))
+        }
+        guard let memoryTypeIndex else {
+            fatalError("VulkanGraphicsDevice error: Unknown memory type!")
         }
 
         if dedicatedRequirements.prefersDedicatedAllocation != 0 {
-            // bind resource to a dedicated allocation.
-            var memoryDedicatedAllocateInfo = VkMemoryDedicatedAllocateInfo()
-            memoryDedicatedAllocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO
-            memoryDedicatedAllocateInfo.image = image
-            result = withUnsafePointer(to: memoryDedicatedAllocateInfo) {
-                memAllocInfo.pNext = UnsafeRawPointer($0)
-                return vkAllocateMemory(self.device, &memAllocInfo, self.allocationCallbacks, &memory)
-            }
+            memory = self.memoryPools[memoryTypeIndex].allocDedicated(size: memReqs.size, image: image, buffer: nil)
         } else {
-            result = vkAllocateMemory(self.device, &memAllocInfo, self.allocationCallbacks, &memory)
+            memory = self.memoryPools[memoryTypeIndex].alloc(size: memReqs.size)
         }
-
-        if result != VK_SUCCESS {
-            Log.err("vkAllocateMemory failed: \(result)")
+        guard let mem = memory else {
+            Log.error("Memory allocation failed.")
             return nil
         }
-        result = vkBindImageMemory(self.device, image, memory, 0)
+        result = vkBindImageMemory(self.device, image, mem.chunk!.memory, mem.offset)
         if result != VK_SUCCESS {
             Log.err("vkBindBufferMemory failed: \(result)")
             return nil
         }
 
-        let memoryType = self.deviceMemoryTypes[Int(memAllocInfo.memoryTypeIndex)]
-        let deviceMemory = VulkanDeviceMemory(device: self, memory: memory!, type: memoryType, size: memAllocInfo.allocationSize)
-        memory = nil
-
-        let imageObject = VulkanImage(memory: deviceMemory, image: image!, imageCreateInfo: imageCreateInfo)
+        let imageObject = VulkanImage(device: self, memory: mem, image: image!, imageCreateInfo: imageCreateInfo)
         image = nil
+        memory = nil
 
         // create imageView
         var imageViewCreateInfo = VkImageViewCreateInfo()
@@ -1618,13 +1530,13 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             b: VK_COMPONENT_SWIZZLE_B,
             a: VK_COMPONENT_SWIZZLE_A)
         
-        if pixelFormat.isColorFormat() {
+        if pixelFormat.isColorFormat {
             imageViewCreateInfo.subresourceRange.aspectMask |= UInt32(VK_IMAGE_ASPECT_COLOR_BIT.rawValue)
         }
-        if pixelFormat.isDepthFormat() {
+        if pixelFormat.isDepthFormat {
             imageViewCreateInfo.subresourceRange.aspectMask |= UInt32(VK_IMAGE_ASPECT_DEPTH_BIT.rawValue)
         }
-        if pixelFormat.isStencilFormat() {
+        if pixelFormat.isStencilFormat {
             imageViewCreateInfo.subresourceRange.aspectMask |= UInt32(VK_IMAGE_ASPECT_STENCIL_BIT.rawValue)
         }
 
@@ -1691,7 +1603,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         createInfo.anisotropyEnable = VK_TRUE
         createInfo.maxAnisotropy = Float(desc.maxAnisotropy)
         createInfo.compareOp = compareOp(desc.compareFunction)
-        createInfo.compareEnable = createInfo.compareOp != VK_COMPARE_OP_NEVER ? VK_TRUE : VK_FALSE
+        createInfo.compareEnable = desc.compareFunction == .always ? VK_FALSE : VK_TRUE
         createInfo.minLod = desc.lodMinClamp
         createInfo.maxLod = desc.lodMaxClamp
 
@@ -1719,7 +1631,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         return VulkanSampler(device: self, sampler: sampler!)
     }
 
-    public func makeEvent() -> Event? {
+    public func makeEvent() -> GPUEvent? {
         var createInfo = VkSemaphoreCreateInfo()
         createInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO
 
@@ -1748,7 +1660,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         return VulkanSemaphore(device: self, semaphore: semaphore!)
     }
 
-    public func makeSemaphore() -> Semaphore? {
+    public func makeSemaphore() -> GPUSemaphore? {
         var createInfo = VkSemaphoreCreateInfo()
         createInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO
 
@@ -1878,8 +1790,18 @@ public class VulkanGraphicsDevice : GraphicsDevice {
                 if layout.size > 0 {
                     var range = VkPushConstantRange()
                     range.stageFlags = module.stage.vkFlags()
-                    range.offset = UInt32(layout.offset)
-                    range.size = UInt32(layout.size)
+
+                    // VUID-VkGraphicsPipelineCreateInfo-layout-07987                
+                    let begin = layout.members.reduce(layout.offset) {
+                        (result, member) in
+                        min(result, member.offset)
+                    }
+                    let end = layout.members.reduce(layout.offset + layout.size) {
+                        (result, member) in
+                        max(result, member.offset + member.size)
+                    }
+                    range.offset = UInt32(begin)
+                    range.size = UInt32(end - begin)
                     pushConstantRanges.append(range)
                 }
             }
@@ -1983,7 +1905,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         }
     }
 
-    public func fence(device: VulkanGraphicsDevice) -> VkFence {
+    public func fence() -> VkFence {
         var fence: VkFence? = synchronizedBy(locking: self.fenceCompletionLock) {
             if self.reusableFences.count > 0 {
                 return self.reusableFences.removeFirst()
@@ -1994,7 +1916,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
             var fenceCreateInfo = VkFenceCreateInfo()
             fenceCreateInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO
 
-            let err = vkCreateFence(device.device, &fenceCreateInfo, device.allocationCallbacks, &fence)
+            let err = vkCreateFence(self.device, &fenceCreateInfo, self.allocationCallbacks, &fence)
             if err != VK_SUCCESS {
                 Log.err("vkCreateFence failed: \(err)")
                 assertionFailure("vkCreateFence failed: \(err)")

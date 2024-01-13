@@ -2,7 +2,7 @@
 //  File: VulkanCommandQueue.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
@@ -80,25 +80,25 @@ public class VulkanCommandQueue: CommandQueue {
         return nil 
     }
 
-    func submit(_ submits: [VkSubmitInfo], callback: (()->Void)?) -> Bool {
+    func submit(_ submits: [VkSubmitInfo2], callback: (()->Void)?) -> Bool {
         let device = self.device as! VulkanGraphicsDevice
         var result: VkResult = VK_SUCCESS
 
         if let callback = callback {
-            let fence: VkFence = device.fence(device: device)
+            let fence: VkFence = device.fence()
             result = synchronizedBy(locking: self.lock) {
-                vkQueueSubmit(self.queue, UInt32(submits.count), submits, fence)
+                vkQueueSubmit2(self.queue, UInt32(submits.count), submits, fence)
             }
             if result == VK_SUCCESS {
                 device.addCompletionHandler(fence: fence, op: callback)
             }
         } else {
             result = synchronizedBy(locking: self.lock) {
-                vkQueueSubmit(self.queue, UInt32(submits.count), submits, nil)
+                vkQueueSubmit2(self.queue, UInt32(submits.count), submits, nil)
             }
         }
         if result != VK_SUCCESS {
-            Log.error("vkQueueSubmit failed: \(result)")
+            Log.error("vkQueueSubmit2 failed: \(result)")
         }        
         return result == VK_SUCCESS 
     }

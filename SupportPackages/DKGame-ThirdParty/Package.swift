@@ -262,8 +262,10 @@ let package = Package(
                 .headerSearchPath("include"),
                 .unsafeFlags([
                     "-Wno-enum-conversion",
+                    "-Wno-int-conversion",
                     "-Wno-tautological-constant-out-of-range-compare",
                     "-Wno-sizeof-pointer-memaccess",
+                    "-Wno-implicit-function-declaration",
                 ])
             ]),
         .target(
@@ -350,6 +352,7 @@ let package = Package(
                 .define("_CRT_NONSTDC_NO_WARNINGS", .when(platforms: [.windows])),
                 .unsafeFlags([
                     "-Wno-shift-negative-value",
+                    "-Wno-deprecated-non-prototype",
                 ])
             ]),
         .target(

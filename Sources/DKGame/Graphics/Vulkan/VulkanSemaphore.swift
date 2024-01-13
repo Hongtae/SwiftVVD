@@ -2,14 +2,14 @@
 //  File: VulkanSemaphore.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
 import Foundation
 import Vulkan
 
-public class VulkanSemaphore: Event {
+public class VulkanSemaphore: GPUEvent {
     public let device: GraphicsDevice
     public let semaphore: VkSemaphore
 
