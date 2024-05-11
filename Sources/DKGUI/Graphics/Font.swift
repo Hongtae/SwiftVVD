@@ -2,7 +2,7 @@
 //  File: Font.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -33,7 +33,7 @@ var defaultFontURL: URL? {
 
 let defaultDPI = 72
 
-typealias GlyphData = DKGame.Font.GlyphData
+typealias GlyphData = TextureFont.GlyphData
 
 protocol TypeFace {
     func glyphData(for c: UnicodeScalar) -> GlyphData?
@@ -47,7 +47,7 @@ protocol TypeFace {
     func isEqual(to: any TypeFace) -> Bool
 }
 
-extension DKGame.Font: TypeFace {
+extension TextureFont: TypeFace {
     var lineHeight: CGFloat {
         self.lineHeight()
     }
@@ -61,7 +61,7 @@ extension DKGame.Font: TypeFace {
     }
 
     func isEqual(to: any TypeFace) -> Bool {
-        if let other = to as? DKGame.Font {
+        if let other = to as? TextureFont {
             return self === other
         }
         return false
@@ -126,7 +126,7 @@ struct SystemFontProvider: TypeFaceProvider {
             }
             if let data, let device = context.graphicsDeviceContext {
                 let dpi = CGFloat(defaultDPI) * displayScale
-                let font = DKGame.Font(deviceContext: device, data: data)
+                let font = TextureFont(deviceContext: device, data: data)
                 font?.setStyle(pointSize: self.size,
                                dpi: (UInt32(dpi), UInt32(dpi)))
                 return font
@@ -165,9 +165,9 @@ struct CustomFontProvider: TypeFaceProvider {
 }
 
 struct FixedFontProvider: TypeFaceProvider {
-    let font: DKGame.Font
+    let font: TextureFont
 
-    init(_ font: DKGame.Font) {
+    init(_ font: TextureFont) {
         self.font = font
     }
 
@@ -282,7 +282,7 @@ extension Font {
 
 extension Font {
 
-    public init(_ font: DKGame.Font) {
+    public init(_ font: TextureFont) {
         let fontBox = FixedFontProvider(font)
         self.init(provider: AnyFontBox(fontBox), displayScale: 1)
     }

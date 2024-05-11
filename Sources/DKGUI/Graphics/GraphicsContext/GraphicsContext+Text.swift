@@ -2,7 +2,7 @@
 //  File: GraphicsContext+Text.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -59,7 +59,7 @@ extension GraphicsContext {
             var texture: Texture?
             var frame: CGRect = .zero       // texture uv-coords
             var advance: CGSize = .zero     // distance to next glyph
-            var position: CGPoint = .zero   // texture origin position from baseline
+            var offset: CGPoint = .zero     // texture origin position from baseline
             var ascender: CGFloat = .zero   // distance from the baseline to the highest or upper grid coordinate
             var descender: CGFloat = .zero  // distance from the baseline to the lowest
             var kerning: CGPoint = .zero    // kern advance from previous glyph.
@@ -111,8 +111,7 @@ extension GraphicsContext {
                     if makeGlyph, let data = face2.glyphData(for: char2) {
                         glyph.texture = data.texture
                         glyph.frame = data.frame
-                        // Set the origin from bottom left to top left
-                        glyph.position = data.position + CGPoint(x: 0, y: data.frame.height)
+                        glyph.offset = data.offset
                         glyph.advance = data.advance
                         glyph.ascender = data.ascender
                         glyph.descender = data.descender
@@ -374,7 +373,7 @@ extension GraphicsContext {
 
                     var glyph = Glyph(scalar: UnicodeScalar(0), face: face)
                     glyph.texture = image.texture
-                    glyph.position = CGPoint(x: 0, y: baseline)
+                    glyph.offset = CGPoint(x: 0, y: baseline)
                     if let texture = image.texture {
                         glyph.frame = CGRect(x: 0, y: 0, width: texture.width, height: texture.height)
                     }
@@ -467,7 +466,7 @@ extension GraphicsContext {
             forEachGlyph(in: lineGlyphs) { glyph, baseline in
                 if glyph.scalar == UnicodeScalar(0), let texture = glyph.texture {
                     let frame = CGRect(x: baseline.x,
-                                       y: baseline.y - glyph.position.y,
+                                       y: baseline.y - glyph.offset.y,
                                        width: glyph.advance.width,
                                        height: glyph.advance.height)
                     self.encodeDrawTextureCommand(renderPass: renderPass,
@@ -518,7 +517,7 @@ extension GraphicsContext {
         for line in lineGlyphs {
             offset.x = 0
             for glyph in line.glyphs {
-                let baseline = CGPoint(x: glyph.position.x + offset.x,
+                let baseline = CGPoint(x: glyph.offset.x + offset.x,
                                        y: line.ascender + offset.y)
                 callback(glyph, baseline)
 
@@ -562,7 +561,7 @@ extension GraphicsContext {
                 let uvMaxY = Float(glyph.frame.maxY) * invH
 
                 let frame = CGRect(x: baseline.x,
-                                   y: baseline.y - glyph.position.y,
+                                   y: baseline.y - glyph.offset.y,
                                    width: glyph.frame.width,
                                    height: glyph.frame.height)
 
