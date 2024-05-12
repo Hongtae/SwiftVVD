@@ -2,7 +2,7 @@
 //  File: ShapeStyle.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 public protocol ShapeStyle {
@@ -133,6 +133,7 @@ class AnyShapeStyleBox {
     }
 
     func _apply(to shape: inout _ShapeStyle_Shape) {
+        self.style._apply(to: &shape)
     }
 
     static func _apply(to type: inout _ShapeStyle_ShapeType) {

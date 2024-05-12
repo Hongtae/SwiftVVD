@@ -2,7 +2,7 @@
 //  File: ButtonStyle.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 public protocol PrimitiveButtonStyle {
@@ -58,44 +58,78 @@ public struct DefaultButtonStyle : PrimitiveButtonStyle {
     public init() {
     }
     public func makeBody(configuration: Configuration) -> some View {
-        fatalError()
+        //TODO: Use .background, .foreground styles instead of specific colors.
+        configuration.label
+            .padding(4)
+            .background {
+                RoundedRectangle(cornerRadius:4).fill(.white)
+                RoundedRectangle(cornerRadius:4).strokeBorder(.black)
+            }
+            .foregroundStyle(.black)
+            ._onButtonGesture {
+                configuration.trigger()
+            }
     }
-    //public typealias Body = @_opaqueReturnTypeOf("$s7SwiftUI18DefaultButtonStyleV8makeBody13configurationQrAA09PrimitivedE13ConfigurationV_tF", 0) __
 }
 
 public struct BorderlessButtonStyle : PrimitiveButtonStyle {
     public init() {
     }
     public func makeBody(configuration: Configuration) -> some View {
-        fatalError()
+        configuration.label
+            .padding(4)
+            .background {
+                RoundedRectangle(cornerRadius:4).fill(.white)
+            }
+            ._onButtonGesture {
+                configuration.trigger()
+            }
     }
-    //public typealias Body = @_opaqueReturnTypeOf("$s7SwiftUI21BorderlessButtonStyleV8makeBody13configurationQrAA09PrimitivedE13ConfigurationV_tF", 0) __
 }
 
 public struct LinkButtonStyle : PrimitiveButtonStyle {
     public init() {
     }
     public func makeBody(configuration: Configuration) -> some View {
-        fatalError()
+        configuration.label
+            .padding(4)
+            .background {
+                RoundedRectangle(cornerRadius:4).strokeBorder(.black)
+            }
+            ._onButtonGesture {
+                configuration.trigger()
+            }
     }
-    //public typealias Body = @_opaqueReturnTypeOf("$s7SwiftUI15LinkButtonStyleV8makeBody13configurationQrAA09PrimitivedE13ConfigurationV_tF", 0) __
 }
 
 public struct PlainButtonStyle : PrimitiveButtonStyle {
     public init() {
     }
     public func makeBody(configuration: Configuration) -> some View {
-        fatalError()
+        configuration.label
+            .padding(4)
+            .background {
+                RoundedRectangle(cornerRadius:4).strokeBorder(.black)
+            }
+            ._onButtonGesture {
+                configuration.trigger()
+            }
     }
-    //public typealias Body = @_opaqueReturnTypeOf("$s7SwiftUI16PlainButtonStyleV8makeBody13configurationQrAA09PrimitivedE13ConfigurationV_tF", 0) __
 }
 
 public struct BorderedButtonStyle : PrimitiveButtonStyle {
     public init() {
     }
     public func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .padding(4)
+            .background {
+                RoundedRectangle(cornerRadius:4).strokeBorder(.black)
+            }
+            ._onButtonGesture {
+                configuration.trigger()
+            }
     }
-    //public typealias Body = @_opaqueReturnTypeOf("$s7SwiftUI19BorderedButtonStyleV8makeBody13configurationQrAA09PrimitivedE13ConfigurationV_tF", 0) __
 }
 
 extension PrimitiveButtonStyle where Self == DefaultButtonStyle {
