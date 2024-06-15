@@ -58,7 +58,7 @@ public struct LinearTransform3: Hashable {
     // See the following sources:
     //  https://opensource.apple.com/source/WebCore/WebCore-514/platform/graphics/transforms/TransformationMatrix.cpp
     //  https://github.com/g-truc/glm/blob/master/glm/gtx/matrix_decompose.inl
-    public func decompose(scale: inout Vector3, rotation: inout Quaternion) -> Bool {
+    public func decompose(scale: inout Vector3, rotation: inout Quaternion, shear: inout Vector3) -> Bool {
         if abs(matrix3.determinant) < .ulpOfOne { return false }
 
         var row = [matrix3.row1, matrix3.row2, matrix3.row3]
@@ -89,7 +89,7 @@ public struct LinearTransform3: Hashable {
         skewXZ /= scale.z
         skewYZ /= scale.z
 
-        //let shear = Vector3(skewYZ, skewXZ, skewXY)
+        shear = Vector3(skewYZ, skewXZ, skewXY)
 
         // check coordindate system flip
         let pdum3 = Vector3.cross(row[1], row[2])
@@ -123,6 +123,11 @@ public struct LinearTransform3: Hashable {
             rotation.w = root * (row[j][k] - row[k][j])
         }
         return true
+    }
+
+    public func decompose(scale: inout Vector3, rotation: inout Quaternion) -> Bool {
+        var shear = Vector3.zero
+        return decompose(scale: &scale, rotation: &rotation, shear: &shear)
     }
 
     public func inverted() -> Self {
