@@ -39,19 +39,11 @@ public struct AnyView: View {
     }
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        func make<V: View>(_ v: V, inputs: _ViewInputs)->_ViewOutputs {
-            V._makeView(view: _GraphValue(v), inputs: inputs)
-        }
-        let v = view[\.storage].value.view
-        return make(v, inputs: inputs)
+        fatalError()
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        func make<V: View>(_ v: V, inputs: _ViewListInputs)->_ViewListOutputs {
-            V._makeViewList(view: _GraphValue(v), inputs: inputs)
-        }
-        let v = view[\.storage].value.view
-        return make(v, inputs: inputs)
+        fatalError()
     }
 
     public typealias Body = Never

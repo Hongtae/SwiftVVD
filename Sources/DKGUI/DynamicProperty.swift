@@ -20,7 +20,7 @@ public struct _DynamicPropertyBuffer {
 extension View {
     static var _hasDynamicProperty: Bool {
         let nonExist = _forEachField(of: Self.self) { _, _, fieldType in
-            if fieldType.self is DynamicProperty.Type {
+            if fieldType is DynamicProperty.Type {
                 return false
             }
             return true

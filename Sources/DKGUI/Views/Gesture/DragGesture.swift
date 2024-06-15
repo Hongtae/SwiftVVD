@@ -51,7 +51,7 @@ public struct DragGesture : Gesture {
     }
 
     public static func _makeGesture(gesture: _GraphValue<DragGesture>, inputs: _GestureInputs) -> _GestureOutputs<DragGesture.Value> {
-        _GestureOutputs<Value>(recognizer: DragGestureRecognizer(gesture: gesture, inputs: inputs))
+        fatalError()
     }
 
     public typealias Body = Never
@@ -65,8 +65,8 @@ class DragGestureRecognizer : _GestureRecognizer<DragGesture.Value> {
     var value: DragGesture.Value
     var dragging = false
 
-    init(gesture: _GraphValue<DragGesture>, inputs: _GestureInputs) {
-        self.gesture = gesture.value
+    init(gesture: DragGesture, inputs: _GestureInputs) {
+        self.gesture = gesture
         self.buttonID = 0
         self.value = .init(time: .now,
                            location: .zero,
@@ -77,7 +77,7 @@ class DragGestureRecognizer : _GestureRecognizer<DragGesture.Value> {
 
     override var type: _PrimitiveGestureTypes { .drag }
     override var isValid: Bool {
-        typeFilter.contains(self.type) && viewProxy != nil
+        typeFilter.contains(self.type) && view != nil
     }
 
     override func setTypeFilter(_ f: _PrimitiveGestureTypes) -> _PrimitiveGestureTypes {

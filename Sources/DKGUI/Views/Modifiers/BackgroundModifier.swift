@@ -15,15 +15,7 @@ public struct _BackgroundModifier<Background>: ViewModifier where Background: Vi
         self.alignment = alignment
     }
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        var inputs = inputs
-        inputs.defaultLayout = ZStackLayout()
-        let layer = ViewProxyLayer(view: modifier[\.background],
-                                   inputs: inputs,
-                                   alignment: modifier.value.alignment,
-                                   ignoresSafeAreaEdges: .all)
-        let viewOutputs = body(_Graph(), inputs)
-        viewOutputs.view.backgroundLayers.append(layer)
-        return viewOutputs
+        fatalError()
     }
     public typealias Body = Never
 }
@@ -42,15 +34,7 @@ public struct _BackgroundStyleModifier<Style>: ViewModifier where Style: ShapeSt
         self.ignoresSafeAreaEdges = ignoresSafeAreaEdges
     }
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        let shapeView = _ShapeView(shape: Rectangle(),
-                                   style: modifier[\.style].value)
-        let layer = ViewProxyLayer(view: _GraphValue(shapeView),
-                                   inputs: inputs,
-                                   alignment: .center,
-                                   ignoresSafeAreaEdges: modifier[\.ignoresSafeAreaEdges].value)
-        let viewOutputs = body(_Graph(), inputs)
-        viewOutputs.view.backgroundLayers.append(layer)
-        return viewOutputs
+        fatalError()
     }
     public typealias Body = Never
 }
@@ -68,16 +52,7 @@ public struct _BackgroundShapeModifier<Style, Bounds>: ViewModifier where Style:
         self.fillStyle = fillStyle
     }
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        let shapeView = _ShapeView(shape: modifier[\.shape].value,
-                                   style: modifier[\.style].value,
-                                   fillStyle: modifier[\.fillStyle].value)
-        let layer = ViewProxyLayer(view: _GraphValue(shapeView),
-                                   inputs: inputs,
-                                   alignment: .center,
-                                   ignoresSafeAreaEdges: .all)
-        let viewOutputs = body(_Graph(), inputs)
-        viewOutputs.view.backgroundLayers.append(layer)
-        return viewOutputs
+        fatalError()
     }
     public typealias Body = Never
 }
@@ -95,16 +70,7 @@ public struct _InsettableBackgroundShapeModifier<Style, Bounds>: ViewModifier wh
         self.fillStyle = fillStyle
     }
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        let shapeView = _ShapeView(shape: modifier[\.shape].value,
-                                   style: modifier[\.style].value,
-                                   fillStyle: modifier[\.fillStyle].value)
-        let layer = ViewProxyLayer(view: _GraphValue(shapeView),
-                                   inputs: inputs,
-                                   alignment: .center,
-                                   ignoresSafeAreaEdges: .all)
-        let viewOutputs = body(_Graph(), inputs)
-        viewOutputs.view.backgroundLayers.append(layer)
-        return viewOutputs
+        fatalError()
     }
     public typealias Body = Never
 }
@@ -149,18 +115,15 @@ extension View {
     }
 }
 
-fileprivate struct ViewProxyLayer: ViewLayer {
-    private let view: ViewProxy
+fileprivate struct ViewContextLayer: ViewLayer {
+    private let view: ViewContext
     private let alignment: Alignment
     private let ignoresSafeAreaEdges: Edge.Set
-    init<V>(view: _GraphValue<V>, inputs: _ViewInputs, alignment: Alignment, ignoresSafeAreaEdges: Edge.Set) where V: View {
-        let outputs = V._makeView(view: view, inputs: inputs)
-        self.view = outputs.view
-        self.alignment = alignment
-        self.ignoresSafeAreaEdges = ignoresSafeAreaEdges
+    init<V>(view: V, inputs: _ViewInputs, alignment: Alignment, ignoresSafeAreaEdges: Edge.Set) where V: View {
+        fatalError()
     }
-    func load(context: GraphicsContext) {
-        self.view.loadView(context: context)
+    func loadResources(_ context: GraphicsContext) {
+        self.view.loadResources(context)
     }
     func layout(frame: CGRect) {
         var position = frame.origin

@@ -18,7 +18,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
     private(set) var window: Window?
 
     var modifiers: [any _SceneModifier] = []
-    var viewProxy: ViewProxy
+    var view: ViewContext
     var environmentValues: EnvironmentValues
     var sharedContext: SharedContext
 
@@ -56,7 +56,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                 guard let self = self else { break }
                 if Task.isCancelled { break }
 
-                let view = self.viewProxy
+                let view = self.view
 
                 let swapChain = self.swapChain
                 let (state, config) = synchronizedBy(locking: self.stateLock) {
@@ -96,7 +96,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                                                              resolution: CGSize(width: width, height: height),
                                                              commandBuffer: commandBuffer) {
                                 context.environment = view.environmentValues
-                                view.loadView(context: context)
+                                view.loadResources(context)
                                 commandBuffer.commit()
                             } else {
                                 Log.error("GraphicsContext failed.")
@@ -201,16 +201,17 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
         self.environmentValues = EnvironmentValues()
         self.sharedContext = SharedContext(appContext: appContext!)
 
-        let graph = _GraphValue(content)
-        let viewInputs = _ViewInputs(sharedContext: self.sharedContext,
-                                     environmentValues: self.environmentValues,
-                                     transform: .identity,
-                                     position: .zero,
-                                     size: self.state.bounds.size,
-                                     safeAreaInsets: EdgeInsets(),
-                                     defaultLayout: VStackLayout())
-        let viewOutputs = Content._makeView(view: graph, inputs: viewInputs)
-        self.viewProxy = viewOutputs.view
+        let properties = PropertyList(DefaultLayoutPropertyItem(layout: VStackLayout()))
+        let baseInputs = _GraphInputs(properties: properties,
+                                      environment: self.environmentValues,
+                                      sharedContext: self.sharedContext)
+        let preferences = PreferenceInputs(preferences: [])
+        let graph = _GraphValue<Content>.root()
+        let inputs = _ViewInputs(base: baseInputs,
+                                 preferences: preferences)
+        let outputs = Content._makeView(view: graph, inputs: inputs)
+
+        fatalError()
     }
 
     deinit {
@@ -367,7 +368,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
         }
 
         if event.type == .wheel {
-            _ = self.viewProxy.handleMouseWheel(at: event.location,
+            _ = self.view.handleMouseWheel(at: event.location,
                                                 delta: event.delta)
             return
         }
@@ -379,7 +380,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
 
         if gestureHandlers.isEmpty {
             if event.type == .buttonDown {
-                gestureHandlers = self.viewProxy.makeGestureHandlers(at: event.location)
+                gestureHandlers = self.view.makeGestureHandlers(at: event.location)
             }
         }
 

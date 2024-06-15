@@ -91,10 +91,6 @@ extension EnvironmentValues {
         return environmentValues
     }
 
-    func _resolve<Content>(_ view: _GraphValue<Content>) -> _GraphValue<Content> where Content: View {
-        _GraphValue(_resolve(view.value))
-    }
-
     func _resolve<Content>(_ view: Content) -> Content where Content: View {
         var view = view
         var resolvedEnvironments: [String: _EnvironmentResolve] = [:]
@@ -105,7 +101,7 @@ extension EnvironmentValues {
             }
         }
         _forEachField(of: Content.self) { charPtr, offset, fieldType in
-            if fieldType.self is _EnvironmentResolve.Type {
+            if fieldType is _EnvironmentResolve.Type {
                 let name = String(cString: charPtr)
                 // Log.debug("Update environment: \(Content.self).\(name) (type: \(fieldType), offset: \(offset))")
                 if let env = resolvedEnvironments[name] {

@@ -14,14 +14,14 @@ protocol _GestureInputsModifier {
 struct EndedCallbacks<Value> : _GestureInputsModifier {
     let ended: (Value)->Void
     static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GestureInputs) {
-        inputs.endedCallbacks.append(modifier.value)
+        //inputs.endedCallbacks.append(modifier.value)
     }
 }
 
 struct ChangedCallbacks<Value> : _GestureInputsModifier {
     let changed: (Value)->Void
     static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GestureInputs) {
-        inputs.changedCallbacks.append(modifier.value)
+        //inputs.changedCallbacks.append(modifier.value)
     }
 }
 
@@ -29,7 +29,7 @@ struct PressableGestureCallbacks<Value> : _GestureInputsModifier {
     let pressing: ((Value)->Void)?
     let pressed: (()->Void)?
     static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GestureInputs) {
-        inputs.pressableGestureCallbacks.append(modifier.value)
+        //inputs.pressableGestureCallbacks.append(modifier.value)
     }
 }
 
@@ -109,7 +109,7 @@ struct AddGestureModifier<T> : ViewModifier where T : Gesture {
 
 extension AddGestureModifier : _ViewInputsModifier {
     static func _makeViewInputs(modifier: _GraphValue<Self>, inputs: inout _ViewInputs) {
-        inputs.gestures.append(modifier[\.gesture].value)
+        fatalError()
     }
 }
 
@@ -122,7 +122,7 @@ struct SimultaneousGestureModifier<T> : ViewModifier where T : Gesture {
 
 extension SimultaneousGestureModifier : _ViewInputsModifier {
     static func _makeViewInputs(modifier: _GraphValue<Self>, inputs: inout _ViewInputs) {
-        inputs.simultaneousGestures.append(modifier[\.gesture].value)
+        fatalError()
     }
 }
 
@@ -135,7 +135,7 @@ struct HighPriorityGestureModifier<T> : ViewModifier where T : Gesture {
 
 extension HighPriorityGestureModifier : _ViewInputsModifier {
     static func _makeViewInputs(modifier: _GraphValue<Self>, inputs: inout _ViewInputs) {
-        inputs.highPriorityGestures.append(modifier[\.gesture].value)
+        fatalError()
     }
 }
 

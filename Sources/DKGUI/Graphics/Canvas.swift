@@ -51,35 +51,9 @@ extension Canvas where Symbols == EmptyView {
 
 extension Canvas {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let view = view.value.makeViewProxy(inputs: inputs)
-        return _ViewOutputs(item: .view(view))
+        fatalError()
     }
 }
 
 extension Canvas: _PrimitiveView {
-}
-
-extension Canvas: _ViewProxyProvider {
-    func makeViewProxy(inputs: _ViewInputs) -> ViewProxy {
-        CanvasProxy(view: self, inputs: inputs)
-    }
-}
-
-class CanvasProxy<Symbols>: ViewProxy where Symbols: View {
-    typealias Content = Canvas<Symbols>
-    var view: Content
-    
-    init(view: Content, inputs: _ViewInputs) {
-        self.view = inputs.environmentValues._resolve(view)
-        super.init(inputs: inputs)
-    }
-
-    override func draw(frame: CGRect, context: GraphicsContext) {
-        if self.frame.width > 0 && self.frame.height > 0 {
-            context.drawLayer(in: frame) { context, size in
-                let renderer = self.view.renderer
-                renderer(&context, size)
-            }
-        }
-    }
 }

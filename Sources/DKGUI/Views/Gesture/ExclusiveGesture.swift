@@ -42,7 +42,7 @@ class ExclusiveGestureRecognizer<First : Gesture, Second : Gesture> : _GestureRe
     var firstGestureProcessing = false
 
     init(gesture: _GraphValue<ExclusiveGesture<First, Second>>, inputs: _GestureInputs) {
-        let inputs2 = _GestureInputs(viewProxy: inputs.viewProxy)
+        let inputs2 = _GestureInputs(view: inputs.view)
         self.first = First._makeGesture(gesture: gesture[\.first], inputs: inputs2).recognizer
         self.second = Second._makeGesture(gesture: gesture[\.second], inputs: inputs2).recognizer
         super.init(inputs: inputs)

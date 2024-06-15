@@ -21,10 +21,6 @@ struct _PrimitiveGestureTypes : OptionSet {
     static let none: Self = []
 }
 
-func _makeGestureHandler<T: Gesture>(_ gesture: T, inputs: _GestureInputs) -> _GestureHandler {
-    T._makeGesture(gesture: _GraphValue(gesture), inputs: inputs).recognizer
-}
-
 class _GestureHandler {
     enum State: Int {
         case ready
@@ -34,7 +30,7 @@ class _GestureHandler {
         case done
     }
     var state: State = .ready
-    weak var viewProxy: ViewProxy?
+    weak var view: ViewContext?
 
     func setTypeFilter(_ f: _PrimitiveGestureTypes) -> _PrimitiveGestureTypes {
         f.subtracting(self.type)
@@ -47,12 +43,12 @@ class _GestureHandler {
     }
 
     init(inputs: _GestureInputs) {
-        self.viewProxy = inputs.viewProxy
+        self.view = inputs.view
     }
 
     func locationInView(_ location: CGPoint) -> CGPoint {
-        if let viewProxy {
-            let transform = viewProxy.transformByRoot.inverted()
+        if let view {
+            let transform = view.transformByRoot.inverted()
             return location.applying(transform)
         }
         return location

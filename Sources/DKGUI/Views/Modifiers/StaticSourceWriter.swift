@@ -15,6 +15,6 @@ extension StaticSourceWriter: ViewModifier where Source: View, Type: View {
 
 extension StaticSourceWriter: _ViewInputsModifier where Self: ViewModifier {
     static func _makeViewInputs(modifier: _GraphValue<Self>, inputs: inout _ViewInputs) {
-        inputs.sourceWrites[ObjectIdentifier(Source.self)] = AnyView(modifier[\.source].value)
+        fatalError()
     }
 }

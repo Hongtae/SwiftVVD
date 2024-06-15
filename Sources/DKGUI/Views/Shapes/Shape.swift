@@ -60,8 +60,6 @@ extension Shape {
         Body._makeView(view: view[\.body], inputs: inputs)
     }
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        let body = view[\.body]
-        let inputs = inputs.inputs
-        return _ViewListOutputs(item: .view(.init(view: AnyView(body.value), inputs: inputs)))
+        fatalError()
     }
 }

@@ -9,10 +9,21 @@ public struct EmptyView: View {
     public init() {}
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        _ViewOutputs(item: .view(ViewProxy(inputs: inputs)))
+        let generator = PrimitiveViewGenerator(view: view,
+                                               baseInputs: inputs.base,
+                                               preferences: inputs.preferences,
+                                               traits: inputs.traits)
+        return _ViewOutputs(view: generator,
+                            preferences: PreferenceOutputs(preferences: []))
     }
+
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        _ViewListOutputs(item: .viewList([]))
+        let generator = PrimitiveViewGenerator(view: view,
+                                               baseInputs: inputs.base,
+                                               preferences: inputs.preferences,
+                                               traits: inputs.traits)
+        return _ViewListOutputs(view: generator,
+                                preferences: PreferenceOutputs(preferences: []))
     }
 
     public typealias Body = Never

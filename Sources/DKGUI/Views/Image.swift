@@ -222,8 +222,7 @@ extension Image {
 
 extension Image: View {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let view = view.value.makeViewProxy(inputs: inputs)
-        return _ViewOutputs(item: .view(view))
+        fatalError()
     }
     public typealias Body = Never
 }
@@ -233,45 +232,4 @@ extension Image {
 }
 
 extension Image: _PrimitiveView {
-}
-
-extension Image: _ViewProxyProvider {
-    func makeViewProxy(inputs: _ViewInputs) -> ViewProxy {
-        ImageViewProxy(image: self, inputs: inputs)
-    }
-}
-
-class ImageViewProxy: ViewProxy {
-    let image: Image
-    var resolvedImage: GraphicsContext.ResolvedImage?
-
-    init(image: Image, inputs: _ViewInputs) {
-        self.image = image
-        super.init(inputs: inputs)
-    }
-
-    override func loadView(context: GraphicsContext) {
-        self.resolvedImage = context.resolve(self.image)
-        self.sharedContext.needsLayout = true
-        super.loadView(context: context)
-    }
-
-    override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
-        if let resolvedImage {
-            return resolvedImage.size
-        }
-        return super.sizeThatFits(proposal)
-    }
-
-    override func draw(frame: CGRect, context: GraphicsContext) {
-        if self.frame.width > 0 && self.frame.height > 0 {
-            if self.resolvedImage == nil {
-                self.resolvedImage = context.resolve(self.image)
-                self.sharedContext.needsLayout = true
-            }
-            if let resolvedImage {
-                context.draw(resolvedImage, in: frame)
-            }
-        }
-    }
 }

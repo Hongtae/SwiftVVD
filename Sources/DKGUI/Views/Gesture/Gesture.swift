@@ -31,16 +31,13 @@ extension Gesture where Self.Body == Never {
 extension Optional : Gesture where Wrapped : Gesture {
     public typealias Value = Wrapped.Value
     public static func _makeGesture(gesture: _GraphValue<Self>, inputs: _GestureInputs) -> _GestureOutputs<Wrapped.Value> {
-        if case let .some(wrapped) = gesture.value {
-            return Wrapped._makeGesture(gesture: _GraphValue(wrapped), inputs: inputs)
-        }
-        fatalError("\(Self.self) is nil")
+        Wrapped._makeGesture(gesture: gesture[\.unsafelyUnwrapped], inputs: inputs)
     }
     public typealias Body = Never
 }
 
 public struct _GestureInputs {
-    weak var viewProxy: ViewProxy?
+    weak var view: ViewContext?
     var endedCallbacks: [Any] = []
     var changedCallbacks: [Any] = []
     var pressableGestureCallbacks: [Any] = []

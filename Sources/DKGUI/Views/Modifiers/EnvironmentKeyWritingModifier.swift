@@ -17,8 +17,7 @@ public struct _EnvironmentKeyWritingModifier<Value>: ViewModifier, _GraphInputsM
     }
 
     public static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GraphInputs) {
-        let modifier = modifier.value
-        inputs.environmentValues[keyPath: modifier.keyPath] = modifier.value
+        fatalError()
     }
 
     func _resolve(_ values: EnvironmentValues) -> EnvironmentValues {

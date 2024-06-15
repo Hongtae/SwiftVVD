@@ -8,99 +8,211 @@
 import Foundation
 import DKGame
 
-enum DisplayScaleEnvironmentKey: EnvironmentKey {
-    static var defaultValue: CGFloat { return 1 }
+protocol ViewLayer {
+    func loadResources(_ context: GraphicsContext)
+    func layout(frame: CGRect)
+    func draw(frame: CGRect, context: GraphicsContext)
 }
 
-extension EnvironmentValues {
-    public var displayScale: CGFloat {
-        set { self[DisplayScaleEnvironmentKey.self] = newValue }
-        get { self[DisplayScaleEnvironmentKey.self] }
+protocol ViewGenerator<Content> where Content : View {
+    associatedtype Content
+    var view: _GraphValue<Content> { get }
+    func makeView(view: Content) -> ViewContext
+}
+
+class ViewContext {
+    let keyPath: any _GraphPath
+    var modifiers: [any ViewModifier]
+    var traits: [ObjectIdentifier: Any]
+    var environmentValues: EnvironmentValues
+    var sharedContext: SharedContext
+    var frame: CGRect
+    var transform: AffineTransform = .identity
+    var transformByRoot: AffineTransform = .identity
+    var spacing: ViewSpacing
+
+    var backgroundLayers: [ViewLayer]
+    var overlayLayers: [ViewLayer]
+
+    var foregroundStyle: (primary: AnyShapeStyle?,
+                          secondary: AnyShapeStyle?,
+                          tertiary: AnyShapeStyle?)
+
+    var gestures: [any Gesture]
+    var simultaneousGestures: [any Gesture]
+    var highPriorityGestures: [any Gesture]
+
+    var bounds: CGRect {
+        CGRect(x: 0, y: 0, width: frame.width, height: frame.height)
+    }
+
+    init(inputs: _GraphInputs, path: any _GraphPath) {
+        self.keyPath = path
+
+        fatalError()
+    }
+
+    func update(transform t: AffineTransform) {
+        let local = AffineTransform(translationX: self.frame.minX, y: self.frame.minY)
+        self.transformByRoot = t.concatenating(local)
+    }
+
+    func loadResources(_ context: GraphicsContext) {
+        self.overlayLayers.forEach {
+            $0.loadResources(context)
+        }
+        self.backgroundLayers.forEach {
+            $0.loadResources(context)
+        }
+    }
+
+    func trait<Trait>(key: Trait.Type) -> Trait.Value where Trait: _ViewTraitKey {
+        traits[ObjectIdentifier(key)] as? Trait.Value ?? Trait.defaultValue
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
+        proposal.replacingUnspecifiedDimensions()
+    }
+
+    func dimensions(in proposal: ProposedViewSize) -> ViewDimensions {
+        ViewDimensions(width: self.frame.width, height: self.frame.height)
+    }
+
+    func place(at position: CGPoint, anchor: UnitPoint, proposal: ProposedViewSize) {
+        //let size = proposal.replacingUnspecifiedDimensions()
+        let size = sizeThatFits(proposal)
+        let offset = CGPoint(x: position.x - size.width * anchor.x,
+                             y: position.y - size.height * anchor.y)
+
+        self.frame = CGRect(origin: offset, size: size)
+        self.layoutSubviews()
+        self.overlayLayers.forEach { $0.layout(frame: self.frame) }
+        self.backgroundLayers.forEach { $0.layout(frame: self.frame) }
+    }
+
+    func setLayoutProperties(_ properties: LayoutProperties) {
+    }
+
+    func layoutSubviews() {
+    }
+
+    func update(tick: UInt64, delta: Double, date: Date) {
+    }
+
+    func draw(frame: CGRect, context: GraphicsContext) {
+    }
+
+    func drawBackground(frame: CGRect, context: GraphicsContext) {
+        self.backgroundLayers.reversed().forEach { layer in
+            layer.draw(frame: frame, context: context)
+        }
+    }
+
+    func drawOverlay(frame: CGRect, context: GraphicsContext){
+        self.overlayLayers.forEach { layer in
+            layer.draw(frame: frame, context: context)
+        }
+    }
+
+    final func drawView(frame: CGRect, context: GraphicsContext) {
+        self.drawBackground(frame: frame, context: context)
+        self.draw(frame: frame, context: context)
+        self.drawOverlay(frame: frame, context: context)
+    }
+
+    func gestureHandlers(at location: CGPoint) -> [_GestureHandler] {
+        fatalError()
+    }
+
+    final func makeGestureHandlers(at location: CGPoint) -> [_GestureHandler] {
+        fatalError()
+    }
+
+    func handleMouseWheel(at location: CGPoint, delta: CGPoint) -> Bool {
+        return false
+    }
+
+    func setFocus(for deviceID: Int) {
+        let vp = self.sharedContext.focusedViews.updateValue(WeakObject(self),
+                                                             forKey: deviceID)?.value
+        if let vp, vp !== self {
+            vp.onLostFocus(for: deviceID)
+        }
+    }
+
+    @discardableResult
+    func releaseFocus(for deviceID: Int) -> Bool {
+        if self.sharedContext.focusedViews[deviceID]?.value === self {
+            self.sharedContext.focusedViews[deviceID] = nil
+            return true
+        }
+        return false
+    }
+
+    func hasFocus(for deviceID: Int) -> Bool {
+        self.sharedContext.focusedViews[deviceID]?.value === self
+    }
+
+    func onLostFocus(for deviceID: Int) {
+    }
+
+    func processKeyboardEvent(type: KeyboardEventType,
+                              deviceID: Int,
+                              key: VirtualKey,
+                              text: String) -> Bool {
+        false
+    }
+
+    func updateEnvironment(_ environmentValues: EnvironmentValues) {
+        self.environmentValues = environmentValues._resolve(modifiers: modifiers)
     }
 }
 
-struct WeakObject<T: AnyObject> : Equatable {
-    weak var value: T?
-    static func == (a: Self, b: Self) -> Bool { a.value === b.value }
+class GenericViewContext<Content> : ViewContext where Content : View {
+    var view: Content
+    var body: ViewContext
 
-    init(_ value: T?) {
-        self.value = value
-    }
-}
-
-class SharedContext {
-    var appContext: AppContext
-
-    var window: Window?
-    var commandQueue: CommandQueue? // render queue for window swap-chain
-
-    var contentBounds: CGRect
-    var contentScaleFactor: CGFloat
-    var needsLayout: Bool
-
-    var resourceData: [String: Data] = [:]
-    var resourceObjects: [String: AnyObject] = [:]
-    var cachedTypeFaces: [Font: TypeFace] = [:]
-
-    var focusedViews: [Int: WeakObject<ViewProxy>] = [:]
-
-    init(appContext: AppContext) {
-        self.appContext = appContext
-        self.contentBounds = .zero
-        self.contentScaleFactor = 1
-        self.needsLayout = true
+    init(view: Content, body: ViewContext, inputs: _GraphInputs, path: _GraphValue<Content>) {
+        self.view = view
+        self.body = body
+        super.init(inputs: inputs, path: path)
     }
 
-    func updateReferencedResourceObjects() {
-        struct WeakWrapper {
-            weak var value: AnyObject?
-        }
-        let weakMap = resourceObjects.mapValues {
-            WeakObject<AnyObject>($0)
-        }
-        resourceObjects.removeAll()
-        resourceObjects = weakMap.compactMapValues {
-            $0.value
-        }
-    }
+    struct Generator : ViewGenerator {
+        let view: _GraphValue<Content>
+        let body: any ViewGenerator
+        var baseInputs: _GraphInputs
+        var preferences: PreferenceInputs
+        var traits: ViewTraitKeys = ViewTraitKeys()
 
-    func loadResourceData(name: String, bundle: Bundle?, cache: Bool) -> Data? {
-        Log.debug("Loading resource: \(name)...")
-        let bundle = bundle ?? Bundle.module
-        var url: URL? = nil
-        //TODO: check for Bundle.module crashes on Windows,Linux after Swift 5.8
-#if os(macOS) || os(iOS)
-        url = bundle.url(forResource: name, withExtension: nil)
-#else
-        url = bundle.bundleURL.appendingPathComponent(name)
-#endif
-        if let url {
-            if let data = self.resourceData[url.path] {
-                return data
-            }
-            do {
-                Log.debug("Loading resource: \(url)")
-                let data = try Data(contentsOf: url, options: [])
-                if cache {
-                    self.resourceData[url.path] = data
+        func makeView(view: Content) -> ViewContext {
+            func makeBody<T: ViewGenerator>(_ gen: T) -> ViewContext? {
+                var body: Any? = view
+                let b = self.view.trackRelativePaths(to: gen.view) {
+                    body = body[keyPath: $0]
                 }
-                return data
-            } catch {
-                Log.error("Error on loading data: \(error)")
+                if (b) {
+                    if let body = body as? T.Content {
+                        return gen.makeView(view: body)
+                    }
+                }
+                return nil
             }
+            guard let body = makeBody(self.body) else {
+                fatalError()
+            }
+            return GenericViewContext(view: view, body: body, inputs: baseInputs, path: self.view)
         }
-        Log.error("cannot load resource.")
-        return nil
     }
 }
 
-private struct ResourceBundleKey: EnvironmentKey {
-    static let defaultValue: Bundle? = nil
-}
+struct PrimitiveViewGenerator<Content> : ViewGenerator where Content: View {
+    let view: _GraphValue<Content>
+    var baseInputs: _GraphInputs
+    var preferences: PreferenceInputs
+    var traits: ViewTraitKeys = ViewTraitKeys()
 
-extension EnvironmentValues {
-    public var resourceBundle: Bundle? {
-        get { self[ResourceBundleKey.self] }
-        set { self[ResourceBundleKey.self] = newValue }
+    func makeView(view _: Content) -> ViewContext {
+        ViewContext(inputs: baseInputs, path: self.view)
     }
 }

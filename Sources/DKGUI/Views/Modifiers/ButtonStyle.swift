@@ -204,7 +204,7 @@ struct PrimitiveButtonStyleContainerModifier<Style> : ViewModifier where Style: 
 
 extension PrimitiveButtonStyleContainerModifier: _ViewInputsModifier {
     static func _makeViewInputs(modifier: _GraphValue<Self>, inputs: inout _ViewInputs) {
-        inputs.primitiveButtonStyles.append(modifier[\.style].value)
+        fatalError()
     }
 }
 
@@ -215,7 +215,7 @@ struct ButtonStyleContainerModifier<Style> : ViewModifier where Style: ButtonSty
 
 extension ButtonStyleContainerModifier: _ViewInputsModifier {
     static func _makeViewInputs(modifier: _GraphValue<Self>, inputs: inout _ViewInputs) {
-        inputs.primitiveButtonStyles.append(_DefaultButtonWithButtonStyle(style: modifier[\.style].value))
+        fatalError()
     }
 }
 

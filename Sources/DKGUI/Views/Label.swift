@@ -48,41 +48,19 @@ extension Label where Title == LabelStyleConfiguration.Title, Icon == LabelStyle
 
 extension LabelStyle {
     func _makeBodyView(configuration: Configuration, inputs: _ViewInputs) -> _ViewOutputs {
-        let view = self.makeBody(configuration: configuration)
-        return Self.Body._makeView(view: _GraphValue(view), inputs: inputs)
+        fatalError()
     }
     func _makeBodyViewList(configuration: Configuration, inputs: _ViewListInputs) -> _ViewListOutputs {
-        let view = self.makeBody(configuration: configuration)
-        return Self.Body._makeViewList(view: _GraphValue(view), inputs: inputs)
+        fatalError()
     }
 }
 
 struct ResolvedLabelStyle: View {
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let title = inputs.sourceWrites[ObjectIdentifier(LabelStyleConfiguration.Title.self)] as? AnyView
-        let icon = inputs.sourceWrites[ObjectIdentifier(LabelStyleConfiguration.Icon.self)] as? AnyView
-        let configuration = LabelStyleConfiguration(title, icon)
-
-        // resolve sytle
-        if let style = inputs.labelStyles.last {
-            var inputs = inputs
-            inputs.labelStyles.removeLast()
-            return style._makeBodyView(configuration: configuration, inputs: inputs)
-        }
-        return DefaultLabelStyle.automatic._makeBodyView(configuration: configuration, inputs: inputs)
+        fatalError()
     }
     static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        let title = inputs.inputs.sourceWrites[ObjectIdentifier(LabelStyleConfiguration.Title.self)] as? AnyView
-        let icon = inputs.inputs.sourceWrites[ObjectIdentifier(LabelStyleConfiguration.Icon.self)] as? AnyView
-        let configuration = LabelStyleConfiguration(title, icon)
-
-        // resolve sytle
-        if let style = inputs.inputs.labelStyles.last {
-            var inputs = inputs
-            inputs.inputs.labelStyles.removeLast()
-            return style._makeBodyViewList(configuration: configuration, inputs: inputs)
-        }
-        return DefaultLabelStyle.automatic._makeBodyViewList(configuration: configuration, inputs: inputs)
+        fatalError()
     }
 }
 
