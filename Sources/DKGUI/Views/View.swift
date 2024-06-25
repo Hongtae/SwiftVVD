@@ -81,7 +81,7 @@ struct IDView<Content, ID>: View where Content: View, ID: Hashable {
 
 extension View {
     public func id<ID>(_ id: ID) -> some View where ID : Hashable {
-        return IDView(self, id: id)
+        IDView(self, id: id)
     }
 }
 

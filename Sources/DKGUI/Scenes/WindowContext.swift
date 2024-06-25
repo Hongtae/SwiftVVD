@@ -211,7 +211,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                                  preferences: preferences)
         let outputs = Content._makeView(view: graph, inputs: inputs)
 
-        fatalError()
+        self.view = AnyViewGenerator(outputs.view).makeView(view: content)
     }
 
     deinit {

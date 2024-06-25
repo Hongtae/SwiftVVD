@@ -20,6 +20,19 @@ protocol ViewGenerator<Content> where Content : View {
     func makeView(view: Content) -> ViewContext
 }
 
+struct AnyViewGenerator {
+    let generator: any ViewGenerator
+    init(_ generator: any ViewGenerator) {
+        self.generator = generator
+    }
+    func makeView(view: some View) -> ViewContext {
+        func make<T: ViewGenerator>(_ g: T, _ v: some View) -> ViewContext {
+            g.makeView(view: v as! T.Content)
+        }
+        return make(generator, view)
+    }
+}
+
 class ViewContext {
     let keyPath: any _GraphPath
     var modifiers: [any ViewModifier]
