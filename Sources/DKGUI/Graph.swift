@@ -50,15 +50,15 @@ struct PropertyList {
             }
         }
     }
-    func find<T>(type: T.Type) -> (any PropertyItem)? where T : PropertyItem {
+    func find<T>(type: T.Type) -> T? where T : PropertyItem {
         if var list = elements {
-            if list.item is T {
-                return list.item
+            if let item = list.item as? T {
+                return item
             }
             while let next = list.next {
                 list = next
-                if list.item is T {
-                    return list.item
+                if let item = list.item as? T {
+                    return item
                 }
             }
         }
@@ -143,11 +143,7 @@ public struct _ViewListOutputs {
     var options: Options = .none
 }
 
-protocol _GraphPath {
-    var keyPath: AnyKeyPath { get }
-}
-
-private class _GraphFamily {
+private class _GraphRoot {
     struct RelativePath: Hashable {
         let keyPath: AnyKeyPath
         let parent: Int
@@ -155,40 +151,40 @@ private class _GraphFamily {
 
     var pathIndices: [RelativePath: Int]
     var paths: [RelativePath]
-    init(root: AnyKeyPath) {
+    init(_ root: AnyKeyPath) {
         let path = RelativePath(keyPath: root, parent: -1)
         paths = [path]
         pathIndices = [path: 0]
     }
 }
 
-public struct _GraphValue<Value> : _GraphPath {
-    private let family: _GraphFamily
+public struct _GraphValue<Value> {
+    private let root: _GraphRoot
     let index: Int
 
-    private init(_ family: _GraphFamily, _ index: Int) {
+    private init(_ root: _GraphRoot, _ index: Int) {
         assert(index >= 0)
-        self.family = family
+        self.root = root
         self.index = index
     }
 
     static func root() -> _GraphValue<Value> {
-        _GraphValue(_GraphFamily(root: \Value.self), 0)
+        _GraphValue(_GraphRoot(\Value.self), 0)
     }
 
     var keyPath: AnyKeyPath {
-        family.paths[index].keyPath
+        root.paths[index].keyPath
     }
 
     func trackRelativePaths<U>(to dest: _GraphValue<U>, _ callback: (AnyKeyPath)->Void) -> Bool {
-        guard self.family === dest.family
+        guard self.root === dest.root
         else { return false }
 
         var paths: [AnyKeyPath] = []
         var idx = dest.index
         if idx == self.index { return true }
         while idx >= 0 {
-            let rp = family.paths[idx]
+            let rp = root.paths[idx]
             paths.append(rp.keyPath)
             idx = rp.parent
             if idx == self.index { break }
@@ -203,24 +199,35 @@ public struct _GraphValue<Value> : _GraphPath {
     }
 
     func unsafeCast<U>(to: U.Type) -> _GraphValue<U> {
-        .init(family, index)
+        .init(root, index)
+    }
+
+    func value<U>(atPath path: _GraphValue<U>, from source: Value) -> U? {
+        var value: Any? = source
+        let b = self.trackRelativePaths(to: path) {
+            value = value[keyPath: $0]
+        }
+        if (b) {
+            return value as? U
+        }
+        return nil
     }
 
     public subscript<U>(keyPath: KeyPath<Value, U>) -> _GraphValue<U> {
-        let rp = _GraphFamily.RelativePath(keyPath: keyPath,
+        let rp = _GraphRoot.RelativePath(keyPath: keyPath,
                                            parent: self.index)
-        if let index = family.pathIndices[rp] {
-            return .init(family, index)
+        if let index = root.pathIndices[rp] {
+            return .init(root, index)
         }
-        let index = family.paths.count
-        family.paths.append(rp)
-        family.pathIndices[rp] = index
-        return .init(family, index)
+        let index = root.paths.count
+        root.paths.append(rp)
+        root.pathIndices[rp] = index
+        return .init(root, index)
     }
 }
 
 extension _GraphValue : Equatable {
     public static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.index == rhs.index && lhs.family === rhs.family
+        lhs.index == rhs.index && lhs.root === rhs.root
     }
 }

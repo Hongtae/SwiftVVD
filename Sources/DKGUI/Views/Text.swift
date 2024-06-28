@@ -281,9 +281,85 @@ extension Text {
 
 extension Text: View {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        fatalError()
+        let generator = TextViewContext.Generator(view: view,
+                                                  baseInputs: inputs.base,
+                                                  preferences: inputs.preferences)
+        return _ViewOutputs(view: generator, preferences: PreferenceOutputs(preferences: []))
     }
 }
 
 extension Text: _PrimitiveView {
+}
+
+class TextViewContext: ViewContext {
+    var text: Text
+    var resolvedText: GraphicsContext.ResolvedText?
+
+    struct Generator : ViewGenerator {
+        let view: _GraphValue<Text>
+        var baseInputs: _GraphInputs
+        var preferences: PreferenceInputs
+        var traits: ViewTraitKeys = ViewTraitKeys()
+
+        func makeView(view: Text) -> ViewContext? {
+            TextViewContext(view: view, inputs: baseInputs, path: self.view)
+        }
+    }
+
+    init(view: Text, inputs: _GraphInputs, path: _GraphValue<Text>) {
+        self.text = inputs.environment._resolve(view)
+        super.init(inputs: inputs, path: path)
+
+        if self.environmentValues.font == nil {
+            self.environmentValues.font = .system(.body)
+        }
+    }
+
+    override func loadResources(_ context: GraphicsContext) {
+        self.resolvedText = context.resolve(self.text)
+        self.sharedContext.needsLayout = true
+        super.loadResources(context)
+    }
+
+    override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
+        if let resolvedText {
+            if proposal == .zero {
+                let lineGlyphs = resolvedText.makeGlyphs(maxWidth: 0, maxHeight: 0)
+                if let glyph = lineGlyphs.first?.glyphs.first {
+                    return glyph.advance / resolvedText.scaleFactor
+                }
+            } else if proposal == .infinity {
+                return resolvedText.size()
+            } else {
+                var width: Int = .max
+                var height: Int = .max
+                if let pw = proposal.width, pw != .infinity {
+                    width = Int(pw * resolvedText.scaleFactor)
+                }
+                if let ph = proposal.height, ph != .infinity {
+                    height = Int(ph * resolvedText.scaleFactor)
+                }
+                return resolvedText.size(maxWidth: width, maxHeight: height)
+            }
+        }
+        return proposal.replacingUnspecifiedDimensions()
+    }
+
+    override func draw(frame: CGRect, context: GraphicsContext) {
+        super.draw(frame: frame, context: context)
+
+        if self.frame.width > 0 && self.frame.height > 0 {
+            if self.resolvedText == nil {
+                self.resolvedText = context.resolve(self.text)
+                self.sharedContext.needsLayout = true
+            }
+            if let resolvedText {
+                if let style = foregroundStyle.primary {
+                    context.draw(resolvedText, in: frame, shading: .style(style))
+                } else {
+                    context.draw(resolvedText, in: frame)
+                }
+            }
+        }
+    }
 }

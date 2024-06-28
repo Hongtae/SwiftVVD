@@ -71,75 +71,81 @@ public struct TupleView<T>: View {
         fatalError("Field: \(name) not found!")
     }
 
-    //var _empty: EmptyView { .init() }
-
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        func _makeView<V: View>(_: V.Type, view: Any, inputs: _ViewInputs) -> _ViewOutputs {
-            V._makeView(view: view as! _GraphValue<V>, inputs: inputs)
-        }
-
+        var children: [any ViewGenerator] = []
         if let viewType = T.self as? any View.Type {
-            return _makeView(viewType, view: view[\.value], inputs: inputs)
-        }
-
-        let subviews = self._subviewTypes
-        if subviews.count > 1 {
+            func _makeView<V: View>(_: V.Type, view: Any, inputs: _ViewInputs) -> _ViewOutputs {
+                V._makeView(view: view as! _GraphValue<V>, inputs: inputs)
+            }
+            let outputs = _makeView(viewType, view: view[\.value], inputs: inputs)
+            children.append(outputs.view)
+        } else {
+            func _makeView<V: View>(_: V.Type, view: _GraphValue<any View>, inputs: _ViewInputs) -> _ViewOutputs {
+                V._makeView(view: view.unsafeCast(to: V.self), inputs: inputs)
+            }
             func _makeViewList<V: View>(_: V.Type, view: _GraphValue<any View>, inputs: _ViewListInputs) -> _ViewListOutputs {
                 return V._makeViewList(view: view.unsafeCast(to: V.self), inputs: inputs)
             }
+            let subviews = self._subviewTypes
             let listInputs = _ViewListInputs(base: inputs.base, preferences: inputs.preferences)
-
-            var views: [any ViewGenerator] = []
             for (index, v) in subviews.enumerated() {
-                let outputs = _makeViewList(v.type, view: view[\._subviews[index]], inputs: listInputs)
-                views.append(outputs.view)
+                if v.type is _PrimitiveView.Type {
+                    let inputs = _ViewInputs(base: inputs.base, preferences: inputs.preferences, traits: inputs.traits)
+                    let outputs = _makeView(v.type, view: view[\._subviews[index]], inputs: inputs)
+                    children.append(outputs.view)
+                } else {
+                    let outputs = _makeViewList(v.type, view: view[\._subviews[index]], inputs: listInputs)
+                    children.append(outputs.view)
+                }
             }
-            let generator = TupleViewGenerator(view: view,
-                                               subviews: views,
-                                               baseInputs: inputs.base,
-                                               preferences: inputs.preferences)
-            return _ViewOutputs(view: generator, preferences: .init(preferences: []))
         }
-        if let first = subviews.first {
-            return _makeView(first.type, view: view[\._subviews[0]], inputs: inputs)
-        }
-        fatalError()
-        //return EmptyView._makeView(view: view[\._empty], inputs: inputs)
+        let generator = TupleViewGenerator(view: view,
+                                           subviews: children,
+                                           baseInputs: inputs.base,
+                                           preferences: inputs.preferences)
+        return _ViewOutputs(view: generator, preferences: .init(preferences: []))
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        func _makeViewList<V: View>(_: V.Type, view: Any, inputs: _ViewListInputs) -> _ViewListOutputs {
-            V._makeViewList(view: view as! _GraphValue<V>, inputs: inputs)
-        }
-
+        var children: [any ViewGenerator] = []
         if let viewType = T.self as? any View.Type {
-            return _makeViewList(viewType, view: view[\.value], inputs: inputs)
-        }
-
-        let subviews = self._subviewTypes
-        if subviews.count > 1 {
+            func _makeView<V: View>(_: V.Type, view: Any, inputs: _ViewInputs) -> _ViewOutputs {
+                V._makeView(view: view as! _GraphValue<V>, inputs: inputs)
+            }
+            func _makeViewList<V: View>(_: V.Type, view: Any, inputs: _ViewListInputs) -> _ViewListOutputs {
+                V._makeViewList(view: view as! _GraphValue<V>, inputs: inputs)
+            }
+            if T.self is _PrimitiveView.Type {
+                let inputs = _ViewInputs(base: inputs.base, preferences: inputs.preferences, traits: inputs.traits)
+                let outputs = _makeView(viewType, view: view[\.value], inputs: inputs)
+                return _ViewListOutputs(view: outputs.view, preferences: outputs.preferences)
+            }
+            let outputs = _makeViewList(viewType, view: view[\.value], inputs: inputs)
+            children.append(outputs.view)
+        } else {
+            func _makeView<V: View>(_: V.Type, view: _GraphValue<any View>, inputs: _ViewInputs) -> _ViewOutputs {
+                V._makeView(view: view.unsafeCast(to: V.self), inputs: inputs)
+            }
             func _makeViewList<V: View>(_: V.Type, view: _GraphValue<any View>, inputs: _ViewListInputs) -> _ViewListOutputs {
                 V._makeViewList(view: view.unsafeCast(to: V.self), inputs: inputs)
             }
-
-            var views: [any ViewGenerator] = []
+            let subviews = self._subviewTypes
             for (index, v) in subviews.enumerated() {
-                let outputs = _makeViewList(v.type,
-                                            view: view[\._subviews[index]],
-                                            inputs: inputs)
-                views.append(outputs.view)
+                if v.type is _PrimitiveView.Type {
+                    let inputs = _ViewInputs(base: inputs.base, preferences: inputs.preferences, traits: inputs.traits)
+                    let outputs = _makeView(v.type, view: view[\._subviews[index]], inputs: inputs)
+                    children.append(outputs.view)
+                } else {
+                    let outputs = _makeViewList(v.type, view: view[\._subviews[index]], inputs: inputs)
+                    children.append(outputs.view)
+                }
             }
-            let generator = TupleViewGenerator(view: view,
-                                               subviews: views,
-                                               baseInputs: inputs.base,
-                                               preferences: inputs.preferences)
-            return _ViewListOutputs(view: generator, preferences: .init(preferences: []))
         }
-        if let first = subviews.first {
-            return _makeViewList(first.type, view: view[\._subviews[0]], inputs: inputs)
-        }
-        fatalError()
-        //return EmptyView._makeViewList(view: view[\._empty], inputs: inputs)
+        let generator = TupleViewGenerator(view: view,
+                                           subviews: children,
+                                           baseInputs: inputs.base,
+                                           preferences: inputs.preferences)
+        return _ViewListOutputs(view: generator, preferences: .init(preferences: []))
     }
 
     public typealias Body = Never
@@ -148,14 +154,34 @@ public struct TupleView<T>: View {
 extension TupleView: _PrimitiveView {
 }
 
-struct TupleViewGenerator<Content> : ViewGenerator where Content: View {
-    let view: _GraphValue<Content>
+struct TupleViewGenerator<Content> : ViewGenerator where Content : View {
+    var view: _GraphValue<Content>
     let subviews: [any ViewGenerator]
     var baseInputs: _GraphInputs
     var preferences: PreferenceInputs
     var traits: ViewTraitKeys = ViewTraitKeys()
 
-    func makeView(view: Content) -> ViewContext {
-        fatalError()
+    func makeView(view: Content) -> ViewContext? {
+        func makeBody<T: ViewGenerator>(_ gen: T) -> ViewContext? {
+            if let body = self.view.value(atPath: gen.view, from: view) {
+                return gen.makeView(view: body)
+            }
+            return nil
+        }
+        let subviews = self.subviews.compactMap { makeBody($0) }
+        if subviews.count > 1 {
+            let layout = baseInputs.properties?
+                .find(type: DefaultLayoutPropertyItem.self)?
+                .layout ?? DefaultLayoutPropertyItem.default
+            return ViewGroupContext(view: view,
+                                    subviews: subviews,
+                                    layout: layout,
+                                    inputs: baseInputs,
+                                    path: self.view)
+        }
+        if let first = subviews.first {
+            return first
+        }
+        return nil
     }
 }

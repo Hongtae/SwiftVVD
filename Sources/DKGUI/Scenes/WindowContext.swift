@@ -18,7 +18,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
     private(set) var window: Window?
 
     var modifiers: [any _SceneModifier] = []
-    var view: ViewContext
+    var view: ViewContext?
     var environmentValues: EnvironmentValues
     var sharedContext: SharedContext
 
@@ -52,15 +52,38 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
             var renderTargets: GraphicsContext.RenderTargets? = nil
             var viewLoaded = false
 
+            //let clearColor = DKGame.Color(rgba8: (245, 242, 241, 255))
+            let clearColor = DKGame.Color(rgba8: (255, 255, 241, 255))
+
             mainLoop: while true {
                 guard let self = self else { break }
                 if Task.isCancelled { break }
 
-                let view = self.view
-
                 let swapChain = self.swapChain
                 let (state, config) = synchronizedBy(locking: self.stateLock) {
                     (self.state, self.config)
+                }
+
+                guard let view = self.view
+                else {
+                    if state.visible, let swapChain {
+                        var renderPass = swapChain.currentRenderPassDescriptor()
+                        if let commandBuffer = swapChain.commandQueue.makeCommandBuffer() {
+                            renderPass.colorAttachments[0].clearColor = clearColor
+                            renderPass.colorAttachments[0].loadAction = .clear
+                            if let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPass) {
+                                encoder.endEncoding()
+                            }
+                            commandBuffer.commit()
+                            _=swapChain.present()
+                        }
+                    }
+                    let frameInterval = config.inactiveFrameInterval
+                    repeat {
+                        if Task.isCancelled { break mainLoop }
+                        await Task.yield()
+                    } while tickCounter.elapsed < frameInterval
+                    continue
                 }
 
                 let frameInterval = state.activated ? config.activeFrameInterval : config.inactiveFrameInterval
@@ -133,7 +156,6 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                             height: backBuffer.height)
                     }
 
-                    let clearColor: DKGame.Color = .init(rgba8: (245, 242, 241, 255))
                     renderPass.colorAttachments[0].clearColor = clearColor
                     if let renderTargets,
                        let commandBuffer = swapChain.commandQueue.makeCommandBuffer() {
@@ -367,8 +389,10 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
             //Log.debug("WindowContext.onMouseEvent: \(event)")
         }
 
+        guard let view = self.view else { return }
+
         if event.type == .wheel {
-            _ = self.view.handleMouseWheel(at: event.location,
+            _ = view.handleMouseWheel(at: event.location,
                                                 delta: event.delta)
             return
         }
@@ -380,7 +404,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
 
         if gestureHandlers.isEmpty {
             if event.type == .buttonDown {
-                gestureHandlers = self.view.makeGestureHandlers(at: event.location)
+                gestureHandlers = view.makeGestureHandlers(at: event.location)
             }
         }
 

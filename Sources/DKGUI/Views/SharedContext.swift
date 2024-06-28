@@ -33,6 +33,7 @@ class SharedContext {
 
     var window: Window?
     var commandQueue: CommandQueue? // render queue for window swap-chain
+    var graphicsContext: GraphicsContext?
 
     var contentBounds: CGRect
     var contentScaleFactor: CGFloat

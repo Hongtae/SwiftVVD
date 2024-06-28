@@ -17,7 +17,7 @@ protocol ViewLayer {
 protocol ViewGenerator<Content> where Content : View {
     associatedtype Content
     var view: _GraphValue<Content> { get }
-    func makeView(view: Content) -> ViewContext
+    func makeView(view: Content) -> ViewContext?
 }
 
 struct AnyViewGenerator {
@@ -25,8 +25,8 @@ struct AnyViewGenerator {
     init(_ generator: any ViewGenerator) {
         self.generator = generator
     }
-    func makeView(view: some View) -> ViewContext {
-        func make<T: ViewGenerator>(_ g: T, _ v: some View) -> ViewContext {
+    func makeView(view: some View) -> ViewContext? {
+        func make<T: ViewGenerator>(_ g: T, _ v: some View) -> ViewContext? {
             g.makeView(view: v as! T.Content)
         }
         return make(generator, view)
@@ -34,7 +34,7 @@ struct AnyViewGenerator {
 }
 
 class ViewContext {
-    let keyPath: any _GraphPath
+    let keyPath: _GraphValue<Any>
     var modifiers: [any ViewModifier]
     var traits: [ObjectIdentifier: Any]
     var environmentValues: EnvironmentValues
@@ -51,18 +51,29 @@ class ViewContext {
                           secondary: AnyShapeStyle?,
                           tertiary: AnyShapeStyle?)
 
-    var gestures: [any Gesture]
-    var simultaneousGestures: [any Gesture]
-    var highPriorityGestures: [any Gesture]
+    var gestures: [_GraphValue<any Gesture>]
+    var simultaneousGestures: [_GraphValue<any Gesture>]
+    var highPriorityGestures: [_GraphValue<any Gesture>]
 
     var bounds: CGRect {
         CGRect(x: 0, y: 0, width: frame.width, height: frame.height)
     }
 
-    init(inputs: _GraphInputs, path: any _GraphPath) {
-        self.keyPath = path
+    init<Content>(inputs: _GraphInputs, path: _GraphValue<Content>) where Content : View {
+        self.keyPath = path.unsafeCast(to: Any.self)
+        self.modifiers = []
+        self.traits = [:]
+        self.environmentValues = inputs.environment
+        self.sharedContext = inputs.sharedContext
 
-        fatalError()
+        self.frame = .zero
+        self.spacing = .zero
+        self.backgroundLayers = []
+        self.overlayLayers = []
+
+        self.gestures = []
+        self.simultaneousGestures = []
+        self.highPriorityGestures = []
     }
 
     func update(transform t: AffineTransform) {
@@ -97,7 +108,7 @@ class ViewContext {
         let offset = CGPoint(x: position.x - size.width * anchor.x,
                              y: position.y - size.height * anchor.y)
 
-        self.frame = CGRect(origin: offset, size: size)
+        self.frame = CGRect(origin: offset, size: size).standardized
         self.layoutSubviews()
         self.overlayLayers.forEach { $0.layout(frame: self.frame) }
         self.backgroundLayers.forEach { $0.layout(frame: self.frame) }
@@ -112,7 +123,18 @@ class ViewContext {
     func update(tick: UInt64, delta: Double, date: Date) {
     }
 
+    var debugDraw = true
     func draw(frame: CGRect, context: GraphicsContext) {
+        if debugDraw {
+            var path = Path()
+            let frame = frame.insetBy(dx: 1, dy: 1).standardized
+            path.addRect(frame)
+            path.move(to: CGPoint(x: frame.minX, y: frame.minY))
+            path.addLine(to: CGPoint(x: frame.maxX, y: frame.maxY))
+            path.move(to: CGPoint(x: frame.maxX, y: frame.minY))
+            path.addLine(to: CGPoint(x: frame.minX, y: frame.maxY))
+            context.stroke(path, with: .color(.blue.opacity(0.6)), lineWidth: 1.0)
+        }
     }
 
     func drawBackground(frame: CGRect, context: GraphicsContext) {
@@ -138,7 +160,7 @@ class ViewContext {
     }
 
     final func makeGestureHandlers(at location: CGPoint) -> [_GestureHandler] {
-        fatalError()
+        return []
     }
 
     func handleMouseWheel(at location: CGPoint, delta: CGPoint) -> Bool {
@@ -186,9 +208,48 @@ class GenericViewContext<Content> : ViewContext where Content : View {
     var body: ViewContext
 
     init(view: Content, body: ViewContext, inputs: _GraphInputs, path: _GraphValue<Content>) {
-        self.view = view
+        self.view = inputs.environment._resolve(view)
         self.body = body
         super.init(inputs: inputs, path: path)
+        self.debugDraw = false
+    }
+
+    override func loadResources(_ context: GraphicsContext) {
+        super.loadResources(context)
+        self.body.loadResources(context)
+    }
+
+    override func update(transform t: AffineTransform) {
+        super.update(transform: t)
+        self.body.update(transform: t)
+    }
+
+    override func update(tick: UInt64, delta: Double, date: Date) {
+        super.update(tick: tick, delta: delta, date: date)
+        self.body.update(tick: tick, delta: delta, date: date)
+    }
+
+    override func draw(frame: CGRect, context: GraphicsContext) {
+        super.draw(frame: frame, context: context)
+
+        var context = context
+        context.environment = self.body.environmentValues
+        self.body.drawView(frame: self.body.frame.standardized, context: context)
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+
+        let center = CGPoint(x: self.frame.midX, y: self.frame.midY)
+        let proposal = ProposedViewSize(width: self.frame.width, height: self.frame.height)
+        self.body.place(at: center, anchor: .center, proposal: proposal)
+    }
+
+    override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
+        let s1 = super.sizeThatFits(proposal)
+        let s2 = self.body.sizeThatFits(proposal)
+        return CGSize(width: max(s1.width, s2.width),
+                      height: max(s1.height, s2.height))
     }
 
     struct Generator : ViewGenerator {
@@ -198,23 +259,17 @@ class GenericViewContext<Content> : ViewContext where Content : View {
         var preferences: PreferenceInputs
         var traits: ViewTraitKeys = ViewTraitKeys()
 
-        func makeView(view: Content) -> ViewContext {
+        func makeView(view: Content) -> ViewContext? {
             func makeBody<T: ViewGenerator>(_ gen: T) -> ViewContext? {
-                var body: Any? = view
-                let b = self.view.trackRelativePaths(to: gen.view) {
-                    body = body[keyPath: $0]
-                }
-                if (b) {
-                    if let body = body as? T.Content {
-                        return gen.makeView(view: body)
-                    }
+                if let body = self.view.value(atPath: gen.view, from: view) {
+                    return gen.makeView(view: body)
                 }
                 return nil
             }
-            guard let body = makeBody(self.body) else {
-                fatalError()
+            if let body = makeBody(self.body) {
+                return GenericViewContext(view: view, body: body, inputs: baseInputs, path: self.view)
             }
-            return GenericViewContext(view: view, body: body, inputs: baseInputs, path: self.view)
+            return nil
         }
     }
 }
@@ -225,7 +280,7 @@ struct PrimitiveViewGenerator<Content> : ViewGenerator where Content: View {
     var preferences: PreferenceInputs
     var traits: ViewTraitKeys = ViewTraitKeys()
 
-    func makeView(view _: Content) -> ViewContext {
+    func makeView(view _: Content) -> ViewContext? {
         ViewContext(inputs: baseInputs, path: self.view)
     }
 }

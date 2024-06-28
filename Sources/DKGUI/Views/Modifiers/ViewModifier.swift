@@ -14,12 +14,6 @@ public struct _ViewModifier_Content<Modifier> where Modifier: ViewModifier {
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
         fatalError()
     }
-
-    enum Storage {
-        case makeView((_Graph, _ViewInputs)->_ViewOutputs)
-        case makeViewList((_Graph, _ViewListInputs)->_ViewListOutputs)
-    }
-    let storage: Storage
 }
 
 extension _ViewModifier_Content: View {
@@ -45,6 +39,7 @@ extension ViewModifier {
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
         fatalError()
     }
+
     public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
         fatalError()
     }
@@ -66,18 +61,17 @@ protocol _UnaryViewModifier {
 
 extension ViewModifier where Self: _GraphInputsModifier, Self.Body == Never {
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        fatalError()
-    }
-    public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        fatalError()
-    }
-}
+        var inputs = inputs
+        Self._makeInputs(modifier: modifier, inputs: &inputs.base)
 
-extension ViewModifier where Self: _ViewInputsModifier, Self.Body == Never {
-    public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
+        //return body(_Graph(), inputs)
         fatalError()
     }
     public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
+        var inputs = inputs
+        Self._makeInputs(modifier: modifier, inputs: &inputs.base)
+
+        //return body(_Graph(), inputs)
         fatalError()
     }
 }
@@ -103,6 +97,12 @@ extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
     }
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+
+        let outputs = Modifier._makeView(modifier: view[\.modifier], inputs: inputs) { graph, inputs in
+
+            return Content._makeView(view: view[\.content], inputs: inputs)
+        }
+
         fatalError()
     }
 

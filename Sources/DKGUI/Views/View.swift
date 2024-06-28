@@ -23,19 +23,34 @@ extension View {
                                                            baseInputs: inputs.base,
                                                            preferences: inputs.preferences,
                                                            traits: inputs.traits)
-        return _ViewOutputs(view: generator,
-                            preferences: PreferenceOutputs(preferences: []))
+        return _ViewOutputs(view: generator, preferences: PreferenceOutputs(preferences: []))
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        let body = Self.Body._makeViewList(view: view[\.body], inputs: inputs)
+        let body: any ViewGenerator
+        if Self.Body.self is _PrimitiveView.Type {
+            let inputs = _ViewInputs(base: inputs.base,
+                                     preferences: inputs.preferences,
+                                     traits: inputs.traits)
+            body = Self.Body._makeView(view: view[\.body], inputs: inputs).view
+        } else {
+            body = Self.Body._makeViewList(view: view[\.body], inputs: inputs).view
+        }
         let generator = GenericViewContext<Self>.Generator(view: view,
-                                                           body: body.view,
+                                                           body: body,
                                                            baseInputs: inputs.base,
                                                            preferences: inputs.preferences,
                                                            traits: inputs.traits)
-        return _ViewListOutputs(view: generator,
-                                preferences: PreferenceOutputs(preferences: []))
+        return _ViewListOutputs(view: generator, preferences: PreferenceOutputs(preferences: []))
+    }
+}
+
+extension View where Body == Never {
+    public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        fatalError("\(Self.self) may not have Body == Never")
+    }
+    public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
+        fatalError("\(Self.self) may not have Body == Never")
     }
 }
 
