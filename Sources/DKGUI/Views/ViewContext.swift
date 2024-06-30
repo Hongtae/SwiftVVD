@@ -14,27 +14,33 @@ protocol ViewLayer {
     func draw(frame: CGRect, context: GraphicsContext)
 }
 
-protocol ViewGenerator<Content> where Content : View {
+protocol ViewGenerator<Content> {
     associatedtype Content
-    var view: _GraphValue<Content> { get }
-    func makeView(view: Content) -> ViewContext?
+    var graph: _GraphValue<Content> { get }
+    func makeView(content: Content) -> ViewContext?
 }
 
-struct AnyViewGenerator {
+struct AnyViewGenerator : ViewGenerator {
     let generator: any ViewGenerator
+    var graph: _GraphValue<Any> {
+        func _graph<T: ViewGenerator>(_ g: T) -> _GraphValue<Any> {
+            g.graph.unsafeCast(to: Any.self)
+        }
+        return _graph(self.generator)
+    }
     init(_ generator: any ViewGenerator) {
         self.generator = generator
     }
-    func makeView(view: some View) -> ViewContext? {
-        func make<T: ViewGenerator>(_ g: T, _ v: some View) -> ViewContext? {
-            g.makeView(view: v as! T.Content)
+    func makeView(content view: Any) -> ViewContext? {
+        func make<T: ViewGenerator>(_ g: T, _ v: Any) -> ViewContext? {
+            g.makeView(content: v as! T.Content)
         }
         return make(generator, view)
     }
 }
 
 class ViewContext {
-    let keyPath: _GraphValue<Any>
+    let graph: _GraphValue<Any>
     var modifiers: [any ViewModifier]
     var traits: [ObjectIdentifier: Any]
     var environmentValues: EnvironmentValues
@@ -59,8 +65,8 @@ class ViewContext {
         CGRect(x: 0, y: 0, width: frame.width, height: frame.height)
     }
 
-    init<Content>(inputs: _GraphInputs, path: _GraphValue<Content>) where Content : View {
-        self.keyPath = path.unsafeCast(to: Any.self)
+    init<Content>(inputs: _GraphInputs, graph: _GraphValue<Content>) {
+        self.graph = graph.unsafeCast(to: Any.self)
         self.modifiers = []
         self.traits = [:]
         self.environmentValues = inputs.environment
@@ -207,10 +213,10 @@ class GenericViewContext<Content> : ViewContext where Content : View {
     var view: Content
     var body: ViewContext
 
-    init(view: Content, body: ViewContext, inputs: _GraphInputs, path: _GraphValue<Content>) {
+    init(view: Content, body: ViewContext, inputs: _GraphInputs, graph: _GraphValue<Content>) {
         self.view = inputs.environment._resolve(view)
         self.body = body
-        super.init(inputs: inputs, path: path)
+        super.init(inputs: inputs, graph: graph)
         self.debugDraw = false
     }
 
@@ -253,21 +259,21 @@ class GenericViewContext<Content> : ViewContext where Content : View {
     }
 
     struct Generator : ViewGenerator {
-        let view: _GraphValue<Content>
+        let graph: _GraphValue<Content>
         let body: any ViewGenerator
         var baseInputs: _GraphInputs
         var preferences: PreferenceInputs
         var traits: ViewTraitKeys = ViewTraitKeys()
 
-        func makeView(view: Content) -> ViewContext? {
+        func makeView(content: Content) -> ViewContext? {
             func makeBody<T: ViewGenerator>(_ gen: T) -> ViewContext? {
-                if let body = self.view.value(atPath: gen.view, from: view) {
-                    return gen.makeView(view: body)
+                if let body = self.graph.value(atPath: gen.graph, from: content) {
+                    return gen.makeView(content: body)
                 }
                 return nil
             }
             if let body = makeBody(self.body) {
-                return GenericViewContext(view: view, body: body, inputs: baseInputs, path: self.view)
+                return GenericViewContext(view: content, body: body, inputs: baseInputs, graph: self.graph)
             }
             return nil
         }
@@ -275,12 +281,12 @@ class GenericViewContext<Content> : ViewContext where Content : View {
 }
 
 struct PrimitiveViewGenerator<Content> : ViewGenerator where Content: View {
-    let view: _GraphValue<Content>
+    let graph: _GraphValue<Content>
     var baseInputs: _GraphInputs
     var preferences: PreferenceInputs
     var traits: ViewTraitKeys = ViewTraitKeys()
 
-    func makeView(view _: Content) -> ViewContext? {
-        ViewContext(inputs: baseInputs, path: self.view)
+    func makeView(content: Content) -> ViewContext? {
+        ViewContext(inputs: baseInputs, graph: self.graph)
     }
 }

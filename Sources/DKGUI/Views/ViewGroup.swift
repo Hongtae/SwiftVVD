@@ -16,16 +16,16 @@ class ViewGroupContext<Content> : ViewContext where Content: View {
     let layoutProperties: LayoutProperties
 
     struct Generator : ViewGenerator {
-        var view: _GraphValue<Content>
+        var graph: _GraphValue<Content>
         let subviews: [any ViewGenerator]
         var baseInputs: _GraphInputs
         var preferences: PreferenceInputs
         var traits: ViewTraitKeys = ViewTraitKeys()
 
-        func makeView(view: Content) -> ViewContext? {
+        func makeView(content view: Content) -> ViewContext? {
             func makeBody<T: ViewGenerator>(_ gen: T) -> ViewContext? {
-                if let body = self.view.value(atPath: gen.view, from: view) {
-                    return gen.makeView(view: body)
+                if let body = self.graph.value(atPath: gen.graph, from: view) {
+                    return gen.makeView(content: body)
                 }
                 return nil
             }
@@ -37,18 +37,18 @@ class ViewGroupContext<Content> : ViewContext where Content: View {
                                     subviews: subviews,
                                     layout: layout,
                                     inputs: baseInputs,
-                                    path: self.view)
+                                    graph: self.graph)
         }
     }
 
-    init<L: Layout>(view: Content, subviews: [ViewContext], layout: L, inputs: _GraphInputs, path: _GraphValue<Content>) {
+    init<L: Layout>(view: Content, subviews: [ViewContext], layout: L, inputs: _GraphInputs, graph: _GraphValue<Content>) {
         self.view = inputs.environment._resolve(view)
         self.subviews = subviews
         self.layout = AnyLayout(layout)
         self.layoutCache = nil
         self.layoutProperties = L.layoutProperties
 
-        super.init(inputs: inputs, path: path)
+        super.init(inputs: inputs, graph: graph)
         self.debugDraw = false
     }
 

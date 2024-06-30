@@ -113,6 +113,8 @@ public struct _ViewInputs {
     var base: _GraphInputs
     var preferences: PreferenceInputs
     var traits: ViewTraitKeys = ViewTraitKeys()
+
+    var _modifierBody: [ObjectIdentifier: (_Graph, _ViewInputs)->_ViewOutputs] = [:]
 }
 
 public struct _ViewOutputs {
@@ -130,6 +132,8 @@ public struct _ViewListInputs {
     var preferences: PreferenceInputs
     var traits: ViewTraitKeys = ViewTraitKeys()
     var options: Options = .none
+
+    var _modifierBody: [ObjectIdentifier: (_Graph, _ViewListInputs)->_ViewListOutputs] = [:]
 }
 
 public struct _ViewListOutputs {
@@ -138,7 +142,7 @@ public struct _ViewListOutputs {
         static var none = Options(rawValue: 0)
     }
 
-    var view: any ViewGenerator
+    var viewList: [any ViewGenerator]
     var preferences: PreferenceOutputs
     var options: Options = .none
 }
@@ -170,6 +174,22 @@ public struct _GraphValue<Value> {
 
     static func root() -> _GraphValue<Value> {
         _GraphValue(_GraphRoot(\Value.self), 0)
+    }
+
+    func isDescendant<U>(of graph: _GraphValue<U>) -> Bool {
+        if graph.root === self.root {
+            var idx = self.index
+            if idx == graph.index {
+                return true
+            }
+            while idx >= 0 {
+                idx = self.root.paths[idx].parent
+                if idx == graph.index {
+                    return true
+                }
+            }
+        }
+        return false
     }
 
     var keyPath: AnyKeyPath {

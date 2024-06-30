@@ -281,7 +281,7 @@ extension Text {
 
 extension Text: View {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let generator = TextViewContext.Generator(view: view,
+        let generator = TextViewContext.Generator(graph: view,
                                                   baseInputs: inputs.base,
                                                   preferences: inputs.preferences)
         return _ViewOutputs(view: generator, preferences: PreferenceOutputs(preferences: []))
@@ -296,19 +296,19 @@ class TextViewContext: ViewContext {
     var resolvedText: GraphicsContext.ResolvedText?
 
     struct Generator : ViewGenerator {
-        let view: _GraphValue<Text>
+        let graph: _GraphValue<Text>
         var baseInputs: _GraphInputs
         var preferences: PreferenceInputs
         var traits: ViewTraitKeys = ViewTraitKeys()
 
-        func makeView(view: Text) -> ViewContext? {
-            TextViewContext(view: view, inputs: baseInputs, path: self.view)
+        func makeView(content view: Text) -> ViewContext? {
+            TextViewContext(view: view, inputs: baseInputs, graph: self.graph)
         }
     }
 
-    init(view: Text, inputs: _GraphInputs, path: _GraphValue<Text>) {
+    init(view: Text, inputs: _GraphInputs, graph: _GraphValue<Text>) {
         self.text = inputs.environment._resolve(view)
-        super.init(inputs: inputs, path: path)
+        super.init(inputs: inputs, graph: graph)
 
         if self.environmentValues.font == nil {
             self.environmentValues.font = .system(.body)
