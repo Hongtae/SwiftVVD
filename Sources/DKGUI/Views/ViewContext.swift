@@ -129,9 +129,10 @@ class ViewContext {
     func update(tick: UInt64, delta: Double, date: Date) {
     }
 
-    var debugDraw = true
+    var _debugDraw = true
+    var _debugDrawShading: GraphicsContext.Shading = .color(.blue.opacity(0.6))
     func draw(frame: CGRect, context: GraphicsContext) {
-        if debugDraw {
+        if _debugDraw {
             var path = Path()
             let frame = frame.insetBy(dx: 1, dy: 1).standardized
             path.addRect(frame)
@@ -139,7 +140,7 @@ class ViewContext {
             path.addLine(to: CGPoint(x: frame.maxX, y: frame.maxY))
             path.move(to: CGPoint(x: frame.maxX, y: frame.minY))
             path.addLine(to: CGPoint(x: frame.minX, y: frame.maxY))
-            context.stroke(path, with: .color(.blue.opacity(0.6)), lineWidth: 1.0)
+            context.stroke(path, with: _debugDrawShading, lineWidth: 1.0)
         }
     }
 
@@ -156,6 +157,9 @@ class ViewContext {
     }
 
     final func drawView(frame: CGRect, context: GraphicsContext) {
+        var context = context
+        context.environment = self.environmentValues
+
         self.drawBackground(frame: frame, context: context)
         self.draw(frame: frame, context: context)
         self.drawOverlay(frame: frame, context: context)
@@ -217,7 +221,7 @@ class GenericViewContext<Content> : ViewContext where Content : View {
         self.view = inputs.environment._resolve(view)
         self.body = body
         super.init(inputs: inputs, graph: graph)
-        self.debugDraw = false
+        self._debugDraw = false
     }
 
     override func loadResources(_ context: GraphicsContext) {
@@ -238,9 +242,21 @@ class GenericViewContext<Content> : ViewContext where Content : View {
     override func draw(frame: CGRect, context: GraphicsContext) {
         super.draw(frame: frame, context: context)
 
-        var context = context
-        context.environment = self.body.environmentValues
-        self.body.drawView(frame: self.body.frame.standardized, context: context)
+        let width = self.body.frame.width
+        let height = self.body.frame.height
+        guard width > 0 && height > 0 else {
+            return
+        }
+        if frame.intersection(self.body.frame).isNull {
+            return
+        }
+        let frame = self.body.frame
+        self.body.drawView(frame: frame, context: context)
+    }
+
+    override func setLayoutProperties(_ properties: LayoutProperties) {
+        super.setLayoutProperties(properties)
+        self.body.setLayoutProperties(properties)
     }
 
     override func layoutSubviews() {
@@ -256,6 +272,19 @@ class GenericViewContext<Content> : ViewContext where Content : View {
         let s2 = self.body.sizeThatFits(proposal)
         return CGSize(width: max(s1.width, s2.width),
                       height: max(s1.height, s2.height))
+    }
+
+    override func handleMouseWheel(at location: CGPoint, delta: CGPoint) -> Bool {
+        if self.frame.contains(location) {
+            let frame = self.body.frame
+            if frame.contains(location) {
+                let loc = location - frame.origin
+                if self.body.handleMouseWheel(at: loc, delta: delta) {
+                    return true
+                }
+            }
+        }
+        return super.handleMouseWheel(at: location, delta: delta)
     }
 
     struct Generator : ViewGenerator {

@@ -32,3 +32,86 @@ extension View {
         return padding(.all, length)
     }
 }
+
+extension _PaddingLayout: _ViewLayoutModifier {
+    class LayoutViewContext : ViewModifierContext<_PaddingLayout> {
+        var layout: _PaddingLayout { modifier }
+
+        override init(content: ViewContext, modifier: _PaddingLayout, inputs: _GraphInputs, graph: _GraphValue<_PaddingLayout>) {
+            super.init(content: content, modifier: modifier, inputs: inputs, graph: graph)
+        }
+
+        override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
+            var paddingH: CGFloat = .zero
+            var paddingV: CGFloat = .zero
+            if let insets = self.layout.insets {
+                if self.layout.edges.contains(.leading) {
+                    paddingH += insets.leading
+                }
+                if self.layout.edges.contains(.trailing) {
+                    paddingH += insets.trailing
+                }
+                if self.layout.edges.contains(.top) {
+                    paddingV += insets.top
+                }
+                if self.layout.edges.contains(.bottom) {
+                    paddingV += insets.bottom
+                }
+            }
+            var proposal = proposal
+            if let w = proposal.width {
+                proposal.width = max(w - paddingH, 0)
+            }
+            if let h = proposal.height {
+                proposal.height = max(h - paddingV, 0)
+            }
+            let size = self.content.sizeThatFits(proposal)
+            return CGSize(width: max(size.width + paddingH, 0),
+                          height: max(size.height + paddingV, 0))
+        }
+
+        override func layoutSubviews() {
+            let bounds = self.frame
+            var minX = bounds.minX
+            var maxX = bounds.maxX
+            var minY = bounds.minY
+            var maxY = bounds.maxY
+            if let insets = self.layout.insets {
+                if self.layout.edges.contains(.leading) {
+                    minX += insets.leading
+                }
+                if self.layout.edges.contains(.trailing) {
+                    maxX -= insets.trailing
+                }
+                if self.layout.edges.contains(.top) {
+                    minY += insets.top
+                }
+                if self.layout.edges.contains(.bottom) {
+                    maxY -= insets.bottom
+                }
+            }
+            let origin = CGPoint(x: minX, y: minY)
+            let width = max(maxX - minX, 0)
+            let height = max(maxY - minY, 0)
+
+            let proposal = ProposedViewSize(width: width, height: height)
+            self.content.place(at: origin,
+                               anchor: .topLeading,
+                               proposal: proposal)
+        }
+    }
+
+    struct LayoutViewGenerator : ViewModifierViewGenerator {
+        let content: any ViewGenerator
+        let graph: _GraphValue<_PaddingLayout>
+        var baseInputs: _GraphInputs
+
+        func makeView(modifier: _PaddingLayout, content: ViewContext) -> ViewContext? {
+            LayoutViewContext(content: content, modifier: modifier, inputs: baseInputs, graph: graph)
+        }
+    }
+
+    static func _makeView(modifier: _GraphValue<_PaddingLayout>, content: any ViewGenerator, inputs: _GraphInputs) -> any ViewGenerator {
+        LayoutViewGenerator(content: content, graph: modifier, baseInputs: inputs)
+    }
+}

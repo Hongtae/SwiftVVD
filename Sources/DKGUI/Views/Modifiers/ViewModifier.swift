@@ -5,6 +5,7 @@
 //  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
+import Foundation
 import DKGame
 
 public struct _ViewModifier_Content<Modifier> where Modifier: ViewModifier {
@@ -81,7 +82,7 @@ protocol _UnaryViewModifier {
 }
 
 protocol _ViewLayoutModifier: _UnaryViewModifier {
-    func _makeView(superview: some View, modifier: _GraphValue<Self>, inputs: _GraphInputs) -> any ViewGenerator
+    static func _makeView(modifier: _GraphValue<Self>, content: any ViewGenerator, inputs: _GraphInputs) -> any ViewGenerator
 }
 
 extension ViewModifier where Self: _GraphInputsModifier, Self.Body == Never {
@@ -106,10 +107,14 @@ extension ViewModifier where Self: Animatable {
         var modifier = modifier
         Self._makeAnimatable(value: &modifier, inputs: inputs.base)
 
-        if let layoutModifier = self as? any _ViewLayoutModifier.Type {
-            // make layout view
-        }
         let viewOutputs = body(_Graph(), inputs)
+        if let layoutModifier = self as? any _ViewLayoutModifier.Type {
+            func _makeView<T: _ViewLayoutModifier>(_: T.Type, modifier: Any, content: any ViewGenerator, inputs: _GraphInputs) -> any ViewGenerator {
+                T._makeView(modifier: modifier as! _GraphValue<T>, content: content, inputs: inputs)
+            }
+            let generator = _makeView(layoutModifier, modifier: modifier, content: viewOutputs.view, inputs: inputs.base)
+            return _ViewOutputs(view: generator, preferences: .init(preferences: []))
+        }
         return viewOutputs
     }
 
@@ -117,10 +122,16 @@ extension ViewModifier where Self: Animatable {
         var modifier = modifier
         Self._makeAnimatable(value: &modifier, inputs: inputs.base)
 
-        if let layoutModifier = self as? any _ViewLayoutModifier.Type {
-            // make layout view
-        }
         let viewOutputs = body(_Graph(), inputs)
+        if let layoutModifier = self as? any _ViewLayoutModifier.Type {
+            func _makeView<T: _ViewLayoutModifier>(_: T.Type, modifier: Any, content: any ViewGenerator, inputs: _GraphInputs) -> any ViewGenerator {
+                T._makeView(modifier: modifier as! _GraphValue<T>, content: content, inputs: inputs)
+            }
+            let generators = viewOutputs.viewList.map {
+                _makeView(layoutModifier, modifier: modifier, content: $0, inputs: inputs.base)
+            }
+            return _ViewListOutputs(viewList: generators, preferences: .init(preferences: []))
+        }
         return viewOutputs
     }
 }
@@ -146,9 +157,8 @@ extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
                                                          baseInputs: inputs.base,
                                                          preferences: inputs.preferences)
             return _ViewOutputs(view: generator, preferences: .init(preferences: []))
-        } else {
-            return outputs
         }
+        return outputs
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
@@ -162,9 +172,8 @@ extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
                                                     baseInputs: inputs.base,
                                                     preferences: inputs.preferences)
 
-            } else {
-                return $0
             }
+            return $0
         }
         return _ViewListOutputs(viewList: viewList, preferences: .init(preferences: []))
     }
@@ -198,6 +207,14 @@ class ViewModifierContext<Modifier> : ViewContext where Modifier : ViewModifier 
         self.content = content
         self.modifier = modifier
         super.init(inputs: inputs, graph: graph)
+
+        self._debugDraw = true
+        self._debugDrawShading = .color(.red.opacity(0.4))
+    }
+
+    override func loadResources(_ context: GraphicsContext) {
+        super.loadResources(context)
+        self.content.loadResources(context)
     }
 
     override func draw(frame: CGRect, context: GraphicsContext) {
@@ -212,9 +229,7 @@ class ViewModifierContext<Modifier> : ViewContext where Modifier : ViewModifier 
         if frame.intersection(self.content.frame).isNull {
             return
         }
-        var context = context
-        context.environment = self.content.environmentValues
-        let frame = self.content.frame.standardized
+        let frame = self.content.frame
         self.content.drawView(frame: frame, context: context)
     }
 
@@ -231,6 +246,7 @@ class ViewModifierContext<Modifier> : ViewContext where Modifier : ViewModifier 
     }
 
     override func layoutSubviews() {
+        super.layoutSubviews()
         let center = CGPoint(x: frame.midX, y: frame.midY)
         let proposal = ProposedViewSize(width: frame.width,
                                         height: frame.height)
@@ -238,8 +254,8 @@ class ViewModifierContext<Modifier> : ViewContext where Modifier : ViewModifier 
     }
 
     override func handleMouseWheel(at location: CGPoint, delta: CGPoint) -> Bool {
-        if self.frame.standardized.contains(location) {
-            let frame = self.content.frame.standardized
+        if self.frame.contains(location) {
+            let frame = self.content.frame
             if frame.contains(location) {
                 let loc = location - frame.origin
                 if self.content.handleMouseWheel(at: loc, delta: delta) {
@@ -249,15 +265,25 @@ class ViewModifierContext<Modifier> : ViewContext where Modifier : ViewModifier 
         }
         return super.handleMouseWheel(at: location, delta: delta)
     }
+
+    override func update(transform t: AffineTransform) {
+        super.update(transform: t)
+        self.content.update(transform: t)
+    }
+
+    override func update(tick: UInt64, delta: Double, date: Date) {
+        super.update(tick: tick, delta: delta, date: date)
+        self.content.update(tick: tick, delta: delta, date: date)
+    }
 }
 
 protocol ViewModifierViewGenerator : ViewGenerator where Content : ViewModifier {
     var content: any ViewGenerator { get }
-    func makeView(modifier: Content, content: ViewContext?) -> ViewContext?
+    func makeView(modifier: Content, content: ViewContext) -> ViewContext?
 }
 
 extension ViewModifierViewGenerator {
-    func makeView(content: any ViewModifier) -> ViewContext? {
+    func makeView(content: Self.Content) -> ViewContext? {
         nil
     }
 }
@@ -270,6 +296,43 @@ class ModifiedContentViewContext<Content> : ViewContext where Content : View {
         self.content = content
         self.modifier = modifier
         super.init(inputs: inputs, graph: graph)
+        self._debugDraw = false
+    }
+
+    override func loadResources(_ context: GraphicsContext) {
+        self.modifier.loadResources(context)
+    }
+
+    override func draw(frame: CGRect, context: GraphicsContext) {
+        self.modifier.draw(frame: frame, context: context)
+    }
+
+    override func setLayoutProperties(_ properties: LayoutProperties) {
+        self.modifier.setLayoutProperties(properties)
+    }
+
+    override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
+        self.modifier.sizeThatFits(proposal)
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let center = CGPoint(x: frame.midX, y: frame.midY)
+        let proposal = ProposedViewSize(width: frame.width,
+                                        height: frame.height)
+        self.modifier.place(at: center, anchor: .center, proposal: proposal)
+    }
+
+    override func handleMouseWheel(at location: CGPoint, delta: CGPoint) -> Bool {
+        self.modifier.handleMouseWheel(at: location, delta: delta)
+    }
+
+    override func update(transform t: AffineTransform) {
+        self.modifier.update(transform: t)
+    }
+
+    override func update(tick: UInt64, delta: Double, date: Date) {
+        self.modifier.update(tick: tick, delta: delta, date: date)
     }
 }
 

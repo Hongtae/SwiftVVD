@@ -49,7 +49,7 @@ class ViewGroupContext<Content> : ViewContext where Content: View {
         self.layoutProperties = L.layoutProperties
 
         super.init(inputs: inputs, graph: graph)
-        self.debugDraw = false
+        self._debugDraw = false
     }
 
     override func updateEnvironment(_ environmentValues: EnvironmentValues) {
@@ -87,7 +87,7 @@ class ViewGroupContext<Content> : ViewContext where Content: View {
     }
 
     override func layoutSubviews() {
-        let frame = self.frame.standardized
+        let frame = self.frame
         guard frame.width > 0 && frame.height > 0 else { return }
 
         if self.subviews.isEmpty == false {
@@ -163,9 +163,7 @@ class ViewGroupContext<Content> : ViewContext where Content: View {
             if frame.intersection(view.frame).isNull {
                 return
             }
-            var context = context
-            context.environment = view.environmentValues
-            view.drawView(frame: view.frame.standardized, context: context)
+            view.drawView(frame: view.frame, context: context)
         }
     }
 
@@ -174,9 +172,9 @@ class ViewGroupContext<Content> : ViewContext where Content: View {
     }
 
     override func handleMouseWheel(at location: CGPoint, delta: CGPoint) -> Bool {
-        if self.frame.standardized.contains(location) {
+        if self.frame.contains(location) {
             for subview in subviews {
-                let frame = subview.frame.standardized
+                let frame = subview.frame
                 if frame.contains(location) {
                     let loc = location - frame.origin
                     if subview.handleMouseWheel(at: loc, delta: delta) {
