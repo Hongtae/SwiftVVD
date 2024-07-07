@@ -24,7 +24,7 @@ extension EmptyView: _PrimitiveView {
 
 struct EmptyViewGenerator : ViewGenerator {
     let graph: _GraphValue<EmptyView>
-    func makeView(content _: EmptyView) -> ViewContext? {
+    func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
         nil
     }
 }

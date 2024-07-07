@@ -233,7 +233,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                                  preferences: preferences)
         let outputs = Content._makeView(view: graph, inputs: inputs)
 
-        self.view = AnyViewGenerator(outputs.view).makeView(content: content)
+        self.view = outputs.view.makeView(encloser: content, graph: graph)
     }
 
     deinit {

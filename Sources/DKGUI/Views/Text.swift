@@ -301,8 +301,11 @@ class TextViewContext: ViewContext {
         var preferences: PreferenceInputs
         var traits: ViewTraitKeys = ViewTraitKeys()
 
-        func makeView(content view: Text) -> ViewContext? {
-            TextViewContext(view: view, inputs: baseInputs, graph: self.graph)
+        func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
+            if let view = graph.value(atPath: self.graph, from: encloser) {
+                return TextViewContext(view: view, inputs: baseInputs, graph: self.graph)
+            }
+            return nil
         }
     }
 

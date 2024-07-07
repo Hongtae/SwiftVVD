@@ -31,7 +31,7 @@ extension _ViewModifier_Content: View {
 
     struct _ViewGenerator : ViewGenerator {
         let graph: _GraphValue<_ViewModifier_Content>
-        func makeView(content: _ViewModifier_Content) -> ViewContext? {
+        func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
             nil
         }
     }
@@ -148,34 +148,15 @@ extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
     }
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let outputs = Modifier._makeView(modifier: view[\.modifier], inputs: inputs) { _, inputs in
+        Modifier._makeView(modifier: view[\.modifier], inputs: inputs) { _, inputs in
             Content._makeView(view: view[\.content], inputs: inputs)
         }
-        if let modifier = outputs.view as? any ViewModifierViewGenerator {
-            let generator = ModifiedContentViewGenerator(graph: view,
-                                                         modifier: modifier,
-                                                         baseInputs: inputs.base,
-                                                         preferences: inputs.preferences)
-            return _ViewOutputs(view: generator, preferences: .init(preferences: []))
-        }
-        return outputs
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        let outputs = Modifier._makeViewList(modifier: view[\.modifier], inputs: inputs) { _, inputs in
+        Modifier._makeViewList(modifier: view[\.modifier], inputs: inputs) { _, inputs in
             Content._makeViewList(view: view[\.content], inputs: inputs)
         }
-        let viewList: [any ViewGenerator] = outputs.viewList.map {
-            if let modifier = $0 as? any ViewModifierViewGenerator {
-                return ModifiedContentViewGenerator(graph: view,
-                                                    modifier: modifier,
-                                                    baseInputs: inputs.base,
-                                                    preferences: inputs.preferences)
-
-            }
-            return $0
-        }
-        return _ViewListOutputs(viewList: viewList, preferences: .init(preferences: []))
     }
 }
 
@@ -274,62 +255,5 @@ class ViewModifierContext<Modifier> : ViewContext where Modifier : ViewModifier 
     override func update(tick: UInt64, delta: Double, date: Date) {
         super.update(tick: tick, delta: delta, date: date)
         self.content.update(tick: tick, delta: delta, date: date)
-    }
-}
-
-protocol ViewModifierViewGenerator : ViewGenerator where Content : ViewModifier {
-    var content: any ViewGenerator { get }
-    func makeView(modifier: Content, content: ViewContext) -> ViewContext?
-}
-
-extension ViewModifierViewGenerator {
-    func makeView(content: Self.Content) -> ViewContext? {
-        nil
-    }
-}
-
-class ModifiedContentViewContext<Content> : GenericViewContext<Content> where Content : View {
-    let content: ViewContext
-    var modifier: ViewContext { body }
-
-    init(view: Content, content: ViewContext, modifier: ViewContext, inputs: _GraphInputs, graph: _GraphValue<Content>) {
-        self.content = content
-        super.init(view: view, body: modifier, inputs: inputs, graph: graph)
-        self._debugDraw = false
-    }
-}
-
-struct ModifiedContentViewGenerator<Content> : ViewGenerator where Content : View {
-    let graph: _GraphValue<Content>
-    let modifier: any ViewModifierViewGenerator
-    var baseInputs: _GraphInputs
-    var preferences: PreferenceInputs
-    var traits: ViewTraitKeys = ViewTraitKeys()
-
-    func makeView(content view: Content) -> ViewContext? {
-        func makeViewContext<T: ViewGenerator>(_ gen: T) -> ViewContext? {
-            if let view = self.graph.value(atPath: gen.graph, from: view) {
-                return gen.makeView(content: view)
-            }
-            return nil
-        }
-        let content = self.modifier.content
-        if let content = makeViewContext(content) {
-            func makeModifier<T: ViewModifierViewGenerator>(_ gen: T) -> ViewContext? {
-                if let mod = self.graph.value(atPath: gen.graph, from: view) {
-                    return gen.makeView(modifier: mod, content: content)
-                }
-                return nil
-            }
-            if let modifier = makeModifier(modifier) {
-                return ModifiedContentViewContext(view: view,
-                                                  content: content,
-                                                  modifier: modifier,
-                                                  inputs: baseInputs,
-                                                  graph: graph)
-            }
-            return content
-        }
-        return nil
     }
 }

@@ -101,13 +101,19 @@ extension _PaddingLayout: _ViewLayoutModifier {
         }
     }
 
-    private struct LayoutViewGenerator : ViewModifierViewGenerator {
+    private struct LayoutViewGenerator : ViewGenerator {
         let content: any ViewGenerator
         let graph: _GraphValue<_PaddingLayout>
         var baseInputs: _GraphInputs
 
-        func makeView(modifier: _PaddingLayout, content: ViewContext) -> ViewContext? {
-            LayoutViewContext(content: content, modifier: modifier, inputs: baseInputs, graph: graph)
+        func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
+            if let content = self.content.makeView(encloser: encloser, graph: graph) {
+                if let modifier = graph.value(atPath: self.graph, from: encloser) {
+                    return LayoutViewContext(content: content, modifier: modifier, inputs: baseInputs, graph: self.graph)
+                }
+                return content
+            }
+            return nil
         }
     }
 

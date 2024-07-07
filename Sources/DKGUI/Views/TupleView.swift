@@ -134,27 +134,26 @@ struct TupleViewGenerator<Content> : ViewGenerator where Content : View {
     var preferences: PreferenceInputs
     var traits: ViewTraitKeys = ViewTraitKeys()
 
-    func makeView(content view: Content) -> ViewContext? {
-        func makeBody<T: ViewGenerator>(_ gen: T) -> ViewContext? {
-            if let body = self.graph.value(atPath: gen.graph, from: view) {
-                return gen.makeView(content: body)
+    func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
+        if let view = graph.value(atPath: self.graph, from: encloser) {
+            let subviews = self.subviews.compactMap {
+                $0.makeView(encloser: view, graph: self.graph)
             }
-            return nil
-        }
-        let subviews = self.subviews.compactMap { makeBody($0) }
-        if subviews.count > 1 {
-            let layout = baseInputs.properties?
-                .find(type: DefaultLayoutPropertyItem.self)?
-                .layout ?? DefaultLayoutPropertyItem.default
-            return ViewGroupContext(view: view,
-                                    subviews: subviews,
-                                    layout: layout,
-                                    inputs: baseInputs,
-                                    graph: self.graph)
-        }
-        if let first = subviews.first {
-            return first
+            if subviews.count > 1 {
+                let layout = baseInputs.properties?
+                    .find(type: DefaultLayoutPropertyItem.self)?
+                    .layout ?? DefaultLayoutPropertyItem.default
+                return ViewGroupContext(view: view,
+                                        subviews: subviews,
+                                        layout: layout,
+                                        inputs: baseInputs,
+                                        graph: self.graph)
+            }
+            if let first = subviews.first {
+                return first
+            }
         }
         return nil
     }
+
 }

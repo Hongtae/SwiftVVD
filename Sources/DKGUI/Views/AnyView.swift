@@ -59,11 +59,14 @@ struct TypeErasedViewGenerator : ViewGenerator {
     let graph: _GraphValue<AnyView>
     let inputs: _ViewInputs
 
-    func makeView(content view: AnyView) -> ViewContext? {
-        func _makeView<V: View>(value: V, graph: _GraphValue<any View>, inputs: _ViewInputs) -> ViewContext? {
-            let outputs = V._makeView(view: graph.unsafeCast(to: V.self), inputs: inputs)
-            return AnyViewGenerator(outputs.view).makeView(content: value)
+    func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
+        func _makeView<V: View>(value: V, graph: _GraphValue<any View>, inputs: _ViewInputs) -> _ViewOutputs {
+            V._makeView(view: graph.unsafeCast(to: V.self), inputs: inputs)
         }
-        return _makeView(value: view.storage.view, graph: self.graph[\.storage.view], inputs: inputs)
+        if let value = graph.value(atPath: self.graph, from: encloser) {
+            let outputs = _makeView(value: value.storage.view, graph: self.graph[\.storage.view], inputs: inputs)
+            return outputs.view.makeView(encloser: value, graph: self.graph)
+        }
+        return nil
     }
 }

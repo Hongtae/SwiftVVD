@@ -17,26 +17,7 @@ protocol ViewLayer {
 protocol ViewGenerator<Content> {
     associatedtype Content
     var graph: _GraphValue<Content> { get }
-    func makeView(content: Content) -> ViewContext?
-}
-
-struct AnyViewGenerator : ViewGenerator {
-    let generator: any ViewGenerator
-    var graph: _GraphValue<Any> {
-        func _graph<T: ViewGenerator>(_ g: T) -> _GraphValue<Any> {
-            g.graph.unsafeCast(to: Any.self)
-        }
-        return _graph(self.generator)
-    }
-    init(_ generator: any ViewGenerator) {
-        self.generator = generator
-    }
-    func makeView(content view: Any) -> ViewContext? {
-        func make<T: ViewGenerator>(_ g: T, _ v: Any) -> ViewContext? {
-            g.makeView(content: v as! T.Content)
-        }
-        return make(generator, view)
-    }
+    func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext?
 }
 
 class ViewContext {
@@ -291,15 +272,11 @@ class GenericViewContext<Content> : ViewContext where Content : View {
         var preferences: PreferenceInputs
         var traits: ViewTraitKeys = ViewTraitKeys()
 
-        func makeView(content: Content) -> ViewContext? {
-            func makeBody<T: ViewGenerator>(_ gen: T) -> ViewContext? {
-                if let body = self.graph.value(atPath: gen.graph, from: content) {
-                    return gen.makeView(content: body)
+        func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
+            if let view = graph.value(atPath: self.graph, from: encloser) {
+                if let body = self.body.makeView(encloser: view, graph: self.graph) {
+                    return GenericViewContext(view: view, body: body, inputs: baseInputs, graph: self.graph)
                 }
-                return nil
-            }
-            if let body = makeBody(self.body) {
-                return GenericViewContext(view: content, body: body, inputs: baseInputs, graph: self.graph)
             }
             return nil
         }
@@ -312,7 +289,7 @@ struct PrimitiveViewGenerator<Content> : ViewGenerator where Content: View {
     var preferences: PreferenceInputs
     var traits: ViewTraitKeys = ViewTraitKeys()
 
-    func makeView(content: Content) -> ViewContext? {
+    func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
         ViewContext(inputs: baseInputs, graph: self.graph)
     }
 }
