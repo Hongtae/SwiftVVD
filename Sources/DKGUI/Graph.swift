@@ -2,69 +2,10 @@
 //  File: Graph.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
-
-protocol PropertyItem {
-    associatedtype Item
-    static var `default`: Item { get }
-}
-
-struct PropertyList {
-    class Element {
-        let item: any PropertyItem
-        var next: Element?
-        init(item: any PropertyItem, next: Element? = nil) {
-            self.item = item
-            self.next = next
-        }
-    }
-    var elements: Element?
-    init(_ item: (any PropertyItem)? = nil) {
-        if let item {
-            self.append(item)
-        }
-    }
-    init(_ items: [any PropertyItem]) {
-        self.elements = nil
-        items.forEach { self.append($0) }
-    }
-    mutating func append(_ item: any PropertyItem) {
-        if var list = elements {
-            while let next = list.next {
-                list = next
-            }
-            list.next = Element(item: item)
-        } else {
-            elements = Element(item: item)
-        }
-    }
-    func forEach(_ body: (any PropertyItem)->Void) {
-        if var list = elements {
-            body(list.item)
-            while let next = list.next {
-                list = next
-                body(list.item)
-            }
-        }
-    }
-    func find<T>(type: T.Type) -> T? where T : PropertyItem {
-        if var list = elements {
-            if let item = list.item as? T {
-                return item
-            }
-            while let next = list.next {
-                list = next
-                if let item = list.item as? T {
-                    return item
-                }
-            }
-        }
-        return nil
-    }
-}
 
 protocol CustomInput {
 }
@@ -79,7 +20,7 @@ public struct _GraphInputs {
     }
 
     var customInputs: [CustomInput] = []
-    var properties: PropertyList?
+    var properties: PropertyList = .init()
     var environment: EnvironmentValues
     var sharedContext: SharedContext
     var options: Options = .none

@@ -2,7 +2,7 @@
 //  File: ViewModifier.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -154,7 +154,14 @@ extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        Modifier._makeViewList(modifier: view[\.modifier], inputs: inputs) { _, inputs in
+        if Modifier.self is _UnaryViewModifier.Type {
+            let inputs = _ViewInputs(base: inputs.base, preferences: inputs.preferences)
+            let outputs = Modifier._makeView(modifier: view[\.modifier], inputs: inputs) { _, inputs in
+                Content._makeView(view: view[\.content], inputs: inputs)
+            }
+            return _ViewListOutputs(viewList: [outputs.view], preferences: .init(preferences: []))
+        }
+        return Modifier._makeViewList(modifier: view[\.modifier], inputs: inputs) { _, inputs in
             Content._makeViewList(view: view[\.content], inputs: inputs)
         }
     }
@@ -180,7 +187,7 @@ extension View {
     }
 }
 
-class ViewModifierContext<Modifier> : ViewContext where Modifier : ViewModifier {
+class ViewModifierContext<Modifier> : ViewContext {
     let content: ViewContext
     let modifier: Modifier
 
@@ -220,10 +227,7 @@ class ViewModifierContext<Modifier> : ViewContext where Modifier : ViewModifier 
     }
 
     override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
-        let size = super.sizeThatFits(proposal)
-        let s = self.content.sizeThatFits(proposal)
-        return CGSize(width: max(size.width, s.width),
-                      height: max(size.height, s.height))
+        self.content.sizeThatFits(proposal)
     }
 
     override func layoutSubviews() {

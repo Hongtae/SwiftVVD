@@ -2,7 +2,7 @@
 //  File: BackgroundModifier.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -10,13 +10,21 @@ import Foundation
 public struct _BackgroundModifier<Background>: ViewModifier where Background: View {
     public var background: Background
     public var alignment: Alignment
+
     @inlinable public init(background: Background, alignment: Alignment = .center) {
         self.background = background
         self.alignment = alignment
     }
+
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        fatalError()
+        let outputs = body(_Graph(), inputs)
+        var backgroundInputs = inputs
+        backgroundInputs.base.properties.replace(item: DefaultLayoutPropertyItem(layout: ZStackLayout()))
+        let background = makeView(view: modifier[\.background], inputs: backgroundInputs)
+        let generator = BackgroundViewContext.Generator(content: outputs.view, background: background.view, graph: modifier, baseInputs: inputs.base)
+        return _ViewOutputs(view: generator, preferences: .init(preferences: []))
     }
+
     public typealias Body = Never
 }
 
@@ -29,14 +37,24 @@ extension _BackgroundModifier: _UnaryViewModifier {
 public struct _BackgroundStyleModifier<Style>: ViewModifier where Style: ShapeStyle {
     public var style: Style
     public var ignoresSafeAreaEdges: Edge.Set
+
     @inlinable public init(style: Style, ignoresSafeAreaEdges: Edge.Set) {
         self.style = style
         self.ignoresSafeAreaEdges = ignoresSafeAreaEdges
     }
+
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        fatalError()
+        let outputs = body(_Graph(), inputs)
+        let background = makeView(view: modifier[\._shapeView], inputs: inputs)
+        let generator = BackgroundViewContext.Generator(content: outputs.view, background: background.view, graph: modifier, baseInputs: inputs.base)
+        return _ViewOutputs(view: generator, preferences: .init(preferences: []))
     }
+
     public typealias Body = Never
+
+    var _shapeView: some View {
+        _ShapeView(shape: Rectangle(), style: self.style)
+    }
 }
 
 extension _BackgroundStyleModifier: _UnaryViewModifier {
@@ -46,15 +64,25 @@ public struct _BackgroundShapeModifier<Style, Bounds>: ViewModifier where Style:
     public var style: Style
     public var shape: Bounds
     public var fillStyle: FillStyle
+
     @inlinable public init(style: Style, shape: Bounds, fillStyle: FillStyle) {
         self.style = style
         self.shape = shape
         self.fillStyle = fillStyle
     }
+
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        fatalError()
+        let outputs = body(_Graph(), inputs)
+        let background = makeView(view: modifier[\._shapeView], inputs: inputs)
+        let generator = BackgroundViewContext.Generator(content: outputs.view, background: background.view, graph: modifier, baseInputs: inputs.base)
+        return _ViewOutputs(view: generator, preferences: .init(preferences: []))
     }
+
     public typealias Body = Never
+
+    var _shapeView: some View {
+        _ShapeView(shape: self.shape, style: self.style, fillStyle: self.fillStyle)
+    }
 }
 
 extension _BackgroundShapeModifier: _UnaryViewModifier {
@@ -64,15 +92,25 @@ public struct _InsettableBackgroundShapeModifier<Style, Bounds>: ViewModifier wh
     public var style: Style
     public var shape: Bounds
     public var fillStyle: FillStyle
+
     @inlinable public init(style: Style, shape: Bounds, fillStyle: FillStyle) {
         self.style = style
         self.shape = shape
         self.fillStyle = fillStyle
     }
+
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        fatalError()
+        let outputs = body(_Graph(), inputs)
+        let background = makeView(view: modifier[\._shapeView], inputs: inputs)
+        let generator = BackgroundViewContext.Generator(content: outputs.view, background: background.view, graph: modifier, baseInputs: inputs.base)
+        return _ViewOutputs(view: generator, preferences: .init(preferences: []))
     }
+
     public typealias Body = Never
+
+    var _shapeView : some View {
+        _ShapeView(shape: self.shape, style: self.style, fillStyle: self.fillStyle)
+    }
 }
 
 extension _InsettableBackgroundShapeModifier: _UnaryViewModifier {
@@ -115,17 +153,73 @@ extension View {
     }
 }
 
-fileprivate struct ViewContextLayer: ViewLayer {
-    private let view: ViewContext
-    private let alignment: Alignment
-    private let ignoresSafeAreaEdges: Edge.Set
-    init<V>(view: V, inputs: _ViewInputs, alignment: Alignment, ignoresSafeAreaEdges: Edge.Set) where V: View {
-        fatalError()
+private protocol _BackgroundModifierWithAlignment {
+    var alignment: Alignment { get }
+}
+
+private protocol _BackgroundModifierWithIgnoresSafeAreaEdges {
+    var ignoresSafeAreaEdges: Edge.Set { get }
+}
+
+extension _BackgroundModifier : _BackgroundModifierWithAlignment {
+}
+
+extension _BackgroundStyleModifier : _BackgroundModifierWithIgnoresSafeAreaEdges {
+}
+
+fileprivate class BackgroundViewContext<Modifier> : ViewModifierContext<Modifier> {
+    let background: ViewContext
+    let alignment: Alignment
+    let ignoresSafeAreaEdges: Edge.Set
+
+    struct Generator : ViewGenerator {
+        let content: any ViewGenerator
+        let background: any ViewGenerator
+        let graph: _GraphValue<Modifier>
+        let baseInputs: _GraphInputs
+
+        func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
+            if let content = content.makeView(encloser: encloser, graph: graph) {
+                if let modifier = graph.value(atPath: self.graph, from: encloser) {
+                    if let background = background.makeView(encloser: modifier, graph: self.graph) {
+                        return BackgroundViewContext(content: content,
+                                                     background: background,
+                                                     modifier: modifier,
+                                                     inputs: baseInputs,
+                                                     graph: self.graph)
+                    }
+                }
+                return content
+            }
+            return nil
+        }
     }
-    func loadResources(_ context: GraphicsContext) {
-        self.view.loadResources(context)
+
+    init(content: ViewContext, background: ViewContext, modifier: Modifier, inputs: _GraphInputs, graph: _GraphValue<Modifier> ) {
+        self.background = background
+        if let alignmentModifier = modifier as? _BackgroundModifierWithAlignment {
+            self.alignment = alignmentModifier.alignment
+        } else {
+            self.alignment = .center
+        }
+        if let ignoresSafeAreaEdgesModifier = modifier as? _BackgroundModifierWithIgnoresSafeAreaEdges {
+            self.ignoresSafeAreaEdges = ignoresSafeAreaEdgesModifier.ignoresSafeAreaEdges
+        } else {
+            self.ignoresSafeAreaEdges = .all
+        }
+        super.init(content: content, modifier: modifier, inputs: inputs, graph: graph)
+        self._debugDraw = false
+        self.background._debugDraw = false
     }
-    func layout(frame: CGRect) {
+    
+    override func loadResources(_ context: GraphicsContext) {
+        super.loadResources(context)
+        background.loadResources(context)
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+
         var position = frame.origin
         var anchor = UnitPoint()
         switch self.alignment.horizontal {
@@ -149,21 +243,20 @@ fileprivate struct ViewContextLayer: ViewLayer {
             anchor.y = 0.5
         }
         let proposal = ProposedViewSize(width: frame.width, height: frame.height)
-        self.view.place(at: position,
-                        anchor: anchor,
-                        proposal: proposal)
+        background.place(at: position,
+                         anchor: anchor,
+                         proposal: proposal)
     }
-    func draw(frame: CGRect, context: GraphicsContext) {
-        let width = view.frame.width
-        let height = view.frame.height
+
+    override func drawBackground(frame: CGRect, context: GraphicsContext) {
+        let width = background.frame.width
+        let height = background.frame.height
         guard width > 0 && height > 0 else {
             return
         }
-        if frame.intersection(view.frame).isNull {
+        if frame.intersection(background.frame).isNull {
             return
         }
-        var context = context
-        context.environment = self.view.environmentValues
-        self.view.drawView(frame: view.frame, context: context)
+        background.drawView(frame: background.frame, context: context)
     }
 }

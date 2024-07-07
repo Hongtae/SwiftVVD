@@ -2,7 +2,7 @@
 //  File: TupleView.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -85,35 +85,23 @@ public struct TupleView<T>: View {
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
         var children: [any ViewGenerator] = []
         if let viewType = T.self as? any View.Type {
-            func _makeView<V: View>(_: V.Type, view: Any, inputs: _ViewInputs) -> _ViewOutputs {
-                V._makeView(view: view as! _GraphValue<V>, inputs: inputs)
-            }
-            func _makeViewList<V: View>(_: V.Type, view: Any, inputs: _ViewListInputs) -> _ViewListOutputs {
-                V._makeViewList(view: view as! _GraphValue<V>, inputs: inputs)
-            }
             if T.self is _PrimitiveView.Type {
                 let inputs = _ViewInputs(base: inputs.base, preferences: inputs.preferences, traits: inputs.traits)
-                let outputs = _makeView(viewType, view: view[\.value], inputs: inputs)
+                let outputs = makeView(viewType, view: view[\.value].unsafeCast(to: Any.self), inputs: inputs)
                 children.append(outputs.view)
             } else {
-                let outputs = _makeViewList(viewType, view: view[\.value], inputs: inputs)
+                let outputs = makeViewList(viewType, view: view[\.value].unsafeCast(to: Any.self), inputs: inputs)
                 children.append(contentsOf: outputs.viewList)
             }
         } else {
-            func _makeView<V: View>(_: V.Type, view: _GraphValue<any View>, inputs: _ViewInputs) -> _ViewOutputs {
-                V._makeView(view: view.unsafeCast(to: V.self), inputs: inputs)
-            }
-            func _makeViewList<V: View>(_: V.Type, view: _GraphValue<any View>, inputs: _ViewListInputs) -> _ViewListOutputs {
-                V._makeViewList(view: view.unsafeCast(to: V.self), inputs: inputs)
-            }
             let subviews = self._subviewTypes
             for (index, v) in subviews.enumerated() {
                 if v.type is _PrimitiveView.Type {
                     let inputs = _ViewInputs(base: inputs.base, preferences: inputs.preferences, traits: inputs.traits)
-                    let outputs = _makeView(v.type, view: view[\._subviews[index]], inputs: inputs)
+                    let outputs = makeView(v.type, view: view[\._subviews[index]].unsafeCast(to: Any.self), inputs: inputs)
                     children.append(outputs.view)
                 } else {
-                    let outputs = _makeViewList(v.type, view: view[\._subviews[index]], inputs: inputs)
+                    let outputs = makeViewList(v.type, view: view[\._subviews[index]].unsafeCast(to: Any.self), inputs: inputs)
                     children.append(contentsOf: outputs.viewList)
                 }
             }
@@ -140,7 +128,7 @@ struct TupleViewGenerator<Content> : ViewGenerator where Content : View {
                 $0.makeView(encloser: view, graph: self.graph)
             }
             if subviews.count > 1 {
-                let layout = baseInputs.properties?
+                let layout = baseInputs.properties
                     .find(type: DefaultLayoutPropertyItem.self)?
                     .layout ?? DefaultLayoutPropertyItem.default
                 return ViewGroupContext(view: view,

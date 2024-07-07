@@ -8,12 +8,6 @@
 import Foundation
 import DKGame
 
-protocol ViewLayer {
-    func loadResources(_ context: GraphicsContext)
-    func layout(frame: CGRect)
-    func draw(frame: CGRect, context: GraphicsContext)
-}
-
 protocol ViewGenerator<Content> {
     associatedtype Content
     var graph: _GraphValue<Content> { get }
@@ -31,16 +25,9 @@ class ViewContext {
     var transformByRoot: AffineTransform = .identity
     var spacing: ViewSpacing
 
-    var backgroundLayers: [ViewLayer]
-    var overlayLayers: [ViewLayer]
-
     var foregroundStyle: (primary: AnyShapeStyle?,
                           secondary: AnyShapeStyle?,
                           tertiary: AnyShapeStyle?)
-
-    var gestures: [_GraphValue<any Gesture>]
-    var simultaneousGestures: [_GraphValue<any Gesture>]
-    var highPriorityGestures: [_GraphValue<any Gesture>]
 
     var bounds: CGRect {
         CGRect(x: 0, y: 0, width: frame.width, height: frame.height)
@@ -52,15 +39,8 @@ class ViewContext {
         self.traits = [:]
         self.environmentValues = inputs.environment
         self.sharedContext = inputs.sharedContext
-
         self.frame = .zero
         self.spacing = .zero
-        self.backgroundLayers = []
-        self.overlayLayers = []
-
-        self.gestures = []
-        self.simultaneousGestures = []
-        self.highPriorityGestures = []
     }
 
     func update(transform t: AffineTransform) {
@@ -69,12 +49,6 @@ class ViewContext {
     }
 
     func loadResources(_ context: GraphicsContext) {
-        self.overlayLayers.forEach {
-            $0.loadResources(context)
-        }
-        self.backgroundLayers.forEach {
-            $0.loadResources(context)
-        }
     }
 
     func trait<Trait>(key: Trait.Type) -> Trait.Value where Trait: _ViewTraitKey {
@@ -97,8 +71,6 @@ class ViewContext {
 
         self.frame = CGRect(origin: offset, size: size).standardized
         self.layoutSubviews()
-        self.overlayLayers.forEach { $0.layout(frame: self.frame) }
-        self.backgroundLayers.forEach { $0.layout(frame: self.frame) }
     }
 
     func setLayoutProperties(_ properties: LayoutProperties) {
@@ -126,15 +98,9 @@ class ViewContext {
     }
 
     func drawBackground(frame: CGRect, context: GraphicsContext) {
-        self.backgroundLayers.reversed().forEach { layer in
-            layer.draw(frame: frame, context: context)
-        }
     }
 
     func drawOverlay(frame: CGRect, context: GraphicsContext){
-        self.overlayLayers.forEach { layer in
-            layer.draw(frame: frame, context: context)
-        }
     }
 
     final func drawView(frame: CGRect, context: GraphicsContext) {

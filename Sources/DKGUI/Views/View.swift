@@ -2,7 +2,7 @@
 //  File: View.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -43,6 +43,22 @@ extension View where Body == Never {
         let outputs = Self._makeView(view: view, inputs: inputs)
         return _ViewListOutputs(viewList: [outputs.view], preferences: PreferenceOutputs(preferences: []))
     }
+}
+
+func makeView<T: View>(view: _GraphValue<T>, inputs: _ViewInputs) -> _ViewOutputs {
+    T._makeView(view: view, inputs: inputs)
+}
+
+func makeViewList<T: View>(view: _GraphValue<T>, inputs: _ViewListInputs) -> _ViewListOutputs {
+    T._makeViewList(view: view, inputs: inputs)
+}
+
+func makeView<T: View>(_: T.Type, view: _GraphValue<Any>, inputs: _ViewInputs) -> _ViewOutputs {
+    T._makeView(view: view.unsafeCast(to: T.self), inputs: inputs)
+}
+
+func makeViewList<T: View>(_: T.Type, view: _GraphValue<Any>, inputs: _ViewListInputs) -> _ViewListOutputs {
+    T._makeViewList(view: view.unsafeCast(to: T.self), inputs: inputs)
 }
 
 // _PrimitiveView is a View type that does not have a body. (body = Never)

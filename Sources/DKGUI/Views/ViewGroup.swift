@@ -27,7 +27,7 @@ class ViewGroupContext<Content> : ViewContext where Content: View {
                 let subviews = self.subviews.compactMap {
                     $0.makeView(encloser: view, graph: self.graph)
                 }
-                let layout = baseInputs.properties?
+                let layout = baseInputs.properties
                     .find(type: DefaultLayoutPropertyItem.self)?
                     .layout ?? DefaultLayoutPropertyItem.default
                 return ViewGroupContext(view: view,

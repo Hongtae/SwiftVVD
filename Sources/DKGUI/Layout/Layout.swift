@@ -2,7 +2,7 @@
 //  File: Layout.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -248,4 +248,7 @@ struct _LayoutRoot<L>: _VariadicView.UnaryViewRoot where L: Layout {
 struct DefaultLayoutPropertyItem : PropertyItem {
     static var `default` : some Layout { VStackLayout() }
     let layout: any Layout
+    var description: String {
+        "DefaultLayoutPropertyItem: \(self.layout)"
+    }
 }

@@ -2,7 +2,7 @@
 //  File: PaddingLayout.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -104,7 +104,7 @@ extension _PaddingLayout: _ViewLayoutModifier {
     private struct LayoutViewGenerator : ViewGenerator {
         let content: any ViewGenerator
         let graph: _GraphValue<_PaddingLayout>
-        var baseInputs: _GraphInputs
+        let baseInputs: _GraphInputs
 
         func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
             if let content = self.content.makeView(encloser: encloser, graph: graph) {
