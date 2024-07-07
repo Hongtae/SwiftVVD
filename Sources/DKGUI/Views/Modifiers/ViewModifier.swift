@@ -288,51 +288,14 @@ extension ViewModifierViewGenerator {
     }
 }
 
-class ModifiedContentViewContext<Content> : ViewContext where Content : View {
+class ModifiedContentViewContext<Content> : GenericViewContext<Content> where Content : View {
     let content: ViewContext
-    let modifier: ViewContext
+    var modifier: ViewContext { body }
 
     init(view: Content, content: ViewContext, modifier: ViewContext, inputs: _GraphInputs, graph: _GraphValue<Content>) {
         self.content = content
-        self.modifier = modifier
-        super.init(inputs: inputs, graph: graph)
+        super.init(view: view, body: modifier, inputs: inputs, graph: graph)
         self._debugDraw = false
-    }
-
-    override func loadResources(_ context: GraphicsContext) {
-        self.modifier.loadResources(context)
-    }
-
-    override func draw(frame: CGRect, context: GraphicsContext) {
-        self.modifier.draw(frame: frame, context: context)
-    }
-
-    override func setLayoutProperties(_ properties: LayoutProperties) {
-        self.modifier.setLayoutProperties(properties)
-    }
-
-    override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
-        self.modifier.sizeThatFits(proposal)
-    }
-
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        let center = CGPoint(x: frame.midX, y: frame.midY)
-        let proposal = ProposedViewSize(width: frame.width,
-                                        height: frame.height)
-        self.modifier.place(at: center, anchor: .center, proposal: proposal)
-    }
-
-    override func handleMouseWheel(at location: CGPoint, delta: CGPoint) -> Bool {
-        self.modifier.handleMouseWheel(at: location, delta: delta)
-    }
-
-    override func update(transform t: AffineTransform) {
-        self.modifier.update(transform: t)
-    }
-
-    override func update(tick: UInt64, delta: Double, date: Date) {
-        self.modifier.update(tick: tick, delta: delta, date: date)
     }
 }
 

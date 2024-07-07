@@ -34,7 +34,7 @@ extension View {
 }
 
 extension _PaddingLayout: _ViewLayoutModifier {
-    class LayoutViewContext : ViewModifierContext<_PaddingLayout> {
+    private class LayoutViewContext : ViewModifierContext<_PaddingLayout> {
         var layout: _PaddingLayout { modifier }
 
         override init(content: ViewContext, modifier: _PaddingLayout, inputs: _GraphInputs, graph: _GraphValue<_PaddingLayout>) {
@@ -101,7 +101,7 @@ extension _PaddingLayout: _ViewLayoutModifier {
         }
     }
 
-    struct LayoutViewGenerator : ViewModifierViewGenerator {
+    private struct LayoutViewGenerator : ViewModifierViewGenerator {
         let content: any ViewGenerator
         let graph: _GraphValue<_PaddingLayout>
         var baseInputs: _GraphInputs

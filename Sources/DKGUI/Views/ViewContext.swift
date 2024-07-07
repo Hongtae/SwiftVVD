@@ -268,10 +268,7 @@ class GenericViewContext<Content> : ViewContext where Content : View {
     }
 
     override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
-        let s1 = super.sizeThatFits(proposal)
-        let s2 = self.body.sizeThatFits(proposal)
-        return CGSize(width: max(s1.width, s2.width),
-                      height: max(s1.height, s2.height))
+        self.body.sizeThatFits(proposal)
     }
 
     override func handleMouseWheel(at location: CGPoint, delta: CGPoint) -> Bool {
