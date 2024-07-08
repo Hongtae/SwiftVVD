@@ -41,7 +41,7 @@ class ViewGroupContext<Content> : ViewContext where Content: View {
     }
 
     init<L: Layout>(view: Content, subviews: [ViewContext], layout: L, inputs: _GraphInputs, graph: _GraphValue<Content>) {
-        self.view = inputs.environment._resolve(view)
+        self.view = view
         self.subviews = subviews
         self.layout = AnyLayout(layout)
         self.layoutCache = nil
@@ -51,8 +51,17 @@ class ViewGroupContext<Content> : ViewContext where Content: View {
         self._debugDraw = false
     }
 
+    override func resolveGraphInputs<T>(encloser: T, graph: _GraphValue<T>) {
+        super.resolveGraphInputs(encloser: encloser, graph: graph)
+        self.view = inputs.environment._resolve(self.view)
+        self.subviews.forEach {
+            $0.resolveGraphInputs(encloser: self.view, graph: self.graph)
+        }
+    }
+
     override func updateEnvironment(_ environmentValues: EnvironmentValues) {
         super.updateEnvironment(environmentValues)
+        self.view = inputs.environment._resolve(self.view)
         self.subviews.forEach {
             $0.updateEnvironment(self.environmentValues)
         }

@@ -89,16 +89,13 @@ extension ViewModifier where Self: _GraphInputsModifier, Self.Body == Never {
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
         var inputs = inputs
         Self._makeInputs(modifier: modifier, inputs: &inputs.base)
-
-        //return body(_Graph(), inputs)
-        fatalError()
+        return body(_Graph(), inputs)
     }
+
     public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
         var inputs = inputs
         Self._makeInputs(modifier: modifier, inputs: &inputs.base)
-
-        //return body(_Graph(), inputs)
-        fatalError()
+        return body(_Graph(), inputs)
     }
 }
 
@@ -198,6 +195,16 @@ class ViewModifierContext<Modifier> : ViewContext {
 
         self._debugDraw = true
         self._debugDrawShading = .color(.red.opacity(0.4))
+    }
+
+    override func resolveGraphInputs<T>(encloser: T, graph: _GraphValue<T>) {
+        super.resolveGraphInputs(encloser: encloser, graph: graph)
+        self.content.resolveGraphInputs(encloser: encloser, graph: graph)
+    }
+
+    override func updateEnvironment(_ environmentValues: EnvironmentValues) {
+        super.updateEnvironment(environmentValues)
+        self.content.updateEnvironment(environmentValues)
     }
 
     override func loadResources(_ context: GraphicsContext) {

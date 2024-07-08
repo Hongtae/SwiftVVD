@@ -13,6 +13,12 @@ protocol CustomInput {
 public struct _Graph {
 }
 
+protocol _GraphInputResolve {
+    var isResolved: Bool { get }
+    func apply(inputs: inout _GraphInputs)
+    mutating func resolve<T>(encloser: T, graph: _GraphValue<T>)
+}
+
 public struct _GraphInputs {
     struct Options : OptionSet {
         let rawValue: Int
@@ -25,6 +31,7 @@ public struct _GraphInputs {
     var sharedContext: SharedContext
     var options: Options = .none
     var mergedInputs: [_GraphInputs] = []
+    var modifiers: [_GraphInputResolve] = []
 }
 
 protocol AnyPreferenceKey {

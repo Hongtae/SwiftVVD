@@ -8,18 +8,31 @@
 import Foundation
 import DKGame
 
-protocol ViewGenerator<Content> {
-    associatedtype Content
-    var graph: _GraphValue<Content> { get }
+protocol ViewGenerator {
     func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext?
+}
+
+public struct _ViewContextDebugDraw : EnvironmentKey {
+    public static var defaultValue: Bool { false }
+}
+
+public extension EnvironmentValues {
+    var _viewContextDebugDraw: Bool {
+        get { self[_ViewContextDebugDraw.self] }
+        set { self[_ViewContextDebugDraw.self] = newValue }
+    }
 }
 
 class ViewContext {
     let graph: _GraphValue<Any>
-    var modifiers: [any ViewModifier]
+    var inputs: _GraphInputs
     var traits: [ObjectIdentifier: Any]
-    var environmentValues: EnvironmentValues
-    var sharedContext: SharedContext
+    var environmentValues: EnvironmentValues {
+        inputs.environment
+    }
+    var sharedContext: SharedContext {
+        inputs.sharedContext
+    }
     var frame: CGRect
     var transform: AffineTransform = .identity
     var transformByRoot: AffineTransform = .identity
@@ -35,10 +48,8 @@ class ViewContext {
 
     init<Content>(inputs: _GraphInputs, graph: _GraphValue<Content>) {
         self.graph = graph.unsafeCast(to: Any.self)
-        self.modifiers = []
+        self.inputs = inputs
         self.traits = [:]
-        self.environmentValues = inputs.environment
-        self.sharedContext = inputs.sharedContext
         self.frame = .zero
         self.spacing = .zero
     }
@@ -46,6 +57,24 @@ class ViewContext {
     func update(transform t: AffineTransform) {
         let local = AffineTransform(translationX: self.frame.minX, y: self.frame.minY)
         self.transformByRoot = t.concatenating(local)
+    }
+
+    func resolveGraphInputs<T>(encloser: T, graph: _GraphValue<T>) {
+        inputs.modifiers.indices.forEach {
+            inputs.modifiers[$0].resolve(encloser: encloser, graph: graph)
+        }
+        inputs.modifiers.forEach {
+            if $0.isResolved {
+                $0.apply(inputs: &self.inputs)
+            }
+        }
+    }
+
+    func updateEnvironment(_ environmentValues: EnvironmentValues) {
+        inputs.environment.values.merge(environmentValues.values) { $1 }
+        inputs.modifiers.forEach {
+            $0.apply(inputs: &inputs)
+        }
     }
 
     func loadResources(_ context: GraphicsContext) {
@@ -85,7 +114,7 @@ class ViewContext {
     var _debugDraw = true
     var _debugDrawShading: GraphicsContext.Shading = .color(.blue.opacity(0.6))
     func draw(frame: CGRect, context: GraphicsContext) {
-        if _debugDraw {
+        if _debugDraw && self.environmentValues._viewContextDebugDraw {
             var path = Path()
             let frame = frame.insetBy(dx: 1, dy: 1).standardized
             path.addRect(frame)
@@ -154,10 +183,6 @@ class ViewContext {
                               text: String) -> Bool {
         false
     }
-
-    func updateEnvironment(_ environmentValues: EnvironmentValues) {
-        self.environmentValues = environmentValues._resolve(modifiers: modifiers)
-    }
 }
 
 class GenericViewContext<Content> : ViewContext where Content : View {
@@ -165,10 +190,22 @@ class GenericViewContext<Content> : ViewContext where Content : View {
     var body: ViewContext
 
     init(view: Content, body: ViewContext, inputs: _GraphInputs, graph: _GraphValue<Content>) {
-        self.view = inputs.environment._resolve(view)
+        self.view = view
         self.body = body
         super.init(inputs: inputs, graph: graph)
         self._debugDraw = false
+    }
+
+    override func resolveGraphInputs<T>(encloser: T, graph: _GraphValue<T>) {
+        super.resolveGraphInputs(encloser: encloser, graph: graph)
+        self.view = inputs.environment._resolve(view)
+        self.body.resolveGraphInputs(encloser: self.view, graph: self.graph)
+    }
+
+    override func updateEnvironment(_ environmentValues: EnvironmentValues) {
+        super.updateEnvironment(environmentValues)
+        self.view = inputs.environment._resolve(view)
+        self.body.updateEnvironment(environmentValues)
     }
 
     override func loadResources(_ context: GraphicsContext) {

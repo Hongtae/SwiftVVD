@@ -313,8 +313,8 @@ class TextViewContext: ViewContext {
         self.text = inputs.environment._resolve(view)
         super.init(inputs: inputs, graph: graph)
 
-        if self.environmentValues.font == nil {
-            self.environmentValues.font = .system(.body)
+        if self.inputs.environment.font == nil {
+            self.inputs.environment.font = .system(.body)
         }
     }
 
