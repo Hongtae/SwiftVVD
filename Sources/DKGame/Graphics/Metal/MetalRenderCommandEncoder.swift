@@ -396,6 +396,27 @@ public class MetalRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
+    public func memoryBarrier(after: RenderStages, before: RenderStages) {
+        assert(self.encoder != nil)
+
+        let mtlStages = { (stages: RenderStages) in
+            var a = MTLRenderStages()
+            if stages.contains(.vertex)     { a.formUnion(.vertex) }
+            if stages.contains(.fragment)   { a.formUnion(.fragment) }
+            if stages.contains(.object)     { a.formUnion(.object) }
+            if stages.contains(.mesh)       { a.formUnion(.mesh) }
+            return a
+        }
+        let after = mtlStages(after)
+        let before = mtlStages(before)
+
+        self.encoder?.commands.append {
+            (encoder: MTLRenderCommandEncoder, state: inout EncodingState) in
+
+            encoder.memoryBarrier(scope: [.buffers, .textures, .renderTargets], after: after, before: before)
+        }
+    }
+
     public func draw(vertexStart: Int, vertexCount: Int, instanceCount: Int, baseInstance: Int) {
         assert(self.encoder != nil)
 
