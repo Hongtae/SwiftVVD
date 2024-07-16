@@ -37,7 +37,11 @@ func unsafePointerCopy(string str: String, holder: TemporaryBufferHolder) -> Uns
         let count = strlen(ptr)
         let length = count + 1
         let buffer: UnsafeMutablePointer<CChar> = .allocate(capacity: length)
+#if os(Windows)
         strncpy_s(buffer, length, ptr, count)
+#else
+        strncpy(buffer, ptr, length)
+#endif
         return UnsafePointer(buffer)
     }
     holder.buffers.append(buffer)
