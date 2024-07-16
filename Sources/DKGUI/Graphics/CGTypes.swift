@@ -27,6 +27,11 @@ extension CGAffineTransform {
 }
 
 #else
+public typealias CGFloat = Foundation.CGFloat
+public typealias CGPoint = Foundation.CGPoint
+public typealias CGSize = Foundation.CGSize
+public typealias CGRect = Foundation.CGRect
+
 public typealias CGAffineTransform = AffineTransform
 
 public enum CGLineCap: Int32, Sendable {

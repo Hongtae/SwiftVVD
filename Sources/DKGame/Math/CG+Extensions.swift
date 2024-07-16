@@ -13,6 +13,11 @@ public typealias CGFloat = CoreGraphics.CGFloat
 public typealias CGPoint = CoreGraphics.CGPoint
 public typealias CGSize = CoreGraphics.CGSize
 public typealias CGRect = CoreGraphics.CGRect
+#else
+public typealias CGFloat = Foundation.CGFloat
+public typealias CGPoint = Foundation.CGPoint
+public typealias CGSize = Foundation.CGSize
+public typealias CGRect = Foundation.CGRect
 #endif
 
 public extension Vector2 {
