@@ -12,7 +12,7 @@ extension GraphicsContext {
     public struct Shading {
         enum Property {
             case color(color: Color)
-            case style(style: ShapeStyle)
+            case style(style: any ShapeStyle)
             case linearGradient(gradient: Gradient, startPoint: CGPoint, endPoint: CGPoint, options: GradientOptions)
             case radialGradient(gradient: Gradient, center: CGPoint, startRadius: CGFloat, endRadius: CGFloat, options: GradientOptions)
             case conicGradient(gradient: Gradient, center: CGPoint, angle: Angle, options: GradientOptions)

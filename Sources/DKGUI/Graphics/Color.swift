@@ -28,7 +28,7 @@ struct LinearColor: ColorBox {
     }
 }
 
-class AnyColorBox: ColorBox {
+class AnyColorBox: ColorBox, @unchecked Sendable {
     static func == (lhs: AnyColorBox, rhs: AnyColorBox) -> Bool {
         return type(of: lhs.colorBox) == type(of: rhs.colorBox) &&
         lhs.colorBox.red == rhs.colorBox.red &&
