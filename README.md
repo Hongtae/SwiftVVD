@@ -17,6 +17,7 @@ Cross-Platform Game Engine for swift programming language.
   * [Microsoft Visual Studio 2022](https://visualstudio.microsoft.com/)
   * [GIT (with LFS)](https://git-scm.com/)
   * [Vulkan SDK](https://vulkan.lunarg.com/)
+    * Requires a graphics driver installed that supports Vulkan 1.3 or later.
   * [Swift 5.9 or later](https://www.swift.org/)
 
 * macOS 12.0 (Monterey) or later
@@ -27,9 +28,11 @@ Cross-Platform Game Engine for swift programming language.
 
 * Linux / WSL2
   * [Vulkan SDK](https://vulkan.lunarg.com/)
+    * Requires a graphics driver installed that supports Vulkan 1.3 or later.
   * [Swift 5.9 or later](https://www.swift.org/)
   * [Wayland-1.20 or later (libwayland-dev)](https://wayland.freedesktop.org/)
-  
+  * [ALSA for Audio (libasound2-dev)](https://www.alsa-project.org/)
+
 ### Build & Run
 ```
 swift build
