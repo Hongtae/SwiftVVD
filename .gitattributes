@@ -1,3 +1,7 @@
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.bat text eof=crlf
+
 *.bmp filter=lfs diff=lfs merge=lfs -text
 *.gif filter=lfs diff=lfs merge=lfs -text
 *.png filter=lfs diff=lfs merge=lfs -text
