@@ -7,7 +7,7 @@
 
 import Foundation
 
-public protocol Layout: Animatable {
+public protocol Layout : Animatable {
     static var layoutProperties: LayoutProperties { get }
 
     associatedtype Cache = Void
@@ -160,7 +160,7 @@ private extension Layout {
     }
 }
 
-public struct AnyLayout: Layout {
+public struct AnyLayout : Layout {
     var layout: any Layout
 
     public struct Cache {
@@ -234,15 +234,18 @@ public struct AnyLayout: Layout {
 }
 
 //MARK: - LayoutRoot, VariadicView Root for Layout
-struct _LayoutRoot<L>: _VariadicView.UnaryViewRoot where L: Layout {
-    public typealias Body = Never
-
-    let layout: L
-    init(_ layout: L) { self.layout = layout }
+public struct _LayoutRoot<L> : _VariadicView.UnaryViewRoot where L : Layout {
+    @usableFromInline
+    var layout: L
+    @inlinable internal init(_ layout: L) {
+        self.layout = layout
+    }
 
     public static func _makeView(root: _GraphValue<Self>, inputs: _ViewInputs, body: (_Graph, _ViewInputs) -> _ViewListOutputs) -> _ViewOutputs {
         fatalError()
     }
+
+    public typealias Body = Never
 }
 
 struct DefaultLayoutPropertyItem : PropertyItem {

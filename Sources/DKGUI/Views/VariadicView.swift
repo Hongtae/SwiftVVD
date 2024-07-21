@@ -2,7 +2,7 @@
 //  File: VariadicView.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -10,7 +10,7 @@ import Foundation
 public protocol _VariadicView_Root {
 }
 
-public struct _VariadicView_Children: View {
+public struct _VariadicView_Children : View {
     public typealias Body = Never
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
@@ -20,7 +20,7 @@ public struct _VariadicView_Children: View {
     let elements: [Element]
 }
 
-extension _VariadicView_Children: RandomAccessCollection {
+extension _VariadicView_Children : RandomAccessCollection {
     public struct Element: View, Identifiable {
         public var id: AnyHashable {
             viewID
@@ -40,7 +40,7 @@ extension _VariadicView_Children: RandomAccessCollection {
             }
         }
         public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-            fatalError()
+            AnyView._makeView(view: view[\.view], inputs: inputs)
         }
 
         public typealias ID = AnyHashable
@@ -65,13 +65,13 @@ extension _VariadicView_Children: RandomAccessCollection {
     }
 }
 
-extension _VariadicView_Children: _PrimitiveView {
+extension _VariadicView_Children : _PrimitiveView {
 }
 
-extension _VariadicView_Children.Element: _PrimitiveView {
+extension _VariadicView_Children.Element : _PrimitiveView {
 }
 
-public protocol _VariadicView_ViewRoot: _VariadicView_Root {
+public protocol _VariadicView_ViewRoot : _VariadicView_Root {
     associatedtype Body: View
     @ViewBuilder func body(children: _VariadicView.Children) -> Self.Body
 
@@ -85,10 +85,10 @@ extension _VariadicView_ViewRoot where Body == Never {
     }
 }
 
-public protocol _VariadicView_UnaryViewRoot: _VariadicView_ViewRoot {
+public protocol _VariadicView_UnaryViewRoot : _VariadicView_ViewRoot {
 }
 
-public protocol _VariadicView_MultiViewRoot: _VariadicView_ViewRoot {
+public protocol _VariadicView_MultiViewRoot : _VariadicView_ViewRoot {
 }
 
 extension _VariadicView_ViewRoot {
@@ -125,35 +125,38 @@ public enum _VariadicView {
     public typealias UnaryViewRoot = _VariadicView_UnaryViewRoot
     public typealias MultiViewRoot = _VariadicView_MultiViewRoot
 
-    public struct Tree<Root, Content> where Root: _VariadicView_Root {
+    public struct Tree<Root, Content> where Root : _VariadicView_Root {
         public var root: Root
         public var content: Content
 
-        init(root: Root, content: Content) {
+        @inlinable internal init(root: Root, content: Content) {
             self.root = root
             self.content = content
         }
-        public init(_ root: Root, @ViewBuilder content: () -> Content) {
+
+        @inlinable public init(_ root: Root, @ViewBuilder content: () -> Content) {
             self.root = root
             self.content = content()
         }
     }
 }
 
-extension _VariadicView.Tree: View where Root: _VariadicView_ViewRoot, Content: View {
+extension _VariadicView.Tree : View where Root : _VariadicView_ViewRoot, Content : View {
     public typealias Body = Never
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let root = view[\.root]
-        let content = view[\.content]
-
-        fatalError()
+        Root._makeView(root: view[\.root], inputs: inputs) { graph, inputs in
+            let inputs = _ViewListInputs(base: inputs.base, preferences: inputs.preferences)
+            return Content._makeViewList(view: view[\.content], inputs: inputs)
+        }
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        fatalError()
+        Root._makeViewList(root: view[\.root], inputs: inputs) { graph, inputs in
+            Content._makeViewList(view: view[\.content], inputs: inputs)
+        }
     }
 }
 
-extension _VariadicView.Tree: _PrimitiveView where Self: View {
+extension _VariadicView.Tree : _PrimitiveView where Self: View {
 }
