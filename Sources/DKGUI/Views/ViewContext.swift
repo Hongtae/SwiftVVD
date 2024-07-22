@@ -12,6 +12,40 @@ protocol ViewGenerator {
     func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext?
 }
 
+protocol ViewListGenerator {
+    func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [ViewContext]
+}
+
+struct StaticViewListGenerator : ViewListGenerator {
+    var viewList: [any ViewGenerator]
+    func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [ViewContext] {
+        viewList.compactMap {
+            $0.makeView(encloser: encloser, graph: graph)
+        }
+    }
+}
+
+struct DynamicViewListGenerator : ViewListGenerator {
+    var viewList: [any ViewListGenerator]
+    func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [ViewContext] {
+        viewList.flatMap {
+            $0.makeViewList(encloser: encloser, graph: graph)
+        }
+    }
+}
+
+extension ViewListGenerator where Self == StaticViewListGenerator {
+    static func staticList(_ list: [any ViewGenerator]) -> StaticViewListGenerator {
+        .init(viewList: list)
+    }
+}
+
+extension ViewListGenerator where Self == DynamicViewListGenerator {
+    static func dynamicList(_ list: [any ViewListGenerator]) -> DynamicViewListGenerator {
+        .init(viewList: list)
+    }
+}
+
 public struct _ViewContextDebugDraw : EnvironmentKey {
     public static var defaultValue: Bool { false }
 }
