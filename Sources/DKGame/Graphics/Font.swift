@@ -102,6 +102,12 @@ private func FT_HAS_FIXED_SIZES(_ face: FT_Face) -> Bool {
     return face.pointee.face_flags & FT_FACE_FLAG_FIXED_SIZES != 0
 }
 
+private extension CGPoint {
+    init(_ vector: FT_Vector) {
+        self.init(x: CGFloat(vector.x), y: CGFloat(vector.y))
+    }
+}
+
 public class Font {
     public typealias DPI = (x: UInt32, y: UInt32)
     //public static let defaultDPI = DPI(x: 96, y: 96)
@@ -348,7 +354,7 @@ public class Font {
     }
 
     public var numGlyphs: Int {
-        face.pointee.num_glyphs
+        Int(face.pointee.num_glyphs)
     }
 
     public func hasGlyph(for c: UnicodeScalar) -> Bool {
@@ -621,14 +627,14 @@ public class Font {
                         ctxt: UnsafeMutableRawPointer?)->Int32 in
             let cb = unsafeBitCast(ctxt!, to: AnyObject.self) as! Callback
             let v = to!.pointee
-            cb(.move(to: CGPoint(x: v.x, y: v.y)))
+            cb(.move(to: CGPoint(v)))
             return 0
         }
         fn.line_to = { (to: UnsafePointer<FT_Vector>?,
                         ctxt: UnsafeMutableRawPointer?)->Int32 in
             let cb = unsafeBitCast(ctxt!, to: AnyObject.self) as! Callback
             let v = to!.pointee
-            cb(.line(to: CGPoint(x: v.x, y: v.y)))
+            cb(.line(to: CGPoint(v)))
             return 0
         }
         fn.conic_to = { (ctl: UnsafePointer<FT_Vector>?,
@@ -637,8 +643,7 @@ public class Font {
             let cb = unsafeBitCast(ctxt!, to: AnyObject.self) as! Callback
             let v = to!.pointee
             let c = ctl!.pointee
-            cb(.quadCurve(to: CGPoint(x: v.x, y: v.y),
-                          control: CGPoint(x: c.x, y: c.y)))
+            cb(.quadCurve(to: CGPoint(v), control: CGPoint(c)))
             return 0
         }
         fn.cubic_to = { (ctl1: UnsafePointer<FT_Vector>?,
@@ -649,9 +654,7 @@ public class Font {
             let v = to!.pointee
             let c1 = ctl1!.pointee
             let c2 = ctl2!.pointee
-            cb(.curve(to: CGPoint(x: v.x, y: v.y),
-                      control1: CGPoint(x: c1.x, y: c1.y),
-                      control2: CGPoint(x: c2.x, y: c2.y)))
+            cb(.curve(to: CGPoint(v), control1: CGPoint(c1), control2: CGPoint(c2)))
             return 0
         }
         fn.shift = 0
