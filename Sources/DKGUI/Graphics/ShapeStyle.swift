@@ -92,7 +92,7 @@ public struct SeparatorShapeStyle : ShapeStyle {
 }
 
 public struct _ImplicitShapeStyle : ShapeStyle {
-    @inlinable internal init() {}
+    @inlinable init() {}
     public func _apply(to shape: inout _ShapeStyle_Shape) {
         fatalError()
     }

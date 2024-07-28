@@ -291,7 +291,7 @@ extension Text: View {
 extension Text: _PrimitiveView {
 }
 
-class TextViewContext: ViewContext {
+private class TextViewContext: ViewContext {
     var text: Text
     var resolvedText: GraphicsContext.ResolvedText?
 

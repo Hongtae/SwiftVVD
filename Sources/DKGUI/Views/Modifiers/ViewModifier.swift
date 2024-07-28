@@ -22,7 +22,7 @@ public struct _ViewModifier_Content<Modifier> where Modifier: ViewModifier {
         if let body = inputs._modifierBody[ObjectIdentifier(Modifier.self)] {
             return body(_Graph(), inputs)
         }
-        return _ViewListOutputs(viewList: [_ViewGenerator(graph: view)], preferences: .init(preferences: []))
+        return _ViewListOutputs(viewList: .staticList([_ViewGenerator(graph: view)]), preferences: .init(preferences: []))
     }
 }
 
@@ -83,6 +83,7 @@ protocol _UnaryViewModifier {
 
 protocol _ViewLayoutModifier: _UnaryViewModifier {
     static func _makeView(modifier: _GraphValue<Self>, content: any ViewGenerator, inputs: _GraphInputs) -> any ViewGenerator
+    static func _makeViewList(modifier: _GraphValue<Self>, content: any ViewListGenerator, inputs: _GraphInputs) -> any ViewListGenerator
 }
 
 extension ViewModifier where Self: _GraphInputsModifier, Self.Body == Never {
@@ -119,17 +120,15 @@ extension ViewModifier where Self: Animatable {
         var modifier = modifier
         Self._makeAnimatable(value: &modifier, inputs: inputs.base)
 
-        let viewOutputs = body(_Graph(), inputs)
+        let viewListOutputs = body(_Graph(), inputs)
         if let layoutModifier = self as? any _ViewLayoutModifier.Type {
-            func _makeView<T: _ViewLayoutModifier>(_: T.Type, modifier: Any, content: any ViewGenerator, inputs: _GraphInputs) -> any ViewGenerator {
-                T._makeView(modifier: modifier as! _GraphValue<T>, content: content, inputs: inputs)
+            func _makeViewList<T: _ViewLayoutModifier>(_: T.Type, modifier: Any, content: any ViewListGenerator, inputs: _GraphInputs) -> any ViewListGenerator {
+                T._makeViewList(modifier: modifier as! _GraphValue<T>, content: content, inputs: inputs)
             }
-            let generators = viewOutputs.viewList.map {
-                _makeView(layoutModifier, modifier: modifier, content: $0, inputs: inputs.base)
-            }
+            let generators = _makeViewList(layoutModifier, modifier: modifier, content: viewListOutputs.viewList, inputs: inputs.base)
             return _ViewListOutputs(viewList: generators, preferences: .init(preferences: []))
         }
-        return viewOutputs
+        return viewListOutputs
     }
 }
 
@@ -156,7 +155,7 @@ extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
             let outputs = Modifier._makeView(modifier: view[\.modifier], inputs: inputs) { _, inputs in
                 Content._makeView(view: view[\.content], inputs: inputs)
             }
-            return _ViewListOutputs(viewList: [outputs.view], preferences: .init(preferences: []))
+            return _ViewListOutputs(viewList: .staticList([outputs.view]), preferences: .init(preferences: []))
         }
         return Modifier._makeViewList(modifier: view[\.modifier], inputs: inputs) { _, inputs in
             Content._makeViewList(view: view[\.content], inputs: inputs)

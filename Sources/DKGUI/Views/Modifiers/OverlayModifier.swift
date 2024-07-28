@@ -125,7 +125,7 @@ extension _OverlayModifier : _OverlayModifierWithAlignment {
 extension _OverlayStyleModifier : _OverlayModifierWithIgnoresSafeAreaEdges {
 }
 
-fileprivate class OverlayViewContext<Modifier> : ViewModifierContext<Modifier> {
+private class OverlayViewContext<Modifier> : ViewModifierContext<Modifier> {
     let overlay: ViewContext
     let alignment: Alignment
     let ignoresSafeAreaEdges: Edge.Set

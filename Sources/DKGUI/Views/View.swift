@@ -41,7 +41,7 @@ extension View where Body == Never {
                                  preferences: inputs.preferences,
                                  traits: inputs.traits)
         let outputs = Self._makeView(view: view, inputs: inputs)
-        return _ViewListOutputs(viewList: [outputs.view], preferences: PreferenceOutputs(preferences: []))
+        return _ViewListOutputs(viewList: .staticList([outputs.view]), preferences: PreferenceOutputs(preferences: []))
     }
 }
 

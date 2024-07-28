@@ -90,7 +90,7 @@ public struct _ViewListOutputs {
         static var none = Options(rawValue: 0)
     }
 
-    var viewList: [any ViewGenerator]
+    var viewList: any ViewListGenerator
     var preferences: PreferenceOutputs
     var options: Options = .none
 }

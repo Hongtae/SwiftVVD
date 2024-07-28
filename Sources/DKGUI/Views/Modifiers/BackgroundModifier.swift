@@ -167,7 +167,7 @@ extension _BackgroundModifier : _BackgroundModifierWithAlignment {
 extension _BackgroundStyleModifier : _BackgroundModifierWithIgnoresSafeAreaEdges {
 }
 
-fileprivate class BackgroundViewContext<Modifier> : ViewModifierContext<Modifier> {
+private class BackgroundViewContext<Modifier> : ViewModifierContext<Modifier> {
     let background: ViewContext
     let alignment: Alignment
     let ignoresSafeAreaEdges: Edge.Set

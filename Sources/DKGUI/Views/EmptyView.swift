@@ -13,7 +13,7 @@ public struct EmptyView: View {
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        return _ViewListOutputs(viewList: [EmptyViewGenerator(graph: view)], preferences: PreferenceOutputs(preferences: []))
+        return _ViewListOutputs(viewList: .staticList([]), preferences: PreferenceOutputs(preferences: []))
     }
 
     public typealias Body = Never
@@ -22,7 +22,7 @@ public struct EmptyView: View {
 extension EmptyView: _PrimitiveView {
 }
 
-struct EmptyViewGenerator : ViewGenerator {
+private struct EmptyViewGenerator : ViewGenerator {
     let graph: _GraphValue<EmptyView>
     func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
         nil

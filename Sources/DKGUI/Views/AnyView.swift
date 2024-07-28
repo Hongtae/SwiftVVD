@@ -46,7 +46,7 @@ public struct AnyView: View {
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
         let inputs = _ViewInputs(base: inputs.base, preferences: inputs.preferences, traits: inputs.traits)
         let generator = TypeErasedViewGenerator(graph: view, inputs: inputs)
-        return _ViewListOutputs(viewList: [generator], preferences: .init(preferences: []))
+        return _ViewListOutputs(viewList: .staticList([generator]), preferences: .init(preferences: []))
     }
 
     public typealias Body = Never
@@ -55,7 +55,7 @@ public struct AnyView: View {
 extension AnyView: _PrimitiveView {
 }
 
-struct TypeErasedViewGenerator : ViewGenerator {
+private struct TypeErasedViewGenerator : ViewGenerator {
     let graph: _GraphValue<AnyView>
     let inputs: _ViewInputs
 

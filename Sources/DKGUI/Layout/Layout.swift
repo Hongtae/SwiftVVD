@@ -80,7 +80,7 @@ public struct LayoutProperties {
     }
 }
 
-internal extension Layout {
+extension Layout {
     static var _defaultLayoutSpacing : CGFloat { 8 }
 }
 
@@ -237,7 +237,7 @@ public struct AnyLayout : Layout {
 public struct _LayoutRoot<L> : _VariadicView.UnaryViewRoot where L : Layout {
     @usableFromInline
     var layout: L
-    @inlinable internal init(_ layout: L) {
+    @inlinable init(_ layout: L) {
         self.layout = layout
     }
 

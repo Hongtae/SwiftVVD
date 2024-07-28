@@ -9,6 +9,8 @@ import Foundation
 import DKGame
 
 protocol ViewGenerator {
+    associatedtype Content
+    var graph: _GraphValue<Content> { get }
     func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext?
 }
 
