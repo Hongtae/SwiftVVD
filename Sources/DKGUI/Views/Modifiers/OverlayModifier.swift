@@ -146,6 +146,8 @@ private class OverlayViewContext<Modifier> : ViewModifierContext<Modifier> {
                                                   inputs: baseInputs,
                                                   graph: self.graph)
                     }
+                } else {
+                    fatalError("Unable to recover modifier")
                 }
                 return content
             }

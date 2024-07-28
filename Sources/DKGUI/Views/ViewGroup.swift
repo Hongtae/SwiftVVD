@@ -36,7 +36,8 @@ class ViewGroupContext<Content> : ViewContext where Content: View {
                                         inputs: baseInputs,
                                         graph: self.graph)
             }
-            return nil
+            fatalError("Unable to recover view")
+            //return nil
         }
     }
 

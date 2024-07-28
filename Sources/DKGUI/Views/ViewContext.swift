@@ -8,18 +8,29 @@
 import Foundation
 import DKGame
 
-protocol ViewGenerator {
+protocol ViewGenerator<Content> {
     associatedtype Content
     var graph: _GraphValue<Content> { get }
     func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext?
 }
 
 protocol ViewListGenerator {
+    func makeViewGenerators<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator]
     func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [ViewContext]
+}
+
+extension ViewListGenerator {
+    func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [ViewContext] {
+        makeViewGenerators(encloser: encloser, graph: graph)
+            .compactMap{ $0.makeView(encloser: encloser, graph: graph) }
+    }
 }
 
 struct StaticViewListGenerator : ViewListGenerator {
     var viewList: [any ViewGenerator]
+    func makeViewGenerators<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
+        viewList
+    }
     func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [ViewContext] {
         viewList.compactMap {
             $0.makeView(encloser: encloser, graph: graph)
@@ -29,6 +40,9 @@ struct StaticViewListGenerator : ViewListGenerator {
 
 struct DynamicViewListGenerator : ViewListGenerator {
     var viewList: [any ViewListGenerator]
+    func makeViewGenerators<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
+        viewList.flatMap { $0.makeViewGenerators(encloser: encloser, graph: graph) }
+    }
     func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [ViewContext] {
         viewList.flatMap {
             $0.makeViewList(encloser: encloser, graph: graph)
@@ -90,19 +104,29 @@ class ViewContext {
         self.spacing = .zero
     }
 
+    func merge(graphInputs inputs: _GraphInputs) {
+        self.inputs.mergedInputs.append(inputs)
+    }
+
     func update(transform t: AffineTransform) {
         let local = AffineTransform(translationX: self.frame.minX, y: self.frame.minY)
         self.transformByRoot = t.concatenating(local)
     }
 
     func resolveGraphInputs<T>(encloser: T, graph: _GraphValue<T>) {
-        inputs.modifiers.indices.forEach {
-            inputs.modifiers[$0].resolve(encloser: encloser, graph: graph)
-        }
-        inputs.modifiers.forEach {
-            if $0.isResolved {
-                $0.apply(inputs: &self.inputs)
+        let resolveInputs = { (inputs: inout _GraphInputs) in
+            inputs.modifiers.indices.forEach {
+                inputs.modifiers[$0].resolve(encloser: encloser, graph: graph)
             }
+            inputs.modifiers.forEach {
+                if $0.isResolved {
+                    $0.apply(inputs: &inputs)
+                }
+            }
+        }
+        resolveInputs(&self.inputs)
+        self.inputs.mergedInputs.indices.forEach {
+            resolveInputs(&self.inputs.mergedInputs[$0])
         }
     }
 
@@ -316,6 +340,8 @@ class GenericViewContext<Content> : ViewContext where Content : View {
                 if let body = self.body.makeView(encloser: view, graph: self.graph) {
                     return GenericViewContext(view: view, body: body, inputs: baseInputs, graph: self.graph)
                 }
+            } else {
+                fatalError("Unable to recover view")
             }
             return nil
         }

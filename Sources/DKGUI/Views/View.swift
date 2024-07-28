@@ -17,31 +17,17 @@ public protocol View {
 
 extension View {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let body = Self.Body._makeView(view: view[\.body], inputs: inputs)
-        let generator = GenericViewContext<Self>.Generator(graph: view,
-                                                           body: body.view,
-                                                           baseInputs: inputs.base,
-                                                           preferences: inputs.preferences,
-                                                           traits: inputs.traits)
-        return _ViewOutputs(view: generator, preferences: PreferenceOutputs(preferences: []))
+        if Body.self is Never.Type {
+            fatalError("\(Self.self) may not have Body == Never")
+        }
+        return Self.Body._makeView(view: view[\.body], inputs: inputs)
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        Self.Body._makeViewList(view: view[\.body], inputs: inputs)
-    }
-}
-
-extension View where Body == Never {
-    public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        fatalError("\(Self.self) may not have Body == Never")
-    }
-
-    public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        let inputs = _ViewInputs(base: inputs.base,
-                                 preferences: inputs.preferences,
-                                 traits: inputs.traits)
-        let outputs = Self._makeView(view: view, inputs: inputs)
-        return _ViewListOutputs(viewList: .staticList([outputs.view]), preferences: PreferenceOutputs(preferences: []))
+        if Body.self is Never.Type {
+            fatalError("\(Self.self) may not have Body == Never")
+        }
+        return Self.Body._makeViewList(view: view[\.body], inputs: inputs)
     }
 }
 

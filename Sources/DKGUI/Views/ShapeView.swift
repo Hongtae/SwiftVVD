@@ -44,7 +44,8 @@ private class ShapeViewContext<Content, Style> : ViewContext where Content: Shap
             if let view = graph.value(atPath: self.graph, from: encloser) {
                 return ShapeViewContext(view: view, inputs: baseInputs, graph: self.graph)
             }
-            return nil
+            fatalError("Unable to recover view")
+            //return nil
         }
     }
 

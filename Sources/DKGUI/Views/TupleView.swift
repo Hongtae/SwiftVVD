@@ -135,10 +135,9 @@ private struct TupleViewGenerator<Content> : ViewGenerator where Content : View 
                                         inputs: baseInputs,
                                         graph: self.graph)
             }
-            if let first = subviews.first {
-                return first
-            }
+            return subviews.first
         }
-        return nil
+        fatalError("Unable to recover view")
+        //return nil
     }
 }

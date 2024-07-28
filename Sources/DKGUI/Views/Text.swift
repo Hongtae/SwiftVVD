@@ -305,7 +305,8 @@ private class TextViewContext: ViewContext {
             if let view = graph.value(atPath: self.graph, from: encloser) {
                 return TextViewContext(view: view, inputs: baseInputs, graph: self.graph)
             }
-            return nil
+            fatalError("Unable to recover view")
+            //return nil
         }
     }
 

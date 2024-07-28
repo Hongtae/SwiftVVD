@@ -188,6 +188,8 @@ private class BackgroundViewContext<Modifier> : ViewModifierContext<Modifier> {
                                                      inputs: baseInputs,
                                                      graph: self.graph)
                     }
+                } else {
+                    fatalError("Unable to recover modifier")
                 }
                 return content
             }

@@ -55,12 +55,18 @@ extension ViewModifier where Self.Body == Never {
 extension ViewModifier {
     var _body: Body { self.body(content: .init()) }
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
+        if Body.self is Never.Type {
+            fatalError("\(Self.self) may not have Body == Never")
+        }
         var inputs = inputs
         inputs._modifierBody[ObjectIdentifier(self)] = body
         return Self.Body._makeView(view: modifier[\._body], inputs: inputs)
     }
 
     public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
+        if Body.self is Never.Type {
+            fatalError("\(Self.self) may not have Body == Never")
+        }
         var inputs = inputs
         inputs._modifierBody[ObjectIdentifier(self)] = body
         return Self.Body._makeViewList(view: modifier[\._body], inputs: inputs)
@@ -81,7 +87,7 @@ public protocol _ViewInputsModifier {
 protocol _UnaryViewModifier {
 }
 
-protocol _ViewLayoutModifier: _UnaryViewModifier {
+protocol _ViewLayoutModifier {
     static func _makeView(modifier: _GraphValue<Self>, content: any ViewGenerator, inputs: _GraphInputs) -> any ViewGenerator
     static func _makeViewList(modifier: _GraphValue<Self>, content: any ViewListGenerator, inputs: _GraphInputs) -> any ViewListGenerator
 }
@@ -149,13 +155,25 @@ extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
         }
     }
 
+    struct UnaryViewListGenerator : ViewListGenerator {
+        let content: any ViewListGenerator
+        let modifier: (any ViewGenerator) -> _ViewOutputs
+        func makeViewGenerators<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
+            let views = content.makeViewGenerators(encloser: encloser, graph: graph)
+            return views.map { modifier($0).view }
+        }
+    }
+
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
         if Modifier.self is _UnaryViewModifier.Type {
+            let content = Content._makeViewList(view: view[\.content], inputs: inputs)
             let inputs = _ViewInputs(base: inputs.base, preferences: inputs.preferences)
-            let outputs = Modifier._makeView(modifier: view[\.modifier], inputs: inputs) { _, inputs in
-                Content._makeView(view: view[\.content], inputs: inputs)
+            let viewList = UnaryViewListGenerator(content: content.viewList) { generator in
+                Modifier._makeView(modifier: view[\.modifier], inputs: inputs) { _, _ in
+                    _ViewOutputs(view: generator, preferences: .init(preferences: []))
+                }
             }
-            return _ViewListOutputs(viewList: .staticList([outputs.view]), preferences: .init(preferences: []))
+            return _ViewListOutputs(viewList: viewList, preferences: .init(preferences: []))
         }
         return Modifier._makeViewList(modifier: view[\.modifier], inputs: inputs) { _, inputs in
             Content._makeViewList(view: view[\.content], inputs: inputs)

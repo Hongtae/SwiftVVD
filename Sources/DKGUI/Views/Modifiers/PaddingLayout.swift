@@ -111,7 +111,8 @@ extension _PaddingLayout: _ViewLayoutModifier {
                 if let modifier = graph.value(atPath: self.graph, from: encloser) {
                     return LayoutViewContext(content: content, modifier: modifier, inputs: baseInputs, graph: self.graph)
                 }
-                return content
+                fatalError("Unable to recover modifier")
+                //return content
             }
             return nil
         }
@@ -126,6 +127,12 @@ extension _PaddingLayout: _ViewLayoutModifier {
         let graph: _GraphValue<_PaddingLayout>
         let baseInputs: _GraphInputs
 
+        func makeViewGenerators<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
+            content.makeViewGenerators(encloser: encloser, graph: graph).map {
+                LayoutViewGenerator(content: $0, graph: self.graph, baseInputs: self.baseInputs)
+            }
+        }
+
         func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [ViewContext] {
             let content = self.content.makeViewList(encloser: encloser, graph: graph)
             if content.isEmpty == false {
@@ -133,6 +140,8 @@ extension _PaddingLayout: _ViewLayoutModifier {
                     return content.map {
                         LayoutViewContext(content: $0, modifier: modifier, inputs: baseInputs, graph: self.graph)
                     }
+                } else {
+                    fatalError("Unable to recover modifier")
                 }
             }
             return content

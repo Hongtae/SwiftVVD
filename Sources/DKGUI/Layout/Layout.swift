@@ -242,7 +242,10 @@ public struct _LayoutRoot<L> : _VariadicView.UnaryViewRoot where L : Layout {
     }
 
     public static func _makeView(root: _GraphValue<Self>, inputs: _ViewInputs, body: (_Graph, _ViewInputs) -> _ViewListOutputs) -> _ViewOutputs {
-        fatalError()
+        let body = body(_Graph(), inputs)
+        let inputs = _ViewListInputs(base: inputs.base, preferences: inputs.preferences)
+        let generator = _VariadicView_ViewRoot_MakeChildrenProxy(graph: root, body: body, inputs: inputs)
+        return _ViewOutputs(view: generator, preferences: .init(preferences: []))
     }
 
     public typealias Body = Never
