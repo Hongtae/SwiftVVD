@@ -4,7 +4,7 @@
     "features": {
         "ghcr.io/devcontainers/features/common-utils:2": {
             "upgradePackages": true,
-            "username": "automatic",
+            "username": "vscode",
             "userUid": "automatic",
             "userGid": "automatic"
         },
@@ -14,7 +14,6 @@
         },
         "ghcr.io/devcontainers/features/git-lfs:1": {
             "autoPull": true,
-            "installDirectlyFromGitHubRelease": true,
             "version": "latest"
         }
     },
