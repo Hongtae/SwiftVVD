@@ -52,6 +52,15 @@ class ViewGroupContext<Content> : ViewContext where Content: View {
         self._debugDraw = false
     }
 
+    override func validatePath<T>(encloser: T, graph: _GraphValue<T>) -> Bool {
+        if let value = graph.value(atPath: self.graph, from: encloser) {
+            return subviews.allSatisfy {
+                $0.validatePath(encloser: value, graph: self.graph)
+            }
+        }
+        return false
+    }
+
     override func resolveGraphInputs<T>(encloser: T, graph: _GraphValue<T>) {
         super.resolveGraphInputs(encloser: encloser, graph: graph)
         self.view = inputs.environment._resolve(self.view)

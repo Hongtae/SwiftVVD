@@ -319,6 +319,10 @@ private class TextViewContext: ViewContext {
         }
     }
 
+    override func validatePath<T>(encloser: T, graph: _GraphValue<T>) -> Bool {
+        graph.value(atPath: self.graph, from: encloser) != nil
+    }
+
     override func loadResources(_ context: GraphicsContext) {
         self.resolvedText = context.resolve(self.text)
         self.sharedContext.needsLayout = true

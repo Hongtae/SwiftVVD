@@ -54,6 +54,10 @@ private class ShapeViewContext<Content, Style> : ViewContext where Content: Shap
         super.init(inputs: inputs, graph: graph)
     }
 
+    override func validatePath<T>(encloser: T, graph: _GraphValue<T>) -> Bool {
+        graph.value(atPath: self.graph, from: encloser) != nil
+    }
+
     override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
         self.shape.sizeThatFits(proposal)
     }

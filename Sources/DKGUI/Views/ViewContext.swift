@@ -104,6 +104,10 @@ class ViewContext {
         self.spacing = .zero
     }
 
+    func validatePath<T>(encloser: T, graph: _GraphValue<T>) -> Bool {
+        false
+    }
+
     func merge(graphInputs inputs: _GraphInputs) {
         self.inputs.mergedInputs.append(inputs)
     }
@@ -254,6 +258,13 @@ class GenericViewContext<Content> : ViewContext where Content : View {
         self.body = body
         super.init(inputs: inputs, graph: graph)
         self._debugDraw = false
+    }
+
+    override func validatePath<T>(encloser: T, graph: _GraphValue<T>) -> Bool {
+        if let value = graph.value(atPath: self.graph, from: encloser) {
+            return body.validatePath(encloser: value, graph: self.graph)
+        }
+        return false
     }
 
     override func resolveGraphInputs<T>(encloser: T, graph: _GraphValue<T>) {

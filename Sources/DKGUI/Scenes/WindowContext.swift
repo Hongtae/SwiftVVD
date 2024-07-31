@@ -234,7 +234,10 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
         let outputs = Content._makeView(view: graph, inputs: inputs)
 
         self.view = outputs.view.makeView(encloser: content, graph: graph)
-        self.view?.resolveGraphInputs(encloser: content, graph: graph)
+        if let view {
+            assert(view.validatePath(encloser: content, graph: graph))
+            view.resolveGraphInputs(encloser: content, graph: graph)
+        }
     }
 
     deinit {
