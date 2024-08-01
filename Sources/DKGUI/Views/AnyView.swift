@@ -57,7 +57,7 @@ extension AnyView: _PrimitiveView {
 
 private struct TypeErasedViewGenerator : ViewGenerator {
     let graph: _GraphValue<AnyView>
-    let inputs: _ViewInputs
+    var inputs: _ViewInputs
 
     func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
         func _makeView<V: View>(value: V, graph: _GraphValue<any View>, inputs: _ViewInputs) -> _ViewOutputs {
@@ -68,5 +68,9 @@ private struct TypeErasedViewGenerator : ViewGenerator {
             return outputs.view.makeView(encloser: value, graph: self.graph)
         }
         return nil
+    }
+
+    mutating func mergeInputs(_ inputs: _GraphInputs) {
+        self.inputs.base.mergedInputs.append(inputs)
     }
 }

@@ -104,7 +104,7 @@ extension _PaddingLayout: _ViewLayoutModifier {
     private struct LayoutViewGenerator : ViewGenerator {
         let content: any ViewGenerator
         let graph: _GraphValue<_PaddingLayout>
-        let baseInputs: _GraphInputs
+        var baseInputs: _GraphInputs
 
         func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
             if let content = self.content.makeView(encloser: encloser, graph: graph) {
@@ -115,6 +115,10 @@ extension _PaddingLayout: _ViewLayoutModifier {
                 //return content
             }
             return nil
+        }
+        
+        mutating func mergeInputs(_ inputs: _GraphInputs) {
+            self.baseInputs.mergedInputs.append(inputs)
         }
     }
 

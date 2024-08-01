@@ -37,7 +37,10 @@ class ViewGroupContext<Content> : ViewContext where Content: View {
                                         graph: self.graph)
             }
             fatalError("Unable to recover view")
-            //return nil
+        }
+
+        mutating func mergeInputs(_ inputs: _GraphInputs) {
+            self.baseInputs.mergedInputs.append(inputs)
         }
     }
 
@@ -59,6 +62,17 @@ class ViewGroupContext<Content> : ViewContext where Content: View {
             }
         }
         return false
+    }
+
+    override func updateContent<T>(encloser: T, graph: _GraphValue<T>) {
+        if let view = graph.value(atPath: self.graph, from: encloser) as? Content {
+            self.view = view
+            self.subviews.forEach {
+                $0.updateContent(encloser: self.view, graph: self.graph)
+            }
+        } else {
+            fatalError("Unable to recover View")
+        }
     }
 
     override func resolveGraphInputs<T>(encloser: T, graph: _GraphValue<T>) {

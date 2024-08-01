@@ -175,3 +175,7 @@ extension _VStackLayout: _VariadicView_UnaryViewRoot {
 
 extension _VStackLayout: _VariadicView_ViewRoot {
 }
+
+extension _VStackLayout {
+    static var _defaultLayoutSpacing : CGFloat { 0 }
+}

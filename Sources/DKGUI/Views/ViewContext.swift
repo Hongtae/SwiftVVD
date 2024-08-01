@@ -12,6 +12,7 @@ protocol ViewGenerator<Content> {
     associatedtype Content
     var graph: _GraphValue<Content> { get }
     func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext?
+    mutating func mergeInputs(_: _GraphInputs)
 }
 
 protocol ViewListGenerator {
@@ -108,6 +109,9 @@ class ViewContext {
         false
     }
 
+    func updateContent<T>(encloser: T, graph: _GraphValue<T>) {
+    }
+
     func merge(graphInputs inputs: _GraphInputs) {
         self.inputs.mergedInputs.append(inputs)
     }
@@ -118,19 +122,22 @@ class ViewContext {
     }
 
     func resolveGraphInputs<T>(encloser: T, graph: _GraphValue<T>) {
-        let resolveInputs = { (inputs: inout _GraphInputs) in
-            inputs.modifiers.indices.forEach {
-                inputs.modifiers[$0].resolve(encloser: encloser, graph: graph)
+        func getModifiers(_ inputs: _GraphInputs) -> [_GraphInputResolve] {
+            var modifiers = inputs.modifiers
+            let merged = inputs.mergedInputs.flatMap {
+                getModifiers($0)
             }
-            inputs.modifiers.forEach {
-                if $0.isResolved {
-                    $0.apply(inputs: &inputs)
-                }
-            }
+            modifiers.append(contentsOf: merged)
+            return modifiers
         }
-        resolveInputs(&self.inputs)
-        self.inputs.mergedInputs.indices.forEach {
-            resolveInputs(&self.inputs.mergedInputs[$0])
+        var modifiers = getModifiers(self.inputs)
+        modifiers.indices.forEach { index in
+            modifiers[index].resolve(encloser: encloser, graph: graph)
+        }
+        modifiers.forEach { modifier in
+            if modifier.isResolved {
+                modifier.apply(inputs: &self.inputs)
+            }
         }
     }
 
@@ -267,6 +274,15 @@ class GenericViewContext<Content> : ViewContext where Content : View {
         return false
     }
 
+    override func updateContent<T>(encloser: T, graph: _GraphValue<T>) {
+        if let view = graph.value(atPath: self.graph, from: encloser) as? Content {
+            self.view = view
+            body.updateContent(encloser: self.view, graph: self.graph)
+        } else {
+            fatalError("Unable to recover View")
+        }
+    }
+
     override func resolveGraphInputs<T>(encloser: T, graph: _GraphValue<T>) {
         super.resolveGraphInputs(encloser: encloser, graph: graph)
         self.view = inputs.environment._resolve(view)
@@ -356,6 +372,10 @@ class GenericViewContext<Content> : ViewContext where Content : View {
             }
             return nil
         }
+
+        mutating func mergeInputs(_ inputs: _GraphInputs) {
+            self.baseInputs.mergedInputs.append(inputs)
+        }
     }
 }
 
@@ -367,5 +387,9 @@ struct PrimitiveViewGenerator<Content> : ViewGenerator where Content: View {
 
     func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
         ViewContext(inputs: baseInputs, graph: self.graph)
+    }
+
+    mutating func mergeInputs(_ inputs: _GraphInputs) {
+        self.baseInputs.mergedInputs.append(inputs)
     }
 }

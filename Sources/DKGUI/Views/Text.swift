@@ -306,7 +306,10 @@ private class TextViewContext: ViewContext {
                 return TextViewContext(view: view, inputs: baseInputs, graph: self.graph)
             }
             fatalError("Unable to recover view")
-            //return nil
+        }
+
+        mutating func mergeInputs(_ inputs: _GraphInputs) {
+            baseInputs.mergedInputs.append(inputs)
         }
     }
 
@@ -321,6 +324,14 @@ private class TextViewContext: ViewContext {
 
     override func validatePath<T>(encloser: T, graph: _GraphValue<T>) -> Bool {
         graph.value(atPath: self.graph, from: encloser) != nil
+    }
+
+    override func updateContent<T>(encloser: T, graph: _GraphValue<T>) {
+        if let view = graph.value(atPath: self.graph, from: encloser) as? Text {
+            self.text = view
+        } else {
+            fatalError("Unable to recover Text")
+        }
     }
 
     override func loadResources(_ context: GraphicsContext) {

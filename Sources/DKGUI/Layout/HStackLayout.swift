@@ -172,3 +172,7 @@ public struct HStackLayout: Layout {
 public typealias _HStackLayout = HStackLayout
 extension _HStackLayout: _VariadicView_UnaryViewRoot {
 }
+
+extension _HStackLayout {
+    static var _defaultLayoutSpacing : CGFloat { 8 }
+}

@@ -81,7 +81,7 @@ public struct LayoutProperties {
 }
 
 extension Layout {
-    static var _defaultLayoutSpacing : CGFloat { 8 }
+    static var _defaultLayoutSpacing : CGFloat { 0 }
 }
 
 private extension Layout {
@@ -244,7 +244,9 @@ public struct _LayoutRoot<L> : _VariadicView.UnaryViewRoot where L : Layout {
     public static func _makeView(root: _GraphValue<Self>, inputs: _ViewInputs, body: (_Graph, _ViewInputs) -> _ViewListOutputs) -> _ViewOutputs {
         let body = body(_Graph(), inputs)
         let inputs = _ViewListInputs(base: inputs.base, preferences: inputs.preferences)
-        let generator = _VariadicView_ViewRoot_MakeChildrenProxy(graph: root, body: body, inputs: inputs)
+        let generator = _VariadicView_ViewRoot_MakeChildren_LayoutRootProxy(graph: root, body: body, inputs: inputs) {
+            $0.layout
+        }
         return _ViewOutputs(view: generator, preferences: .init(preferences: []))
     }
 

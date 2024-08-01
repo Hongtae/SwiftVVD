@@ -34,6 +34,8 @@ extension _ViewModifier_Content: View {
         func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
             nil
         }
+        func mergeInputs(_ inputs: _GraphInputs) {
+        }
     }
 }
 
@@ -149,9 +151,59 @@ extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
         fatalError("body() should not be called on \(Self.self).")
     }
 
+    struct MultiViewGenerator : ViewGenerator {
+        let graph: _GraphValue<ModifiedContent>
+        let content: any _VariadicView_MultiViewRootViewGenerator
+        var baseInputs: _GraphInputs
+        let modifier: (any ViewGenerator) -> _ViewOutputs
+
+        func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
+            let outputs = content.makeViewGenerators(encloser: encloser, graph: graph).compactMap {
+                modifier($0)
+            }
+            let subviews = outputs.compactMap {
+                $0.view.makeView(encloser: encloser, graph: graph)
+            }
+            if let view = graph.value(atPath: self.graph, from: encloser) {
+
+                let layout = baseInputs.properties
+                    .find(type: DefaultLayoutPropertyItem.self)?
+                    .layout ?? DefaultLayoutPropertyItem.default
+
+                return ViewGroupContext(view: view,
+                                        subviews: subviews,
+                                        layout: layout,
+                                        inputs: baseInputs,
+                                        graph: self.graph)
+            }
+            fatalError("Unable to recover ModifiedContent")
+        }
+
+        mutating func mergeInputs(_ inputs: _GraphInputs) {
+            self.baseInputs.mergedInputs.append(inputs)
+        }
+    }
+
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        Modifier._makeView(modifier: view[\.modifier], inputs: inputs) { _, inputs in
-            Content._makeView(view: view[\.content], inputs: inputs)
+        var outputs = Content._makeView(view: view[\.content], inputs: inputs)
+        if let multiView = outputs.view as? any _VariadicView_MultiViewRootViewGenerator {
+            let generator = MultiViewGenerator(graph: view, content: multiView, baseInputs: inputs.base) {
+                generator in
+                Modifier._makeView(modifier: view[\.modifier], inputs: inputs) { _, inputs in
+                    func merge<T: ViewGenerator>(_ view: T, inputs: _GraphInputs) -> any ViewGenerator {
+                        var view = view
+                        view.mergeInputs(inputs)
+                        return view
+                    }
+                    let generator = merge(generator, inputs: inputs.base)
+                    return _ViewOutputs(view: generator, preferences: .init(preferences: []))
+                }
+            }
+            return _ViewOutputs(view: generator, preferences: .init(preferences: []))
+        }
+        return Modifier._makeView(modifier: view[\.modifier], inputs: inputs) { _, inputs in
+            outputs.view.mergeInputs(inputs.base)
+            return outputs
         }
     }
 
@@ -212,6 +264,17 @@ class ViewModifierContext<Modifier> : ViewContext {
 
         self._debugDraw = true
         self._debugDrawShading = .color(.red.opacity(0.4))
+    }
+
+    override func validatePath<T>(encloser: T, graph: _GraphValue<T>) -> Bool {
+        if graph.value(atPath: self.graph, from: encloser) != nil {
+            return content.validatePath(encloser: encloser, graph: graph)
+        }
+        return false
+    }
+
+    override func updateContent<T>(encloser: T, graph: _GraphValue<T>) {
+        content.updateContent(encloser: encloser, graph: graph)
     }
 
     override func resolveGraphInputs<T>(encloser: T, graph: _GraphValue<T>) {

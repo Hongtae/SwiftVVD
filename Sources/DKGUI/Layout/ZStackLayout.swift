@@ -81,3 +81,7 @@ public struct ZStackLayout: Layout {
 public typealias _ZStackLayout = ZStackLayout
 extension _ZStackLayout: _VariadicView_UnaryViewRoot {
 }
+
+extension _ZStackLayout {
+    static var _defaultLayoutSpacing : CGFloat { 0 }
+}

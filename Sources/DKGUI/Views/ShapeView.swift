@@ -45,7 +45,10 @@ private class ShapeViewContext<Content, Style> : ViewContext where Content: Shap
                 return ShapeViewContext(view: view, inputs: baseInputs, graph: self.graph)
             }
             fatalError("Unable to recover view")
-            //return nil
+        }
+
+        mutating func mergeInputs(_ inputs: _GraphInputs) {
+            self.baseInputs.mergedInputs.append(inputs)
         }
     }
 
@@ -56,6 +59,9 @@ private class ShapeViewContext<Content, Style> : ViewContext where Content: Shap
 
     override func validatePath<T>(encloser: T, graph: _GraphValue<T>) -> Bool {
         graph.value(atPath: self.graph, from: encloser) != nil
+    }
+
+    override func updateContent<T>(encloser: T, graph: _GraphValue<T>) {
     }
 
     override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {

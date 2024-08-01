@@ -24,6 +24,11 @@ extension View {
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
+        if self is _PrimitiveView.Type {
+            let inputs = _ViewInputs(base: inputs.base, preferences: inputs.preferences)
+            let outputs = Self._makeView(view: view, inputs: inputs)
+            return _ViewListOutputs(viewList: .staticList([outputs.view]), preferences: .init(preferences: []))
+        }
         if Body.self is Never.Type {
             fatalError("\(Self.self) may not have Body == Never")
         }

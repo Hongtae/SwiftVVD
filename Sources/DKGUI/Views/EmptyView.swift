@@ -27,4 +27,6 @@ private struct EmptyViewGenerator : ViewGenerator {
     func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
         nil
     }
+    func mergeInputs(_: _GraphInputs) {
+    }
 }

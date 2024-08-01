@@ -138,6 +138,9 @@ private struct TupleViewGenerator<Content> : ViewGenerator where Content : View 
             return subviews.first
         }
         fatalError("Unable to recover view")
-        //return nil
+    }
+
+    mutating func mergeInputs(_ inputs: _GraphInputs) {
+        self.baseInputs.mergedInputs.append(inputs)
     }
 }

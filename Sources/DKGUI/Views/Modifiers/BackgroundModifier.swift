@@ -176,7 +176,7 @@ private class BackgroundViewContext<Modifier> : ViewModifierContext<Modifier> {
         let content: any ViewGenerator
         let background: any ViewGenerator
         let graph: _GraphValue<Modifier>
-        let baseInputs: _GraphInputs
+        var baseInputs: _GraphInputs
 
         func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
             if let content = content.makeView(encloser: encloser, graph: graph) {
@@ -194,6 +194,10 @@ private class BackgroundViewContext<Modifier> : ViewModifierContext<Modifier> {
                 return content
             }
             return nil
+        }
+
+        mutating func mergeInputs(_ inputs: _GraphInputs) {
+            baseInputs.mergedInputs.append(inputs)
         }
     }
 
