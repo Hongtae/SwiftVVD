@@ -36,6 +36,7 @@ let package = Package(
             cxxSettings: [
                 .headerSearchPath("../libogg/include"),
                 .define("_CRT_SECURE_NO_WARNINGS", .when(platforms: [.windows])),
+                .define("_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH", .when(platforms:[.windows])),
                 .unsafeFlags([
                     "-Wno-module-import-in-extern-c",
                 ])
@@ -63,6 +64,8 @@ let package = Package(
                 .define("SPIRV_CROSS_C_API_HLSL", to: "1"),
                 .define("SPIRV_CROSS_C_API_MSL", to: "1"),
                 .define("SPIRV_CROSS_C_API_REFLECT", to: "1"),
+
+                .define("_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH", .when(platforms:[.windows])),
 
                 // Temporarily changed the optimization flag due to an internal compiler error
                 .unsafeFlags(["-Oz"], .when(platforms: [.windows], configuration: .release))
