@@ -158,7 +158,7 @@ extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
         let modifier: (any ViewGenerator) -> _ViewOutputs
 
         func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
-            let outputs = content.makeViewGenerators(encloser: encloser, graph: graph).compactMap {
+            let outputs = content.makeViewList(encloser: encloser, graph: graph).compactMap {
                 modifier($0)
             }
             let subviews = outputs.compactMap {
@@ -210,8 +210,8 @@ extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
     struct UnaryViewListGenerator : ViewListGenerator {
         let content: any ViewListGenerator
         let modifier: (any ViewGenerator) -> _ViewOutputs
-        func makeViewGenerators<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
-            let views = content.makeViewGenerators(encloser: encloser, graph: graph)
+        func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
+            let views = content.makeViewList(encloser: encloser, graph: graph)
             return views.map { modifier($0).view }
         }
     }
@@ -267,7 +267,7 @@ class ViewModifierContext<Modifier> : ViewContext {
     }
 
     override func validatePath<T>(encloser: T, graph: _GraphValue<T>) -> Bool {
-        if graph.value(atPath: self.graph, from: encloser) != nil {
+        if graph.value(atPath: self.graph, from: encloser) is Modifier {
             return content.validatePath(encloser: encloser, graph: graph)
         }
         return false

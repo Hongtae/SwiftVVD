@@ -112,7 +112,6 @@ extension _PaddingLayout: _ViewLayoutModifier {
                     return LayoutViewContext(content: content, modifier: modifier, inputs: baseInputs, graph: self.graph)
                 }
                 fatalError("Unable to recover modifier")
-                //return content
             }
             return nil
         }
@@ -126,33 +125,18 @@ extension _PaddingLayout: _ViewLayoutModifier {
         LayoutViewGenerator(content: content, graph: modifier, baseInputs: inputs)
     }
 
-    private struct LayoutViewListGenerator : ViewListGenerator {
-        let content: any ViewListGenerator
-        let graph: _GraphValue<_PaddingLayout>
-        let baseInputs: _GraphInputs
+    static func _makeViewList(modifier: _GraphValue<_PaddingLayout>, content: any ViewListGenerator, inputs: _GraphInputs) -> any ViewListGenerator {
+        struct Generator : ViewListGenerator {
+            let content: any ViewListGenerator
+            let graph: _GraphValue<_PaddingLayout>
+            let baseInputs: _GraphInputs
 
-        func makeViewGenerators<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
-            content.makeViewGenerators(encloser: encloser, graph: graph).map {
-                LayoutViewGenerator(content: $0, graph: self.graph, baseInputs: self.baseInputs)
-            }
-        }
-
-        func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [ViewContext] {
-            let content = self.content.makeViewList(encloser: encloser, graph: graph)
-            if content.isEmpty == false {
-                if let modifier = graph.value(atPath: self.graph, from: encloser) {
-                    return content.map {
-                        LayoutViewContext(content: $0, modifier: modifier, inputs: baseInputs, graph: self.graph)
-                    }
-                } else {
-                    fatalError("Unable to recover modifier")
+            func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
+                content.makeViewList(encloser: encloser, graph: graph).map {
+                    LayoutViewGenerator(content: $0, graph: self.graph, baseInputs: self.baseInputs)
                 }
             }
-            return content
         }
-    }
-
-    static func _makeViewList(modifier: _GraphValue<_PaddingLayout>, content: any ViewListGenerator, inputs: _GraphInputs) -> any ViewListGenerator {
-        LayoutViewListGenerator(content: content, graph: modifier, baseInputs: inputs)
+        return Generator(content: content, graph: modifier, baseInputs: inputs)
     }
 }

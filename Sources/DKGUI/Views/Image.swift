@@ -2,7 +2,7 @@
 //  File: Image.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -222,8 +222,12 @@ extension Image {
 
 extension Image: View {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        fatalError()
+        let generator = ImageViewContext.Generator(graph: view,
+                                                   baseInputs: inputs.base,
+                                                   preferences: inputs.preferences)
+        return _ViewOutputs(view: generator, preferences: PreferenceOutputs(preferences: []))
     }
+
     public typealias Body = Never
 }
 
@@ -232,4 +236,65 @@ extension Image {
 }
 
 extension Image: _PrimitiveView {
+}
+
+class ImageViewContext : ViewContext {
+    var image: Image
+    var resolvedImage: GraphicsContext.ResolvedImage?
+
+    struct Generator : ViewGenerator {
+        let graph: _GraphValue<Image>
+        var baseInputs: _GraphInputs
+        var preferences: PreferenceInputs
+        var traits: ViewTraitKeys = ViewTraitKeys()
+
+        func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
+            if let view = graph.value(atPath: self.graph, from: encloser) {
+                return ImageViewContext(view: view, inputs: baseInputs, graph: self.graph)
+            }
+            fatalError("Unable to recover view")
+        }
+
+        mutating func mergeInputs(_ inputs: _GraphInputs) {
+            baseInputs.mergedInputs.append(inputs)
+        }
+    }
+
+    init(view: Image, inputs: _GraphInputs, graph: _GraphValue<Image>) {
+        self.image = view
+        super.init(inputs: inputs, graph: graph)
+    }
+
+    override func validatePath<T>(encloser: T, graph: _GraphValue<T>) -> Bool {
+        graph.value(atPath: self.graph, from: encloser) is Image
+    }
+
+    override func updateContent<T>(encloser: T, graph: _GraphValue<T>) {
+        if let view = graph.value(atPath: self.graph, from: encloser) as? Image {
+            self.image = view
+        } else {
+            fatalError("Unable to recover Image")
+        }
+    }
+
+    override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
+        if let resolvedImage {
+            return resolvedImage.size
+        }
+        return super.sizeThatFits(proposal)
+    }
+
+    override func draw(frame: CGRect, context: GraphicsContext) {
+        super.draw(frame: frame, context: context)
+
+        if self.frame.width > 0 && self.frame.height > 0 {
+            if self.resolvedImage == nil {
+                self.resolvedImage = context.resolve(self.image)
+                self.sharedContext.needsLayout = true
+            }
+            if let resolvedImage {
+                context.draw(resolvedImage, in: frame)
+            }
+        }
+    }
 }

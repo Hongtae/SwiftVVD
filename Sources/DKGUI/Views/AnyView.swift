@@ -60,11 +60,8 @@ private struct TypeErasedViewGenerator : ViewGenerator {
     var inputs: _ViewInputs
 
     func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
-        func _makeView<V: View>(value: V, graph: _GraphValue<any View>, inputs: _ViewInputs) -> _ViewOutputs {
-            V._makeView(view: graph.unsafeCast(to: V.self), inputs: inputs)
-        }
         if let value = graph.value(atPath: self.graph, from: encloser) {
-            let outputs = _makeView(value: value.storage.view, graph: self.graph[\.storage.view], inputs: inputs)
+            let outputs = DKGUI.makeView(view: self.graph[\.storage.view].unsafeCast(to: type(of: value)), inputs: inputs)
             return outputs.view.makeView(encloser: value, graph: self.graph)
         }
         return nil

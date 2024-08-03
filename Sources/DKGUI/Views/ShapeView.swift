@@ -58,7 +58,7 @@ private class ShapeViewContext<Content, Style> : ViewContext where Content: Shap
     }
 
     override func validatePath<T>(encloser: T, graph: _GraphValue<T>) -> Bool {
-        graph.value(atPath: self.graph, from: encloser) != nil
+        graph.value(atPath: self.graph, from: encloser) is ShapeView
     }
 
     override func updateContent<T>(encloser: T, graph: _GraphValue<T>) {

@@ -17,6 +17,12 @@ public protocol View {
 
 extension View {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        if let prim = self as? any _PrimitiveView.Type {
+            func makeView<T: _PrimitiveView>(_: T.Type, view: _GraphValue<Any>, sharedContext: SharedContext) -> _ViewOutputs {
+                T._makeView(view: view.unsafeCast(to: T.self), sharedContext: sharedContext)
+            }
+            return makeView(prim, view: view.unsafeCast(to: Any.self), sharedContext: inputs.base.sharedContext)
+        }
         if Body.self is Never.Type {
             fatalError("\(Self.self) may not have Body == Never")
         }
@@ -24,7 +30,7 @@ extension View {
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        if self is _PrimitiveView.Type {
+        if self is any _PrimitiveView.Type {
             let inputs = _ViewInputs(base: inputs.base, preferences: inputs.preferences)
             let outputs = Self._makeView(view: view, inputs: inputs)
             return _ViewListOutputs(viewList: .staticList([outputs.view]), preferences: .init(preferences: []))
@@ -54,11 +60,15 @@ func makeViewList<T: View>(_: T.Type, view: _GraphValue<Any>, inputs: _ViewListI
 
 // _PrimitiveView is a View type that does not have a body. (body = Never)
 protocol _PrimitiveView {
+    static func _makeView(view: _GraphValue<Self>, sharedContext: SharedContext) -> _ViewOutputs
 }
 
 extension _PrimitiveView {
     public var body: Never {
         fatalError("\(Self.self) may not have Body == Never")
+    }
+    static func _makeView(view: _GraphValue<Self>, sharedContext: SharedContext) -> _ViewOutputs {
+        fatalError("PrimitiveView must provide view")
     }
 }
 

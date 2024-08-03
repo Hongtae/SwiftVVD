@@ -85,7 +85,7 @@ public struct TupleView<T>: View {
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
         var children: [any ViewListGenerator] = []
         if let viewType = T.self as? any View.Type {
-            if T.self is _PrimitiveView.Type {
+            if T.self is any _PrimitiveView.Type {
                 let inputs = _ViewInputs(base: inputs.base, preferences: inputs.preferences, traits: inputs.traits)
                 let outputs = makeView(viewType, view: view[\.value].unsafeCast(to: Any.self), inputs: inputs)
                 children.append(.staticList([outputs.view]))
@@ -96,7 +96,7 @@ public struct TupleView<T>: View {
         } else {
             let subviews = self._subviewTypes
             for (index, v) in subviews.enumerated() {
-                if v.type is _PrimitiveView.Type {
+                if v.type is any _PrimitiveView.Type {
                     let inputs = _ViewInputs(base: inputs.base, preferences: inputs.preferences, traits: inputs.traits)
                     let outputs = makeView(v.type, view: view[\._subviews[index]].unsafeCast(to: Any.self), inputs: inputs)
                     children.append(.staticList([outputs.view]))
@@ -124,7 +124,9 @@ private struct TupleViewGenerator<Content> : ViewGenerator where Content : View 
 
     func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
         if let view = graph.value(atPath: self.graph, from: encloser) {
-            let subviews = self.subviews.makeViewList(encloser: view, graph: self.graph)
+            let subviews = self.subviews.makeViewList(encloser: view, graph: self.graph).compactMap {
+                $0.makeView(encloser: encloser, graph: graph)
+            }
             if subviews.count > 1 {
                 let layout = baseInputs.properties
                     .find(type: DefaultLayoutPropertyItem.self)?

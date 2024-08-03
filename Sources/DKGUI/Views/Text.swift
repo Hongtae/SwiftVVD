@@ -2,7 +2,7 @@
 //  File: Text.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -314,7 +314,7 @@ private class TextViewContext: ViewContext {
     }
 
     init(view: Text, inputs: _GraphInputs, graph: _GraphValue<Text>) {
-        self.text = inputs.environment._resolve(view)
+        self.text = view
         super.init(inputs: inputs, graph: graph)
 
         if self.inputs.environment.font == nil {
@@ -323,7 +323,7 @@ private class TextViewContext: ViewContext {
     }
 
     override func validatePath<T>(encloser: T, graph: _GraphValue<T>) -> Bool {
-        graph.value(atPath: self.graph, from: encloser) != nil
+        graph.value(atPath: self.graph, from: encloser) is Text
     }
 
     override func updateContent<T>(encloser: T, graph: _GraphValue<T>) {

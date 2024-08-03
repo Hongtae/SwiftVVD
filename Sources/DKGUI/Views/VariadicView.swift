@@ -19,30 +19,14 @@ public struct _VariadicView_Children : View {
             let graph: _GraphValue<_VariadicView_Children>
             let inputs: _ViewListInputs
 
-            func makeViewGenerators<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
+            func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
                 if let view = graph.value(atPath: self.graph, from: encloser) {
                     let inputs = _ViewInputs(base: inputs.base, preferences: inputs.preferences, traits: inputs.traits)
                     return (0..<view.elements.count).map { index in
                         Element._makeView(view: self.graph[\.elements[index]], inputs: inputs).view
                     }
                 }
-                fatalError("Unable to recover view")
-                //return []
-            }
-
-            func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [ViewContext] {
-                if let view = graph.value(atPath: self.graph, from: encloser) {
-                    let inputs = _ViewInputs(base: inputs.base, preferences: inputs.preferences, traits: inputs.traits)
-                    var viewList: [_ViewOutputs] = []
-                    for index in 0..<view.elements.count {
-                        let outputs = Element._makeView(view: self.graph[\.elements[index]], inputs: inputs)
-                        viewList.append(outputs)
-                    }
-                    return viewList.compactMap {
-                        $0.view.makeView(encloser: view, graph: self.graph)
-                    }
-                }
-                fatalError("Unable to recover view")
+                fatalError("Unable to recover _VariadicView_Children")
                 //return []
             }
         }
@@ -175,13 +159,15 @@ private struct _VariadicView_ViewRoot_MakeChildrenProxy<Root> : _VariadicView_Vi
     }
 
     func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
-        let views = body.viewList.makeViewList(encloser: encloser, graph: graph)
+        let views = body.viewList.makeViewList(encloser: encloser, graph: graph).compactMap {
+            $0.makeView(encloser: encloser, graph: graph)
+        }
         if let root = graph.value(atPath: self.graph, from: encloser) {
             let proxy = Proxy(root: root, views: views)
             let proxyGraph = _GraphValue<Proxy>.root()
             if Root.Body.self is Never.Type {
                 let listOutputs = _VariadicView_Children._makeViewList(view: proxyGraph[\.children], inputs: inputs)
-                return listOutputs.viewList.makeViewGenerators(encloser: proxy, graph: proxyGraph).map {
+                return listOutputs.viewList.makeViewList(encloser: proxy, graph: proxyGraph).map {
                     func makeGenerator<G: ViewGenerator>(gen: G) -> any ViewGenerator {
                         ProxyGenerator(proxy: proxy, proxyGraph: proxyGraph, generator: gen)
                     }
@@ -189,7 +175,7 @@ private struct _VariadicView_ViewRoot_MakeChildrenProxy<Root> : _VariadicView_Vi
                 }
             } else {
                 let listOutputs = Root.Body._makeViewList(view: proxyGraph[\.body], inputs: inputs)
-                return listOutputs.viewList.makeViewGenerators(encloser: proxy, graph: proxyGraph).map {
+                return listOutputs.viewList.makeViewList(encloser: proxy, graph: proxyGraph).map {
                     func makeGenerator<G: ViewGenerator>(gen: G) -> any ViewGenerator {
                         ProxyGenerator(proxy: proxy, proxyGraph: proxyGraph, generator: gen)
                     }
@@ -216,16 +202,9 @@ extension _VariadicView_ViewRoot_MakeChildrenProxy : ViewGenerator {
 }
 
 extension _VariadicView_ViewRoot_MakeChildrenProxy : ViewListGenerator {
-    func makeViewGenerators<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
-        makeViewList(encloser: encloser, graph: graph)
-    }
-    func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [ViewContext] {
-        makeChildren(encloser: encloser, graph: graph)
-    }
 }
 
 private protocol _VariadicView_ViewRoot_MakeChildren_UnaryViewRoot : ViewListGenerator {
-    func makeChildren<T>(encloser: T, graph: _GraphValue<T>) -> [ViewContext]
 }
 
 struct _VariadicView_ViewRoot_MakeChildren_UnaryViewRootProxy<Root> : _VariadicView_ViewRoot_MakeChildren_UnaryViewRoot where Root : _VariadicView_UnaryViewRoot {
@@ -236,18 +215,13 @@ struct _VariadicView_ViewRoot_MakeChildren_UnaryViewRootProxy<Root> : _VariadicV
         self.proxy = .init(graph: graph, body: body, inputs: inputs)
     }
 
-    func makeChildren<T>(encloser: T, graph: _GraphValue<T>) -> [ViewContext] {
-        proxy.makeChildren(encloser: encloser, graph: graph)
-    }
-
-    func makeViewGenerators<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
-        proxy.makeViewGenerators(encloser: encloser, graph: graph)
+    func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
+        proxy.makeViewList(encloser: encloser, graph: graph)
     }
 } 
 
 private protocol _VariadicView_ViewRoot_MakeChildren_MultiViewRoot : ViewGenerator {
-    func makeChildren<T>(encloser: T, graph: _GraphValue<T>) -> [ViewContext]
-    func makeViewGenerators<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator]
+    func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator]
 }
 
 struct _VariadicView_ViewRoot_MakeChildren_MultiViewRootProxy<Root> : _VariadicView_ViewRoot_MakeChildren_MultiViewRoot where Root : _VariadicView_MultiViewRoot {
@@ -258,12 +232,8 @@ struct _VariadicView_ViewRoot_MakeChildren_MultiViewRootProxy<Root> : _VariadicV
         self.proxy = .init(graph: graph, body: body, inputs: inputs)
     }
 
-    func makeChildren<T>(encloser: T, graph: _GraphValue<T>) -> [ViewContext] {
-        proxy.makeChildren(encloser: encloser, graph: graph)
-    }
-
-    func makeViewGenerators<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
-        proxy.makeViewGenerators(encloser: encloser, graph: graph)
+    func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
+        proxy.makeViewList(encloser: encloser, graph: graph)
     }
 
     func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
@@ -365,8 +335,7 @@ public enum _VariadicView {
 }
 
 protocol _VariadicView_MultiViewRootViewGenerator : ViewGenerator {
-    func makeChildren<T>(encloser: T, graph: _GraphValue<T>) -> [ViewContext]
-    func makeViewGenerators<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator]
+    func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator]
 }
 
 extension _VariadicView.Tree : View where Root : _VariadicView_ViewRoot, Content : View {
@@ -411,18 +380,15 @@ extension _VariadicView.Tree : View where Root : _VariadicView_ViewRoot, Content
 
         fileprivate let children: any _VariadicView_ViewRoot_MakeChildren_MultiViewRoot
 
-        func makeChildren<T>(encloser: T, graph: _GraphValue<T>) -> [ViewContext] {
-            children.makeChildren(encloser: encloser, graph: graph)
-        }
-
-        func makeViewGenerators<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
-            children.makeViewGenerators(encloser: encloser, graph: graph)
+        func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
+            children.makeViewList(encloser: encloser, graph: graph)
         }
 
         func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
             if let view = graph.value(atPath: self.graph, from: encloser) {
-                let subviews = self.makeChildren(encloser: view, graph: self.graph)
-
+                let subviews = self.makeViewList(encloser: view, graph: self.graph).compactMap {
+                    $0.makeView(encloser: encloser, graph: graph)
+                }
                 var layout: any Layout = DefaultLayoutPropertyItem.default
                 if let layoutRoot = children as? any _VariadicView_ViewRoot_MakeChildren_LayoutRoot {
                     layout = layoutRoot.makeLayout(encloser: encloser, graph: graph)
@@ -431,7 +397,6 @@ extension _VariadicView.Tree : View where Root : _VariadicView_ViewRoot, Content
                 } else if let layoutItem = baseInputs.properties.find(type: DefaultLayoutPropertyItem.self) {
                     layout = layoutItem.layout
                 }
-
                 return ViewGroupContext(view: view,
                                         subviews: subviews,
                                         layout: layout,
@@ -452,8 +417,8 @@ extension _VariadicView.Tree : View where Root : _VariadicView_ViewRoot, Content
         var preferences: PreferenceInputs
         fileprivate let children: any _VariadicView_ViewRoot_MakeChildren_UnaryViewRoot
 
-        func makeViewGenerators<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
-            let subviews = children.makeViewGenerators(encloser: encloser, graph: graph)
+        func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
+            let subviews = children.makeViewList(encloser: encloser, graph: graph)
             let generator = ViewGroupContext<_VariadicView.Tree<Root, Content>>.Generator(
                 graph: self.graph,
                 subviews: subviews,

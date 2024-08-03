@@ -2,7 +2,7 @@
 //  File: Canvas.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -51,9 +51,63 @@ extension Canvas where Symbols == EmptyView {
 
 extension Canvas {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        fatalError()
+        let generator = CanvasViewContext.Generator(graph: view,
+                                                    baseInputs: inputs.base,
+                                                    preferences: inputs.preferences)
+        return _ViewOutputs(view: generator, preferences: PreferenceOutputs(preferences: []))
     }
 }
 
 extension Canvas: _PrimitiveView {
+}
+
+private class CanvasViewContext<Symbols>: ViewContext where Symbols: View {
+    typealias Content = Canvas<Symbols>
+    var view: Content
+    
+    struct Generator : ViewGenerator {
+        let graph: _GraphValue<Content>
+        var baseInputs: _GraphInputs
+        var preferences: PreferenceInputs
+        var traits: ViewTraitKeys = ViewTraitKeys()
+
+        func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
+            if let view = graph.value(atPath: self.graph, from: encloser) {
+                return CanvasViewContext(view: view, inputs: baseInputs, graph: self.graph)
+            }
+            fatalError("Unable to recover view")
+        }
+
+        mutating func mergeInputs(_ inputs: _GraphInputs) {
+            baseInputs.mergedInputs.append(inputs)
+        }
+    }
+
+    init(view: Content, inputs: _GraphInputs, graph: _GraphValue<Content>) {
+        self.view = view
+        super.init(inputs: inputs, graph: graph)
+    }
+
+    override func validatePath<T>(encloser: T, graph: _GraphValue<T>) -> Bool {
+        graph.value(atPath: self.graph, from: encloser) is Content
+    }
+
+    override func updateContent<T>(encloser: T, graph: _GraphValue<T>) {
+        if let view = graph.value(atPath: self.graph, from: encloser) as? Content {
+            self.view = view
+        } else {
+            fatalError("Unable to recover Canvas")
+        }
+    }
+
+    override func draw(frame: CGRect, context: GraphicsContext) {
+        super.draw(frame: frame, context: context)
+
+        if self.frame.width > 0 && self.frame.height > 0 {
+            context.drawLayer(in: frame) { context, size in
+                let renderer = self.view.renderer
+                renderer(&context, size)
+            }
+        }
+    }
 }

@@ -16,38 +16,20 @@ protocol ViewGenerator<Content> {
 }
 
 protocol ViewListGenerator {
-    func makeViewGenerators<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator]
-    func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [ViewContext]
-}
-
-extension ViewListGenerator {
-    func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [ViewContext] {
-        makeViewGenerators(encloser: encloser, graph: graph)
-            .compactMap{ $0.makeView(encloser: encloser, graph: graph) }
-    }
+    func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator]
 }
 
 struct StaticViewListGenerator : ViewListGenerator {
     var viewList: [any ViewGenerator]
-    func makeViewGenerators<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
+    func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
         viewList
-    }
-    func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [ViewContext] {
-        viewList.compactMap {
-            $0.makeView(encloser: encloser, graph: graph)
-        }
     }
 }
 
 struct DynamicViewListGenerator : ViewListGenerator {
     var viewList: [any ViewListGenerator]
-    func makeViewGenerators<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
-        viewList.flatMap { $0.makeViewGenerators(encloser: encloser, graph: graph) }
-    }
-    func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [ViewContext] {
-        viewList.flatMap {
-            $0.makeViewList(encloser: encloser, graph: graph)
-        }
+    func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
+        viewList.flatMap { $0.makeViewList(encloser: encloser, graph: graph) }
     }
 }
 
@@ -268,7 +250,7 @@ class GenericViewContext<Content> : ViewContext where Content : View {
     }
 
     override func validatePath<T>(encloser: T, graph: _GraphValue<T>) -> Bool {
-        if let value = graph.value(atPath: self.graph, from: encloser) {
+        if let value = graph.value(atPath: self.graph, from: encloser) as? Content {
             return body.validatePath(encloser: value, graph: self.graph)
         }
         return false

@@ -53,10 +53,16 @@ class ViewGroupContext<Content> : ViewContext where Content: View {
 
         super.init(inputs: inputs, graph: graph)
         self._debugDraw = false
+
+        defer {
+            self.subviews.forEach {
+                $0.setLayoutProperties(self.layoutProperties)
+            }
+        }
     }
 
     override func validatePath<T>(encloser: T, graph: _GraphValue<T>) -> Bool {
-        if let value = graph.value(atPath: self.graph, from: encloser) {
+        if let value = graph.value(atPath: self.graph, from: encloser) as? Content {
             return subviews.allSatisfy {
                 $0.validatePath(encloser: value, graph: self.graph)
             }
@@ -91,7 +97,11 @@ class ViewGroupContext<Content> : ViewContext where Content: View {
         }
     }
 
-    override func setLayoutProperties(_ properties: LayoutProperties) {
+    override func setLayoutProperties(_: LayoutProperties) {
+        super.setLayoutProperties(self.layoutProperties)
+        self.subviews.forEach {
+            $0.setLayoutProperties(self.layoutProperties)
+        }
     }
 
     override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
