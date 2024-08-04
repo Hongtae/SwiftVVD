@@ -48,7 +48,7 @@ private class ShapeViewContext<Content, Style> : ViewContext where Content: Shap
         }
 
         mutating func mergeInputs(_ inputs: _GraphInputs) {
-            self.baseInputs.mergedInputs.append(inputs)
+            baseInputs.mergedInputs.append(inputs)
         }
     }
 

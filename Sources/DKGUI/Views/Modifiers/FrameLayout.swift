@@ -61,7 +61,7 @@ extension _FrameLayout : _ViewLayoutModifier {
     }
 
     private struct LayoutViewGenerator : ViewGenerator {
-        let content: any ViewGenerator
+        var content: any ViewGenerator
         let graph: _GraphValue<_FrameLayout>
         var baseInputs: _GraphInputs
 
@@ -76,7 +76,8 @@ extension _FrameLayout : _ViewLayoutModifier {
         }
 
         mutating func mergeInputs(_ inputs: _GraphInputs) {
-            self.baseInputs.mergedInputs.append(inputs)
+            content.mergeInputs(inputs)
+            baseInputs.mergedInputs.append(inputs)
         }
     }
 
@@ -86,14 +87,19 @@ extension _FrameLayout : _ViewLayoutModifier {
 
     static func _makeViewList(modifier: _GraphValue<_FrameLayout>, content: any ViewListGenerator, inputs: _GraphInputs) -> any ViewListGenerator {
         struct Generator : ViewListGenerator {
-            let content: any ViewListGenerator
+            var content: any ViewListGenerator
             let graph: _GraphValue<_FrameLayout>
-            let baseInputs: _GraphInputs
+            var baseInputs: _GraphInputs
 
             func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
                 content.makeViewList(encloser: encloser, graph: graph).map {
                     LayoutViewGenerator(content: $0, graph: self.graph, baseInputs: self.baseInputs)
                 }
+            }
+
+            mutating func mergeInputs(_ inputs: _GraphInputs) {
+                content.mergeInputs(inputs)
+                baseInputs.mergedInputs.append(inputs)
             }
         }
         return Generator(content: content, graph: modifier, baseInputs: inputs)

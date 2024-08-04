@@ -34,6 +34,26 @@ public struct _GraphInputs {
     var modifiers: [_GraphInputResolve] = []
 }
 
+extension _GraphInputs {
+    func resolveMergedInputs() -> _GraphInputs {
+        if self.mergedInputs.isEmpty {
+            return self
+        }
+        var mergedInputs = self.mergedInputs
+        mergedInputs.indices.forEach { index in
+            mergedInputs[index] = mergedInputs[index].resolveMergedInputs()
+        }
+        var inputs = self
+        mergedInputs.forEach {
+            inputs.environment.values.merge($0.environment.values) { $1 }
+            inputs.modifiers.append(contentsOf: $0.modifiers)
+        }
+        inputs.mergedInputs = []
+        return inputs
+    }
+}
+
+
 protocol AnyPreferenceKey {
 }
 
@@ -144,6 +164,28 @@ public struct _GraphValue<Value> {
         root.paths[index].keyPath
     }
 
+    func trackRelativeGraphs<U>(to dest: _GraphValue<U>, _ callback: (_GraphValue<Any>)->Void) -> Bool {
+        guard self.root === dest.root
+        else { return false }
+
+        var pathIndices: [Int] = []
+        var idx = dest.index
+        if idx == self.index { return true }
+        while idx >= 0 {
+            let rp = root.paths[idx]
+            pathIndices.append(idx)
+            idx = rp.parent
+            if idx == self.index { break }
+        }
+        if idx >= 0 {
+            pathIndices.reversed().forEach { index in
+                callback(_GraphValue<Any>(self.root, index))
+            }
+            return true
+        }
+        return false
+    }
+
     func trackRelativePaths<U>(to dest: _GraphValue<U>, _ callback: (AnyKeyPath)->Void) -> Bool {
         guard self.root === dest.root
         else { return false }
@@ -197,5 +239,8 @@ public struct _GraphValue<Value> {
 extension _GraphValue : Equatable {
     public static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.index == rhs.index && lhs.root === rhs.root
+    }
+    public static func == <U>(lhs: Self, rhs: _GraphValue<U>) -> Bool {
+        lhs == rhs.unsafeCast(to: Value.self)
     }
 }

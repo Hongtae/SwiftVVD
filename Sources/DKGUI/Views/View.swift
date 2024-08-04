@@ -26,7 +26,14 @@ extension View {
         if Body.self is Never.Type {
             fatalError("\(Self.self) may not have Body == Never")
         }
-        return Self.Body._makeView(view: view[\.body], inputs: inputs)
+        let outputs = Self.Body._makeView(view: view[\.body], inputs: inputs)
+        if MemoryLayout<Self>.size > 0 && Self._hasDynamicProperty {
+            let generator = GenericViewContext.Generator(graph: view,
+                                                         body: outputs.view,
+                                                         baseInputs: inputs.base)
+            return _ViewOutputs(view: generator, preferences: .init(preferences: []))
+        }
+        return outputs
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {

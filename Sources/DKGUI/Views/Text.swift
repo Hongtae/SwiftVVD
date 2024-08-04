@@ -281,9 +281,7 @@ extension Text {
 
 extension Text: View {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let generator = TextViewContext.Generator(graph: view,
-                                                  baseInputs: inputs.base,
-                                                  preferences: inputs.preferences)
+        let generator = TextViewContext.Generator(graph: view, baseInputs: inputs.base)
         return _ViewOutputs(view: generator, preferences: PreferenceOutputs(preferences: []))
     }
 }
@@ -298,8 +296,6 @@ private class TextViewContext: ViewContext {
     struct Generator : ViewGenerator {
         let graph: _GraphValue<Text>
         var baseInputs: _GraphInputs
-        var preferences: PreferenceInputs
-        var traits: ViewTraitKeys = ViewTraitKeys()
 
         func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
             if let view = graph.value(atPath: self.graph, from: encloser) {

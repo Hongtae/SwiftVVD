@@ -9,7 +9,8 @@ import Foundation
 import DKGame
 
 class ViewGroupContext<Content> : ViewContext where Content: View {
-    var view: Content
+    var view: Content { references.content }
+    var references: any ViewReferences<Content>
     var subviews: [ViewContext]
     var layout: AnyLayout
     var layoutCache: AnyLayout.Cache?
@@ -17,10 +18,8 @@ class ViewGroupContext<Content> : ViewContext where Content: View {
 
     struct Generator : ViewGenerator {
         var graph: _GraphValue<Content>
-        let subviews: [any ViewGenerator]
+        var subviews: [any ViewGenerator]
         var baseInputs: _GraphInputs
-        var preferences: PreferenceInputs
-        var traits: ViewTraitKeys = ViewTraitKeys()
 
         func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
             if let view = graph.value(atPath: self.graph, from: encloser) {
@@ -40,16 +39,17 @@ class ViewGroupContext<Content> : ViewContext where Content: View {
         }
 
         mutating func mergeInputs(_ inputs: _GraphInputs) {
-            self.baseInputs.mergedInputs.append(inputs)
+            subviews.indices.forEach { subviews[$0].mergeInputs(inputs) }
+            baseInputs.mergedInputs.append(inputs)
         }
     }
 
     init<L: Layout>(view: Content, subviews: [ViewContext], layout: L, inputs: _GraphInputs, graph: _GraphValue<Content>) {
-        self.view = view
         self.subviews = subviews
         self.layout = AnyLayout(layout)
         self.layoutCache = nil
         self.layoutProperties = L.layoutProperties
+        self.references = buildViewReferences(root: view, graph: graph, subviews: subviews)
 
         super.init(inputs: inputs, graph: graph)
         self._debugDraw = false
@@ -71,19 +71,12 @@ class ViewGroupContext<Content> : ViewContext where Content: View {
     }
 
     override func updateContent<T>(encloser: T, graph: _GraphValue<T>) {
-        if let view = graph.value(atPath: self.graph, from: encloser) as? Content {
-            self.view = view
-            self.subviews.forEach {
-                $0.updateContent(encloser: self.view, graph: self.graph)
-            }
-        } else {
-            fatalError("Unable to recover View")
-        }
+        references.updateContent(encloser: encloser, graph: graph)
     }
 
     override func resolveGraphInputs<T>(encloser: T, graph: _GraphValue<T>) {
         super.resolveGraphInputs(encloser: encloser, graph: graph)
-        self.view = inputs.environment._resolve(self.view)
+        references.updateContent(environment: inputs.environment)
         self.subviews.forEach {
             $0.resolveGraphInputs(encloser: self.view, graph: self.graph)
         }
@@ -91,7 +84,7 @@ class ViewGroupContext<Content> : ViewContext where Content: View {
 
     override func updateEnvironment(_ environmentValues: EnvironmentValues) {
         super.updateEnvironment(environmentValues)
-        self.view = inputs.environment._resolve(self.view)
+        references.updateContent(environment: inputs.environment)
         self.subviews.forEach {
             $0.updateEnvironment(self.environmentValues)
         }

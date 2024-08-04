@@ -22,7 +22,6 @@ extension Spacer : _PrimitiveView {
         struct Generator : ViewGenerator {
             let graph: _GraphValue<Spacer>
             var baseInputs: _GraphInputs
-            var acceptsModifiers: Bool { false }
 
             func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
                 if let view = graph.value(atPath: self.graph, from: encloser) {
@@ -31,7 +30,9 @@ extension Spacer : _PrimitiveView {
                 fatalError("Unable to recover view")
             }
 
-            func mergeInputs(_ inputs: _GraphInputs) {}
+            mutating func mergeInputs(_ inputs: _GraphInputs) {
+                baseInputs.mergedInputs.append(inputs)
+            }
         }
         let baseInputs = _GraphInputs(environment: .init(), sharedContext: sharedContext)
         let generator = Generator(graph: view, baseInputs: baseInputs)
@@ -47,7 +48,6 @@ public struct Divider : View {
         struct Generator : ViewGenerator {
             let graph: _GraphValue<Divider>
             var baseInputs: _GraphInputs
-            var acceptsModifiers: Bool { false }
 
             func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
                 if let view = graph.value(atPath: self.graph, from: encloser) {
@@ -56,7 +56,9 @@ public struct Divider : View {
                 fatalError("Unable to recover view")
             }
 
-            func mergeInputs(_ inputs: _GraphInputs) {}
+            mutating func mergeInputs(_ inputs: _GraphInputs) {
+                baseInputs.mergedInputs.append(inputs)
+            }
         }
         let generator = Generator(graph: view, baseInputs: inputs.base)
         return _ViewOutputs(view: generator, preferences: PreferenceOutputs(preferences: []))

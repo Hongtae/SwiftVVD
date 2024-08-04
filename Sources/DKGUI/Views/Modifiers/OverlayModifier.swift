@@ -131,8 +131,8 @@ private class OverlayViewContext<Modifier> : ViewModifierContext<Modifier> {
     let ignoresSafeAreaEdges: Edge.Set
 
     struct Generator : ViewGenerator {
-        let content: any ViewGenerator
-        let overlay: any ViewGenerator
+        var content: any ViewGenerator
+        var overlay: any ViewGenerator
         let graph: _GraphValue<Modifier>
         var baseInputs: _GraphInputs
 
@@ -155,6 +155,8 @@ private class OverlayViewContext<Modifier> : ViewModifierContext<Modifier> {
         }
 
         mutating func mergeInputs(_ inputs: _GraphInputs) {
+            content.mergeInputs(inputs)
+            overlay.mergeInputs(inputs)
             baseInputs.mergedInputs.append(inputs)
         }
     }

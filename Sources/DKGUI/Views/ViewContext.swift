@@ -17,6 +17,7 @@ protocol ViewGenerator<Content> {
 
 protocol ViewListGenerator {
     func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator]
+    mutating func mergeInputs(_: _GraphInputs)
 }
 
 struct StaticViewListGenerator : ViewListGenerator {
@@ -24,12 +25,27 @@ struct StaticViewListGenerator : ViewListGenerator {
     func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
         viewList
     }
+    mutating func mergeInputs(_ inputs: _GraphInputs) {
+        viewList.indices.forEach { viewList[$0].mergeInputs(inputs) }
+    }
 }
 
 struct DynamicViewListGenerator : ViewListGenerator {
     var viewList: [any ViewListGenerator]
+    var mergedInputs: [_GraphInputs] = []
     func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
-        viewList.flatMap { $0.makeViewList(encloser: encloser, graph: graph) }
+        viewList.flatMap {
+            var list = $0.makeViewList(encloser: encloser, graph: graph)
+            list.indices.forEach { index in
+                mergedInputs.forEach { inputs in
+                    list[index].mergeInputs(inputs)
+                }
+            }
+            return list
+        }
+    }
+    mutating func mergeInputs(_ inputs: _GraphInputs) {
+        mergedInputs.append(inputs)
     }
 }
 
@@ -81,10 +97,10 @@ class ViewContext {
 
     init<Content>(inputs: _GraphInputs, graph: _GraphValue<Content>) {
         self.graph = graph.unsafeCast(to: Any.self)
-        self.inputs = inputs
         self.traits = [:]
         self.frame = .zero
         self.spacing = .zero
+        self.inputs = inputs.resolveMergedInputs()
     }
 
     func validatePath<T>(encloser: T, graph: _GraphValue<T>) -> Bool {
@@ -96,6 +112,7 @@ class ViewContext {
 
     func merge(graphInputs inputs: _GraphInputs) {
         self.inputs.mergedInputs.append(inputs)
+        self.inputs = self.inputs.resolveMergedInputs()
     }
 
     func update(transform t: AffineTransform) {
@@ -104,15 +121,8 @@ class ViewContext {
     }
 
     func resolveGraphInputs<T>(encloser: T, graph: _GraphValue<T>) {
-        func getModifiers(_ inputs: _GraphInputs) -> [_GraphInputResolve] {
-            var modifiers = inputs.modifiers
-            let merged = inputs.mergedInputs.flatMap {
-                getModifiers($0)
-            }
-            modifiers.append(contentsOf: merged)
-            return modifiers
-        }
-        var modifiers = getModifiers(self.inputs)
+        assert(self.inputs.mergedInputs.isEmpty)
+        var modifiers = self.inputs.modifiers
         modifiers.indices.forEach { index in
             modifiers[index].resolve(encloser: encloser, graph: graph)
         }
@@ -339,10 +349,10 @@ class GenericViewContext<Content> : ViewContext where Content : View {
 
     struct Generator : ViewGenerator {
         let graph: _GraphValue<Content>
-        let body: any ViewGenerator
+        var body: any ViewGenerator
         var baseInputs: _GraphInputs
-        var preferences: PreferenceInputs
-        var traits: ViewTraitKeys = ViewTraitKeys()
+//        var preferences: PreferenceInputs
+//        var traits: ViewTraitKeys = ViewTraitKeys()
 
         func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
             if let view = graph.value(atPath: self.graph, from: encloser) {
@@ -357,6 +367,7 @@ class GenericViewContext<Content> : ViewContext where Content : View {
 
         mutating func mergeInputs(_ inputs: _GraphInputs) {
             self.baseInputs.mergedInputs.append(inputs)
+            self.body.mergeInputs(inputs)
         }
     }
 }
@@ -364,14 +375,12 @@ class GenericViewContext<Content> : ViewContext where Content : View {
 struct PrimitiveViewGenerator<Content> : ViewGenerator where Content: View {
     let graph: _GraphValue<Content>
     var baseInputs: _GraphInputs
-    var preferences: PreferenceInputs
-    var traits: ViewTraitKeys = ViewTraitKeys()
 
     func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
         ViewContext(inputs: baseInputs, graph: self.graph)
     }
 
     mutating func mergeInputs(_ inputs: _GraphInputs) {
-        self.baseInputs.mergedInputs.append(inputs)
+        baseInputs.mergedInputs.append(inputs)
     }
 }

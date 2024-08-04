@@ -31,11 +31,8 @@ extension _ViewModifier_Content: View {
 
     struct _ViewGenerator : ViewGenerator {
         let graph: _GraphValue<_ViewModifier_Content>
-        func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
-            nil
-        }
-        func mergeInputs(_ inputs: _GraphInputs) {
-        }
+        func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? { nil }
+        func mergeInputs(_ inputs: _GraphInputs) {}
     }
 }
 
@@ -153,7 +150,7 @@ extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
 
     struct MultiViewGenerator : ViewGenerator {
         let graph: _GraphValue<ModifiedContent>
-        let content: any _VariadicView_MultiViewRootViewGenerator
+        var content: any _VariadicView_MultiViewRootViewGenerator
         var baseInputs: _GraphInputs
         let modifier: (any ViewGenerator) -> _ViewOutputs
 
@@ -180,12 +177,15 @@ extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
         }
 
         mutating func mergeInputs(_ inputs: _GraphInputs) {
-            self.baseInputs.mergedInputs.append(inputs)
+            content.mergeInputs(inputs)
+            baseInputs.mergedInputs.append(inputs)
         }
     }
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         var outputs = Content._makeView(view: view[\.content], inputs: inputs)
+        let baseInputs = _GraphInputs(environment: .init(), sharedContext: inputs.base.sharedContext)
+        let inputs = _ViewInputs(base: baseInputs, preferences: inputs.preferences)
         if let multiView = outputs.view as? any _VariadicView_MultiViewRootViewGenerator {
             let generator = MultiViewGenerator(graph: view, content: multiView, baseInputs: inputs.base) {
                 generator in
@@ -208,21 +208,27 @@ extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
     }
 
     struct UnaryViewListGenerator : ViewListGenerator {
-        let content: any ViewListGenerator
+        var content: any ViewListGenerator
         let modifier: (any ViewGenerator) -> _ViewOutputs
         func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
             let views = content.makeViewList(encloser: encloser, graph: graph)
             return views.map { modifier($0).view }
+        }
+        mutating func mergeInputs(_ inputs: _GraphInputs) {
+            content.mergeInputs(inputs)
         }
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
         if Modifier.self is _UnaryViewModifier.Type {
             let content = Content._makeViewList(view: view[\.content], inputs: inputs)
-            let inputs = _ViewInputs(base: inputs.base, preferences: inputs.preferences)
+            let baseInputs = _GraphInputs(environment: .init(), sharedContext: inputs.base.sharedContext)
+            let inputs = _ViewInputs(base: baseInputs, preferences: inputs.preferences)
             let viewList = UnaryViewListGenerator(content: content.viewList) { generator in
-                Modifier._makeView(modifier: view[\.modifier], inputs: inputs) { _, _ in
-                    _ViewOutputs(view: generator, preferences: .init(preferences: []))
+                Modifier._makeView(modifier: view[\.modifier], inputs: inputs) { _, inputs in
+                    var generator = generator
+                    generator.mergeInputs(inputs.base)
+                    return _ViewOutputs(view: generator, preferences: .init(preferences: []))
                 }
             }
             return _ViewListOutputs(viewList: viewList, preferences: .init(preferences: []))

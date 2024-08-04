@@ -173,8 +173,8 @@ private class BackgroundViewContext<Modifier> : ViewModifierContext<Modifier> {
     let ignoresSafeAreaEdges: Edge.Set
 
     struct Generator : ViewGenerator {
-        let content: any ViewGenerator
-        let background: any ViewGenerator
+        var content: any ViewGenerator
+        var background: any ViewGenerator
         let graph: _GraphValue<Modifier>
         var baseInputs: _GraphInputs
 
@@ -197,6 +197,8 @@ private class BackgroundViewContext<Modifier> : ViewModifierContext<Modifier> {
         }
 
         mutating func mergeInputs(_ inputs: _GraphInputs) {
+            content.mergeInputs(inputs)
+            background.mergeInputs(inputs)
             baseInputs.mergedInputs.append(inputs)
         }
     }

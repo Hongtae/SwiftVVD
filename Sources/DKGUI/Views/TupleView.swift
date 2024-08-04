@@ -77,8 +77,7 @@ public struct TupleView<T>: View {
 
         let generator = TupleViewGenerator(graph: view,
                                            subviews: listOutputs.viewList,
-                                           baseInputs: inputs.base,
-                                           preferences: inputs.preferences)
+                                           baseInputs: inputs.base)
         return _ViewOutputs(view: generator, preferences: .init(preferences: []))
     }
 
@@ -117,10 +116,8 @@ extension TupleView: _PrimitiveView {
 
 private struct TupleViewGenerator<Content> : ViewGenerator where Content : View {
     var graph: _GraphValue<Content>
-    let subviews: any ViewListGenerator
+    var subviews: any ViewListGenerator
     var baseInputs: _GraphInputs
-    var preferences: PreferenceInputs
-    var traits: ViewTraitKeys = ViewTraitKeys()
 
     func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
         if let view = graph.value(atPath: self.graph, from: encloser) {
@@ -143,6 +140,7 @@ private struct TupleViewGenerator<Content> : ViewGenerator where Content : View 
     }
 
     mutating func mergeInputs(_ inputs: _GraphInputs) {
-        self.baseInputs.mergedInputs.append(inputs)
+        subviews.mergeInputs(inputs)
+        baseInputs.mergedInputs.append(inputs)
     }
 }

@@ -17,7 +17,7 @@ public struct _VariadicView_Children : View {
 
         struct Generator : ViewListGenerator {
             let graph: _GraphValue<_VariadicView_Children>
-            let inputs: _ViewListInputs
+            var inputs: _ViewListInputs
 
             func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
                 if let view = graph.value(atPath: self.graph, from: encloser) {
@@ -28,6 +28,10 @@ public struct _VariadicView_Children : View {
                 }
                 fatalError("Unable to recover _VariadicView_Children")
                 //return []
+            }
+
+            mutating func mergeInputs(_ inputs: _GraphInputs) {
+                self.inputs.base.mergedInputs.append(inputs)
             }
         }
         return _ViewListOutputs(viewList: Generator(graph: view, inputs: inputs), preferences: .init(preferences: []))
@@ -66,7 +70,6 @@ extension _VariadicView_Children : RandomAccessCollection {
                         return view
                     }
                     fatalError("Unable to recover element")
-                    //return nil
                 }
                 mutating func mergeInputs(_ inputs: _GraphInputs) {
                     self.inputs.base.mergedInputs.append(inputs)
@@ -127,12 +130,13 @@ public protocol _VariadicView_MultiViewRoot : _VariadicView_ViewRoot {
 
 private protocol _VariadicView_ViewRoot_MakeChildren {
     func makeChildren<T>(encloser: T, graph: _GraphValue<T>) -> [ViewContext]
+    mutating func mergeInputs(_ inputs: _GraphInputs)
 }
 
 private struct _VariadicView_ViewRoot_MakeChildrenProxy<Root> : _VariadicView_ViewRoot_MakeChildren where Root : _VariadicView_ViewRoot {
     let graph: _GraphValue<Root>
-    let body: _ViewListOutputs
-    let inputs: _ViewListInputs
+    var body: _ViewListOutputs
+    var inputs: _ViewListInputs
 
     struct Proxy {
         let root: Root
@@ -166,7 +170,7 @@ private struct _VariadicView_ViewRoot_MakeChildrenProxy<Root> : _VariadicView_Vi
             let proxy = Proxy(root: root, views: views)
             let proxyGraph = _GraphValue<Proxy>.root()
             if Root.Body.self is Never.Type {
-                let listOutputs = _VariadicView_Children._makeViewList(view: proxyGraph[\.children], inputs: inputs)
+                let listOutputs = _VariadicView_Children._makeViewList(view: proxyGraph[\.children], inputs: self.inputs)
                 return listOutputs.viewList.makeViewList(encloser: proxy, graph: proxyGraph).map {
                     func makeGenerator<G: ViewGenerator>(gen: G) -> any ViewGenerator {
                         ProxyGenerator(proxy: proxy, proxyGraph: proxyGraph, generator: gen)
@@ -174,7 +178,7 @@ private struct _VariadicView_ViewRoot_MakeChildrenProxy<Root> : _VariadicView_Vi
                     return makeGenerator(gen: $0)
                 }
             } else {
-                let listOutputs = Root.Body._makeViewList(view: proxyGraph[\.body], inputs: inputs)
+                let listOutputs = Root.Body._makeViewList(view: proxyGraph[\.body], inputs: self.inputs)
                 return listOutputs.viewList.makeViewList(encloser: proxy, graph: proxyGraph).map {
                     func makeGenerator<G: ViewGenerator>(gen: G) -> any ViewGenerator {
                         ProxyGenerator(proxy: proxy, proxyGraph: proxyGraph, generator: gen)
@@ -197,7 +201,9 @@ extension _VariadicView_ViewRoot_MakeChildrenProxy : ViewGenerator {
     func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
         fatalError("This method should not be called.")
     }
-    func mergeInputs(_: _GraphInputs) {
+    mutating func mergeInputs(_ inputs: _GraphInputs) {
+        self.body.viewList.mergeInputs(inputs)
+        self.inputs.base.mergedInputs.append(inputs)
     }
 }
 
@@ -208,7 +214,7 @@ private protocol _VariadicView_ViewRoot_MakeChildren_UnaryViewRoot : ViewListGen
 }
 
 struct _VariadicView_ViewRoot_MakeChildren_UnaryViewRootProxy<Root> : _VariadicView_ViewRoot_MakeChildren_UnaryViewRoot where Root : _VariadicView_UnaryViewRoot {
-    private let proxy: _VariadicView_ViewRoot_MakeChildrenProxy<Root>
+    private var proxy: _VariadicView_ViewRoot_MakeChildrenProxy<Root>
     var graph: _GraphValue<Root> { proxy.graph }
 
     init(graph: _GraphValue<Root>, body: _ViewListOutputs, inputs: _ViewListInputs) {
@@ -218,14 +224,18 @@ struct _VariadicView_ViewRoot_MakeChildren_UnaryViewRootProxy<Root> : _VariadicV
     func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
         proxy.makeViewList(encloser: encloser, graph: graph)
     }
-} 
+
+    mutating func mergeInputs(_ inputs: _GraphInputs) {
+        proxy.mergeInputs(inputs)
+    }
+}
 
 private protocol _VariadicView_ViewRoot_MakeChildren_MultiViewRoot : ViewGenerator {
     func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator]
 }
 
 struct _VariadicView_ViewRoot_MakeChildren_MultiViewRootProxy<Root> : _VariadicView_ViewRoot_MakeChildren_MultiViewRoot where Root : _VariadicView_MultiViewRoot {
-    private let proxy: _VariadicView_ViewRoot_MakeChildrenProxy<Root>
+    private var proxy: _VariadicView_ViewRoot_MakeChildrenProxy<Root>
     var graph: _GraphValue<Root> { proxy.graph }
 
     init(graph: _GraphValue<Root>, body: _ViewListOutputs, inputs: _ViewListInputs) {
@@ -240,7 +250,8 @@ struct _VariadicView_ViewRoot_MakeChildren_MultiViewRootProxy<Root> : _VariadicV
         fatalError("This method should not be called.")
     }
 
-    func mergeInputs(_: _GraphInputs) {
+    mutating func mergeInputs(_ inputs: _GraphInputs) {
+        proxy.mergeInputs(inputs)
     }
 }
 
@@ -250,7 +261,7 @@ private protocol _VariadicView_ViewRoot_MakeChildren_LayoutRoot : _VariadicView_
 }
 
 struct _VariadicView_ViewRoot_MakeChildren_LayoutRootProxy<Root> : _VariadicView_ViewRoot_MakeChildren_LayoutRoot where Root :  _VariadicView.UnaryViewRoot {
-    private let proxy: _VariadicView_ViewRoot_MakeChildrenProxy<Root>
+    private var proxy: _VariadicView_ViewRoot_MakeChildrenProxy<Root>
     var graph: _GraphValue<Root> { proxy.graph }
     let layout: (Root) -> any Layout
 
@@ -274,7 +285,8 @@ struct _VariadicView_ViewRoot_MakeChildren_LayoutRootProxy<Root> : _VariadicView
         fatalError("This method should not be called.")
     }
 
-    func mergeInputs(_: _GraphInputs) {
+    mutating func mergeInputs(_ inputs: _GraphInputs) {
+        proxy.mergeInputs(inputs)
     }
 }
 
@@ -344,7 +356,7 @@ extension _VariadicView.Tree : View where Root : _VariadicView_ViewRoot, Content
     private struct _ViewGenerator : ViewGenerator {
         let graph: _GraphValue<_VariadicView.Tree<Root, Content>>
         var baseInputs: _GraphInputs
-        let children: any _VariadicView_ViewRoot_MakeChildren
+        var children: any _VariadicView_ViewRoot_MakeChildren
 
         func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
             if let view = graph.value(atPath: self.graph, from: encloser) {
@@ -369,7 +381,8 @@ extension _VariadicView.Tree : View where Root : _VariadicView_ViewRoot, Content
         }
 
         mutating func mergeInputs(_ inputs: _GraphInputs) {
-            self.baseInputs.mergedInputs.append(inputs)
+            children.mergeInputs(inputs)
+            baseInputs.mergedInputs.append(inputs)
         }
     }
 
@@ -377,8 +390,7 @@ extension _VariadicView.Tree : View where Root : _VariadicView_ViewRoot, Content
         let graph: _GraphValue<_VariadicView.Tree<Root, Content>>
         var baseInputs: _GraphInputs
         var makeView: ((ViewContext) -> ViewContext)?
-
-        fileprivate let children: any _VariadicView_ViewRoot_MakeChildren_MultiViewRoot
+        fileprivate var children: any _VariadicView_ViewRoot_MakeChildren_MultiViewRoot
 
         func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
             children.makeViewList(encloser: encloser, graph: graph)
@@ -407,24 +419,29 @@ extension _VariadicView.Tree : View where Root : _VariadicView_ViewRoot, Content
         }
 
         mutating func mergeInputs(_ inputs: _GraphInputs) {
-            self.baseInputs.mergedInputs.append(inputs)
+            children.mergeInputs(inputs)
+            baseInputs.mergedInputs.append(inputs)
         }
     }
 
     struct _UnaryViewRootViewListGenerator : ViewListGenerator {
         let graph: _GraphValue<_VariadicView.Tree<Root, Content>>
-        let baseInputs: _GraphInputs
+        var baseInputs: _GraphInputs
         var preferences: PreferenceInputs
-        fileprivate let children: any _VariadicView_ViewRoot_MakeChildren_UnaryViewRoot
+        fileprivate var children: any _VariadicView_ViewRoot_MakeChildren_UnaryViewRoot
 
         func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
             let subviews = children.makeViewList(encloser: encloser, graph: graph)
-            let generator = ViewGroupContext<_VariadicView.Tree<Root, Content>>.Generator(
-                graph: self.graph,
-                subviews: subviews,
-                baseInputs: self.baseInputs,
-                preferences: self.preferences)
+            let generator = ViewGroupContext<_VariadicView.Tree<Root, Content>>
+                .Generator(graph: self.graph,
+                           subviews: subviews,
+                           baseInputs: self.baseInputs)
             return [generator]
+        }
+
+        mutating func mergeInputs(_ inputs: _GraphInputs) {
+            children.mergeInputs(inputs)
+            baseInputs.mergedInputs.append(inputs)
         }
     }
 
