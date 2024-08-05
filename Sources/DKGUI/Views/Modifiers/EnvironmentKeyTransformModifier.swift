@@ -54,6 +54,10 @@ public struct _EnvironmentKeyTransformModifier<Value> : ViewModifier, _GraphInpu
                 self.modifier = modifier
             }
         }
+
+        static func == (lhs: _EnvironmentKeyTransformModifier<Value>._InputModifier, rhs: _EnvironmentKeyTransformModifier<Value>._InputModifier) -> Bool {
+            lhs === rhs
+        }
     }
 }
 

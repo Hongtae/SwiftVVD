@@ -50,6 +50,10 @@ public struct _EnvironmentKeyWritingModifier<Value> : ViewModifier, _GraphInputs
                 self.modifier = modifier
             }
         }
+
+        static func == (lhs: _EnvironmentKeyWritingModifier<Value>._InputModifier, rhs: _EnvironmentKeyWritingModifier<Value>._InputModifier) -> Bool {
+            lhs === rhs
+        }
     }
 }
 

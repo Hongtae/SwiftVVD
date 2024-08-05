@@ -13,10 +13,19 @@ protocol CustomInput {
 public struct _Graph {
 }
 
-protocol _GraphInputResolve {
+protocol _GraphInputResolve : Equatable {
     var isResolved: Bool { get }
     func apply(inputs: inout _GraphInputs)
     mutating func resolve<T>(encloser: T, graph: _GraphValue<T>)
+}
+
+extension _GraphInputResolve {
+    func isEqual(to: any _GraphInputResolve) -> Bool {
+        if let other = to as? Self {
+            return self == other
+        }
+        return false
+    }
 }
 
 public struct _GraphInputs {
@@ -31,7 +40,7 @@ public struct _GraphInputs {
     var sharedContext: SharedContext
     var options: Options = .none
     var mergedInputs: [_GraphInputs] = []
-    var modifiers: [_GraphInputResolve] = []
+    var modifiers: [any _GraphInputResolve] = []
 }
 
 extension _GraphInputs {
@@ -46,13 +55,16 @@ extension _GraphInputs {
         var inputs = self
         mergedInputs.forEach {
             inputs.environment.values.merge($0.environment.values) { $1 }
-            inputs.modifiers.append(contentsOf: $0.modifiers)
+            $0.modifiers.forEach { modifier in
+                if inputs.modifiers.contains(where: { modifier.isEqual(to: $0) }) == false {
+                    inputs.modifiers.append(modifier)
+                }
+            }
         }
         inputs.mergedInputs = []
         return inputs
     }
 }
-
 
 protocol AnyPreferenceKey {
 }
