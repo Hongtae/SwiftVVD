@@ -103,8 +103,10 @@ class ViewContext {
         self.inputs = inputs.resolveMergedInputs()
     }
 
+    var _validPath = false
     func validatePath<T>(encloser: T, graph: _GraphValue<T>) -> Bool {
-        false
+        _validPath = false
+        return _validPath
     }
 
     func updateContent<T>(encloser: T, graph: _GraphValue<T>) {
@@ -172,6 +174,7 @@ class ViewContext {
     }
 
     func update(tick: UInt64, delta: Double, date: Date) {
+        assert(self._validPath)
     }
 
     var _debugDraw = true
@@ -260,7 +263,9 @@ class GenericViewContext<Content> : ViewContext where Content : View {
     }
 
     override func validatePath<T>(encloser: T, graph: _GraphValue<T>) -> Bool {
+        self._validPath = false
         if let value = graph.value(atPath: self.graph, from: encloser) as? Content {
+            self._validPath = true
             return body.validatePath(encloser: value, graph: self.graph)
         }
         return false

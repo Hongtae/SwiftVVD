@@ -62,9 +62,14 @@ class ViewGroupContext<Content> : ViewContext where Content: View {
     }
 
     override func validatePath<T>(encloser: T, graph: _GraphValue<T>) -> Bool {
+        self._validPath = false
         if let value = graph.value(atPath: self.graph, from: encloser) as? Content {
-            return subviews.allSatisfy {
-                $0.validatePath(encloser: value, graph: self.graph)
+            self._validPath = true
+
+            if self.references.validatePath(encloser: value, graph: self.graph) {
+                return subviews.allSatisfy {
+                    $0.validatePath(encloser: value, graph: self.graph)
+                }
             }
         }
         return false

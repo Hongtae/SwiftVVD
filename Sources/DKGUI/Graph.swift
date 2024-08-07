@@ -256,3 +256,9 @@ extension _GraphValue : Equatable {
         lhs == rhs.unsafeCast(to: Value.self)
     }
 }
+
+extension _GraphValue : CustomDebugStringConvertible {
+    public var debugDescription: String {
+        self.keyPath.debugDescription
+    }
+}

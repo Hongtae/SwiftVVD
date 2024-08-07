@@ -262,7 +262,12 @@ class ImageViewContext : ViewContext {
     }
 
     override func validatePath<T>(encloser: T, graph: _GraphValue<T>) -> Bool {
-        graph.value(atPath: self.graph, from: encloser) is Image
+        self._validPath = false
+        if graph.value(atPath: self.graph, from: encloser) is Image {
+            self._validPath = true
+            return true
+        }
+        return false
     }
 
     override func updateContent<T>(encloser: T, graph: _GraphValue<T>) {

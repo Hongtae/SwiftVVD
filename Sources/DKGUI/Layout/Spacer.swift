@@ -79,7 +79,12 @@ private class SpacerViewContext : ViewContext {
     }
 
     override func validatePath<T>(encloser: T, graph: _GraphValue<T>) -> Bool {
-        graph.value(atPath: self.graph, from: encloser) is Spacer
+        self._validPath = false
+        if graph.value(atPath: self.graph, from: encloser) is Spacer {
+            self._validPath = true
+            return true
+        }
+        return false
     }
 
     override func updateContent<T>(encloser: T, graph: _GraphValue<T>) {
@@ -125,7 +130,12 @@ private class DividerViewContext : ViewContext {
     }
 
     override func validatePath<T>(encloser: T, graph: _GraphValue<T>) -> Bool {
-        graph.value(atPath: self.graph, from: encloser) is Divider
+        self._validPath = false
+        if graph.value(atPath: self.graph, from: encloser) is Divider {
+            self._validPath = true
+            return true
+        }
+        return false
     }
 
     override func updateContent<T>(encloser: T, graph: _GraphValue<T>) {

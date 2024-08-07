@@ -235,7 +235,9 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
 
         self.view = outputs.view.makeView(encloser: content, graph: graph)
         if let view {
-            assert(view.validatePath(encloser: content, graph: graph))
+            if view.validatePath(encloser: content, graph: graph) == false {
+                fatalError("Invalid path")
+            }
             view.resolveGraphInputs(encloser: content, graph: graph)
         }
     }

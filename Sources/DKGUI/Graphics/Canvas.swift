@@ -85,7 +85,12 @@ private class CanvasViewContext<Symbols>: ViewContext where Symbols: View {
     }
 
     override func validatePath<T>(encloser: T, graph: _GraphValue<T>) -> Bool {
-        graph.value(atPath: self.graph, from: encloser) is Content
+        self._validPath = false
+        if graph.value(atPath: self.graph, from: encloser) is Content {
+            self._validPath = true
+            return true
+        }
+        return false
     }
 
     override func updateContent<T>(encloser: T, graph: _GraphValue<T>) {

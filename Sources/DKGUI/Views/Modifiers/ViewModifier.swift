@@ -273,7 +273,9 @@ class ViewModifierContext<Modifier> : ViewContext {
     }
 
     override func validatePath<T>(encloser: T, graph: _GraphValue<T>) -> Bool {
+        self._validPath = false
         if graph.value(atPath: self.graph, from: encloser) is Modifier {
+            self._validPath = true
             return content.validatePath(encloser: encloser, graph: graph)
         }
         return false
