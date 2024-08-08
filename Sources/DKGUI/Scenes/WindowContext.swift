@@ -379,7 +379,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
 
         if gestureHandlers.isEmpty {
             if event.type == .buttonDown {
-                gestureHandlers = self.viewProxy.gestureHandlers(at: event.location)
+                gestureHandlers = self.viewProxy.makeGestureHandlers(at: event.location)
             }
         }
 

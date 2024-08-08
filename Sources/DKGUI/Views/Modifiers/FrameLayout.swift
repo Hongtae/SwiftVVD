@@ -24,14 +24,14 @@ public struct _FrameLayout: ViewModifier, Animatable {
 }
 
 extension _FrameLayout: _ViewLayoutModifier {
-    class _FrameLayoutViewProxy: ViewProxy {
+    class _FrameLayoutViewProxy: GenericViewProxy {
         let layout: _FrameLayout
         let view: ViewProxy
 
         init(layout: _FrameLayout, view: ViewProxy, inputs: _ViewInputs) {
             self.layout = layout
             self.view = view
-            super.init(inputs: inputs, subviews: [self.view])
+            super.init(inputs: inputs, body: self.view)
         }
 
         override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {

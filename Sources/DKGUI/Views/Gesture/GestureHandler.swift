@@ -21,6 +21,10 @@ struct _PrimitiveGestureTypes : OptionSet {
     static let none: Self = []
 }
 
+func _makeGestureHandler<T: Gesture>(_ gesture: T, inputs: _GestureInputs) -> _GestureHandler {
+    T._makeGesture(gesture: _GraphValue(gesture), inputs: inputs).recognizer
+}
+
 class _GestureHandler {
     enum State: Int {
         case ready

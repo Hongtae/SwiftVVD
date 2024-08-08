@@ -22,15 +22,17 @@ extension View {
             let proxy = provider.makeViewProxy(inputs: inputs)
             return _ViewOutputs(item: .view(proxy))
         }
+        
         let body = view[\.body]
         if body.value is _ViewProxyProvider {
-            return Self.Body._makeView(view: body, inputs: inputs)
-//            let subview = outputs.view
-//            let viewProxy = ViewGroupProxy(view: view.value,
-//                                           inputs: inputs,
-//                                           subviews: [subview],
-//                                           layout: inputs.defaultLayout)
-//            return _ViewOutputs(item: .view(viewProxy))
+            let output = Self.Body._makeView(view: body, inputs: inputs)
+            if Self._hasDynamicProperty {
+                let viewProxy = TypedViewProxy(view: view.value,
+                                               inputs: inputs,
+                                               body: output.view)
+                return _ViewOutputs(item: .view(viewProxy))
+            }
+            return output
         }
 
         let listInputs = _ViewListInputs(inputs: inputs)

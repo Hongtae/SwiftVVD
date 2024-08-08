@@ -19,14 +19,14 @@ public struct _PaddingLayout: ViewModifier, Animatable {
 }
 
 extension _PaddingLayout: _ViewLayoutModifier {
-    class _PaddingLayoutViewProxy: ViewProxy {
+    class _PaddingLayoutViewProxy: GenericViewProxy {
         let layout: _PaddingLayout
         let view: ViewProxy
 
         init(layout: _PaddingLayout, view: ViewProxy, inputs: _ViewInputs) {
             self.layout = layout
             self.view = view
-            super.init(inputs: inputs, subviews: [self.view])
+            super.init(inputs: inputs, body: self.view)
         }
 
         override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {

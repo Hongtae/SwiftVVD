@@ -50,6 +50,18 @@ public struct ScissorRect {
     }
 }
 
+public struct RenderStages: OptionSet {
+    public let rawValue: UInt32
+    public init(rawValue: UInt32) {
+        self.rawValue = rawValue
+    }
+
+    public static let vertex   = RenderStages(rawValue: 1 << 0)
+    public static let fragment = RenderStages(rawValue: 1 << 1)
+    public static let object   = RenderStages(rawValue: 1 << 2)
+    public static let mesh     = RenderStages(rawValue: 1 << 3)
+}
+
 public protocol RenderCommandEncoder: CommandEncoder {
     func setResource(_: ShaderBindingSet, index: Int)
     func setViewport(_: Viewport)
@@ -70,6 +82,8 @@ public protocol RenderCommandEncoder: CommandEncoder {
     func setDepthBias(_ depthBias: Float, slopeScale: Float, clamp: Float)
 
     func pushConstant<D: DataProtocol>(stages: ShaderStageFlags, offset: Int, data: D)
+
+    func memoryBarrier(after: RenderStages, before: RenderStages)
 
     func draw(vertexStart: Int, vertexCount: Int, instanceCount: Int, baseInstance: Int)
     func drawIndexed(indexCount: Int, indexType: IndexType, indexBuffer: GPUBuffer, indexBufferOffset: Int, instanceCount: Int, baseVertex: Int, baseInstance: Int)
