@@ -27,11 +27,11 @@ extension View {
             fatalError("\(Self.self) may not have Body == Never")
         }
         let outputs = Self.Body._makeView(view: view[\.body], inputs: inputs)
-        if MemoryLayout<Self>.size > 0 && Self._hasDynamicProperty {
+        if let body = outputs.view, MemoryLayout<Self>.size > 0 && Self._hasDynamicProperty {
             let generator = GenericViewContext.Generator(graph: view,
-                                                         body: outputs.view,
+                                                         body: body,
                                                          baseInputs: inputs.base)
-            return _ViewOutputs(view: generator, preferences: .init(preferences: []))
+            return _ViewOutputs(view: generator)
         }
         return outputs
     }
@@ -40,7 +40,7 @@ extension View {
         if self is any _PrimitiveView.Type {
             let inputs = _ViewInputs(base: inputs.base, preferences: inputs.preferences)
             let outputs = Self._makeView(view: view, inputs: inputs)
-            return _ViewListOutputs(viewList: .staticList([outputs.view]), preferences: .init(preferences: []))
+            return _ViewListOutputs(viewList: .staticList([outputs.view].compactMap { $0 }))
         }
         if Body.self is Never.Type {
             fatalError("\(Self.self) may not have Body == Never")

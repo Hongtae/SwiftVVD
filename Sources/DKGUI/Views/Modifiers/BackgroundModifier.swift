@@ -18,11 +18,15 @@ public struct _BackgroundModifier<Background>: ViewModifier where Background: Vi
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
         let outputs = body(_Graph(), inputs)
-        var backgroundInputs = inputs
-        backgroundInputs.base.properties.replace(item: DefaultLayoutPropertyItem(layout: ZStackLayout()))
-        let background = makeView(view: modifier[\.background], inputs: backgroundInputs)
-        let generator = BackgroundViewContext.Generator(content: outputs.view, background: background.view, graph: modifier, baseInputs: inputs.base)
-        return _ViewOutputs(view: generator, preferences: .init(preferences: []))
+        if let content = outputs.view {
+            var backgroundInputs = inputs
+            backgroundInputs.base.properties.replace(item: DefaultLayoutPropertyItem(layout: ZStackLayout()))
+            if let background = makeView(view: modifier[\.background], inputs: backgroundInputs).view {
+                let generator = BackgroundViewContext.Generator(content: content, background: background, graph: modifier, baseInputs: inputs.base)
+                return _ViewOutputs(view: generator)
+            }
+        }
+        return outputs
     }
 
     public typealias Body = Never
@@ -45,9 +49,11 @@ public struct _BackgroundStyleModifier<Style>: ViewModifier where Style: ShapeSt
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
         let outputs = body(_Graph(), inputs)
-        let background = makeView(view: modifier[\._shapeView], inputs: inputs)
-        let generator = BackgroundViewContext.Generator(content: outputs.view, background: background.view, graph: modifier, baseInputs: inputs.base)
-        return _ViewOutputs(view: generator, preferences: .init(preferences: []))
+        if let content = outputs.view, let background = makeView(view: modifier[\._shapeView], inputs: inputs).view {
+            let generator = BackgroundViewContext.Generator(content: content, background: background, graph: modifier, baseInputs: inputs.base)
+            return _ViewOutputs(view: generator)
+        }
+        return outputs
     }
 
     public typealias Body = Never
@@ -73,9 +79,11 @@ public struct _BackgroundShapeModifier<Style, Bounds>: ViewModifier where Style:
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
         let outputs = body(_Graph(), inputs)
-        let background = makeView(view: modifier[\._shapeView], inputs: inputs)
-        let generator = BackgroundViewContext.Generator(content: outputs.view, background: background.view, graph: modifier, baseInputs: inputs.base)
-        return _ViewOutputs(view: generator, preferences: .init(preferences: []))
+        if let content = outputs.view, let background = makeView(view: modifier[\._shapeView], inputs: inputs).view {
+            let generator = BackgroundViewContext.Generator(content: content, background: background, graph: modifier, baseInputs: inputs.base)
+            return _ViewOutputs(view: generator)
+        }
+        return outputs
     }
 
     public typealias Body = Never
@@ -101,9 +109,11 @@ public struct _InsettableBackgroundShapeModifier<Style, Bounds>: ViewModifier wh
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
         let outputs = body(_Graph(), inputs)
-        let background = makeView(view: modifier[\._shapeView], inputs: inputs)
-        let generator = BackgroundViewContext.Generator(content: outputs.view, background: background.view, graph: modifier, baseInputs: inputs.base)
-        return _ViewOutputs(view: generator, preferences: .init(preferences: []))
+        if let content = outputs.view, let background = makeView(view: modifier[\._shapeView], inputs: inputs).view {
+            let generator = BackgroundViewContext.Generator(content: content, background: background, graph: modifier, baseInputs: inputs.base)
+            return _ViewOutputs(view: generator)
+        }
+        return outputs
     }
 
     public typealias Body = Never

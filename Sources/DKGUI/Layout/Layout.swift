@@ -247,7 +247,7 @@ public struct _LayoutRoot<L> : _VariadicView.UnaryViewRoot where L : Layout {
         let generator = _VariadicView_ViewRoot_MakeChildren_LayoutRootProxy(graph: root, body: body, inputs: inputs) {
             $0.layout
         }
-        return _ViewOutputs(view: generator, preferences: .init(preferences: []))
+        return _ViewOutputs(view: generator)
     }
 
     public typealias Body = Never

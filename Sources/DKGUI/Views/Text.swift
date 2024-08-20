@@ -282,7 +282,7 @@ extension Text {
 extension Text: View {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         let generator = TextViewContext.Generator(graph: view, baseInputs: inputs.base)
-        return _ViewOutputs(view: generator, preferences: PreferenceOutputs(preferences: []))
+        return _ViewOutputs(view: generator)
     }
 }
 

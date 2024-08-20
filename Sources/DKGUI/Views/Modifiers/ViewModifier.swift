@@ -15,14 +15,14 @@ public struct _ViewModifier_Content<Modifier> where Modifier: ViewModifier {
         if let body = inputs._modifierBody[ObjectIdentifier(Modifier.self)] {
             return body(_Graph(), inputs)
         }
-        return _ViewOutputs(view: _ViewGenerator(graph: view), preferences: .init(preferences: []))
+        return _ViewOutputs(view: _ViewGenerator(graph: view))
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
         if let body = inputs._modifierBody[ObjectIdentifier(Modifier.self)] {
             return body(_Graph(), inputs)
         }
-        return _ViewListOutputs(viewList: .staticList([_ViewGenerator(graph: view)]), preferences: .init(preferences: []))
+        return _ViewListOutputs(viewList: .staticList([_ViewGenerator(graph: view)]))
     }
 }
 
@@ -111,12 +111,12 @@ extension ViewModifier where Self: Animatable {
         Self._makeAnimatable(value: &modifier, inputs: inputs.base)
 
         let viewOutputs = body(_Graph(), inputs)
-        if let layoutModifier = self as? any _ViewLayoutModifier.Type {
+        if let content = viewOutputs.view, let layoutModifier = self as? any _ViewLayoutModifier.Type {
             func _makeView<T: _ViewLayoutModifier>(_: T.Type, modifier: Any, content: any ViewGenerator, inputs: _GraphInputs) -> any ViewGenerator {
                 T._makeView(modifier: modifier as! _GraphValue<T>, content: content, inputs: inputs)
             }
-            let generator = _makeView(layoutModifier, modifier: modifier, content: viewOutputs.view, inputs: inputs.base)
-            return _ViewOutputs(view: generator, preferences: .init(preferences: []))
+            let generator = _makeView(layoutModifier, modifier: modifier, content: content, inputs: inputs.base)
+            return _ViewOutputs(view: generator)
         }
         return viewOutputs
     }
@@ -131,7 +131,7 @@ extension ViewModifier where Self: Animatable {
                 T._makeViewList(modifier: modifier as! _GraphValue<T>, content: content, inputs: inputs)
             }
             let generators = _makeViewList(layoutModifier, modifier: modifier, content: viewListOutputs.viewList, inputs: inputs.base)
-            return _ViewListOutputs(viewList: generators, preferences: .init(preferences: []))
+            return _ViewListOutputs(viewList: generators)
         }
         return viewListOutputs
     }
@@ -159,7 +159,7 @@ extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
                 modifier($0)
             }
             let subviews = outputs.compactMap {
-                $0.view.makeView(encloser: encloser, graph: graph)
+                $0.view?.makeView(encloser: encloser, graph: graph)
             }
             if let view = graph.value(atPath: self.graph, from: encloser) {
 
@@ -196,13 +196,13 @@ extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
                         return view
                     }
                     let generator = merge(generator, inputs: inputs.base)
-                    return _ViewOutputs(view: generator, preferences: .init(preferences: []))
+                    return _ViewOutputs(view: generator)
                 }
             }
-            return _ViewOutputs(view: generator, preferences: .init(preferences: []))
+            return _ViewOutputs(view: generator)
         }
         return Modifier._makeView(modifier: view[\.modifier], inputs: inputs) { _, inputs in
-            outputs.view.mergeInputs(inputs.base)
+            outputs.view?.mergeInputs(inputs.base)
             return outputs
         }
     }
@@ -212,7 +212,7 @@ extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
         let modifier: (any ViewGenerator) -> _ViewOutputs
         func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
             let views = content.makeViewList(encloser: encloser, graph: graph)
-            return views.map { modifier($0).view }
+            return views.compactMap { modifier($0).view }
         }
         mutating func mergeInputs(_ inputs: _GraphInputs) {
             content.mergeInputs(inputs)
@@ -228,10 +228,10 @@ extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
                 Modifier._makeView(modifier: view[\.modifier], inputs: inputs) { _, inputs in
                     var generator = generator
                     generator.mergeInputs(inputs.base)
-                    return _ViewOutputs(view: generator, preferences: .init(preferences: []))
+                    return _ViewOutputs(view: generator)
                 }
             }
-            return _ViewListOutputs(viewList: viewList, preferences: .init(preferences: []))
+            return _ViewListOutputs(viewList: viewList)
         }
         return Modifier._makeViewList(modifier: view[\.modifier], inputs: inputs) { _, inputs in
             Content._makeViewList(view: view[\.content], inputs: inputs)

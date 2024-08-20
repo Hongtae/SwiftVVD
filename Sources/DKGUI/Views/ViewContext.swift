@@ -53,6 +53,9 @@ extension ViewListGenerator where Self == StaticViewListGenerator {
     static func staticList(_ list: [any ViewGenerator]) -> StaticViewListGenerator {
         .init(viewList: list)
     }
+    static var empty: StaticViewListGenerator {
+        .staticList([])
+    }
 }
 
 extension ViewListGenerator where Self == DynamicViewListGenerator {

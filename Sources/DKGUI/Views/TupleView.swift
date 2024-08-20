@@ -78,34 +78,22 @@ public struct TupleView<T>: View {
         let generator = TupleViewGenerator(graph: view,
                                            subviews: listOutputs.viewList,
                                            baseInputs: inputs.base)
-        return _ViewOutputs(view: generator, preferences: .init(preferences: []))
+        return _ViewOutputs(view: generator)
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
         var children: [any ViewListGenerator] = []
         if let viewType = T.self as? any View.Type {
-            if T.self is any _PrimitiveView.Type {
-                let inputs = _ViewInputs(base: inputs.base, preferences: inputs.preferences, traits: inputs.traits)
-                let outputs = makeView(viewType, view: view[\.value].unsafeCast(to: Any.self), inputs: inputs)
-                children.append(.staticList([outputs.view]))
-            } else {
-                let outputs = makeViewList(viewType, view: view[\.value].unsafeCast(to: Any.self), inputs: inputs)
-                children.append(outputs.viewList)
-            }
+            let outputs = makeViewList(viewType, view: view[\.value].unsafeCast(to: Any.self), inputs: inputs)
+            children.append(outputs.viewList)
         } else {
             let subviews = self._subviewTypes
             for (index, v) in subviews.enumerated() {
-                if v.type is any _PrimitiveView.Type {
-                    let inputs = _ViewInputs(base: inputs.base, preferences: inputs.preferences, traits: inputs.traits)
-                    let outputs = makeView(v.type, view: view[\._subviews[index]].unsafeCast(to: Any.self), inputs: inputs)
-                    children.append(.staticList([outputs.view]))
-                } else {
-                    let outputs = makeViewList(v.type, view: view[\._subviews[index]].unsafeCast(to: Any.self), inputs: inputs)
-                    children.append(outputs.viewList)
-                }
+                let outputs = makeViewList(v.type, view: view[\._subviews[index]].unsafeCast(to: Any.self), inputs: inputs)
+                children.append(outputs.viewList)
             }
         }
-        return _ViewListOutputs(viewList: .dynamicList(children), preferences: .init(preferences: []))
+        return _ViewListOutputs(viewList: .dynamicList(children))
     }
 
     public typealias Body = Never

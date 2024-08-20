@@ -36,7 +36,7 @@ extension Spacer : _PrimitiveView {
         }
         let baseInputs = _GraphInputs(environment: .init(), sharedContext: sharedContext)
         let generator = Generator(graph: view, baseInputs: baseInputs)
-        return _ViewOutputs(view: generator, preferences: PreferenceOutputs(preferences: []))
+        return _ViewOutputs(view: generator)
     }
 }
 
@@ -61,7 +61,7 @@ public struct Divider : View {
             }
         }
         let generator = Generator(graph: view, baseInputs: inputs.base)
-        return _ViewOutputs(view: generator, preferences: PreferenceOutputs(preferences: []))
+        return _ViewOutputs(view: generator)
     }
 
     public typealias Body = Never

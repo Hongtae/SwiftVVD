@@ -18,11 +18,15 @@ public struct _OverlayModifier<Overlay>: ViewModifier where Overlay: View {
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
         let outputs = body(_Graph(), inputs)
-        var overlayInputs = inputs
-        overlayInputs.base.properties.replace(item: DefaultLayoutPropertyItem(layout: ZStackLayout()))
-        let overlay = makeView(view: modifier[\.overlay], inputs: overlayInputs)
-        let generator = OverlayViewContext.Generator(content: outputs.view, overlay: overlay.view, graph: modifier, baseInputs: inputs.base)
-        return _ViewOutputs(view: generator, preferences: .init(preferences: []))
+        if let content = outputs.view {
+            var overlayInputs = inputs
+            overlayInputs.base.properties.replace(item: DefaultLayoutPropertyItem(layout: ZStackLayout()))
+            if let overlay = makeView(view: modifier[\.overlay], inputs: overlayInputs).view {
+                let generator = OverlayViewContext.Generator(content: content, overlay: overlay, graph: modifier, baseInputs: inputs.base)
+                return _ViewOutputs(view: generator)
+            }
+        }
+        return outputs
     }
 
     public typealias Body = Never
@@ -45,9 +49,11 @@ public struct _OverlayStyleModifier<Style>: ViewModifier where Style: ShapeStyle
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
         let outputs = body(_Graph(), inputs)
-        let overlay = makeView(view: modifier[\._shapeView], inputs: inputs)
-        let generator = OverlayViewContext.Generator(content: outputs.view, overlay: overlay.view, graph: modifier, baseInputs: inputs.base)
-        return _ViewOutputs(view: generator, preferences: .init(preferences: []))
+        if let content = outputs.view, let overlay = makeView(view: modifier[\._shapeView], inputs: inputs).view {
+            let generator = OverlayViewContext.Generator(content: content, overlay: overlay, graph: modifier, baseInputs: inputs.base)
+            return _ViewOutputs(view: generator)
+        }
+        return outputs
     }
 
     public typealias Body = Never
@@ -73,9 +79,11 @@ public struct _OverlayShapeModifier<Style, Bounds>: ViewModifier where Style: Sh
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
         let outputs = body(_Graph(), inputs)
-        let overlay = makeView(view: modifier[\._shapeView], inputs: inputs)
-        let generator = OverlayViewContext.Generator(content: outputs.view, overlay: overlay.view, graph: modifier, baseInputs: inputs.base)
-        return _ViewOutputs(view: generator, preferences: .init(preferences: []))
+        if let content = outputs.view, let overlay = makeView(view: modifier[\._shapeView], inputs: inputs).view {
+            let generator = OverlayViewContext.Generator(content: content, overlay: overlay, graph: modifier, baseInputs: inputs.base)
+            return _ViewOutputs(view: generator)
+        }
+        return outputs
     }
 
     public typealias Body = Never

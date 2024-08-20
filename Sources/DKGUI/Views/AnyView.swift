@@ -40,13 +40,13 @@ public struct AnyView: View {
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         let generator = TypeErasedViewGenerator(graph: view, inputs: inputs)
-        return _ViewOutputs(view: generator, preferences: .init(preferences: []))
+        return _ViewOutputs(view: generator)
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
         let inputs = _ViewInputs(base: inputs.base, preferences: inputs.preferences, traits: inputs.traits)
         let generator = TypeErasedViewGenerator(graph: view, inputs: inputs)
-        return _ViewListOutputs(viewList: .staticList([generator]), preferences: .init(preferences: []))
+        return _ViewListOutputs(viewList: .staticList([generator]))
     }
 
     public typealias Body = Never
@@ -61,8 +61,12 @@ private struct TypeErasedViewGenerator : ViewGenerator {
 
     func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
         if let value = graph.value(atPath: self.graph, from: encloser) {
-            let outputs = DKGUI.makeView(view: self.graph[\.storage.view].unsafeCast(to: type(of: value)), inputs: inputs)
-            return outputs.view.makeView(encloser: value, graph: self.graph)
+            func make<V: View>(_ view: V, graph: _GraphValue<Any>, inputs: _ViewInputs) -> ViewContext? {
+                let graph = graph.unsafeCast(to: V.self)
+                let outputs = V._makeView(view: graph, inputs: inputs)
+                return outputs.view?.makeView(encloser: view, graph: graph)
+            }
+            return make(value.storage.view, graph: self.graph[\.storage.view].unsafeCast(to: Any.self), inputs: inputs)
         }
         return nil
     }

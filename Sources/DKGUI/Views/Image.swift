@@ -223,7 +223,7 @@ extension Image {
 extension Image: View {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         let generator = ImageViewContext.Generator(graph: view, baseInputs: inputs.base)
-        return _ViewOutputs(view: generator, preferences: PreferenceOutputs(preferences: []))
+        return _ViewOutputs(view: generator)
     }
 
     public typealias Body = Never

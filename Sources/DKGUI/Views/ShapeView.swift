@@ -20,7 +20,7 @@ public struct _ShapeView<Content, Style>: View where Content: Shape, Style: Shap
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         let generator = ShapeViewContext.Generator(graph: view, baseInputs: inputs.base)
-        return _ViewOutputs(view: generator, preferences: .init(preferences: []))
+        return _ViewOutputs(view: generator)
     }
 
     public typealias Body = Never

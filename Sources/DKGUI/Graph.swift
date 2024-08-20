@@ -91,15 +91,15 @@ struct ViewTraitKeys {
 
 public struct _ViewInputs {
     var base: _GraphInputs
-    var preferences: PreferenceInputs
+    var preferences: PreferenceInputs = PreferenceInputs(preferences: [])
     var traits: ViewTraitKeys = ViewTraitKeys()
 
     var _modifierBody: [ObjectIdentifier: (_Graph, _ViewInputs)->_ViewOutputs] = [:]
 }
 
 public struct _ViewOutputs {
-    var view: any ViewGenerator
-    var preferences: PreferenceOutputs
+    var view: (any ViewGenerator)?
+    var preferences: PreferenceOutputs = PreferenceOutputs(preferences: [])
 }
 
 public struct _ViewListInputs {
@@ -109,7 +109,7 @@ public struct _ViewListInputs {
     }
 
     var base: _GraphInputs
-    var preferences: PreferenceInputs
+    var preferences: PreferenceInputs = PreferenceInputs(preferences: [])
     var traits: ViewTraitKeys = ViewTraitKeys()
     var options: Options = .none
 
@@ -123,7 +123,7 @@ public struct _ViewListOutputs {
     }
 
     var viewList: any ViewListGenerator
-    var preferences: PreferenceOutputs
+    var preferences: PreferenceOutputs = PreferenceOutputs(preferences: [])
     var options: Options = .none
 }
 
