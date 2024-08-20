@@ -126,26 +126,28 @@ private struct GenericViewReferences<Content> : ViewReferences where Content : V
         let b = self.graph.trackRelativeGraphs(to: view.graph) {
             paths.append($0)
         }
-        if b == false || paths.isEmpty {
-            fatalError("Reachable path!")
+        if b == false {
+            fatalError("Unreachable path: \(view.graph.debugDescription), from: \(self.graph.debugDescription)")
         }
-        paths = paths.dropLast(1)
-        if paths.count > 0 {
-            for path in paths {
-                // if sizeof View > 0 create node.
-                if let value = self.graph.value(atPath: path, from: self.content) as? any View, MemoryLayout.size(ofValue: value) > 0 {
-                    func isEqual<T>(_ v: some ViewReferences, _ graph: _GraphValue<T>) -> Bool {
-                        v.graph == graph
-                    }
-                    if self.children.firstIndex(where: { isEqual($0, path) } ) == nil {
-                        func make<T : View, U>(_ content: T, _ graph: _GraphValue<U>) -> any ViewReferences {
-                            GenericViewReferences<T>(content: content, graph: graph.unsafeCast(to: T.self), children: [], subviews: [])
+        if paths.isEmpty == false {
+            paths = paths.dropLast(1)
+            if paths.count > 0 {
+                for path in paths {
+                    // if sizeof View > 0 create node.
+                    if let value = self.graph.value(atPath: path, from: self.content) as? any View, MemoryLayout.size(ofValue: value) > 0 {
+                        func isEqual<T>(_ v: some ViewReferences, _ graph: _GraphValue<T>) -> Bool {
+                            v.graph == graph
                         }
-                        self.children.append(make(value, path))
+                        if self.children.firstIndex(where: { isEqual($0, path) } ) == nil {
+                            func make<T : View, U>(_ content: T, _ graph: _GraphValue<U>) -> any ViewReferences {
+                                GenericViewReferences<T>(content: content, graph: graph.unsafeCast(to: T.self), children: [], subviews: [])
+                            }
+                            self.children.append(make(value, path))
+                        }
+                        let index = self.children.firstIndex(where: { isEqual($0, path) } )!
+                        self.children[index].append(view: view)
+                        return
                     }
-                    let index = self.children.firstIndex(where: { isEqual($0, path) } )!
-                    self.children[index].append(view: view)
-                    return
                 }
             }
         }

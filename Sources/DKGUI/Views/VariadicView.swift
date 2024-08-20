@@ -22,7 +22,7 @@ public struct _VariadicView_Children : View {
             func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
                 if let view = graph.value(atPath: self.graph, from: encloser) {
                     let inputs = _ViewInputs(base: inputs.base, preferences: inputs.preferences, traits: inputs.traits)
-                    return (0..<view.elements.count).map { index in
+                    return (0..<view.elements.count).compactMap { index in
                         Element._makeView(view: self.graph[\.elements[index]], inputs: inputs).view
                     }
                 }
@@ -34,7 +34,7 @@ public struct _VariadicView_Children : View {
                 self.inputs.base.mergedInputs.append(inputs)
             }
         }
-        return _ViewListOutputs(viewList: Generator(graph: view, inputs: inputs), preferences: .init(preferences: []))
+        return _ViewListOutputs(viewList: Generator(graph: view, inputs: inputs))
     }
 
     let elements: [Element]
@@ -65,9 +65,9 @@ extension _VariadicView_Children : RandomAccessCollection {
                 var inputs: _ViewInputs
                 func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
                     if let element = graph.value(atPath: self.graph, from: encloser) {
-                        let view = element.view
-                        view.merge(graphInputs: self.inputs.base)
-                        return view
+                        var view = element.view
+                        view.mergeInputs(self.inputs.base)
+                        return view.makeView(encloser: encloser, graph: graph)
                     }
                     fatalError("Unable to recover element")
                 }
@@ -76,13 +76,13 @@ extension _VariadicView_Children : RandomAccessCollection {
                 }
             }
             let generator = Generator(graph: view, inputs: inputs)
-            return _ViewOutputs(view: generator, preferences: PreferenceOutputs(preferences: []))
+            return _ViewOutputs(view: generator)
         }
 
         public typealias ID = AnyHashable
         public typealias Body = Never
 
-        let view: ViewContext
+        let view: any ViewGenerator
         var traits: [ObjectIdentifier: Any]
         var viewID: AnyHashable
     }
@@ -95,7 +95,7 @@ extension _VariadicView_Children : RandomAccessCollection {
     public typealias SubSequence = Slice<_VariadicView_Children>
     public typealias Indices = Range<Int>
 
-    init(_ viewList: [ViewContext]) {
+    init(_ viewList: [any ViewGenerator]) {
         self.elements = viewList.indices.map { index in
             Element(view: viewList[index],  traits: [:], viewID: index)
         }
@@ -140,7 +140,7 @@ private struct _VariadicView_ViewRoot_MakeChildrenProxy<Root> : _VariadicView_Vi
 
     struct Proxy {
         let root: Root
-        let views: [ViewContext]
+        let views: [any ViewGenerator]
         var children:  _VariadicView.Children {
             _VariadicView.Children(views)
         }
@@ -149,31 +149,71 @@ private struct _VariadicView_ViewRoot_MakeChildrenProxy<Root> : _VariadicView_Vi
         }
     }
 
-    private struct ProxyGenerator<Generator> : ViewGenerator where Generator : ViewGenerator {
-        let proxy: Proxy
-        let proxyGraph: _GraphValue<Proxy>
-        var generator: Generator
-        var graph: _GraphValue<Generator.Content> { generator.graph }
+    private struct ApplyProxyView<Generator> : ViewGenerator where Generator : ViewGenerator {
+        let proxy: _ProxyContext
+        var view: Generator
+        var graph: _GraphValue<Generator.Content> { view.graph }
         func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
-            generator.makeView(encloser: proxy, graph: proxyGraph)
+            let view = view.makeView(encloser: proxy.proxy, graph: proxy.proxyGraph)
+            if let view, view.graph.isDescendant(of: proxy.proxyGraph) {
+                // this view must be validated using the proxy.
+                return ProxyViewContext(proxy: proxy,
+                                        view: view,
+                                        inputs: view.inputs,
+                                        graph: graph.unsafeCast(to: Any.self))
+            }
+            return view
         }
         mutating func mergeInputs(_ inputs: _GraphInputs) {
-            generator.mergeInputs(inputs)
+            view.mergeInputs(inputs)
+        }
+    }
+
+    struct BypassProxyView<Generator> : ViewGenerator where Generator : ViewGenerator {
+        let proxy: _ProxyContext
+        var view: Generator
+        var graph: _GraphValue<Generator.Content> { view.graph }
+
+        func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
+            if let view = view.makeView(encloser: proxy.encloser, graph: proxy.encloserGraph) {
+                // this view must be validated by bypassing the proxy.
+                return BypassProxyViewContext(proxy: proxy,
+                                              view: view,
+                                              inputs: view.inputs,
+                                              graph: graph.unsafeCast(to: Any.self))
+            }
+            return nil
+        }
+
+        mutating func mergeInputs(_ inputs: _GraphInputs) {
+            view.mergeInputs(inputs)
         }
     }
 
     func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
-        let views = body.viewList.makeViewList(encloser: encloser, graph: graph).compactMap {
-            $0.makeView(encloser: encloser, graph: graph)
-        }
         if let root = graph.value(atPath: self.graph, from: encloser) {
-            let proxy = Proxy(root: root, views: views)
             let proxyGraph = _GraphValue<Proxy>.root()
+            let proxyContext = _ProxyContext(encloser: encloser,
+                                             encloserGraph: graph.unsafeCast(to: Any.self),
+                                             proxy: Proxy(root: root, views: []),
+                                             proxyGraph: proxyGraph.unsafeCast(to: Any.self))
+
+            let views: [any ViewGenerator] = body.viewList.makeViewList(encloser: encloser, graph: graph).map {
+                // redirect encloser to view (bypass proxy)
+                func makeGenerator<G: ViewGenerator>(gen: G) -> any ViewGenerator {
+                    BypassProxyView(proxy: proxyContext, view: gen)
+                }
+                return makeGenerator(gen: $0)
+            }
+
+            let proxy = Proxy(root: root, views: views)
+            proxyContext.proxy = proxy
+
             if Root.Body.self is Never.Type {
                 let listOutputs = _VariadicView_Children._makeViewList(view: proxyGraph[\.children], inputs: self.inputs)
                 return listOutputs.viewList.makeViewList(encloser: proxy, graph: proxyGraph).map {
                     func makeGenerator<G: ViewGenerator>(gen: G) -> any ViewGenerator {
-                        ProxyGenerator(proxy: proxy, proxyGraph: proxyGraph, generator: gen)
+                        ApplyProxyView(proxy: proxyContext, view: gen)
                     }
                     return makeGenerator(gen: $0)
                 }
@@ -181,7 +221,7 @@ private struct _VariadicView_ViewRoot_MakeChildrenProxy<Root> : _VariadicView_Vi
                 let listOutputs = Root.Body._makeViewList(view: proxyGraph[\.body], inputs: self.inputs)
                 return listOutputs.viewList.makeViewList(encloser: proxy, graph: proxyGraph).map {
                     func makeGenerator<G: ViewGenerator>(gen: G) -> any ViewGenerator {
-                        ProxyGenerator(proxy: proxy, proxyGraph: proxyGraph, generator: gen)
+                        ApplyProxyView(proxy: proxyContext, view: gen)
                     }
                     return makeGenerator(gen: $0)
                 }
@@ -290,19 +330,18 @@ struct _VariadicView_ViewRoot_MakeChildren_LayoutRootProxy<Root> : _VariadicView
     }
 }
 
-
 extension _VariadicView_ViewRoot {
     public static func _makeView(root: _GraphValue<Self>, inputs: _ViewInputs, body: (_Graph, _ViewInputs) -> _ViewListOutputs) -> _ViewOutputs {
         let body = body(_Graph(), inputs)
         let inputs = _ViewListInputs(base: inputs.base, preferences: inputs.preferences)
         let generator = _VariadicView_ViewRoot_MakeChildrenProxy(graph: root, body: body, inputs: inputs)
-        return _ViewOutputs(view: generator, preferences: .init(preferences: []))
+        return _ViewOutputs(view: generator)
     }
 
     public static func _makeViewList(root: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
         let body = body(_Graph(), inputs)
         let generator = _VariadicView_ViewRoot_MakeChildrenProxy(graph: root, body: body, inputs: inputs)
-        return _ViewListOutputs(viewList: generator, preferences: .init(preferences: []))
+        return _ViewListOutputs(viewList: generator)
     }
 }
 
@@ -310,7 +349,7 @@ extension _VariadicView_UnaryViewRoot {
     public static func _makeViewList(root: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
         let body = body(_Graph(), inputs)
         let generator = _VariadicView_ViewRoot_MakeChildren_UnaryViewRootProxy(graph: root, body: body, inputs: inputs)
-        return _ViewListOutputs(viewList: generator, preferences: .init(preferences: []))
+        return _ViewListOutputs(viewList: generator)
     }
 }
 
@@ -319,7 +358,7 @@ extension _VariadicView_MultiViewRoot {
         let body = body(_Graph(), inputs)
         let inputs = _ViewListInputs(base: inputs.base, preferences: inputs.preferences)
         let generator = _VariadicView_ViewRoot_MakeChildren_MultiViewRootProxy(graph: root, body: body, inputs: inputs)
-        return _ViewOutputs(view: generator, preferences: .init(preferences: []))
+        return _ViewOutputs(view: generator)
     }
 }
 
@@ -361,6 +400,7 @@ extension _VariadicView.Tree : View where Root : _VariadicView_ViewRoot, Content
         func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
             if let view = graph.value(atPath: self.graph, from: encloser) {
                 let subviews = self.children.makeChildren(encloser: view, graph: self.graph)
+                if subviews.isEmpty { return nil }
 
                 var layout: any Layout = DefaultLayoutPropertyItem.default
                 if let layoutRoot = children as? any _VariadicView_ViewRoot_MakeChildren_LayoutRoot {
@@ -453,11 +493,11 @@ extension _VariadicView.Tree : View where Root : _VariadicView_ViewRoot, Content
 
         if let multiView = outputs.view as? any _VariadicView_ViewRoot_MakeChildren_MultiViewRoot {
             let generator = _MultiViewRootViewGenerator(graph: view, baseInputs: inputs.base, children: multiView)
-            return _ViewOutputs(view: generator, preferences: .init(preferences: []))
+            return _ViewOutputs(view: generator)
         }
         if let children = outputs.view as? _VariadicView_ViewRoot_MakeChildren {
             let generator = _ViewGenerator(graph: view, baseInputs: inputs.base, children: children)
-            return _ViewOutputs(view: generator, preferences: .init(preferences: []))
+            return _ViewOutputs(view: generator)
         }
         return outputs
     }
@@ -471,11 +511,132 @@ extension _VariadicView.Tree : View where Root : _VariadicView_ViewRoot, Content
                                                             baseInputs: inputs.base,
                                                             preferences: inputs.preferences,
                                                             children: unaryView)
-            return _ViewListOutputs(viewList: generator, preferences: .init(preferences: []))
+            return _ViewListOutputs(viewList: generator)
         }
         return outputs
     }
 }
 
 extension _VariadicView.Tree : _PrimitiveView where Self: View {
+}
+
+class _ProxyContext {
+    var encloser: Any
+    let encloserGraph: _GraphValue<Any>
+    var proxy: Any
+    let proxyGraph: _GraphValue<Any>
+    
+    func updateContent<T>(encloser: T, graph: _GraphValue<T>) {
+        if self.encloserGraph == graph {
+            self.encloser = encloser
+        } else {
+            fatalError("Invalid encloser graph!")
+        }
+    }
+
+    init(encloser: Any, encloserGraph: _GraphValue<Any>, proxy: Any, proxyGraph: _GraphValue<Any>) {
+        self.encloser = encloser
+        self.encloserGraph = encloserGraph
+        self.proxy = proxy
+        self.proxyGraph = proxyGraph
+    }
+}
+
+private class ProxyViewContext<Proxy : _ProxyContext> : ViewContext {
+    var proxy: Proxy
+    var view: ViewContext
+
+    init(proxy: Proxy, view: ViewContext, inputs: _GraphInputs, graph: _GraphValue<Any>) {
+        self.proxy = proxy
+        self.view = view
+        super.init(inputs: inputs, graph: graph)
+        self._debugDraw = false
+    }
+
+    override func validatePath<T>(encloser: T, graph: _GraphValue<T>) -> Bool {
+        self._validPath = self.view.validatePath(encloser: proxy.proxy, graph: proxy.proxyGraph)
+        return self._validPath
+    }
+
+    override func updateContent<T>(encloser: T, graph: _GraphValue<T>) {
+        self.proxy.updateContent(encloser: encloser, graph: graph)
+        self.view.updateContent(encloser: proxy.proxy, graph: proxy.proxyGraph)
+    }
+
+    override func resolveGraphInputs<T>(encloser: T, graph: _GraphValue<T>) {
+        super.resolveGraphInputs(encloser: encloser, graph: graph)
+        self.view.resolveGraphInputs(encloser: proxy.proxy, graph: proxy.proxyGraph)
+    }
+
+    override func updateEnvironment(_ environmentValues: EnvironmentValues) {
+        super.updateEnvironment(environmentValues)
+        self.view.updateEnvironment(environmentValues)
+    }
+
+    override func loadResources(_ context: GraphicsContext) {
+        super.loadResources(context)
+        self.view.loadResources(context)
+    }
+
+    override func update(transform t: AffineTransform) {
+        super.update(transform: t)
+        self.view.update(transform: t)
+    }
+
+    override func update(tick: UInt64, delta: Double, date: Date) {
+        super.update(tick: tick, delta: delta, date: date)
+        self.view.update(tick: tick, delta: delta, date: date)
+    }
+
+    override func draw(frame: CGRect, context: GraphicsContext) {
+        super.draw(frame: frame, context: context)
+
+        let width = self.view.frame.width
+        let height = self.view.frame.height
+        guard width > 0 && height > 0 else {
+            return
+        }
+        if frame.intersection(self.view.frame).isNull {
+            return
+        }
+        let frame = self.view.frame
+        self.view.drawView(frame: frame, context: context)
+    }
+
+    override func setLayoutProperties(_ properties: LayoutProperties) {
+        super.setLayoutProperties(properties)
+        self.view.setLayoutProperties(properties)
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+
+        let center = CGPoint(x: self.frame.midX, y: self.frame.midY)
+        let proposal = ProposedViewSize(width: self.frame.width, height: self.frame.height)
+        self.view.place(at: center, anchor: .center, proposal: proposal)
+    }
+
+    override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
+        self.view.sizeThatFits(proposal)
+    }
+
+    override func handleMouseWheel(at location: CGPoint, delta: CGPoint) -> Bool {
+        self.view.handleMouseWheel(at: location, delta: delta)
+    }
+}
+
+private class BypassProxyViewContext<Proxy : _ProxyContext> : ProxyViewContext<Proxy> {
+    override func validatePath<T>(encloser: T, graph: _GraphValue<T>) -> Bool {
+        self._validPath = self.view.validatePath(encloser: proxy.encloser, graph: proxy.encloserGraph)
+        return self._validPath
+    }
+
+    override func updateContent<T>(encloser: T, graph: _GraphValue<T>) {
+        self.view.updateContent(encloser: proxy.encloser, graph: proxy.encloserGraph)
+    }
+
+    override func resolveGraphInputs<T>(encloser: T, graph: _GraphValue<T>) {
+        super.resolveGraphInputs(encloser: encloser, graph: graph)
+        self.view.resolveGraphInputs(encloser: proxy.encloser, graph: proxy.encloserGraph)
+    }
 }
