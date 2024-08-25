@@ -21,3 +21,9 @@ public struct EmptyView: View {
 
 extension EmptyView: _PrimitiveView {
 }
+
+struct EmptyViewGenerator<T> : ViewGenerator {
+    let graph: _GraphValue<T>
+    func makeView<U>(encloser: U, graph: _GraphValue<U>) -> ViewContext? { nil }
+    mutating func mergeInputs(_ inputs: _GraphInputs) {}
+}

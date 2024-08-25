@@ -72,6 +72,10 @@ protocol AnyPreferenceKey {
 struct LayoutInputs {
     var modifierViews: [ObjectIdentifier: (_Graph, _ViewInputs)->_ViewOutputs] = [:]
     var modifierViewLists: [ObjectIdentifier: (_Graph, _ViewListInputs)->_ViewListOutputs] = [:]
+
+    var sourceWrites: [ObjectIdentifier: any ViewGenerator] = [:]
+
+    var labelStyles: [any LabelStyle] = []
 }
 
 struct PreferenceInputs {
@@ -201,6 +205,13 @@ public struct _GraphValue<Value> {
         root.paths[index].keyPath
     }
 
+    var valueType: Value.Type {
+        if let t = type(of: keyPath).valueType as? Value.Type {
+            return t
+        }
+        fatalError("Invalid type!")
+    }
+
     var parent: _GraphValue<Any>? {
         if self.index > 0 {
             let rp = root.paths[self.index]
@@ -279,6 +290,48 @@ public struct _GraphValue<Value> {
         root.pathIndices[rp] = index
         return .init(root, index)
     }
+}
+
+extension _GraphValue {
+    func nearestAncestor<T>(_ path: _GraphValue<T>?) -> _GraphValue<Any>? {
+        var graph = self.unsafeCast(to: Any.self)
+        if let path {
+            while path.isDescendant(of: graph) == false {
+                if let _graph = graph.parent {
+                    graph = _graph
+                } else {
+                    return nil
+                }
+            }
+        }
+        return graph
+    }
+
+#if swift(>=6.0)
+    func nearestCommonAncestor<each T>(_ path: repeat _GraphValue<each T>?) -> _GraphValue<Any>? {
+        var graph = self.unsafeCast(to: Any.self)
+        repeat if let _graph = graph.nearestAncestor(each path) {
+            graph = _graph
+        } else { return nil }
+        return graph
+    }
+#else
+    func nearestCommonAncestor<T, U>(_ path1: _GraphValue<T>?, _ path2: _GraphValue<U>?) -> _GraphValue<Any>? {
+        if path1 == nil { return nearestAncestor(path2) }
+        if path2 == nil { return nearestAncestor(path1) }
+        var graph = self.unsafeCast(to: Any.self)
+        if let path1, let path2 {
+            while path1.isDescendant(of: graph) == false || path2.isDescendant(of: graph) == false {
+                if let _graph = graph.parent {
+                    graph = _graph
+                } else {
+                    return nil
+                }
+            }
+        }
+        return graph
+    }
+#endif
 }
 
 extension _GraphValue : Equatable {

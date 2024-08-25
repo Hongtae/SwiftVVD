@@ -60,6 +60,7 @@ extension ViewReferences {
                     $0.validatePath(encloser: value, graph: self.graph)
                 }
             }
+            Log.warn("path validation failed: \(self.graph.debugDescription)")
         }
         return false
     }

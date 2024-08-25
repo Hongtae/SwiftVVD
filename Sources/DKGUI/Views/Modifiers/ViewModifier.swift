@@ -265,6 +265,14 @@ private struct ModifierViewListProxyGenerator<Modifier : ViewModifier> : ViewLis
 
 extension ViewModifier {
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
+        if let modifierType = self as? any _ViewInputsModifier.Type {
+            func makeInputs<T : _ViewInputsModifier>(_: T.Type, graph: _GraphValue<Any>, inputs: inout _ViewInputs) {
+                T._makeViewInputs(modifier: graph.unsafeCast(to: T.self), inputs: &inputs)
+            }
+            var inputs = inputs
+            makeInputs(modifierType, graph: modifier.unsafeCast(to: Any.self), inputs: &inputs)
+            return body(_Graph(), inputs)
+        }
         if Body.self is Never.Type {
             fatalError("\(Self.self) may not have Body == Never")
         }
@@ -274,6 +282,14 @@ extension ViewModifier {
     }
 
     public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
+        if let modifierType = self as? any _ViewInputsModifier.Type {
+            func makeInputs<T : _ViewInputsModifier>(_: T.Type, graph: _GraphValue<Any>, inputs: inout _ViewListInputs) {
+                T._makeViewListInputs(modifier: graph.unsafeCast(to: T.self), inputs: &inputs)
+            }
+            var inputs = inputs
+            makeInputs(modifierType, graph: modifier.unsafeCast(to: Any.self), inputs: &inputs)
+            return body(_Graph(), inputs)
+        }
         if Body.self is Never.Type {
             fatalError("\(Self.self) may not have Body == Never")
         }
@@ -289,8 +305,20 @@ public protocol _GraphInputsModifier {
 }
 
 // _ViewInputsModifier is a type of modifier that modifies _ViewInputs.
-public protocol _ViewInputsModifier {
+protocol _ViewInputsModifier {
     static func _makeViewInputs(modifier: _GraphValue<Self>, inputs: inout _ViewInputs)
+    static func _makeViewListInputs(modifier: _GraphValue<Self>, inputs: inout _ViewListInputs)
+}
+
+extension _ViewInputsModifier {
+    static func _makeViewInputs(modifier: _GraphValue<Self>, inputs: inout _ViewInputs) {
+        fatalError()
+    }
+    static func _makeViewListInputs(modifier: _GraphValue<Self>, inputs: inout _ViewListInputs) {
+        var _inputs = inputs.inputs
+        Self._makeViewInputs(modifier: modifier, inputs: &_inputs)
+        inputs = _inputs.listInputs
+    }
 }
 
 // _UnaryViewModifier is for View-Modifiers with Body = Never without _makeViewList.

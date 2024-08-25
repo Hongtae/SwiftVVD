@@ -98,12 +98,12 @@ extension Button where Label == DKGUI.Label<Text, Image> {
 }
 
 extension PrimitiveButtonStyle {
-    func _makeBodyView(configuration: Configuration, inputs: _ViewInputs) -> _ViewOutputs {
-        fatalError()
-    }
-    func _makeBodyViewList(configuration: Configuration, inputs: _ViewListInputs) -> _ViewListOutputs {
-        fatalError()
-    }
+//    func _makeBodyView(configuration: Configuration, inputs: _ViewInputs) -> _ViewOutputs {
+//        fatalError()
+//    }
+//    func _makeBodyViewList(configuration: Configuration, inputs: _ViewListInputs) -> _ViewListOutputs {
+//        fatalError()
+//    }
 }
 
 struct ResolvedButtonStyle: View {

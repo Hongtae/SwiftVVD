@@ -12,12 +12,18 @@ protocol ViewGenerator<Content> {
     associatedtype Content
     var graph: _GraphValue<Content> { get }
     func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext?
-    mutating func mergeInputs(_: _GraphInputs)
+    mutating func mergeInputs(_ inputs: _GraphInputs)
+}
+
+extension ViewGenerator {
+    var anyGraph: _GraphValue<Any> {
+        self.graph.unsafeCast(to: Any.self)
+    }
 }
 
 protocol ViewListGenerator {
     func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator]
-    mutating func mergeInputs(_: _GraphInputs)
+    mutating func mergeInputs(_ inputs: _GraphInputs)
 }
 
 struct StaticViewListGenerator : ViewListGenerator {
