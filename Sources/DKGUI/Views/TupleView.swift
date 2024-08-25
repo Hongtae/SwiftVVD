@@ -110,7 +110,7 @@ private struct TupleViewGenerator<Content> : ViewGenerator where Content : View 
     func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
         if let view = graph.value(atPath: self.graph, from: encloser) {
             let subviews = self.subviews.makeViewList(encloser: view, graph: self.graph).compactMap {
-                $0.makeView(encloser: encloser, graph: graph)
+                $0.makeView(encloser: view, graph: self.graph)
             }
             if subviews.count > 1 {
                 let layout = baseInputs.properties

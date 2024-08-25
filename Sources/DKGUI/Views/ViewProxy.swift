@@ -27,8 +27,12 @@ class ProxyViewContext<Proxy : ViewProxy> : ViewContext {
     }
 
     override func validatePath<T>(encloser: T, graph: _GraphValue<T>) -> Bool {
-        self._validPath = self.view.validatePath(encloser: proxy.content, graph: proxy.contentGraph)
-        return self._validPath
+        self._validPath = false
+        if self.proxy.validatePath(encloser: encloser, graph: graph) {
+            self._validPath = true
+            return self.view.validatePath(encloser: proxy.content, graph: proxy.contentGraph)
+        }
+        return false
     }
 
     override func updateContent<T>(encloser: T, graph: _GraphValue<T>) {

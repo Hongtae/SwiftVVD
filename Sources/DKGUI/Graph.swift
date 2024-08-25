@@ -176,6 +176,14 @@ public struct _GraphValue<Value> {
         root.paths[index].keyPath
     }
 
+    var parent: _GraphValue<Any>? {
+        if self.index > 0 {
+            let rp = root.paths[self.index]
+            return _GraphValue<Any>(self.root, rp.parent)
+        }
+        return nil
+    }
+
     func trackRelativeGraphs<U>(to dest: _GraphValue<U>, _ callback: (_GraphValue<Any>)->Void) -> Bool {
         guard self.root === dest.root
         else { return false }
@@ -237,7 +245,7 @@ public struct _GraphValue<Value> {
 
     public subscript<U>(keyPath: KeyPath<Value, U>) -> _GraphValue<U> {
         let rp = _GraphRoot.RelativePath(keyPath: keyPath,
-                                           parent: self.index)
+                                         parent: self.index)
         if let index = root.pathIndices[rp] {
             return .init(root, index)
         }

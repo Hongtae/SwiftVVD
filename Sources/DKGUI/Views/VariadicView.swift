@@ -156,21 +156,14 @@ private struct _VariadicView_ViewRoot_MakeChildrenProxy<Root> : _VariadicView_Vi
         let proxyGraph: _GraphValue<Proxy>
 
         func validatePath<T>(encloser: T, graph: _GraphValue<T>) -> Bool {
-            if self.contentGraph == graph {
-                return encloser is Content
-            }
-            return false
+            graph.value(atPath: self.contentGraph, from: encloser) != nil
         }
 
         func updateContent<T>(encloser: T, graph: _GraphValue<T>) {
-            if self.contentGraph == graph {
-                if let encloser = encloser as? Content {
-                    self.content = encloser
-                } else {
-                    fatalError("Invalid encloser object!")
-                }
+            if let value = graph.value(atPath: self.contentGraph, from: encloser) {
+                self.content = value
             } else {
-                fatalError("Invalid encloser graph!")
+                fatalError("Unable to recover Content: \(Content.self)")
             }
         }
 
@@ -247,13 +240,25 @@ private struct _VariadicView_ViewRoot_MakeChildrenProxy<Root> : _VariadicView_Vi
 
     func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
         if let root = graph.value(atPath: self.graph, from: encloser) {
+            // get VariadicTree object from encloser.
+            var tree: Any = encloser
+            var treeGraph: _GraphValue<Any> = graph.unsafeCast(to: Any.self)
+            if let parent = self.graph.parent, treeGraph != parent {
+                if let view = graph.value(atPath: parent, from: encloser) {
+                    tree = view
+                    treeGraph = parent
+                } else {
+                    fatalError("Unable to recover _VariadicView.Tree")
+                }
+            }
+
             let proxyGraph = _GraphValue<Proxy>.root()
-            let proxyContext = ProxyContext(content: encloser,
-                                            contentGraph: graph,
+            let proxyContext = ProxyContext(content: tree,
+                                            contentGraph: treeGraph,
                                             proxy: Proxy(root: root, views: []),
                                             proxyGraph: proxyGraph)
 
-            let views: [any ViewGenerator] = body.viewList.makeViewList(encloser: encloser, graph: graph).map {
+            let views: [any ViewGenerator] = body.viewList.makeViewList(encloser: tree, graph: treeGraph).map {
                 // redirect encloser to view (bypass proxy)
                 func makeGenerator<G: ViewGenerator>(gen: G) -> any ViewGenerator {
                     BypassProxyView(proxy: proxyContext, view: gen)
@@ -526,12 +531,15 @@ extension _VariadicView.Tree : View where Root : _VariadicView_ViewRoot, Content
         fileprivate var children: any _VariadicView_ViewRoot_MakeChildren_UnaryViewRoot
 
         func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
-            let subviews = children.makeViewList(encloser: encloser, graph: graph)
-            let generator = ViewGroupContext<_VariadicView.Tree<Root, Content>>
-                .Generator(graph: self.graph,
-                           subviews: subviews,
-                           baseInputs: self.baseInputs)
-            return [generator]
+            if let view = graph.value(atPath: self.graph, from: encloser) {
+                let subviews = children.makeViewList(encloser: view, graph: self.graph)
+                let generator = ViewGroupContext<_VariadicView.Tree<Root, Content>>
+                    .Generator(graph: self.graph,
+                               subviews: subviews,
+                               baseInputs: self.baseInputs)
+                return [generator]
+            }
+            fatalError("Unable to recover _VariadicView.Tree")
         }
 
         mutating func mergeInputs(_ inputs: _GraphInputs) {
