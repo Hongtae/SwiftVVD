@@ -69,6 +69,11 @@ extension _GraphInputs {
 protocol AnyPreferenceKey {
 }
 
+struct LayoutInputs {
+    var modifierViews: [ObjectIdentifier: (_Graph, _ViewInputs)->_ViewOutputs] = [:]
+    var modifierViewLists: [ObjectIdentifier: (_Graph, _ViewListInputs)->_ViewListOutputs] = [:]
+}
+
 struct PreferenceInputs {
     struct KeyValue {
         let key: AnyPreferenceKey
@@ -91,10 +96,24 @@ struct ViewTraitKeys {
 
 public struct _ViewInputs {
     var base: _GraphInputs
+    var layouts: LayoutInputs
     var preferences: PreferenceInputs = PreferenceInputs(preferences: [])
     var traits: ViewTraitKeys = ViewTraitKeys()
 
-    var _modifierBody: [ObjectIdentifier: (_Graph, _ViewInputs)->_ViewOutputs] = [:]
+    var listInputs: _ViewListInputs {
+        _ViewListInputs(base: self.base,
+                        layouts: self.layouts,
+                        preferences: self.preferences,
+                        traits: self.traits)
+    }
+
+    static func inputs(with sharedContext: SharedContext) -> _ViewInputs {
+        _ViewInputs(base: _GraphInputs(environment: EnvironmentValues(),
+                                       sharedContext: sharedContext),
+                    layouts: LayoutInputs(),
+                    preferences: PreferenceInputs(preferences: []),
+                    traits: ViewTraitKeys())
+    }
 }
 
 public struct _ViewOutputs {
@@ -109,11 +128,17 @@ public struct _ViewListInputs {
     }
 
     var base: _GraphInputs
+    var layouts: LayoutInputs
     var preferences: PreferenceInputs = PreferenceInputs(preferences: [])
     var traits: ViewTraitKeys = ViewTraitKeys()
     var options: Options = .none
 
-    var _modifierBody: [ObjectIdentifier: (_Graph, _ViewListInputs)->_ViewListOutputs] = [:]
+    var inputs: _ViewInputs {
+        _ViewInputs(base: self.base,
+                    layouts: self.layouts,
+                    preferences: self.preferences,
+                    traits: self.traits)
+    }
 }
 
 public struct _ViewListOutputs {

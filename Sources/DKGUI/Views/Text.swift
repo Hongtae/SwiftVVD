@@ -301,7 +301,7 @@ private class TextViewContext: ViewContext {
             if let view = graph.value(atPath: self.graph, from: encloser) {
                 return TextViewContext(view: view, inputs: baseInputs, graph: self.graph)
             }
-            fatalError("Unable to recover view")
+            fatalError("Unable to recover Text")
         }
 
         mutating func mergeInputs(_ inputs: _GraphInputs) {

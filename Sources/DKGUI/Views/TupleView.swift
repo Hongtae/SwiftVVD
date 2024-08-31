@@ -72,11 +72,9 @@ public struct TupleView<T>: View {
     }
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let listInputs = _ViewListInputs(base: inputs.base, preferences: inputs.preferences)
-        let listOutputs = Self._makeViewList(view: view, inputs: listInputs)
-
+        let outputs = Self._makeViewList(view: view, inputs: inputs.listInputs)
         let generator = TupleViewGenerator(graph: view,
-                                           subviews: listOutputs.viewList,
+                                           subviews: outputs.viewList,
                                            baseInputs: inputs.base)
         return _ViewOutputs(view: generator)
     }

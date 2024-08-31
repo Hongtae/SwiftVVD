@@ -12,17 +12,23 @@ public struct _ViewModifier_Content<Modifier> where Modifier: ViewModifier {
     public typealias Body = Never
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        if let body = inputs._modifierBody[ObjectIdentifier(Modifier.self)] {
+        if let body = inputs.layouts.modifierViews[ObjectIdentifier(Modifier.self)] {
             return body(_Graph(), inputs)
         }
-        return _ViewOutputs(view: _ViewGenerator(graph: view))
+        fatalError("Unable to get view body of \(Modifier.self)")
+        //return _ViewOutputs(view: _ViewGenerator(graph: view))
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        if let body = inputs._modifierBody[ObjectIdentifier(Modifier.self)] {
+        if let body = inputs.layouts.modifierViewLists[ObjectIdentifier(Modifier.self)] {
             return body(_Graph(), inputs)
         }
-        return _ViewListOutputs(viewList: .staticList([_ViewGenerator(graph: view)]))
+        if let body = inputs.layouts.modifierViews[ObjectIdentifier(Modifier.self)] {
+            let outputs = body(_Graph(), inputs.inputs)
+            return _ViewListOutputs(viewList: .staticList([outputs.view].compactMap { $0 }))
+        }
+        fatalError("Unable to get view body of \(Modifier.self)")
+        //return _ViewListOutputs(viewList: .staticList([_ViewGenerator(graph: view)]))
     }
 }
 
@@ -51,24 +57,229 @@ extension ViewModifier where Self.Body == Never {
     }
 }
 
+private class Proxy<Modifier> where Modifier : ViewModifier {
+    let root: _GraphValue<Proxy<Modifier>>
+    var modifier: Modifier
+    let modifierGraph: _GraphValue<Modifier>
+    var modifiedContent: Any
+    let modifiedContentGraph: _GraphValue<Any>
+
+    var body: Modifier.Body {
+        modifier.body(content: .init())
+    }
+
+    init(root: _GraphValue<Proxy<Modifier>>,
+         modifier: Modifier,
+         modifierGraph: _GraphValue<Modifier>,
+         modifiedContent: Any,
+         modifiedContentGraph: _GraphValue<Any>) {
+        self.root = root
+        self.modifier = modifier
+        self.modifierGraph = modifierGraph
+        self.modifiedContent = modifiedContent
+        self.modifiedContentGraph = modifiedContentGraph
+    }
+    func validatePath<T>(encloser: T, graph: _GraphValue<T>) -> Bool {
+        if let content = graph.value(atPath: self.modifiedContentGraph, from: encloser) {
+            return self.modifiedContentGraph.value(atPath: self.modifierGraph, from: content) != nil
+        }
+        return false
+    }
+    func updateContent<T>(encloser: T, graph: _GraphValue<T>) {
+        if let content = graph.value(atPath: self.modifiedContentGraph, from: encloser) {
+            self.modifiedContent = content
+            if let modifier = self.modifiedContentGraph.value(atPath: self.modifierGraph, from: content) {
+                self.modifier = modifier
+            }
+            fatalError("Unable to recover Modifier")
+        }
+        fatalError("Unable to recover ModifiedContent")
+    }
+}
+
+private struct ApplyProxy<Modifier : ViewModifier> : ViewProxy {
+    let proxy: Proxy<Modifier>
+    var content: Modifier.Body { proxy.body }
+    var contentGraph: _GraphValue<Modifier.Body> { proxy.root[\.body] }
+    func validatePath<T>(encloser: T, graph: _GraphValue<T>) -> Bool {
+        proxy.validatePath(encloser: encloser, graph: graph)
+    }
+    func updateContent<T>(encloser: T, graph: _GraphValue<T>) {
+        proxy.updateContent(encloser: encloser, graph: graph)
+    }
+}
+
+private struct BypassProxy<Modifier : ViewModifier> : ViewProxy {
+    let proxy: Proxy<Modifier>
+    var content: Any { proxy.modifiedContent }
+    var contentGraph: _GraphValue<Any> { proxy.modifiedContentGraph }
+    func validatePath<T>(encloser: T, graph: _GraphValue<T>) -> Bool {
+        true
+    }
+    func updateContent<T>(encloser: T, graph: _GraphValue<T>) {
+    }
+}
+
+private struct ModifierViewProxyGenerator<Modifier : ViewModifier> : ViewGenerator {
+    let graph: _GraphValue<Modifier>
+    var inputs: _ViewInputs
+    let body: (_Graph, _ViewInputs) -> _ViewOutputs
+
+    struct BypassProxyView : ViewGenerator {
+        let proxy: Proxy<Modifier>
+        var graph: _GraphValue<Any> { proxy.modifiedContentGraph }
+        var body: any ViewGenerator
+        func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
+            if let view = body.makeView(encloser: proxy.modifiedContent, graph: proxy.modifiedContentGraph) {
+                return ProxyViewContext(proxy: BypassProxy(proxy: proxy),
+                                        view: view,
+                                        inputs: view.inputs,
+                                        graph: graph)
+            }
+            fatalError("Unable to recover body")
+        }
+        mutating func mergeInputs(_ inputs: _GraphInputs) {
+            body.mergeInputs(inputs)
+        }
+    }
+
+    func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
+        if let modifier = graph.value(atPath: self.graph, from: encloser) {
+            guard let parent = self.graph.parent else {
+                fatalError("Unable to recover graph")
+            }
+            if let modifiedContent = graph.value(atPath: parent, from: encloser) {
+                let root = _GraphValue<Proxy<Modifier>>.root()
+                let proxy = Proxy(root: root,
+                                  modifier: modifier,
+                                  modifierGraph: self.graph,
+                                  modifiedContent: modifiedContent,
+                                  modifiedContentGraph: parent)
+
+                var inputs = self.inputs
+                inputs.layouts.modifierViews[ObjectIdentifier(Modifier.self)] = { _, inputs in
+                    let outputs = body(_Graph(), inputs)
+                    if let view = outputs.view {
+                        return _ViewOutputs(view: BypassProxyView(proxy: proxy, body: view))
+                    }
+                    return outputs
+                }
+
+                let outputs = Modifier.Body._makeView(view: root[\.body], inputs: inputs)
+                if let view = outputs.view {
+                    if let view = view.makeView(encloser: proxy, graph: root) {
+                        return ProxyViewContext(proxy: ApplyProxy(proxy: proxy),
+                                                view: view,
+                                                inputs: view.inputs,
+                                                graph: graph)
+                    }
+                    fatalError("Unable to make view")
+                }
+                return nil
+            }
+            fatalError("Unable to recover ModifiedContent")
+        }
+        fatalError("Unable to recover Modifier")
+    }
+    mutating func mergeInputs(_ inputs: _GraphInputs) {
+        self.inputs.base.mergedInputs.append(inputs)
+    }
+}
+
+private struct ModifierViewListProxyGenerator<Modifier : ViewModifier> : ViewListGenerator {
+    let graph: _GraphValue<Modifier>
+    var inputs: _ViewListInputs
+    let body: (_Graph, _ViewListInputs) -> _ViewListOutputs
+
+    typealias BypassProxyView = ModifierViewProxyGenerator<Modifier>.BypassProxyView
+
+    struct BypassProxyViewList : ViewListGenerator {
+        let proxy: Proxy<Modifier>
+        var graph: _GraphValue<Any> { proxy.modifiedContentGraph }
+        var body: any ViewListGenerator
+        func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
+            body.makeViewList(encloser: proxy.modifiedContent, graph: proxy.modifiedContentGraph)
+                .map {
+                    BypassProxyView(proxy: proxy, body: $0)
+                }
+        }
+
+        mutating func mergeInputs(_ inputs: _GraphInputs) {
+            body.mergeInputs(inputs)
+        }
+    }
+
+    struct ApplyProxyView : ViewGenerator {
+        let proxy: Proxy<Modifier>
+        var graph: _GraphValue<Modifier> { proxy.modifierGraph }
+        var body: any ViewGenerator
+        func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
+            if let view = body.makeView(encloser: proxy, graph: proxy.root) {
+                return ProxyViewContext(proxy: ApplyProxy(proxy: proxy),
+                                        view: view,
+                                        inputs: view.inputs,
+                                        graph: graph)
+            }
+            fatalError("Unable to make view")
+        }
+        mutating func mergeInputs(_ inputs: _GraphInputs) {
+            body.mergeInputs(inputs)
+        }
+    }
+
+    func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
+        if let modifier = graph.value(atPath: self.graph, from: encloser) {
+            guard let parent = self.graph.parent else {
+                fatalError("Unable to recover graph")
+            }
+            if let modifiedContent = graph.value(atPath: parent, from: encloser) {
+                let root = _GraphValue<Proxy<Modifier>>.root()
+                let proxy = Proxy(root: root,
+                                  modifier: modifier,
+                                  modifierGraph: self.graph,
+                                  modifiedContent: modifiedContent,
+                                  modifiedContentGraph: parent)
+
+                var inputs = self.inputs
+                inputs.layouts.modifierViewLists[ObjectIdentifier(Modifier.self)] = { _, inputs in
+                    let outputs = body(_Graph(), inputs)
+                    let viewList = BypassProxyViewList(proxy: proxy, body: outputs.viewList)
+                    return _ViewListOutputs(viewList: viewList)
+                }
+
+                let outputs = Modifier.Body._makeViewList(view: root[\.body], inputs: inputs)
+                return outputs.viewList.makeViewList(encloser: proxy, graph: root)
+                    .map {
+                        ApplyProxyView(proxy: proxy, body: $0)
+                    }
+            }
+            fatalError("Unable to recover ModifiedContent")
+        }
+        fatalError("Unable to recover Modifier")
+    }
+
+    mutating func mergeInputs(_ inputs: _GraphInputs) {
+        self.inputs.base.mergedInputs.append(inputs)
+    }
+}
+
 extension ViewModifier {
-    var _body: Body { self.body(content: .init()) }
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
         if Body.self is Never.Type {
             fatalError("\(Self.self) may not have Body == Never")
         }
-        var inputs = inputs
-        inputs._modifierBody[ObjectIdentifier(self)] = body
-        return Self.Body._makeView(view: modifier[\._body], inputs: inputs)
+
+        let generator = ModifierViewProxyGenerator(graph: modifier, inputs: inputs, body: body)
+        return _ViewOutputs(view: generator)
     }
 
     public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
         if Body.self is Never.Type {
             fatalError("\(Self.self) may not have Body == Never")
         }
-        var inputs = inputs
-        inputs._modifierBody[ObjectIdentifier(self)] = body
-        return Self.Body._makeViewList(view: modifier[\._body], inputs: inputs)
+
+        let generator = ModifierViewListProxyGenerator(graph: modifier, inputs: inputs, body: body)
+        return _ViewListOutputs(viewList: generator)
     }
 }
 
@@ -184,8 +395,7 @@ extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         var outputs = Content._makeView(view: view[\.content], inputs: inputs)
-        let baseInputs = _GraphInputs(environment: .init(), sharedContext: inputs.base.sharedContext)
-        let inputs = _ViewInputs(base: baseInputs, preferences: inputs.preferences)
+        let inputs = _ViewInputs.inputs(with: inputs.base.sharedContext)
         if let multiView = outputs.view as? any _VariadicView_MultiViewRootViewGenerator {
             let generator = MultiViewGenerator(graph: view, content: multiView, baseInputs: inputs.base) {
                 generator in
@@ -201,6 +411,7 @@ extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
             }
             return _ViewOutputs(view: generator)
         }
+        
         return Modifier._makeView(modifier: view[\.modifier], inputs: inputs) { _, inputs in
             outputs.view?.mergeInputs(inputs.base)
             return outputs
@@ -222,8 +433,7 @@ extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
         if Modifier.self is _UnaryViewModifier.Type {
             let content = Content._makeViewList(view: view[\.content], inputs: inputs)
-            let baseInputs = _GraphInputs(environment: .init(), sharedContext: inputs.base.sharedContext)
-            let inputs = _ViewInputs(base: baseInputs, preferences: inputs.preferences)
+            let inputs = _ViewInputs.inputs(with: inputs.base.sharedContext)
             let viewList = UnaryViewListGenerator(content: content.viewList) { generator in
                 Modifier._makeView(modifier: view[\.modifier], inputs: inputs) { _, inputs in
                     var generator = generator

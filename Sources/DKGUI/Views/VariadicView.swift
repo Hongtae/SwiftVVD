@@ -21,7 +21,7 @@ public struct _VariadicView_Children : View {
 
             func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
                 if let view = graph.value(atPath: self.graph, from: encloser) {
-                    let inputs = _ViewInputs(base: inputs.base, preferences: inputs.preferences, traits: inputs.traits)
+                    let inputs = self.inputs.inputs
                     return (0..<view.elements.count).compactMap { index in
                         Element._makeView(view: self.graph[\.elements[index]], inputs: inputs).view
                     }
@@ -393,8 +393,7 @@ struct _VariadicView_ViewRoot_MakeChildren_LayoutRootProxy<Root> : _VariadicView
 extension _VariadicView_ViewRoot {
     public static func _makeView(root: _GraphValue<Self>, inputs: _ViewInputs, body: (_Graph, _ViewInputs) -> _ViewListOutputs) -> _ViewOutputs {
         let body = body(_Graph(), inputs)
-        let inputs = _ViewListInputs(base: inputs.base, preferences: inputs.preferences)
-        let generator = _VariadicView_ViewRoot_MakeChildrenProxy(graph: root, body: body, inputs: inputs)
+        let generator = _VariadicView_ViewRoot_MakeChildrenProxy(graph: root, body: body, inputs: inputs.listInputs)
         return _ViewOutputs(view: generator)
     }
 
@@ -416,8 +415,7 @@ extension _VariadicView_UnaryViewRoot {
 extension _VariadicView_MultiViewRoot {
     public static func _makeView(root: _GraphValue<Self>, inputs: _ViewInputs, body: (_Graph, _ViewInputs) -> _ViewListOutputs) -> _ViewOutputs {
         let body = body(_Graph(), inputs)
-        let inputs = _ViewListInputs(base: inputs.base, preferences: inputs.preferences)
-        let generator = _VariadicView_ViewRoot_MakeChildren_MultiViewRootProxy(graph: root, body: body, inputs: inputs)
+        let generator = _VariadicView_ViewRoot_MakeChildren_MultiViewRootProxy(graph: root, body: body, inputs: inputs.listInputs)
         return _ViewOutputs(view: generator)
     }
 }
@@ -550,8 +548,7 @@ extension _VariadicView.Tree : View where Root : _VariadicView_ViewRoot, Content
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         let outputs = Root._makeView(root: view[\.root], inputs: inputs) { graph, inputs in
-            let inputs = _ViewListInputs(base: inputs.base, preferences: inputs.preferences)
-            return Content._makeViewList(view: view[\.content], inputs: inputs)
+            return Content._makeViewList(view: view[\.content], inputs: inputs.listInputs)
         }
 
         if let multiView = outputs.view as? any _VariadicView_ViewRoot_MakeChildren_MultiViewRoot {

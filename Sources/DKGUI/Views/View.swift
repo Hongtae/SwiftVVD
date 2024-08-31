@@ -38,8 +38,7 @@ extension View {
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
         if self is any _PrimitiveView.Type {
-            let inputs = _ViewInputs(base: inputs.base, preferences: inputs.preferences)
-            let outputs = Self._makeView(view: view, inputs: inputs)
+            let outputs = Self._makeView(view: view, inputs: inputs.inputs)
             return _ViewListOutputs(viewList: .staticList([outputs.view].compactMap { $0 }))
         }
         if Body.self is Never.Type {

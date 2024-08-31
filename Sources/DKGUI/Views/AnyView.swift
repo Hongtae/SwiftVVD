@@ -44,8 +44,7 @@ public struct AnyView: View {
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        let inputs = _ViewInputs(base: inputs.base, preferences: inputs.preferences, traits: inputs.traits)
-        let generator = TypeErasedViewGenerator(graph: view, inputs: inputs)
+        let generator = TypeErasedViewGenerator(graph: view, inputs: inputs.inputs)
         return _ViewListOutputs(viewList: .staticList([generator]))
     }
 

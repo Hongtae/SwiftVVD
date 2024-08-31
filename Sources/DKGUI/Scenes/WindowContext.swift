@@ -136,7 +136,12 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                 assert(viewLoaded)
                 if sharedContext.needsLayout {
                     sharedContext.needsLayout = false
-                    view.layoutSubviews()
+                    let bounds = contentBounds
+                    //view.layoutSubviews()
+                    view.place(at: CGPoint(x: bounds.midX, y: bounds.midY),
+                               anchor: .center,
+                               proposal: ProposedViewSize(bounds.size))
+
                 }
                 view.update(tick: tick, delta: delta, date: date)
 
@@ -229,8 +234,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                                       sharedContext: self.sharedContext)
         let preferences = PreferenceInputs(preferences: [])
         let graph = _GraphValue<Content>.root()
-        let inputs = _ViewInputs(base: baseInputs,
-                                 preferences: preferences)
+        let inputs = _ViewInputs(base: baseInputs, layouts: LayoutInputs(), preferences: preferences)
         let outputs = Content._makeView(view: graph, inputs: inputs)
 
         self.view = outputs.view?.makeView(encloser: content, graph: graph)

@@ -243,7 +243,7 @@ public struct _LayoutRoot<L> : _VariadicView.UnaryViewRoot where L : Layout {
 
     public static func _makeView(root: _GraphValue<Self>, inputs: _ViewInputs, body: (_Graph, _ViewInputs) -> _ViewListOutputs) -> _ViewOutputs {
         let body = body(_Graph(), inputs)
-        let inputs = _ViewListInputs(base: inputs.base, preferences: inputs.preferences)
+        let inputs = inputs.listInputs
         let generator = _VariadicView_ViewRoot_MakeChildren_LayoutRootProxy(graph: root, body: body, inputs: inputs) {
             $0.layout
         }
