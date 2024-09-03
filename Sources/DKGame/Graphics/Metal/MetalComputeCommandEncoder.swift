@@ -182,6 +182,15 @@ public class MetalComputeCommandEncoder: ComputeCommandEncoder {
         }
     }
 
+    public func memoryBarrier() {
+        assert(self.encoder != nil)
+        self.encoder?.commands.append {
+            (encoder: MTLComputeCommandEncoder, state: inout EncodingState) in
+
+            encoder.memoryBarrier(scope: [.buffers, .textures, .renderTargets])
+        }
+    }
+
     public func dispatch(numGroupX: Int, numGroupY: Int, numGroupZ: Int) {
         assert(self.encoder != nil)
         self.encoder?.commands.append {

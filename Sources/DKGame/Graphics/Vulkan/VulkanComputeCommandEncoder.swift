@@ -187,6 +187,29 @@ public class VulkanComputeCommandEncoder: VulkanCommandEncoder, ComputeCommandEn
         }
     }
 
+    public func memoryBarrier() {
+        let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
+            var memoryBarrier = VkMemoryBarrier2()
+            memoryBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2
+            memoryBarrier.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT
+            memoryBarrier.srcAccessMask = VK_ACCESS_2_NONE
+            memoryBarrier.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT
+            memoryBarrier.dstAccessMask = VK_ACCESS_2_NONE
+
+            withUnsafePointer(to: memoryBarrier) { pMemoryBarriers in
+                var dependencyInfo = VkDependencyInfo()
+                dependencyInfo.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO
+                dependencyInfo.memoryBarrierCount = 1
+                dependencyInfo.pMemoryBarriers = pMemoryBarriers
+
+                withUnsafePointer(to: dependencyInfo) { pDependencyInfo in
+                    vkCmdPipelineBarrier2(commandBuffer, pDependencyInfo)
+                }
+            }
+        }
+        self.encoder!.commands.append(command)
+    }
+
     public func dispatch(numGroupX: Int, numGroupY: Int, numGroupZ: Int) {
         let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
             vkCmdDispatch(commandBuffer, UInt32(numGroupX), UInt32(numGroupY), UInt32(numGroupZ))

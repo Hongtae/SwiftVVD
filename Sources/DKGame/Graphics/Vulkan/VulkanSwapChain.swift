@@ -2,7 +2,7 @@
 //  File: VulkanSwapChain.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
@@ -13,7 +13,24 @@ public class VulkanSwapChain: SwapChain {
 
     let window: Window
     let queue: VulkanCommandQueue
-    let frameReadySemaphore: VkSemaphore
+
+    private struct SemaphoreFrameIndex {
+        var semaphore: VkSemaphore
+        var frameIndex: UInt64
+    }
+    private var frameSemaphores: [SemaphoreFrameIndex]
+    private var frameReady: SemaphoreFrameIndex {
+        get {
+            let index = Int(frameCount % UInt64(frameSemaphores.count))
+            return frameSemaphores[index]
+        }
+        set {
+            let index = Int(frameCount % UInt64(frameSemaphores.count))
+            frameSemaphores[index] = newValue
+        }
+    }
+    private var frameTimelineSemaphore: VkSemaphore
+    private(set) var frameCount: UInt64
 
     var enableVSync = false
     var swapchain: VkSwapchainKHR?
@@ -31,21 +48,48 @@ public class VulkanSwapChain: SwapChain {
 
     public var commandQueue: CommandQueue { queue }
 
+    let maxFrameSemaphores = 3
+
     @MainActor
     public init?(queue: VulkanCommandQueue, window: Window) {
 
         let device = queue.device as! VulkanGraphicsDevice
+
+        self.frameSemaphores = []
+        self.frameSemaphores.reserveCapacity(maxFrameSemaphores)
+        while frameSemaphores.count < maxFrameSemaphores {
+            // create semaphore
+            var semaphoreCreateInfo = VkSemaphoreCreateInfo()
+            semaphoreCreateInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO
+            var semaphore: VkSemaphore?
+            let err = vkCreateSemaphore(device.device, &semaphoreCreateInfo, device.allocationCallbacks, &semaphore)
+            if err != VK_SUCCESS {
+                Log.err("vkCreateSemaphore failed: \(err)")            
+                assertionFailure("vkCreateSemaphore failed: \(err)")            
+                return nil
+            }
+            self.frameSemaphores.append(SemaphoreFrameIndex(semaphore: semaphore!, frameIndex: 0))
+        }
+        // create timeline semaphore
         var semaphoreCreateInfo = VkSemaphoreCreateInfo()
         semaphoreCreateInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO
-        var frameReadySemaphore: VkSemaphore?
-        let err = vkCreateSemaphore(device.device, &semaphoreCreateInfo, device.allocationCallbacks, &frameReadySemaphore)
+        var typeCreateInfo = VkSemaphoreTypeCreateInfo()
+        typeCreateInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO
+        typeCreateInfo.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE
+        typeCreateInfo.initialValue = 0
+        var semaphore: VkSemaphore?
+        let err = withUnsafePointer(to: typeCreateInfo) {
+            semaphoreCreateInfo.pNext = UnsafeRawPointer($0)
+            return vkCreateSemaphore(device.device, &semaphoreCreateInfo, device.allocationCallbacks, &semaphore)
+        }
         if err != VK_SUCCESS {
             Log.err("vkCreateSemaphore failed: \(err)")            
             assertionFailure("vkCreateSemaphore failed: \(err)")            
             return nil
         }
-
-        self.frameReadySemaphore = frameReadySemaphore!
+        self.frameTimelineSemaphore = semaphore!
+        self.frameCount = 0
+        
         self.queue = queue
         self.window = window
         self.renderPassDescriptor = RenderPassDescriptor(
@@ -81,7 +125,10 @@ public class VulkanSwapChain: SwapChain {
         if let surface = self.surface {
             vkDestroySurfaceKHR(instance.instance, surface, device.allocationCallbacks)          
         }
-        vkDestroySemaphore(device.device, self.frameReadySemaphore, device.allocationCallbacks)
+        self.frameSemaphores.forEach {
+            vkDestroySemaphore(device.device, $0.semaphore, device.allocationCallbacks)
+        }
+        vkDestroySemaphore(device.device, self.frameTimelineSemaphore, device.allocationCallbacks)
     }
 
     @MainActor
@@ -390,8 +437,8 @@ public class VulkanSwapChain: SwapChain {
 
             let swapchainImageView = VulkanImageView(device: device, imageView: imageView!)
             swapchainImageView.image = swapchainImage
-            swapchainImageView.waitSemaphore = frameReadySemaphore
-            swapchainImageView.signalSemaphore = frameReadySemaphore
+            swapchainImageView.waitSemaphore = nil
+            swapchainImageView.signalSemaphore = nil
 
             self.imageViews.append(swapchainImageView)
         }
@@ -401,8 +448,28 @@ public class VulkanSwapChain: SwapChain {
     func setupFrame() {
         let device = self.queue.device as! VulkanGraphicsDevice
 
+        let frameReady = self.frameReady
+        if frameReady.frameIndex > 0 {
+            let value: UInt64 = frameReady.frameIndex
+            let err = withUnsafePointer(to: Optional(frameTimelineSemaphore)) { pSemaphore in
+                withUnsafePointer(to: value) { pValue in
+                    var waitInfo = VkSemaphoreWaitInfo()
+                    waitInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO
+                    waitInfo.flags = 0
+                    waitInfo.semaphoreCount = 1
+                    waitInfo.pSemaphores = pSemaphore
+                    waitInfo.pValues = pValue
+                    return vkWaitSemaphores(device.device, &waitInfo, UInt64.max)
+                }
+            }
+            if err != VK_SUCCESS {
+                Log.err("vkWaitSemaphores failed: \(err)")            
+                assertionFailure("vkWaitSemaphores failed: \(err)")            
+            }
+        }
+
         let result = synchronizedBy(locking: self.lock) {
-            vkAcquireNextImageKHR(device.device, self.swapchain, UInt64.max, self.frameReadySemaphore, nil, &self.frameIndex)
+            vkAcquireNextImageKHR(device.device, self.swapchain, UInt64.max, frameReady.semaphore, nil, &self.frameIndex)
         }
         switch result {
         case VK_SUCCESS, VK_TIMEOUT, VK_NOT_READY ,VK_SUBOPTIMAL_KHR:
@@ -411,8 +478,12 @@ public class VulkanSwapChain: SwapChain {
             Log.err("vkAcquireNextImageKHR failed: \(result)")
         }
 
+        let renderTarget = self.imageViews[Int(self.frameIndex)]
+        renderTarget.waitSemaphore = frameReady.semaphore
+        renderTarget.signalSemaphore = frameReady.semaphore
+
         let colorAttachment = RenderPassColorAttachmentDescriptor(
-            renderTarget: self.imageViews[Int(self.frameIndex)],
+            renderTarget: renderTarget,
             loadAction: .clear,
             storeAction: .store,
             clearColor: Color(r: 0, g: 0, b: 0, a:0))
@@ -475,18 +546,21 @@ public class VulkanSwapChain: SwapChain {
 
     @discardableResult
     public func present(waitEvents: [GPUEvent]) -> Bool {
+        let frameReady = self.frameReady
         let presentSrc = self.imageViews[Int(self.frameIndex)]
         if let image = presentSrc.image, image.layout() != VK_IMAGE_LAYOUT_PRESENT_SRC_KHR {
             if let buffer = self.queue.makeCommandBuffer() {
                 if let encoder = buffer.makeCopyCommandEncoder() as? VulkanCopyCommandEncoder {
                     encoder.callback { commandBuffer in
                         image.setLayout(VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-                                        accessMask: VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT,
+                                        accessMask: VK_ACCESS_2_NONE,
                                         stageBegin: VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                                         stageEnd: VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                                         queueFamilyIndex: self.queue.family.familyIndex,
                                         commandBuffer: commandBuffer)
                     }
+                    encoder.waitSemaphore(frameReady.semaphore, value: 0, flags: VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT)
+                    encoder.signalSemaphore(frameReady.semaphore, value: 0, flags: VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT)
                     encoder.endEncoding()
                     buffer.commit()
                 }
@@ -500,7 +574,7 @@ public class VulkanSwapChain: SwapChain {
             let s = event as! VulkanSemaphore
             waitSemaphores.append(s.semaphore)
         }
-        waitSemaphores.append(self.frameReadySemaphore)
+        waitSemaphores.append(frameReady.semaphore)
 
         var presentInfo = VkPresentInfoKHR()
         presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR
@@ -558,6 +632,35 @@ public class VulkanSwapChain: SwapChain {
                 Log.error("VulkanSwapChain.updateDevice() failed.")
             }
         }
+
+        let frameCount = self.frameCount + 1
+        if err == VK_SUCCESS {
+            self.frameReady.frameIndex = frameCount
+
+            // signal timeline semaphore
+            var signalSemaphoreInfo = VkSemaphoreSubmitInfo()
+            signalSemaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO
+            signalSemaphoreInfo.semaphore = frameTimelineSemaphore
+            signalSemaphoreInfo.value = frameCount
+            signalSemaphoreInfo.stageMask = VK_PIPELINE_STAGE_2_NONE
+            signalSemaphoreInfo.deviceIndex = 0
+
+            let r = withUnsafePointer(to: signalSemaphoreInfo) { pSignalSemaphoreInfo in
+                var submitInfo = VkSubmitInfo2()
+                submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2
+                submitInfo.signalSemaphoreInfoCount = 1
+                submitInfo.pSignalSemaphoreInfos = pSignalSemaphoreInfo
+                return vkQueueSubmit2(self.queue.queue, 1, &submitInfo, nil)
+            }
+            if r != VK_SUCCESS {
+                Log.err("vkQueueSubmit2 failed: \(err)")            
+                //assertionFailure("vkQueueSubmit2 failed: \(err)")            
+            }
+        } else {
+            self.frameReady.frameIndex = 0
+        }
+        self.frameCount = frameCount
+
         return err == VK_SUCCESS
     }
 }

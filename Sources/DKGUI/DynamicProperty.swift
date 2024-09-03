@@ -11,6 +11,20 @@ public protocol DynamicProperty {
 
 extension DynamicProperty {
     public mutating func update() {
-        fatalError()
+    }
+}
+
+public struct _DynamicPropertyBuffer {
+}
+
+extension View {
+    static var _hasDynamicProperty: Bool {
+        let nonExist = _forEachField(of: Self.self) { _, _, fieldType in
+            if fieldType.self is DynamicProperty.Type {
+                return false
+            }
+            return true
+        }
+        return nonExist == false
     }
 }

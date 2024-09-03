@@ -2,7 +2,7 @@
 //  File: VulkanImage.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
@@ -170,67 +170,65 @@ public class VulkanImage {
                           stageBegin: VkPipelineStageFlags2, // this barrier's dst-stage
                           stageEnd: VkPipelineStageFlags2,   // next barrier's src-stage
                           queueFamilyIndex: UInt32 = VK_QUEUE_FAMILY_IGNORED,
-                          commandBuffer: VkCommandBuffer? = nil) -> VkImageLayout {
+                          commandBuffer: VkCommandBuffer) -> VkImageLayout {
         assert(layout != VK_IMAGE_LAYOUT_UNDEFINED)
         assert(layout != VK_IMAGE_LAYOUT_PREINITIALIZED)
 
         self.layoutLock.lock()
         defer { self.layoutLock.unlock() }
 
-        if let commandBuffer = commandBuffer {
-            var barrier = VkImageMemoryBarrier2()
-            barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2
-            barrier.srcAccessMask = layoutInfo.accessMask
-            barrier.dstAccessMask = accessMask
-            barrier.oldLayout = layoutInfo.layout
-            barrier.newLayout = layout
-            barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED
-            barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED
-            barrier.image = image
+        var barrier = VkImageMemoryBarrier2()
+        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2
+        barrier.srcAccessMask = layoutInfo.accessMask
+        barrier.dstAccessMask = accessMask
+        barrier.oldLayout = layoutInfo.layout
+        barrier.newLayout = layout
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED
+        barrier.image = image
 
-            let pixelFormat = self.pixelFormat
-            if pixelFormat.isColorFormat {
-                barrier.subresourceRange.aspectMask = VkImageAspectFlags(VK_IMAGE_ASPECT_COLOR_BIT.rawValue)
-            } else {
-                if pixelFormat.isDepthFormat {
-                    barrier.subresourceRange.aspectMask |= UInt32(VK_IMAGE_ASPECT_DEPTH_BIT.rawValue)
-                }
-                if pixelFormat.isStencilFormat {
-                    barrier.subresourceRange.aspectMask |= UInt32(VK_IMAGE_ASPECT_STENCIL_BIT.rawValue)
-                }
+        let pixelFormat = self.pixelFormat
+        if pixelFormat.isColorFormat {
+            barrier.subresourceRange.aspectMask = VkImageAspectFlags(VK_IMAGE_ASPECT_COLOR_BIT.rawValue)
+        } else {
+            if pixelFormat.isDepthFormat {
+                barrier.subresourceRange.aspectMask |= UInt32(VK_IMAGE_ASPECT_DEPTH_BIT.rawValue)
             }
-            barrier.subresourceRange.baseMipLevel = 0
-            barrier.subresourceRange.levelCount = VK_REMAINING_MIP_LEVELS
-            barrier.subresourceRange.baseArrayLayer = 0
-            barrier.subresourceRange.layerCount = VK_REMAINING_ARRAY_LAYERS
-
-            barrier.srcStageMask = self.layoutInfo.stageMaskEnd
-
-            if self.layoutInfo.queueFamilyIndex != queueFamilyIndex {
-                if self.layoutInfo.queueFamilyIndex == VK_QUEUE_FAMILY_IGNORED || queueFamilyIndex == VK_QUEUE_FAMILY_IGNORED {
-                    barrier.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT
-                } else {
-                    barrier.srcQueueFamilyIndex = self.layoutInfo.queueFamilyIndex
-                    barrier.dstQueueFamilyIndex = queueFamilyIndex
-                }
-            }
-            if barrier.srcStageMask == VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT  {
-                barrier.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT
-            }
-            barrier.dstStageMask = stageBegin
-
-            withUnsafePointer(to: barrier) { pImageMemoryBarriers in
-                var dependencyInfo = VkDependencyInfo()
-                dependencyInfo.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO
-                dependencyInfo.imageMemoryBarrierCount = 1
-                dependencyInfo.pImageMemoryBarriers = pImageMemoryBarriers
-
-                withUnsafePointer(to: dependencyInfo) { pDependencyInfo in
-                    vkCmdPipelineBarrier2(commandBuffer, pDependencyInfo)
-                }
+            if pixelFormat.isStencilFormat {
+                barrier.subresourceRange.aspectMask |= UInt32(VK_IMAGE_ASPECT_STENCIL_BIT.rawValue)
             }
         }
+        barrier.subresourceRange.baseMipLevel = 0
+        barrier.subresourceRange.levelCount = VK_REMAINING_MIP_LEVELS
+        barrier.subresourceRange.baseArrayLayer = 0
+        barrier.subresourceRange.layerCount = VK_REMAINING_ARRAY_LAYERS
 
+        barrier.srcStageMask = self.layoutInfo.stageMaskEnd
+
+        if self.layoutInfo.queueFamilyIndex != queueFamilyIndex {
+            if self.layoutInfo.queueFamilyIndex == VK_QUEUE_FAMILY_IGNORED || queueFamilyIndex == VK_QUEUE_FAMILY_IGNORED {
+                barrier.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT
+            } else {
+                barrier.srcQueueFamilyIndex = self.layoutInfo.queueFamilyIndex
+                barrier.dstQueueFamilyIndex = queueFamilyIndex
+            }
+        }
+        if barrier.srcStageMask == VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT  {
+            barrier.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT
+        }
+        barrier.dstStageMask = stageBegin
+
+        withUnsafePointer(to: barrier) { pImageMemoryBarriers in
+            var dependencyInfo = VkDependencyInfo()
+            dependencyInfo.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO
+            dependencyInfo.imageMemoryBarrierCount = 1
+            dependencyInfo.pImageMemoryBarriers = pImageMemoryBarriers
+
+            withUnsafePointer(to: dependencyInfo) { pDependencyInfo in
+                vkCmdPipelineBarrier2(commandBuffer, pDependencyInfo)
+            }
+        }
+        
         let oldLayout = self.layoutInfo.layout
         self.layoutInfo.layout = layout
         self.layoutInfo.stageMaskBegin = stageBegin

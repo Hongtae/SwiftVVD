@@ -650,6 +650,50 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
         }
     }
  
+    public func memoryBarrier(after: RenderStages, before: RenderStages) {
+
+        let stageMask = { (stages: RenderStages) in
+            var mask: VkPipelineStageFlags2 = VK_PIPELINE_STAGE_2_NONE
+            if stages.contains(.vertex) {
+                mask |= VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT
+            }
+            if stages.contains(.fragment) {
+                mask |= VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT
+            }
+            if stages.contains(.object) {
+                mask |= VK_PIPELINE_STAGE_2_TASK_SHADER_BIT_EXT
+            }
+            if stages.contains(.mesh) {
+                mask |= VK_PIPELINE_STAGE_2_MESH_SHADER_BIT_EXT
+            }
+            return mask
+        }
+
+        let srcStages = stageMask(after)
+        let dstStages = stageMask(before)
+
+        let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
+            var memoryBarrier = VkMemoryBarrier2()
+            memoryBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2
+            memoryBarrier.srcStageMask = srcStages
+            memoryBarrier.srcAccessMask = VK_ACCESS_2_NONE
+            memoryBarrier.dstStageMask = dstStages
+            memoryBarrier.dstAccessMask = VK_ACCESS_2_NONE
+
+            withUnsafePointer(to: memoryBarrier) { pMemoryBarriers in
+                var dependencyInfo = VkDependencyInfo()
+                dependencyInfo.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO
+                dependencyInfo.memoryBarrierCount = 1
+                dependencyInfo.pMemoryBarriers = pMemoryBarriers
+
+                withUnsafePointer(to: dependencyInfo) { pDependencyInfo in
+                    vkCmdPipelineBarrier2(commandBuffer, pDependencyInfo)
+                }
+            }
+        }
+        self.encoder!.commands.append(command)
+    }
+
     public func draw(vertexStart: Int, vertexCount: Int, instanceCount: Int, baseInstance: Int) {
         if vertexCount > 0 && instanceCount > 0 {
             assert(vertexStart >= 0)

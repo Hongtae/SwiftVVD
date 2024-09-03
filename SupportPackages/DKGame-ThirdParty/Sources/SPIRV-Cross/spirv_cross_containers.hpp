@@ -26,6 +26,7 @@
 
 #include "spirv_cross_error_handling.hpp"
 #include <algorithm>
+#include <exception>
 #include <functional>
 #include <iterator>
 #include <limits>
@@ -575,6 +576,7 @@ public:
 			if (!ptr)
 				return nullptr;
 
+			vacants.reserve(num_objects);
 			for (unsigned i = 0; i < num_objects; i++)
 				vacants.push_back(&ptr[i]);
 

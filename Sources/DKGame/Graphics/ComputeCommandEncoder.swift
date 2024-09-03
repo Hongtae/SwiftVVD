@@ -13,5 +13,7 @@ public protocol ComputeCommandEncoder: CommandEncoder {
 
     func pushConstant<D: DataProtocol>(stages: ShaderStageFlags, offset: Int, data: D)
 
+    func memoryBarrier()
+
     func dispatch(numGroupX: Int, numGroupY: Int, numGroupZ: Int)
 }

@@ -2,7 +2,7 @@
 //  File: Win32Application.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_WIN32
@@ -37,6 +37,7 @@ private func keyboardHookProc(_ nCode: Int32, _ wParam: WPARAM, _ lParam: LPARAM
     return CallNextHookEx(keyboardHook, nCode, wParam, lParam)
 }
 
+@discardableResult
 private func processRunLoop() -> Int {
     var processed = 0
     while true {
