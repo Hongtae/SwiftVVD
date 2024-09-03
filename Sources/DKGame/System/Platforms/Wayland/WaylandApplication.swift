@@ -267,9 +267,9 @@ public class WaylandApplication: Application {
         if seat != nil { wl_seat_destroy(seat) }
         if shell != nil { xdg_wm_base_destroy(shell) }
 
-        wl_compositor_destroy(compositor)
-        wl_registry_destroy(registry)
-        wl_display_disconnect(display)
+        if compositor != nil { wl_compositor_destroy(compositor) }
+        if registry != nil { wl_registry_destroy(registry) }
+        if display != nil { wl_display_disconnect(display) }
     }
 
     var pointerTarget: WaylandWindow? = nil
