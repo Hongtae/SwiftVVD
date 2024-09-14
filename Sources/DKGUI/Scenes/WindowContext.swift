@@ -232,9 +232,10 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
         let baseInputs = _GraphInputs(properties: properties,
                                       environment: self.environmentValues,
                                       sharedContext: self.sharedContext)
-        let preferences = PreferenceInputs(preferences: [])
+
         let graph = _GraphValue<Content>.root()
-        let inputs = _ViewInputs(base: baseInputs, layouts: LayoutInputs(), preferences: preferences)
+        let inputs = _ViewInputs.inputs(with: baseInputs)
+
         let outputs = Content._makeView(view: graph, inputs: inputs)
 
         self.view = outputs.view?.makeView(encloser: content, graph: graph)

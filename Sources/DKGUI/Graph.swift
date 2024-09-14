@@ -76,6 +76,19 @@ struct LayoutInputs {
     var sourceWrites: [ObjectIdentifier: any ViewGenerator] = [:]
 
     var labelStyles: [any LabelStyle] = []
+    var buttonStyles: [any PrimitiveButtonStyle] = []
+}
+
+struct ViewStyles {
+    var foregroundStyle: (primary: AnyShapeStyle?,
+                          secondary: AnyShapeStyle?,
+                          tertiary: AnyShapeStyle?) = (nil, nil, nil)
+}
+
+protocol ViewStyleModifier : Equatable {
+    var isResolved: Bool { get }
+    func apply(inputs: inout ViewStyles)
+    mutating func resolve<T>(encloser: T, graph: _GraphValue<T>)
 }
 
 struct PreferenceInputs {
@@ -101,20 +114,22 @@ struct ViewTraitKeys {
 public struct _ViewInputs {
     var base: _GraphInputs
     var layouts: LayoutInputs
+    var styles: [any ViewStyleModifier] = []
     var preferences: PreferenceInputs = PreferenceInputs(preferences: [])
     var traits: ViewTraitKeys = ViewTraitKeys()
 
     var listInputs: _ViewListInputs {
         _ViewListInputs(base: self.base,
                         layouts: self.layouts,
+                        styles: self.styles,
                         preferences: self.preferences,
                         traits: self.traits)
     }
 
-    static func inputs(with sharedContext: SharedContext) -> _ViewInputs {
-        _ViewInputs(base: _GraphInputs(environment: EnvironmentValues(),
-                                       sharedContext: sharedContext),
+    static func inputs(with base: _GraphInputs) -> _ViewInputs {
+        _ViewInputs(base: base,
                     layouts: LayoutInputs(),
+                    styles: [],
                     preferences: PreferenceInputs(preferences: []),
                     traits: ViewTraitKeys())
     }
@@ -133,6 +148,7 @@ public struct _ViewListInputs {
 
     var base: _GraphInputs
     var layouts: LayoutInputs
+    var styles: [any ViewStyleModifier] = []
     var preferences: PreferenceInputs = PreferenceInputs(preferences: [])
     var traits: ViewTraitKeys = ViewTraitKeys()
     var options: Options = .none
@@ -140,6 +156,7 @@ public struct _ViewListInputs {
     var inputs: _ViewInputs {
         _ViewInputs(base: self.base,
                     layouts: self.layouts,
+                    styles: self.styles,
                     preferences: self.preferences,
                     traits: self.traits)
     }

@@ -17,6 +17,7 @@ public struct Button<Label> : View where Label : View {
         self.label = label()
         self.action = action
     }
+
     public var body: some View {
         ResolvedButtonStyle(
             configuration: PrimitiveButtonStyleConfiguration(
@@ -97,15 +98,6 @@ extension Button where Label == DKGUI.Label<Text, Image> {
     }
 }
 
-extension PrimitiveButtonStyle {
-//    func _makeBodyView(configuration: Configuration, inputs: _ViewInputs) -> _ViewOutputs {
-//        fatalError()
-//    }
-//    func _makeBodyViewList(configuration: Configuration, inputs: _ViewListInputs) -> _ViewListOutputs {
-//        fatalError()
-//    }
-}
-
 struct ResolvedButtonStyle: View {
     typealias Body = Never
     let configuration: PrimitiveButtonStyleConfiguration
@@ -113,11 +105,218 @@ struct ResolvedButtonStyle: View {
         self.configuration = configuration
     }
 
-    static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        fatalError()
+    static let primitiveButtonStyleLabelKey = ObjectIdentifier(PrimitiveButtonStyleConfiguration.Label.self)
+    static let buttonStyleLabelKey = ObjectIdentifier(ButtonStyleConfiguration.Label.self)
+
+    struct Style<S : PrimitiveButtonStyle> {
+        typealias Body = S.Body
+        let style: S
+        var configuration: PrimitiveButtonStyleConfiguration
+
+        var body: Body {
+            style.makeBody(configuration: self.configuration)
+        }
     }
+
+    class Proxy<S : PrimitiveButtonStyle> {
+        var style: Style<S>
+        let graph: _GraphValue<Style<S>>
+
+        var encloser: Any
+        let encloserGraph: _GraphValue<Any>
+
+        var body: S.Body { style.body }
+
+        init<T>(style: Style<S>, graph: _GraphValue<Style<S>>,
+             encloser: T, encloserGraph: _GraphValue<T>) {
+            self.style = style
+            self.graph = graph
+            self.encloser = encloser
+            self.encloserGraph = encloserGraph.unsafeCast(to: Any.self)
+        }
+    }
+
+    // proxy for ButtonStyle generated contents
+    struct LayoutStyleProxy<S: PrimitiveButtonStyle> : ViewProxy {
+        let proxy: Proxy<S>
+        var content: S.Body { proxy.body }
+        var contentGraph: _GraphValue<S.Body> { proxy.graph[\.body] }
+        func validatePath<T>(encloser: T, graph: _GraphValue<T>) -> Bool {
+            graph.value(atPath: proxy.encloserGraph, from: encloser) != nil
+        }
+        func updateContent<T>(encloser: T, graph: _GraphValue<T>) {
+            if let encloser = graph.value(atPath: proxy.encloserGraph, from: encloser) {
+                proxy.encloser = encloser
+            } else {
+                fatalError("Unable to recover view encloser (\(proxy.encloserGraph.debugDescription))")
+            }
+        }
+
+        struct _ViewGenerator : ViewGenerator {
+            let proxy: LayoutStyleProxy
+            var view: any ViewGenerator
+            var graph: _GraphValue<Any> { proxy.proxy.encloserGraph }
+            func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
+                if let _view = view.makeView(encloser: proxy.content, graph: proxy.contentGraph) {
+                    return ProxyViewContext(proxy: self.proxy, view: _view, inputs: _view.inputs, graph: self.graph)
+                }
+                return nil
+            }
+            mutating func mergeInputs(_ inputs: _GraphInputs) {
+                view.mergeInputs(inputs)
+            }
+        }
+        func makeViewGenerator(view: any ViewGenerator) -> any ViewGenerator {
+            _ViewGenerator(proxy: self, view: view)
+        }
+    }
+
+    // proxy for Button contents (Button-Label)
+    struct ButtonContentProxy<S: PrimitiveButtonStyle> : ViewProxy {
+        let proxy: Proxy<S>
+        var content: Any { proxy.encloser }
+        var contentGraph: _GraphValue<Any> { proxy.encloserGraph }
+        func validatePath<T>(encloser: T, graph: _GraphValue<T>) -> Bool { true }
+        func updateContent<T>(encloser: T, graph: _GraphValue<T>) {}
+
+        struct _ViewGenerator : ViewGenerator {
+            var view: (any ViewGenerator)?
+            var graph: _GraphValue<Style<S>> { proxy.proxy.graph }
+            let proxy: ButtonContentProxy
+            func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
+                if let _view = view?.makeView(encloser: proxy.content, graph: proxy.contentGraph) {
+                    return ProxyViewContext(proxy: self.proxy, view: _view, inputs: _view.inputs, graph: self.graph)
+                }
+                return nil
+            }
+            mutating func mergeInputs(_ inputs: _GraphInputs) {
+                view?.mergeInputs(inputs)
+            }
+        }
+        func makeViewGenerator(view: (any ViewGenerator)?) -> any ViewGenerator {
+            _ViewGenerator(view: view, proxy: self)
+        }
+    }
+
+    struct ButtonContentViewGenerator<S: PrimitiveButtonStyle> : ViewGenerator {
+        let view: _GraphValue<ResolvedButtonStyle>
+        let style: Style<S>
+        let graph: _GraphValue<Any>
+        var inputs: _ViewInputs
+
+        func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
+            if let encloser = graph.value(atPath: self.graph, from: encloser) {
+                let root = _GraphValue<Style<S>>.root()
+                let proxy = Proxy(style: style, graph: root, encloser: encloser, encloserGraph: self.graph)
+
+                guard let view = self.graph.value(atPath: self.view, from: encloser) else {
+                    fatalError("Unable to recover view: \(self.view.debugDescription)")
+                }
+
+                // reassemble configuration with proxy
+                let label = ButtonContentProxy(proxy: proxy)
+                    .makeViewGenerator(view: style.configuration.label.view)
+                proxy.style.configuration = PrimitiveButtonStyleConfiguration(
+                    role: view.configuration.role,
+                    label: PrimitiveButtonStyleConfiguration.Label(label),
+                    action: view.configuration.action)
+
+                let outputs = Style<S>.Body._makeView(view: root[\.body], inputs: inputs)
+                if let view = outputs.view {
+                    if let view = LayoutStyleProxy(proxy: proxy).makeViewGenerator(view: view)
+                        .makeView(encloser: encloser, graph: self.graph) {
+                        return view
+                    }
+                    fatalError("Unable to make view")
+                }
+                return nil
+            } else {
+                fatalError("Unable to recover view encloser: \(self.graph.debugDescription)")
+            }
+        }
+
+        mutating func mergeInputs(_ inputs: _GraphInputs) {
+            self.inputs.base.mergedInputs.append(inputs)
+        }
+    }
+
+    struct ButtonContentViewListGenerator<S: PrimitiveButtonStyle> : ViewListGenerator {
+        let view: _GraphValue<ResolvedButtonStyle>
+        let style: Style<S>
+        let graph: _GraphValue<Any>
+        var inputs: _ViewListInputs
+        func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
+            if let encloser = graph.value(atPath: self.graph, from: encloser) {
+                let root = _GraphValue<Style<S>>.root()
+                let proxy = Proxy(style: style, graph: root, encloser: encloser, encloserGraph: self.graph)
+
+                guard let view = self.graph.value(atPath: self.view, from: encloser) else {
+                    fatalError("Unable to recover view: \(self.view.debugDescription)")
+                }
+
+                // reassemble configuration with proxy
+                let label = ButtonContentProxy(proxy: proxy)
+                    .makeViewGenerator(view: style.configuration.label.view)
+                proxy.style.configuration = PrimitiveButtonStyleConfiguration(
+                    role: view.configuration.role,
+                    label: PrimitiveButtonStyleConfiguration.Label(label),
+                    action: view.configuration.action)
+
+                let outputs = Style<S>.Body._makeViewList(view: root[\.body], inputs: inputs)
+                return outputs.viewList.makeViewList(encloser: proxy.style, graph: root).map {
+                    LayoutStyleProxy(proxy: proxy).makeViewGenerator(view: $0)
+                }
+            } else {
+                fatalError("Unable to recover view encloser: \(self.graph.debugDescription)")
+            }
+        }
+
+        mutating func mergeInputs(_ inputs: _GraphInputs) {
+            self.inputs.base.mergedInputs.append(inputs)
+        }
+    }
+    static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        var inputs = inputs
+
+        let label1 = inputs.layouts.sourceWrites.removeValue(forKey: primitiveButtonStyleLabelKey)
+        let label2 = inputs.layouts.sourceWrites.removeValue(forKey: buttonStyleLabelKey)
+        let style = inputs.layouts.buttonStyles.popLast() ?? DefaultButtonStyle.automatic
+
+        let label = label1 ?? label2
+        let graph = view.nearestAncestor(label?.anyGraph)
+        guard let graph else { fatalError("Invalid path") }
+
+        func makeView<S: PrimitiveButtonStyle>(view: _GraphValue<Self>, style: S, configuration: PrimitiveButtonStyleConfiguration, inputs: _ViewInputs) -> _ViewOutputs {
+            let resolvedStyle = Style(style: style, configuration: configuration)
+            let gen = ButtonContentViewGenerator(view: view, style: resolvedStyle, graph: graph, inputs: inputs)
+            return _ViewOutputs(view: gen)
+        }
+        let configuration = PrimitiveButtonStyleConfiguration(role: nil,
+                                                              label: PrimitiveButtonStyleConfiguration.Label(label),
+                                                              action: {})
+        return makeView(view: view, style: style, configuration: configuration, inputs: inputs)
+    }
+
     static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        fatalError()
+        var inputs = inputs
+
+        let label1 = inputs.layouts.sourceWrites.removeValue(forKey: primitiveButtonStyleLabelKey)
+        let label2 = inputs.layouts.sourceWrites.removeValue(forKey: buttonStyleLabelKey)
+        let style = inputs.layouts.buttonStyles.popLast() ?? DefaultButtonStyle.automatic
+
+        let label = label1 ?? label2
+        let graph = view.nearestAncestor(label?.anyGraph)
+        guard let graph else { fatalError("Invalid path") }
+
+        func makeViewList<S: PrimitiveButtonStyle>(view: _GraphValue<Self>, style: S, configuration: PrimitiveButtonStyleConfiguration, inputs: _ViewListInputs) -> _ViewListOutputs {
+            let resolvedStyle = Style(style: style, configuration: configuration)
+            let gen = ButtonContentViewListGenerator(view: view, style: resolvedStyle, graph: graph, inputs: inputs)
+            return _ViewListOutputs(viewList: gen)
+        }
+        let configuration = PrimitiveButtonStyleConfiguration(role: nil,
+                                                              label: PrimitiveButtonStyleConfiguration.Label(label),
+                                                              action: {})
+        return makeViewList(view: view, style: style, configuration: configuration, inputs: inputs)
     }
 }
 

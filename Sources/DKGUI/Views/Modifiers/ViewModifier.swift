@@ -423,7 +423,7 @@ extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         var outputs = Content._makeView(view: view[\.content], inputs: inputs)
-        let inputs = _ViewInputs.inputs(with: inputs.base.sharedContext)
+        let inputs = _ViewInputs.inputs(with: _GraphInputs(environment: .init(), sharedContext: inputs.base.sharedContext))
         if let multiView = outputs.view as? any _VariadicView_MultiViewRootViewGenerator {
             let generator = MultiViewGenerator(graph: view, content: multiView, baseInputs: inputs.base) {
                 generator in
@@ -461,7 +461,7 @@ extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
         if Modifier.self is _UnaryViewModifier.Type {
             let content = Content._makeViewList(view: view[\.content], inputs: inputs)
-            let inputs = _ViewInputs.inputs(with: inputs.base.sharedContext)
+            let inputs = _ViewInputs.inputs(with: _GraphInputs(environment: .init(), sharedContext: inputs.base.sharedContext))
             let viewList = UnaryViewListGenerator(content: content.viewList) { generator in
                 Modifier._makeView(modifier: view[\.modifier], inputs: inputs) { _, inputs in
                     var generator = generator
