@@ -30,7 +30,7 @@ struct PropertyList : CustomStringConvertible {
         }
     }
 
-    init(_ items: [any PropertyItem]) {
+    init(_ items: (any PropertyItem)...) {
         self.elements = nil
         items.forEach { self.append($0) }
     }

@@ -228,7 +228,11 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
         self.environmentValues = EnvironmentValues()
         self.sharedContext = SharedContext(appContext: appContext!)
 
-        let properties = PropertyList(DefaultLayoutPropertyItem(layout: VStackLayout()))
+        let properties = PropertyList(
+            DefaultLayoutPropertyItem(layout: VStackLayout()),
+            DefaultPaddingEdgeInsetsPropertyItem(insets: EdgeInsets(_all: 16))
+        )
+
         let baseInputs = _GraphInputs(properties: properties,
                                       environment: self.environmentValues,
                                       sharedContext: self.sharedContext)

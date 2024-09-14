@@ -41,23 +41,34 @@ extension _PaddingLayout: _ViewLayoutModifier {
             super.init(content: content, modifier: modifier, inputs: inputs, graph: graph)
         }
 
+        var layoutInsets : EdgeInsets {
+            if let insets = self.layout.insets {
+                return insets
+            }
+            if let insets = self.inputs.properties.find(type: DefaultPaddingEdgeInsetsPropertyItem.self)?.insets {
+                return insets
+            }
+            return DefaultPaddingEdgeInsetsPropertyItem.default
+        }
+
         override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
             var paddingH: CGFloat = .zero
             var paddingV: CGFloat = .zero
-            if let insets = self.layout.insets {
-                if self.layout.edges.contains(.leading) {
-                    paddingH += insets.leading
-                }
-                if self.layout.edges.contains(.trailing) {
-                    paddingH += insets.trailing
-                }
-                if self.layout.edges.contains(.top) {
-                    paddingV += insets.top
-                }
-                if self.layout.edges.contains(.bottom) {
-                    paddingV += insets.bottom
-                }
+
+            let insets = self.layoutInsets
+            if self.layout.edges.contains(.leading) {
+                paddingH += insets.leading
             }
+            if self.layout.edges.contains(.trailing) {
+                paddingH += insets.trailing
+            }
+            if self.layout.edges.contains(.top) {
+                paddingV += insets.top
+            }
+            if self.layout.edges.contains(.bottom) {
+                paddingV += insets.bottom
+            }
+
             var proposal = proposal
             if let w = proposal.width {
                 proposal.width = max(w - paddingH, 0)
@@ -76,20 +87,21 @@ extension _PaddingLayout: _ViewLayoutModifier {
             var maxX = bounds.maxX
             var minY = bounds.minY
             var maxY = bounds.maxY
-            if let insets = self.layout.insets {
-                if self.layout.edges.contains(.leading) {
-                    minX += insets.leading
-                }
-                if self.layout.edges.contains(.trailing) {
-                    maxX -= insets.trailing
-                }
-                if self.layout.edges.contains(.top) {
-                    minY += insets.top
-                }
-                if self.layout.edges.contains(.bottom) {
-                    maxY -= insets.bottom
-                }
+
+            let insets = self.layoutInsets
+            if self.layout.edges.contains(.leading) {
+                minX += insets.leading
             }
+            if self.layout.edges.contains(.trailing) {
+                maxX -= insets.trailing
+            }
+            if self.layout.edges.contains(.top) {
+                minY += insets.top
+            }
+            if self.layout.edges.contains(.bottom) {
+                maxY -= insets.bottom
+            }
+
             let origin = CGPoint(x: minX, y: minY)
             let width = max(maxX - minX, 0)
             let height = max(maxY - minY, 0)
@@ -144,5 +156,13 @@ extension _PaddingLayout: _ViewLayoutModifier {
             }
         }
         return Generator(content: content, graph: modifier, baseInputs: inputs)
+    }
+}
+
+struct DefaultPaddingEdgeInsetsPropertyItem : PropertyItem {
+    static var `default` : EdgeInsets { .init(_all: 16) }
+    let insets: EdgeInsets
+    var description: String {
+        "DefaultPaddingEdgeInsetsPropertyItem: \(self.insets)"
     }
 }
