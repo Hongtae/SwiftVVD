@@ -96,10 +96,6 @@ class ViewContext {
     var transformByRoot: AffineTransform = .identity
     var spacing: ViewSpacing
 
-    var foregroundStyle: (primary: AnyShapeStyle?,
-                          secondary: AnyShapeStyle?,
-                          tertiary: AnyShapeStyle?)
-
     var bounds: CGRect {
         CGRect(x: 0, y: 0, width: frame.width, height: frame.height)
     }
@@ -133,14 +129,28 @@ class ViewContext {
 
     func resolveGraphInputs<T>(encloser: T, graph: _GraphValue<T>) {
         assert(self.inputs.mergedInputs.isEmpty)
-        var modifiers = self.inputs.modifiers
-        modifiers.indices.forEach { index in
-            modifiers[index].resolve(encloser: encloser, graph: graph)
-        }
-        modifiers.forEach { modifier in
-            if modifier.isResolved {
-                modifier.apply(inputs: &self.inputs)
+        do {
+            var modifiers = self.inputs.modifiers
+            modifiers.indices.forEach { index in
+                if modifiers[index].isResolved == false {
+                    modifiers[index].resolve(encloser: encloser, graph: graph)
+                }
             }
+            modifiers.forEach { modifier in
+                if modifier.isResolved {
+                    modifier.apply(inputs: &self.inputs)
+                }
+            }
+            self.inputs.modifiers = modifiers
+        }
+        do {
+            var modifiers = self.inputs.viewStyleModifiers
+            modifiers.indices.forEach { index in
+                if modifiers[index].isResolved == false {
+                    modifiers[index].resolve(encloser: encloser, graph: graph)
+                }
+            }
+            self.inputs.viewStyleModifiers = modifiers
         }
     }
 
@@ -156,6 +166,16 @@ class ViewContext {
 
     func trait<Trait>(key: Trait.Type) -> Trait.Value where Trait: _ViewTraitKey {
         traits[ObjectIdentifier(key)] as? Trait.Value ?? Trait.defaultValue
+    }
+
+    func viewStyles() -> ViewStyles {
+        var styles = ViewStyles()
+        self.inputs.viewStyleModifiers.forEach { modifier in
+            if modifier.isResolved {
+                modifier.apply(to: &styles)
+            }
+        }
+        return styles
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {

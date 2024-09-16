@@ -293,6 +293,8 @@ private class TextViewContext: ViewContext {
     var text: Text
     var resolvedText: GraphicsContext.ResolvedText?
 
+    var primaryStyle: AnyShapeStyle?
+
     struct Generator : ViewGenerator {
         let graph: _GraphValue<Text>
         var baseInputs: _GraphInputs
@@ -339,6 +341,8 @@ private class TextViewContext: ViewContext {
         self.resolvedText = context.resolve(self.text)
         self.sharedContext.needsLayout = true
         super.loadResources(context)
+
+        self.primaryStyle = self.viewStyles().foregroundStyle.primary
     }
 
     override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
@@ -374,7 +378,7 @@ private class TextViewContext: ViewContext {
                 self.sharedContext.needsLayout = true
             }
             if let resolvedText {
-                if let style = foregroundStyle.primary {
+                if let style = self.primaryStyle {
                     context.draw(resolvedText, in: frame, shading: .style(style))
                 } else {
                     context.draw(resolvedText, in: frame)

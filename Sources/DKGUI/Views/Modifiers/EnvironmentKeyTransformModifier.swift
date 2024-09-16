@@ -55,7 +55,7 @@ public struct _EnvironmentKeyTransformModifier<Value> : ViewModifier, _GraphInpu
             }
         }
 
-        static func == (lhs: _EnvironmentKeyTransformModifier<Value>._InputModifier, rhs: _EnvironmentKeyTransformModifier<Value>._InputModifier) -> Bool {
+        static func == (lhs: _InputModifier, rhs: _InputModifier) -> Bool {
             lhs === rhs
         }
     }

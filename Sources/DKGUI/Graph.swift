@@ -28,6 +28,27 @@ extension _GraphInputResolve {
     }
 }
 
+struct ViewStyles {
+    var foregroundStyle: (primary: AnyShapeStyle?,
+                          secondary: AnyShapeStyle?,
+                          tertiary: AnyShapeStyle?) = (nil, nil, nil)
+}
+
+protocol ViewStyleModifier : Equatable {
+    var isResolved: Bool { get }
+    func apply(to style: inout ViewStyles)
+    mutating func resolve<T>(encloser: T, graph: _GraphValue<T>)
+}
+
+extension ViewStyleModifier {
+    func isEqual(to: any ViewStyleModifier) -> Bool {
+        if let other = to as? Self {
+            return self == other
+        }
+        return false
+    }
+}
+
 public struct _GraphInputs {
     struct Options : OptionSet {
         let rawValue: Int
@@ -41,6 +62,7 @@ public struct _GraphInputs {
     var options: Options = .none
     var mergedInputs: [_GraphInputs] = []
     var modifiers: [any _GraphInputResolve] = []
+    var viewStyleModifiers: [any ViewStyleModifier] = []
 }
 
 extension _GraphInputs {
@@ -60,6 +82,11 @@ extension _GraphInputs {
                     inputs.modifiers.append(modifier)
                 }
             }
+            $0.viewStyleModifiers.forEach { modifier in
+                if inputs.viewStyleModifiers.contains(where: { modifier.isEqual(to: $0) }) == false {
+                    inputs.viewStyleModifiers.append(modifier)
+                }
+            }
         }
         inputs.mergedInputs = []
         return inputs
@@ -77,18 +104,6 @@ struct LayoutInputs {
 
     var labelStyles: [any LabelStyle] = []
     var buttonStyles: [any PrimitiveButtonStyle] = []
-}
-
-struct ViewStyles {
-    var foregroundStyle: (primary: AnyShapeStyle?,
-                          secondary: AnyShapeStyle?,
-                          tertiary: AnyShapeStyle?) = (nil, nil, nil)
-}
-
-protocol ViewStyleModifier : Equatable {
-    var isResolved: Bool { get }
-    func apply(inputs: inout ViewStyles)
-    mutating func resolve<T>(encloser: T, graph: _GraphValue<T>)
 }
 
 struct PreferenceInputs {
@@ -114,14 +129,12 @@ struct ViewTraitKeys {
 public struct _ViewInputs {
     var base: _GraphInputs
     var layouts: LayoutInputs
-    var styles: [any ViewStyleModifier] = []
     var preferences: PreferenceInputs = PreferenceInputs(preferences: [])
     var traits: ViewTraitKeys = ViewTraitKeys()
 
     var listInputs: _ViewListInputs {
         _ViewListInputs(base: self.base,
                         layouts: self.layouts,
-                        styles: self.styles,
                         preferences: self.preferences,
                         traits: self.traits)
     }
@@ -129,7 +142,6 @@ public struct _ViewInputs {
     static func inputs(with base: _GraphInputs) -> _ViewInputs {
         _ViewInputs(base: base,
                     layouts: LayoutInputs(),
-                    styles: [],
                     preferences: PreferenceInputs(preferences: []),
                     traits: ViewTraitKeys())
     }
@@ -148,7 +160,6 @@ public struct _ViewListInputs {
 
     var base: _GraphInputs
     var layouts: LayoutInputs
-    var styles: [any ViewStyleModifier] = []
     var preferences: PreferenceInputs = PreferenceInputs(preferences: [])
     var traits: ViewTraitKeys = ViewTraitKeys()
     var options: Options = .none
@@ -156,7 +167,6 @@ public struct _ViewListInputs {
     var inputs: _ViewInputs {
         _ViewInputs(base: self.base,
                     layouts: self.layouts,
-                    styles: self.styles,
                     preferences: self.preferences,
                     traits: self.traits)
     }
