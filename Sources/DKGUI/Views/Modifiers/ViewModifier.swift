@@ -571,6 +571,13 @@ class ViewModifierContext<Modifier> : ViewContext {
         self.content.place(at: center, anchor: .center, proposal: proposal)
     }
 
+    override func hitTest(_ location: CGPoint) -> ViewContext? {
+        if let view = self.content.hitTest(location) {
+            return view
+        }
+        return super.hitTest(location)
+    }
+
     override func handleMouseWheel(at location: CGPoint, delta: CGPoint) -> Bool {
         if self.frame.contains(location) {
             let frame = self.content.frame

@@ -256,6 +256,10 @@ class ViewContext {
         }
     }
 
+    func hitTest(_ location: CGPoint) -> ViewContext? {
+        nil
+    }
+
     @discardableResult
     func releaseFocus(for deviceID: Int) -> Bool {
         if self.sharedContext.focusedViews[deviceID]?.value === self {
@@ -349,6 +353,13 @@ class GenericViewContext<Content> : ViewContext where Content : View {
         }
         let frame = self.body.frame
         self.body.drawView(frame: frame, context: context)
+    }
+
+    override func hitTest(_ location: CGPoint) -> ViewContext? {
+        if let view = self.body.hitTest(location) {
+            return view
+        }
+        return super.hitTest(location)
     }
 
     override func setLayoutProperties(_ properties: LayoutProperties) {

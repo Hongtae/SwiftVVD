@@ -207,6 +207,15 @@ class ViewGroupContext<Content> : ViewContext where Content: View {
         }
     }
 
+    override func hitTest(_ location: CGPoint) -> ViewContext? {
+        for subview in subviews {
+            if let view = subview.hitTest(location) {
+                return view
+            }
+        }
+        return super.hitTest(location)
+    }
+
     override func gestureHandlers(at location: CGPoint) -> [_GestureHandler] {
         fatalError()
     }

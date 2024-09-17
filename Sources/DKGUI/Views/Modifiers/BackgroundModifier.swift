@@ -277,4 +277,11 @@ private class BackgroundViewContext<Modifier> : ViewModifierContext<Modifier> {
         }
         background.drawView(frame: background.frame, context: context)
     }
+
+    override func hitTest(_ location: CGPoint) -> ViewContext? {
+        if let view = self.background.hitTest(location) {
+            return view
+        }
+        return super.hitTest(location)
+    }
 }

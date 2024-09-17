@@ -298,4 +298,11 @@ class ImageViewContext : ViewContext {
             }
         }
     }
+
+    override func hitTest(_ location: CGPoint) -> ViewContext? {
+        if self.frame.contains(location) {
+            return self
+        }
+        return super.hitTest(location)
+    }
 }

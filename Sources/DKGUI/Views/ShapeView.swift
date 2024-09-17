@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import DKGame
 
 public struct _ShapeView<Content, Style>: View where Content: Shape, Style: ShapeStyle {
     public var shape: Content
@@ -80,5 +81,20 @@ private class ShapeViewContext<Content, Style> : ViewContext where Content: Shap
             let path = self.shape.path(in: frame)
             context.fill(path, with: .style(self.style), style: self.fillStyle)
         }
+    }
+
+    override func hitTest(_ location: CGPoint) -> ViewContext? {
+        if self.frame.contains(location) {
+            if self.shape is ShapeDrawer {
+                // TODO: Find the closest distance to Path-Stroke
+                Log.warn("Hit testing for path-stroke is not yet implemented.")
+            } else {
+                let path = self.shape.path(in: frame)
+                if path.contains(location, eoFill: self.fillStyle.isEOFilled) {
+                    return self
+                }
+            }
+        }
+        return super.hitTest(location)
     }
 }

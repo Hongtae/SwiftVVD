@@ -233,4 +233,11 @@ private class OverlayViewContext<Modifier> : ViewModifierContext<Modifier> {
         }
         overlay.drawView(frame: overlay.frame, context: context)
     }
+
+    override func hitTest(_ location: CGPoint) -> ViewContext? {
+        if let view = self.overlay.hitTest(location) {
+            return view
+        }
+        return super.hitTest(location)
+    }
 }

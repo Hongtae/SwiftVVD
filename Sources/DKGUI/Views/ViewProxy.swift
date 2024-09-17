@@ -80,6 +80,13 @@ class ProxyViewContext<Proxy : ViewProxy> : ViewContext {
         self.view.drawView(frame: frame, context: context)
     }
 
+    override func hitTest(_ location: CGPoint) -> ViewContext? {
+        if let view = self.view.hitTest(location) {
+            return view
+        }
+        return super.hitTest(location)
+    }
+
     override func setLayoutProperties(_ properties: LayoutProperties) {
         super.setLayoutProperties(properties)
         self.view.setLayoutProperties(properties)
