@@ -17,7 +17,18 @@ public struct _ButtonGesture : Gesture {
     }
 
     public static func _makeGesture(gesture: _GraphValue<Self>, inputs: _GestureInputs) -> _GestureOutputs<Value> {
-        fatalError()
+        struct _Generator : _GestureRecognizerGenerator {
+            let graph: _GraphValue<_ButtonGesture>
+            let inputs: _GestureInputs
+            func makeGesture<T>(encloser: T, graph: _GraphValue<T>) -> _GestureRecognizer<Value>? {
+                if let gesture = graph.value(atPath: self.graph, from: encloser) {
+                    let callbacks = inputs.makeCallbacks(of: Value.self, from: encloser, graph: graph)
+                    return _ButtonGestureRecognizer(gesture: gesture, callbacks: callbacks, target: inputs.view)
+                }
+                fatalError("Unable to recover gesture: \(self.graph.valueType)")
+            }
+        }
+        return _GestureOutputs(generator: _Generator(graph: gesture, inputs: inputs))
     }
 
     public typealias Body = Never
@@ -38,12 +49,12 @@ class _ButtonGestureRecognizer : _GestureRecognizer<_ButtonGesture.Value> {
     var location: CGPoint
     var hover: Bool
 
-    init(gesture: _ButtonGesture, inputs: _GestureInputs) {
+    init(gesture: _ButtonGesture, callbacks: Callbacks, target: ViewContext?) {
         self.gesture = gesture
         self.location = .zero
         self.hover = false
         self.buttonID = 0
-        super.init(inputs: inputs)
+        super.init(callbacks: callbacks, target: target)
     }
 
     override var type: _PrimitiveGestureTypes { .button }
@@ -89,6 +100,7 @@ class _ButtonGestureRecognizer : _GestureRecognizer<_ButtonGesture.Value> {
             self.state = .done
         }
         if invokeAction {
+            self.gesture.pressingAction?(false)
             self.gesture.action()
         }
     }

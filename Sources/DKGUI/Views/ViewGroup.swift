@@ -176,10 +176,10 @@ class ViewGroupContext<Content> : ViewContext where Content: View {
         }
     }
 
-    override func update(transform t: AffineTransform) {
-        super.update(transform: t)
+    override func update(transform t: AffineTransform, origin: CGPoint) {
+        super.update(transform: t, origin: origin)
         self.subviews.forEach {
-            $0.update(transform: t)
+            $0.update(transform: self.transformByRoot, origin: self.frame.origin)
         }
     }
 
@@ -216,8 +216,17 @@ class ViewGroupContext<Content> : ViewContext where Content: View {
         return super.hitTest(location)
     }
 
-    override func gestureHandlers(at location: CGPoint) -> [_GestureHandler] {
-        fatalError()
+    override func gestureHandlers(at location: CGPoint) -> GestureHandlerOutputs {
+        var outputs = super.gestureHandlers(at: location)
+        if self.frame.contains(location) {
+            for subview in subviews {
+                let frame = subview.frame
+                if frame.contains(location) {
+                    outputs = outputs.merge(subview.gestureHandlers(at: location))
+                }
+            }
+        }
+        return outputs
     }
 
     override func handleMouseWheel(at location: CGPoint, delta: CGPoint) -> Bool {
@@ -225,8 +234,7 @@ class ViewGroupContext<Content> : ViewContext where Content: View {
             for subview in subviews {
                 let frame = subview.frame
                 if frame.contains(location) {
-                    let loc = location - frame.origin
-                    if subview.handleMouseWheel(at: loc, delta: delta) {
+                    if subview.handleMouseWheel(at: location, delta: delta) {
                         return true
                     }
                 }

@@ -55,9 +55,9 @@ class ProxyViewContext<Proxy : ViewProxy> : ViewContext {
         self.view.loadResources(context)
     }
 
-    override func update(transform t: AffineTransform) {
-        super.update(transform: t)
-        self.view.update(transform: t)
+    override func update(transform t: AffineTransform, origin: CGPoint) {
+        super.update(transform: t, origin: origin)
+        self.view.update(transform: self.transformByRoot, origin: self.frame.origin)
     }
 
     override func update(tick: UInt64, delta: Double, date: Date) {
@@ -102,6 +102,11 @@ class ProxyViewContext<Proxy : ViewProxy> : ViewContext {
 
     override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
         self.view.sizeThatFits(proposal)
+    }
+
+    override func gestureHandlers(at location: CGPoint) -> GestureHandlerOutputs {
+        let outputs = super.gestureHandlers(at: location)
+        return outputs.merge(self.view.gestureHandlers(at: location))
     }
 
     override func handleMouseWheel(at location: CGPoint, delta: CGPoint) -> Bool {

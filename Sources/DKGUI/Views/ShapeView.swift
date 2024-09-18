@@ -87,7 +87,7 @@ private class ShapeViewContext<Content, Style> : ViewContext where Content: Shap
         if self.frame.contains(location) {
             if self.shape is ShapeDrawer {
                 // TODO: Find the closest distance to Path-Stroke
-                Log.warn("Hit testing for path-stroke is not yet implemented.")
+                //Log.warn("Hit testing for path-stroke is not yet implemented.")
             } else {
                 let path = self.shape.path(in: frame)
                 if path.contains(location, eoFill: self.fillStyle.isEOFilled) {

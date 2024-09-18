@@ -132,6 +132,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                     view.place(at: CGPoint(x: bounds.midX, y: bounds.midY),
                                anchor: .center,
                                proposal: ProposedViewSize(bounds.size))
+                    view.update(transform: .identity, origin: .zero)
                 }
                 assert(viewLoaded)
                 if sharedContext.needsLayout {
@@ -141,7 +142,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                     view.place(at: CGPoint(x: bounds.midX, y: bounds.midY),
                                anchor: .center,
                                proposal: ProposedViewSize(bounds.size))
-
+                    view.update(transform: .identity, origin: .zero)
                 }
                 view.update(tick: tick, delta: delta, date: date)
 
@@ -419,7 +420,8 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
 
         if gestureHandlers.isEmpty {
             if event.type == .buttonDown {
-                gestureHandlers = view.makeGestureHandlers(at: event.location)
+                let outputs = view.gestureHandlers(at: event.location)
+                gestureHandlers = outputs.highPriorityGestures + outputs.gestures + outputs.simultaneousGestures
             }
         }
 

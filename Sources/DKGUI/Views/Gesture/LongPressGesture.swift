@@ -22,9 +22,20 @@ public struct LongPressGesture : Gesture {
     }
 
     public static func _makeGesture(gesture: _GraphValue<Self>, inputs: _GestureInputs) -> _GestureOutputs<Value> {
-        fatalError()
+        struct _Generator : _GestureRecognizerGenerator {
+            let graph: _GraphValue<LongPressGesture>
+            let inputs: _GestureInputs
+            func makeGesture<T>(encloser: T, graph: _GraphValue<T>) -> _GestureRecognizer<Value>? {
+                if let gesture = graph.value(atPath: self.graph, from: encloser) {
+                    let callbacks = inputs.makeCallbacks(of: Value.self, from: encloser, graph: graph)
+                    return LongPressGestureRecognizer(gesture: gesture, callbacks: callbacks, target: inputs.view)
+                }
+                fatalError("Unable to recover gesture: \(self.graph.valueType)")
+            }
+        }
+        return _GestureOutputs(generator: _Generator(graph: gesture, inputs: inputs))
     }
-    
+
     public typealias Value = Bool
     public typealias Body = Never
 }
@@ -57,13 +68,13 @@ class LongPressGestureRecognizer : _GestureRecognizer<LongPressGesture.Value> {
     var timestamp: ContinuousClock.Instant
     var task: Task<Void, Never>?
 
-    init(gesture: LongPressGesture, inputs: _GestureInputs) {
+    init(gesture: LongPressGesture, callbacks: Callbacks, target: ViewContext?) {
         self.gesture = gesture
         self.buttonID = 0
         self.location = .zero
         self.clock = .continuous
         self.timestamp = .now
-        super.init(inputs: inputs)
+        super.init(callbacks: callbacks, target: target)
     }
 
     override var type: _PrimitiveGestureTypes { .longPress }

@@ -423,7 +423,7 @@ extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         var outputs = Content._makeView(view: view[\.content], inputs: inputs)
-        let inputs = _ViewInputs.inputs(with: _GraphInputs(environment: .init(), sharedContext: inputs.base.sharedContext))
+        //let inputs = _ViewInputs.inputs(with: _GraphInputs(environment: .init(), sharedContext: inputs.base.sharedContext))
         if let multiView = outputs.view as? any _VariadicView_MultiViewRootViewGenerator {
             let generator = MultiViewGenerator(graph: view, content: multiView, baseInputs: inputs.base) {
                 generator in
@@ -461,7 +461,8 @@ extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
         if Modifier.self is _UnaryViewModifier.Type {
             let content = Content._makeViewList(view: view[\.content], inputs: inputs)
-            let inputs = _ViewInputs.inputs(with: _GraphInputs(environment: .init(), sharedContext: inputs.base.sharedContext))
+            //let inputs = _ViewInputs.inputs(with: _GraphInputs(environment: .init(), sharedContext: inputs.base.sharedContext))
+            let inputs = inputs.inputs
             let viewList = UnaryViewListGenerator(content: content.viewList) { generator in
                 Modifier._makeView(modifier: view[\.modifier], inputs: inputs) { _, inputs in
                     var generator = generator
@@ -578,6 +579,11 @@ class ViewModifierContext<Modifier> : ViewContext {
         return super.hitTest(location)
     }
 
+    override func gestureHandlers(at location: CGPoint) -> GestureHandlerOutputs {
+        let outputs = super.gestureHandlers(at: location)
+        return outputs.merge(self.content.gestureHandlers(at: location))
+    }
+
     override func handleMouseWheel(at location: CGPoint, delta: CGPoint) -> Bool {
         if self.frame.contains(location) {
             let frame = self.content.frame
@@ -591,9 +597,9 @@ class ViewModifierContext<Modifier> : ViewContext {
         return super.handleMouseWheel(at: location, delta: delta)
     }
 
-    override func update(transform t: AffineTransform) {
-        super.update(transform: t)
-        self.content.update(transform: t)
+    override func update(transform t: AffineTransform, origin: CGPoint) {
+        super.update(transform: t, origin: origin)
+        self.content.update(transform: self.transformByRoot, origin: self.frame.origin)
     }
 
     override func update(tick: UInt64, delta: Double, date: Date) {

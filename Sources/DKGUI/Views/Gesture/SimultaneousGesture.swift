@@ -12,15 +12,43 @@ public struct SimultaneousGesture<First, Second> : Gesture where First : Gesture
         public var first: First.Value?
         public var second: Second.Value?
     }
+
     public var first: First
     public var second: Second
+
     @inlinable public init(_ first: First, _ second: Second) {
         (self.first, self.second) = (first, second)
     }
+
     public static func _makeGesture(gesture: _GraphValue<Self>, inputs: _GestureInputs) -> _GestureOutputs<Self.Value> {
-        _GestureOutputs(recognizer: SimultaneousGestureRecognizer(gesture: gesture, inputs: inputs))
+        let first = First._makeGesture(gesture: gesture[\.first], inputs: inputs)
+        let second = Second._makeGesture(gesture: gesture[\.second], inputs: inputs)
+        return _GestureOutputs(generator: _Generator(graph: gesture,
+                                                     first: first,
+                                                     second: second,
+                                                     inputs: inputs))
     }
+
     public typealias Body = Never
+
+    private struct _Generator : _GestureRecognizerGenerator {
+        let graph: _GraphValue<SimultaneousGesture>
+        let first: _GestureOutputs<First.Value>
+        let second: _GestureOutputs<Second.Value>
+        let inputs: _GestureInputs
+        func makeGesture<T>(encloser: T, graph: _GraphValue<T>) -> _GestureRecognizer<Value>? {
+            if let gesture = graph.value(atPath: self.graph, from: encloser) {
+                let first = self.first.generator.makeGesture(encloser: gesture, graph: self.graph)
+                let second = self.second.generator.makeGesture(encloser: gesture, graph: self.graph)
+                if let first, let second {
+                    let callbacks = inputs.makeCallbacks(of: Value.self, from: encloser, graph: graph)
+                    return SimultaneousGestureRecognizer(first: first, second: second, callbacks: callbacks, target: inputs.view)
+                }
+                return nil
+            }
+            fatalError("Unable to recover gesture: \(self.graph.valueType)")
+        }
+    }
 }
 
 extension SimultaneousGesture.Value : Equatable where First.Value : Equatable, Second.Value : Equatable {
@@ -40,11 +68,10 @@ class SimultaneousGestureRecognizer<First : Gesture, Second : Gesture> : _Gestur
     let second: _GestureRecognizer<Second.Value>
     typealias Value = SimultaneousGesture<First, Second>.Value
 
-    init(gesture: _GraphValue<SimultaneousGesture<First, Second>>, inputs: _GestureInputs) {
-        let inputs2 = _GestureInputs(view: inputs.view)
-        self.first = First._makeGesture(gesture: gesture[\.first], inputs: inputs2).recognizer
-        self.second = Second._makeGesture(gesture: gesture[\.second], inputs: inputs2).recognizer
-        super.init(inputs: inputs)
+    init(first: _GestureRecognizer<First.Value>, second: _GestureRecognizer<Second.Value>, callbacks: Callbacks, target: ViewContext?) {
+        self.first = first
+        self.second = second
+        super.init(callbacks: callbacks, target: target)
 
         self.first.endedCallbacks.append(EndedCallbacks<First.Value> {
             [weak self] in

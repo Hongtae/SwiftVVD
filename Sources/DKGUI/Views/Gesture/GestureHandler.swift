@@ -42,13 +42,13 @@ class _GestureHandler {
         self.isValid && (self.state == .ready || self.state == .processing)
     }
 
-    init(inputs: _GestureInputs) {
-        self.view = inputs.view
+    init(target: ViewContext?) {
+        self.view = target
     }
 
     func locationInView(_ location: CGPoint) -> CGPoint {
         if let view {
-            let transform = view.transformByRoot.inverted()
+            let transform = view.transformByRoot
             return location.applying(transform)
         }
         return location
@@ -71,14 +71,19 @@ class _GestureHandler {
 }
 
 class _GestureRecognizer<Value> : _GestureHandler {
-    var endedCallbacks: [EndedCallbacks<Value>]
-    var changedCallbacks: [ChangedCallbacks<Value>]
-    var pressableGestureCallbacks : [PressableGestureCallbacks<Value>]
+    struct Callbacks {
+        var endedCallbacks: [EndedCallbacks<Value>] = []
+        var changedCallbacks: [ChangedCallbacks<Value>] = []
+        var pressableGestureCallbacks : [PressableGestureCallbacks<Value>] = []
+    }
+    var endedCallbacks: [EndedCallbacks<Value>] = []
+    var changedCallbacks: [ChangedCallbacks<Value>] = []
+    var pressableGestureCallbacks : [PressableGestureCallbacks<Value>] = []
 
-    override init(inputs: _GestureInputs) {
-        self.endedCallbacks = inputs.endedCallbacks.compactMap { $0 as? EndedCallbacks<Value> }
-        self.changedCallbacks = inputs.changedCallbacks.compactMap { $0 as? ChangedCallbacks<Value> }
-        self.pressableGestureCallbacks = inputs.pressableGestureCallbacks.compactMap { $0 as? PressableGestureCallbacks<Value> }
-        super.init(inputs: inputs)
+    init(callbacks: Callbacks, target: ViewContext?) {
+        self.endedCallbacks = callbacks.endedCallbacks
+        self.changedCallbacks = callbacks.changedCallbacks
+        self.pressableGestureCallbacks = callbacks.pressableGestureCallbacks
+        super.init(target: target)
     }
 }

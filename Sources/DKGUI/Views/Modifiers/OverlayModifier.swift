@@ -240,4 +240,10 @@ private class OverlayViewContext<Modifier> : ViewModifierContext<Modifier> {
         }
         return super.hitTest(location)
     }
+
+    override func update(transform t: AffineTransform, origin: CGPoint) {
+        super.update(transform: t, origin: origin)
+        self.overlay.update(transform: self.transformByRoot, origin: self.frame.origin)
+    }
+
 }
