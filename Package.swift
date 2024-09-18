@@ -9,7 +9,7 @@ let package = Package(
     products: [
         // Products define the executables and libraries a package produces, and make them visible to other packages.
         .library(name: "VVD", type: .dynamic, targets: ["VVD"]),
-        .library(name: "DKGUI", type: .dynamic, targets: ["DKGUI"]),
+        .library(name: "XGUI", type: .dynamic, targets: ["XGUI"]),
         .executable(name: "VVDEditor", targets: ["VVDEditor"]),
         .executable(name: "TestApp1", targets: ["TestApp1"])
     ],
@@ -87,7 +87,7 @@ let package = Package(
                 ], .when(platforms: [.linux])),
             ]),
         .target(
-            name: "DKGUI",
+            name: "XGUI",
             dependencies: [
                 .target(name: "VVD"),
             ],
@@ -103,7 +103,7 @@ let package = Package(
             name: "VVDEditor",
             dependencies: [
                 .target(name: "VVD"),
-                .target(name: "DKGUI"),
+                .target(name: "XGUI"),
             ]),
         .testTarget(
             name: "VVDTests",
@@ -114,7 +114,7 @@ let package = Package(
             name: "TestApp1",
             dependencies: [
                 .target(name: "VVD"),
-                .target(name: "DKGUI")
+                .target(name: "XGUI")
             ],
             resources: [
                 .process("Resources")

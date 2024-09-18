@@ -1,8 +1,8 @@
 import Foundation
-import DKGUI
+import XGUI
 
 struct Star: Shape {
-    func path(in rect: CGRect) -> DKGUI.Path {
+    func path(in rect: CGRect) -> XGUI.Path {
         var path = Path()
         path.addRoundedRect(in: CGRect(x: 0, y: 0, width: 1, height: 1),
                             cornerSize: CGSize(width: 0.15, height: 0.15),
@@ -97,7 +97,7 @@ struct ContentView: View {
                 Text("Views with background shapes")
                 HStack {
                     Text("SwiftVVD").modifier(OutlineCircle())
-                    Text("DKGUI").modifier(OutlineCircle())
+                    Text("XGUI").modifier(OutlineCircle())
                     Text("VVD").modifier(OutlineCircle())
                     Star()
                         .fill(.purple)

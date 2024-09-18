@@ -1,5 +1,5 @@
 import Foundation
-import DKGUI
+import XGUI
 
 struct ContentView: View {
     init() {

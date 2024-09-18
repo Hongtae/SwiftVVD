@@ -8,7 +8,7 @@
 import Foundation
 import VVD
 
-private let defaultWindowTitle = "DKGUI.WindowGroup"
+private let defaultWindowTitle = "XGUI.WindowGroup"
 
 public struct WindowGroup<Content>: Scene where Content: View {
 

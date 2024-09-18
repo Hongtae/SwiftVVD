@@ -1,4 +1,4 @@
-import DKGUI
+import XGUI
 
 @main
 struct TestApp1: App {
