@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import DKGame
+import VVD
 
 class ViewGroupContext<Content> : ViewContext where Content: View {
     var view: Content { references.content }

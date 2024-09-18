@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import DKGame
+import VVD
 
 public struct _ShapeView<Content, Style>: View where Content: Shape, Style: ShapeStyle {
     public var shape: Content

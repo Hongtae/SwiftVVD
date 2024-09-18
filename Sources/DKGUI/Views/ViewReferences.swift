@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import DKGame
+import VVD
 
 protocol ViewReferences<Content> where Content : View {
     associatedtype Content

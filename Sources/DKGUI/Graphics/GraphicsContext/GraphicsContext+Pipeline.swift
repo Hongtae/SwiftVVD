@@ -2,11 +2,11 @@
 //  File: GraphicsContext+Pipeline.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
-import DKGame
+import VVD
 
 #if false
 private func decodeShader(device: GraphicsDevice, encodedText: String) -> ShaderFunction? {
@@ -508,7 +508,7 @@ extension GraphicsContext {
     }
 
     func beginRenderPassBackdropTarget(clear: Bool = false,
-                                       clearColor: DKGame.Color = .clear
+                                       clearColor: VVD.Color = .clear
     ) -> RenderPass? {
         let loadAction: RenderPassAttachmentLoadAction = clear ? .clear : .load
         return beginRenderPass(viewport: self.viewport,
@@ -522,7 +522,7 @@ extension GraphicsContext {
                          renderTarget: Texture,
                          stencilBuffer: Texture?,
                          loadAction: RenderPassAttachmentLoadAction,
-                         clearColor: DKGame.Color) -> RenderPass? {
+                         clearColor: VVD.Color) -> RenderPass? {
         var descriptor = RenderPassDescriptor(
             colorAttachments: [.init(renderTarget: renderTarget,
                                      loadAction: loadAction,
@@ -563,7 +563,7 @@ extension GraphicsContext {
                           descriptor: descriptor)
     }
 
-    func clear(with color: DKGame.Color) {
+    func clear(with color: VVD.Color) {
         if let renderPass = self.beginRenderPassBackdropTarget(
             clear: true,
             clearColor: color) {

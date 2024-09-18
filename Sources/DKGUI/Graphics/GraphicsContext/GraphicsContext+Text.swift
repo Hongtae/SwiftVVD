@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import DKGame
+import VVD
 
 extension GraphicsContext {
     public struct ResolvedText {
@@ -533,7 +533,7 @@ extension GraphicsContext {
     func encodeDrawTextCommand(renderPass: RenderPass,
                                lineGlyphs: [ResolvedText.LineGlyphs],
                                transform: CGAffineTransform,
-                               color: DKGame.Color,
+                               color: VVD.Color,
                                blendState: BlendState) {
         if lineGlyphs.isEmpty { return }
 

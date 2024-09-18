@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import DKGame
+import VVD
 
 enum DisplayScaleEnvironmentKey: EnvironmentKey {
     static var defaultValue: CGFloat { return 1 }

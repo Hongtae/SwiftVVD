@@ -2,11 +2,11 @@
 //  File: GraphicsContext+BlendMode.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
-import DKGame
+import VVD
 
 extension GraphicsContext {
 
@@ -60,7 +60,7 @@ extension GraphicsContext {
         let blendResult = self.renderTargets.composited
 
         let opacity = opacity ?? self.opacity
-        let color = DKGame.Color(white: 1, opacity: opacity)
+        let color = VVD.Color(white: 1, opacity: opacity)
 
         if let renderPass = self.beginRenderPassCompositionTarget() {
             if self.encodeBlendTexturesCommand(renderPass: renderPass,
@@ -88,7 +88,7 @@ extension GraphicsContext {
                                     backdrop: Texture,
                                     textureFrame: CGRect,
                                     blendMode: BlendMode,
-                                    color: DKGame.Color) -> Bool {
+                                    color: VVD.Color) -> Bool {
         if source.dimensions != backdrop.dimensions {
             Log.error("GraphicsContext.encodeBlendTexturesCommand failed.")
             return false

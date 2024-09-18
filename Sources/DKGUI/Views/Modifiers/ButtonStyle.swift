@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import DKGame
+import VVD
 
 public protocol PrimitiveButtonStyle {
     associatedtype Body : View

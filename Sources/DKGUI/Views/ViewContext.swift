@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import DKGame
+import VVD
 
 protocol ViewGenerator<Content> {
     associatedtype Content

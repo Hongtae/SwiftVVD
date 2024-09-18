@@ -2,11 +2,11 @@
 //  File: GraphicsContext+Filter.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
-import DKGame
+import VVD
 
 extension GraphicsContext {
         public struct Filter {
@@ -353,7 +353,7 @@ extension GraphicsContext {
                                          textureFrame: CGRect,
                                          projectionTransform: ProjectionTransform,
                                          blendState: BlendState,
-                                         color: DKGame.Color) -> Bool {
+                                         color: VVD.Color) -> Bool {
 
         let invW = 1.0 / CGFloat(texture.width)
         let invH = 1.0 / CGFloat(texture.height)
@@ -418,7 +418,7 @@ extension GraphicsContext {
                                  textureFrame: CGRect,
                                  colorMatrix: ColorMatrix,
                                  blendState: BlendState,
-                                 color: DKGame.Color) -> Bool {
+                                 color: VVD.Color) -> Bool {
         let invW = 1.0 / CGFloat(texture.width)
         let invH = 1.0 / CGFloat(texture.height)
         let uvMinX = Float(textureFrame.minX * invW)
@@ -485,7 +485,7 @@ extension GraphicsContext {
                           options: BlurOptions,
                           blurPass: Int,
                           blendState: BlendState,
-                          color: DKGame.Color) -> Bool {
+                          color: VVD.Color) -> Bool {
         struct PushConstant {
             var resolution: Float2
             var direction: Float2

@@ -2,11 +2,11 @@
 //  File: GraphicsContext+View.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
-import DKGame
+import VVD
 
 extension GraphicsContext {
     public struct ResolvedSymbol {
@@ -20,6 +20,7 @@ extension GraphicsContext {
     public func draw(_ symbol: ResolvedSymbol, in rect: CGRect) {
         fatalError()
     }
+
     public func draw(_ symbol: ResolvedSymbol, at point: CGPoint, anchor: UnitPoint = .center) {
         fatalError()
     }

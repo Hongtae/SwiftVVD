@@ -5,8 +5,8 @@
 //  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
-import DKGame
 import Foundation
+import VVD
 
 public protocol App {
     associatedtype Body: Scene

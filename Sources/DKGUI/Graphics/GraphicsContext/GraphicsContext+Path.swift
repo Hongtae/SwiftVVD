@@ -2,11 +2,11 @@
 //  File: GraphicsContext+Path.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
-import DKGame
+import VVD
 
 extension GraphicsContext {
     public struct Shading {
@@ -811,7 +811,7 @@ extension GraphicsContext {
                 let gradientToViewportTransform = gradientTransform
                     .concatenating(self.viewTransform)
 
-                let addGradientBox = { (x1: CGFloat, x2: CGFloat, c1: DKGame.Color, c2: DKGame.Color) in
+                let addGradientBox = { (x1: CGFloat, x2: CGFloat, c1: VVD.Color, c2: VVD.Color) in
                     let verts = [_Vertex(position: Vector2(x1, maxY).applying(gradientToViewportTransform).float2,
                                          texcoord: Vector2.zero.float2,
                                          color: c1.float4),

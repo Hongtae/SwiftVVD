@@ -2,11 +2,11 @@
 //  File: WindowContext.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
-import DKGame
 import Foundation
+import VVD
 
 class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegate where Content: View {
 
@@ -52,8 +52,8 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
             var renderTargets: GraphicsContext.RenderTargets? = nil
             var viewLoaded = false
 
-            //let clearColor = DKGame.Color(rgba8: (245, 242, 241, 255))
-            let clearColor = DKGame.Color(rgba8: (255, 255, 241, 255))
+            //let clearColor = VVD.Color(rgba8: (245, 242, 241, 255))
+            let clearColor = VVD.Color(rgba8: (255, 255, 241, 255))
 
             mainLoop: while true {
                 guard let self = self else { break }
@@ -265,7 +265,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
             self.task = nil
             self.swapChain = nil
 
-            if let window = DKGame.makeWindow(name: self.title,
+            if let window = VVD.makeWindow(name: self.title,
                                               style: [.genericWindow],
                                               delegate: self) {
 

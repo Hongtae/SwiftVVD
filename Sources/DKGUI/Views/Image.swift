@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import DKGame
+import VVD
 
 class AnyImageProviderBox {
     func makeTexture(_ context: GraphicsContext) -> Texture? {
@@ -50,12 +50,12 @@ class NamedImageProvider: AnyImageProviderBox {
                 return texture
             }
 
-            var image: DKGame.Image?
+            var image: VVD.Image?
             do {
                 Log.debug("url: \(url)")
                 let data = try Data(contentsOf: url, options: [])
                 image = data.withUnsafeBytes { ptr in
-                    DKGame.Image(data: ptr)
+                    VVD.Image(data: ptr)
                 }
             } catch {
                 Log.error("Error on loading data: \(error)")

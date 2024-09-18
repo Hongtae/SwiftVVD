@@ -2,11 +2,11 @@
 //  File: Color.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
-import DKGame
+import VVD
 
 protocol ColorBox: Hashable {
     var red: Double     { get set }
@@ -68,7 +68,7 @@ class AnyColorBox: ColorBox, @unchecked Sendable {
         Self(self.colorBox.copy())
     }
 
-    var dkColor: DKGame.Color {
+    var dkColor: VVD.Color {
         .init(self.red, self.green, self.blue, self.alpha)
     }
 }
@@ -81,7 +81,7 @@ public struct Color: Hashable {
     }
 
     let provider: AnyColorBox
-    var dkColor: DKGame.Color { provider.dkColor }
+    var dkColor: VVD.Color { provider.dkColor }
 
     public init(_ colorSpace: RGBColorSpace = .sRGB, red: Double, green: Double, blue: Double, opacity: Double = 1) {
         let colorBox = LinearColor(red: red, green: green, blue: blue, alpha: opacity)
@@ -134,10 +134,10 @@ public struct Color: Hashable {
 
     static func lerp(_ lhs: Self, _ rhs: Self, _ t: CGFloat) -> Self {
         // FIXME: Convert RGB values to the correct color space.
-        let r = DKGame.lerp(lhs.provider.red, rhs.provider.red, t)
-        let g = DKGame.lerp(lhs.provider.green, rhs.provider.green, t)
-        let b = DKGame.lerp(lhs.provider.blue, rhs.provider.blue, t)
-        let a = DKGame.lerp(lhs.provider.alpha, rhs.provider.alpha, t)
+        let r = VVD.lerp(lhs.provider.red, rhs.provider.red, t)
+        let g = VVD.lerp(lhs.provider.green, rhs.provider.green, t)
+        let b = VVD.lerp(lhs.provider.blue, rhs.provider.blue, t)
+        let a = VVD.lerp(lhs.provider.alpha, rhs.provider.alpha, t)
         return Self(.sRGB, red: r, green: g, blue: b, opacity: a)
     }
 }

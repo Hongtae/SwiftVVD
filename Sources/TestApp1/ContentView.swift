@@ -98,7 +98,7 @@ struct ContentView: View {
                 HStack {
                     Text("SwiftVVD").modifier(OutlineCircle())
                     Text("DKGUI").modifier(OutlineCircle())
-                    Text("DKGame").modifier(OutlineCircle())
+                    Text("VVD").modifier(OutlineCircle())
                     Star()
                         .fill(.purple)
                         .frame(width: 100, height: 100)

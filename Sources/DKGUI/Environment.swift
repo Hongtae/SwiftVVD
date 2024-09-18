@@ -5,7 +5,8 @@
 //  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
-import DKGame
+import Foundation
+import VVD
 
 public protocol EnvironmentKey {
     associatedtype Value

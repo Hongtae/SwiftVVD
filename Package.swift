@@ -4,21 +4,21 @@
 import PackageDescription
 
 let package = Package(
-    name: "DKGame",
+    name: "VVD",
     platforms: [.macOS(.v14), .iOS(.v17), .macCatalyst(.v17)],
     products: [
         // Products define the executables and libraries a package produces, and make them visible to other packages.
-        .library(name: "DKGame", type: .dynamic, targets: ["DKGame"]),
+        .library(name: "VVD", type: .dynamic, targets: ["VVD"]),
         .library(name: "DKGUI", type: .dynamic, targets: ["DKGUI"]),
-        .executable(name: "DKGameEditor", targets: ["DKGameEditor"]),
+        .executable(name: "VVDEditor", targets: ["VVDEditor"]),
         .executable(name: "TestApp1", targets: ["TestApp1"])
     ],
     dependencies: [
         // Dependencies declare other packages that this package depends on.
         // .package(url: /* package url */, from: "1.0.0"),
         .package(
-            name: "DKGame-ThirdParty",
-            path: "SupportPackages/DKGame-ThirdParty"),
+            name: "VVDSupport",
+            path: "SupportPackages/VVDSupport"),
         .package(
             name: "Vulkan",
             path: "SupportPackages/Vulkan"),
@@ -33,11 +33,11 @@ let package = Package(
         // Targets are the basic building blocks of a package. A target can define a module or a test suite.
         // Targets can depend on other targets in this package, and on products in packages this package depends on.
         .target(
-            name: "DKGame",
+            name: "VVD",
             dependencies: [
                 .product(
-                    name: "DKGame-ThirdParty",
-                    package: "DKGame-ThirdParty"),
+                    name: "VVDSupport",
+                    package: "VVDSupport"),
                 .product(
                     name: "Vulkan",
                     package: "Vulkan",
@@ -55,7 +55,7 @@ let package = Package(
                 .define("VK_USE_PLATFORM_WIN32_KHR",   .when(platforms:[.windows])),
                 .define("VK_USE_PLATFORM_ANDROID_KHR", .when(platforms:[.android])),
                 .define("VK_USE_PLATFORM_WAYLAND_KHR", .when(platforms:[.linux])),
-                //.unsafeFlags(["-ISupportPackages/DKGame-ThirdParty/Sources/FreeType/include"]),
+                //.unsafeFlags(["-ISupportPackages/VVD-ThirdParty/Sources/FreeType/include"]),
             ],
             swiftSettings: [
                 // App & Window
@@ -89,7 +89,7 @@ let package = Package(
         .target(
             name: "DKGUI",
             dependencies: [
-                .target(name: "DKGame"),
+                .target(name: "VVD"),
             ],
             exclude: [
                 "Resources/Shaders/GLSL",
@@ -100,20 +100,20 @@ let package = Package(
                 .copy("Resources/Shaders/SPIRV")
             ]),
         .executableTarget(
-            name: "DKGameEditor",
+            name: "VVDEditor",
             dependencies: [
-                .target(name: "DKGame"),
+                .target(name: "VVD"),
                 .target(name: "DKGUI"),
             ]),
         .testTarget(
-            name: "DKGameTests",
+            name: "VVDTests",
             dependencies: [
-                .target(name: "DKGame"),
+                .target(name: "VVD"),
             ]),
         .executableTarget(
             name: "TestApp1",
             dependencies: [
-                .target(name: "DKGame"),
+                .target(name: "VVD"),
                 .target(name: "DKGUI")
             ],
             resources: [

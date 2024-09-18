@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import DKGame
+import VVD
 
 extension View {
     public func font(_ font: Font?) -> some View {

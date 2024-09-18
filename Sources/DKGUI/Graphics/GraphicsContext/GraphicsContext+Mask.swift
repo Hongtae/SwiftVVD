@@ -2,11 +2,11 @@
 //  File: GraphicsContext+Mask.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
-import DKGame
+import VVD
 
 extension GraphicsContext {
     public struct ClipOptions: OptionSet, Sendable {
@@ -40,7 +40,7 @@ extension GraphicsContext {
                     let makeVertex = { (x: Scalar, y: Scalar) in
                         _Vertex(position: Vector2(x, y).float2,
                                 texcoord: Vector2.zero.float2,
-                                color: DKGame.Color.white.float4)
+                                color: VVD.Color.white.float4)
                     }
                     let vertices: [_Vertex] = [
                         makeVertex(-1, -1), makeVertex(-1, 1), makeVertex(1, -1),

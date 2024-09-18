@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import DKGame
+import VVD
 
 public protocol VectorArithmetic: AdditiveArithmetic {
     mutating func scale(by rhs: Double)

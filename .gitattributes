@@ -15,6 +15,9 @@
 *.wav filter=lfs diff=lfs merge=lfs -text
 *.ogg filter=lfs diff=lfs merge=lfs -text
 *.mp3 filter=lfs diff=lfs merge=lfs -text
+*.mp4 filter=lfs diff=lfs merge=lfs -text
+*.mov filter=lfs diff=lfs merge=lfs -text
+*.avi filter=lfs diff=lfs merge=lfs -text
 *.zip filter=lfs diff=lfs merge=lfs -text
 *.7z filter=lfs diff=lfs merge=lfs -text
 *.xz filter=lfs diff=lfs merge=lfs -text
@@ -30,4 +33,4 @@
 *.spv filter=lfs diff=lfs merge=lfs -text
 
 SupportPackages/** linguist-vendored
-SupportPackages/DKGame-ThirdParty/Sources/DKWrapper/** -linguist-vendored
+SupportPackages/VVDSupport/Sources/VVDHelper/** -linguist-vendored

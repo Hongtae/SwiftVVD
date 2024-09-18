@@ -2,11 +2,11 @@
 //  File: GraphicsContext+Image.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
-import DKGame
+import VVD
 
 extension GraphicsContext {
     public struct ResolvedImage {
@@ -74,7 +74,7 @@ extension GraphicsContext {
                                   textureFrame: CGRect,
                                   textureTransform: CGAffineTransform = .identity,
                                   blendState: BlendState,
-                                  color: DKGame.Color) {
+                                  color: VVD.Color) {
         let trans = transform.concatenating(self.viewTransform)
         let makeVertex = { (x: Scalar, y: Scalar, u: Scalar, v: Scalar) in
             _Vertex(position: Vector2(x, y).applying(trans).float2,

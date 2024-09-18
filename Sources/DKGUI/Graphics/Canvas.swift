@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import DKGame
+import VVD
 
 public enum ColorRenderingMode: Equatable, Hashable {
     case nonLinear
