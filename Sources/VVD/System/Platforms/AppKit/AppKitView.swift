@@ -422,7 +422,6 @@ class AppKitView: NSView, NSTextInputClient, NSWindowDelegate {
     func windowDidResize(_ notification: Notification) {
         //    NSRect rc = [[notification object] frame];
         //    NSRect rc = [self bounds];
-        //    DKLog("Window resized. (%f x %f)\n", rc.size.width, rc.size.height);
 
         if notification.object as? NSWindow === self.window {
             self.postWindowEvent(type: .resized)

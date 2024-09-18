@@ -51,8 +51,8 @@ private let updateKeyboardMouseTimerId: UINT_PTR = 10
 private let updateKeyboardMouseTimeInterval: UINT = 10
 
 // WINDOW MESSAGE
-private let WM_DKWINDOW_SHOWCURSOR = (WM_USER + 0x1175)
-private let WM_DKWINDOW_UPDATEMOUSECAPTURE = (WM_USER + 0x1180)
+private let WM_VVDWINDOW_SHOWCURSOR = (WM_USER + 0x1175)
+private let WM_VVDWINDOW_UPDATEMOUSECAPTURE = (WM_USER + 0x1180)
 
 private let HWND_TOP:HWND? = nil
 private let HWND_TOPMOST:HWND = HWND(bitPattern: -1)!
@@ -367,7 +367,7 @@ public class Win32Window : Window {
     public func showMouse(_ show: Bool, forDeviceID deviceID: Int) {
         if let hWnd = self.hWnd, deviceID == 0 {
             let wParam = show ? WPARAM(1) : WPARAM(0)
-            PostMessageW(hWnd, UINT(WM_DKWINDOW_SHOWCURSOR), wParam, 0)
+            PostMessageW(hWnd, UINT(WM_VVDWINDOW_SHOWCURSOR), wParam, 0)
         }
     }
 
@@ -388,7 +388,7 @@ public class Win32Window : Window {
             self.mousePosition = self.mousePosition(forDeviceID: 0)!
             self.lockedMousePosition = mousePosition
 
-            PostMessageW(hWnd, UINT(WM_DKWINDOW_UPDATEMOUSECAPTURE), 0, 0)
+            PostMessageW(hWnd, UINT(WM_VVDWINDOW_UPDATEMOUSECAPTURE), 0, 0)
         }
     }
 
@@ -883,7 +883,7 @@ public class Win32Window : Window {
                                                  deviceID: 0,
                                                  buttonID: 0,
                                                  location: pos))
-                PostMessageW(hWnd, UINT(WM_DKWINDOW_UPDATEMOUSECAPTURE), 0, 0)
+                PostMessageW(hWnd, UINT(WM_VVDWINDOW_UPDATEMOUSECAPTURE), 0, 0)
                 return 0
             case UINT(WM_LBUTTONUP):
                 window.mouseButtonDownMask.remove(.button1)
@@ -896,7 +896,7 @@ public class Win32Window : Window {
                                                  deviceID: 0,
                                                  buttonID: 0,
                                                  location: pos))
-                PostMessageW(hWnd, UINT(WM_DKWINDOW_UPDATEMOUSECAPTURE), 0, 0)
+                PostMessageW(hWnd, UINT(WM_VVDWINDOW_UPDATEMOUSECAPTURE), 0, 0)
                 return 0
             case UINT(WM_RBUTTONDOWN):
                 window.mouseButtonDownMask.insert(.button2)
@@ -909,7 +909,7 @@ public class Win32Window : Window {
                                                  deviceID: 0,
                                                  buttonID: 1,
                                                  location: pos))
-                PostMessageW(hWnd, UINT(WM_DKWINDOW_UPDATEMOUSECAPTURE), 0, 0)
+                PostMessageW(hWnd, UINT(WM_VVDWINDOW_UPDATEMOUSECAPTURE), 0, 0)
                 return 0
             case UINT(WM_RBUTTONUP):
                 window.mouseButtonDownMask.remove(.button2)
@@ -922,7 +922,7 @@ public class Win32Window : Window {
                                                  deviceID: 0,
                                                  buttonID: 1,
                                                  location: pos))
-                PostMessageW(hWnd, UINT(WM_DKWINDOW_UPDATEMOUSECAPTURE), 0, 0)
+                PostMessageW(hWnd, UINT(WM_VVDWINDOW_UPDATEMOUSECAPTURE), 0, 0)
                 return 0
             case UINT(WM_MBUTTONDOWN):
                 window.mouseButtonDownMask.insert(.button3)
@@ -935,7 +935,7 @@ public class Win32Window : Window {
                                                  deviceID: 0,
                                                  buttonID: 2,
                                                  location: pos))
-                PostMessageW(hWnd, UINT(WM_DKWINDOW_UPDATEMOUSECAPTURE), 0, 0)
+                PostMessageW(hWnd, UINT(WM_VVDWINDOW_UPDATEMOUSECAPTURE), 0, 0)
                 return 0
             case UINT(WM_MBUTTONUP):
                 window.mouseButtonDownMask.remove(.button3)
@@ -948,7 +948,7 @@ public class Win32Window : Window {
                                                  deviceID: 0,
                                                  buttonID: 2,
                                                  location: pos))
-                PostMessageW(hWnd, UINT(WM_DKWINDOW_UPDATEMOUSECAPTURE), 0, 0)
+                PostMessageW(hWnd, UINT(WM_VVDWINDOW_UPDATEMOUSECAPTURE), 0, 0)
                 return 0
             case UINT(WM_XBUTTONDOWN):
                 let pts = MAKEPOINTS(lParam)
@@ -974,7 +974,7 @@ public class Win32Window : Window {
                                                      buttonID: 4,
                                                      location: pos))
                 }
-                PostMessageW(hWnd, UINT(WM_DKWINDOW_UPDATEMOUSECAPTURE), 0, 0)
+                PostMessageW(hWnd, UINT(WM_VVDWINDOW_UPDATEMOUSECAPTURE), 0, 0)
                 return 1 // should return TRUE
             case UINT(WM_XBUTTONUP):
                 let pts = MAKEPOINTS(lParam)
@@ -1000,7 +1000,7 @@ public class Win32Window : Window {
                                                      buttonID: 4,
                                                      location: pos))
                 }
-                PostMessageW(hWnd, UINT(WM_DKWINDOW_UPDATEMOUSECAPTURE), 0, 0)                  
+                PostMessageW(hWnd, UINT(WM_VVDWINDOW_UPDATEMOUSECAPTURE), 0, 0)                  
                 return 1 // should return TRUE
             case UINT(WM_MOUSEWHEEL):
                 var origin: POINT = POINT(x:0, y:0)
@@ -1117,7 +1117,7 @@ public class Win32Window : Window {
             case UINT(WM_KEYDOWN),
                  UINT(WM_KEYUP):
                 return 0
-            case UINT(WM_DKWINDOW_SHOWCURSOR):
+            case UINT(WM_VVDWINDOW_SHOWCURSOR):
                 // If we need to control mouse position from other thread,
                 // we should call AttachThreadInput() to synchronize threads.
                 // but we are not going to control position, but control visibility
@@ -1128,7 +1128,7 @@ public class Win32Window : Window {
                     while ShowCursor(false) >= 0 {}
                 }
                 return 0
-            case UINT(WM_DKWINDOW_UPDATEMOUSECAPTURE):
+            case UINT(WM_VVDWINDOW_UPDATEMOUSECAPTURE):
                 if GetCapture() == hWnd {
                     if window.mouseButtonDownMask.rawValue == 0 && !window.mouseLocked {
                         ReleaseCapture()
