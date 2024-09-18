@@ -2,7 +2,7 @@ import Foundation
 import XGUI
 
 struct Star: Shape {
-    func path(in rect: CGRect) -> XGUI.Path {
+    func path(in rect: CGRect) -> Path {
         var path = Path()
         path.addRoundedRect(in: CGRect(x: 0, y: 0, width: 1, height: 1),
                             cornerSize: CGSize(width: 0.15, height: 0.15),
