@@ -2,7 +2,7 @@
 //  File: Text.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -281,37 +281,68 @@ extension Text {
 
 extension Text: View {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let view = view.value.makeViewProxy(inputs: inputs)
-        return _ViewOutputs(item: .view(view))
+        let generator = TextViewContext.Generator(graph: view, baseInputs: inputs.base)
+        return _ViewOutputs(view: generator)
     }
 }
 
 extension Text: _PrimitiveView {
 }
 
-extension Text: _ViewProxyProvider {
-    func makeViewProxy(inputs: _ViewInputs) -> ViewProxy {
-        return TextViewProxy(text: self, inputs: inputs)
-    }
-}
-
-class TextViewProxy: ViewProxy {
+private class TextViewContext: ViewContext {
     var text: Text
     var resolvedText: GraphicsContext.ResolvedText?
 
-    init(text: Text, inputs: _ViewInputs) {
-        self.text = inputs.environmentValues._resolve(text)
-        super.init(inputs: inputs)
+    var primaryStyle: AnyShapeStyle?
 
-        if self.environmentValues.font == nil {
-            self.environmentValues.font = .system(.body)
+    struct Generator : ViewGenerator {
+        let graph: _GraphValue<Text>
+        var baseInputs: _GraphInputs
+
+        func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
+            if let view = graph.value(atPath: self.graph, from: encloser) {
+                return TextViewContext(view: view, inputs: baseInputs, graph: self.graph)
+            }
+            fatalError("Unable to recover Text")
+        }
+
+        mutating func mergeInputs(_ inputs: _GraphInputs) {
+            baseInputs.mergedInputs.append(inputs)
         }
     }
 
-    override func loadView(context: GraphicsContext) {
+    init(view: Text, inputs: _GraphInputs, graph: _GraphValue<Text>) {
+        self.text = view
+        super.init(inputs: inputs, graph: graph)
+
+        if self.inputs.environment.font == nil {
+            self.inputs.environment.font = .system(.body)
+        }
+    }
+
+    override func validatePath<T>(encloser: T, graph: _GraphValue<T>) -> Bool {
+        self._validPath = false
+        if graph.value(atPath: self.graph, from: encloser) is Text {
+            self._validPath = true
+            return true
+        }
+        return false
+    }
+
+    override func updateContent<T>(encloser: T, graph: _GraphValue<T>) {
+        if let view = graph.value(atPath: self.graph, from: encloser) as? Text {
+            self.text = view
+        } else {
+            fatalError("Unable to recover Text")
+        }
+    }
+
+    override func loadResources(_ context: GraphicsContext) {
         self.resolvedText = context.resolve(self.text)
         self.sharedContext.needsLayout = true
-        super.loadView(context: context)
+        super.loadResources(context)
+
+        self.primaryStyle = self.viewStyles().foregroundStyle.primary
     }
 
     override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
@@ -339,18 +370,27 @@ class TextViewProxy: ViewProxy {
     }
 
     override func draw(frame: CGRect, context: GraphicsContext) {
+        super.draw(frame: frame, context: context)
+
         if self.frame.width > 0 && self.frame.height > 0 {
             if self.resolvedText == nil {
                 self.resolvedText = context.resolve(self.text)
                 self.sharedContext.needsLayout = true
             }
             if let resolvedText {
-                if let style = foregroundStyle.primary {
+                if let style = self.primaryStyle {
                     context.draw(resolvedText, in: frame, shading: .style(style))
                 } else {
                     context.draw(resolvedText, in: frame)
                 }
             }
         }
+    }
+
+    override func hitTest(_ location: CGPoint) -> ViewContext? {
+        if self.frame.contains(location) {
+            return self
+        }
+        return super.hitTest(location)
     }
 }

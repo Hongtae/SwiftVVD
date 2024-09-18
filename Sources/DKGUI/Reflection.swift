@@ -21,7 +21,7 @@ private func _getChildOffset(_: Any.Type, index: Int) -> Int
 
 // Note: I modified some code that I don't think is necessary. (removed _MetadataKind)
 @discardableResult
-internal func _forEachField(of type: Any.Type, body: (UnsafePointer<CChar>, Int, Any.Type) -> Bool) -> Bool {
+func _forEachField(of type: Any.Type, body: (UnsafePointer<CChar>, Int, Any.Type) -> Bool) -> Bool {
     let numChildren = _getRecursiveChildCount(type)
     for i in 0..<numChildren {
         let offset = _getChildOffset(type, index: i)

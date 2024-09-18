@@ -62,7 +62,7 @@ public struct VStackLayout: Layout {
         }
 
         let fitSizes = subviews.map {
-            $0.sizeThatFits(ProposedViewSize(width: size.width))
+            $0.sizeThatFits(proposal)
         }
 
         let fitHeight = fitSizes.reduce(CGFloat.zero) { result, size in
@@ -174,4 +174,8 @@ extension _VStackLayout: _VariadicView_UnaryViewRoot {
 }
 
 extension _VStackLayout: _VariadicView_ViewRoot {
+}
+
+extension _VStackLayout {
+    static var _defaultLayoutSpacing : CGFloat { 8 }
 }

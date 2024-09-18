@@ -2,12 +2,12 @@
 //  File: Layout.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
 
-public protocol Layout: Animatable {
+public protocol Layout : Animatable {
     static var layoutProperties: LayoutProperties { get }
 
     associatedtype Cache = Void
@@ -80,8 +80,8 @@ public struct LayoutProperties {
     }
 }
 
-internal extension Layout {
-    static var _defaultLayoutSpacing : CGFloat { 8 }
+extension Layout {
+    static var _defaultLayoutSpacing : CGFloat { 0 }
 }
 
 private extension Layout {
@@ -160,7 +160,7 @@ private extension Layout {
     }
 }
 
-public struct AnyLayout: Layout {
+public struct AnyLayout : Layout {
     var layout: any Layout
 
     public struct Cache {
@@ -234,13 +234,29 @@ public struct AnyLayout: Layout {
 }
 
 //MARK: - LayoutRoot, VariadicView Root for Layout
-struct _LayoutRoot<L>: _VariadicView.UnaryViewRoot where L: Layout {
-    public typealias Body = Never
-
-    let layout: L
-    init(_ layout: L) { self.layout = layout }
+public struct _LayoutRoot<L> : _VariadicView.UnaryViewRoot where L : Layout {
+    @usableFromInline
+    var layout: L
+    @inlinable init(_ layout: L) {
+        self.layout = layout
+    }
 
     public static func _makeView(root: _GraphValue<Self>, inputs: _ViewInputs, body: (_Graph, _ViewInputs) -> _ViewListOutputs) -> _ViewOutputs {
-        return _ViewOutputs(item: .layout(root.value.layout, body(_Graph(), inputs)))
+        let body = body(_Graph(), inputs)
+        let inputs = inputs.listInputs
+        let generator = _VariadicView_ViewRoot_MakeChildren_LayoutRootProxy(graph: root, body: body, inputs: inputs) {
+            $0.layout
+        }
+        return _ViewOutputs(view: generator)
+    }
+
+    public typealias Body = Never
+}
+
+struct DefaultLayoutPropertyItem : PropertyItem {
+    static var `default` : some Layout { VStackLayout() }
+    let layout: any Layout
+    var description: String {
+        "DefaultLayoutPropertyItem: \(self.layout)"
     }
 }

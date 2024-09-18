@@ -9,27 +9,27 @@
 public struct ViewBuilder {
 
     public static func buildBlock() -> EmptyView {
-        return EmptyView()
+        EmptyView()
     }
 
     public static func buildBlock<Content>(_ content: Content) -> Content where Content: View {
-        return content
+        content
     }
 
     public static func buildIf<Content>(_ content: Content?) -> Content? where Content: View {
-        return content
+        content
     }
 
     public static func buildEither<TrueContent, FalseContent>(first: TrueContent) -> _ConditionalContent<TrueContent, FalseContent> where TrueContent: View, FalseContent: View {
-        return _ConditionalContent(storage: .trueContent(first))
+        .init(storage: .trueContent(first))
     }
 
     public static func buildEither<TrueContent, FalseContent>(second: FalseContent) -> _ConditionalContent<TrueContent, FalseContent> where TrueContent: View, FalseContent: View {
-        return _ConditionalContent(storage: .falseContent(second))
+        .init(storage: .falseContent(second))
     }
 
     public static func buildLimitedAvailability<Content>(_ content: Content) -> AnyView where Content: View {
-        return AnyView(content)
+        AnyView(content)
     }
 
     public static func buildBlock<each Content>(_ content: repeat each Content) -> TupleView<(repeat each Content)> where repeat each Content: View {

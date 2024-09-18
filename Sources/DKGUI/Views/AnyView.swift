@@ -39,23 +39,38 @@ public struct AnyView: View {
     }
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        func make<V: View>(_ v: V, inputs: _ViewInputs)->_ViewOutputs {
-            V._makeView(view: _GraphValue(v), inputs: inputs)
-        }
-        let v = view[\.storage].value.view
-        return make(v, inputs: inputs)
+        let generator = TypeErasedViewGenerator(graph: view, inputs: inputs)
+        return _ViewOutputs(view: generator)
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        func make<V: View>(_ v: V, inputs: _ViewListInputs)->_ViewListOutputs {
-            V._makeViewList(view: _GraphValue(v), inputs: inputs)
-        }
-        let v = view[\.storage].value.view
-        return make(v, inputs: inputs)
+        let generator = TypeErasedViewGenerator(graph: view, inputs: inputs.inputs)
+        return _ViewListOutputs(viewList: .staticList([generator]))
     }
 
     public typealias Body = Never
 }
 
 extension AnyView: _PrimitiveView {
+}
+
+private struct TypeErasedViewGenerator : ViewGenerator {
+    let graph: _GraphValue<AnyView>
+    var inputs: _ViewInputs
+
+    func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
+        if let value = graph.value(atPath: self.graph, from: encloser) {
+            func make<V: View>(_ view: V, graph: _GraphValue<Any>, inputs: _ViewInputs) -> ViewContext? {
+                let graph = graph.unsafeCast(to: V.self)
+                let outputs = V._makeView(view: graph, inputs: inputs)
+                return outputs.view?.makeView(encloser: view, graph: graph)
+            }
+            return make(value.storage.view, graph: self.graph[\.storage.view].unsafeCast(to: Any.self), inputs: inputs)
+        }
+        return nil
+    }
+
+    mutating func mergeInputs(_ inputs: _GraphInputs) {
+        self.inputs.base.mergedInputs.append(inputs)
+    }
 }

@@ -2,10 +2,11 @@
 //  File: ShapeView.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
+import DKGame
 
 public struct _ShapeView<Content, Style>: View where Content: Shape, Style: ShapeStyle {
     public var shape: Content
@@ -19,8 +20,8 @@ public struct _ShapeView<Content, Style>: View where Content: Shape, Style: Shap
     }
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let proxy = view.value.makeViewProxy(inputs: inputs)
-        return _ViewOutputs(item: .view(proxy))
+        let generator = ShapeViewContext.Generator(graph: view, baseInputs: inputs.base)
+        return _ViewOutputs(view: generator)
     }
 
     public typealias Body = Never
@@ -29,22 +30,44 @@ public struct _ShapeView<Content, Style>: View where Content: Shape, Style: Shap
 extension _ShapeView: _PrimitiveView {
 }
 
-extension _ShapeView: _ViewProxyProvider {
-    func makeViewProxy(inputs: _ViewInputs) -> ViewProxy {
-        ShapeViewProxy(view: self, inputs: inputs)
+private class ShapeViewContext<Content, Style> : ViewContext where Content: Shape, Style: ShapeStyle {
+    typealias ShapeView = _ShapeView<Content, Style>
+    let view: ShapeView
+    var shape: Content          { view.shape }
+    var style: Style            { view.style }
+    var fillStyle: FillStyle    { view.fillStyle }
+
+    struct Generator : ViewGenerator {
+        let graph: _GraphValue<ShapeView>
+        var baseInputs: _GraphInputs
+
+        func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
+            if let view = graph.value(atPath: self.graph, from: encloser) {
+                return ShapeViewContext(view: view, inputs: baseInputs, graph: self.graph)
+            }
+            fatalError("Unable to recover view")
+        }
+
+        mutating func mergeInputs(_ inputs: _GraphInputs) {
+            baseInputs.mergedInputs.append(inputs)
+        }
     }
-}
 
-class ShapeViewProxy<Content, Style>: ViewProxy where Content: Shape, Style: ShapeStyle {
-    let shape: Content
-    let style: Style
-    let fillStyle: FillStyle
+    init(view: _ShapeView<Content, Style>, inputs: _GraphInputs, graph: _GraphValue<ShapeView>) {
+        self.view = view
+        super.init(inputs: inputs, graph: graph)
+    }
 
-    init(view: _ShapeView<Content, Style>, inputs: _ViewInputs) {
-        self.shape = view.shape
-        self.style = view.style
-        self.fillStyle = view.fillStyle
-        super.init(inputs: inputs)
+    override func validatePath<T>(encloser: T, graph: _GraphValue<T>) -> Bool {
+        self._validPath = false
+        if graph.value(atPath: self.graph, from: encloser) is ShapeView {
+            self._validPath = true
+            return true
+        }
+        return false
+    }
+
+    override func updateContent<T>(encloser: T, graph: _GraphValue<T>) {
     }
 
     override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
@@ -58,5 +81,20 @@ class ShapeViewProxy<Content, Style>: ViewProxy where Content: Shape, Style: Sha
             let path = self.shape.path(in: frame)
             context.fill(path, with: .style(self.style), style: self.fillStyle)
         }
+    }
+
+    override func hitTest(_ location: CGPoint) -> ViewContext? {
+        if self.frame.contains(location) {
+            if self.shape is ShapeDrawer {
+                // TODO: Find the closest distance to Path-Stroke
+                //Log.warn("Hit testing for path-stroke is not yet implemented.")
+            } else {
+                let path = self.shape.path(in: frame)
+                if path.contains(location, eoFill: self.fillStyle.isEOFilled) {
+                    return self
+                }
+            }
+        }
+        return super.hitTest(location)
     }
 }

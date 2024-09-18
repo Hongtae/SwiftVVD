@@ -18,7 +18,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
     private(set) var window: Window?
 
     var modifiers: [any _SceneModifier] = []
-    var viewProxy: ViewProxy
+    var view: ViewContext?
     var environmentValues: EnvironmentValues
     var sharedContext: SharedContext
 
@@ -52,15 +52,38 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
             var renderTargets: GraphicsContext.RenderTargets? = nil
             var viewLoaded = false
 
+            //let clearColor = DKGame.Color(rgba8: (245, 242, 241, 255))
+            let clearColor = DKGame.Color(rgba8: (255, 255, 241, 255))
+
             mainLoop: while true {
                 guard let self = self else { break }
                 if Task.isCancelled { break }
 
-                let view = self.viewProxy
-
                 let swapChain = self.swapChain
                 let (state, config) = synchronizedBy(locking: self.stateLock) {
                     (self.state, self.config)
+                }
+
+                guard let view = self.view
+                else {
+                    if state.visible, let swapChain {
+                        var renderPass = swapChain.currentRenderPassDescriptor()
+                        if let commandBuffer = swapChain.commandQueue.makeCommandBuffer() {
+                            renderPass.colorAttachments[0].clearColor = clearColor
+                            renderPass.colorAttachments[0].loadAction = .clear
+                            if let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPass) {
+                                encoder.endEncoding()
+                            }
+                            commandBuffer.commit()
+                            _=swapChain.present()
+                        }
+                    }
+                    let frameInterval = config.inactiveFrameInterval
+                    repeat {
+                        if Task.isCancelled { break mainLoop }
+                        await Task.yield()
+                    } while tickCounter.elapsed < frameInterval
+                    continue
                 }
 
                 let frameInterval = state.activated ? config.activeFrameInterval : config.inactiveFrameInterval
@@ -96,7 +119,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                                                              resolution: CGSize(width: width, height: height),
                                                              commandBuffer: commandBuffer) {
                                 context.environment = view.environmentValues
-                                view.loadView(context: context)
+                                view.loadResources(context)
                                 commandBuffer.commit()
                             } else {
                                 Log.error("GraphicsContext failed.")
@@ -109,11 +132,17 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                     view.place(at: CGPoint(x: bounds.midX, y: bounds.midY),
                                anchor: .center,
                                proposal: ProposedViewSize(bounds.size))
+                    view.update(transform: .identity, origin: .zero)
                 }
                 assert(viewLoaded)
                 if sharedContext.needsLayout {
                     sharedContext.needsLayout = false
-                    view.layoutSubviews()
+                    let bounds = contentBounds
+                    //view.layoutSubviews()
+                    view.place(at: CGPoint(x: bounds.midX, y: bounds.midY),
+                               anchor: .center,
+                               proposal: ProposedViewSize(bounds.size))
+                    view.update(transform: .identity, origin: .zero)
                 }
                 view.update(tick: tick, delta: delta, date: date)
 
@@ -133,7 +162,6 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                             height: backBuffer.height)
                     }
 
-                    let clearColor: DKGame.Color = .init(rgba8: (245, 242, 241, 255))
                     renderPass.colorAttachments[0].clearColor = clearColor
                     if let renderTargets,
                        let commandBuffer = swapChain.commandQueue.makeCommandBuffer() {
@@ -201,16 +229,27 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
         self.environmentValues = EnvironmentValues()
         self.sharedContext = SharedContext(appContext: appContext!)
 
-        let graph = _GraphValue(content)
-        let viewInputs = _ViewInputs(sharedContext: self.sharedContext,
-                                     environmentValues: self.environmentValues,
-                                     transform: .identity,
-                                     position: .zero,
-                                     size: self.state.bounds.size,
-                                     safeAreaInsets: EdgeInsets(),
-                                     defaultLayout: VStackLayout())
-        let viewOutputs = Content._makeView(view: graph, inputs: viewInputs)
-        self.viewProxy = viewOutputs.view
+        let properties = PropertyList(
+            DefaultLayoutPropertyItem(layout: VStackLayout()),
+            DefaultPaddingEdgeInsetsPropertyItem(insets: EdgeInsets(_all: 16))
+        )
+
+        let baseInputs = _GraphInputs(properties: properties,
+                                      environment: self.environmentValues,
+                                      sharedContext: self.sharedContext)
+
+        let graph = _GraphValue<Content>.root()
+        let inputs = _ViewInputs.inputs(with: baseInputs)
+
+        let outputs = Content._makeView(view: graph, inputs: inputs)
+
+        self.view = outputs.view?.makeView(encloser: content, graph: graph)
+        if let view {
+            if view.validatePath(encloser: content, graph: graph) == false {
+                fatalError("Invalid path")
+            }
+            view.resolveGraphInputs(encloser: content, graph: graph)
+        }
     }
 
     deinit {
@@ -366,8 +405,10 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
             //Log.debug("WindowContext.onMouseEvent: \(event)")
         }
 
+        guard let view = self.view else { return }
+
         if event.type == .wheel {
-            _ = self.viewProxy.handleMouseWheel(at: event.location,
+            _ = view.handleMouseWheel(at: event.location,
                                                 delta: event.delta)
             return
         }
@@ -379,7 +420,8 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
 
         if gestureHandlers.isEmpty {
             if event.type == .buttonDown {
-                gestureHandlers = self.viewProxy.makeGestureHandlers(at: event.location)
+                let outputs = view.gestureHandlers(at: event.location)
+                gestureHandlers = outputs.highPriorityGestures + outputs.gestures + outputs.simultaneousGestures
             }
         }
 

@@ -51,7 +51,18 @@ public struct DragGesture : Gesture {
     }
 
     public static func _makeGesture(gesture: _GraphValue<DragGesture>, inputs: _GestureInputs) -> _GestureOutputs<DragGesture.Value> {
-        _GestureOutputs<Value>(recognizer: DragGestureRecognizer(gesture: gesture, inputs: inputs))
+        struct _Generator : _GestureRecognizerGenerator {
+            let graph: _GraphValue<DragGesture>
+            let inputs: _GestureInputs
+            func makeGesture<T>(encloser: T, graph: _GraphValue<T>) -> _GestureRecognizer<Value>? {
+                if let gesture = graph.value(atPath: self.graph, from: encloser) {
+                    let callbacks = inputs.makeCallbacks(of: Value.self, from: encloser, graph: graph)
+                    return DragGestureRecognizer(gesture: gesture, callbacks: callbacks, target: inputs.view)
+                }
+                fatalError("Unable to recover gesture: \(self.graph.valueType)")
+            }
+        }
+        return _GestureOutputs(generator: _Generator(graph: gesture, inputs: inputs))
     }
 
     public typealias Body = Never
@@ -65,19 +76,19 @@ class DragGestureRecognizer : _GestureRecognizer<DragGesture.Value> {
     var value: DragGesture.Value
     var dragging = false
 
-    init(gesture: _GraphValue<DragGesture>, inputs: _GestureInputs) {
-        self.gesture = gesture.value
+    init(gesture: DragGesture, callbacks: Callbacks, target: ViewContext?) {
+        self.gesture = gesture
         self.buttonID = 0
         self.value = .init(time: .now,
                            location: .zero,
                            startLocation: .zero,
                            _velocity: _Velocity(valuePerSecond: .zero))
-        super.init(inputs: inputs)
+        super.init(callbacks: callbacks, target: target)
     }
 
     override var type: _PrimitiveGestureTypes { .drag }
     override var isValid: Bool {
-        typeFilter.contains(self.type) && viewProxy != nil
+        typeFilter.contains(self.type) && view != nil
     }
 
     override func setTypeFilter(_ f: _PrimitiveGestureTypes) -> _PrimitiveGestureTypes {

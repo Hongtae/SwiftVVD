@@ -31,23 +31,43 @@ extension Gesture where Self.Body == Never {
 extension Optional : Gesture where Wrapped : Gesture {
     public typealias Value = Wrapped.Value
     public static func _makeGesture(gesture: _GraphValue<Self>, inputs: _GestureInputs) -> _GestureOutputs<Wrapped.Value> {
-        if case let .some(wrapped) = gesture.value {
-            return Wrapped._makeGesture(gesture: _GraphValue(wrapped), inputs: inputs)
-        }
-        fatalError("\(Self.self) is nil")
+        Wrapped._makeGesture(gesture: gesture[\.unsafelyUnwrapped], inputs: inputs)
     }
     public typealias Body = Never
 }
 
+protocol GestureCallbackGenerator {
+    func _makeCallback<T>(encloser: T, graph: _GraphValue<T>) -> Any
+}
+
 public struct _GestureInputs {
-    weak var viewProxy: ViewProxy?
-    var endedCallbacks: [Any] = []
-    var changedCallbacks: [Any] = []
-    var pressableGestureCallbacks: [Any] = []
+    let view: ViewContext
+    var endedCallbacks: [GestureCallbackGenerator] = []
+    var changedCallbacks: [GestureCallbackGenerator] = []
+    var pressableGestureCallbacks: [GestureCallbackGenerator] = []
+
+    func makeCallbacks<Value, T>(of: Value.Type, from encloser: T, graph: _GraphValue<T>) -> _GestureRecognizer<Value>.Callbacks {
+        var callbacks = _GestureRecognizer<Value>.Callbacks()
+        callbacks.endedCallbacks = self.endedCallbacks.compactMap {
+            $0._makeCallback(encloser: encloser, graph: graph) as? EndedCallbacks<Value>
+        }
+        callbacks.changedCallbacks = self.changedCallbacks.compactMap {
+            $0._makeCallback(encloser: encloser, graph: graph) as? ChangedCallbacks<Value>
+        }
+        callbacks.pressableGestureCallbacks = self.pressableGestureCallbacks.compactMap {
+            $0._makeCallback(encloser: encloser, graph: graph) as? PressableGestureCallbacks<Value>
+        }
+        return callbacks
+    }
+}
+
+protocol _GestureRecognizerGenerator<Value> {
+    associatedtype Value
+    func makeGesture<T>(encloser: T, graph: _GraphValue<T>) -> _GestureRecognizer<Value>?
 }
 
 public struct _GestureOutputs<Value> {
-    var recognizer: _GestureRecognizer<Value>
+    let generator: any _GestureRecognizerGenerator<Value>
 }
 
 public struct GestureMask : OptionSet {

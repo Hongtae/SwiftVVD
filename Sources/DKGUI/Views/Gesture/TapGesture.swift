@@ -12,8 +12,20 @@ public struct TapGesture : Gesture {
     public init(count: Int = 1) {
         self.count = count
     }
+
     public static func _makeGesture(gesture: _GraphValue<TapGesture>, inputs: _GestureInputs) -> _GestureOutputs<Value> {
-        _GestureOutputs<Value>(recognizer: TapGestureRecognizer(gesture: gesture, inputs: inputs))
+        struct _Generator : _GestureRecognizerGenerator {
+            let graph: _GraphValue<TapGesture>
+            let inputs: _GestureInputs
+            func makeGesture<T>(encloser: T, graph: _GraphValue<T>) -> _GestureRecognizer<Value>? {
+                if let gesture = graph.value(atPath: self.graph, from: encloser) {
+                    let callbacks = inputs.makeCallbacks(of: Value.self, from: encloser, graph: graph)
+                    return TapGestureRecognizer(gesture: gesture, callbacks: callbacks, target: inputs.view)
+                }
+                fatalError("Unable to recover gesture: \(self.graph.valueType)")
+            }
+        }
+        return _GestureOutputs(generator: _Generator(graph: gesture, inputs: inputs))
     }
 
     public typealias Body = Never
@@ -37,15 +49,15 @@ class TapGestureRecognizer : _GestureRecognizer<TapGesture.Value> {
     let clock: ContinuousClock
     var timestamp: ContinuousClock.Instant
 
-    init(gesture: _GraphValue<TapGesture>, inputs: _GestureInputs) {
-        self.gesture = gesture.value
+    init(gesture: TapGesture, callbacks: Callbacks, target: ViewContext?) {
+        self.gesture = gesture
         self.buttonID = 0
         self.count = 0
         self.maximumInterval = .seconds(0.5)
         self.maximumDuration = .seconds(1.0)
         self.clock = .continuous
         self.timestamp = .now
-        super.init(inputs: inputs)
+        super.init(callbacks: callbacks, target: target)
     }
 
     override var type: _PrimitiveGestureTypes { .tap }

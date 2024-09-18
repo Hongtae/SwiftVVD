@@ -24,6 +24,3 @@ public struct VStack<Content>: View where Content: View {
 
 extension VStack: _PrimitiveView {
 }
-
-extension VStack: _ViewProxyProvider {
-}

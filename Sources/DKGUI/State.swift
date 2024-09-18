@@ -23,10 +23,10 @@ class StoredLocation<Value> : AnyLocation<Value> {
 
 @propertyWrapper public struct State<Value> : DynamicProperty {
     @usableFromInline
-    internal var _value: Value
+    var _value: Value
 
     @usableFromInline
-    internal var _location: AnyLocation<Value>?
+    var _location: AnyLocation<Value>?
 
     public init(wrappedValue value: Value) {
         _value = value

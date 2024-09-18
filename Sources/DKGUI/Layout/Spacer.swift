@@ -2,12 +2,12 @@
 //  File: Spacer.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
 
-public struct Spacer: View {
+public struct Spacer : View {
     public var minLength: CGFloat?
     public init(minLength: CGFloat? = nil) {
         self.minLength = minLength
@@ -16,22 +16,83 @@ public struct Spacer: View {
     public typealias Body = Never
 }
 
-extension Spacer: _PrimitiveView {
-}
+extension Spacer : Sendable {}
+extension Spacer : _PrimitiveView {
+    static func _makeView(view: _GraphValue<Self>, sharedContext: SharedContext) -> _ViewOutputs {
+        struct Generator : ViewGenerator {
+            let graph: _GraphValue<Spacer>
+            var baseInputs: _GraphInputs
 
-extension Spacer: _ViewProxyProvider {
-    func makeViewProxy(inputs: _ViewInputs) -> ViewProxy {
-        SpacerProxy(view: self, inputs: inputs)
+            func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
+                if let view = graph.value(atPath: self.graph, from: encloser) {
+                    return SpacerViewContext(view: view, inputs: baseInputs, graph: self.graph)
+                }
+                fatalError("Unable to recover view")
+            }
+
+            mutating func mergeInputs(_ inputs: _GraphInputs) {
+                baseInputs.mergedInputs.append(inputs)
+            }
+        }
+        let baseInputs = _GraphInputs(environment: .init(), sharedContext: sharedContext)
+        let generator = Generator(graph: view, baseInputs: baseInputs)
+        return _ViewOutputs(view: generator)
     }
 }
 
-class SpacerProxy: ViewProxy {
+public struct Divider : View {
+    public init() {
+    }
+
+    public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        struct Generator : ViewGenerator {
+            let graph: _GraphValue<Divider>
+            var baseInputs: _GraphInputs
+
+            func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
+                if let view = graph.value(atPath: self.graph, from: encloser) {
+                    return DividerViewContext(view: view, inputs: baseInputs, graph: self.graph)
+                }
+                fatalError("Unable to recover view")
+            }
+
+            mutating func mergeInputs(_ inputs: _GraphInputs) {
+                baseInputs.mergedInputs.append(inputs)
+            }
+        }
+        let generator = Generator(graph: view, baseInputs: inputs.base)
+        return _ViewOutputs(view: generator)
+    }
+
+    public typealias Body = Never
+}
+
+extension Divider : _PrimitiveView {}
+
+private class SpacerViewContext : ViewContext {
     var view: Spacer
     var stackOrientation: Axis = .vertical
 
-    init(view: Spacer, inputs: _ViewInputs) {
-        self.view = inputs.environmentValues._resolve(view)
-        super.init(inputs: inputs)
+    init(view: Spacer, inputs: _GraphInputs, graph: _GraphValue<Spacer>) {
+        self.view = view
+        super.init(inputs: inputs, graph: graph)
+    }
+
+    override func validatePath<T>(encloser: T, graph: _GraphValue<T>) -> Bool {
+        self._validPath = false
+        if graph.value(atPath: self.graph, from: encloser) is Spacer {
+            self._validPath = true
+            return true
+        }
+        return false
+    }
+
+    override func updateContent<T>(encloser: T, graph: _GraphValue<T>) {
+        if let view = graph.value(atPath: self.graph, from: encloser) as? Spacer {
+            self.view = view
+        } else {
+            fatalError("Unable to recover Spacer")
+        }
     }
 
     override func setLayoutProperties(_ prop: LayoutProperties) {
@@ -59,34 +120,30 @@ class SpacerProxy: ViewProxy {
     }
 }
 
-public struct Divider: View {
-    public init() {
-    }
-
-    public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let view = view.value.makeViewProxy(inputs: inputs)
-        return _ViewOutputs(item: .view(view))
-    }
-
-    public typealias Body = Never
-}
-
-extension Divider: _PrimitiveView {
-}
-
-extension Divider: _ViewProxyProvider {
-    func makeViewProxy(inputs: _ViewInputs) -> ViewProxy {
-        DividerProxy(view: self, inputs: inputs)
-    }
-}
-
-class DividerProxy: ViewProxy {
+private class DividerViewContext : ViewContext {
     var view: Divider
     var stackOrientation: Axis = .vertical
 
-    init(view: Divider, inputs: _ViewInputs) {
-        self.view = inputs.environmentValues._resolve(view)
-        super.init(inputs: inputs)
+    init(view: Divider, inputs: _GraphInputs, graph: _GraphValue<Divider>) {
+        self.view = view
+        super.init(inputs: inputs, graph: graph)
+    }
+
+    override func validatePath<T>(encloser: T, graph: _GraphValue<T>) -> Bool {
+        self._validPath = false
+        if graph.value(atPath: self.graph, from: encloser) is Divider {
+            self._validPath = true
+            return true
+        }
+        return false
+    }
+
+    override func updateContent<T>(encloser: T, graph: _GraphValue<T>) {
+        if let view = graph.value(atPath: self.graph, from: encloser) as? Divider {
+            self.view = view
+        } else {
+            fatalError("Unable to recover Divider")
+        }
     }
 
     override func setLayoutProperties(_ prop: LayoutProperties) {
@@ -104,6 +161,8 @@ class DividerProxy: ViewProxy {
     }
 
     override func draw(frame: CGRect, context: GraphicsContext) {
+        super.draw(frame: frame, context: context)
+
         var path = Path()
         if self.stackOrientation == .horizontal {
             path.move(to: CGPoint(x: frame.midX, y: frame.minY))

@@ -24,6 +24,3 @@ public struct ZStack<Content>: View where Content: View {
 
 extension ZStack: _PrimitiveView {
 }
-
-extension ZStack: _ViewProxyProvider {
-}

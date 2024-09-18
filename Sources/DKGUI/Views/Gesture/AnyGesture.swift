@@ -11,7 +11,7 @@ public struct AnyGesture<Value> : Gesture {
         self.storage = AnyGestureBox(gesture)
     }
     public static func _makeGesture(gesture: _GraphValue<Self>, inputs: _GestureInputs) -> _GestureOutputs<Value> {
-        gesture[\.storage].value._makeGesture(inputs: inputs)
+        fatalError()
     }
     public typealias Body = Never
 }
@@ -32,6 +32,6 @@ class AnyGestureBox<T: Gesture> : AnyGestureStorageBase<T.Value> {
         super.init(gesture)
     }
     override func _makeGesture(inputs: _GestureInputs) -> _GestureOutputs<T.Value> {
-        T._makeGesture(gesture: _GraphValue(gesture), inputs: inputs)
+        fatalError()
     }
 }

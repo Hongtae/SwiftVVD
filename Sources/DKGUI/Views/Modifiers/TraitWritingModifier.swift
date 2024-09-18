@@ -19,15 +19,11 @@ public struct _TraitWritingModifier<Trait>: ViewModifier where Trait: _ViewTrait
     }
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        var inputs = inputs
-        inputs.traits[ObjectIdentifier(Self.self)] = modifier.value.value
-        return body(_Graph(), inputs)
+        fatalError()
     }
 
     public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        var inputs = inputs
-        inputs.inputs.traits[ObjectIdentifier(Self.self)] = modifier.value.value
-        return body(_Graph(), inputs)
+        fatalError()
     }
 
     public typealias Body = Never

@@ -2,10 +2,10 @@
 //  File: EnvironmentKeyTransformModifier.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
-public struct _EnvironmentKeyTransformModifier<Value>: ViewModifier, _GraphInputsModifier, _EnvironmentValuesResolve {
+public struct _EnvironmentKeyTransformModifier<Value> : ViewModifier, _GraphInputsModifier, _EnvironmentValuesResolve {
     public typealias Body = Never
 
     public var keyPath: WritableKeyPath<EnvironmentValues, Value>
@@ -17,10 +17,7 @@ public struct _EnvironmentKeyTransformModifier<Value>: ViewModifier, _GraphInput
     }
 
     public static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GraphInputs) {
-        let modifier = modifier.value
-        var value = inputs.environmentValues[keyPath: modifier.keyPath]
-        modifier.transform(&value)
-        inputs.environmentValues[keyPath: modifier.keyPath] = value
+        inputs.modifiers.append(_InputModifier(graph: modifier))
     }
 
     func _resolve(_ values: EnvironmentValues) -> EnvironmentValues {
@@ -29,6 +26,38 @@ public struct _EnvironmentKeyTransformModifier<Value>: ViewModifier, _GraphInput
         transform(&value)
         values[keyPath: self.keyPath] = value
         return values
+    }
+
+    func _resolve(_ values: inout EnvironmentValues) {
+        var value = values[keyPath: self.keyPath]
+        transform(&value)
+        values[keyPath: self.keyPath] = value
+    }
+
+    class _InputModifier : _GraphInputResolve {
+        typealias Modifier = _EnvironmentKeyTransformModifier<Value>
+        var isResolved: Bool {  modifier != nil }
+        var modifier: Modifier?
+        let graph: _GraphValue<Modifier>
+        init(graph: _GraphValue<Modifier>) {
+            self.graph = graph
+        }
+
+        func apply(inputs: inout _GraphInputs) {
+            if let modifier {
+                modifier._resolve(&inputs.environment)
+            }
+        }
+
+        func resolve<T>(encloser: T, graph: _GraphValue<T>) {
+            if let modifier = graph.value(atPath: self.graph, from: encloser) {
+                self.modifier = modifier
+            }
+        }
+
+        static func == (lhs: _InputModifier, rhs: _InputModifier) -> Bool {
+            lhs === rhs
+        }
     }
 }
 

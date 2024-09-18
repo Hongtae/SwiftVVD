@@ -48,8 +48,8 @@ class LocationBox<Location: _Location> : AnyLocation<Location.Value> {
 
 @propertyWrapper @dynamicMemberLookup public struct Binding<Value> {
     public var transaction: Transaction
-    internal var location: AnyLocation<Value>
-    internal var _value: Value
+    var location: AnyLocation<Value>
+    var _value: Value
 
     public init(get: @escaping () -> Value, set: @escaping (Value) -> Void) {
         self.transaction = Transaction()

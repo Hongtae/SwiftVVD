@@ -2,7 +2,7 @@
 //  File: OverlayModifier.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -17,16 +17,18 @@ public struct _OverlayModifier<Overlay>: ViewModifier where Overlay: View {
     }
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        var inputs = inputs
-        inputs.defaultLayout = ZStackLayout()
-        let layer = ViewProxyLayer(view: modifier[\.overlay],
-                                   inputs: inputs,
-                                   alignment: modifier.value.alignment,
-                                   ignoresSafeAreaEdges: .all)
-        let viewOutputs = body(_Graph(), inputs)
-        viewOutputs.view.overlayLayers.append(layer)
-        return viewOutputs
+        let outputs = body(_Graph(), inputs)
+        if let content = outputs.view {
+            var overlayInputs = inputs
+            overlayInputs.base.properties.replace(item: DefaultLayoutPropertyItem(layout: ZStackLayout()))
+            if let overlay = makeView(view: modifier[\.overlay], inputs: overlayInputs).view {
+                let generator = OverlayViewContext.Generator(content: content, overlay: overlay, graph: modifier, baseInputs: inputs.base)
+                return _ViewOutputs(view: generator)
+            }
+        }
+        return outputs
     }
+
     public typealias Body = Never
 }
 
@@ -46,17 +48,19 @@ public struct _OverlayStyleModifier<Style>: ViewModifier where Style: ShapeStyle
     }
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        let shapeView = _ShapeView(shape: Rectangle(),
-                                   style: modifier[\.style].value)
-        let layer = ViewProxyLayer(view: _GraphValue(shapeView),
-                                   inputs: inputs,
-                                   alignment: .center,
-                                   ignoresSafeAreaEdges: modifier[\.ignoresSafeAreaEdges].value)
-        let viewOutputs = body(_Graph(), inputs)
-        viewOutputs.view.backgroundLayers.append(layer)
-        return viewOutputs
+        let outputs = body(_Graph(), inputs)
+        if let content = outputs.view, let overlay = makeView(view: modifier[\._shapeView], inputs: inputs).view {
+            let generator = OverlayViewContext.Generator(content: content, overlay: overlay, graph: modifier, baseInputs: inputs.base)
+            return _ViewOutputs(view: generator)
+        }
+        return outputs
     }
+
     public typealias Body = Never
+
+    var _shapeView : some View {
+        _ShapeView(shape: Rectangle(), style: self.style)
+    }
 }
 
 extension _OverlayStyleModifier: _UnaryViewModifier {
@@ -74,18 +78,19 @@ public struct _OverlayShapeModifier<Style, Bounds>: ViewModifier where Style: Sh
     }
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        let shapeView = _ShapeView(shape: modifier[\.shape].value,
-                                   style: modifier[\.style].value,
-                                   fillStyle: modifier[\.fillStyle].value)
-        let layer = ViewProxyLayer(view: _GraphValue(shapeView),
-                                   inputs: inputs,
-                                   alignment: .center,
-                                   ignoresSafeAreaEdges: .all)
-        let viewOutputs = body(_Graph(), inputs)
-        viewOutputs.view.backgroundLayers.append(layer)
-        return viewOutputs
+        let outputs = body(_Graph(), inputs)
+        if let content = outputs.view, let overlay = makeView(view: modifier[\._shapeView], inputs: inputs).view {
+            let generator = OverlayViewContext.Generator(content: content, overlay: overlay, graph: modifier, baseInputs: inputs.base)
+            return _ViewOutputs(view: generator)
+        }
+        return outputs
     }
+
     public typealias Body = Never
+
+    var _shapeView : some View {
+        _ShapeView(shape: self.shape, style: self.style, fillStyle: self.fillStyle)
+    }
 }
 
 extension _OverlayShapeModifier: _UnaryViewModifier {
@@ -113,20 +118,82 @@ extension View {
     }
 }
 
-fileprivate struct ViewProxyLayer: ViewLayer {
-    private let view: ViewProxy
-    private let alignment: Alignment
-    private let ignoresSafeAreaEdges: Edge.Set
-    init<V>(view: _GraphValue<V>, inputs: _ViewInputs, alignment: Alignment, ignoresSafeAreaEdges: Edge.Set) where V: View {
-        let outputs = V._makeView(view: view, inputs: inputs)
-        self.view = outputs.view
-        self.alignment = alignment
-        self.ignoresSafeAreaEdges = ignoresSafeAreaEdges
+
+private protocol _OverlayModifierWithAlignment {
+    var alignment: Alignment { get }
+}
+
+private protocol _OverlayModifierWithIgnoresSafeAreaEdges {
+    var ignoresSafeAreaEdges: Edge.Set { get }
+}
+
+extension _OverlayModifier : _OverlayModifierWithAlignment {
+}
+
+extension _OverlayStyleModifier : _OverlayModifierWithIgnoresSafeAreaEdges {
+}
+
+private class OverlayViewContext<Modifier> : ViewModifierContext<Modifier> {
+    let overlay: ViewContext
+    let alignment: Alignment
+    let ignoresSafeAreaEdges: Edge.Set
+
+    struct Generator : ViewGenerator {
+        var content: any ViewGenerator
+        var overlay: any ViewGenerator
+        let graph: _GraphValue<Modifier>
+        var baseInputs: _GraphInputs
+
+        func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
+            if let content = content.makeView(encloser: encloser, graph: graph) {
+                if let modifier = graph.value(atPath: self.graph, from: encloser) {
+                    if let overlay = overlay.makeView(encloser: modifier, graph: self.graph) {
+                        return OverlayViewContext(content: content,
+                                                  overlay: overlay,
+                                                  modifier: modifier,
+                                                  inputs: baseInputs,
+                                                  graph: self.graph)
+                    }
+                } else {
+                    fatalError("Unable to recover modifier")
+                }
+                return content
+            }
+            return nil
+        }
+
+        mutating func mergeInputs(_ inputs: _GraphInputs) {
+            content.mergeInputs(inputs)
+            overlay.mergeInputs(inputs)
+            baseInputs.mergedInputs.append(inputs)
+        }
     }
-    func load(context: GraphicsContext) {
-        self.view.loadView(context: context)
+
+    init(content: ViewContext, overlay: ViewContext, modifier: Modifier, inputs: _GraphInputs, graph: _GraphValue<Modifier> ) {
+        self.overlay = overlay
+        if let alignmentModifier = modifier as? _OverlayModifierWithAlignment {
+            self.alignment = alignmentModifier.alignment
+        } else {
+            self.alignment = .center
+        }
+        if let ignoresSafeAreaEdgesModifier = modifier as? _OverlayModifierWithIgnoresSafeAreaEdges {
+            self.ignoresSafeAreaEdges = ignoresSafeAreaEdgesModifier.ignoresSafeAreaEdges
+        } else {
+            self.ignoresSafeAreaEdges = .all
+        }
+        super.init(content: content, modifier: modifier, inputs: inputs, graph: graph)
+        self._debugDraw = false
+        self.overlay._debugDraw = false
     }
-    func layout(frame: CGRect) {
+
+    override func loadResources(_ context: GraphicsContext) {
+        super.loadResources(context)
+        self.overlay.loadResources(context)
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+
         var position = frame.origin
         var anchor = UnitPoint()
         switch self.alignment.horizontal {
@@ -150,22 +217,33 @@ fileprivate struct ViewProxyLayer: ViewLayer {
             anchor.y = 0.5
         }
         let proposal = ProposedViewSize(width: frame.width, height: frame.height)
-        self.view.place(at: position,
-                        anchor: anchor,
-                        proposal: proposal)
+        overlay.place(at: position,
+                           anchor: anchor,
+                           proposal: proposal)
     }
-    func draw(frame: CGRect, context: GraphicsContext) {
-        let width = view.frame.width
-        let height = view.frame.height
+
+    override func drawOverlay(frame: CGRect, context: GraphicsContext) {
+        let width = overlay.frame.width
+        let height = overlay.frame.height
         guard width > 0 && height > 0 else {
             return
         }
-        if frame.intersection(view.frame).isNull {
+        if frame.intersection(overlay.frame).isNull {
             return
         }
-        var context = context
-        context.environment = self.view.environmentValues
-        self.view.draw(frame: view.frame, context: context)
+        overlay.drawView(frame: overlay.frame, context: context)
     }
-}
 
+    override func hitTest(_ location: CGPoint) -> ViewContext? {
+        if let view = self.overlay.hitTest(location) {
+            return view
+        }
+        return super.hitTest(location)
+    }
+
+    override func update(transform t: AffineTransform, origin: CGPoint) {
+        super.update(transform: t, origin: origin)
+        self.overlay.update(transform: self.transformByRoot, origin: self.frame.origin)
+    }
+
+}

@@ -17,7 +17,18 @@ public struct _ButtonGesture : Gesture {
     }
 
     public static func _makeGesture(gesture: _GraphValue<Self>, inputs: _GestureInputs) -> _GestureOutputs<Value> {
-        _GestureOutputs<Value>(recognizer: _ButtonGestureRecognizer(gesture: gesture, inputs: inputs))
+        struct _Generator : _GestureRecognizerGenerator {
+            let graph: _GraphValue<_ButtonGesture>
+            let inputs: _GestureInputs
+            func makeGesture<T>(encloser: T, graph: _GraphValue<T>) -> _GestureRecognizer<Value>? {
+                if let gesture = graph.value(atPath: self.graph, from: encloser) {
+                    let callbacks = inputs.makeCallbacks(of: Value.self, from: encloser, graph: graph)
+                    return _ButtonGestureRecognizer(gesture: gesture, callbacks: callbacks, target: inputs.view)
+                }
+                fatalError("Unable to recover gesture: \(self.graph.valueType)")
+            }
+        }
+        return _GestureOutputs(generator: _Generator(graph: gesture, inputs: inputs))
     }
 
     public typealias Body = Never
@@ -38,17 +49,17 @@ class _ButtonGestureRecognizer : _GestureRecognizer<_ButtonGesture.Value> {
     var location: CGPoint
     var hover: Bool
 
-    init(gesture: _GraphValue<_ButtonGesture>, inputs: _GestureInputs) {
-        self.gesture = gesture.value
+    init(gesture: _ButtonGesture, callbacks: Callbacks, target: ViewContext?) {
+        self.gesture = gesture
         self.location = .zero
         self.hover = false
         self.buttonID = 0
-        super.init(inputs: inputs)
+        super.init(callbacks: callbacks, target: target)
     }
 
     override var type: _PrimitiveGestureTypes { .button }
     override var isValid: Bool {
-        typeFilter.contains(self.type) && viewProxy != nil
+        typeFilter.contains(self.type) && view != nil
     }
 
     override func setTypeFilter(_ f: _PrimitiveGestureTypes) -> _PrimitiveGestureTypes {
@@ -57,11 +68,11 @@ class _ButtonGestureRecognizer : _GestureRecognizer<_ButtonGesture.Value> {
     }
 
     override func began(deviceID: Int, buttonID: Int, location: CGPoint) {
-        if self.deviceID == nil, self.buttonID == buttonID, let viewProxy {
+        if self.deviceID == nil, self.buttonID == buttonID, let view {
             let location = self.locationInView(location)
             self.deviceID = deviceID
             self.location = location
-            self.hover = viewProxy.bounds.contains(location)
+            self.hover = view.bounds.contains(location)
             self.state = .processing
             self.gesture.pressingAction?(self.hover)
         }
@@ -69,11 +80,11 @@ class _ButtonGestureRecognizer : _GestureRecognizer<_ButtonGesture.Value> {
 
     override func moved(deviceID: Int, buttonID: Int, location: CGPoint) {
         let h = self.hover
-        if self.deviceID == deviceID, self.buttonID == buttonID, let viewProxy {
+        if self.deviceID == deviceID, self.buttonID == buttonID, let view {
             let location = self.locationInView(location)
             self.location = location
             self.state = .processing
-            self.hover = viewProxy.bounds.contains(location)
+            self.hover = view.bounds.contains(location)
         }
         if h != self.hover {
             self.gesture.pressingAction?(self.hover)
@@ -82,13 +93,14 @@ class _ButtonGestureRecognizer : _GestureRecognizer<_ButtonGesture.Value> {
 
     override func ended(deviceID: Int, buttonID: Int) {
         var invokeAction = false
-        if self.deviceID == deviceID, self.buttonID == buttonID, viewProxy != nil {
+        if self.deviceID == deviceID, self.buttonID == buttonID, view != nil {
             invokeAction = self.hover
             self.deviceID = nil
             self.hover = false
             self.state = .done
         }
         if invokeAction {
+            self.gesture.pressingAction?(false)
             self.gesture.action()
         }
     }
