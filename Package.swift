@@ -10,7 +10,7 @@ let package = Package(
         // Products define the executables and libraries a package produces, and make them visible to other packages.
         .library(name: "VVD", type: .dynamic, targets: ["VVD"]),
         .library(name: "XGUI", type: .dynamic, targets: ["XGUI"]),
-        .executable(name: "VVDEditor", targets: ["VVDEditor"]),
+        .executable(name: "Editor", targets: ["Editor"]),
         .executable(name: "TestApp1", targets: ["TestApp1"])
     ],
     dependencies: [
@@ -100,7 +100,7 @@ let package = Package(
                 .copy("Resources/Shaders/SPIRV")
             ]),
         .executableTarget(
-            name: "VVDEditor",
+            name: "Editor",
             dependencies: [
                 .target(name: "VVD"),
                 .target(name: "XGUI"),

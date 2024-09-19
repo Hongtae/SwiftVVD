@@ -134,7 +134,7 @@ public class VulkanInstance {
         let tempHolder = TemporaryBufferHolder(label: "VulkanInstance.init")
 
         let applicationName = unsafePointerCopy(string: "VVD.Vulkan", holder: tempHolder)
-        let engineName = unsafePointerCopy(string: "DKGL", holder: tempHolder)
+        let engineName = unsafePointerCopy(string: "SwiftVVD", holder: tempHolder)
 
         appInfo.pApplicationName = applicationName
         appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0)
