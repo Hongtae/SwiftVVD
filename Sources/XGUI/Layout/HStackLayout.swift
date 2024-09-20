@@ -2,7 +2,7 @@
 //  File: HStackLayout.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -171,8 +171,9 @@ public struct HStackLayout: Layout {
 }
 
 public typealias _HStackLayout = HStackLayout
-extension _HStackLayout: _VariadicView_UnaryViewRoot {
-}
+extension _HStackLayout : _VariadicView_UnaryViewRoot {}
+extension _HStackLayout : _VariadicView_ViewRoot {}
+extension _HStackLayout : Sendable {}
 
 extension _HStackLayout {
     static var _defaultLayoutSpacing : CGFloat { 8 }

@@ -2,10 +2,10 @@
 //  File: EmptyAnimatableData.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
-public struct EmptyAnimatableData: VectorArithmetic, Equatable {
+public struct EmptyAnimatableData : VectorArithmetic, Equatable {
     public init() {}
     public static var zero: EmptyAnimatableData {
         .init()
@@ -24,3 +24,5 @@ public struct EmptyAnimatableData: VectorArithmetic, Equatable {
         true
     }
 }
+
+extension EmptyAnimatableData : Sendable {}
