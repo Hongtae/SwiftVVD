@@ -61,7 +61,7 @@ public struct HStackLayout: Layout {
             return CGSize(width: minWidth + spacing, height: size.height)
         }
 
-        let proposalFitSize = ProposedViewSize(height: size.height)
+        let proposalFitSize = ProposedViewSize(height: proposal.height)
         let fitSizes = subviews.map {
             $0.sizeThatFits(proposalFitSize)
         }
