@@ -21,6 +21,8 @@ class ViewGroupContext<Content> : ViewContext where Content: View {
         self.layout = AnyLayout(layout)
         self.layoutCache = nil
         self.layoutProperties = L.layoutProperties
+
+        assert(subviews.allSatisfy({ $0.graph.isDescendant(of: graph) }))
         self.references = buildViewReferences(root: view, graph: graph, subviews: subviews)
 
         super.init(inputs: inputs, graph: graph)

@@ -22,6 +22,7 @@ class ProxyViewContext<Proxy : ViewProxy> : ViewContext {
     init<T>(proxy: Proxy, view: ViewContext, inputs: _GraphInputs, graph: _GraphValue<T>) {
         self.proxy = proxy
         self.view = view
+
         super.init(inputs: inputs, graph: graph)
         self._debugDraw = false
     }

@@ -134,7 +134,7 @@ private struct ModifierViewProxyGenerator<Modifier : ViewModifier> : ViewGenerat
                 return ProxyViewContext(proxy: BypassProxy(proxy: proxy),
                                         view: view,
                                         inputs: view.inputs,
-                                        graph: graph)
+                                        graph: self.graph)
             }
             fatalError("Unable to recover body")
         }
@@ -171,7 +171,7 @@ private struct ModifierViewProxyGenerator<Modifier : ViewModifier> : ViewGenerat
                         return ProxyViewContext(proxy: ApplyProxy(proxy: proxy),
                                                 view: view,
                                                 inputs: view.inputs,
-                                                graph: graph)
+                                                graph: self.graph)
                     }
                     fatalError("Unable to make view")
                 }
@@ -218,7 +218,7 @@ private struct ModifierViewListProxyGenerator<Modifier : ViewModifier> : ViewLis
                 return ProxyViewContext(proxy: ApplyProxy(proxy: proxy),
                                         view: view,
                                         inputs: view.inputs,
-                                        graph: graph)
+                                        graph: self.graph)
             }
             fatalError("Unable to make view")
         }
@@ -387,11 +387,17 @@ extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
         fatalError("body() should not be called on \(Self.self).")
     }
 
-    struct MultiViewGenerator : ViewGenerator {
+    struct MultiViewGenerator : _VariadicView_MultiViewRootViewGenerator {
         let graph: _GraphValue<ModifiedContent>
         var content: any _VariadicView_MultiViewRootViewGenerator
         var baseInputs: _GraphInputs
         let modifier: (any ViewGenerator) -> _ViewOutputs
+
+        func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
+            content.makeViewList(encloser: encloser, graph: graph).compactMap {
+                modifier($0).view
+            }
+        }
 
         func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
             let outputs = content.makeViewList(encloser: encloser, graph: graph).compactMap {
@@ -425,16 +431,14 @@ extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
         var outputs = Content._makeView(view: view[\.content], inputs: inputs)
         //let inputs = _ViewInputs.inputs(with: _GraphInputs(environment: .init(), sharedContext: inputs.base.sharedContext))
         if let multiView = outputs.view as? any _VariadicView_MultiViewRootViewGenerator {
-            let generator = MultiViewGenerator(graph: view, content: multiView, baseInputs: inputs.base) {
-                generator in
+            let generator = MultiViewGenerator(graph: view, content: multiView, baseInputs: inputs.base) { generator in
                 Modifier._makeView(modifier: view[\.modifier], inputs: inputs) { _, inputs in
                     func merge<T: ViewGenerator>(_ view: T, inputs: _GraphInputs) -> any ViewGenerator {
                         var view = view
                         view.mergeInputs(inputs)
                         return view
                     }
-                    let generator = merge(generator, inputs: inputs.base)
-                    return _ViewOutputs(view: generator)
+                    return _ViewOutputs(view: merge(generator, inputs: inputs.base))
                 }
             }
             return _ViewOutputs(view: generator)

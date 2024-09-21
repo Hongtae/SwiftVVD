@@ -201,7 +201,7 @@ private struct _VariadicView_ViewRoot_MakeChildrenProxy<Root> : _VariadicView_Vi
                 return ProxyViewContext(proxy: _ViewProxy(proxy: proxy),
                                         view: view,
                                         inputs: view.inputs,
-                                        graph: graph)
+                                        graph: self.graph)
             }
             return view
         }
@@ -229,7 +229,7 @@ private struct _VariadicView_ViewRoot_MakeChildrenProxy<Root> : _VariadicView_Vi
                 return ProxyViewContext(proxy: _ViewProxy(proxy: proxy),
                                         view: view,
                                         inputs: view.inputs,
-                                        graph: graph)
+                                        graph: self.graph)
             }
             return nil
         }
@@ -302,6 +302,7 @@ extension _VariadicView_ViewRoot_MakeChildrenProxy : ViewGenerator {
     func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
         fatalError("This method should not be called.")
     }
+
     mutating func mergeInputs(_ inputs: _GraphInputs) {
         self.body.viewList.mergeInputs(inputs)
         self.inputs.base.mergedInputs.append(inputs)
@@ -417,7 +418,6 @@ extension _VariadicView_UnaryViewRoot {
         let outputs = Self._makeView(root: root, inputs: inputs.inputs) { graph, inputs in
             body(graph, inputs.listInputs)
         }
-
         if let proxy = outputs.view as? _VariadicView_ViewRoot_MakeChildren {
             let generator = _VariadicView_ViewRoot_MakeChildren_UnaryViewRootProxy(graph: root, proxy: proxy)
             return _ViewListOutputs(viewList: generator)
