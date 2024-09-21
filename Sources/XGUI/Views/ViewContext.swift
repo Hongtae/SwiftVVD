@@ -404,39 +404,21 @@ class GenericViewContext<Content> : ViewContext where Content : View {
         let outputs = super.gestureHandlers(at: location)
         return outputs.merge(self.body.gestureHandlers(at: location))
     }
-
-    struct Generator : ViewGenerator {
-        let graph: _GraphValue<Content>
-        var body: any ViewGenerator
-        var baseInputs: _GraphInputs
-
-        func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
-            if let view = graph.value(atPath: self.graph, from: encloser) {
-                if let body = self.body.makeView(encloser: view, graph: self.graph) {
-                    return GenericViewContext(view: view, body: body, inputs: baseInputs, graph: self.graph)
-                }
-            } else {
-                fatalError("Unable to recover view")
-            }
-            return nil
-        }
-
-        mutating func mergeInputs(_ inputs: _GraphInputs) {
-            self.baseInputs.mergedInputs.append(inputs)
-            self.body.mergeInputs(inputs)
-        }
-    }
 }
 
-struct PrimitiveViewGenerator<Content> : ViewGenerator where Content: View {
+struct GenericViewGenerator<Content> : ViewGenerator {
     let graph: _GraphValue<Content>
-    var baseInputs: _GraphInputs
+    var inputs: _ViewInputs
+    let body: (_:Content, _:_ViewInputs) -> ViewContext?
 
     func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
-        ViewContext(inputs: baseInputs, graph: self.graph)
+        if let content = graph.value(atPath: self.graph, from: encloser) {
+            return body(content, self.inputs)
+        }
+        fatalError("Unable to recover content: \(self.graph.valueType)")
     }
 
     mutating func mergeInputs(_ inputs: _GraphInputs) {
-        baseInputs.mergedInputs.append(inputs)
+        self.inputs.base.mergedInputs.append(inputs)
     }
 }

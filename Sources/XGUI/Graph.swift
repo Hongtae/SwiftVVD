@@ -128,7 +128,7 @@ struct ViewTraitKeys {
 
 public struct _ViewInputs {
     var base: _GraphInputs
-    var layouts: LayoutInputs
+    var layouts: LayoutInputs = LayoutInputs()
     var preferences: PreferenceInputs = PreferenceInputs(preferences: [])
     var traits: ViewTraitKeys = ViewTraitKeys()
 
@@ -159,7 +159,7 @@ public struct _ViewListInputs {
     }
 
     var base: _GraphInputs
-    var layouts: LayoutInputs
+    var layouts: LayoutInputs = LayoutInputs()
     var preferences: PreferenceInputs = PreferenceInputs(preferences: [])
     var traits: ViewTraitKeys = ViewTraitKeys()
     var options: Options = .none

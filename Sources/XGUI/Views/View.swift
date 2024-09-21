@@ -28,9 +28,12 @@ extension View {
         }
         let outputs = Self.Body._makeView(view: view[\.body], inputs: inputs)
         if let body = outputs.view, MemoryLayout<Self>.size > 0 && Self._hasDynamicProperty {
-            let generator = GenericViewContext.Generator(graph: view,
-                                                         body: body,
-                                                         baseInputs: inputs.base)
+            let generator = GenericViewGenerator(graph: view, inputs: inputs) { content, inputs in
+                if let body = body.makeView(encloser: content, graph: view) {
+                    return GenericViewContext(view: content, body: body, inputs: inputs.base, graph: view)
+                }
+                return nil
+            }
             return _ViewOutputs(view: generator)
         }
         return outputs

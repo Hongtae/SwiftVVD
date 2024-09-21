@@ -51,7 +51,9 @@ extension Canvas where Symbols == EmptyView {
 
 extension Canvas {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let generator = CanvasViewContext.Generator(graph: view, baseInputs: inputs.base)
+        let generator = GenericViewGenerator(graph: view, inputs: inputs) { content, inputs in
+            CanvasViewContext(view: content, inputs: inputs.base, graph: view)
+        }
         return _ViewOutputs(view: generator)
     }
 }
@@ -63,22 +65,6 @@ private class CanvasViewContext<Symbols>: ViewContext where Symbols: View {
     typealias Content = Canvas<Symbols>
     var view: Content
     
-    struct Generator : ViewGenerator {
-        let graph: _GraphValue<Content>
-        var baseInputs: _GraphInputs
-
-        func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
-            if let view = graph.value(atPath: self.graph, from: encloser) {
-                return CanvasViewContext(view: view, inputs: baseInputs, graph: self.graph)
-            }
-            fatalError("Unable to recover view")
-        }
-
-        mutating func mergeInputs(_ inputs: _GraphInputs) {
-            baseInputs.mergedInputs.append(inputs)
-        }
-    }
-
     init(view: Content, inputs: _GraphInputs, graph: _GraphValue<Content>) {
         self.view = view
         super.init(inputs: inputs, graph: graph)

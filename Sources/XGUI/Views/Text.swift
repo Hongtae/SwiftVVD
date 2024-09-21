@@ -281,7 +281,9 @@ extension Text {
 
 extension Text: View {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let generator = TextViewContext.Generator(graph: view, baseInputs: inputs.base)
+        let generator = GenericViewGenerator(graph: view, inputs: inputs) { content, inputs in
+            TextViewContext(view: content, inputs: inputs.base, graph: view)
+        }
         return _ViewOutputs(view: generator)
     }
 }
@@ -292,24 +294,7 @@ extension Text: _PrimitiveView {
 private class TextViewContext: ViewContext {
     var text: Text
     var resolvedText: GraphicsContext.ResolvedText?
-
     var primaryStyle: AnyShapeStyle?
-
-    struct Generator : ViewGenerator {
-        let graph: _GraphValue<Text>
-        var baseInputs: _GraphInputs
-
-        func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
-            if let view = graph.value(atPath: self.graph, from: encloser) {
-                return TextViewContext(view: view, inputs: baseInputs, graph: self.graph)
-            }
-            fatalError("Unable to recover Text")
-        }
-
-        mutating func mergeInputs(_ inputs: _GraphInputs) {
-            baseInputs.mergedInputs.append(inputs)
-        }
-    }
 
     init(view: Text, inputs: _GraphInputs, graph: _GraphValue<Text>) {
         self.text = view

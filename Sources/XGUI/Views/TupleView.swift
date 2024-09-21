@@ -73,9 +73,22 @@ public struct TupleView<T>: View {
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         let outputs = Self._makeViewList(view: view, inputs: inputs.listInputs)
-        let generator = TupleViewGenerator(graph: view,
-                                           subviews: outputs.viewList,
-                                           baseInputs: inputs.base)
+        let generator = GenericViewGenerator(graph: view, inputs: inputs) { content, inputs in
+            let subviews = outputs.viewList.makeViewList(encloser: content, graph: view).compactMap {
+                $0.makeView(encloser: content, graph: view)
+            }
+            if subviews.count > 1 {
+                let layout = inputs.base.properties
+                    .find(type: DefaultLayoutPropertyItem.self)?
+                    .layout ?? DefaultLayoutPropertyItem.default
+                return ViewGroupContext(view: content,
+                                        subviews: subviews,
+                                        layout: layout,
+                                        inputs: inputs.base,
+                                        graph: view)
+            }
+            return subviews.first
+        }
         return _ViewOutputs(view: generator)
     }
 
@@ -97,36 +110,4 @@ public struct TupleView<T>: View {
     public typealias Body = Never
 }
 
-extension TupleView: _PrimitiveView {
-}
-
-private struct TupleViewGenerator<Content> : ViewGenerator where Content : View {
-    var graph: _GraphValue<Content>
-    var subviews: any ViewListGenerator
-    var baseInputs: _GraphInputs
-
-    func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
-        if let view = graph.value(atPath: self.graph, from: encloser) {
-            let subviews = self.subviews.makeViewList(encloser: view, graph: self.graph).compactMap {
-                $0.makeView(encloser: view, graph: self.graph)
-            }
-            if subviews.count > 1 {
-                let layout = baseInputs.properties
-                    .find(type: DefaultLayoutPropertyItem.self)?
-                    .layout ?? DefaultLayoutPropertyItem.default
-                return ViewGroupContext(view: view,
-                                        subviews: subviews,
-                                        layout: layout,
-                                        inputs: baseInputs,
-                                        graph: self.graph)
-            }
-            return subviews.first
-        }
-        fatalError("Unable to recover view")
-    }
-
-    mutating func mergeInputs(_ inputs: _GraphInputs) {
-        subviews.mergeInputs(inputs)
-        baseInputs.mergedInputs.append(inputs)
-    }
-}
+extension TupleView: _PrimitiveView {}

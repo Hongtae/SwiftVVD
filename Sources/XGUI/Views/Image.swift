@@ -222,7 +222,9 @@ extension Image {
 
 extension Image: View {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let generator = ImageViewContext.Generator(graph: view, baseInputs: inputs.base)
+        let generator = GenericViewGenerator(graph: view, inputs: inputs) { content, inputs in
+            ImageViewContext(view: content, inputs: inputs.base, graph: view)
+        }
         return _ViewOutputs(view: generator)
     }
 
@@ -239,22 +241,6 @@ extension Image: _PrimitiveView {
 class ImageViewContext : ViewContext {
     var image: Image
     var resolvedImage: GraphicsContext.ResolvedImage?
-
-    struct Generator : ViewGenerator {
-        let graph: _GraphValue<Image>
-        var baseInputs: _GraphInputs
-
-        func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
-            if let view = graph.value(atPath: self.graph, from: encloser) {
-                return ImageViewContext(view: view, inputs: baseInputs, graph: self.graph)
-            }
-            fatalError("Unable to recover view")
-        }
-
-        mutating func mergeInputs(_ inputs: _GraphInputs) {
-            baseInputs.mergedInputs.append(inputs)
-        }
-    }
 
     init(view: Image, inputs: _GraphInputs, graph: _GraphValue<Image>) {
         self.image = view

@@ -19,23 +19,11 @@ public struct Spacer : View {
 extension Spacer : Sendable {}
 extension Spacer : _PrimitiveView {
     static func _makeView(view: _GraphValue<Self>, sharedContext: SharedContext) -> _ViewOutputs {
-        struct Generator : ViewGenerator {
-            let graph: _GraphValue<Spacer>
-            var baseInputs: _GraphInputs
-
-            func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
-                if let view = graph.value(atPath: self.graph, from: encloser) {
-                    return SpacerViewContext(view: view, inputs: baseInputs, graph: self.graph)
-                }
-                fatalError("Unable to recover view")
-            }
-
-            mutating func mergeInputs(_ inputs: _GraphInputs) {
-                baseInputs.mergedInputs.append(inputs)
-            }
-        }
         let baseInputs = _GraphInputs(environment: .init(), sharedContext: sharedContext)
-        let generator = Generator(graph: view, baseInputs: baseInputs)
+        let inputs = _ViewInputs(base: baseInputs)
+        let generator = GenericViewGenerator(graph: view, inputs: inputs) { content, inputs in
+            SpacerViewContext(view: content, inputs: inputs.base, graph: view)
+        }
         return _ViewOutputs(view: generator)
     }
 }
@@ -45,22 +33,9 @@ public struct Divider : View {
     }
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        struct Generator : ViewGenerator {
-            let graph: _GraphValue<Divider>
-            var baseInputs: _GraphInputs
-
-            func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
-                if let view = graph.value(atPath: self.graph, from: encloser) {
-                    return DividerViewContext(view: view, inputs: baseInputs, graph: self.graph)
-                }
-                fatalError("Unable to recover view")
-            }
-
-            mutating func mergeInputs(_ inputs: _GraphInputs) {
-                baseInputs.mergedInputs.append(inputs)
-            }
+        let generator = GenericViewGenerator(graph: view, inputs: inputs) { content, inputs in
+            DividerViewContext(view: content, inputs: inputs.base, graph: view)
         }
-        let generator = Generator(graph: view, baseInputs: inputs.base)
         return _ViewOutputs(view: generator)
     }
 
