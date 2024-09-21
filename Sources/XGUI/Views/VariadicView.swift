@@ -130,6 +130,7 @@ public protocol _VariadicView_MultiViewRoot : _VariadicView_ViewRoot {
 
 private protocol _VariadicView_ViewRoot_MakeChildren {
     func makeChildren<T>(encloser: T, graph: _GraphValue<T>) -> [ViewContext]
+    func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator]
     mutating func mergeInputs(_ inputs: _GraphInputs)
 }
 
@@ -311,18 +312,22 @@ extension _VariadicView_ViewRoot_MakeChildrenProxy : ViewListGenerator {
 }
 
 private protocol _VariadicView_ViewRoot_MakeChildren_UnaryViewRoot : ViewListGenerator {
+    func makeLayout<T>(encloser: T, graph: _GraphValue<T>) -> (any Layout)?
 }
 
-struct _VariadicView_ViewRoot_MakeChildren_UnaryViewRootProxy<Root> : _VariadicView_ViewRoot_MakeChildren_UnaryViewRoot where Root : _VariadicView_UnaryViewRoot {
-    private var proxy: _VariadicView_ViewRoot_MakeChildrenProxy<Root>
-    var graph: _GraphValue<Root> { proxy.graph }
-
-    init(graph: _GraphValue<Root>, body: _ViewListOutputs, inputs: _ViewListInputs) {
-        self.proxy = .init(graph: graph, body: body, inputs: inputs)
-    }
+private struct _VariadicView_ViewRoot_MakeChildren_UnaryViewRootProxy<Root> : _VariadicView_ViewRoot_MakeChildren_UnaryViewRoot where Root : _VariadicView_UnaryViewRoot {
+    var graph: _GraphValue<Root>
+    var proxy: any _VariadicView_ViewRoot_MakeChildren
 
     func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
         proxy.makeViewList(encloser: encloser, graph: graph)
+    }
+
+    func makeLayout<T>(encloser: T, graph: _GraphValue<T>) -> (any Layout)? {
+        if let layout = proxy as? (any _VariadicView_ViewRoot_MakeChildren_LayoutRoot) {
+            return layout.makeLayout(encloser: encloser, graph: graph)
+        }
+        return nil
     }
 
     mutating func mergeInputs(_ inputs: _GraphInputs) {
@@ -357,7 +362,6 @@ struct _VariadicView_ViewRoot_MakeChildren_MultiViewRootProxy<Root> : _VariadicV
 
 private protocol _VariadicView_ViewRoot_MakeChildren_LayoutRoot : _VariadicView_ViewRoot_MakeChildren, ViewGenerator {
     func makeLayout<T>(encloser: T, graph: _GraphValue<T>) -> any Layout
-    func makeChildren<T>(encloser: T, graph: _GraphValue<T>) -> [ViewContext]
 }
 
 struct _VariadicView_ViewRoot_MakeChildren_LayoutRootProxy<Root> : _VariadicView_ViewRoot_MakeChildren_LayoutRoot where Root :  _VariadicView.UnaryViewRoot {
@@ -379,6 +383,10 @@ struct _VariadicView_ViewRoot_MakeChildren_LayoutRootProxy<Root> : _VariadicView
 
     func makeChildren<T>(encloser: T, graph: _GraphValue<T>) -> [ViewContext] {
         proxy.makeChildren(encloser: encloser, graph: graph)
+    }
+
+    func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
+        proxy.makeViewList(encloser: encloser, graph: graph)
     }
 
     func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
@@ -406,9 +414,15 @@ extension _VariadicView_ViewRoot {
 
 extension _VariadicView_UnaryViewRoot {
     public static func _makeViewList(root: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        let body = body(_Graph(), inputs)
-        let generator = _VariadicView_ViewRoot_MakeChildren_UnaryViewRootProxy(graph: root, body: body, inputs: inputs)
-        return _ViewListOutputs(viewList: generator)
+        let outputs = Self._makeView(root: root, inputs: inputs.inputs) { graph, inputs in
+            body(graph, inputs.listInputs)
+        }
+
+        if let proxy = outputs.view as? _VariadicView_ViewRoot_MakeChildren {
+            let generator = _VariadicView_ViewRoot_MakeChildren_UnaryViewRootProxy(graph: root, proxy: proxy)
+            return _ViewListOutputs(viewList: generator)
+        }
+        return _ViewListOutputs(viewList: .staticList([outputs.view].compactMap { $0 } ))
     }
 }
 
@@ -499,14 +513,17 @@ extension _VariadicView.Tree : View where Root : _VariadicView_ViewRoot, Content
                 let subviews = self.makeViewList(encloser: view, graph: self.graph).compactMap {
                     $0.makeView(encloser: encloser, graph: graph)
                 }
-                var layout: any Layout = DefaultLayoutPropertyItem.default
+                let layout: any Layout
                 if let layoutRoot = children as? any _VariadicView_ViewRoot_MakeChildren_LayoutRoot {
                     layout = layoutRoot.makeLayout(encloser: encloser, graph: graph)
                 } else if let layoutRoot = view.root as? any Layout {
                     layout = layoutRoot
                 } else if let layoutItem = baseInputs.properties.find(type: DefaultLayoutPropertyItem.self) {
                     layout = layoutItem.layout
+                } else {
+                    layout = DefaultLayoutPropertyItem.default
                 }
+
                 return ViewGroupContext(view: view,
                                         subviews: subviews,
                                         layout: layout,
@@ -524,25 +541,41 @@ extension _VariadicView.Tree : View where Root : _VariadicView_ViewRoot, Content
 
     struct _UnaryViewRootViewListGenerator : ViewListGenerator {
         let graph: _GraphValue<_VariadicView.Tree<Root, Content>>
-        var baseInputs: _GraphInputs
-        var preferences: PreferenceInputs
+        var inputs: _ViewInputs
         fileprivate var children: any _VariadicView_ViewRoot_MakeChildren_UnaryViewRoot
 
         func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
             if let view = graph.value(atPath: self.graph, from: encloser) {
                 let subviews = children.makeViewList(encloser: view, graph: self.graph)
-                let generator = ViewGroupContext<_VariadicView.Tree<Root, Content>>
-                    .Generator(graph: self.graph,
-                               subviews: subviews,
-                               baseInputs: self.baseInputs)
+
+                let layout: any Layout
+                if let _layout = children.makeLayout(encloser: encloser, graph: graph) {
+                    layout = _layout
+                } else if let _layout = inputs.base.properties.find(type: DefaultLayoutPropertyItem.self)?.layout {
+                    layout = _layout
+                } else {
+                    layout = DefaultLayoutPropertyItem.default
+                }
+
+                let generator = GenericViewGenerator(graph: self.graph, inputs: self.inputs) { view, inputs in
+                    let subviews = subviews.compactMap { $0.makeView(encloser: view, graph: self.graph) }
+                    if subviews.isEmpty == false {
+                        return ViewGroupContext(view: view,
+                                                subviews: subviews,
+                                                layout: layout,
+                                                inputs: inputs.base,
+                                                graph: self.graph)
+                    }
+                    return nil
+                }
                 return [generator]
             }
             fatalError("Unable to recover _VariadicView.Tree")
         }
 
         mutating func mergeInputs(_ inputs: _GraphInputs) {
-            children.mergeInputs(inputs)
-            baseInputs.mergedInputs.append(inputs)
+            self.inputs.base.mergedInputs.append(inputs)
+            self.children.mergeInputs(inputs)
         }
     }
 
@@ -568,8 +601,7 @@ extension _VariadicView.Tree : View where Root : _VariadicView_ViewRoot, Content
         }
         if let unaryView = outputs.viewList as? any _VariadicView_ViewRoot_MakeChildren_UnaryViewRoot {
             let generator = _UnaryViewRootViewListGenerator(graph: view,
-                                                            baseInputs: inputs.base,
-                                                            preferences: inputs.preferences,
+                                                            inputs: inputs.inputs,
                                                             children: unaryView)
             return _ViewListOutputs(viewList: generator)
         }

@@ -16,34 +16,6 @@ class ViewGroupContext<Content> : ViewContext where Content: View {
     var layoutCache: AnyLayout.Cache?
     let layoutProperties: LayoutProperties
 
-    struct Generator : ViewGenerator {
-        var graph: _GraphValue<Content>
-        var subviews: [any ViewGenerator]
-        var baseInputs: _GraphInputs
-
-        func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
-            if let view = graph.value(atPath: self.graph, from: encloser) {
-                let subviews = self.subviews.compactMap {
-                    $0.makeView(encloser: view, graph: self.graph)
-                }
-                let layout = baseInputs.properties
-                    .find(type: DefaultLayoutPropertyItem.self)?
-                    .layout ?? DefaultLayoutPropertyItem.default
-                return ViewGroupContext(view: view,
-                                        subviews: subviews,
-                                        layout: layout,
-                                        inputs: baseInputs,
-                                        graph: self.graph)
-            }
-            fatalError("Unable to recover view")
-        }
-
-        mutating func mergeInputs(_ inputs: _GraphInputs) {
-            subviews.indices.forEach { subviews[$0].mergeInputs(inputs) }
-            baseInputs.mergedInputs.append(inputs)
-        }
-    }
-
     init<L: Layout>(view: Content, subviews: [ViewContext], layout: L, inputs: _GraphInputs, graph: _GraphValue<Content>) {
         self.subviews = subviews
         self.layout = AnyLayout(layout)
