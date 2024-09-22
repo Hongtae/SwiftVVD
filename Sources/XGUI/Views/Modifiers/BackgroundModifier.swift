@@ -238,6 +238,7 @@ private class BackgroundViewContext<Modifier> : ViewModifierContext<Modifier> {
     override func layoutSubviews() {
         super.layoutSubviews()
 
+        let frame = self.bounds
         var position = frame.origin
         var anchor = UnitPoint()
         switch self.alignment.horizontal {
@@ -269,24 +270,28 @@ private class BackgroundViewContext<Modifier> : ViewModifierContext<Modifier> {
     override func drawBackground(frame: CGRect, context: GraphicsContext) {
         let width = background.frame.width
         let height = background.frame.height
-        guard width > 0 && height > 0 else {
+        guard width > .ulpOfOne && height > .ulpOfOne else {
             return
         }
-        if frame.intersection(background.frame).isNull {
+
+        let drawingFrame = self.background.frame.offsetBy(dx: frame.minX,
+                                                          dy: frame.minY)
+        if frame.intersection(drawingFrame).isNull {
             return
         }
-        background.drawView(frame: background.frame, context: context)
+        background.drawView(frame: drawingFrame, context: context)
     }
 
     override func hitTest(_ location: CGPoint) -> ViewContext? {
-        if let view = self.background.hitTest(location) {
+        let loc = location.applying(self.background.transformToContainer.inverted())
+        if let view = self.background.hitTest(loc) {
             return view
         }
         return super.hitTest(location)
     }
 
-    override func update(transform t: AffineTransform, origin: CGPoint) {
-        super.update(transform: t, origin: origin)
-        self.background.update(transform: self.transformByRoot, origin: self.frame.origin)
+    override func update(transform t: AffineTransform) {
+        super.update(transform: t)
+        self.background.update(transform: self.transformToRoot)
     }
 }

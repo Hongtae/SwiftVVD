@@ -82,11 +82,11 @@ extension _PaddingLayout: _ViewLayoutModifier {
         }
 
         override func layoutSubviews() {
-            let bounds = self.frame
-            var minX = bounds.minX
-            var maxX = bounds.maxX
-            var minY = bounds.minY
-            var maxY = bounds.maxY
+            let frame = self.bounds
+            var minX = frame.minX
+            var maxX = frame.maxX
+            var minY = frame.minY
+            var maxY = frame.maxY
 
             let insets = self.layoutInsets
             if self.layout.edges.contains(.leading) {

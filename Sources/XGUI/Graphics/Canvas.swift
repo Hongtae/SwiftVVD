@@ -90,7 +90,8 @@ private class CanvasViewContext<Symbols>: ViewContext where Symbols: View {
     override func draw(frame: CGRect, context: GraphicsContext) {
         super.draw(frame: frame, context: context)
 
-        if self.frame.width > 0 && self.frame.height > 0 {
+        let bounds = self.bounds
+        if bounds.width > 0 && bounds.height > 0 {
             context.drawLayer(in: frame) { context, size in
                 let renderer = self.view.renderer
                 renderer(&context, size)
@@ -99,7 +100,7 @@ private class CanvasViewContext<Symbols>: ViewContext where Symbols: View {
     }
 
     override func hitTest(_ location: CGPoint) -> ViewContext? {
-        if self.frame.contains(location) {
+        if self.bounds.contains(location) {
             return self
         }
         return super.hitTest(location)

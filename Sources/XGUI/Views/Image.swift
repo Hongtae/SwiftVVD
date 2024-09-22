@@ -274,7 +274,8 @@ class ImageViewContext : ViewContext {
     override func draw(frame: CGRect, context: GraphicsContext) {
         super.draw(frame: frame, context: context)
 
-        if self.frame.width > 0 && self.frame.height > 0 {
+        let bounds = self.bounds
+        if bounds.width > 0 && bounds.height > 0 {
             if self.resolvedImage == nil {
                 self.resolvedImage = context.resolve(self.image)
                 self.sharedContext.needsLayout = true
@@ -286,7 +287,7 @@ class ImageViewContext : ViewContext {
     }
 
     override func hitTest(_ location: CGPoint) -> ViewContext? {
-        if self.frame.contains(location) {
+        if self.bounds.contains(location) {
             return self
         }
         return super.hitTest(location)

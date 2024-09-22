@@ -48,7 +48,7 @@ class _GestureHandler {
 
     func locationInView(_ location: CGPoint) -> CGPoint {
         if let view {
-            let transform = view.transformByRoot
+            let transform = view.transformToRoot.inverted()
             return location.applying(transform)
         }
         return location

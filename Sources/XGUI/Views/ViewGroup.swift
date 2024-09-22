@@ -101,7 +101,7 @@ class ViewGroupContext<Content> : ViewContext where Content: View {
     }
 
     override func layoutSubviews() {
-        let frame = self.frame
+        let frame = self.bounds
         guard frame.width > 0 && frame.height > 0 else { return }
 
         if self.subviews.isEmpty == false {
@@ -150,10 +150,10 @@ class ViewGroupContext<Content> : ViewContext where Content: View {
         }
     }
 
-    override func update(transform t: AffineTransform, origin: CGPoint) {
-        super.update(transform: t, origin: origin)
+    override func update(transform t: AffineTransform) {
+        super.update(transform: t)
         self.subviews.forEach {
-            $0.update(transform: self.transformByRoot, origin: self.frame.origin)
+            $0.update(transform: self.transformToRoot)
         }
     }
 
@@ -167,23 +167,28 @@ class ViewGroupContext<Content> : ViewContext where Content: View {
     override func draw(frame: CGRect, context: GraphicsContext) {
         super.draw(frame: frame, context: context)
 
+        let offsetX = frame.minX
+        let offsetY = frame.minY
+
         self.subviews.forEach { view in
             let width = view.frame.width
             let height = view.frame.height
-            guard width > 0 && height > 0 else {
+            guard width > .ulpOfOne && height > .ulpOfOne else {
                 return
             }
 
-            if frame.intersection(view.frame).isNull {
+            let drawingFrame = view.frame.offsetBy(dx: offsetX, dy: offsetY)
+            if frame.intersection(drawingFrame).isNull {
                 return
             }
-            view.drawView(frame: view.frame, context: context)
+            view.drawView(frame: drawingFrame, context: context)
         }
     }
 
     override func hitTest(_ location: CGPoint) -> ViewContext? {
         for subview in subviews {
-            if let view = subview.hitTest(location) {
+            let loc = location.applying(subview.transformToContainer.inverted())
+            if let view = subview.hitTest(loc) {
                 return view
             }
         }
@@ -192,12 +197,10 @@ class ViewGroupContext<Content> : ViewContext where Content: View {
 
     override func gestureHandlers(at location: CGPoint) -> GestureHandlerOutputs {
         var outputs = super.gestureHandlers(at: location)
-        if self.frame.contains(location) {
+        if self.bounds.contains(location) {
             for subview in subviews {
-                let frame = subview.frame
-                if frame.contains(location) {
-                    outputs = outputs.merge(subview.gestureHandlers(at: location))
-                }
+                let local = location.applying(subview.transformToContainer.inverted())
+                outputs = outputs.merge(subview.gestureHandlers(at: local))
             }
         }
         return outputs

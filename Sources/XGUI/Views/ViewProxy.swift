@@ -56,9 +56,9 @@ class ProxyViewContext<Proxy : ViewProxy> : ViewContext {
         self.view.loadResources(context)
     }
 
-    override func update(transform t: AffineTransform, origin: CGPoint) {
-        super.update(transform: t, origin: origin)
-        self.view.update(transform: self.transformByRoot, origin: self.frame.origin)
+    override func update(transform t: AffineTransform) {
+        super.update(transform: t)
+        self.view.update(transform: self.transformToRoot)
     }
 
     override func update(tick: UInt64, delta: Double, date: Date) {
@@ -71,18 +71,21 @@ class ProxyViewContext<Proxy : ViewProxy> : ViewContext {
 
         let width = self.view.frame.width
         let height = self.view.frame.height
-        guard width > 0 && height > 0 else {
+        guard width > .ulpOfOne && height > .ulpOfOne else {
             return
         }
-        if frame.intersection(self.view.frame).isNull {
+
+        let drawingFrame = self.view.frame.offsetBy(dx: frame.minX,
+                                                    dy: frame.minY)
+        if frame.intersection(drawingFrame).isNull {
             return
         }
-        let frame = self.view.frame
-        self.view.drawView(frame: frame, context: context)
+        self.view.drawView(frame: drawingFrame, context: context)
     }
 
     override func hitTest(_ location: CGPoint) -> ViewContext? {
-        if let view = self.view.hitTest(location) {
+        let loc = location.applying(self.view.transformToContainer.inverted())
+        if let view = self.view.hitTest(loc) {
             return view
         }
         return super.hitTest(location)
@@ -96,8 +99,9 @@ class ProxyViewContext<Proxy : ViewProxy> : ViewContext {
     override func layoutSubviews() {
         super.layoutSubviews()
 
-        let center = CGPoint(x: self.frame.midX, y: self.frame.midY)
-        let proposal = ProposedViewSize(width: self.frame.width, height: self.frame.height)
+        let frame = self.bounds
+        let center = CGPoint(x: frame.midX, y: frame.midY)
+        let proposal = ProposedViewSize(width: frame.width, height: frame.height)
         self.view.place(at: center, anchor: .center, proposal: proposal)
     }
 
@@ -107,7 +111,8 @@ class ProxyViewContext<Proxy : ViewProxy> : ViewContext {
 
     override func gestureHandlers(at location: CGPoint) -> GestureHandlerOutputs {
         let outputs = super.gestureHandlers(at: location)
-        return outputs.merge(self.view.gestureHandlers(at: location))
+        let local = location.applying(self.view.transformToContainer.inverted())
+        return outputs.merge(self.view.gestureHandlers(at: local))
     }
 
     override func handleMouseWheel(at location: CGPoint, delta: CGPoint) -> Bool {

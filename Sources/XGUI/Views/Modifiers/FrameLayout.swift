@@ -48,6 +48,7 @@ extension _FrameLayout : _ViewLayoutModifier {
         }
 
         override func layoutSubviews() {
+            let frame = self.bounds
             let midX = frame.midX
             let midY = frame.midY
             let width = frame.width

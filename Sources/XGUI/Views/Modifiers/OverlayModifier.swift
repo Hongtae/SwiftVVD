@@ -194,6 +194,7 @@ private class OverlayViewContext<Modifier> : ViewModifierContext<Modifier> {
     override func layoutSubviews() {
         super.layoutSubviews()
 
+        let frame = self.bounds
         var position = frame.origin
         var anchor = UnitPoint()
         switch self.alignment.horizontal {
@@ -225,25 +226,29 @@ private class OverlayViewContext<Modifier> : ViewModifierContext<Modifier> {
     override func drawOverlay(frame: CGRect, context: GraphicsContext) {
         let width = overlay.frame.width
         let height = overlay.frame.height
-        guard width > 0 && height > 0 else {
+        guard width > .ulpOfOne && height > .ulpOfOne else {
             return
         }
-        if frame.intersection(overlay.frame).isNull {
+
+        let drawingFrame = self.overlay.frame.offsetBy(dx: frame.minX,
+                                                       dy: frame.minY)
+        if frame.intersection(drawingFrame).isNull {
             return
         }
-        overlay.drawView(frame: overlay.frame, context: context)
+        overlay.drawView(frame: drawingFrame, context: context)
     }
 
     override func hitTest(_ location: CGPoint) -> ViewContext? {
-        if let view = self.overlay.hitTest(location) {
+        let loc = location.applying(self.overlay.transformToContainer.inverted())
+        if let view = self.overlay.hitTest(loc) {
             return view
         }
         return super.hitTest(location)
     }
 
-    override func update(transform t: AffineTransform, origin: CGPoint) {
-        super.update(transform: t, origin: origin)
-        self.overlay.update(transform: self.transformByRoot, origin: self.frame.origin)
+    override func update(transform t: AffineTransform) {
+        super.update(transform: t)
+        self.overlay.update(transform: self.transformToRoot)
     }
 
 }

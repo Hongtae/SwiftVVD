@@ -92,12 +92,18 @@ class ViewContext {
         inputs.sharedContext
     }
     var frame: CGRect
-    var transform: AffineTransform = .identity          // parent to local
-    var transformByRoot: AffineTransform = .identity    // from root to local
+    var transform: AffineTransform = .identity          // local transform
+    var transformToRoot: AffineTransform = .identity    // local to root
     var spacing: ViewSpacing
 
     var bounds: CGRect {
         CGRect(x: 0, y: 0, width: frame.width, height: frame.height)
+    }
+
+    var transformToContainer: AffineTransform {         // local to container (superview)
+        let local = self.transform
+        let offset = AffineTransform(translationX: self.frame.minX, y: self.frame.minY)
+        return local.concatenating(offset)
     }
 
     init<Content>(inputs: _GraphInputs, graph: _GraphValue<Content>) {
@@ -122,10 +128,8 @@ class ViewContext {
         self.inputs = self.inputs.resolveMergedInputs()
     }
 
-    func update(transform t: AffineTransform, origin: CGPoint) {
-        let t2 = t.concatenating(self.transform)
-        let local = AffineTransform(translationX: origin.x - self.frame.minX, y: origin.y - self.frame.minY)
-        self.transformByRoot = t2.concatenating(local)
+    func update(transform t: AffineTransform) {
+        self.transformToRoot = self.transformToContainer.concatenating(t)
     }
 
     func resolveGraphInputs<T>(encloser: T, graph: _GraphValue<T>) {
@@ -338,9 +342,9 @@ class GenericViewContext<Content> : ViewContext where Content : View {
         self.body.loadResources(context)
     }
 
-    override func update(transform t: AffineTransform, origin: CGPoint) {
-        super.update(transform: t, origin: origin)
-        self.body.update(transform: self.transformByRoot, origin: self.frame.origin)
+    override func update(transform t: AffineTransform) {
+        super.update(transform: t)
+        self.body.update(transform: self.transformToRoot)
     }
 
     override func update(tick: UInt64, delta: Double, date: Date) {
@@ -353,18 +357,21 @@ class GenericViewContext<Content> : ViewContext where Content : View {
 
         let width = self.body.frame.width
         let height = self.body.frame.height
-        guard width > 0 && height > 0 else {
+        guard width > .ulpOfOne && height > .ulpOfOne else {
             return
         }
-        if frame.intersection(self.body.frame).isNull {
+
+        let drawingFrame = self.body.frame.offsetBy(dx: frame.minX,
+                                                    dy: frame.minY)
+        if frame.intersection(drawingFrame).isNull {
             return
         }
-        let frame = self.body.frame
-        self.body.drawView(frame: frame, context: context)
+        self.body.drawView(frame: drawingFrame, context: context)
     }
 
     override func hitTest(_ location: CGPoint) -> ViewContext? {
-        if let view = self.body.hitTest(location) {
+        let loc = location.applying(self.body.transformToContainer.inverted())
+        if let view = self.body.hitTest(loc) {
             return view
         }
         return super.hitTest(location)
@@ -378,8 +385,9 @@ class GenericViewContext<Content> : ViewContext where Content : View {
     override func layoutSubviews() {
         super.layoutSubviews()
 
-        let center = CGPoint(x: self.frame.midX, y: self.frame.midY)
-        let proposal = ProposedViewSize(width: self.frame.width, height: self.frame.height)
+        let frame = self.bounds
+        let center = CGPoint(x: frame.midX, y: frame.midY)
+        let proposal = ProposedViewSize(width: frame.width, height: frame.height)
         self.body.place(at: center, anchor: .center, proposal: proposal)
     }
 
@@ -402,7 +410,8 @@ class GenericViewContext<Content> : ViewContext where Content : View {
 
     override func gestureHandlers(at location: CGPoint) -> GestureHandlerOutputs {
         let outputs = super.gestureHandlers(at: location)
-        return outputs.merge(self.body.gestureHandlers(at: location))
+        let local = location.applying(self.body.transformToContainer.inverted())
+        return outputs.merge(self.body.gestureHandlers(at: local))
     }
 }
 
