@@ -2,13 +2,13 @@
 //  File: Gradient.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
 
 public struct Gradient {
-    public struct Stop: Equatable {
+    public struct Stop: Equatable, Hashable, Sendable {
         public var color: Color
         public var location: CGFloat
 
@@ -39,7 +39,7 @@ public struct Gradient {
         }
     }
 
-    public struct ColorSpace: Hashable {
+    public struct ColorSpace: Hashable, Sendable {
         let id: UInt32
 
         static let device = ColorSpace(id: 0)
@@ -106,10 +106,19 @@ public struct Gradient {
     }
 }
 
-extension Gradient: ShapeStyle {
+extension Gradient: ShapeStyle, Hashable {
+    public typealias Resolved = Never
+    public func _apply(to shape: inout _ShapeStyle_Shape) {
+    }
 }
 
-class AnyGradientBox {
+class AnyGradientBox: AnyShapeStyleBox, @unchecked Sendable {
+    init(style: Gradient) {
+        super.init(style: style)
+    }
+    var gradient: Gradient {
+        self.style as! Gradient
+    }
 }
 
 struct AnyGradient: Hashable, ShapeStyle {
@@ -128,10 +137,10 @@ struct AnyGradient: Hashable, ShapeStyle {
     }
 
     public init(_ gradient: Gradient) {
-        self.provider = AnyGradientBox()
+        self.provider = AnyGradientBox(style: gradient)
     }
 
     public func colorSpace(_ space: Gradient.ColorSpace) -> AnyGradient {
-        AnyGradient(provider: AnyGradientBox())
+        self
     }
 }

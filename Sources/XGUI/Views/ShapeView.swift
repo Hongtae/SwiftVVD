@@ -29,10 +29,9 @@ public struct _ShapeView<Content, Style>: View where Content: Shape, Style: Shap
     public typealias Body = Never
 }
 
-extension _ShapeView: _PrimitiveView {
-}
+extension _ShapeView: _PrimitiveView {}
 
-private class ShapeViewContext<Content, Style> : ViewContext where Content: Shape, Style: ShapeStyle {
+private class ShapeViewContext<Content, Style>: ViewContext where Content: Shape, Style: ShapeStyle {
     typealias ShapeView = _ShapeView<Content, Style>
     let view: ShapeView
     var shape: Content          { view.shape }
@@ -71,10 +70,7 @@ private class ShapeViewContext<Content, Style> : ViewContext where Content: Shap
 
     override func hitTest(_ location: CGPoint) -> ViewContext? {
         if self.bounds.contains(location) {
-            if self.shape is ShapeDrawer {
-                // TODO: Find the closest distance to Path-Stroke
-                //Log.warn("Hit testing for path-stroke is not yet implemented.")
-            } else {
+            if self.shape is ShapeDrawer == false {
                 let path = self.shape.path(in: frame)
                 if path.contains(location, eoFill: self.fillStyle.isEOFilled) {
                     return self
