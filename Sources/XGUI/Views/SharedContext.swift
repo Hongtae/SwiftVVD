@@ -68,14 +68,7 @@ class SharedContext {
     func loadResourceData(name: String, bundle: Bundle?, cache: Bool) -> Data? {
         Log.debug("Loading resource: \(name)...")
         let bundle = bundle ?? Bundle.module
-        var url: URL? = nil
-        //TODO: check for Bundle.module crashes on Windows,Linux after Swift 5.8
-#if os(macOS) || os(iOS)
-        url = bundle.url(forResource: name, withExtension: nil)
-#else
-        url = bundle.bundleURL.appendingPathComponent(name)
-#endif
-        if let url {
+        if let url = bundle.url(forResource: name, withExtension: nil) {
             if let data = self.resourceData[url.path] {
                 return data
             }
