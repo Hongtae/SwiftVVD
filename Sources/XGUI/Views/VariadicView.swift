@@ -229,7 +229,7 @@ private struct _VariadicView_ViewRoot_MakeChildrenProxy<Root> : _VariadicView_Vi
                 return ProxyViewContext(proxy: _ViewProxy(proxy: proxy),
                                         view: view,
                                         inputs: view.inputs,
-                                        graph: self.graph)
+                                        graph: proxy.contentGraph)
             }
             return nil
         }

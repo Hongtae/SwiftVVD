@@ -232,11 +232,8 @@ public struct _GraphValue<Value> {
         root.paths[index].keyPath
     }
 
-    var valueType: Value.Type {
-        if let t = type(of: keyPath).valueType as? Value.Type {
-            return t
-        }
-        fatalError("Invalid type!")
+    var valueType: any Any.Type {
+        type(of: keyPath).valueType
     }
 
     var parent: _GraphValue<Any>? {
