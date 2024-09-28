@@ -2,13 +2,14 @@
 //  File: AudioSource.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
+import Synchronization
 import OpenAL
 
-public class AudioSource {
+public final class AudioSource: Sendable {
     public enum State {
         case stopped
         case playing
@@ -88,89 +89,43 @@ public class AudioSource {
     }
 
     public func play() {
-        self.bufferLock.lock()
-        defer { self.bufferLock.unlock() }
-
-        alSourcePlay(sourceID)
+        self.buffers.withLock { _ in
+            alSourcePlay(sourceID)
+        }
     }
 
     public func pause() {
-        self.bufferLock.lock()
-        defer { self.bufferLock.unlock() }
-
-        alSourcePause(sourceID)
+        self.buffers.withLock { _ in
+            alSourcePause(sourceID)
+        }
     }
 
     public func stop() {
-        self.bufferLock.lock()
-        defer { self.bufferLock.unlock() }
- 
-        alSourceStop(sourceID)
-        var buffersQueued: ALint = 0
-        var buffersProcessed: ALint = 0
-        alGetSourcei(sourceID, AL_BUFFERS_QUEUED, &buffersQueued)       // entire buffer
-        alGetSourcei(sourceID, AL_BUFFERS_PROCESSED, &buffersProcessed) // finished buffer
+        self.buffers.withLock { buffers in
+            alSourceStop(sourceID)
+            var buffersQueued: ALint = 0
+            var buffersProcessed: ALint = 0
+            alGetSourcei(sourceID, AL_BUFFERS_QUEUED, &buffersQueued)       // entire buffer
+            alGetSourcei(sourceID, AL_BUFFERS_PROCESSED, &buffersProcessed) // finished buffer
 
-        for _ in 0..<buffersProcessed {
-            var bufferID: ALuint = 0
-            alSourceUnqueueBuffers(sourceID, 1, &bufferID)
-        }
-
-        if buffersProcessed != buffers.count {
-            Log.warn("Buffer mismatch! (\(buffers.count) allocated, \(buffersProcessed) released)")
-        }
-
-        alSourcei(sourceID, AL_LOOPING, 0)
-        alSourcei(sourceID, AL_BUFFER, 0)
-        alSourceRewind(sourceID)
-
-        buffers.forEach {
-            var bufferID = $0.bufferID
-            alDeleteBuffers(1, &bufferID)
-        }
-        buffers.removeAll()
-
-        // check error.
-        let err = alGetError()
-        if err != AL_NO_ERROR {
-            Log.err("AudioSource Error: \(String(format: "0x%x (%s)", err, alGetString(err)))")
-        }
-    }
-
-    public func numberOfBuffersInQueue() -> Int {
-        self.dequeueBuffers()
-
-        self.bufferLock.lock()
-        defer { self.bufferLock.unlock() }
-
-        // get number of total buffers.    
-        var queuedBuffers: ALint = 0
-        alGetSourcei(sourceID, AL_BUFFERS_QUEUED, &queuedBuffers)
-        if queuedBuffers != self.buffers.count {
-            Log.err("AudioSource buffer count mismatch! (\(buffers.count) != \(queuedBuffers))")
-        }
-        return buffers.count
-    }
-
-    public func dequeueBuffers() {
-        self.bufferLock.lock()
-        defer { self.bufferLock.unlock() }
-
-        var bufferProcessed: ALint = 0
-        alGetSourcei(sourceID, AL_BUFFERS_PROCESSED, &bufferProcessed)
-        for _ in 0..<bufferProcessed {
-            var bufferID: ALuint = 0
-            alSourceUnqueueBuffers(sourceID, 1, &bufferID)
-            if bufferID != 0 {
-                if let index = buffers.firstIndex(where: {
-                    $0.bufferID == bufferID
-                }) {
-                    buffers.remove(at: index)
-                }
-                alDeleteBuffers(1, &bufferID)
-            } else {
-                Log.err("AudioSource Failed to dequeue buffer! (source: \(sourceID))")
+            for _ in 0..<buffersProcessed {
+                var bufferID: ALuint = 0
+                alSourceUnqueueBuffers(sourceID, 1, &bufferID)
             }
+
+            if buffersProcessed != buffers.count {
+                Log.warn("Buffer mismatch! (\(buffers.count) allocated, \(buffersProcessed) released)")
+            }
+
+            alSourcei(sourceID, AL_LOOPING, 0)
+            alSourcei(sourceID, AL_BUFFER, 0)
+            alSourceRewind(sourceID)
+
+            buffers.forEach {
+                var bufferID = $0.bufferID
+                alDeleteBuffers(1, &bufferID)
+            }
+            buffers.removeAll()
 
             // check error.
             let err = alGetError()
@@ -178,9 +133,49 @@ public class AudioSource {
                 Log.err("AudioSource Error: \(String(format: "0x%x (%s)", err, alGetString(err)))")
             }
         }
+    }
 
-        if bufferProcessed > 0 {
-            // Log.debug("AudioSource buffer dequeued. remains: \(buffers.count)")
+    public func numberOfBuffersInQueue() -> Int {
+        self.dequeueBuffers()
+        return self.buffers.withLock { buffers in
+            // get number of total buffers.
+            var queuedBuffers: ALint = 0
+            alGetSourcei(sourceID, AL_BUFFERS_QUEUED, &queuedBuffers)
+            if queuedBuffers != buffers.count {
+                Log.err("AudioSource buffer count mismatch! (\(buffers.count) != \(queuedBuffers))")
+            }
+            return buffers.count
+        }
+    }
+
+    public func dequeueBuffers() {
+        self.buffers.withLock { buffers in
+            var bufferProcessed: ALint = 0
+            alGetSourcei(sourceID, AL_BUFFERS_PROCESSED, &bufferProcessed)
+            for _ in 0..<bufferProcessed {
+                var bufferID: ALuint = 0
+                alSourceUnqueueBuffers(sourceID, 1, &bufferID)
+                if bufferID != 0 {
+                    if let index = buffers.firstIndex(where: {
+                        $0.bufferID == bufferID
+                    }) {
+                        buffers.remove(at: index)
+                    }
+                    alDeleteBuffers(1, &bufferID)
+                } else {
+                    Log.err("AudioSource Failed to dequeue buffer! (source: \(sourceID))")
+                }
+
+                // check error.
+                let err = alGetError()
+                if err != AL_NO_ERROR {
+                    Log.err("AudioSource Error: \(String(format: "0x%x (%s)", err, alGetString(err)))")
+                }
+            }
+
+            if bufferProcessed > 0 {
+                // Log.debug("AudioSource buffer dequeued. remains: \(buffers.count)")
+            }
         }
     }
 
@@ -193,61 +188,60 @@ public class AudioSource {
         if byteCount > 0 && sampleRate > 0 {
             let format = self.device.format(bits: bits, channels: channels)
             if format != 0 {
-                self.bufferLock.lock()
-                defer { self.bufferLock.unlock() }
+                return self.buffers.withLock { buffers in
+                    var finishedBuffers: [ALuint] = []
+                    var numBuffersProcessed: ALint = 0
+                    alGetSourcei(sourceID, AL_BUFFERS_PROCESSED, &numBuffersProcessed)
+                    finishedBuffers.reserveCapacity(Int(numBuffersProcessed))
 
-                var finishedBuffers: [ALuint] = []
-                var numBuffersProcessed: ALint = 0
-                alGetSourcei(sourceID, AL_BUFFERS_PROCESSED, &numBuffersProcessed)
-                finishedBuffers.reserveCapacity(Int(numBuffersProcessed))
+                    while numBuffersProcessed > 0 {
+                        var bufferID: ALuint = 0
+                        alSourceUnqueueBuffers(sourceID, 1, &bufferID) // collect buffer to recycle
+                        if bufferID != 0 {
+                            finishedBuffers.append(bufferID)
+                        }
+                        numBuffersProcessed -= 1
+                    }
 
-                while numBuffersProcessed > 0 {
                     var bufferID: ALuint = 0
-                    alSourceUnqueueBuffers(sourceID, 1, &bufferID) // collect buffer to recycle
-                    if bufferID != 0 {
-                        finishedBuffers.append(bufferID)
-                    }
-                    numBuffersProcessed -= 1
-                }
+                    if finishedBuffers.isEmpty == false {
+                        finishedBuffers.forEach { buffID in
+                            if let index = buffers.firstIndex(where: {
+                                $0.bufferID == buffID
+                            }) {
+                                buffers.remove(at: index);
+                            }
+                        }
 
-                var bufferID: ALuint = 0
-                if finishedBuffers.isEmpty == false {
-                    finishedBuffers.forEach { buffID in
-                        if let index = self.buffers.firstIndex(where: {
-                            $0.bufferID == buffID
-                        }) {
-                            self.buffers.remove(at: index);
+                        bufferID = finishedBuffers[0]
+                        let numBuffers = finishedBuffers.count
+                        if numBuffers > 1 {
+                            finishedBuffers[1...].withUnsafeBufferPointer { ptr in
+                                alDeleteBuffers(ALsizei(numBuffers - 1), ptr.baseAddress)
+                            }
                         }
                     }
 
-                    bufferID = finishedBuffers[0]
-                    let numBuffers = finishedBuffers.count
-                    if numBuffers > 1 {
-                        finishedBuffers[1...].withUnsafeBufferPointer { ptr in 
-                            alDeleteBuffers(ALsizei(numBuffers - 1), ptr.baseAddress)
-                        }
+                    if bufferID == 0 {
+                        alGenBuffers(1, &bufferID)
                     }
+                    // enqueue buffer.
+                    let bytes = ALsizei(byteCount)
+                    alBufferData(bufferID, format, data, bytes, ALsizei(sampleRate))
+                    alSourceQueueBuffers(sourceID, 1, &bufferID)
+
+                    let bytesSecond = UInt(sampleRate * channels * (bits >> 3))
+                    let bufferInfo = Buffer(timeStamp: timeStamp, bytes: UInt(bytes), bytesSecond: bytesSecond, bufferID: bufferID)
+                    buffers.append(bufferInfo)
+
+                    // check error.
+                    let err = alGetError()
+                    if err != AL_NO_ERROR {
+                        Log.err("AudioSource Error: \(String(format: "0x%x (%s)", err, alGetString(err)))")
+                    }
+
+                    return true
                 }
-
-                if bufferID == 0 {
-                    alGenBuffers(1, &bufferID)
-                }
-                // enqueue buffer.
-                let bytes = ALsizei(byteCount)
-                alBufferData(bufferID, format, data, bytes, ALsizei(sampleRate))
-                alSourceQueueBuffers(sourceID, 1, &bufferID)
-
-                let bytesSecond = UInt(sampleRate * channels * (bits >> 3))
-                let bufferInfo = Buffer(timeStamp: timeStamp, bytes: UInt(bytes), bytesSecond: bytesSecond, bufferID: bufferID)
-                self.buffers.append(bufferInfo)
-
-                // check error.
-                let err = alGetError()
-                if err != AL_NO_ERROR {
-                    Log.err("AudioSource Error: \(String(format: "0x%x (%s)", err, alGetString(err)))")
-                }
-
-                return true
             }
             else {
                 Log.err("Unsupported audio format! (\(bits) bits, \(channels) channels)")
@@ -260,47 +254,43 @@ public class AudioSource {
     public var timePosition: Double {
         get {
             self.dequeueBuffers()
-            self.bufferLock.lock()
-            defer { self.bufferLock.unlock() }
+            return self.buffers.withLock { buffers in
+                if let buffer = buffers.first {
+                    assert(buffer.bufferID != 0)
+                    assert(buffer.bytes != 0)
+                    assert(buffer.bytesSecond != 0)
 
-            if self.buffers.isEmpty { return 0.0 }
+                    var bytesOffset: ALint = 0
+                    alGetSourcei(sourceID, AL_BYTE_OFFSET, &bytesOffset)
+                    // If last buffer is too small, playing over next buffer before unqueue.
+                    // This can be time accuracy problem.
+                    bytesOffset = clamp(bytesOffset, min: 0, max: ALint(buffer.bytes))
 
-            let buffer = self.buffers[0]
-            assert(buffer.bufferID != 0)
-            assert(buffer.bytes != 0)
-            assert(buffer.bytesSecond != 0)
-
-            var bytesOffset: ALint = 0
-            alGetSourcei(sourceID, AL_BYTE_OFFSET, &bytesOffset)
-            // If last buffer is too small, playing over next buffer before unqueue.
-            // This can be time accuracy problem.
-            bytesOffset = clamp(bytesOffset, min: 0, max: ALint(buffer.bytes))
-
-            let position = buffer.timeStamp + Double(bytesOffset) / Double(buffer.bytesSecond)
-            return position
+                    let position = buffer.timeStamp + Double(bytesOffset) / Double(buffer.bytesSecond)
+                    return position
+                }
+                return 0.0
+            }
         }
         set {
             self.dequeueBuffers()
-            self.bufferLock.lock()
-            defer { self.bufferLock.unlock() }
+            self.buffers.withLock { buffers in
+                if let buffer = buffers.first {
+                    assert(buffer.bufferID != 0)
+                    assert(buffer.bytes != 0)
+                    assert(buffer.bytesSecond != 0)
 
-            if self.buffers.isEmpty == false {
+                    if newValue > buffer.timeStamp {
+                        let t = newValue - buffer.timeStamp
 
-                let buffer = self.buffers[0]
-                assert(buffer.bufferID != 0)
-                assert(buffer.bytes != 0)
-                assert(buffer.bytesSecond != 0)
+                        let bytesOffset: ALint = clamp(ALint(Double(buffer.bytesSecond) * t), min: 0, max: ALint(buffer.bytes))
+                        alSourcei(sourceID, AL_BYTE_OFFSET, bytesOffset)
 
-                if newValue > buffer.timeStamp {
-                    let t = newValue - buffer.timeStamp
-
-                    let bytesOffset: ALint = clamp(ALint(Double(buffer.bytesSecond) * t), min: 0, max: ALint(buffer.bytes))
-                    alSourcei(sourceID, AL_BYTE_OFFSET, bytesOffset)
-
-                    // check error.
-                    let err = alGetError()
-                    if err != AL_NO_ERROR {
-                        Log.err("AudioSource Error: \(String(format: "0x%x (%s)", err, alGetString(err)))")
+                        // check error.
+                        let err = alGetError()
+                        if err != AL_NO_ERROR {
+                            Log.err("AudioSource Error: \(String(format: "0x%x (%s)", err, alGetString(err)))")
+                        }
                     }
                 }
             }
@@ -310,45 +300,41 @@ public class AudioSource {
     public var timeOffset: Double {
         get {
             self.dequeueBuffers()
-            self.bufferLock.lock()
-            defer { self.bufferLock.unlock() }
+            return self.buffers.withLock { buffers in
+                if let buffer = buffers.first {
+                    assert(buffer.bufferID != 0)
+                    assert(buffer.bytes != 0)
+                    assert(buffer.bytesSecond != 0)
 
-            if self.buffers.isEmpty { return 0.0 }
+                    var bytesOffset: ALint = 0
+                    alGetSourcei(sourceID, AL_BYTE_OFFSET, &bytesOffset)
+                    // If last buffer is too small, playing over next buffer before unqueue.
+                    // This can be time accuracy problem.
+                    bytesOffset = clamp(bytesOffset, min: 0, max: ALint(buffer.bytes))
 
-            let buffer = self.buffers[0]
-            assert(buffer.bufferID != 0)
-            assert(buffer.bytes != 0)
-            assert(buffer.bytesSecond != 0)
-
-            var bytesOffset: ALint = 0
-            alGetSourcei(sourceID, AL_BYTE_OFFSET, &bytesOffset)
-            // If last buffer is too small, playing over next buffer before unqueue.
-            // This can be time accuracy problem.
-            bytesOffset = clamp(bytesOffset, min: 0, max: ALint(buffer.bytes))
-
-            return Double(bytesOffset) / Double(buffer.bytesSecond)
+                    return Double(bytesOffset) / Double(buffer.bytesSecond)
+                }
+                return 0.0
+            }
         }
         set {
             self.dequeueBuffers()
-            self.bufferLock.lock()
-            defer { self.bufferLock.unlock() }
+            self.buffers.withLock { buffers in
+                if let buffer = buffers.first {
+                    assert(buffer.bufferID != 0)
+                    assert(buffer.bytes != 0)
+                    assert(buffer.bytesSecond != 0)
 
-            if self.buffers.isEmpty == false {
+                    if newValue > buffer.timeStamp {
+                        let t = newValue
+                        let bytesOffset: ALint = clamp(ALint(Double(buffer.bytesSecond) * t), min: 0, max: ALint(buffer.bytes))
+                        alSourcei(sourceID, AL_BYTE_OFFSET, bytesOffset)
 
-                let buffer = self.buffers[0]
-                assert(buffer.bufferID != 0)
-                assert(buffer.bytes != 0)
-                assert(buffer.bytesSecond != 0)
-
-                if newValue > buffer.timeStamp {
-                    let t = newValue
-                    let bytesOffset: ALint = clamp(ALint(Double(buffer.bytesSecond) * t), min: 0, max: ALint(buffer.bytes))
-                    alSourcei(sourceID, AL_BYTE_OFFSET, bytesOffset)
-
-                    // check error.
-                    let err = alGetError()
-                    if err != AL_NO_ERROR {
-                        Log.err("AudioSource Error: \(String(format: "0x%x (%s)", err, alGetString(err)))")
+                        // check error.
+                        let err = alGetError()
+                        if err != AL_NO_ERROR {
+                            Log.err("AudioSource Error: \(String(format: "0x%x (%s)", err, alGetString(err)))")
+                        }
                     }
                 }
             }
@@ -364,8 +350,8 @@ public class AudioSource {
         let bytesSecond: UInt
         let bufferID: ALuint
     }
-    private var buffers: [Buffer] = []
-    private let bufferLock = SpinLock()
+
+    private let buffers = Mutex<[Buffer]>([])
 
     init(device: AudioDevice, sourceID: UInt32) {
         assert(sourceID != 0)
@@ -378,6 +364,7 @@ public class AudioSource {
         assert(alIsSource(sourceID) != 0)
 
         self.stop()
+        let buffers = self.buffers.withLock { $0 }
         assert(buffers.isEmpty)
 
         var sourceID = self.sourceID

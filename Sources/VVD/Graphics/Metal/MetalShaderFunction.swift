@@ -9,7 +9,7 @@
 import Foundation
 import Metal
 
-public class MetalShaderFunction: ShaderFunction {
+final class MetalShaderFunction: ShaderFunction {
     public let stageInputAttributes: [ShaderAttribute]
     public let functionConstants: [String : ShaderFunctionConstant]
     public let functionName: String

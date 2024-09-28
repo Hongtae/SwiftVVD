@@ -31,7 +31,7 @@ struct EmptyScene: Scene, _PrimitiveScene {
     }
 }
 
-var appContext: AppContext? = nil
+nonisolated(unsafe) var appContext: AppContext? = nil
 
 class AppMain<A>: ApplicationDelegate, AppContext where A: App {
 
@@ -92,6 +92,7 @@ class AppMain<A>: ApplicationDelegate, AppContext where A: App {
 }
 
 extension App {
+    @MainActor
     public static func main() {
         let app = AppMain<Self>()
         appContext = app

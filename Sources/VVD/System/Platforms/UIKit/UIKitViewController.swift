@@ -2,14 +2,14 @@
 //  File: UIKitWindow.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_UIKIT
 import Foundation
 import UIKit
 
-class UIKitViewController: UIViewController {
+final class UIKitViewController: UIViewController {
 
     var ukview: UIKitView? = nil
 

@@ -161,25 +161,25 @@ extension GraphicsContext {
         public let rawValue: UInt32
         public init(rawValue: UInt32) { self.rawValue = rawValue }
 
-        public static var shadowAbove   = ShadowOptions(rawValue: 1)
-        public static var shadowOnly    = ShadowOptions(rawValue: 2)
-        public static var invertsAlpha  = ShadowOptions(rawValue: 4)
-        public static var disablesGroup = ShadowOptions(rawValue: 8)
+        public static var shadowAbove: ShadowOptions    { .init(rawValue: 1) }
+        public static var shadowOnly: ShadowOptions     { .init(rawValue: 2) }
+        public static var invertsAlpha: ShadowOptions   { .init(rawValue: 4) }
+        public static var disablesGroup: ShadowOptions  { .init(rawValue: 8) }
     }
 
     public struct BlurOptions: OptionSet, Sendable {
         public let rawValue: UInt32
         public init(rawValue: UInt32) { self.rawValue = rawValue }
 
-        public static var opaque        = BlurOptions(rawValue: 1)
-        public static var dithersResult = BlurOptions(rawValue: 2)
+        public static var opaque: BlurOptions           { .init(rawValue: 1) }
+        public static var dithersResult: BlurOptions    { .init(rawValue: 2) }
     }
 
     public struct FilterOptions: OptionSet, Sendable {
         public let rawValue: UInt32
         public init(rawValue: UInt32) { self.rawValue = rawValue }
 
-        public static var linearColor = FilterOptions(rawValue: 1)
+        public static var linearColor: FilterOptions { .init(rawValue: 1) }
     }
 
     public mutating func addFilter(_ filter: Filter,

@@ -2,25 +2,25 @@
 //  File: VulkanShaderFunction.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
 import Foundation
 import Vulkan
 
-public class VulkanShaderFunction: ShaderFunction {
-    public let module: VulkanShaderModule
-    public var device: GraphicsDevice { self.module.device }
-    public var stage: ShaderStage { self.module.stage }
-    public let functionName: String
-    public let functionConstants: [String: ShaderFunctionConstant]
-    public var stageInputAttributes: [ShaderAttribute] { self.module.inputAttributes }
+final class VulkanShaderFunction: ShaderFunction {
+    let module: VulkanShaderModule
+    var device: GraphicsDevice { self.module.device }
+    var stage: ShaderStage { self.module.stage }
+    let functionName: String
+    let functionConstants: [String: ShaderFunctionConstant]
+    var stageInputAttributes: [ShaderAttribute] { self.module.inputAttributes }
 
     var specializationInfo: VkSpecializationInfo
     var specializationData: UnsafeMutableRawPointer?
 
-    public init(module: VulkanShaderModule, name: String, constantValues: [ShaderFunctionConstantValue]) {
+    init(module: VulkanShaderModule, name: String, constantValues: [ShaderFunctionConstantValue]) {
         self.module = module
         self.functionName = name
         self.specializationData = nil

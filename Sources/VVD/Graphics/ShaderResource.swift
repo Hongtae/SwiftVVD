@@ -2,7 +2,7 @@
 //  File: ShaderResource.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 public enum ShaderDataType {
@@ -206,7 +206,7 @@ public enum ShaderStage {
     case compute
 }
 
-public struct ShaderStageFlags: OptionSet {
+public struct ShaderStageFlags: OptionSet, Sendable {
     public let rawValue: UInt32
     public init(rawValue: UInt32) { self.rawValue = rawValue }
     public init(stage: ShaderStage) {

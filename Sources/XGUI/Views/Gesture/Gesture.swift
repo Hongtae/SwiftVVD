@@ -70,7 +70,7 @@ public struct _GestureOutputs<Value> {
     let generator: any _GestureRecognizerGenerator<Value>
 }
 
-public struct GestureMask : OptionSet {
+public struct GestureMask : OptionSet, Sendable {
     public let rawValue: UInt32
     public init(rawValue: UInt32) { self.rawValue = rawValue }
     public static let none = GestureMask([])

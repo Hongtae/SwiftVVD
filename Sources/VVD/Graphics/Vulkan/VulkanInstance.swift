@@ -9,20 +9,23 @@
 import Foundation
 import Vulkan
 
-let VK_MAKE_VERSION = { (major: UInt32, minor: UInt32, patch: UInt32)->UInt32 in
+func VK_MAKE_VERSION(_ major: UInt32, _ minor: UInt32, _ patch: UInt32) -> UInt32 {
     (((major) << 22) | ((minor) << 12) | (patch))
 }
-let VK_VERSION_MAJOR = { (version: UInt32) -> UInt32 in
+
+func VK_VERSION_MAJOR(_ version: UInt32) -> UInt32 {
     version >> 22
 }
-let VK_VERSION_MINOR = { (version: UInt32) -> UInt32 in
+
+func VK_VERSION_MINOR(_ version: UInt32) -> UInt32 {
     (version >> 12) & 0x3ff 
 }
-let VK_VERSION_PATCH = { (version: UInt32) -> UInt32 in
+
+func VK_VERSION_PATCH(_ version: UInt32) -> UInt32 {
     (version & 0xfff)
 }
 
-public struct VulkanLayerProperties {
+struct VulkanLayerProperties {
     let name: String
     let specVersion: UInt32
     let implementationVersion: UInt32
@@ -30,10 +33,11 @@ public struct VulkanLayerProperties {
     let extensions: [String: UInt32]
 }
 
+nonisolated(unsafe)
 private weak var vulkanDebugLogger: Logger? = nil
 
-public class VulkanLogger: Logger {
-    public init() {
+final class VulkanLogger: Logger, @unchecked Sendable {
+    init() {
         super.init(category: "Vulkan", bind: false)
     }
 }
@@ -93,33 +97,33 @@ private func debugUtilsMessengerCallback(messageSeverity: VkDebugUtilsMessageSev
     return VkBool32(VK_FALSE)
 }
 
-public class VulkanInstance {
+final class VulkanInstance {
 
-    public private(set) var layers: [String: VulkanLayerProperties]
-    public private(set) var extensions: [String: UInt32] // key: extension-name, value: spec-version
-    public private(set) var extensionSupportLayers: [String: [String]] // key: extension-name, value: layer-names(array)
-    public private(set) var physicalDevices: [VulkanPhysicalDeviceDescription]
+    private(set) var layers: [String: VulkanLayerProperties]
+    private(set) var extensions: [String: UInt32] // key: extension-name, value: spec-version
+    private(set) var extensionSupportLayers: [String: [String]] // key: extension-name, value: layer-names(array)
+    private(set) var physicalDevices: [VulkanPhysicalDeviceDescription]
 
-    public private(set) var instance: VkInstance
-    public private(set) var allocationCallbacks: UnsafePointer<VkAllocationCallbacks>?
+    private(set) var instance: VkInstance
+    private(set) var allocationCallbacks: UnsafePointer<VkAllocationCallbacks>?
     
     private var debugMessenger: VkDebugUtilsMessengerEXT?
     
-    public var extensionProc = VulkanInstanceExtensions()
+    var extensionProc = VulkanInstanceExtensions()
 
-    public let debugLogger = VulkanLogger()
+    let debugLogger = VulkanLogger()
 
     private let tempBufferHolder = TemporaryBufferHolder(label: "VulkanInstance") // for allocated unsafe buffers
 
-    public init?(requiredLayers: [String] = [],
-                 optionalLayers: [String] = [],
-                 requiredExtensions: [String] = [],
-                 optionalExtensions: [String] = [],
-                 enableExtensionsForEnabledLayers: Bool = false,
-                 enableLayersForEnabledExtensions: Bool = false,
-                 enableValidation: Bool = false,
-                 enableDebugUtils: Bool = false,
-                 allocationCallbacks: VkAllocationCallbacks? = nil) {
+    init?(requiredLayers: [String] = [],
+          optionalLayers: [String] = [],
+          requiredExtensions: [String] = [],
+          optionalExtensions: [String] = [],
+          enableExtensionsForEnabledLayers: Bool = false,
+          enableLayersForEnabledExtensions: Bool = false,
+          enableValidation: Bool = false,
+          enableDebugUtils: Bool = false,
+          allocationCallbacks: VkAllocationCallbacks? = nil) {
         var requiredLayers = requiredLayers
         var optionalLayers = optionalLayers
         var requiredExtensions = requiredExtensions
@@ -463,7 +467,7 @@ public class VulkanInstance {
         vkDestroyInstance(self.instance, self.allocationCallbacks)
     }
 
-    public func makeDevice(identifier: String,
+    func makeDevice(identifier: String,
                            requiredExtensions: [String] = [],
                            optionalExtensions: [String] = []) -> VulkanGraphicsDevice? {
         for device in self.physicalDevices {
@@ -477,7 +481,7 @@ public class VulkanInstance {
         return nil
     }
 
-    public func makeDevice(requiredExtensions: [String] = [],
+    func makeDevice(requiredExtensions: [String] = [],
                            optionalExtensions: [String] = []) -> VulkanGraphicsDevice? {
         for device in self.physicalDevices {
             if let vgd = VulkanGraphicsDevice(instance: self,

@@ -2,15 +2,15 @@
 //  File: HeadlessApplication.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
 
-public class HeadlessApplication: Application {
+final class HeadlessApplication: Application, @unchecked Sendable {
 
     private var requestExitWithCode: Int?
-    public static var shared: Application? = nil
+    nonisolated(unsafe) static var shared: Application? = nil
 
     public static func run(delegate: ApplicationDelegate?) -> Int {
         precondition(Thread.isMainThread, "\(#function) must be called on the main thread.")
@@ -38,7 +38,7 @@ public class HeadlessApplication: Application {
         return exitCode
     }
 
-    public func terminate(exitCode : Int) {
+    public func terminate(exitCode: Int) {
         Task { @MainActor in self.requestExitWithCode = exitCode }
     }
 

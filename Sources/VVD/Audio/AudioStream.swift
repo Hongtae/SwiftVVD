@@ -2,15 +2,12 @@
 //  File: AudioStream.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
 import VVDHelper
 
-@globalActor public actor AudioActor: GlobalActor {
-    public static let shared = AudioActor()
-}
 
 private protocol StreamWrapper {
     var stream: VVDStream { get }
@@ -73,7 +70,6 @@ public enum AudioStreamEncodingFormat {
     case wave
 }
 
-@AudioActor
 public class AudioStream {
     let stream: UnsafeMutablePointer<VVDAudioStream>
     private var source: StreamWrapper

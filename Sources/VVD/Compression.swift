@@ -2,13 +2,13 @@
 //  File: Compression.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
 import VVDHelper
 
-public enum CompressionAlgorithm {
+public enum CompressionAlgorithm: Sendable {
     case zlib
     case zstd
     case lz4
@@ -16,7 +16,7 @@ public enum CompressionAlgorithm {
     case automatic // Default method for compression, Auto-detected method for decompression.
 }
 
-public struct CompressionMethod {
+public struct CompressionMethod: Sendable {
     public var algorithm: CompressionAlgorithm
     public var level: Int
 

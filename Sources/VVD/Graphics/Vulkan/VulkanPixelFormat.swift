@@ -2,13 +2,13 @@
 //  File: VulkanPixelFormat.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
 import Vulkan
 
-public extension PixelFormat {
+extension PixelFormat {
     static func from(vkFormat format: VkFormat) -> PixelFormat {
         switch format {
         case VK_FORMAT_R8_UNORM:                    return .r8Unorm

@@ -2,7 +2,7 @@
 //  File: Texture.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 public enum TextureType {
@@ -13,7 +13,7 @@ public enum TextureType {
     case typeCube
 }
 
-public struct TextureUsage: OptionSet {
+public struct TextureUsage: OptionSet, Sendable {
     public let rawValue: UInt
     public init(rawValue: UInt) { self.rawValue = rawValue }
 

@@ -2,27 +2,27 @@
 //  File: VulkanShaderBindingSet.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
 import Foundation
 import Vulkan
 
-public class VulkanShaderBindingSet: ShaderBindingSet {
-    public let device: GraphicsDevice
-    public let descriptorSetLayout: VkDescriptorSetLayout
-    public let layoutFlags: VkDescriptorSetLayoutCreateFlags
+final class VulkanShaderBindingSet: ShaderBindingSet {
+    let device: GraphicsDevice
+    let descriptorSetLayout: VkDescriptorSetLayout
+    let layoutFlags: VkDescriptorSetLayoutCreateFlags
 
     private let poolID: VulkanDescriptorPoolID
     
     typealias DescriptorBinding = VulkanDescriptorSet.Binding    
     var bindings: [DescriptorBinding]
 
-    public init(device: VulkanGraphicsDevice,
-                layout: VkDescriptorSetLayout,
-                poolID: VulkanDescriptorPoolID,
-                layoutCreateInfo: VkDescriptorSetLayoutCreateInfo) {
+    init(device: VulkanGraphicsDevice,
+         layout: VkDescriptorSetLayout,
+         poolID: VulkanDescriptorPoolID,
+         layoutCreateInfo: VkDescriptorSetLayoutCreateInfo) {
         self.device = device
         self.descriptorSetLayout = layout
         self.poolID = poolID
@@ -42,14 +42,14 @@ public class VulkanShaderBindingSet: ShaderBindingSet {
         vkDestroyDescriptorSetLayout(device.device, descriptorSetLayout, device.allocationCallbacks)
     }
 
-    public func setBuffer(_ buffer: GPUBuffer, offset: Int, length: Int, binding: Int) {
+    func setBuffer(_ buffer: GPUBuffer, offset: Int, length: Int, binding: Int) {
         self.setBufferArray([BufferBindingInfo(buffer: buffer,
                                                offset: offset,
                                                length: length)],
                             binding:binding)
     }
 
-    public func setBufferArray(_ buffers: [BufferBindingInfo], binding: Int) {
+    func setBufferArray(_ buffers: [BufferBindingInfo], binding: Int) {
         if var descriptorBinding = self.findDescriptorBinding(binding) {
             descriptorBinding.valueSet = false
             descriptorBinding.bufferInfos = []
@@ -129,11 +129,11 @@ public class VulkanShaderBindingSet: ShaderBindingSet {
     }
 
     // bind textures
-    public func setTexture(_ texture: Texture, binding: Int) {
+    func setTexture(_ texture: Texture, binding: Int) {
         self.setTextureArray([texture], binding: binding)
     }
 
-    public func setTextureArray(_ textures: [Texture], binding: Int) {
+    func setTextureArray(_ textures: [Texture], binding: Int) {
         if var descriptorBinding = self.findDescriptorBinding(binding) {
 
             descriptorBinding.bufferInfos = []
@@ -224,11 +224,11 @@ public class VulkanShaderBindingSet: ShaderBindingSet {
     }
 
     // bind samplers
-    public func setSamplerState(_ sampler: SamplerState, binding: Int) {
+    func setSamplerState(_ sampler: SamplerState, binding: Int) {
         self.setSamplerStateArray([sampler], binding: binding)
     }
 
-    public func setSamplerStateArray(_ samplers: [SamplerState], binding: Int) {
+    func setSamplerStateArray(_ samplers: [SamplerState], binding: Int) {
         if var descriptorBinding = self.findDescriptorBinding(binding) {
 
             descriptorBinding.bufferInfos = []
@@ -289,7 +289,7 @@ public class VulkanShaderBindingSet: ShaderBindingSet {
         }
     }
 
-    public func makeDescriptorSet() -> VulkanDescriptorSet {
+    func makeDescriptorSet() -> VulkanDescriptorSet {
         let device = self.device as! VulkanGraphicsDevice
         let descriptorSet = device.makeDescriptorSet(layout: self.descriptorSetLayout, poolID: self.poolID)!
         descriptorSet.bindings = self.bindings

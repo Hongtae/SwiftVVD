@@ -9,7 +9,7 @@
 import Foundation
 import Metal
 
-public class MetalCopyCommandEncoder: CopyCommandEncoder {
+final class MetalCopyCommandEncoder: CopyCommandEncoder {
 
     struct EncodingState {
         let encoder: Encoder

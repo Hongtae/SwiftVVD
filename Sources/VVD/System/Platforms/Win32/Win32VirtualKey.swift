@@ -2,11 +2,11 @@
 //  File: Win32VirtualKey.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_WIN32
-public extension VirtualKey {
+extension VirtualKey {
     static func from(win32VK key: Int) -> VirtualKey {
         switch key {
         case 0x03:  return .f15             // VK_F15 (ctrl+break)

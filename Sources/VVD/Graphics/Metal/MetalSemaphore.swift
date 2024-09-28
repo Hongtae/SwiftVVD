@@ -9,7 +9,7 @@
 import Foundation
 import Metal
 
-public class MetalSemaphore: GPUSemaphore {
+final class MetalSemaphore: GPUSemaphore {
     public let device: GraphicsDevice
     let event: MTLEvent
 

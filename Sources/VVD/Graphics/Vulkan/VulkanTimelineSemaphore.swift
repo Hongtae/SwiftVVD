@@ -2,17 +2,17 @@
 //  File: VulkanTimelineSemaphore.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
 import Vulkan
 
-public class VulkanTimelineSemaphore: GPUSemaphore {
-    public let device: GraphicsDevice
-    public let semaphore: VkSemaphore
+final class VulkanTimelineSemaphore: GPUSemaphore {
+    let device: GraphicsDevice
+    let semaphore: VkSemaphore
 
-    public init(device: VulkanGraphicsDevice, semaphore: VkSemaphore) {
+    init(device: VulkanGraphicsDevice, semaphore: VkSemaphore) {
         self.device = device
         self.semaphore = semaphore
     }
@@ -22,7 +22,7 @@ public class VulkanTimelineSemaphore: GPUSemaphore {
         vkDestroySemaphore(device.device, semaphore, device.allocationCallbacks)
     }
 
-    public func signal(_ value: UInt64) {
+    func signal(_ value: UInt64) {
         let device = self.device as! VulkanGraphicsDevice
         var signalInfo = VkSemaphoreSignalInfo()
         signalInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SIGNAL_INFO
@@ -31,7 +31,7 @@ public class VulkanTimelineSemaphore: GPUSemaphore {
         vkSignalSemaphore(device.device, &signalInfo)
     }
 
-    public func wait(_ value: UInt64, timeout: UInt64 = UInt64.max) -> Bool {
+    func wait(_ value: UInt64, timeout: UInt64 = UInt64.max) -> Bool {
         withUnsafePointer(to: Optional(semaphore)) { pSemaphore in
             withUnsafePointer(to: value) { pValue in
 
@@ -49,7 +49,7 @@ public class VulkanTimelineSemaphore: GPUSemaphore {
         }
     }
 
-    public var value: UInt64 {
+    var value: UInt64 {
         let device = self.device as! VulkanGraphicsDevice
         var value: UInt64 = 0
         vkGetSemaphoreCounterValue(device.device, semaphore, &value)

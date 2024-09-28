@@ -2,15 +2,15 @@
 //  File: VulkanCommandBuffer.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
 import Foundation
 import Vulkan
 
-public class VulkanCommandEncoder {
-    public let initialNumberOfCommands = 128
+class VulkanCommandEncoder {
+    let initialNumberOfCommands = 128
 
     struct TimelineSemaphoreStageValue {
         var stages: VkPipelineStageFlags2 // wait before or signal after
@@ -20,9 +20,9 @@ public class VulkanCommandEncoder {
     var waitSemaphores: [VkSemaphore: TimelineSemaphoreStageValue] = [:]
     var signalSemaphores: [VkSemaphore: TimelineSemaphoreStageValue] = [:]
 
-    public func encode(commandBuffer: VkCommandBuffer) -> Bool { false }
+    func encode(commandBuffer: VkCommandBuffer) -> Bool { false }
 
-    public func addWaitSemaphore(_ semaphore: VkSemaphore, value: UInt64, flags: VkPipelineStageFlags2) {
+    func addWaitSemaphore(_ semaphore: VkSemaphore, value: UInt64, flags: VkPipelineStageFlags2) {
         if var p = self.waitSemaphores[semaphore] {
             p.value = max(p.value, value)
             p.stages |= flags
@@ -32,7 +32,7 @@ public class VulkanCommandEncoder {
         }
     }
 
-    public func addSignalSemaphore(_ semaphore: VkSemaphore, value: UInt64, flags: VkPipelineStageFlags2) {
+    func addSignalSemaphore(_ semaphore: VkSemaphore, value: UInt64, flags: VkPipelineStageFlags2) {
         if var p = self.signalSemaphores[semaphore] {
             p.value = max(p.value, value)
             p.stages |= flags
@@ -43,11 +43,11 @@ public class VulkanCommandEncoder {
     }
 }
 
-public class VulkanCommandBuffer: CommandBuffer {
+final class VulkanCommandBuffer: CommandBuffer, @unchecked Sendable {
 
-    public let commandQueue: CommandQueue
-    public let device: GraphicsDevice   
-    public let lock = NSLock()
+    let commandQueue: CommandQueue
+    let device: GraphicsDevice   
+    let lock = NSLock()
 
     private let commandPool: VkCommandPool
 
@@ -59,7 +59,7 @@ public class VulkanCommandBuffer: CommandBuffer {
 
     private var completedHandlers: [CommandBufferHandler] = []
 
-    public init(queue: VulkanCommandQueue, pool: VkCommandPool) {
+    init(queue: VulkanCommandQueue, pool: VkCommandPool) {
         self.commandQueue = queue
         self.device = queue.device
         self.commandPool = pool
@@ -74,7 +74,7 @@ public class VulkanCommandBuffer: CommandBuffer {
         vkDestroyCommandPool(device.device, commandPool, device.allocationCallbacks)
     }
 
-    public func makeRenderCommandEncoder(descriptor: RenderPassDescriptor) -> RenderCommandEncoder? {
+    func makeRenderCommandEncoder(descriptor: RenderPassDescriptor) -> RenderCommandEncoder? {
         let queue = self.commandQueue as! VulkanCommandQueue
         if queue.family.properties.queueFlags & UInt32(VK_QUEUE_GRAPHICS_BIT.rawValue) != 0 {
             return VulkanRenderCommandEncoder(buffer: self, descriptor: descriptor)
@@ -82,7 +82,7 @@ public class VulkanCommandBuffer: CommandBuffer {
         return nil
     }
 
-    public func makeComputeCommandEncoder() -> ComputeCommandEncoder? {
+    func makeComputeCommandEncoder() -> ComputeCommandEncoder? {
          let queue = self.commandQueue as! VulkanCommandQueue
         if queue.family.properties.queueFlags & UInt32(VK_QUEUE_COMPUTE_BIT.rawValue) != 0 {
             return VulkanComputeCommandEncoder(buffer: self)
@@ -90,16 +90,16 @@ public class VulkanCommandBuffer: CommandBuffer {
         return nil
     }
 
-    public func makeCopyCommandEncoder() -> CopyCommandEncoder? {
+    func makeCopyCommandEncoder() -> CopyCommandEncoder? {
         return VulkanCopyCommandEncoder(buffer: self)
     }
 
-    public func addCompletedHandler(_ handler: @escaping CommandBufferHandler) {
+    func addCompletedHandler(_ handler: @escaping CommandBufferHandler) {
         completedHandlers.append(handler)
     }
 
     @discardableResult
-    public func commit() -> Bool {
+    func commit() -> Bool {
         let device = self.device as! VulkanGraphicsDevice
 
         self.lock.lock()
@@ -227,12 +227,13 @@ public class VulkanCommandBuffer: CommandBuffer {
         return false
     }
 
-    public func endEncoder(_ encoder: VulkanCommandEncoder) {
+    func endEncoder(_ encoder: VulkanCommandEncoder) {
         self.encoders.append(encoder)
     }
 
-    public var queueFamily: VulkanQueueFamily {
+    var queueFamily: VulkanQueueFamily {
         return (self.commandQueue as! VulkanCommandQueue).family
     }
 }
+
 #endif //if ENABLE_VULKAN

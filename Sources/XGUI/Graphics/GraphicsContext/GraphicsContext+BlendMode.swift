@@ -14,34 +14,34 @@ extension GraphicsContext {
         public let rawValue: Int32
         public init(rawValue: Int32) { self.rawValue = rawValue }
 
-        public static var normal            = BlendMode(rawValue: 0)
-        public static var multiply          = BlendMode(rawValue: 1)
-        public static var screen            = BlendMode(rawValue: 2)
-        public static var overlay           = BlendMode(rawValue: 3)
-        public static var darken            = BlendMode(rawValue: 4)
-        public static var lighten           = BlendMode(rawValue: 5)
-        public static var colorDodge        = BlendMode(rawValue: 6)
-        public static var colorBurn         = BlendMode(rawValue: 7)
-        public static var softLight         = BlendMode(rawValue: 8)
-        public static var hardLight         = BlendMode(rawValue: 9)
-        public static var difference        = BlendMode(rawValue: 10)
-        public static var exclusion         = BlendMode(rawValue: 11)
-        public static var hue               = BlendMode(rawValue: 12)
-        public static var saturation        = BlendMode(rawValue: 13)
-        public static var color             = BlendMode(rawValue: 14)
-        public static var luminosity        = BlendMode(rawValue: 15)
-        public static var clear             = BlendMode(rawValue: 16)
-        public static var copy              = BlendMode(rawValue: 17)
-        public static var sourceIn          = BlendMode(rawValue: 18)
-        public static var sourceOut         = BlendMode(rawValue: 19)
-        public static var sourceAtop        = BlendMode(rawValue: 20)
-        public static var destinationOver   = BlendMode(rawValue: 21)
-        public static var destinationIn     = BlendMode(rawValue: 22)
-        public static var destinationOut    = BlendMode(rawValue: 23)
-        public static var destinationAtop   = BlendMode(rawValue: 24)
-        public static var xor               = BlendMode(rawValue: 25)
-        public static var plusDarker        = BlendMode(rawValue: 26)
-        public static var plusLighter       = BlendMode(rawValue: 27)
+        public static var normal: BlendMode             { .init(rawValue: 0) }
+        public static var multiply: BlendMode           { .init(rawValue: 1) }
+        public static var screen: BlendMode             { .init(rawValue: 2) }
+        public static var overlay: BlendMode            { .init(rawValue: 3) }
+        public static var darken: BlendMode             { .init(rawValue: 4) }
+        public static var lighten: BlendMode            { .init(rawValue: 5) }
+        public static var colorDodge: BlendMode         { .init(rawValue: 6) }
+        public static var colorBurn: BlendMode          { .init(rawValue: 7) }
+        public static var softLight: BlendMode          { .init(rawValue: 8) }
+        public static var hardLight: BlendMode          { .init(rawValue: 9) }
+        public static var difference: BlendMode         { .init(rawValue: 10) }
+        public static var exclusion: BlendMode          { .init(rawValue: 11) }
+        public static var hue: BlendMode                { .init(rawValue: 12) }
+        public static var saturation: BlendMode         { .init(rawValue: 13) }
+        public static var color: BlendMode              { .init(rawValue: 14) }
+        public static var luminosity: BlendMode         { .init(rawValue: 15) }
+        public static var clear: BlendMode              { .init(rawValue: 16) }
+        public static var copy: BlendMode               { .init(rawValue: 17) }
+        public static var sourceIn: BlendMode           { .init(rawValue: 18) }
+        public static var sourceOut: BlendMode          { .init(rawValue: 19) }
+        public static var sourceAtop: BlendMode         { .init(rawValue: 20) }
+        public static var destinationOver: BlendMode    { .init(rawValue: 21) }
+        public static var destinationIn: BlendMode      { .init(rawValue: 22) }
+        public static var destinationOut: BlendMode     { .init(rawValue: 23) }
+        public static var destinationAtop: BlendMode    { .init(rawValue: 24) }
+        public static var xor: BlendMode                { .init(rawValue: 25) }
+        public static var plusDarker: BlendMode         { .init(rawValue: 26) }
+        public static var plusLighter: BlendMode        { .init(rawValue: 27) }
     }
 
     // references:
@@ -57,7 +57,7 @@ extension GraphicsContext {
 
         let blendSrc = self.renderTargets.source
         let blendDst = self.renderTargets.backdrop
-        let blendResult = self.renderTargets.composited
+        //let blendResult = self.renderTargets.composited
 
         let opacity = opacity ?? self.opacity
         let color = VVD.Color(white: 1, opacity: opacity)

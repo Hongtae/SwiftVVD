@@ -9,7 +9,7 @@
 import Foundation
 import Metal
 
-public class MetalShaderBindingSet: ShaderBindingSet {
+final class MetalShaderBindingSet: ShaderBindingSet {
 
     public let device: GraphicsDevice
     let layout: [ShaderBinding]

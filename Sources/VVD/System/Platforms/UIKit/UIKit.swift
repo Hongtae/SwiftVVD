@@ -2,7 +2,7 @@
 //  File: UIKit.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_UIKIT
@@ -13,6 +13,7 @@ public struct PlatformFactoryUIKit: PlatformFactory {
         return UIKitApplication.shared
     }
 
+    @MainActor
     public func runApplication(delegate: ApplicationDelegate?) -> Int {
         return UIKitApplication.run(delegate: delegate)
     }

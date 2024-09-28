@@ -2,33 +2,33 @@
 //  File: VulkanDescriptorPoolChain.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
 import Foundation
 import Vulkan
 
-public class VulkanDescriptorPoolChain {
+final class VulkanDescriptorPoolChain {
     unowned let device: VulkanGraphicsDevice
-    public let poolID: VulkanDescriptorPoolID
+    let poolID: VulkanDescriptorPoolID
     
-    public var maxSets: UInt32
-    public var descriptorPools: [VulkanDescriptorPool]
+    var maxSets: UInt32
+    var descriptorPools: [VulkanDescriptorPool]
     
-    public struct AllocationInfo {
-        public let descriptorSet: VkDescriptorSet
-        public let descriptorPool: VulkanDescriptorPool
+    struct AllocationInfo {
+        let descriptorSet: VkDescriptorSet
+        let descriptorPool: VulkanDescriptorPool
     }
 
-    public init(device: VulkanGraphicsDevice, poolID: VulkanDescriptorPoolID) {
+    init(device: VulkanGraphicsDevice, poolID: VulkanDescriptorPoolID) {
         self.device = device
         self.poolID = poolID
         self.maxSets = 2
         self.descriptorPools = []
     }
 
-    public func allocateDescriptorSet(layout: VkDescriptorSetLayout) -> AllocationInfo? {
+    func allocateDescriptorSet(layout: VkDescriptorSetLayout) -> AllocationInfo? {
         for (i, pool) in self.descriptorPools.enumerated() {
             if let ds = pool.allocateDescriptorSet(layout: layout) {
                 if i > 0 {
@@ -45,7 +45,7 @@ public class VulkanDescriptorPoolChain {
         return nil
     }
 
-    public func addNewPool(flags: VkDescriptorPoolCreateFlags) -> VulkanDescriptorPool? {
+    func addNewPool(flags: VkDescriptorPoolCreateFlags) -> VulkanDescriptorPool? {
         self.maxSets = max(self.maxSets, 1) * 2
         var poolSizes: [VkDescriptorPoolSize] = []
         poolSizes.reserveCapacity(descriptorTypes.count)
@@ -81,7 +81,7 @@ public class VulkanDescriptorPoolChain {
     }
 
     @discardableResult
-    public func cleanup() -> Int {
+    func cleanup() -> Int {
         var activePools: [VulkanDescriptorPool] = []
         var inactivePools: [VulkanDescriptorPool] = []
 

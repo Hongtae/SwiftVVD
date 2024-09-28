@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct ViewSpacing {
+public struct ViewSpacing: Sendable {
     public static let zero = ViewSpacing()
 
     let top: CGFloat

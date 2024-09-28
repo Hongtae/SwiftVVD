@@ -2,14 +2,14 @@
 //  File: VulkanUnsafePointer.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
 import Foundation
 import Vulkan
 
-class TemporaryBufferHolder {
+final class TemporaryBufferHolder {
     var buffers: [UnsafeRawPointer] = []
     let label: String
     init (label: String) {

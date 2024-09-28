@@ -2,33 +2,32 @@
 //  File: MetalEvent.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_METAL
 import Foundation
+import Synchronization
 import Metal
 
-public class MetalEvent: GPUEvent {
+final class MetalEvent: GPUEvent {
     public let device: GraphicsDevice
     let event: MTLEvent
 
-    let waitValue: AtomicNumber64
-    let signalValue: AtomicNumber64
+    let waitValue = Atomic<UInt64>(0)
+    let signalValue = Atomic<UInt64>(0)
 
     init(device: MetalGraphicsDevice, event: MTLEvent) {
         self.device = device
         self.event = event
-        self.waitValue = AtomicNumber64(0)
-        self.signalValue = AtomicNumber64(0)
     }
 
     func nextWaitValue() -> UInt64 {
-        UInt64(bitPattern: waitValue.increment())
+        waitValue.add(1, ordering: .sequentiallyConsistent).newValue
     }
 
     func nextSignalValue() -> UInt64 {
-        UInt64(bitPattern: signalValue.increment())
+        signalValue.add(1, ordering: .sequentiallyConsistent).newValue
     }
 }
 #endif //if ENABLE_METAL

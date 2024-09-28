@@ -2,7 +2,7 @@
 //  File: UIKitWindow.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_UIKIT
@@ -10,20 +10,20 @@ import Foundation
 import UIKit
 
 @MainActor
-public class UIKitWindow: Window {
-    public var activated: Bool = false
-    public var visible: Bool = false
+final class UIKitWindow: Window {
+    var activated: Bool = false
+    var visible: Bool = false
 
-    public var contentBounds: CGRect { self.view.contentBounds }
-    public var windowFrame: CGRect { self.view.windowFrame }
-    public var contentScaleFactor: CGFloat { self.view.contentScaleFactor }
+    var contentBounds: CGRect { self.view.contentBounds }
+    var windowFrame: CGRect { self.view.windowFrame }
+    var contentScaleFactor: CGFloat { self.view.contentScaleFactor }
 
-    public var origin: CGPoint {
+    var origin: CGPoint {
         get { self.view.frame.origin }
         set(value) { self.view.frame.origin = value }
     }
 
-    public var contentSize: CGSize {
+    var contentSize: CGSize {
         get {
             let bounds = self.view.bounds
             return CGSize(width: bounds.width, height: bounds.height)
@@ -33,7 +33,7 @@ public class UIKitWindow: Window {
         }
     }
 
-    public var resolution: CGSize {
+    var resolution: CGSize {
         get {
             let bounds = self.view.bounds
             let scale = self.view.contentScaleFactor
@@ -46,17 +46,17 @@ public class UIKitWindow: Window {
         }
     }
 
-    public var title: String {
+    var title: String {
         get { self.view.window?.rootViewController?.title ?? "" }
         set { self.view.window?.rootViewController?.title = newValue }
     }
 
-    public var delegate: WindowDelegate?
+    var delegate: WindowDelegate?
 
     var window: UIWindow
     var view: UIKitView
 
-    public required init?(name: String, style: WindowStyle, delegate: WindowDelegate?) {
+    required init?(name: String, style: WindowStyle, delegate: WindowDelegate?) {
 
         let viewController = UIKitViewController()
         self.view = viewController.view as! UIKitView
@@ -86,52 +86,52 @@ public class UIKitWindow: Window {
         activeWindows.removeAll { $0 === window }
     }
 
-    public func show() {
+    func show() {
         self.view.isHidden = false
     }
 
-    public func hide() {
+    func hide() {
         self.view.isHidden = true
     }
 
-    public func activate() {
+    func activate() {
         self.view.isHidden = false
         self.window.makeKeyAndVisible()
         _=self.view.becomeFirstResponder()
     }
 
-    public func minimize() {
+    func minimize() {
         self.view.isHidden = true
     }
 
-    public func showMouse(_ show: Bool, forDeviceID deviceID: Int) {
+    func showMouse(_ show: Bool, forDeviceID deviceID: Int) {
     }
 
-    public func isMouseVisible(forDeviceID deviceID: Int) -> Bool {
+    func isMouseVisible(forDeviceID deviceID: Int) -> Bool {
         return false
     }
 
-    public func lockMouse(_ hold: Bool, forDeviceID deviceID: Int) {
+    func lockMouse(_ hold: Bool, forDeviceID deviceID: Int) {
     }
 
-    public func isMouseLocked(forDeviceID deviceID: Int) -> Bool {
+    func isMouseLocked(forDeviceID deviceID: Int) -> Bool {
         return false
     }
 
-    public func setMousePosition(_ pos: CGPoint, forDeviceID deviceID: Int) {
+    func setMousePosition(_ pos: CGPoint, forDeviceID deviceID: Int) {
     }
 
-    public func mousePosition(forDeviceID deviceID: Int) -> CGPoint? {
+    func mousePosition(forDeviceID deviceID: Int) -> CGPoint? {
         return self.view.touchLocation(atIndex: deviceID)
     }
 
-    public func enableTextInput(_ enable: Bool, forDeviceID deviceID: Int) {
+    func enableTextInput(_ enable: Bool, forDeviceID deviceID: Int) {
         if deviceID == 0 {
             self.view.textInput = enable
         }
     }
 
-    public func isTextInputEnabled(forDeviceID deviceID: Int) -> Bool {
+    func isTextInputEnabled(forDeviceID deviceID: Int) -> Bool {
         if deviceID == 0 {
             return self.view.textInput
         }
@@ -197,7 +197,7 @@ public class UIKitWindow: Window {
     }
     private var eventObservers: [ObjectIdentifier: EventHandlers] = [:]
 
-    public func addEventObserver(_ observer: AnyObject, handler: @escaping (_: WindowEvent)->Void) {
+    func addEventObserver(_ observer: AnyObject, handler: @escaping (_: WindowEvent)->Void) {
         let key = ObjectIdentifier(observer)
         if var handlers = self.eventObservers[key] {
             handlers.windowEventHandler = handler
@@ -206,7 +206,7 @@ public class UIKitWindow: Window {
             self.eventObservers[key] = EventHandlers(observer: observer, windowEventHandler: handler)
         }
     }
-    public func addEventObserver(_ observer: AnyObject, handler: @escaping (_: MouseEvent)->Void) {
+    func addEventObserver(_ observer: AnyObject, handler: @escaping (_: MouseEvent)->Void) {
         let key = ObjectIdentifier(observer)
         if var handlers = self.eventObservers[key] {
             handlers.mouseEventHandler = handler
@@ -215,7 +215,7 @@ public class UIKitWindow: Window {
             self.eventObservers[key] = EventHandlers(observer: observer, mouseEventHandler: handler)
         }
     }
-    public func addEventObserver(_ observer: AnyObject, handler: @escaping (_: KeyboardEvent)->Void) {
+    func addEventObserver(_ observer: AnyObject, handler: @escaping (_: KeyboardEvent)->Void) {
         let key = ObjectIdentifier(observer)
         if var handlers = self.eventObservers[key] {
             handlers.keyboardEventHandler = handler
@@ -224,7 +224,7 @@ public class UIKitWindow: Window {
             self.eventObservers[key] = EventHandlers(observer: observer, keyboardEventHandler: handler)
         }
     }
-    public func removeEventObserver(_ observer: AnyObject) {
+    func removeEventObserver(_ observer: AnyObject) {
         let key = ObjectIdentifier(observer)
         self.eventObservers[key] = nil
     }

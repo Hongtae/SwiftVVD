@@ -9,7 +9,7 @@
 import Foundation
 import Metal
 
-public class MetalBuffer: GPUBuffer {
+final class MetalBuffer: GPUBuffer {
     public let device: GraphicsDevice
     public var length: Int { buffer.length }
 

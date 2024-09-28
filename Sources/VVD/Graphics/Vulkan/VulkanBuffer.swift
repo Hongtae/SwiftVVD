@@ -2,23 +2,23 @@
 //  File: VulkanBuffer.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
 import Foundation
 import Vulkan
 
-public class VulkanBuffer {
-    public var buffer: VkBuffer
-    public var usage: VkBufferUsageFlags
-    public var sharingMode: VkSharingMode
-    public var size: VkDeviceSize
+final class VulkanBuffer {
+    var buffer: VkBuffer
+    var usage: VkBufferUsageFlags
+    var sharingMode: VkSharingMode
+    var size: VkDeviceSize
 
     let memory: VulkanMemoryBlock?
-    public let device: GraphicsDevice
+    let device: GraphicsDevice
 
-    public init(device: VulkanGraphicsDevice, memory: VulkanMemoryBlock, buffer: VkBuffer, bufferCreateInfo: VkBufferCreateInfo) {
+    init(device: VulkanGraphicsDevice, memory: VulkanMemoryBlock, buffer: VkBuffer, bufferCreateInfo: VkBufferCreateInfo) {
         self.device = device
         self.memory = memory
         self.buffer = buffer
@@ -29,7 +29,7 @@ public class VulkanBuffer {
         assert(self.memory!.size >= self.size)
     }
 
-    public init(device: VulkanGraphicsDevice, buffer: VkBuffer, size: VkDeviceSize) {
+    init(device: VulkanGraphicsDevice, buffer: VkBuffer, size: VkDeviceSize) {
         self.device = device
         self.memory = nil
         self.buffer = buffer
@@ -48,9 +48,9 @@ public class VulkanBuffer {
         }
     }
 
-    public var length: Int { Int(self.size) }
+    var length: Int { Int(self.size) }
 
-    public func contents() -> UnsafeMutableRawPointer? {
+    func contents() -> UnsafeMutableRawPointer? {
         if let memory = self.memory {
             assert(memory.chunk != nil)
             if let mapped = memory.chunk!.mapped {
@@ -60,7 +60,7 @@ public class VulkanBuffer {
         return nil
     }
 
-    public func flush(offset: UInt, size: UInt) {
+    func flush(offset: UInt, size: UInt) {
         if let memory = self.memory {
             assert(memory.chunk != nil)
             if (offset < memory.size) {
@@ -70,7 +70,7 @@ public class VulkanBuffer {
         }
     }
 
-    public func makeBufferView(pixelFormat: PixelFormat, offset: UInt, range: UInt) -> VulkanBufferView? {
+    func makeBufferView(pixelFormat: PixelFormat, offset: UInt, range: UInt) -> VulkanBufferView? {
         if self.usage & UInt32(VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT.rawValue) != 0 ||
            self.usage & UInt32(VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT.rawValue) != 0 {
 

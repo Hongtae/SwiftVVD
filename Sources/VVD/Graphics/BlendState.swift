@@ -2,10 +2,10 @@
 //  File: BlendState.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
-public enum BlendFactor {
+public enum BlendFactor: Sendable {
     case zero
     case one
     case sourceColor
@@ -27,7 +27,7 @@ public enum BlendFactor {
     case oneMinusSource1Alpha
 }
 
-public enum BlendOperation {
+public enum BlendOperation: Sendable {
     case add
     case subtract
     case reverseSubtract
@@ -35,7 +35,7 @@ public enum BlendOperation {
     case max
 }
 
-public struct ColorWriteMask: OptionSet, Hashable {
+public struct ColorWriteMask: OptionSet, Hashable, Sendable {
     public let rawValue: UInt
     public init(rawValue: UInt) { self.rawValue = rawValue }
 
@@ -46,7 +46,7 @@ public struct ColorWriteMask: OptionSet, Hashable {
     public static let all      = ColorWriteMask(rawValue: 0xf)
 }
 
-public struct BlendState: Hashable {
+public struct BlendState: Hashable, Sendable {
     public var enabled : Bool
 
     public var sourceRGBBlendFactor : BlendFactor

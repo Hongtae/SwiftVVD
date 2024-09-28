@@ -10,7 +10,7 @@ import Foundation
 import Metal
 import QuartzCore
 
-public class MetalSwapChain: SwapChain {
+final class MetalSwapChain: SwapChain {
 
     let window: Window
     let queue: MetalCommandQueue

@@ -7,7 +7,7 @@
 
 import Foundation
 
-public class TextureFont : Font {
+public class TextureFont: Font {
     
     public struct GlyphData {
         public let texture: Texture?
@@ -39,7 +39,7 @@ public class TextureFont : Font {
     public var embolden: CGFloat {
         get { _embolden }
         set {
-            synchronizedBy(locking: self.faceLock) {
+            self.withFaceLock {
                 _embolden = newValue
                 glyphMap.removeAll()
                 textures.removeAll()
@@ -50,7 +50,7 @@ public class TextureFont : Font {
     public var outline: CGFloat {
         get { _outline }
         set {
-            synchronizedBy(locking: self.faceLock) {
+            self.withFaceLock {
                 _outline = newValue
                 glyphMap.removeAll()
                 textures.removeAll()
@@ -61,7 +61,7 @@ public class TextureFont : Font {
     public override var kerningEnabled: Bool {
         get { _kerningEnabled }
         set {
-            synchronizedBy(locking: self.faceLock) {
+            self.withFaceLock {
                 _kerningEnabled = newValue
                 glyphMap.removeAll()
                 textures.removeAll()
@@ -72,7 +72,7 @@ public class TextureFont : Font {
     public override var forceBitmap: Bool {
         get { _forceBitmap }
         set {
-            synchronizedBy(locking: self.faceLock) {
+            self.withFaceLock {
                 _forceBitmap = newValue
                 glyphMap.removeAll()
                 textures.removeAll()
@@ -138,21 +138,20 @@ public class TextureFont : Font {
 
     public func glyphData(for c: UnicodeScalar) -> GlyphData? {
         if c.value == 0 { return nil }
-        var cachedData = synchronizedBy(locking: self.faceLock) {
-            self.glyphMap[c]
-        }
+        var cachedData = self.withFaceLock { self.glyphMap[c] }
         if let cachedData {
             return cachedData
         }
 
         let loaded = self.loadBitmap(for: c,
                                      embolden: self.embolden,
-                                     outline: self.outline) { data, glyph, bmp in
+                                     outline: self.outline) { data, glyph, bmp, metrics in
             var frame: CGRect = .zero
             let offset = CGPoint(x: bmp.left, y: bmp.top)
             let texture = self.cacheGlyphTexture(width: bmp.width,
                                                  height: bmp.rows,
                                                  data: data,
+                                                 metrics: metrics,
                                                  frame: &frame)
             self.glyphMap[c] = GlyphData(texture: texture,
                                          offset: offset,
@@ -168,7 +167,7 @@ public class TextureFont : Font {
         return nil
     }
 
-    private func cacheGlyphTexture(width: UInt32, height: UInt32, data: UnsafePointer<UInt8>?, frame: inout CGRect) -> Texture? {
+    private func cacheGlyphTexture(width: UInt32, height: UInt32, data: UnsafePointer<UInt8>?, metrics: SizeMetrics, frame: inout CGRect) -> Texture? {
         // keep padding between each glyphs.
         if width == 0 || height == 0 {
             frame = .zero
@@ -266,8 +265,8 @@ public class TextureFont : Font {
         }
         if createNewTexture {
             // create new texture.
-            let glyphWidth = Int(ceil(self.glyphMaxWidth)) + hPadding
-            let glyphHeight = Int(ceil(self.glyphMaxHeight)) + vPadding
+            let glyphWidth = Int(ceil(metrics.maxAdvance)) + hPadding
+            let glyphHeight = Int(ceil(metrics.height)) + vPadding
             let glyphsToLoad = self.numGlyphs - self.numGlyphsLoaded
             assert(glyphsToLoad > 0)
 

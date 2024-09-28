@@ -2,24 +2,24 @@
 //  File: VulkanQueueFamily.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
 import Foundation
 import Vulkan
 
-public class VulkanQueueFamily {
+final class VulkanQueueFamily {
 
-    public let familyIndex: UInt32
-    public let supportPresentation: Bool
+    let familyIndex: UInt32
+    let supportPresentation: Bool
 
-    public let properties: VkQueueFamilyProperties
-    public var freeQueues: [VkQueue] = []
+    let properties: VkQueueFamilyProperties
+    var freeQueues: [VkQueue] = []
 
-    private let spinLock = SpinLock()
+    private let lock = NSLock()
 
-    public init(device: VkDevice, familyIndex: UInt32, count: UInt32, properties: VkQueueFamilyProperties, presentationSupport: Bool) {
+    init(device: VkDevice, familyIndex: UInt32, count: UInt32, properties: VkQueueFamilyProperties, presentationSupport: Bool) {
         self.familyIndex = familyIndex
         self.supportPresentation = presentationSupport
         self.properties = properties
@@ -34,8 +34,8 @@ public class VulkanQueueFamily {
         }
     }
 
-    public func makeCommandQueue(device: VulkanGraphicsDevice) -> CommandQueue? {
-        synchronizedBy(locking: self.spinLock) {
+    func makeCommandQueue(device: VulkanGraphicsDevice) -> CommandQueue? {
+        self.lock.withLock {
             if self.freeQueues.count > 0 {
                 let queue = self.freeQueues.removeLast()
                 let commandQueue = VulkanCommandQueue(device: device, family: self, queue: queue)
@@ -46,8 +46,8 @@ public class VulkanQueueFamily {
         }
     }
 
-    public func recycle(queue: VkQueue) {
-        synchronizedBy(locking: self.spinLock) {
+    func recycle(queue: VkQueue) {
+        self.lock.withLock {
             Log.verbose("Vulakn Command-Queue with family-index: \(self.familyIndex) was reclaimed for recycling.")
             self.freeQueues.append(queue)
         }

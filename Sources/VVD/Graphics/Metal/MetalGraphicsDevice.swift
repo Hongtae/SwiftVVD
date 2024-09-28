@@ -2,7 +2,7 @@
 //  File: MetalGraphicsDevice.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_METAL
@@ -10,7 +10,7 @@ import Foundation
 import Metal
 import SPIRV_Cross_static
 
-public class MetalGraphicsDevice: GraphicsDevice {
+final class MetalGraphicsDevice: GraphicsDevice {
 
     public var name: String { device.name }
     let device: MTLDevice
@@ -204,7 +204,7 @@ public class MetalGraphicsDevice: GraphicsDevice {
             Log.info("MSL Source: \(mslSource)")
 
             let compileOptions = MTLCompileOptions()
-            compileOptions.fastMathEnabled = true
+            compileOptions.mathMode = .fast
 
             var library: MTLLibrary? = nil
             do {

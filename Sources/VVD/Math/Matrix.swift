@@ -2,10 +2,10 @@
 //  File: Matrix.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
-public protocol Matrix: Equatable {
+public protocol Matrix: Equatable, Sendable {
     associatedtype Vector
 
     mutating func invert()

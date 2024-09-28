@@ -9,7 +9,7 @@
 import Foundation
 import Vulkan
 
-public class VulkanSwapChain: SwapChain {
+final class VulkanSwapChain: SwapChain, @unchecked Sendable {
 
     let window: Window
     let queue: VulkanCommandQueue
@@ -46,12 +46,12 @@ public class VulkanSwapChain: SwapChain {
     private var frameIndex: UInt32 = 0
     private var renderPassDescriptor: RenderPassDescriptor
 
-    public var commandQueue: CommandQueue { queue }
+    var commandQueue: CommandQueue { queue }
 
     let maxFrameSemaphores = 3
 
     @MainActor
-    public init?(queue: VulkanCommandQueue, window: Window) {
+    init?(queue: VulkanCommandQueue, window: Window) {
 
         let device = queue.device as! VulkanGraphicsDevice
 
@@ -99,7 +99,9 @@ public class VulkanSwapChain: SwapChain {
         window.addEventObserver(self) { [weak self](event: WindowEvent) in
             if event.type == .resized {
                 if let self = self {
-                    synchronizedBy(locking: self.lock) { self.deviceReset = true }
+                    self.lock.withLock {
+                        self.deviceReset = true
+                    }
                 }
             }
         }
@@ -346,7 +348,7 @@ public class VulkanSwapChain: SwapChain {
             swapchainCreateInfo.imageUsage |= UInt32(VK_IMAGE_USAGE_TRANSFER_SRC_BIT.rawValue)
         }
 
-        err = synchronizedBy(locking: self.lock) {
+        err = self.lock.withLock {
             vkCreateSwapchainKHR(device.device, &swapchainCreateInfo, device.allocationCallbacks, &self.swapchain)
         }
         if err != VK_SUCCESS {
@@ -371,7 +373,7 @@ public class VulkanSwapChain: SwapChain {
         // If an existing swap chain is re-created, destroy the old swap chain
         // This also cleans up all the presentable images
         if let swapchainOld = swapchainOld {
-            synchronizedBy(locking: self.lock) {
+            self.lock.withLock {
                 vkDestroySwapchainKHR(device.device, swapchainOld, device.allocationCallbacks)
             }
         }
@@ -468,7 +470,7 @@ public class VulkanSwapChain: SwapChain {
             }
         }
 
-        let result = synchronizedBy(locking: self.lock) {
+        let result = self.lock.withLock {
             vkAcquireNextImageKHR(device.device, self.swapchain, UInt64.max, frameReady.semaphore, nil, &self.frameIndex)
         }
         switch result {
@@ -492,14 +494,14 @@ public class VulkanSwapChain: SwapChain {
         self.renderPassDescriptor.colorAttachments.append(colorAttachment)
     }
 
-    public var pixelFormat: PixelFormat {
+    var pixelFormat: PixelFormat {
         get {
-            synchronizedBy(locking: self.lock) {
+            self.lock.withLock {
                 PixelFormat.from(vkFormat: self.surfaceFormat.format)
             }
         }
         set (value) {
-            synchronizedBy(locking: self.lock) {
+            self.lock.withLock {
                 let format = value.vkFormat()
                 if format != self.surfaceFormat.format {
                     if value.isColorFormat {
@@ -532,11 +534,11 @@ public class VulkanSwapChain: SwapChain {
         }
     }
 
-    public var maximumBufferCount: Int {
-        synchronizedBy(locking: self.lock) { self.imageViews.count }
+    var maximumBufferCount: Int {
+        self.lock.withLock { self.imageViews.count }
     }
 
-    public func currentRenderPassDescriptor() -> RenderPassDescriptor {
+    func currentRenderPassDescriptor() -> RenderPassDescriptor {
         if self.renderPassDescriptor.colorAttachments.count == 0 {
             self.setupFrame()
         }
@@ -545,7 +547,7 @@ public class VulkanSwapChain: SwapChain {
     }
 
     @discardableResult
-    public func present(waitEvents: [GPUEvent]) -> Bool {
+    func present(waitEvents: [GPUEvent]) -> Bool {
         let frameReady = self.frameReady
         let presentSrc = self.imageViews[Int(self.frameIndex)]
         if let image = presentSrc.image, image.layout() != VK_IMAGE_LAYOUT_PRESENT_SRC_KHR {
@@ -610,12 +612,12 @@ public class VulkanSwapChain: SwapChain {
         var resetSwapchain = err == VK_ERROR_OUT_OF_DATE_KHR
         // Check if a device reset is requested and update the device if necessary.
         if resetSwapchain == false {
-            resetSwapchain = synchronizedBy(locking: self.lock) { self.deviceReset }
+            resetSwapchain = self.lock.withLock { self.deviceReset }
         }
         if resetSwapchain {
             let device = self.queue.device as! VulkanGraphicsDevice
             vkDeviceWaitIdle(device.device)
-            synchronizedBy(locking: self.lock) { self.deviceReset = false }
+            self.lock.withLock { self.deviceReset = false }
 
             let updated = if Thread.isMainThread {
                 MainActor.assumeIsolated {

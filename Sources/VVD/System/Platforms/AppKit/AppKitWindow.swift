@@ -2,27 +2,27 @@
 //  File: AppKitWindow.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_APPKIT
 import Foundation
 import AppKit
 
-class MainKeyWindow: NSWindow {
+final class MainKeyWindow: NSWindow {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
 }
 
-private var hideCursorCount = 0
+nonisolated(unsafe) private var hideCursorCount = 0
 
 @MainActor
-public class AppKitWindow: Window {
+final class AppKitWindow: Window {
+    
+    var activated: Bool { self.view.activated }
+    var visible: Bool { self.view.visible }
 
-    public var activated: Bool { self.view.activated }
-    public var visible: Bool { self.view.visible }
-
-    public var resolution: CGSize {
+    var resolution: CGSize {
         get {
             let pixelBounds = self.view.convertToBacking(self.view.bounds)
             return CGSize(width: pixelBounds.width, height: pixelBounds.height)
@@ -40,11 +40,11 @@ public class AppKitWindow: Window {
         }
     }
 
-    public var contentBounds: CGRect { self.view.contentBounds }
-    public var windowFrame: CGRect { self.view.windowFrame }
-    public var contentScaleFactor: CGFloat { self.view.contentScaleFactor }
+    var contentBounds: CGRect { self.view.contentBounds }
+    var windowFrame: CGRect { self.view.windowFrame }
+    var contentScaleFactor: CGFloat { self.view.contentScaleFactor }
 
-    public var title: String {
+    var title: String {
         get { self.view.window?.title ?? "" }
         set { self.view.window?.title = newValue }
     }
@@ -52,7 +52,7 @@ public class AppKitWindow: Window {
     var window: NSWindow
     var view: AppKitView
 
-    public var origin: CGPoint {
+    var origin: CGPoint {
         get {
             if self.view.window?.contentView === self.view {
                 return self.view.window!.frame.origin
@@ -71,7 +71,7 @@ public class AppKitWindow: Window {
         }
     }
 
-    public var contentSize: CGSize {
+    var contentSize: CGSize {
         get {
             var bounds = self.view.bounds
             if self.view.window != nil {
@@ -90,9 +90,9 @@ public class AppKitWindow: Window {
         }
     }
 
-    public var delegate: WindowDelegate?
+    var delegate: WindowDelegate?
 
-    public required init?(name: String, style: WindowStyle, delegate: WindowDelegate?) {
+    required init?(name: String, style: WindowStyle, delegate: WindowDelegate?) {
         var styleMask: NSWindow.StyleMask = []
         let backingStoreType: NSWindow.BackingStoreType = .buffered
         let contentRect = NSMakeRect(0, 0, 640, 480)
@@ -131,7 +131,7 @@ public class AppKitWindow: Window {
                         contentScaleFactor: self.contentScaleFactor))
     }
 
-    public func show() {
+    func show() {
         if let window = self.view.window {
             window.orderFront(nil)
 
@@ -139,7 +139,7 @@ public class AppKitWindow: Window {
         }
     }
 
-    public func hide() {
+    func hide() {
         if let window = self.view.window {
             window.resignKey()
             window.orderOut(nil)
@@ -148,7 +148,7 @@ public class AppKitWindow: Window {
         }
     }
 
-    public func activate() {
+    func activate() {
         if let window = self.view.window {
             window.makeKeyAndOrderFront(nil)
             self.view.visible = true
@@ -163,11 +163,11 @@ public class AppKitWindow: Window {
         }
     }
 
-    public func minimize() {
+    func minimize() {
         self.view.window?.miniaturize(nil)
     }
 
-    public func showMouse(_ show: Bool, forDeviceID deviceID: Int) {
+    func showMouse(_ show: Bool, forDeviceID deviceID: Int) {
         if deviceID == 0 {
             if show {
                 if CGDisplayShowCursor(CGMainDisplayID()) == .success {
@@ -181,46 +181,46 @@ public class AppKitWindow: Window {
         }
     }
 
-    public func isMouseVisible(forDeviceID deviceID: Int) -> Bool {
+    func isMouseVisible(forDeviceID deviceID: Int) -> Bool {
         if deviceID == 0 {
             return hideCursorCount >= 0
         }
         return false
     }
 
-    public func lockMouse(_ hold: Bool, forDeviceID deviceID: Int) {
+    func lockMouse(_ hold: Bool, forDeviceID deviceID: Int) {
         if deviceID == 0 {
             self.view.mouseLocked = hold
         }
     }
 
-    public func isMouseLocked(forDeviceID deviceID: Int) -> Bool {
+    func isMouseLocked(forDeviceID deviceID: Int) -> Bool {
         if deviceID == 0 {
             return self.view.mouseLocked
         }
         return false
     }
 
-    public func setMousePosition(_ pos: CGPoint, forDeviceID deviceID: Int) {
+    func setMousePosition(_ pos: CGPoint, forDeviceID deviceID: Int) {
         if deviceID == 0 {
             self.view.mousePosition = pos
         }
     }
 
-    public func mousePosition(forDeviceID deviceID: Int) -> CGPoint? {
+    func mousePosition(forDeviceID deviceID: Int) -> CGPoint? {
         if deviceID == 0 {
             return self.view.mousePosition
         }
         return nil
     }
  
-    public func enableTextInput(_ enable: Bool, forDeviceID deviceID: Int) {
+    func enableTextInput(_ enable: Bool, forDeviceID deviceID: Int) {
         if deviceID == 0 {
             self.view.textInput = enable
         }
     }
     
-    public func isTextInputEnabled(forDeviceID deviceID: Int) -> Bool {
+    func isTextInputEnabled(forDeviceID deviceID: Int) -> Bool {
         if deviceID == 0 {
             return self.view.textInput
         }
@@ -283,7 +283,7 @@ public class AppKitWindow: Window {
     }
     private var eventObservers: [ObjectIdentifier: EventHandlers] = [:]
 
-    public func addEventObserver(_ observer: AnyObject, handler: @escaping (_: WindowEvent)->Void) {
+    func addEventObserver(_ observer: AnyObject, handler: @escaping (_: WindowEvent)->Void) {
         let key = ObjectIdentifier(observer)
         if var handlers = self.eventObservers[key] {
             handlers.windowEventHandler = handler
@@ -292,7 +292,7 @@ public class AppKitWindow: Window {
             self.eventObservers[key] = EventHandlers(observer: observer, windowEventHandler: handler)
         }
     }
-    public func addEventObserver(_ observer: AnyObject, handler: @escaping (_: MouseEvent)->Void) {
+    func addEventObserver(_ observer: AnyObject, handler: @escaping (_: MouseEvent)->Void) {
         let key = ObjectIdentifier(observer)
         if var handlers = self.eventObservers[key] {
             handlers.mouseEventHandler = handler
@@ -301,7 +301,7 @@ public class AppKitWindow: Window {
             self.eventObservers[key] = EventHandlers(observer: observer, mouseEventHandler: handler)
         }
     }
-    public func addEventObserver(_ observer: AnyObject, handler: @escaping (_: KeyboardEvent)->Void) {
+    func addEventObserver(_ observer: AnyObject, handler: @escaping (_: KeyboardEvent)->Void) {
         let key = ObjectIdentifier(observer)
         if var handlers = self.eventObservers[key] {
             handlers.keyboardEventHandler = handler
@@ -310,7 +310,7 @@ public class AppKitWindow: Window {
             self.eventObservers[key] = EventHandlers(observer: observer, keyboardEventHandler: handler)
         }
     }
-    public func removeEventObserver(_ observer: AnyObject) {
+    func removeEventObserver(_ observer: AnyObject) {
         let key = ObjectIdentifier(observer)
         self.eventObservers[key] = nil
     }

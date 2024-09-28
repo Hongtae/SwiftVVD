@@ -15,7 +15,7 @@ public enum Edge : Int8, CaseIterable, Equatable, Hashable, RawRepresentable {
 }
 
 extension Edge {
-    public struct Set: OptionSet {
+    public struct Set: OptionSet, Sendable {
         public let rawValue: Int8
         public init(rawValue: Int8) {self.rawValue = rawValue }
 

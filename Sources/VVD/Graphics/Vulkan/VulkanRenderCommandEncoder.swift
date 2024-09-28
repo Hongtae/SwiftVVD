@@ -2,7 +2,7 @@
 //  File: VulkanRenderCommandEncoder.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
@@ -11,9 +11,9 @@ import Vulkan
 
 fileprivate let flipViewportY = true
 
-extension VkDynamicState: Hashable {}
+extension VkDynamicState: @retroactive Hashable {}
 
-public class VulkanRenderCommandEncoder: RenderCommandEncoder {
+final class VulkanRenderCommandEncoder: RenderCommandEncoder {
 
     struct EncodingState {
         var pipelineState: VulkanRenderPipelineState? = nil
@@ -22,7 +22,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
         var imageViewLayouts: VulkanDescriptorSet.ImageViewLayoutMap = [:]
     }
     
-    class Encoder: VulkanCommandEncoder {
+    final class Encoder: VulkanCommandEncoder {
         let renderPassDescriptor: RenderPassDescriptor
         unowned let commandBuffer: VulkanCommandBuffer
         let device: VulkanGraphicsDevice
@@ -312,26 +312,26 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
     }
 
     private var encoder: Encoder?
-    public let commandBuffer: CommandBuffer
+    let commandBuffer: CommandBuffer
 
-    public init(buffer: VulkanCommandBuffer, descriptor: RenderPassDescriptor) {   
+    init(buffer: VulkanCommandBuffer, descriptor: RenderPassDescriptor) {   
         self.commandBuffer = buffer
         self.encoder = Encoder(commandBuffer: buffer, descriptor: descriptor)
     }
 
-    public func reset(descriptor: RenderPassDescriptor) {   
+    func reset(descriptor: RenderPassDescriptor) {   
         self.encoder = Encoder(commandBuffer: self.commandBuffer as! VulkanCommandBuffer, descriptor: descriptor)
     }
 
-    public func endEncoding() {
+    func endEncoding() {
         let commandBuffer = self.commandBuffer as! VulkanCommandBuffer
         commandBuffer.endEncoder(self.encoder!)
         self.encoder = nil
     }
 
-    public var isCompleted: Bool { self.encoder == nil }
+    var isCompleted: Bool { self.encoder == nil }
 
-    public func waitEvent(_ event: GPUEvent) {
+    func waitEvent(_ event: GPUEvent) {
         assert(event is VulkanSemaphore)
         if let semaphore = event as? VulkanSemaphore {
             let pipelineStages = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT
@@ -339,7 +339,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
             self.encoder!.events.append(event)
         }
     }
-    public func signalEvent(_ event: GPUEvent) {
+    func signalEvent(_ event: GPUEvent) {
         assert(event is VulkanSemaphore)
         if let semaphore = event as? VulkanSemaphore {
             let pipelineStages = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT 
@@ -348,7 +348,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func waitSemaphoreValue(_ sema: GPUSemaphore, value: UInt64) {
+    func waitSemaphoreValue(_ sema: GPUSemaphore, value: UInt64) {
         assert(sema is VulkanTimelineSemaphore)
         if let semaphore = sema as? VulkanTimelineSemaphore {
             let pipelineStages = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT
@@ -356,7 +356,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
             self.encoder!.semaphores.append(sema)
         }
     }
-    public func signalSemaphoreValue(_ sema: GPUSemaphore, value: UInt64) {
+    func signalSemaphoreValue(_ sema: GPUSemaphore, value: UInt64) {
         assert(sema is VulkanTimelineSemaphore)
         if let semaphore = sema as? VulkanTimelineSemaphore {
             let pipelineStages = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT
@@ -365,7 +365,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
         }
     }
     
-    public func setResource(_ set: ShaderBindingSet, index: Int) {
+    func setResource(_ set: ShaderBindingSet, index: Int) {
         assert(set is VulkanShaderBindingSet)
         var descriptorSet: VulkanDescriptorSet? = nil
         if let bindingSet = set as? VulkanShaderBindingSet {
@@ -395,7 +395,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func setRenderPipelineState(_ pso: RenderPipelineState) {
+    func setRenderPipelineState(_ pso: RenderPipelineState) {
         assert(pso is VulkanRenderPipelineState)
         if let pipeline = pso as? VulkanRenderPipelineState {
             let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
@@ -407,7 +407,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func setViewport(_ v: Viewport) {
+    func setViewport(_ v: Viewport) {
         var viewport = VkViewport(x: Float(v.x),
                                   y: Float(v.y),
                                   width: Float(v.width),
@@ -427,7 +427,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func setScissorRect(_ r: ScissorRect) {
+    func setScissorRect(_ r: ScissorRect) {
         var scissorRect = VkRect2D(offset: VkOffset2D(x: Int32(r.x),
                                                       y: Int32(r.y)),
                                    extent: VkExtent2D(width: UInt32(r.width),
@@ -441,11 +441,11 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func setVertexBuffer(_ buffer: GPUBuffer, offset: Int, index: Int) {
+    func setVertexBuffer(_ buffer: GPUBuffer, offset: Int, index: Int) {
         setVertexBuffers([buffer], offsets: [offset], index: index)
     }
 
-    public func setVertexBuffers(_ buffers: [GPUBuffer], offsets: [Int], index: Int) {
+    func setVertexBuffers(_ buffers: [GPUBuffer], offsets: [Int], index: Int) {
         assert(buffers.count == offsets.count)
         let count = min(buffers.count, offsets.count)
         if count > 0 {
@@ -477,7 +477,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func setDepthStencilState(_ state: DepthStencilState?) {
+    func setDepthStencilState(_ state: DepthStencilState?) {
         var depthStencilState: VulkanDepthStencilState? = nil
         if let state = state {
             assert(state is VulkanDepthStencilState)
@@ -524,7 +524,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func setDepthClipMode(_ mode: DepthClipMode) {
+    func setDepthClipMode(_ mode: DepthClipMode) {
 
         if mode == .clamp && self.encoder!.device.features.depthClamp == 0 {
             Log.warn("\(#function): DepthClamp not supported for this hardware.")
@@ -555,7 +555,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
 #endif
     }
 
-    public func setCullMode(_ mode: CullMode) {
+    func setCullMode(_ mode: CullMode) {
         let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
             let flags: VkCullModeFlags
             switch mode {
@@ -571,7 +571,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func setFrontFacing(_ winding: Winding) {
+    func setFrontFacing(_ winding: Winding) {
            let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
             let frontFace: VkFrontFace
             switch winding {
@@ -586,7 +586,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func setBlendColor(red: Float, green: Float, blue: Float, alpha: Float) {
+    func setBlendColor(red: Float, green: Float, blue: Float, alpha: Float) {
         let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
             let blendConstants = (red, green, blue, alpha)
             withUnsafeBytes(of: blendConstants) {
@@ -599,7 +599,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func setStencilReferenceValue(_ value: UInt32) {
+    func setStencilReferenceValue(_ value: UInt32) {
         let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
             vkCmdSetStencilReference(commandBuffer, VkStencilFaceFlags(VK_STENCIL_FACE_FRONT_AND_BACK.rawValue), value)
         }
@@ -609,7 +609,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func setStencilReferenceValues(front: UInt32, back: UInt32) {
+    func setStencilReferenceValues(front: UInt32, back: UInt32) {
         let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
             vkCmdSetStencilReference(commandBuffer, VkStencilFaceFlags(VK_STENCIL_FACE_FRONT_BIT.rawValue), front)
             vkCmdSetStencilReference(commandBuffer, VkStencilFaceFlags(VK_STENCIL_FACE_BACK_BIT.rawValue), back)
@@ -620,7 +620,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func setDepthBias(_ depthBias: Float, slopeScale: Float, clamp: Float) {
+    func setDepthBias(_ depthBias: Float, slopeScale: Float, clamp: Float) {
         let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
             vkCmdSetDepthBias(commandBuffer, depthBias, clamp, slopeScale)
         }
@@ -630,7 +630,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func pushConstant<D: DataProtocol>(stages: ShaderStageFlags, offset: Int, data: D) {
+    func pushConstant<D: DataProtocol>(stages: ShaderStageFlags, offset: Int, data: D) {
         let stageFlags = stages.vkFlags()
         if stageFlags != 0 && data.count > 0 {
             var buffer: [UInt8] = .init(data)
@@ -650,7 +650,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
         }
     }
  
-    public func memoryBarrier(after: RenderStages, before: RenderStages) {
+    func memoryBarrier(after: RenderStages, before: RenderStages) {
 
         let stageMask = { (stages: RenderStages) in
             var mask: VkPipelineStageFlags2 = VK_PIPELINE_STAGE_2_NONE
@@ -694,7 +694,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
         self.encoder!.commands.append(command)
     }
 
-    public func draw(vertexStart: Int, vertexCount: Int, instanceCount: Int, baseInstance: Int) {
+    func draw(vertexStart: Int, vertexCount: Int, instanceCount: Int, baseInstance: Int) {
         if vertexCount > 0 && instanceCount > 0 {
             assert(vertexStart >= 0)
             assert(baseInstance >= 0)
@@ -710,7 +710,7 @@ public class VulkanRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func drawIndexed(indexCount: Int, indexType: IndexType, indexBuffer: GPUBuffer, indexBufferOffset: Int, instanceCount: Int, baseVertex: Int, baseInstance: Int) {
+    func drawIndexed(indexCount: Int, indexType: IndexType, indexBuffer: GPUBuffer, indexBufferOffset: Int, instanceCount: Int, baseVertex: Int, baseInstance: Int) {
         if indexCount > 0 && instanceCount > 0 {
             assert(indexBufferOffset >= 0)
             assert(baseVertex >= 0)

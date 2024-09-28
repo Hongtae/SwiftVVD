@@ -2,10 +2,10 @@
 //  File: Vector.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
-public protocol Vector: Equatable {
+public protocol Vector: Equatable, Sendable {
     associatedtype Scalar: BinaryFloatingPoint
 
     static var components: Int { get }

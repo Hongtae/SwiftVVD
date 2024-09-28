@@ -2,7 +2,7 @@
 //  File: AppKitView.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_APPKIT
@@ -19,8 +19,7 @@ private let RIGHT_ALTERNATE_BIT = UInt(0x80040)
 private let LEFT_COMMAND_BIT = UInt(0x100008)
 private let RIGHT_COMMAND_BIT = UInt(0x100010)
 
-
-class AppKitView: NSView, NSTextInputClient, NSWindowDelegate {
+final class AppKitView: NSView, NSTextInputClient, NSWindowDelegate {
 
     var mouseLocked: Bool = false {
         didSet {
@@ -40,7 +39,7 @@ class AppKitView: NSView, NSTextInputClient, NSWindowDelegate {
     override var isFlipped: Bool { true } // upper-left is origin
     override var acceptsFirstResponder: Bool { true }
 
-    var observers: [NSObjectProtocol] = []
+    nonisolated(unsafe) var observers: [NSObjectProtocol] = []
 
     var contentBounds: CGRect {
         var rect = self.bounds
@@ -96,12 +95,18 @@ class AppKitView: NSView, NSTextInputClient, NSWindowDelegate {
             center.addObserver(forName: NSApplication.didHideNotification,
                                object: nil,
                                queue: queue) { [weak self](notification) in
-                                   self?.applicationDidHide(notification)
+                                   nonisolated(unsafe) let noti = notification
+                                   MainActor.assumeIsolated {
+                                       self?.applicationDidHide(noti)
+                                   }
                                },
             center.addObserver(forName: NSApplication.didUnhideNotification,
                                object: nil,
                                queue: queue) { [weak self](notification) in
-                                   self?.applicationDidUnhide(notification)
+                                   nonisolated(unsafe) let noti = notification
+                                   MainActor.assumeIsolated {
+                                       self?.applicationDidUnhide(noti)
+                                   }
                                }
         ]
     }
@@ -213,7 +218,7 @@ class AppKitView: NSView, NSTextInputClient, NSWindowDelegate {
     }
 
     // MARK: - NSTextInputClient
-    func insertText(_ string: Any, replacementRange: NSRange) {
+    nonisolated func insertText(_ string: Any, replacementRange: NSRange) {
         var str = ""
         if let string = string as? NSString {
             str = string as String
@@ -221,18 +226,20 @@ class AppKitView: NSView, NSTextInputClient, NSWindowDelegate {
             str = string.string as String
         }
 
-        self.postTextInputEvent(str)
+        MainActor.assumeIsolated {
+            self.postTextInputEvent(str)
 
-        if self.markedText.count > 0 {
-            self.postTextCompositionEvent("")
+            if self.markedText.count > 0 {
+                self.postTextCompositionEvent("")
+            }
+
+            self.markedText = ""
+            self.inputContext?.discardMarkedText()
+            self.inputContext?.invalidateCharacterCoordinates()
         }
-
-        self.markedText = ""
-        self.inputContext?.discardMarkedText()
-        self.inputContext?.invalidateCharacterCoordinates()
     }
 
-    override func doCommand(by selector: Selector) {
+    nonisolated override func doCommand(by selector: Selector) {
         let textBySelector: [Selector: String] = [
             #selector(insertLineBreak(_:)): "\r",
             #selector(insertNewline(_:)): "\n",
@@ -242,83 +249,95 @@ class AppKitView: NSView, NSTextInputClient, NSWindowDelegate {
             #selector(cancelOperation(_:)): "\u{27}", // \e (esc)
         ]
 
-        if let text = textBySelector[selector] {
-            self.insertText(text, replacementRange:NSMakeRange(NSNotFound, 0))
-        } else {
-            let event = self.window!.currentEvent!
-            let key = VirtualKey.from(code: event.keyCode)
+        MainActor.assumeIsolated {
+            if let text = textBySelector[selector] {
+                self.insertText(text, replacementRange:NSMakeRange(NSNotFound, 0))
+            } else {
+                let event = self.window!.currentEvent!
+                let key = VirtualKey.from(code: event.keyCode)
 
-            Log.err("[NSTextInput] doCommandBySelector:(\(selector)) for key:(\(key)) not processed.")
-        }
-
-        self.markedText = ""
-        self.inputContext?.discardMarkedText()
-        self.inputContext?.invalidateCharacterCoordinates()
-    }
-
-    func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
-        if self.textInput {
-            var str = ""
-            if let string = string as? NSString {
-                str = string as String
-            } else if let string = string as? NSAttributedString {
-                str = string.string as String
+                Log.err("[NSTextInput] doCommandBySelector:(\(selector)) for key:(\(key)) not processed.")
             }
 
-            if str.isEmpty == false {
-                self.markedText = str
-                Log.debug("self.markedText: \(self.markedText)")
+            self.markedText = ""
+            self.inputContext?.discardMarkedText()
+            self.inputContext?.invalidateCharacterCoordinates()
+        }
+    }
 
-                self.postTextCompositionEvent(str)
+    nonisolated func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
+        nonisolated(unsafe) let string: Any = string
+        MainActor.assumeIsolated {
+            if self.textInput {
+                var str = ""
+                if let string = string as? NSString {
+                    str = string as String
+                } else if let string = string as? NSAttributedString {
+                    str = string.string as String
+                }
+
+                if str.isEmpty == false {
+                    self.markedText = str
+                    Log.debug("self.markedText: \(self.markedText)")
+
+                    self.postTextCompositionEvent(str)
+                } else {
+                    self.postTextCompositionEvent("")
+
+                    self.markedText = ""
+                    self.inputContext?.discardMarkedText()
+                }
+                self.inputContext?.invalidateCharacterCoordinates() // recentering
             } else {
-                self.postTextCompositionEvent("")
-
                 self.markedText = ""
                 self.inputContext?.discardMarkedText()
             }
-            self.inputContext?.invalidateCharacterCoordinates() // recentering
-        } else {
+        }
+    }
+
+    nonisolated func unmarkText() {
+        MainActor.assumeIsolated {
+
+            if self.textInput && self.markedText.count > 0 {
+                self.insertText(self.markedText, replacementRange: NSMakeRange(NSNotFound, 0))
+            }
             self.markedText = ""
             self.inputContext?.discardMarkedText()
         }
     }
 
-    func unmarkText() {
-        if self.textInput && self.markedText.count > 0 {
-            self.insertText(self.markedText, replacementRange: NSMakeRange(NSNotFound, 0))
-        }
-        self.markedText = ""
-        self.inputContext?.discardMarkedText()
-    }
-
-    func selectedRange() -> NSRange {
+    nonisolated func selectedRange() -> NSRange {
         return NSMakeRange(NSNotFound, 0)
     }
 
-    func markedRange() -> NSRange {
-        if self.markedText.count > 0 {
-            return NSMakeRange(0, self.markedText.count)
+    nonisolated func markedRange() -> NSRange {
+        MainActor.assumeIsolated {
+            if self.markedText.count > 0 {
+                return NSMakeRange(0, self.markedText.count)
+            }
+            return NSMakeRange(NSNotFound, 0)
         }
-        return NSMakeRange(NSNotFound, 0)
     }
 
-    func hasMarkedText() -> Bool {
-        return self.markedText.isEmpty == false
+    nonisolated func hasMarkedText() -> Bool {
+        MainActor.assumeIsolated {
+            return self.markedText.isEmpty == false
+        }
     }
 
-    func attributedSubstring(forProposedRange range: NSRange, actualRange: NSRangePointer?) -> NSAttributedString? {
+    nonisolated func attributedSubstring(forProposedRange range: NSRange, actualRange: NSRangePointer?) -> NSAttributedString? {
         return nil
     }
 
-    func validAttributesForMarkedText() -> [NSAttributedString.Key] {
+    nonisolated func validAttributesForMarkedText() -> [NSAttributedString.Key] {
         return []
     }
 
-    func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer?) -> NSRect {
+    nonisolated func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer?) -> NSRect {
         return .zero
     }
 
-    func characterIndex(for point: NSPoint) -> Int {
+    nonisolated func characterIndex(for point: NSPoint) -> Int {
         return NSNotFound
     }
 

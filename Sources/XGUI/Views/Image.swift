@@ -8,7 +8,7 @@
 import Foundation
 import VVD
 
-class AnyImageProviderBox {
+class AnyImageProviderBox: @unchecked Sendable {
     func makeTexture(_ context: GraphicsContext) -> Texture? {
         nil
     }
@@ -20,7 +20,7 @@ class AnyImageProviderBox {
     }
 }
 
-class NamedImageProvider: AnyImageProviderBox {
+final class NamedImageProvider: AnyImageProviderBox, @unchecked Sendable {
     let name: String
     let value: Float?
     let location: Bundle?
@@ -81,7 +81,7 @@ class NamedImageProvider: AnyImageProviderBox {
     }
 }
 
-class RenderedImageProviderBox: AnyImageProviderBox {
+final class RenderedImageProviderBox: AnyImageProviderBox, @unchecked Sendable {
     let size: CGSize
     let label: Text?
     let opaque: Bool
@@ -104,7 +104,7 @@ class RenderedImageProviderBox: AnyImageProviderBox {
     }
 }
 
-class TextureImageProvider: AnyImageProviderBox {
+final class TextureImageProvider: AnyImageProviderBox, @unchecked Sendable {
     let texture: Texture
     let scale: CGFloat
     let orientation: Image.Orientation
@@ -136,7 +136,7 @@ class TextureImageProvider: AnyImageProviderBox {
     }
 }
 
-class SymbolImageProvider: AnyImageProviderBox {
+final class SymbolImageProvider: AnyImageProviderBox, @unchecked Sendable {
     let name: String
     let variableValue: Double?
     let bundle: Bundle?
@@ -150,7 +150,7 @@ class SymbolImageProvider: AnyImageProviderBox {
     }
 }
 
-public struct Image: Equatable {
+public struct Image: Equatable, Sendable {
     var provider: AnyImageProviderBox
 
     init(provider: AnyImageProviderBox) {
@@ -232,7 +232,7 @@ extension Image: View {
 }
 
 extension Image {
-    public static var _mainNamedBundle: Bundle?
+    nonisolated(unsafe) public static var _mainNamedBundle: Bundle?
 }
 
 extension Image: _PrimitiveView {

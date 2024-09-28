@@ -2,10 +2,10 @@
 //  File: Transform.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
-public struct Transform: Hashable {
+public struct Transform: Hashable, Sendable {
     public typealias Vector = Vector3
     
     public var orientation: Quaternion

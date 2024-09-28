@@ -67,9 +67,9 @@ extension GraphicsContext {
         public let rawValue: UInt32
         public init(rawValue: UInt32) { self.rawValue = rawValue }
 
-        public static var `repeat`      = GradientOptions(rawValue: 1)
-        public static var mirror        = GradientOptions(rawValue: 2)
-        public static var linearColor   = GradientOptions(rawValue: 4)
+        public static var `repeat`      : GradientOptions { .init(rawValue: 1) }
+        public static var mirror        : GradientOptions { .init(rawValue: 2) }
+        public static var linearColor   : GradientOptions { .init(rawValue: 4) }
     }
 
     public func fill(_ path: Path, with shading: Shading, style: FillStyle = FillStyle()) {
@@ -420,6 +420,8 @@ extension GraphicsContext {
                     }
                     vertexData.append(contentsOf: triangles)
                 }
+            @unknown default:
+                fatalError("Unknown value")
             }
         }
 
@@ -774,7 +776,8 @@ extension GraphicsContext {
                     makeVertex(1, -1), makeVertex(-1, 1), makeVertex(1, 1)
                 ]
             case let .style(style):
-                fatalError("ShapeStyle should be resolved to GraphicsContext.Shading")
+                Log.err("ShapeStyle:\(style) not supported.")
+                fatalError("ShapeStyle:\(style) should be resolved to GraphicsContext.Shading")
 
             case let .linearGradient(gradient, startPoint, endPoint, options):
                 let stops = gradient.normalized().stops

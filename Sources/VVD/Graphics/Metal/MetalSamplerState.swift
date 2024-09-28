@@ -9,7 +9,7 @@
 import Foundation
 import Metal
 
-public class MetalSamplerState: SamplerState {
+final class MetalSamplerState: SamplerState {
     public let device: GraphicsDevice
     let sampler: MTLSamplerState
 

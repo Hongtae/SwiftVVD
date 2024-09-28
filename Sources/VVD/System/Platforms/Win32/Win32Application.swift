@@ -9,9 +9,9 @@
 import WinSDK
 import Foundation
 
-private var keyboardHook: HHOOK? = nil
+nonisolated(unsafe) private var keyboardHook: HHOOK? = nil
+nonisolated(unsafe) var numActiveWindows: Int = 0
 private let disableWindowKey: Bool = true
-internal var numActiveWindows: Int = 0
 
 private func keyboardHookProc(_ nCode: Int32, _ wParam: WPARAM, _ lParam: LPARAM) -> LRESULT {
     let hook = disableWindowKey && numActiveWindows > 0
@@ -51,26 +51,26 @@ private func processRunLoop() -> Int {
     return processed
 }
 
-public class Win32Application : Application {
+final class Win32Application: Application, @unchecked Sendable {
 
     let mainLoopMaximumInterval: Double = 0.01
     var running: Bool = false
     var threadId: DWORD = 0
     var exitCode: Int = 0
 
-    public static var shared: Application? = nil
+    nonisolated(unsafe) static var shared: Application? = nil
 
     private init() {
     }
 
-    public func terminate(exitCode: Int) {
+    func terminate(exitCode: Int) {
         if self.running && self.threadId != 0 {
             self.exitCode = exitCode
             PostThreadMessageW(threadId, UINT(WM_QUIT), 0, 0)
         }
     }
 
-    public static func run(delegate: ApplicationDelegate?) -> Int{
+    static func run(delegate: ApplicationDelegate?) -> Int{
 
         let app: Win32Application = Win32Application()
         self.shared = app

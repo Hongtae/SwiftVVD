@@ -2,18 +2,19 @@
 //  File: VulkanSemaphore.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
 import Foundation
+import Synchronization
 import Vulkan
 
-public class VulkanSemaphore: GPUEvent {
-    public let device: GraphicsDevice
-    public let semaphore: VkSemaphore
+class VulkanSemaphore: GPUEvent {
+    let device: GraphicsDevice
+    let semaphore: VkSemaphore
 
-    public init(device: VulkanGraphicsDevice, semaphore: VkSemaphore) {
+    init(device: VulkanGraphicsDevice, semaphore: VkSemaphore) {
         self.device = device
         self.semaphore = semaphore
     }
@@ -23,20 +24,20 @@ public class VulkanSemaphore: GPUEvent {
         vkDestroySemaphore(device.device, semaphore, device.allocationCallbacks)
     }
 
-    public var nextWaitValue: UInt64 { 0 }
-    public var nextSignalValue: UInt64 { 0 }
+    var nextWaitValue: UInt64 { 0 }
+    var nextSignalValue: UInt64 { 0 }
 }
 
-public class VulkanSemaphoreAutoIncrementalTimeline: VulkanSemaphore {
+final class VulkanSemaphoreAutoIncrementalTimeline: VulkanSemaphore {
+    let waitValue = Atomic<UInt64>(0)
+    let signalValue = Atomic<UInt64>(0)
 
-    public let waitValue = AtomicNumber64(0)
-    public let signalValue = AtomicNumber64(0)
-
-    public override var nextWaitValue: UInt64 {
-        UInt64(bitPattern: waitValue.increment())
+    override var nextWaitValue: UInt64 {
+        waitValue.add(1, ordering: .sequentiallyConsistent).newValue
     }
-    public override var nextSignalValue: UInt64 {
-        UInt64(bitPattern: signalValue.increment())
+    
+    override var nextSignalValue: UInt64 {
+        signalValue.add(1, ordering: .sequentiallyConsistent).newValue
     }
 }
 

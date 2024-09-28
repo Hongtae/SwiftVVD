@@ -2,7 +2,7 @@
 //  File: VulkanDescriptorPool.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
@@ -41,11 +41,11 @@ private func index(of type: VkDescriptorType) -> Int {
     return begin
 }
 
-public struct VulkanDescriptorPoolID: Hashable, Equatable {
-    public let mask: UInt32
-    public let typeSize: [UInt32]
+struct VulkanDescriptorPoolID: Hashable, Equatable {
+    let mask: UInt32
+    let typeSize: [UInt32]
 
-    public var hash: UInt32 {
+    var hash: UInt32 {
         assert(self.typeSize.count == descriptorTypes.count)
         var data: [UInt32] = []
         data.reserveCapacity(self.typeSize.count + 1)
@@ -54,12 +54,12 @@ public struct VulkanDescriptorPoolID: Hashable, Equatable {
         return data.withUnsafeBytes { CRC32.hash(data: $0).hash }
     }
 
-    public init() {
+    init() {
         self.mask = 0
         self.typeSize = .init(repeating: 0, count: descriptorTypes.count)
     }
 
-    public init(poolSizes: [VkDescriptorPoolSize]) {
+    init(poolSizes: [VkDescriptorPoolSize]) {
         var typeSize: [UInt32] = .init(repeating: 0, count: descriptorTypes.count)
         for ps in poolSizes {
             let index = index(of: ps.type)
@@ -75,7 +75,7 @@ public struct VulkanDescriptorPoolID: Hashable, Equatable {
         self.typeSize = typeSize
     }
 
-    public init(layout: ShaderBindingSetLayout) {
+    init(layout: ShaderBindingSetLayout) {
         var typeSize: [UInt32] = .init(repeating: 0, count: descriptorTypes.count)
         for binding in layout.bindings {
             let type = binding.type.vkType()
@@ -92,14 +92,14 @@ public struct VulkanDescriptorPoolID: Hashable, Equatable {
         self.typeSize = typeSize
     }
 
-    public func hash(into hasher: inout Hasher) {
+    func hash(into hasher: inout Hasher) {
         hasher.combine(mask)
         for type in typeSize {
             hasher.combine(type)
         }
     }
     
-    public static func == (lhs: Self, rhs: Self) -> Bool {
+    static func == (lhs: Self, rhs: Self) -> Bool {
         if lhs.mask == rhs.mask {
             for i in 0..<descriptorTypes.count {
                 if lhs.typeSize[i] != rhs.typeSize[i] {
@@ -112,18 +112,18 @@ public struct VulkanDescriptorPoolID: Hashable, Equatable {
     }
 }
 
-public class VulkanDescriptorPool {
-    public let poolID: VulkanDescriptorPoolID
-    public let pool: VkDescriptorPool
-    public let poolCreateFlags: VkDescriptorPoolCreateFlags
-    public let maxSets: UInt32
-    public weak var device: VulkanGraphicsDevice?
+final class VulkanDescriptorPool {
+    let poolID: VulkanDescriptorPoolID
+    let pool: VkDescriptorPool
+    let poolCreateFlags: VkDescriptorPoolCreateFlags
+    let maxSets: UInt32
+    weak var device: VulkanGraphicsDevice?
 
-    public var numAllocatedSets: UInt32
+    var numAllocatedSets: UInt32
 
     private let lock = NSLock()
 
-    public init(device: VulkanGraphicsDevice, pool: VkDescriptorPool, poolCreateInfo: VkDescriptorPoolCreateInfo, poolID: VulkanDescriptorPoolID) {
+    init(device: VulkanGraphicsDevice, pool: VkDescriptorPool, poolCreateInfo: VkDescriptorPoolCreateInfo, poolID: VulkanDescriptorPoolID) {
         self.device = device
         self.pool = pool
         self.poolID = poolID
@@ -138,7 +138,7 @@ public class VulkanDescriptorPool {
         }
     }
 
-    public func allocateDescriptorSet(layout: VkDescriptorSetLayout) -> VkDescriptorSet? {
+    func allocateDescriptorSet(layout: VkDescriptorSetLayout) -> VkDescriptorSet? {
         var allocateInfo = VkDescriptorSetAllocateInfo()
         allocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO
         allocateInfo.descriptorPool = self.pool
@@ -149,7 +149,7 @@ public class VulkanDescriptorPool {
         var descriptorSet: VkDescriptorSet? = nil
         let result: VkResult = withUnsafePointer(to: Optional(layout)) {
             allocateInfo.pSetLayouts = $0
-            return synchronizedBy(locking: self.lock) {
+            return self.lock.withLock {
                 vkAllocateDescriptorSets(device.device, &allocateInfo, &descriptorSet)
             }
         }
@@ -161,7 +161,7 @@ public class VulkanDescriptorPool {
         return descriptorSet
     }
 
-    public func release(descriptorSets: [VkDescriptorSet]) {
+    func release(descriptorSets: [VkDescriptorSet]) {
         guard descriptorSets.isEmpty == false else { return }
 
         assert(self.numAllocatedSets > 0)
@@ -171,7 +171,7 @@ public class VulkanDescriptorPool {
 
         self.numAllocatedSets -= UInt32(descriptorSets.count)
         if self.numAllocatedSets == 0 {
-            let result = synchronizedBy(locking: self.lock) {
+            let result = self.lock.withLock {
                 vkResetDescriptorPool(device.device, pool, 0)
             }
             if result != VK_SUCCESS {
@@ -180,7 +180,7 @@ public class VulkanDescriptorPool {
         } else if self.poolCreateFlags & UInt32(VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT.rawValue) != 0 {
             let optionalSets = descriptorSets.map{ Optional($0) }
             let result = optionalSets.withUnsafeBufferPointer { buffer in
-                synchronizedBy(locking: self.lock) {
+                self.lock.withLock {
                     vkFreeDescriptorSets(device.device, self.pool, UInt32(buffer.count), buffer.baseAddress)
                 }
             }

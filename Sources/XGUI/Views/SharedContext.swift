@@ -19,16 +19,7 @@ extension EnvironmentValues {
     }
 }
 
-struct WeakObject<T: AnyObject> : Equatable {
-    weak var value: T?
-    static func == (a: Self, b: Self) -> Bool { a.value === b.value }
-
-    init(_ value: T?) {
-        self.value = value
-    }
-}
-
-class SharedContext {
+class SharedContext: @unchecked Sendable {
     var appContext: AppContext
 
     var window: Window?

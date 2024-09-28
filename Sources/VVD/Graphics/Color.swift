@@ -2,10 +2,10 @@
 //  File: Color.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
-public struct Color: Hashable {
+public struct Color: Hashable, Sendable {
     public var r : Scalar = 0.0
     public var g : Scalar = 0.0
     public var b : Scalar = 0.0

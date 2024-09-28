@@ -6,10 +6,10 @@
 //
 
 import Foundation
+import Synchronization
 import VVD
 
-class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegate where Content: View {
-
+final class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegate, @unchecked Sendable where Content: View {
     let contextType: Any.Type
     let identifier: String
     let title: String
@@ -36,16 +36,15 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
         var activeFrameInterval = 1.0 / 60.0
         var inactiveFrameInterval = 1.0 / 30.0
     }
-    private let stateLock = SpinLock()
-    private var state = State()
-    private var config = Configuration()
+
+    private let stateConfig = Mutex<(state: State, config: Configuration)>((state: State(), config: Configuration()))
 
     private var task: Task<Void, Never>?
 
     private func runWindowUpdateTask() -> Task<Void, Never> {
-        Task.detached(priority: .userInitiated) { @MainActor [weak self] in
+        Task.detached(priority: .userInitiated) { @MainActor @Sendable [weak self] in
             Log.info("WindowContext<\(Content.self)> update task is started.")
-            var tickCounter = TickCounter()
+            var tickCounter = TickCounter.now
 
             var contentBounds: CGRect = .null
             var contentScaleFactor: CGFloat = 1
@@ -60,8 +59,8 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                 if Task.isCancelled { break }
 
                 let swapChain = self.swapChain
-                let (state, config) = synchronizedBy(locking: self.stateLock) {
-                    (self.state, self.config)
+                let (state, config) = self.stateConfig.withLock {
+                    ($0.state, $0.config)
                 }
 
                 guard let view = self.view
@@ -214,7 +213,7 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                 // It's less than the tick granularity, so we can't call sleep.
                 while tickCounter.elapsed < frameInterval {
                     if Task.isCancelled { break mainLoop }
-                    threadYield()
+                    Platform.threadYield()
                 }
             }
             Log.info("WindowContext<\(Content.self)> update task is finished.")
@@ -274,11 +273,13 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                         Log.error("Failed to cache GraphicsPipelineStates")
                     }
                     if let swapChain = graphicsDevice.renderQueue()?.makeSwapChain(target: window) {
-                        self.state.frame = window.windowFrame.standardized
-                        self.state.bounds = window.contentBounds.standardized
-                        self.state.contentScaleFactor = window.contentScaleFactor
-                        self.state.visible = window.visible
-                        self.state.activated = window.activated
+                        self.stateConfig.withLock {
+                            $0.state.frame = window.windowFrame.standardized
+                            $0.state.bounds = window.contentBounds.standardized
+                            $0.state.contentScaleFactor = window.contentScaleFactor
+                            $0.state.visible = window.visible
+                            $0.state.activated = window.activated
+                        }
                         self.window = window
 
                         window.addEventObserver(self) {
@@ -310,11 +311,12 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
         return self.window
     }
 
-    @MainActor
     func applyModifiers() {
         if let frameRate = self.modifiers.first(where: { $0 is _UpdateFrameRate }) as? _UpdateFrameRate {
-            self.config.activeFrameInterval = frameRate.activeFrameRate
-            self.config.inactiveFrameInterval = frameRate.inactiveFrameRate
+            self.stateConfig.withLock {
+                $0.config.activeFrameInterval = frameRate.activeFrameRate
+                $0.config.inactiveFrameInterval = frameRate.inactiveFrameRate
+            }
         }
     }
 
@@ -327,8 +329,6 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
     func onWindowEvent(event: WindowEvent) {
         if event.window !== self.window { return }
         Log.debug("WindowContext.onWindowEvent: \(event)")
-        self.stateLock.lock()
-        defer { self.stateLock.unlock() }
 
         let releaseEventHandlers = {
             self.sharedContext.focusedViews.forEach {
@@ -358,29 +358,43 @@ class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegat
                 appContext?.checkWindowActivities()
             }
         case .created:
-            self.state.frame = event.windowFrame.standardized
-            self.state.bounds = event.contentBounds.standardized
-            self.state.contentScaleFactor = event.contentScaleFactor
+            self.stateConfig.withLock {
+                $0.state.frame = event.windowFrame.standardized
+                $0.state.bounds = event.contentBounds.standardized
+                $0.state.contentScaleFactor = event.contentScaleFactor
+            }
         case .hidden:
             releaseEventHandlers()
-            self.state.visible = false
-            self.state.activated = false
+            self.stateConfig.withLock {
+                $0.state.visible = false
+                $0.state.activated = false
+            }
         case .shown:
-            self.state.visible = true
+            self.stateConfig.withLock {
+                $0.state.visible = true
+            }
         case .activated:
-            self.state.visible = true
-            self.state.activated = true
+            self.stateConfig.withLock {
+                $0.state.visible = true
+                $0.state.activated = true
+            }
         case .inactivated:
             releaseEventHandlers()
-            self.state.activated = false
+            self.stateConfig.withLock {
+                $0.state.activated = false
+            }
         case .minimized:
             releaseEventHandlers()
-            self.state.activated = false
-            self.state.visible = false
+            self.stateConfig.withLock {
+                $0.state.activated = false
+                $0.state.visible = false
+            }
         case .moved, .resized:
-            self.state.frame = event.windowFrame.standardized
-            self.state.bounds = event.contentBounds.standardized
-            self.state.contentScaleFactor = event.contentScaleFactor
+            self.stateConfig.withLock {
+                $0.state.frame = event.windowFrame.standardized
+                $0.state.bounds = event.contentBounds.standardized
+                $0.state.contentScaleFactor = event.contentScaleFactor
+            }
         case .update:
             break
         }

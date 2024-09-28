@@ -2,22 +2,22 @@
 //  File: AppKitApplication.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_APPKIT
 import Foundation
 import AppKit
 
-public class AppKitApplication: Application {
-    public static var shared: Application? = nil
+final class AppKitApplication: Application, @unchecked Sendable {
+    nonisolated(unsafe) static var shared: Application? = nil
 
     weak var delegate: ApplicationDelegate?
 
     var running = false
     var exitCode: Int = 0
 
-    public func terminate(exitCode : Int) {
+    func terminate(exitCode : Int) {
         if self.running {
             DispatchQueue.main.async {
                 let app = NSApplication.shared
@@ -39,7 +39,7 @@ public class AppKitApplication: Application {
         }
     }
 
-    public static func run(delegate: ApplicationDelegate?) -> Int {
+    static func run(delegate: ApplicationDelegate?) -> Int {
         assert(Thread.isMainThread)
 
         let observers = [

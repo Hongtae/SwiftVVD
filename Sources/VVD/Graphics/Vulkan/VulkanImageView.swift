@@ -2,34 +2,31 @@
 //  File: VulkanImageView.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
 import Foundation
 import Vulkan
 
-public class VulkanImageView: Texture {
+final class VulkanImageView: Texture {
 
-    public let imageView: VkImageView
-    
-    public var waitSemaphore: VkSemaphore?
-    public var signalSemaphore: VkSemaphore?
+    let imageView: VkImageView
+    var waitSemaphore: VkSemaphore?
+    var signalSemaphore: VkSemaphore?
+    var image: VulkanImage?
 
-    public var image: VulkanImage?
-    public let device: GraphicsDevice
-    public let parent: Texture?
+    let device: GraphicsDevice
+    let parent: Texture?
 
-    public init(image: VulkanImage,
-                imageView: VkImageView,
-                parent: VulkanImageView? = nil) {
+    init(image: VulkanImage, imageView: VkImageView, parent: VulkanImageView? = nil) {
         self.image = image
         self.imageView = imageView
         self.device = image.device
         self.parent = parent
     }
 
-    public init(device: VulkanGraphicsDevice, imageView: VkImageView) {
+    init(device: VulkanGraphicsDevice, imageView: VkImageView) {
         self.imageView = imageView
         self.device = device
         self.parent = nil
@@ -47,16 +44,16 @@ public class VulkanImageView: Texture {
         }
     }
 
-    public var width: Int       { self.image!.width }
-    public var height: Int      { self.image!.height }
-    public var depth: Int       { self.image!.depth }
-    public var mipmapCount: Int { self.image!.mipmapCount }
-    public var arrayLength: Int { self.image!.arrayLength }
+    var width: Int       { self.image!.width }
+    var height: Int      { self.image!.height }
+    var depth: Int       { self.image!.depth }
+    var mipmapCount: Int { self.image!.mipmapCount }
+    var arrayLength: Int { self.image!.arrayLength }
 
-    public var type: TextureType    { self.image!.type }
-    public var pixelFormat: PixelFormat { self.image!.pixelFormat }
+    var type: TextureType    { self.image!.type }
+    var pixelFormat: PixelFormat { self.image!.pixelFormat }
 
-    public func makeTextureView(pixelFormat: PixelFormat) -> Texture? {
+    func makeTextureView(pixelFormat: PixelFormat) -> Texture? {
         self.image?.makeImageView(format: pixelFormat, parent: self)
     }
 }

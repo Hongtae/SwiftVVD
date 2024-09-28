@@ -6,21 +6,16 @@
 //
 
 import Foundation
-import VVDHelper
 
 public struct TickCounter: Equatable, Comparable {
     public private(set) var timestamp: UInt64
-    public static let frequency: UInt64 = VVDTimerSystemTickFrequency()
 
+    public static let frequency: UInt64 = Platform.tickFrequency()
     public static let frequencyUnitFraction: Double = 1.0 / Double(frequency)
 
-    public static var now: TickCounter { TickCounter(timestamp: VVDTimerSystemTick()) }
+    public static var now: TickCounter { TickCounter(timestamp: Platform.tick()) }
 
-    public init() {
-        self.timestamp = VVDTimerSystemTick()
-    }
-
-    public init(timestamp: UInt64) {
+    private init(timestamp: UInt64) {
         self.timestamp = timestamp
     }
 
@@ -34,7 +29,13 @@ public struct TickCounter: Equatable, Comparable {
     public var elapsed: Double { Self.now.distance(to: self) }
 
     public func distance(to other: TickCounter) -> Double {
-        return (Double(self.timestamp) - Double(other.timestamp)) * Self.frequencyUnitFraction
+        if self.timestamp > other.timestamp {
+            return Double(self.timestamp - other.timestamp) * Self.frequencyUnitFraction
+        } else {
+            var d = Double(other.timestamp - self.timestamp)
+            d.negate()
+            return d * Self.frequencyUnitFraction
+        }
     }
 
     // Equatable

@@ -2,31 +2,31 @@
 //  File: VulkanBufferView.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
 import Foundation
 import Vulkan
 
-public class VulkanBufferView: GPUBuffer {
-    public let device: GraphicsDevice
-    public let bufferView: VkBufferView?
-    public let buffer: VulkanBuffer?
+final class VulkanBufferView: GPUBuffer {
+    let device: GraphicsDevice
+    let bufferView: VkBufferView?
+    let buffer: VulkanBuffer?
 
-    public init(buffer: VulkanBuffer) {
+    init(buffer: VulkanBuffer) {
         self.device = buffer.device
         self.buffer = buffer
         self.bufferView = nil
     }
 
-    public init(buffer: VulkanBuffer, bufferView: VkBufferView) {
+    init(buffer: VulkanBuffer, bufferView: VkBufferView) {
         self.device = buffer.device
         self.bufferView = bufferView
         self.buffer = buffer
     }
 
-    public init(device: VulkanGraphicsDevice, bufferView: VkBufferView) {
+    init(device: VulkanGraphicsDevice, bufferView: VkBufferView) {
         self.device = device
         self.bufferView = bufferView
         self.buffer = nil
@@ -39,15 +39,15 @@ public class VulkanBufferView: GPUBuffer {
         }
     }
 
-    public func contents() -> UnsafeMutableRawPointer? {
+    func contents() -> UnsafeMutableRawPointer? {
         return self.buffer?.contents()
     }
 
-    public func flush() {
+    func flush() {
         self.buffer?.flush(offset: 0, size: UInt(VK_WHOLE_SIZE))
     }
 
-    public var length: Int { self.buffer?.length ?? 0 }
+    var length: Int { self.buffer?.length ?? 0 }
 }
 
 #endif //if ENABLE_VULKAN

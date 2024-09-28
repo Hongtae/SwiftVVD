@@ -58,7 +58,7 @@ extension View {
     }
 }
 
-class LongPressGestureRecognizer : _GestureRecognizer<LongPressGesture.Value> {
+final class LongPressGestureRecognizer : _GestureRecognizer<LongPressGesture.Value>, @unchecked Sendable {
     let gesture: LongPressGesture
     var typeFilter: _PrimitiveGestureTypes = .all
     let buttonID: Int

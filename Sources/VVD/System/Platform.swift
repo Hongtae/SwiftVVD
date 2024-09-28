@@ -2,43 +2,38 @@
 //  File: Platform.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
+import Synchronization
+import VVDHelper
 
 public protocol PlatformFactory {
-    func sharedApplication() -> Application? 
+    func sharedApplication() -> Application?
+    @MainActor
     func runApplication(delegate: ApplicationDelegate?) -> Int
     @MainActor
     func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?) -> Window?
 }
 
-var numberOfThreadsToWaitBeforeExiting = AtomicNumber64(0)
-
-func runServiceThread(_ block: @escaping () -> Void) {
-    Thread.detachNewThread {
-        numberOfThreadsToWaitBeforeExiting.increment()
-        block()
-        numberOfThreadsToWaitBeforeExiting.decrement()
-    }
-}
+let numberOfThreadsToWaitBeforeExiting = Atomic<Int>(0)
 
 func appFinalize() {
-    var timer = TickCounter()
+    var timer = TickCounter.now
     while true {
         let next = RunLoop.main.limitDate(forMode: .default)
         if let next = next, next.timeIntervalSinceNow <= 0.0 {
             continue
         }
 
-        let numThreads = numberOfThreadsToWaitBeforeExiting.load()
+        let numThreads = numberOfThreadsToWaitBeforeExiting.load(ordering: .sequentiallyConsistent)
         if numThreads > 0 {
             if timer.elapsed > 1.5 {
                 Log.info("Waiting for system service threads to finish. (\(numThreads))")
                 timer.reset()
             }
-            threadYield()
+            Platform.threadYield()
             continue
         }
         break
@@ -46,7 +41,7 @@ func appFinalize() {
 }
 
 public class Platform {
-    public static var headlessMode: Bool = {
+    public static let headlessMode: Bool = {
         CommandLine.arguments.contains { $0.lowercased() == "--headless" }
     }()
 
@@ -73,10 +68,33 @@ public class Platform {
     public class func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?) -> Window? {
         factory.makeWindow(name: name, style: style, delegate: delegate)
     }
+    @MainActor
     public class func runApplication(delegate: ApplicationDelegate?) -> Int {
         factory.runApplication(delegate: delegate)
     }
     public class func sharedApplication() -> Application? {
         factory.sharedApplication()
+    }
+}
+
+extension Platform {
+    public static func threadSleep(_ d: Double) {
+        VVDThreadSleep(d)
+    }
+
+    public static func threadYield() {
+        VVDThreadYield()
+    }
+
+    public static func currentThreadID() -> UInt {
+        return VVDThreadCurrentId()
+    }
+
+    public static func tickFrequency() -> UInt64 {
+        return VVDTimerSystemTickFrequency()
+    }
+
+    public static func tick() -> UInt64 {
+        return VVDTimerSystemTick()
     }
 }

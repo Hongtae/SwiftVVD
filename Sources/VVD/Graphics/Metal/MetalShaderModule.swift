@@ -29,7 +29,7 @@ struct MetalStageResourceBindingMap {
     var pushConstantBufferSize: Int     // buffer size in MSL (not spir-v)
 }
 
-public class MetalShaderModule: ShaderModule {
+final class MetalShaderModule: ShaderModule {
 
     public var device: GraphicsDevice
     let library: MTLLibrary

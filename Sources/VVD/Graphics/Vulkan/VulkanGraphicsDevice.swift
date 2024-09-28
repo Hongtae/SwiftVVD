@@ -2,7 +2,7 @@
 //  File: VulkanGraphicsDevice.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
@@ -11,50 +11,50 @@ import Vulkan
 
 private let pipelineCacheDataKey = "_SavedSystemStates.Vulkan.PipelineCacheData"
 
-public class VulkanGraphicsDevice : GraphicsDevice {
+final class VulkanGraphicsDevice: GraphicsDevice, @unchecked Sendable {
 
-    public var name: String
+    var name: String
 
-    public let instance: VulkanInstance
-    public let physicalDevice: VulkanPhysicalDeviceDescription
+    let instance: VulkanInstance
+    let physicalDevice: VulkanPhysicalDeviceDescription
 
-    public let device: VkDevice
-    public var allocationCallbacks: UnsafePointer<VkAllocationCallbacks>? { self.instance.allocationCallbacks }
+    let device: VkDevice
+    var allocationCallbacks: UnsafePointer<VkAllocationCallbacks>? { self.instance.allocationCallbacks }
 
-    public var properties: VkPhysicalDeviceProperties { self.physicalDevice.properties }
-    public var features: VkPhysicalDeviceFeatures { self.physicalDevice.features }
+    var properties: VkPhysicalDeviceProperties { self.physicalDevice.properties }
+    var features: VkPhysicalDeviceFeatures { self.physicalDevice.features }
 
-    public var extensionProc = VulkanDeviceExtensions()
+    var extensionProc = VulkanDeviceExtensions()
 
-    public let queueFamilies: [VulkanQueueFamily]
-    public let deviceMemoryTypes: [VkMemoryType]
-    public let deviceMemoryHeaps: [VkMemoryHeap]
+    let queueFamilies: [VulkanQueueFamily]
+    let deviceMemoryTypes: [VkMemoryType]
+    let deviceMemoryHeaps: [VkMemoryHeap]
     private var memoryPools: [VulkanMemoryPool]
 
     private var pipelineCache: VkPipelineCache?
 
     private struct FenceCallback {
         let fence: VkFence
-        let operation: () -> Void
+        let operation: @Sendable () -> Void
     }
     private var pendingFenceCallbacks: [FenceCallback] = []
     private var reusableFences: [VkFence] = []
     private var numberOfFences: UInt = 0
-    private var fenceCompletionLock = SpinLock()
+    private var fenceCompletionLock = NSLock()
 
-    public var autoIncrementTimelineEvent = false
+    var autoIncrementTimelineEvent = false
 
     private struct DescriptorPoolChainMap {
         var poolChainMap: [VulkanDescriptorPoolID: VulkanDescriptorPoolChain] = [:]
-        let lock: SpinLock = SpinLock()
+        let lock = NSLock()
     }
     private var descriptorPoolChainMaps: [DescriptorPoolChainMap] = .init(repeating: DescriptorPoolChainMap(), count: 7)
     private var task: Task<Void, Never>?
 
-    public init?(instance: VulkanInstance,
-                 physicalDevice: VulkanPhysicalDeviceDescription,
-                 requiredExtensions: [String],
-                 optionalExtensions: [String]) {
+    init?(instance: VulkanInstance,
+          physicalDevice: VulkanPhysicalDeviceDescription,
+          requiredExtensions: [String],
+          optionalExtensions: [String]) {
 
         self.instance = instance
         self.physicalDevice = physicalDevice
@@ -91,8 +91,6 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         }
 
         var requiredExtensions = requiredExtensions
-        var optionalExtensions = optionalExtensions
-
         requiredExtensions.append(VK_KHR_SWAPCHAIN_EXTENSION_NAME)
         // requiredExtensions.append(VK_KHR_MAINTENANCE1_EXTENSION_NAME)                // vulkan 1.1
         // requiredExtensions.append(VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME)          // vulkan 1.2
@@ -102,6 +100,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         // requiredExtensions.append(VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME)    // vulkan 1.3
         // requiredExtensions.append(VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME)    
 
+        //var optionalExtensions = optionalExtensions
         // optionalExtensions.append(VK_KHR_MAINTENANCE_2_EXTENSION_NAME)   // vulkan 1.1
         // optionalExtensions.append(VK_KHR_MAINTENANCE_3_EXTENSION_NAME)   // vulkan 1.1
         // optionalExtensions.append(VK_KHR_MAINTENANCE_4_EXTENSION_NAME)   // vulkan 1.1
@@ -243,24 +242,24 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         self.loadPipelineCache()
 
         self.task = .detached(priority: .background) { [weak self] in
-            numberOfThreadsToWaitBeforeExiting.increment()
-            defer { numberOfThreadsToWaitBeforeExiting.decrement() }
+            numberOfThreadsToWaitBeforeExiting.add(1, ordering: .sequentiallyConsistent)
+            defer { numberOfThreadsToWaitBeforeExiting.subtract(1, ordering: .sequentiallyConsistent) }
 
             Log.info("VulkanGraphicsDevice Helper task is started.")
 
             var err: VkResult = VK_SUCCESS
             var fences: [VkFence?] = []
             var waitingFences: [FenceCallback] = []
-            var completionHandlers: [()->Void] = []
+            var completionHandlers: [@Sendable ()->Void] = []
 
             let fenceWaitInterval = 0.01
-            var timer = TickCounter()
+            var timer = TickCounter.now
 
             mainLoop: while true {
                 guard let self = self else { break }
                 if Task.isCancelled { break }
 
-                synchronizedBy(locking: self.fenceCompletionLock) {
+                self.fenceCompletionLock.withLock {
                     waitingFences.append(contentsOf: self.pendingFenceCallbacks)
                     self.pendingFenceCallbacks.removeAll(keepingCapacity: true)
                 }
@@ -310,7 +309,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
                     }
 
                     if fences.count > 0 {
-                        synchronizedBy(locking: self.fenceCompletionLock) {
+                        self.fenceCompletionLock.withLock {
                             self.reusableFences.append(contentsOf: fences.compactMap{ $0 })
                         }
                         fences.removeAll(keepingCapacity: true)
@@ -373,7 +372,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         Log.debug("VulkanGraphicsDevice destroyed.")
     }
 
-    public func loadPipelineCache() {
+    func loadPipelineCache() {
         if let pipelineCache = self.pipelineCache {
             vkDestroyPipelineCache(self.device, pipelineCache, self.allocationCallbacks)
             self.pipelineCache = nil
@@ -403,7 +402,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         }
     }
 
-    public func savePipelineCache() {
+    func savePipelineCache() {
         if let pipelineCache = self.pipelineCache {
             var result: VkResult = VK_SUCCESS
             var buffer: UnsafeMutableRawPointer? = nil
@@ -453,7 +452,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         return nil
     }
 
-    public func makeCommandQueue(flags: CommandQueueFlags) -> CommandQueue? {
+    func makeCommandQueue(flags: CommandQueueFlags) -> CommandQueue? {
         var queueFlags: UInt32 = 0
         if flags.contains(.render) {
             queueFlags = queueFlags | UInt32(VK_QUEUE_GRAPHICS_BIT.rawValue)
@@ -484,7 +483,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         return nil
     }
 
-    public func makeShaderModule(from shader: Shader) -> ShaderModule? {
+    func makeShaderModule(from shader: Shader) -> ShaderModule? {
         if shader.validate() == false { return nil }
 
         let maxPushConstantsSize = self.properties.limits.maxPushConstantsSize
@@ -531,13 +530,13 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         return VulkanShaderModule(device: self, module: shaderModule!, shader: shader)
     }
 
-    public func makeShaderBindingSet(layout: ShaderBindingSetLayout) -> ShaderBindingSet? {
+    func makeShaderBindingSet(layout: ShaderBindingSetLayout) -> ShaderBindingSet? {
         let poolID = VulkanDescriptorPoolID(layout: layout)
         if poolID.mask != 0 {
 #if DEBUG
             let index: Int = Int(poolID.hash % UInt32(descriptorPoolChainMaps.count))
 
-            synchronizedBy(locking: self.descriptorPoolChainMaps[index].lock) {
+            self.descriptorPoolChainMaps[index].lock.withLock {
                 // find matching pool.
                 if let chain = self.descriptorPoolChainMaps[index].poolChainMap[poolID] {
                     assert(chain.device === self)
@@ -590,7 +589,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         return nil
     }
 
-    public func makeRenderPipelineState(descriptor desc: RenderPipelineDescriptor,
+    func makeRenderPipelineState(descriptor desc: RenderPipelineDescriptor,
         reflection: UnsafeMutablePointer<PipelineReflection>?) -> RenderPipelineState? {
 
         var result: VkResult = VK_SUCCESS
@@ -986,7 +985,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         return pipelineState
     }
 
-    public func makeComputePipelineState(descriptor desc: ComputePipelineDescriptor,
+    func makeComputePipelineState(descriptor desc: ComputePipelineDescriptor,
         reflection: UnsafeMutablePointer<PipelineReflection>?) -> ComputePipelineState? {
 
         var result: VkResult = VK_SUCCESS
@@ -1064,7 +1063,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         return pipelineState
     }
 
-    public func makeDepthStencilState(descriptor desc: DepthStencilDescriptor) -> DepthStencilState? {
+    func makeDepthStencilState(descriptor desc: DepthStencilDescriptor) -> DepthStencilState? {
 
         let compareOp = { (fn: CompareFunction) -> VkCompareOp in
             switch fn {
@@ -1129,7 +1128,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         return depthStencilState
     }
 
-    public func makeBuffer(length: Int, storageMode: StorageMode, cpuCacheMode: CPUCacheMode) -> GPUBuffer? {
+    func makeBuffer(length: Int, storageMode: StorageMode, cpuCacheMode: CPUCacheMode) -> GPUBuffer? {
         guard length > 0 else { return nil }
 
         var buffer: VkBuffer? = nil
@@ -1205,7 +1204,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         return VulkanBufferView(buffer: bufferObject)
     }
 
-    public func makeTexture(descriptor desc: TextureDescriptor) -> Texture? {
+    func makeTexture(descriptor desc: TextureDescriptor) -> Texture? {
         var image: VkImage? = nil
         var memory: VulkanMemoryBlock? = nil
 
@@ -1332,7 +1331,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         return imageObject.makeImageView(format: desc.pixelFormat)
     }
 
-    public func makeTransientRenderTarget(type textureType: TextureType,
+    func makeTransientRenderTarget(type textureType: TextureType,
                                           pixelFormat: PixelFormat,
                                           width: Int,
                                           height: Int,
@@ -1450,7 +1449,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
     }
 
 
-    public func makeSamplerState(descriptor desc: SamplerDescriptor) -> SamplerState? {
+    func makeSamplerState(descriptor desc: SamplerDescriptor) -> SamplerState? {
         let filter = { (f: SamplerMinMagFilter) -> VkFilter in
             switch f {
             case .nearest:      return VK_FILTER_NEAREST
@@ -1526,7 +1525,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         return VulkanSampler(device: self, sampler: sampler!)
     }
 
-    public func makeEvent() -> GPUEvent? {
+    func makeEvent() -> GPUEvent? {
         var createInfo = VkSemaphoreCreateInfo()
         createInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO
 
@@ -1555,7 +1554,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         return VulkanSemaphore(device: self, semaphore: semaphore!)
     }
 
-    public func makeSemaphore() -> GPUSemaphore? {
+    func makeSemaphore() -> GPUSemaphore? {
         var createInfo = VkSemaphoreCreateInfo()
         createInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO
 
@@ -1613,7 +1612,7 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         let cleanupThresholdAllChains = 2000
         let cleanupThreshold = 100
 
-        synchronizedBy(locking: self.descriptorPoolChainMaps[index].lock) {
+        self.descriptorPoolChainMaps[index].lock.withLock {
             pool.release(descriptorSets: sets)
             
             var numChainPools = 0
@@ -1793,15 +1792,15 @@ public class VulkanGraphicsDevice : GraphicsDevice {
         return pipelineLayout
     }
 
-    public func addCompletionHandler(fence: VkFence, op: @escaping ()->Void) {
-        synchronizedBy(locking: self.fenceCompletionLock) {
+    func addCompletionHandler(fence: VkFence, op: @escaping @Sendable ()->Void) {
+        self.fenceCompletionLock.withLock {
             let cb = FenceCallback(fence: fence, operation: op)
             self.pendingFenceCallbacks.append(cb)
         }
     }
 
-    public func fence() -> VkFence {
-        var fence: VkFence? = synchronizedBy(locking: self.fenceCompletionLock) {
+    func fence() -> VkFence {
+        var fence: VkFence? = self.fenceCompletionLock.withLock {
             if self.reusableFences.count > 0 {
                 return self.reusableFences.removeFirst()
             }

@@ -9,7 +9,7 @@
 import Foundation
 import Metal
 
-public class MetalDepthStencilState: DepthStencilState {
+final class MetalDepthStencilState: DepthStencilState {
     public let device: GraphicsDevice
 
     let depthStencilState: MTLDepthStencilState

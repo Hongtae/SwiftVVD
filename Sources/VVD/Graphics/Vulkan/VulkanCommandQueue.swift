@@ -2,24 +2,24 @@
 //  File: VulkanCommandQueue.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
 import Foundation
 import Vulkan
 
-public class VulkanCommandQueue: CommandQueue {
+final class VulkanCommandQueue: CommandQueue {
 
-    public let device: GraphicsDevice
-    public let flags: CommandQueueFlags
+    let device: GraphicsDevice
+    let flags: CommandQueueFlags
 
-    public let queue: VkQueue
+    let queue: VkQueue
     let family: VulkanQueueFamily
 
     private let lock = NSLock()
 
-    public init(device: VulkanGraphicsDevice, family: VulkanQueueFamily, queue: VkQueue) {
+    init(device: VulkanGraphicsDevice, family: VulkanQueueFamily, queue: VkQueue) {
 
         let queueFlags = family.properties.queueFlags
 
@@ -48,7 +48,7 @@ public class VulkanCommandQueue: CommandQueue {
         self.family.recycle(queue: self.queue)
     }
 
-    public func makeCommandBuffer() -> CommandBuffer? {
+    func makeCommandBuffer() -> CommandBuffer? {
         let device = self.device as! VulkanGraphicsDevice
         var commandPoolCreateInfo = VkCommandPoolCreateInfo()
         commandPoolCreateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO
@@ -65,7 +65,7 @@ public class VulkanCommandQueue: CommandQueue {
     }
 
     @MainActor
-    public func makeSwapChain(target: Window) -> SwapChain? {
+    func makeSwapChain(target: Window) -> SwapChain? {
         guard self.family.supportPresentation else {
             Log.err("Vulkan WSI not supported with this queue family. Try to use other queue family!")
             return nil
@@ -80,20 +80,20 @@ public class VulkanCommandQueue: CommandQueue {
         return nil 
     }
 
-    func submit(_ submits: [VkSubmitInfo2], callback: (()->Void)?) -> Bool {
+    func submit(_ submits: [VkSubmitInfo2], callback: (@Sendable ()->Void)?) -> Bool {
         let device = self.device as! VulkanGraphicsDevice
         var result: VkResult = VK_SUCCESS
 
         if let callback = callback {
             let fence: VkFence = device.fence()
-            result = synchronizedBy(locking: self.lock) {
+            result = self.lock.withLock {
                 vkQueueSubmit2(self.queue, UInt32(submits.count), submits, fence)
             }
             if result == VK_SUCCESS {
                 device.addCompletionHandler(fence: fence, op: callback)
             }
         } else {
-            result = synchronizedBy(locking: self.lock) {
+            result = self.lock.withLock {
                 vkQueueSubmit2(self.queue, UInt32(submits.count), submits, nil)
             }
         }
@@ -105,7 +105,7 @@ public class VulkanCommandQueue: CommandQueue {
 
     @discardableResult
     func waitIdle() -> Bool { 
-        synchronizedBy(locking: self.lock) { vkQueueWaitIdle(self.queue) } == VK_SUCCESS
+        self.lock.withLock { vkQueueWaitIdle(self.queue) == VK_SUCCESS }
     }
 }
 #endif //if ENABLE_VULKAN

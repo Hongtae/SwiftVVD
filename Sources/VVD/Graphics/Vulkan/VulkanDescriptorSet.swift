@@ -2,17 +2,17 @@
 //  File: VulkanDescriptorSet.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
 import Foundation
 import Vulkan
 
-public class VulkanDescriptorSet {
-    public let device: VulkanGraphicsDevice
-    public let descriptorSet: VkDescriptorSet
-    public let descriptorPool: VulkanDescriptorPool
+final class VulkanDescriptorSet {
+    let device: VulkanGraphicsDevice
+    let descriptorSet: VkDescriptorSet
+    let descriptorPool: VulkanDescriptorPool
 
     struct Binding {
         let layoutBinding: VkDescriptorSetLayoutBinding
@@ -30,7 +30,7 @@ public class VulkanDescriptorSet {
     }
     var bindings: [Binding] = []
 
-    public init(device: VulkanGraphicsDevice, descriptorPool: VulkanDescriptorPool, descriptorSet: VkDescriptorSet) {
+    init(device: VulkanGraphicsDevice, descriptorPool: VulkanDescriptorPool, descriptorSet: VkDescriptorSet) {
         self.device = device
         self.descriptorPool = descriptorPool
         self.descriptorSet = descriptorSet
@@ -40,19 +40,19 @@ public class VulkanDescriptorSet {
         device.releaseDescriptorSets([self.descriptorSet], pool: self.descriptorPool)
     }
 
-    public struct ImageLayoutInfo {
-        public let image: VulkanImage
-        public var layout: VkImageLayout
+    struct ImageLayoutInfo {
+        let image: VulkanImage
+        var layout: VkImageLayout
     }
-    public struct ImageViewLayoutInfo {
-        public let imageView: VulkanImageView
-        public var layout: VkImageLayout
+    struct ImageViewLayoutInfo {
+        let imageView: VulkanImageView
+        var layout: VkImageLayout
     }
-    public typealias ImageLayoutMap = [VkImage: ImageLayoutInfo]
-    public typealias ImageViewLayoutMap = [VkImageView: ImageViewLayoutInfo]
+    typealias ImageLayoutMap = [VkImage: ImageLayoutInfo]
+    typealias ImageViewLayoutMap = [VkImageView: ImageViewLayoutInfo]
 
-    public func collectImageViewLayouts(_ imageLayouts: inout ImageLayoutMap,
-                                        _ imageViewLayouts: inout ImageViewLayoutMap) {
+    func collectImageViewLayouts(_ imageLayouts: inout ImageLayoutMap,
+                                 _ imageViewLayouts: inout ImageViewLayoutMap) {
         var imageViewMap: [VkImageView: VulkanImageView] = [:]
         for binding in self.bindings {
             if binding.valueSet == false {
@@ -97,7 +97,7 @@ public class VulkanDescriptorSet {
         }
     }
 
-    public func updateImageViewLayouts(_ imageLayouts: ImageViewLayoutMap) {
+    func updateImageViewLayouts(_ imageLayouts: ImageViewLayoutMap) {
         var descriptorWrites: [VkWriteDescriptorSet] = []
         descriptorWrites.reserveCapacity(self.bindings.count)
 

@@ -23,4 +23,7 @@ struct MetalHashable<Object: AnyObject>: Hashable {
         return ObjectIdentifier(lhs.object) == ObjectIdentifier(rhs.object)
     }
 }
+
+extension MetalHashable: Sendable where Object: Sendable {}
+
 #endif //if ENABLE_METAL

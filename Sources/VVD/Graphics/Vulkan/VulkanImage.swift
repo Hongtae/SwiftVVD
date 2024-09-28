@@ -9,18 +9,18 @@
 import Foundation
 import Vulkan
 
-public class VulkanImage {
+final class VulkanImage {
 
-    public var image: VkImage?
-    public var imageType: VkImageType
-    public var format: VkFormat
-    public var extent: VkExtent3D
-    public var mipLevels: UInt32
-    public var arrayLayers: UInt32
-    public var usage: VkImageUsageFlags
+    var image: VkImage?
+    var imageType: VkImageType
+    var format: VkFormat
+    var extent: VkExtent3D
+    var mipLevels: UInt32
+    var arrayLayers: UInt32
+    var usage: VkImageUsageFlags
  
-    public let memory: VulkanMemoryBlock?
-    public let device: GraphicsDevice
+    let memory: VulkanMemoryBlock?
+    let device: GraphicsDevice
 
     private struct LayoutAccessInfo {
         var layout: VkImageLayout
@@ -29,10 +29,10 @@ public class VulkanImage {
         var stageMaskEnd: VkPipelineStageFlags2
         var queueFamilyIndex: UInt32
     }
-    private let layoutLock = SpinLock()
+    private let layoutLock = NSLock()
     private var layoutInfo: LayoutAccessInfo
 
-    public init(device: VulkanGraphicsDevice, memory: VulkanMemoryBlock, image: VkImage, imageCreateInfo: VkImageCreateInfo) {
+    init(device: VulkanGraphicsDevice, memory: VulkanMemoryBlock, image: VkImage, imageCreateInfo: VkImageCreateInfo) {
         self.device = device
         self.memory = memory
 
@@ -62,7 +62,7 @@ public class VulkanImage {
         assert(format != VK_FORMAT_UNDEFINED)
     }
 
-    public init(device: VulkanGraphicsDevice, image: VkImage) {
+    init(device: VulkanGraphicsDevice, image: VkImage) {
         self.device = device
         self.memory = nil
         
@@ -92,7 +92,7 @@ public class VulkanImage {
         }
     }
 
-    public func makeImageView(format: PixelFormat, parent: VulkanImageView? = nil)-> VulkanImageView? {
+    func makeImageView(format: PixelFormat, parent: VulkanImageView? = nil)-> VulkanImageView? {
         if self.usage & (UInt32(VK_IMAGE_USAGE_SAMPLED_BIT.rawValue) |
                          UInt32(VK_IMAGE_USAGE_STORAGE_BIT.rawValue) |
                          UInt32(VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT.rawValue) |
@@ -165,7 +165,7 @@ public class VulkanImage {
     }
 
     @discardableResult
-    public func setLayout(_ layout: VkImageLayout,
+    func setLayout(_ layout: VkImageLayout,
                           accessMask: VkAccessFlags2,
                           stageBegin: VkPipelineStageFlags2, // this barrier's dst-stage
                           stageEnd: VkPipelineStageFlags2,   // next barrier's src-stage
@@ -238,17 +238,17 @@ public class VulkanImage {
         return oldLayout
     }
 
-    public func layout() -> VkImageLayout {
-        synchronizedBy(locking: self.layoutLock) { self.layoutInfo.layout }
+    func layout() -> VkImageLayout {
+        self.layoutLock.withLock { self.layoutInfo.layout }
     }
 
-    public var width: Int       { Int(self.extent.width) }
-    public var height: Int      { Int(self.extent.height) }
-    public var depth: Int       { Int(self.extent.depth) }
-    public var mipmapCount: Int { Int(self.mipLevels) }
-    public var arrayLength: Int { Int(self.arrayLayers) }
+    var width: Int       { Int(self.extent.width) }
+    var height: Int      { Int(self.extent.height) }
+    var depth: Int       { Int(self.extent.depth) }
+    var mipmapCount: Int { Int(self.mipLevels) }
+    var arrayLength: Int { Int(self.arrayLayers) }
 
-    public var type: TextureType {
+    var type: TextureType {
         switch self.imageType {
             case VK_IMAGE_TYPE_1D:  return .type1D
             case VK_IMAGE_TYPE_2D:  return .type2D
@@ -256,9 +256,9 @@ public class VulkanImage {
             default:                return .unknown
         }
     }
-    public var pixelFormat: PixelFormat { .from(vkFormat: self.format) }
+    var pixelFormat: PixelFormat { .from(vkFormat: self.format) }
 
-    public static func commonAccessMask(forLayout layout: VkImageLayout) -> VkAccessFlags2 {
+    static func commonAccessMask(forLayout layout: VkImageLayout) -> VkAccessFlags2 {
         var accessMask = VK_ACCESS_2_NONE 
         switch layout {
         case VK_IMAGE_LAYOUT_UNDEFINED:

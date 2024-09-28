@@ -1,11 +1,10 @@
 FROM swift:latest
 
 USER root
-RUN apt-get update
 
+RUN apt-get update
 RUN apt-get install -y vulkan-tools
 RUN apt-get install -y libvulkan-dev
-RUN apt-get install -y vulkan-validationlayers-dev
 RUN apt-get install -y spirv-tools
 
 RUN apt-get install -y libwayland-dev

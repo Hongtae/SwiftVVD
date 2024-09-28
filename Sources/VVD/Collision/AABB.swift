@@ -2,12 +2,12 @@
 //  File: AABB.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
 
-public struct AABB: Hashable {
+public struct AABB: Hashable, Sendable {
     public var min: Vector3
     public var max: Vector3
 

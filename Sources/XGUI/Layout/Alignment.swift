@@ -70,7 +70,7 @@ public struct Alignment : Equatable {
     public static let topTrailing = Alignment(horizontal: .trailing, vertical: .top)
 
     public static let bottomLeading = Alignment(horizontal: .leading, vertical: .bottom)
-    public static var bottomTrailing = Alignment(horizontal: .trailing, vertical: .bottom)
+    public static let bottomTrailing = Alignment(horizontal: .trailing, vertical: .bottom)
 }
 
 extension AlignmentKey : Sendable {}

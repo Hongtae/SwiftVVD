@@ -126,7 +126,7 @@ public struct Text: Equatable {
     }
 
     public struct LineStyle: Hashable {
-        public struct Pattern: Equatable {
+        public struct Pattern: Equatable, Sendable {
             enum UnderlineStyle {
                 case solid
                 case dot

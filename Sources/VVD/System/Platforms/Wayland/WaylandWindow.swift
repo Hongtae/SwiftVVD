@@ -2,14 +2,14 @@
 //  File: WaylandWindow.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_WAYLAND
 import Foundation
 import Wayland
 
-
+nonisolated(unsafe)
 var xdgSurfaceListener = xdg_surface_listener(
     configure: { data, surface, serial in
         let window = unsafeBitCast(data, to: AnyObject.self) as! WaylandWindow
@@ -23,6 +23,8 @@ var xdgSurfaceListener = xdg_surface_listener(
         }
     }
 )
+
+nonisolated(unsafe)
 var xdgToplevelListener = xdg_toplevel_listener(
     configure: { data, topLevel, width, height, states in
         let window = unsafeBitCast(data, to: AnyObject.self) as! WaylandWindow
@@ -40,16 +42,16 @@ var xdgToplevelListener = xdg_toplevel_listener(
 
 
 @MainActor
-public class WaylandWindow: Window {
+final class WaylandWindow: Window {
 
-    public private(set) var activated: Bool = false
-    public private(set) var visible: Bool = false
+    private(set) var activated: Bool = false
+    private(set) var visible: Bool = false
 
-    public private(set) var contentBounds: CGRect = .null
-    public private(set) var windowFrame: CGRect = .null
-    public private(set) var contentScaleFactor: CGFloat = 1
+    private(set) var contentBounds: CGRect = .null
+    private(set) var windowFrame: CGRect = .null
+    private(set) var contentScaleFactor: CGFloat = 1
 
-    public var resolution: CGSize {
+    var resolution: CGSize {
         get { _resolution }
         set { _resolution = CGSize(width: max(newValue.width, 1), height: max(newValue.height, 1)) }
     }
@@ -61,23 +63,23 @@ public class WaylandWindow: Window {
         }
     }
 
-    public var origin: CGPoint = .zero
-    public var contentSize: CGSize {
+    var origin: CGPoint = .zero
+    var contentSize: CGSize {
         get { self.contentBounds.size }
         set { self.resolution = newValue * self.contentScaleFactor }
     }
 
-    public private(set) var delegate: WindowDelegate?
+    private(set) var delegate: WindowDelegate?
 
     private(set) var display: OpaquePointer?
-    private(set) var surface: OpaquePointer?
+    nonisolated(unsafe) private(set) var surface: OpaquePointer?
 
-    private var xdgSurface: OpaquePointer?
-    private var xdgToplevel: OpaquePointer?
+    nonisolated(unsafe) private var xdgSurface: OpaquePointer?
+    nonisolated(unsafe) private var xdgToplevel: OpaquePointer?
 
     fileprivate var xdgSurfaceConfigured = false
 
-    public required init?(name: String, style: WindowStyle, delegate: WindowDelegate?) {
+    required init?(name: String, style: WindowStyle, delegate: WindowDelegate?) {
         guard let app = (WaylandApplication.shared as? WaylandApplication) else {
             Log.error("Unable to identify Application class")
             return nil
@@ -131,60 +133,60 @@ public class WaylandWindow: Window {
         wl_surface_destroy(self.surface)
     }
 
-    public func show() {
+    func show() {
         self.visible = true
         Task { self.postWindowEvent(type: .shown) }
     }
 
-    public func hide() {
+    func hide() {
         self.activated = false
         self.visible = false
         Task { self.postWindowEvent(type: .hidden) }
     }
 
-    public func activate() {
+    func activate() {
         self.activated = true
         self.visible = true
         Task { self.postWindowEvent(type: .activated) }
     }
 
-    public func minimize() {
+    func minimize() {
         self.activated = false
         self.visible = false
         Task { self.postWindowEvent(type: .minimized) }
     }
 
-    public func showMouse(_: Bool, forDeviceID: Int) {
+    func showMouse(_: Bool, forDeviceID: Int) {
 
     }
 
-    public func isMouseVisible(forDeviceID: Int) -> Bool {
+    func isMouseVisible(forDeviceID: Int) -> Bool {
         false 
     }
 
-    public func lockMouse(_: Bool, forDeviceID: Int) {
+    func lockMouse(_: Bool, forDeviceID: Int) {
 
     }
 
-    public func isMouseLocked(forDeviceID: Int) -> Bool {
+    func isMouseLocked(forDeviceID: Int) -> Bool {
         false
     }
 
-    public func setMousePosition(_: CGPoint, forDeviceID: Int) {
+    func setMousePosition(_: CGPoint, forDeviceID: Int) {
 
     }
 
-    public func mousePosition(forDeviceID: Int) -> CGPoint? {
+    func mousePosition(forDeviceID: Int) -> CGPoint? {
         nil
     }
 
-    public func enableTextInput(_ enable: Bool, forDeviceID deviceID: Int) {
+    func enableTextInput(_ enable: Bool, forDeviceID deviceID: Int) {
         if deviceID == 0 {
             
         }
     }
 
-    public func isTextInputEnabled(forDeviceID deviceID: Int) -> Bool {
+    func isTextInputEnabled(forDeviceID deviceID: Int) -> Bool {
         if deviceID == 0 {
             return false
         }
@@ -249,7 +251,7 @@ public class WaylandWindow: Window {
     }
     private var eventObservers: [ObjectIdentifier: EventHandlers] = [:]
 
-    public func addEventObserver(_ observer: AnyObject, handler: @escaping (_: WindowEvent)->Void) {
+    func addEventObserver(_ observer: AnyObject, handler: @escaping (_: WindowEvent)->Void) {
         let key = ObjectIdentifier(observer)
         if var handlers = self.eventObservers[key] {
             handlers.windowEventHandler = handler
@@ -258,7 +260,7 @@ public class WaylandWindow: Window {
             self.eventObservers[key] = EventHandlers(observer: observer, windowEventHandler: handler)
         }
     }
-    public func addEventObserver(_ observer: AnyObject, handler: @escaping (_: MouseEvent)->Void) {
+    func addEventObserver(_ observer: AnyObject, handler: @escaping (_: MouseEvent)->Void) {
         let key = ObjectIdentifier(observer)
         if var handlers = self.eventObservers[key] {
             handlers.mouseEventHandler = handler
@@ -267,7 +269,7 @@ public class WaylandWindow: Window {
             self.eventObservers[key] = EventHandlers(observer: observer, mouseEventHandler: handler)
         }
     }
-    public func addEventObserver(_ observer: AnyObject, handler: @escaping (_: KeyboardEvent)->Void) {
+    func addEventObserver(_ observer: AnyObject, handler: @escaping (_: KeyboardEvent)->Void) {
         let key = ObjectIdentifier(observer)
         if var handlers = self.eventObservers[key] {
             handlers.keyboardEventHandler = handler
@@ -276,7 +278,7 @@ public class WaylandWindow: Window {
             self.eventObservers[key] = EventHandlers(observer: observer, keyboardEventHandler: handler)
         }
     }
-    public func removeEventObserver(_ observer: AnyObject) {
+    func removeEventObserver(_ observer: AnyObject) {
         let key = ObjectIdentifier(observer)
         self.eventObservers[key] = nil
     }

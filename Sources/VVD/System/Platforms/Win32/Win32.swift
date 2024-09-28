@@ -2,7 +2,7 @@
 //  File: Win32.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_WIN32
@@ -13,6 +13,7 @@ public struct PlatformFactoryWin32: PlatformFactory {
         return Win32Application.shared
     }
 
+    @MainActor
     public func runApplication(delegate: ApplicationDelegate?) -> Int {
         return Win32Application.run(delegate: delegate)
     }

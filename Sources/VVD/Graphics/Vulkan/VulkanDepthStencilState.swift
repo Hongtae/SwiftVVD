@@ -2,15 +2,15 @@
 //  File: VulkanDepthStencilState.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
 import Foundation
 import Vulkan
 
-public class VulkanDepthStencilState: DepthStencilState {
-    public let device: GraphicsDevice
+final class VulkanDepthStencilState: DepthStencilState {
+    let device: GraphicsDevice
 
     var depthTestEnable: VkBool32
     var depthWriteEnable: VkBool32
@@ -23,7 +23,7 @@ public class VulkanDepthStencilState: DepthStencilState {
     var back: VkStencilOpState
     var stencilTestEnable: VkBool32
 
-    public init(device: VulkanGraphicsDevice) {
+    init(device: VulkanGraphicsDevice) {
         self.device = device
 
         self.depthTestEnable = VK_FALSE

@@ -12,7 +12,7 @@
 #else
 #include <pthread.h>
 #include <sys/select.h>
-#include <sched.h>  // to using sched_yield() in VVDThread::Yield()
+#include <sched.h>
 #include <errno.h>
 #include <limits.h>
 #endif
@@ -56,16 +56,22 @@ extern "C" void VVDThreadYield()
 {
 #ifdef _WIN32
     if (SwitchToThread() == 0)
-        VVDThreadSleep(0);
+    {
+        YieldProcessor();
+        //Sleep(0);
+    }
 #else
     if (sched_yield() != 0)
-        VVDThreadSleep(0);
+    {
+        struct timespec req = {0, 1};
+        nanosleep(&req, nullptr);
+    }
 #endif
 }
 
 extern "C" uintptr_t VVDThreadCurrentId()
 {
-    #ifdef _WIN32
+#ifdef _WIN32
     return (uintptr_t)::GetCurrentThreadId();
 #else
     return (uintptr_t)pthread_self();

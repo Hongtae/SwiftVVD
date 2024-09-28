@@ -2,14 +2,14 @@
 //  File: VulkanExtensions.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
 import Foundation
 import Vulkan
 
-public struct VulkanInstanceExtensions {
+struct VulkanInstanceExtensions {
     // VK_EXT_debug_utils
     var vkSetDebugUtilsObjectNameEXT: PFN_vkSetDebugUtilsObjectNameEXT?
     var vkSetDebugUtilsObjectTagEXT: PFN_vkSetDebugUtilsObjectTagEXT?
@@ -88,11 +88,11 @@ public struct VulkanInstanceExtensions {
     }
 }
 
-public struct VulkanDeviceExtensions {
+struct VulkanDeviceExtensions {
 
     mutating func load(device: VkDevice) {
-
     }
+
     func loadDeviceProc<T>(_ device: VkDevice, _ proc: String, to: T.Type) -> T? {
         if let pfn = vkGetDeviceProcAddr(device, proc) {
             return unsafeBitCast(pfn, to: T.self)
@@ -101,7 +101,7 @@ public struct VulkanDeviceExtensions {
     }
 }
 
-extension VkResult: CustomStringConvertible {
+extension VkResult: @retroactive CustomStringConvertible {
     public var description: String {
         let enumStr = { (value: VkResult) -> String in
             switch value {

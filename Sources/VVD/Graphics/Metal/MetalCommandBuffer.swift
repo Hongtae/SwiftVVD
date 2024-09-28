@@ -2,7 +2,7 @@
 //  File: MetalCommandBuffer.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_METAL
@@ -17,7 +17,7 @@ class MetalCommandEncoder {
     }
 }
 
-public class MetalCommandBuffer: CommandBuffer {
+final class MetalCommandBuffer: CommandBuffer {
     public let commandQueue: CommandQueue
     public var device: GraphicsDevice   { commandQueue.device }
 

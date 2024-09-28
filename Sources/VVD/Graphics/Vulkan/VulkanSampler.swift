@@ -2,18 +2,18 @@
 //  File: VulkanSampler.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
 import Foundation
 import Vulkan
 
-public class VulkanSampler: SamplerState {
-    public let device: GraphicsDevice
-    public let sampler: VkSampler
+final class VulkanSampler: SamplerState {
+    let device: GraphicsDevice
+    let sampler: VkSampler
 
-    public init(device: VulkanGraphicsDevice, sampler: VkSampler) {
+    init(device: VulkanGraphicsDevice, sampler: VkSampler) {
         self.device = device
         self.sampler = sampler
     }

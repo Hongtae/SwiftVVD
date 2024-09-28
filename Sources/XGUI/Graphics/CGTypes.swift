@@ -9,7 +9,8 @@ import Foundation
 import VVD
 
 #if canImport(CoreGraphics)
-import CoreGraphics
+//import CoreGraphics
+@_exported import CoreGraphics
 
 public typealias CGFloat = CoreGraphics.CGFloat
 public typealias CGPoint = CoreGraphics.CGPoint

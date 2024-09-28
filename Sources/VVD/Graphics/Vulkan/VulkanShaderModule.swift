@@ -2,25 +2,25 @@
 //  File: VulkanShaderModule.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
 import Foundation
 import Vulkan
 
-public class VulkanShaderModule: ShaderModule {
-    public let device: GraphicsDevice
-    public let module: VkShaderModule
-    public let functionNames: [String]
+final class VulkanShaderModule: ShaderModule {
+    let device: GraphicsDevice
+    let module: VkShaderModule
+    let functionNames: [String]
 
-    public let stage: ShaderStage
-    public let inputAttributes: [ShaderAttribute]
-    public let pushConstantLayouts: [ShaderPushConstantLayout]
-    public let resources: [ShaderResource]
-    public let descriptors: [ShaderDescriptor]
+    let stage: ShaderStage
+    let inputAttributes: [ShaderAttribute]
+    let pushConstantLayouts: [ShaderPushConstantLayout]
+    let resources: [ShaderResource]
+    let descriptors: [ShaderDescriptor]
 
-    public init(device: VulkanGraphicsDevice, module: VkShaderModule, shader: Shader) {
+    init(device: VulkanGraphicsDevice, module: VkShaderModule, shader: Shader) {
         self.device = device
         self.module = module
 
@@ -37,14 +37,14 @@ public class VulkanShaderModule: ShaderModule {
         vkDestroyShaderModule(device.device, module, device.allocationCallbacks)
     }
 
-    public func makeFunction(name: String) -> ShaderFunction? {
+    func makeFunction(name: String) -> ShaderFunction? {
         if self.functionNames.contains(name) {
             return VulkanShaderFunction(module: self, name: name, constantValues:[])
         }
         return nil
     }
 
-    public func makeFunction(name: String, constantValues: [ShaderFunctionConstantValue]) -> ShaderFunction? {
+    func makeFunction(name: String, constantValues: [ShaderFunctionConstantValue]) -> ShaderFunction? {
         // TODO: verify spir-v specialization constant
 
         if self.functionNames.contains(name) {

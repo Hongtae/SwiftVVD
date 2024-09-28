@@ -2,24 +2,25 @@
 //  File: AudioDeviceContext.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
+import Synchronization
 import OpenAL
 
 private let maxBufferCount = 3
 private let minBufferTime = 0.4
 private let maxBufferTime = 10.0
 
-public class AudioDeviceContext {
+public final class AudioDeviceContext: @unchecked Sendable {
     public let device: AudioDevice
     public let listener: AudioListener
 
-    struct Player {
-        weak var player: AudioPlayer?
+    struct Player: Sendable {
+        nonisolated(unsafe) weak var player: AudioPlayer?
     }
-    private var players: [Player] = []
+    private let players = Mutex<[Player]>([])
     private let lock = NSLock()
 
     private var task: Task<Void, Never>?
@@ -28,9 +29,9 @@ public class AudioDeviceContext {
         self.device = device
         self.listener = AudioListener(device: self.device)
 
-        self.task = .detached(priority: .background) { @AudioActor [weak self] in
-            numberOfThreadsToWaitBeforeExiting.increment()
-            defer { numberOfThreadsToWaitBeforeExiting.decrement() }
+        self.task = .detached(priority: .background) { [weak self] in
+            numberOfThreadsToWaitBeforeExiting.add(1, ordering: .sequentiallyConsistent)
+            defer { numberOfThreadsToWaitBeforeExiting.subtract(1, ordering: .sequentiallyConsistent) }
 
             Log.info("AudioDeviceContext playback task is started.")
 
@@ -42,9 +43,9 @@ public class AudioDeviceContext {
                 guard let self = self else { break }
                 if Task.isCancelled { break }
 
-                let players: [AudioPlayer] = synchronizedBy(locking: self.lock) {
-                    let r = self.players.compactMap{ $0.player }
-                    self.players = r.map { Player(player: $0) }
+                let players: [AudioPlayer] = self.players.withLock {
+                    let r = $0.compactMap(\.player)
+                    $0 = r.map { Player(player: $0) }
                     return r
                 }
 
@@ -151,14 +152,14 @@ public class AudioDeviceContext {
 
     deinit {
         self.task?.cancel()
-        self.players.removeAll()
+        self.players.withLock { $0.removeAll() }
     }
 
     public func makePlayer(stream: AudioStream) -> AudioPlayer? {
         if let source = device.makeSource() {
             let player = AudioPlayer(source: source, stream: stream)
-            synchronizedBy(locking: self.lock) {
-                self.players.append(Player(player: player))
+            self.players.withLock {
+                $0.append(Player(player: player))
             }
             return player
         }

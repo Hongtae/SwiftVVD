@@ -2,11 +2,12 @@
 //  File: WaylandApplication.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_WAYLAND
 import Foundation
+@preconcurrency
 import Wayland
 
 private let BTN_MOUSE		= 0x110
@@ -19,6 +20,7 @@ private let BTN_FORWARD		= 0x115
 private let BTN_BACK		= 0x116
 private let BTN_TASK		= 0x117
 
+nonisolated(unsafe)
 private var registryListener = wl_registry_listener(
     global: { data, registry, name, interface, version in
         let app = unsafeBitCast(data, to: AnyObject.self) as! WaylandApplication
@@ -46,6 +48,7 @@ private var registryListener = wl_registry_listener(
     }
 )
 
+nonisolated(unsafe)
 private var xdgWmBaseListener = xdg_wm_base_listener(
     ping: { data, shell, serial in
         Log.debug("xdg_wm_base_listener.ping (serial:\(serial))")
@@ -53,6 +56,7 @@ private var xdgWmBaseListener = xdg_wm_base_listener(
     }
 )
 
+nonisolated(unsafe)
 private var seatListener = wl_seat_listener(
     capabilities: { data, seat, capabilities in
         let app = unsafeBitCast(data, to: AnyObject.self) as! WaylandApplication
@@ -87,6 +91,7 @@ private var seatListener = wl_seat_listener(
     }
 )
 
+nonisolated(unsafe)
 private var pointerListener = wl_pointer_listener(
     enter: { data, pointer, serial, surface, x, y in
         let app = unsafeBitCast(data, to: AnyObject.self) as! WaylandApplication
@@ -123,9 +128,14 @@ private var pointerListener = wl_pointer_listener(
     axis_discrete: { data, pointer, axis, discrete in
         let app = unsafeBitCast(data, to: AnyObject.self) as! WaylandApplication
         app.pointerAxis(axis, discrete: discrete)
+    },
+    axis_value120: { data, pointer, axis, value120 in
+    },
+    axis_relative_direction: { data, pointer, axis, direction in
     }
 )
 
+nonisolated(unsafe)
 private var keyboardListener = wl_keyboard_listener(
     keymap: { data, keyboard, format, fd, size in
         let app = unsafeBitCast(data, to: AnyObject.self) as! WaylandApplication
@@ -154,7 +164,7 @@ private var keyboardListener = wl_keyboard_listener(
 )
 
 
-public class WaylandApplication: Application {
+final class WaylandApplication: Application, @unchecked Sendable {
 
     private(set) var display: OpaquePointer?
     private(set) var registry: OpaquePointer?
@@ -166,7 +176,7 @@ public class WaylandApplication: Application {
 
     private var requestExitWithCode: Int? = nil
 
-    public static func run(delegate: ApplicationDelegate?) -> Int {
+    static func run(delegate: ApplicationDelegate?) -> Int {
         guard let app = WaylandApplication() else {
             Log.error("Failed to initialize wayland client.")
             return -1
@@ -194,7 +204,7 @@ public class WaylandApplication: Application {
             let next = RunLoop.main.limitDate(forMode: .default)
             let s = next?.timeIntervalSinceNow ?? 1.0
             if s > 0.0 {
-                threadYield()
+                Platform.threadYield()
             }
         }
 
@@ -203,11 +213,12 @@ public class WaylandApplication: Application {
         return result
     }
 
-    public func terminate(exitCode : Int) {
+    func terminate(exitCode : Int) {
         Task { @MainActor in requestExitWithCode = exitCode }
     }
     
-    public static var shared: Application? = nil
+    nonisolated(unsafe)
+    static var shared: Application? = nil
 
     private struct WeakWindow {
         weak var window: WaylandWindow?

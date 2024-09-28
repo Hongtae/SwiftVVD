@@ -2,14 +2,14 @@
 //  File: VulkanComputeCommandEncoder.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
 import Foundation
 import Vulkan
 
-public class VulkanComputeCommandEncoder: VulkanCommandEncoder, ComputeCommandEncoder {
+final class VulkanComputeCommandEncoder: ComputeCommandEncoder {
 
     struct EncodingState {
         var pipelineState: VulkanComputePipelineState?
@@ -17,7 +17,7 @@ public class VulkanComputeCommandEncoder: VulkanCommandEncoder, ComputeCommandEn
         var imageViewLayouts: VulkanDescriptorSet.ImageViewLayoutMap = [:]
     }
 
-    class Encoder: VulkanCommandEncoder {
+    final class Encoder: VulkanCommandEncoder {
         unowned let commandBuffer: VulkanCommandBuffer
 
         var pipelineStateObjects: [VulkanComputePipelineState] = []
@@ -72,26 +72,26 @@ public class VulkanComputeCommandEncoder: VulkanCommandEncoder, ComputeCommandEn
     }
     
     private var encoder: Encoder?
-    public let commandBuffer: CommandBuffer
+    let commandBuffer: CommandBuffer
 
-    public init(buffer: VulkanCommandBuffer) {   
+    init(buffer: VulkanCommandBuffer) {   
         self.commandBuffer = buffer
         self.encoder = Encoder(commandBuffer: buffer)
     }
 
-    public func reset(descriptor: RenderPassDescriptor) {   
+    func reset(descriptor: RenderPassDescriptor) {   
         self.encoder = Encoder(commandBuffer: self.commandBuffer as! VulkanCommandBuffer)
     }
 
-    public func endEncoding() {
+    func endEncoding() {
         let commandBuffer = self.commandBuffer as! VulkanCommandBuffer
         commandBuffer.endEncoder(self.encoder!)
         self.encoder = nil
     }
 
-    public var isCompleted: Bool { self.encoder == nil }
+    var isCompleted: Bool { self.encoder == nil }
 
-    public func waitEvent(_ event: GPUEvent) {
+    func waitEvent(_ event: GPUEvent) {
         assert(event is VulkanSemaphore)
         if let semaphore = event as? VulkanSemaphore {
             let pipelineStages = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT
@@ -99,7 +99,7 @@ public class VulkanComputeCommandEncoder: VulkanCommandEncoder, ComputeCommandEn
             self.encoder!.events.append(event)
         }
     }
-    public func signalEvent(_ event: GPUEvent) {
+    func signalEvent(_ event: GPUEvent) {
         assert(event is VulkanSemaphore)
         if let semaphore = event as? VulkanSemaphore {
             let pipelineStages = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT 
@@ -108,7 +108,7 @@ public class VulkanComputeCommandEncoder: VulkanCommandEncoder, ComputeCommandEn
         }
     }
 
-    public func waitSemaphoreValue(_ sema: GPUSemaphore, value: UInt64) {
+    func waitSemaphoreValue(_ sema: GPUSemaphore, value: UInt64) {
         assert(sema is VulkanTimelineSemaphore)
         if let semaphore = sema as? VulkanTimelineSemaphore {
             let pipelineStages = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT 
@@ -116,7 +116,7 @@ public class VulkanComputeCommandEncoder: VulkanCommandEncoder, ComputeCommandEn
             self.encoder!.semaphores.append(sema)
         }
     }
-    public func signalSemaphoreValue(_ sema: GPUSemaphore, value: UInt64) {
+    func signalSemaphoreValue(_ sema: GPUSemaphore, value: UInt64) {
         assert(sema is VulkanTimelineSemaphore)
         if let semaphore = sema as? VulkanTimelineSemaphore {
             let pipelineStages = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT 
@@ -125,7 +125,7 @@ public class VulkanComputeCommandEncoder: VulkanCommandEncoder, ComputeCommandEn
         }
     }
     
-    public func setResource(_ set: ShaderBindingSet, index: Int) {
+    func setResource(_ set: ShaderBindingSet, index: Int) {
         assert(set is VulkanShaderBindingSet)
         var descriptorSet: VulkanDescriptorSet? = nil
         if let bindingSet = set as? VulkanShaderBindingSet {
@@ -155,7 +155,7 @@ public class VulkanComputeCommandEncoder: VulkanCommandEncoder, ComputeCommandEn
         }
     }
 
-    public func setComputePipelineState(_ pso: ComputePipelineState) {
+    func setComputePipelineState(_ pso: ComputePipelineState) {
         assert(pso is VulkanComputePipelineState)
         if let pipeline = pso as? VulkanComputePipelineState {
             let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
@@ -167,7 +167,7 @@ public class VulkanComputeCommandEncoder: VulkanCommandEncoder, ComputeCommandEn
         }
     }
 
-    public func pushConstant<D: DataProtocol>(stages: ShaderStageFlags, offset: Int, data: D) {
+    func pushConstant<D: DataProtocol>(stages: ShaderStageFlags, offset: Int, data: D) {
         if stages.contains(.compute) && data.count > 0 {
             let stageFlags = stages.vkFlags()
             var buffer: [UInt8] = .init(data)
@@ -187,7 +187,7 @@ public class VulkanComputeCommandEncoder: VulkanCommandEncoder, ComputeCommandEn
         }
     }
 
-    public func memoryBarrier() {
+    func memoryBarrier() {
         let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
             var memoryBarrier = VkMemoryBarrier2()
             memoryBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2
@@ -210,7 +210,7 @@ public class VulkanComputeCommandEncoder: VulkanCommandEncoder, ComputeCommandEn
         self.encoder!.commands.append(command)
     }
 
-    public func dispatch(numGroupX: Int, numGroupY: Int, numGroupZ: Int) {
+    func dispatch(numGroupX: Int, numGroupY: Int, numGroupZ: Int) {
         let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
             vkCmdDispatch(commandBuffer, UInt32(numGroupX), UInt32(numGroupY), UInt32(numGroupZ))
         }

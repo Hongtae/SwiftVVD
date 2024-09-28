@@ -2,14 +2,14 @@
 //  File: VulkanShaderStage.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
 import Vulkan
 
 extension ShaderStage {
-    public func from(vkFlagBits: VkShaderStageFlagBits) -> Self {
+    func from(vkFlagBits: VkShaderStageFlagBits) -> Self {
         switch vkFlagBits {
         case VK_SHADER_STAGE_VERTEX_BIT:
             return .vertex
@@ -28,7 +28,8 @@ extension ShaderStage {
             return .unknown
         }
     }
-    public func vkFlagBits() -> VkShaderStageFlagBits
+    
+    func vkFlagBits() -> VkShaderStageFlagBits
     {
         switch self {
         case .vertex:
@@ -48,13 +49,14 @@ extension ShaderStage {
             return VkShaderStageFlagBits(0)
         }        
     }
-    public func vkFlags() -> VkShaderStageFlags {
+    
+    func vkFlags() -> VkShaderStageFlags {
         return VkShaderStageFlags(self.vkFlagBits().rawValue)
     }
 }
 
 extension ShaderStageFlags {
-    public static func from(vkFlags: VkShaderStageFlags) -> Self {
+    static func from(vkFlags: VkShaderStageFlags) -> Self {
         var flags: Self = []
         if vkFlags & UInt32(VK_SHADER_STAGE_VERTEX_BIT.rawValue) != 0 {
             flags.insert(.vertex)
@@ -77,7 +79,7 @@ extension ShaderStageFlags {
         return flags
     }
 
-    public func vkFlags() -> VkShaderStageFlags {
+    func vkFlags() -> VkShaderStageFlags {
         var flags: VkShaderStageFlags = 0
         if self.contains(.vertex) {
             flags |= UInt32(VK_SHADER_STAGE_VERTEX_BIT.rawValue)

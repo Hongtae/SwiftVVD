@@ -16,6 +16,7 @@ extern "C"
 
 void VVDThreadSleep(double d);
 void VVDThreadYield();
+void VVDProcessorYield();
 uintptr_t VVDThreadCurrentId();
 
 #ifdef __cplusplus

@@ -2,17 +2,17 @@
 //  File: UIKitApplication.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_UIKIT
 import Foundation
 import UIKit
 
-var activeWindowScenes: [UIWindowScene] = []
-var activeWindows: [UIWindow] = []
+nonisolated(unsafe) var activeWindowScenes: [UIWindowScene] = []
+nonisolated(unsafe) var activeWindows: [UIWindow] = []
 
-class SceneDelegate: NSObject, UIWindowSceneDelegate {
+final class SceneDelegate: NSObject, UIWindowSceneDelegate {
     func scene(
         _ scene: UIScene,
         willConnectTo session: UISceneSession,
@@ -33,7 +33,7 @@ class SceneDelegate: NSObject, UIWindowSceneDelegate {
     }
 }
 
-class AppLoader: NSObject, UIApplicationDelegate {
+final class AppLoader: NSObject, UIApplicationDelegate {
     func application(
         _ application: UIApplication,
         willFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]?
@@ -70,16 +70,18 @@ class AppLoader: NSObject, UIApplicationDelegate {
     }
 }
 
-public class UIKitApplication: Application {
-    public static var shared: Application? = nil
+final class UIKitApplication: Application, @unchecked Sendable {
+    nonisolated(unsafe) public static var shared: Application? = nil
 
     var delegate: ApplicationDelegate?
     var initialized = false
 
     public func terminate(exitCode : Int) {
         if self.initialized {
-            self.delegate?.finalize(application: self)
-            self.initialized = false
+            Task { @MainActor in
+                self.delegate?.finalize(application: self)
+                self.initialized = false
+            }
         }
 
         DispatchQueue.main.async {

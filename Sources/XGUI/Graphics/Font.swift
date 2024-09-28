@@ -192,7 +192,7 @@ struct FixedFontProvider: TypeFaceProvider {
     var isShareable: Bool { false }
 }
 
-class AnyFontBox {
+class AnyFontBox : @unchecked Sendable {
     let fontBox: any TypeFaceProvider
 
     init(_ fontBox: any TypeFaceProvider) {
@@ -214,7 +214,7 @@ class AnyFontBox {
     var isShareable: Bool { fontBox.isShareable }
 }
 
-public struct Font: Hashable {
+public struct Font: Hashable, Sendable {
     let provider: AnyFontBox
     let displayScale: CGFloat
 
@@ -327,7 +327,7 @@ extension Font {
 }
 
 extension Font {
-    public struct Weight: Hashable {
+    public struct Weight: Hashable, Sendable {
         public var value: CGFloat
 
         public static let ultraLight = Weight(value: 100)
@@ -343,10 +343,10 @@ extension Font {
 
     public static let largeTitle = Font.system(Font.TextStyle.largeTitle)
     public static let title = Font.system(Font.TextStyle.title)
-    public static var headline = Font.system(Font.TextStyle.headline)
-    public static var subheadline = Font.system(Font.TextStyle.subheadline)
-    public static var body = Font.system(Font.TextStyle.body)
-    public static var callout = Font.system(Font.TextStyle.callout)
-    public static var footnote = Font.system(Font.TextStyle.footnote)
-    public static var caption = Font.system(Font.TextStyle.caption)
+    public static let headline = Font.system(Font.TextStyle.headline)
+    public static let subheadline = Font.system(Font.TextStyle.subheadline)
+    public static let body = Font.system(Font.TextStyle.body)
+    public static let callout = Font.system(Font.TextStyle.callout)
+    public static let footnote = Font.system(Font.TextStyle.footnote)
+    public static let caption = Font.system(Font.TextStyle.caption)
 }

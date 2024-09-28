@@ -2,7 +2,7 @@
 //  File: Win32Window.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_WIN32
@@ -58,8 +58,8 @@ private let HWND_TOP:HWND? = nil
 private let HWND_TOPMOST:HWND = HWND(bitPattern: -1)!
 private let HWND_NOTOPMOST:HWND = HWND(bitPattern: -2)!
 
-
-public class Win32Window : Window {
+@MainActor
+final class Win32Window : Window {
 
     private struct MouseButtonDownMask: OptionSet {
         let rawValue: UInt8
@@ -75,20 +75,22 @@ public class Win32Window : Window {
         static let button8 = MouseButtonDownMask(rawValue: 1 << 7)
     }
 
-    public private(set) var hWnd: HWND?
-    public private(set) var style: WindowStyle
-    public private(set) var contentBounds: CGRect = .null
-    public private(set) var windowFrame: CGRect = .null
-    public private(set) var contentScaleFactor: CGFloat = 1.0
+    typealias HWND = WinSDK.HWND
 
-    public var name: String
+    private(set) var hWnd: HWND?
+    private(set) var style: WindowStyle
+    private(set) var contentBounds: CGRect = .null
+    private(set) var windowFrame: CGRect = .null
+    private(set) var contentScaleFactor: CGFloat = 1.0
 
-    public weak var delegate: WindowDelegate?
+    var name: String
 
-    public private(set) var resizing: Bool = false
-    public private(set) var activated: Bool = false
-    public private(set) var visible: Bool = false
-    public private(set) var minimized: Bool = false
+    weak var delegate: WindowDelegate?
+
+    private(set) var resizing: Bool = false
+    private(set) var activated: Bool = false
+    private(set) var visible: Bool = false
+    private(set) var minimized: Bool = false
     
     private var mousePosition: CGPoint = .zero
     private var lockedMousePosition: CGPoint = .zero
@@ -130,7 +132,7 @@ public class Win32Window : Window {
         return atom
     }()
 
-    public required init?(name: String, style: WindowStyle, delegate: WindowDelegate?) {
+    required init?(name: String, style: WindowStyle, delegate: WindowDelegate?) {
 
         OleInitialize(nil)
 
@@ -155,7 +157,7 @@ public class Win32Window : Window {
         OleUninitialize()
     }
 
-    public func show() {
+    func show() {
         if let hWnd = self.hWnd {
             if IsIconic(hWnd) {
                 ShowWindow(hWnd, SW_RESTORE)
@@ -165,13 +167,13 @@ public class Win32Window : Window {
         }
     }
 
-    public func hide() {
+    func hide() {
         if let hWnd = self.hWnd {
             ShowWindow(hWnd, SW_HIDE)
         }
     }
 
-    public func activate() {
+    func activate() {
         if let hWnd = self.hWnd {
             if IsIconic(hWnd) {
                 ShowWindow(hWnd, SW_RESTORE)
@@ -182,7 +184,7 @@ public class Win32Window : Window {
         }
     }
 
-    public var origin: CGPoint {
+    var origin: CGPoint {
         get { self.windowFrame.origin }
         set (value) {
             if let hWnd = self.hWnd {
@@ -193,14 +195,14 @@ public class Win32Window : Window {
         }
     }
 
-    public var contentSize: CGSize {
+    var contentSize: CGSize {
         get { self.contentBounds.size }
         set (value) {
             self.resolution = value * self.contentScaleFactor
         }
     }
 
-    public var resolution: CGSize {
+    var resolution: CGSize {
         get {
             return self.contentSize * self.contentScaleFactor
         }
@@ -227,7 +229,7 @@ public class Win32Window : Window {
         }
     }
 
-    public func minimize() {
+    func minimize() {
         if let hWnd = self.hWnd {
             ShowWindow(hWnd, SW_MINIMIZE)
         }
@@ -339,7 +341,7 @@ public class Win32Window : Window {
         self.hWnd = nil
     }
 
-    public var title: String {
+    var title: String {
         get {
             if let hWnd = self.hWnd {
                 let len = GetWindowTextLengthW(hWnd)
@@ -364,14 +366,14 @@ public class Win32Window : Window {
         }
     }
 
-    public func showMouse(_ show: Bool, forDeviceID deviceID: Int) {
+    func showMouse(_ show: Bool, forDeviceID deviceID: Int) {
         if let hWnd = self.hWnd, deviceID == 0 {
             let wParam = show ? WPARAM(1) : WPARAM(0)
             PostMessageW(hWnd, UINT(WM_VVDWINDOW_SHOWCURSOR), wParam, 0)
         }
     }
 
-    public func isMouseVisible(forDeviceID deviceID: Int) -> Bool {
+    func isMouseVisible(forDeviceID deviceID: Int) -> Bool {
         if deviceID == 0 {
             var info: CURSORINFO = CURSORINFO()
             if GetCursorInfo(&info) {
@@ -381,7 +383,7 @@ public class Win32Window : Window {
         return false
     }
 
-    public func lockMouse(_ lock: Bool, forDeviceID deviceID: Int) {
+    func lockMouse(_ lock: Bool, forDeviceID deviceID: Int) {
         if deviceID == 0 {
             self.mouseLocked = lock
 
@@ -392,14 +394,14 @@ public class Win32Window : Window {
         }
     }
 
-    public func isMouseLocked(forDeviceID deviceID: Int) -> Bool {
+    func isMouseLocked(forDeviceID deviceID: Int) -> Bool {
         if deviceID == 0 {
             return self.mouseLocked
         }
         return false
     }
 
-    public func mousePosition(forDeviceID deviceID: Int) -> CGPoint? {
+    func mousePosition(forDeviceID deviceID: Int) -> CGPoint? {
         if let hWnd = self.hWnd, deviceID == 0 {
             var pt: POINT = POINT()
             GetCursorPos(&pt)
@@ -409,7 +411,7 @@ public class Win32Window : Window {
         return nil
     }
 
-    public func setMousePosition(_ pos: CGPoint, forDeviceID deviceID: Int) {
+    func setMousePosition(_ pos: CGPoint, forDeviceID deviceID: Int) {
         if let hWnd = self.hWnd, deviceID == 0 {
             var pt: POINT = POINT()
             pt.x = LONG(pos.x)
@@ -422,13 +424,13 @@ public class Win32Window : Window {
         }
     }
 
-    public func enableTextInput(_ enable: Bool, forDeviceID deviceID: Int) {
+    func enableTextInput(_ enable: Bool, forDeviceID deviceID: Int) {
         if deviceID == 0 {
             self.textCompositionMode = enable
         }
     }
 
-    public func isTextInputEnabled(forDeviceID deviceID: Int) -> Bool {
+    func isTextInputEnabled(forDeviceID deviceID: Int) -> Bool {
         if deviceID == 0 {
             return self.textCompositionMode
         }
@@ -600,7 +602,7 @@ public class Win32Window : Window {
     }
     private var eventObservers: [ObjectIdentifier: EventHandlers] = [:]
 
-    public func addEventObserver(_ observer: AnyObject, handler: @escaping (_: WindowEvent)->Void) {
+    func addEventObserver(_ observer: AnyObject, handler: @escaping (_: WindowEvent)->Void) {
         let key = ObjectIdentifier(observer)
         if var handlers = self.eventObservers[key] {
             handlers.windowEventHandler = handler
@@ -609,7 +611,7 @@ public class Win32Window : Window {
             self.eventObservers[key] = EventHandlers(observer: observer, windowEventHandler: handler)
         }
     }
-    public func addEventObserver(_ observer: AnyObject, handler: @escaping (_: MouseEvent)->Void) {
+    func addEventObserver(_ observer: AnyObject, handler: @escaping (_: MouseEvent)->Void) {
         let key = ObjectIdentifier(observer)
         if var handlers = self.eventObservers[key] {
             handlers.mouseEventHandler = handler
@@ -618,7 +620,7 @@ public class Win32Window : Window {
             self.eventObservers[key] = EventHandlers(observer: observer, mouseEventHandler: handler)
         }
     }
-    public func addEventObserver(_ observer: AnyObject, handler: @escaping (_: KeyboardEvent)->Void) {
+    func addEventObserver(_ observer: AnyObject, handler: @escaping (_: KeyboardEvent)->Void) {
         let key = ObjectIdentifier(observer)
         if var handlers = self.eventObservers[key] {
             handlers.keyboardEventHandler = handler
@@ -627,7 +629,7 @@ public class Win32Window : Window {
             self.eventObservers[key] = EventHandlers(observer: observer, keyboardEventHandler: handler)
         }
     }
-    public func removeEventObserver(_ observer: AnyObject) {
+    func removeEventObserver(_ observer: AnyObject) {
         let key = ObjectIdentifier(observer)
         self.eventObservers[key] = nil
     }
@@ -1027,7 +1029,7 @@ public class Win32Window : Window {
                     var str: [WCHAR] = [WCHAR](repeating: 0, count: 2)
                     str[0] = WCHAR(wParam)
 
-                    let inputText = String(decodingCString: str, as: UTF16.self)
+                    let inputText = String(decoding: str, as: UTF16.self)
 
                     window.postKeyboardEvent(KeyboardEvent(type: .textInput,
                                                            window: window,

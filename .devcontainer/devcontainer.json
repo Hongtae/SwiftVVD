@@ -15,7 +15,8 @@
         "ghcr.io/devcontainers/features/git-lfs:1": {
             "autoPull": true,
             "version": "latest"
-        }
+        },
+        "ghcr.io/wxw-matt/devcontainer-features/command_runner:0": {}
     },
     "runArgs": [
         "--cap-add=SYS_PTRACE",

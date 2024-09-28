@@ -2,14 +2,14 @@
 //  File: MetalTexture.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_METAL
 import Foundation
 import Metal
 
-public class MetalTexture: Texture {
+final class MetalTexture: Texture {
     public let device: GraphicsDevice
     public let parent: Texture?
 

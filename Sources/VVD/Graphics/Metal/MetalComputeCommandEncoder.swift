@@ -9,7 +9,7 @@
 import Foundation
 import Metal
 
-public class MetalComputeCommandEncoder: ComputeCommandEncoder {
+final class MetalComputeCommandEncoder: ComputeCommandEncoder {
 
     struct EncodingState {
         let encoder: Encoder
@@ -187,7 +187,12 @@ public class MetalComputeCommandEncoder: ComputeCommandEncoder {
         self.encoder?.commands.append {
             (encoder: MTLComputeCommandEncoder, state: inout EncodingState) in
 
-            encoder.memoryBarrier(scope: [.buffers, .textures, .renderTargets])
+#if os(iOS)
+            let scope: MTLBarrierScope = [.buffers, .textures]
+#else
+            let scope: MTLBarrierScope = [.buffers, .textures, .renderTargets]
+#endif
+            encoder.memoryBarrier(scope: scope)
         }
     }
 

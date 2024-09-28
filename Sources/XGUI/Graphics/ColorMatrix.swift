@@ -82,7 +82,6 @@ public struct ColorMatrix: Equatable, Sendable {
     }
 
     static func constantColor(_ color: Color) -> ColorMatrix {
-        let c = color.dkColor
         var cm = ColorMatrix.zero
         cm.r5 = Float(color.provider.red)
         cm.g5 = Float(color.provider.green)

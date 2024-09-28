@@ -1,11 +1,11 @@
-// swift-tools-version: 5.9
+// swift-tools-version: 6.0
 // The swift-tools-version declares the minimum version of Swift required to build this package.
 
 import PackageDescription
 
 let package = Package(
     name: "VVD",
-    platforms: [.macOS(.v14), .iOS(.v17), .macCatalyst(.v17)],
+    platforms: [.macOS(.v15), .iOS(.v18), .macCatalyst(.v18)],
     products: [
         // Products define the executables and libraries a package produces, and make them visible to other packages.
         .library(name: "VVD", type: .dynamic, targets: ["VVD"]),
@@ -55,7 +55,6 @@ let package = Package(
                 .define("VK_USE_PLATFORM_WIN32_KHR",   .when(platforms:[.windows])),
                 .define("VK_USE_PLATFORM_ANDROID_KHR", .when(platforms:[.android])),
                 .define("VK_USE_PLATFORM_WAYLAND_KHR", .when(platforms:[.linux])),
-                //.unsafeFlags(["-ISupportPackages/VVD-ThirdParty/Sources/FreeType/include"]),
             ],
             swiftSettings: [
                 // App & Window
@@ -98,6 +97,10 @@ let package = Package(
             resources: [
                 .copy("Resources/Fonts"),
                 .copy("Resources/Shaders/SPIRV")
+            ],
+            swiftSettings: [
+                .swiftLanguageMode(.v5),
+                .enableUpcomingFeature("StrictConcurrency")
             ]),
         .executableTarget(
             name: "Editor",

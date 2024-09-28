@@ -258,7 +258,7 @@ class GraphicsPipelineStates {
     }
 
     private static let lock = NSLock()
-    private static weak var sharedInstance: GraphicsPipelineStates? = nil
+    nonisolated(unsafe) private static weak var sharedInstance: GraphicsPipelineStates? = nil
 
     static func sharedInstance(commandQueue: CommandQueue) -> GraphicsPipelineStates? {
         if let instance = sharedInstance {

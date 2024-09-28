@@ -2,22 +2,14 @@
 //  File: VulkanDeviceMemory.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
 import Foundation
 import Vulkan
 
-extension NSLocking {
-    func withLock<R>(_ body: () throws -> R) rethrows -> R {
-        self.lock()
-        defer { self.unlock() }
-        return try body()    
-    }
-}
-
-public struct VulkanMemoryBlock {
+struct VulkanMemoryBlock {
     let offset: UInt64
     let size: UInt64
     unowned var chunk: VulkanMemoryChunk?
@@ -28,7 +20,7 @@ struct VulkanMemoryAllocationContext {
     let allocationCallbacks: ()->UnsafePointer<VkAllocationCallbacks>?
 }
 
-class VulkanMemoryChunk {
+final class VulkanMemoryChunk {
     let chunkSize: UInt64
     let blockSize: UInt64
     let totalBlocks: UInt64
@@ -164,7 +156,7 @@ class VulkanMemoryChunk {
     }
 }
 
-class VulkanMemoryAllocator {
+final class VulkanMemoryAllocator {
     var numAllocations: Int {
         mutex.withLock {
             chunks.reduce(0) { result, chunk in
@@ -314,7 +306,7 @@ private let memoryChunkSizeBlocks: [(blockSize: UInt64, numBlocks: UInt64)] = [
     ( 33554432, 4 ), // 32M
 ]
 
-public class VulkanMemoryPool {
+final class VulkanMemoryPool {
     let memoryTypeIndex: UInt32
     let memoryPropertyFlags: VkMemoryPropertyFlags
     let memoryHeap: VkMemoryHeap

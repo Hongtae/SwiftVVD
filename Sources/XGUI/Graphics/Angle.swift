@@ -45,7 +45,7 @@ public enum Axis: Int8, CaseIterable  {
     case horizontal
     case vertical
 
-    public struct Set: OptionSet {
+    public struct Set: OptionSet, Sendable {
         public let rawValue: Int8
         public init(rawValue: Int8) { self.rawValue = rawValue }
 

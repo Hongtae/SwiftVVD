@@ -13,7 +13,7 @@ extension GraphicsContext {
         public let rawValue: UInt32
         public init(rawValue: UInt32) { self.rawValue = rawValue }
 
-        public static var inverse = ClipOptions(rawValue: 1)
+        public static var inverse: ClipOptions { .init(rawValue: 1) }
     }
 
     public mutating func clip(to path: Path,

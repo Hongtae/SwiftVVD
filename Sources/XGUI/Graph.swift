@@ -50,9 +50,9 @@ extension ViewStyleModifier {
 }
 
 public struct _GraphInputs {
-    struct Options : OptionSet {
+    struct Options : OptionSet, Sendable {
         let rawValue: Int
-        static var none = Options(rawValue: 0)
+        static var none: Options { Options(rawValue: 0) }
     }
 
     var customInputs: [CustomInput] = []
@@ -153,9 +153,9 @@ public struct _ViewOutputs {
 }
 
 public struct _ViewListInputs {
-    struct Options : OptionSet {
+    struct Options : OptionSet, Sendable {
         let rawValue: Int
-        static var none = Options(rawValue: 0)
+        static var none: Options { Options(rawValue: 0) }
     }
 
     var base: _GraphInputs
@@ -173,9 +173,9 @@ public struct _ViewListInputs {
 }
 
 public struct _ViewListOutputs {
-    struct Options : OptionSet {
+    struct Options : OptionSet, Sendable {
         let rawValue: Int
-        static var none = Options(rawValue: 0)
+        static var none: Options { Options(rawValue: 0) }
     }
 
     var viewList: any ViewListGenerator
@@ -331,31 +331,17 @@ extension _GraphValue {
         return graph
     }
 
-#if swift(>=6.0)
     func nearestCommonAncestor<each T>(_ path: repeat _GraphValue<each T>?) -> _GraphValue<Any>? {
         var graph = self.unsafeCast(to: Any.self)
-        repeat if let _graph = graph.nearestAncestor(each path) {
-            graph = _graph
-        } else { return nil }
-        return graph
-    }
-#else
-    func nearestCommonAncestor<T, U>(_ path1: _GraphValue<T>?, _ path2: _GraphValue<U>?) -> _GraphValue<Any>? {
-        if path1 == nil { return nearestAncestor(path2) }
-        if path2 == nil { return nearestAncestor(path1) }
-        var graph = self.unsafeCast(to: Any.self)
-        if let path1, let path2 {
-            while path1.isDescendant(of: graph) == false || path2.isDescendant(of: graph) == false {
-                if let _graph = graph.parent {
-                    graph = _graph
-                } else {
-                    return nil
-                }
+        for _path in repeat each path {
+            if let _graph = graph.nearestAncestor(_path) {
+                graph = _graph
+            } else {
+                return nil
             }
         }
         return graph
     }
-#endif
 }
 
 extension _GraphValue : Equatable {

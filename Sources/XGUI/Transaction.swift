@@ -27,10 +27,10 @@ public struct Transaction {
 }
 
 @usableFromInline
-class AnyTransitionBox {
+class AnyTransitionBox: @unchecked Sendable {
 }
 
-public struct AnyTransition {
+public struct AnyTransition: Sendable {
     fileprivate let box: AnyTransitionBox
 
     public static var slide: AnyTransition {

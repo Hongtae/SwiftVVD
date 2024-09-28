@@ -2,10 +2,10 @@
 //  File: UniformScaleTransform.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
-public struct UniformScaleTransform: Hashable {
+public struct UniformScaleTransform: Hashable, Sendable {
     public typealias Vector = Vector3
 
     public var scale: Scalar

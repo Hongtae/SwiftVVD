@@ -9,7 +9,7 @@
 import Foundation
 import Metal
 
-public class MetalCommandQueue: CommandQueue {
+final class MetalCommandQueue: CommandQueue {
 
     public let flags: CommandQueueFlags
     public let device: GraphicsDevice

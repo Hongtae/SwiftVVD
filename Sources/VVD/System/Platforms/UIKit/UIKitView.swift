@@ -2,7 +2,7 @@
 //  File: UIKitWindow.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_UIKIT
@@ -10,7 +10,7 @@ import Foundation
 import UIKit
 import QuartzCore
 
-class UIKitView: UIView, UITextFieldDelegate {
+final class UIKitView: UIView, UITextFieldDelegate {
 
     var defaultTextFieldHeight: CGFloat { 30 }
     var defaultTextFieldMargin: CGFloat { 2 }
@@ -38,7 +38,8 @@ class UIKitView: UIView, UITextFieldDelegate {
     var textField: UITextField
 
     var touches: [UITouch?] = []
-    var observers: [NSObjectProtocol] = []
+    nonisolated(unsafe) var observers: [NSObjectProtocol] = []
+    var uiActions: [(event: UIControl.Event, action: UIAction)] = []
 
     weak var proxyWindow: UIKitWindow?
 
@@ -122,7 +123,14 @@ class UIKitView: UIView, UITextFieldDelegate {
         self.textField.clearsOnBeginEditing = true
         self.textField.autoresizingMask = .flexibleWidth
         self.textField.adjustsFontSizeToFitWidth = false
-        self.textField.addTarget(self, action: #selector(updateTextField(_:)), for: .editingChanged)
+
+        let updateTextField = UIAction { action in
+            if let textField = action.sender as? UITextField {
+                self.postTextCompositionEvent(textField.text ?? "")
+            }
+        }
+        self.uiActions.append((event: .editingChanged, action: updateTextField))
+        self.textField.addAction(updateTextField, for: .editingChanged)
 
         let queue = OperationQueue.main
         let center = NotificationCenter.default
@@ -130,32 +138,50 @@ class UIKitView: UIView, UITextFieldDelegate {
             center.addObserver(forName: UIResponder.keyboardWillShowNotification,
                                object: nil,
                                queue: queue) { [weak self](notification) in
-                                   self?.keyboardWillShow(notification)
+                                   nonisolated(unsafe) let noti = notification
+                                   MainActor.assumeIsolated {
+                                       self?.keyboardWillShow(noti)
+                                   }
                                },
             center.addObserver(forName: UIResponder.keyboardWillHideNotification,
                                object: nil,
                                queue: queue) { [weak self](notification) in
-                                   self?.keyboardWillHide(notification)
+                                   nonisolated(unsafe) let noti = notification
+                                   MainActor.assumeIsolated {
+                                       self?.keyboardWillHide(noti)
+                                   }
                                },
             center.addObserver(forName: UIResponder.keyboardWillChangeFrameNotification,
                                object: nil,
                                queue: queue) { [weak self](notification) in
-                                   self?.keyboardWillChangeFrame(notification)
+                                   nonisolated(unsafe) let noti = notification
+                                   MainActor.assumeIsolated {
+                                       self?.keyboardWillChangeFrame(noti)
+                                   }
                                },
             center.addObserver(forName: UIResponder.keyboardDidChangeFrameNotification,
                                object: nil,
                                queue: queue) { [weak self](notification) in
-                                   self?.keyboardDidChangeFrame(notification)
+                                   nonisolated(unsafe) let noti = notification
+                                   MainActor.assumeIsolated {
+                                       self?.keyboardDidChangeFrame(noti)
+                                   }
                                },
             center.addObserver(forName: UIApplication.willResignActiveNotification,
                                object: nil,
                                queue: queue) { [weak self](notification) in
-                                   self?.applicationWillResignActive(notification)
+                                   nonisolated(unsafe) let noti = notification
+                                   MainActor.assumeIsolated {
+                                       self?.applicationWillResignActive(noti)
+                                   }
                                },
             center.addObserver(forName: UIApplication.didBecomeActiveNotification,
                                object: nil,
                                queue: queue) { [weak self](notification) in
-                                   self?.applicationDidBecomeActive(notification)
+                                   nonisolated(unsafe) let noti = notification
+                                   MainActor.assumeIsolated {
+                                       self?.applicationDidBecomeActive(noti)
+                                   }
                                },
         ]
 
@@ -163,9 +189,19 @@ class UIKitView: UIView, UITextFieldDelegate {
     }
 
     deinit {
-        self.textField.delegate = nil
-        self.textField.removeTarget(self, action: nil, for: .editingChanged)
-        observers.forEach { NotificationCenter.default.removeObserver($0) }
+        //self.textField.delegate = nil
+        //self.textField.removeTarget(self, action: nil, for: .editingChanged)
+
+        let uiActions = self.uiActions
+        let textField = self.textField
+        let observers = self.observers
+
+        Task { @MainActor in
+            uiActions.forEach { event, action in
+                textField.removeAction(action, for: event)
+            }
+            observers.forEach { NotificationCenter.default.removeObserver($0) }
+        }
     }
 
     override func becomeFirstResponder() -> Bool {
@@ -193,10 +229,6 @@ class UIKitView: UIView, UITextFieldDelegate {
             }
         }
         return nil
-    }
-
-    @objc func updateTextField(_ textField: UITextField) {
-        self.postTextCompositionEvent(textField.text ?? "")
     }
 
     // MARK: - UITouch, Touch Events

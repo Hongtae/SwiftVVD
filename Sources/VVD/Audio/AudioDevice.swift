@@ -2,7 +2,7 @@
 //  File: AudioDevice.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -36,8 +36,8 @@ public func availableALDevices() -> [ALDevice] {
                     alcGetIntegerv(device, ALC_MINOR_VERSION, Int32(MemoryLayout<Int32>.size), &minorVersion)
 
                     let dev = ALDevice(name: name,
-                                    majorVersion: Int(majorVersion),
-                                    minorVersion: Int(minorVersion))
+                                       majorVersion: Int(majorVersion),
+                                       minorVersion: Int(minorVersion))
                     if name == defaultDeviceName {
                         devices.insert(dev, at: 0)
                     } else {
@@ -58,7 +58,7 @@ public typealias ALCdevice = OpaquePointer
 public typealias ALCcontext = OpaquePointer
 
 
-public class AudioDevice {
+public final class AudioDevice: @unchecked Sendable {
     public let device: ALCdevice
     public let context: ALCcontext
 

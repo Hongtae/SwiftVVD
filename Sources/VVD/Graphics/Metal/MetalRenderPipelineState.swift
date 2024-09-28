@@ -9,7 +9,7 @@
 import Foundation
 import Metal
 
-public class MetalRenderPipelineState: RenderPipelineState {
+final class MetalRenderPipelineState: RenderPipelineState {
     public let device: GraphicsDevice
 
     let pipelineState: MTLRenderPipelineState

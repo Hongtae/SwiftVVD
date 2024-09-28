@@ -9,12 +9,11 @@
 import Foundation
 import Vulkan
 
-public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder {
+final class VulkanCopyCommandEncoder: CopyCommandEncoder {
 
-    struct EncodingState {
-    }
+    struct EncodingState {}
 
-    class Encoder: VulkanCommandEncoder {
+    final class Encoder: VulkanCommandEncoder {
         unowned let commandBuffer: VulkanCommandBuffer
 
         var buffers: [GPUBuffer] = []
@@ -53,26 +52,26 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
     }
 
     private var encoder: Encoder?
-    public let commandBuffer: CommandBuffer
+    let commandBuffer: CommandBuffer
 
-    public init(buffer: VulkanCommandBuffer) {   
+    init(buffer: VulkanCommandBuffer) {   
         self.commandBuffer = buffer
         self.encoder = Encoder(commandBuffer: buffer)
     }
 
-    public func reset(descriptor: RenderPassDescriptor) {   
+    func reset(descriptor: RenderPassDescriptor) {   
         self.encoder = Encoder(commandBuffer: self.commandBuffer as! VulkanCommandBuffer)
     }
 
-    public func endEncoding() {
+    func endEncoding() {
         let commandBuffer = self.commandBuffer as! VulkanCommandBuffer
         commandBuffer.endEncoder(self.encoder!)
         self.encoder = nil
     }
 
-    public var isCompleted: Bool { self.encoder == nil }
+    var isCompleted: Bool { self.encoder == nil }
 
-    public func waitEvent(_ event: GPUEvent) {
+    func waitEvent(_ event: GPUEvent) {
         assert(event is VulkanSemaphore)
         if let semaphore = event as? VulkanSemaphore {
             let pipelineStages = VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT
@@ -80,7 +79,7 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
             self.encoder!.events.append(event)
         }
     }
-    public func signalEvent(_ event: GPUEvent) {
+    func signalEvent(_ event: GPUEvent) {
         assert(event is VulkanSemaphore)
         if let semaphore = event as? VulkanSemaphore {
             let pipelineStages = VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT 
@@ -89,7 +88,7 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
         }
     }
 
-    public func waitSemaphoreValue(_ sema: GPUSemaphore, value: UInt64) {
+    func waitSemaphoreValue(_ sema: GPUSemaphore, value: UInt64) {
         assert(sema is VulkanTimelineSemaphore)
         if let semaphore = sema as? VulkanTimelineSemaphore {
             let pipelineStages = VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT
@@ -97,7 +96,7 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
             self.encoder!.semaphores.append(sema)
         }
     }
-    public func signalSemaphoreValue(_ sema: GPUSemaphore, value: UInt64) {
+    func signalSemaphoreValue(_ sema: GPUSemaphore, value: UInt64) {
         assert(sema is VulkanTimelineSemaphore)
         if let semaphore = sema as? VulkanTimelineSemaphore {
             let pipelineStages = VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT 
@@ -106,15 +105,15 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
         }
     }
     
-    public func waitSemaphore(_ semaphore: VkSemaphore, value: UInt64, flags: VkPipelineStageFlags2) {
+    func waitSemaphore(_ semaphore: VkSemaphore, value: UInt64, flags: VkPipelineStageFlags2) {
         self.encoder!.addWaitSemaphore(semaphore, value: value, flags: flags)
     }
 
-    public func signalSemaphore(_ semaphore: VkSemaphore, value: UInt64, flags: VkPipelineStageFlags2) {
+    func signalSemaphore(_ semaphore: VkSemaphore, value: UInt64, flags: VkPipelineStageFlags2) {
         self.encoder!.addSignalSemaphore(semaphore, value: value, flags: flags)
     }
 
-    public func copy(from src: GPUBuffer,
+    func copy(from src: GPUBuffer,
                      sourceOffset srcOffset: Int,
                      to dst: GPUBuffer,
                      destinationOffset dstOffset: Int,
@@ -141,7 +140,7 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
         self.encoder!.buffers.append(dst)
     }
 
-    public func copy(from src: GPUBuffer,
+    func copy(from src: GPUBuffer,
                      sourceOffset srcOffset: BufferImageOrigin,
                      to dst: Texture,
                      destinationOffset dstOffset: TextureOrigin,
@@ -212,7 +211,7 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
         self.encoder!.textures.append(dst)
     }
 
-    public func copy(from src: Texture,
+    func copy(from src: Texture,
                      sourceOffset srcOffset: TextureOrigin,
                      to dst: GPUBuffer,
                      destinationOffset dstOffset: BufferImageOrigin,
@@ -282,7 +281,7 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
         self.encoder!.buffers.append(dst)
     }
 
-    public func copy(from src: Texture,
+    func copy(from src: Texture,
                      sourceOffset srcOffset: TextureOrigin,
                      to dst: Texture,
                      destinationOffset dstOffset: TextureOrigin,
@@ -369,7 +368,7 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
         self.encoder!.textures.append(dst)
     }
 
-    public func fill(buffer: GPUBuffer, offset: Int, length: Int, value: UInt8) {
+    func fill(buffer: GPUBuffer, offset: Int, length: Int, value: UInt8) {
         assert(buffer is VulkanBufferView)
         let buf = (buffer as! VulkanBufferView).buffer!
 
@@ -392,7 +391,7 @@ public class VulkanCopyCommandEncoder: VulkanCommandEncoder, CopyCommandEncoder 
         self.encoder!.buffers.append(buffer)
     }
 
-    public func callback(_ fn: @escaping (_:VkCommandBuffer)->Void) {
+    func callback(_ fn: @escaping (_:VkCommandBuffer)->Void) {
         let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
             fn(commandBuffer)
         }

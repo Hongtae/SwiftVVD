@@ -2,16 +2,16 @@
 //  File: VulkanPhysicalDevice.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
 import Foundation
 import Vulkan
 
-public class VulkanPhysicalDeviceDescription: CustomStringConvertible {
+final class VulkanPhysicalDeviceDescription: CustomStringConvertible {
 
-    public enum DeviceType { 
+    enum DeviceType { 
         case integratedGPU
         case discreteGPU
         case virtualGPU
@@ -19,42 +19,42 @@ public class VulkanPhysicalDeviceDescription: CustomStringConvertible {
         case unknown
     }
 
-    public let device: VkPhysicalDevice
-    public private(set) lazy var name: String = {
+    let device: VkPhysicalDevice
+    private(set) lazy var name: String = {
         withUnsafeBytes(of: self.properties.deviceName) {
             String(cString: $0.baseAddress!.assumingMemoryBound(to: CChar.self))
         }
     }()
-    public var venderID: UInt32 { self.properties.vendorID }
-    public var deviceID: UInt32 { self.properties.deviceID }
+    var venderID: UInt32 { self.properties.vendorID }
+    var deviceID: UInt32 { self.properties.deviceID }
 
-    public private(set) lazy var registryID: String = {
+    private(set) lazy var registryID: String = {
         String(format: "%08x%08x", self.properties.vendorID, self.properties.deviceID)
     }()
 
-    public private(set) var devicePriority: Int
-    public private(set) var deviceMemory: UInt64
-    public private(set) var numGCQueues: UInt        // graphics | compute queue count.
-    public private(set) var maxQueues: UInt
+    private(set) var devicePriority: Int
+    private(set) var deviceMemory: UInt64
+    private(set) var numGCQueues: UInt        // graphics | compute queue count.
+    private(set) var maxQueues: UInt
 
-    public private(set) var properties: VkPhysicalDeviceProperties
-    public private(set) var extendedDynamicState3Properties: VkPhysicalDeviceExtendedDynamicState3PropertiesEXT 
+    private(set) var properties: VkPhysicalDeviceProperties
+    private(set) var extendedDynamicState3Properties: VkPhysicalDeviceExtendedDynamicState3PropertiesEXT 
 
-    public private(set) var features: VkPhysicalDeviceFeatures
-    public private(set) var v11Features: VkPhysicalDeviceVulkan11Features 
-    public private(set) var v12Features: VkPhysicalDeviceVulkan12Features 
-    public private(set) var v13Features: VkPhysicalDeviceVulkan13Features
-    public private(set) var extendedDynamicStateFeatures: VkPhysicalDeviceExtendedDynamicStateFeaturesEXT
-    public private(set) var extendedDynamicState2Features: VkPhysicalDeviceExtendedDynamicState2FeaturesEXT
-    public private(set) var extendedDynamicState3Features: VkPhysicalDeviceExtendedDynamicState3FeaturesEXT
+    private(set) var features: VkPhysicalDeviceFeatures
+    private(set) var v11Features: VkPhysicalDeviceVulkan11Features 
+    private(set) var v12Features: VkPhysicalDeviceVulkan12Features 
+    private(set) var v13Features: VkPhysicalDeviceVulkan13Features
+    private(set) var extendedDynamicStateFeatures: VkPhysicalDeviceExtendedDynamicStateFeaturesEXT
+    private(set) var extendedDynamicState2Features: VkPhysicalDeviceExtendedDynamicState2FeaturesEXT
+    private(set) var extendedDynamicState3Features: VkPhysicalDeviceExtendedDynamicState3FeaturesEXT
 
-    public private(set) var memory: VkPhysicalDeviceMemoryProperties
-    public private(set) var queueFamilies: [VkQueueFamilyProperties]
-    public private(set) var extensions: [String: UInt32]
+    private(set) var memory: VkPhysicalDeviceMemoryProperties
+    private(set) var queueFamilies: [VkQueueFamilyProperties]
+    private(set) var extensions: [String: UInt32]
 
-    public func hasExtension(_ name: String) -> Bool { self.extensions[name] != nil }
+    func hasExtension(_ name: String) -> Bool { self.extensions[name] != nil }
 
-    public init(device: VkPhysicalDevice) {
+    init(device: VkPhysicalDevice) {
         self.device = device
         self.numGCQueues = 0 // graphics | compute queue
         self.maxQueues = 0
@@ -215,7 +215,7 @@ public class VulkanPhysicalDeviceDescription: CustomStringConvertible {
         self.extensions = extensions
     }
 
-    public var description: String {
+    var description: String {
 
         var deviceType = "Unknown"
 
