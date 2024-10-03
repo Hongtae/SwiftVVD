@@ -8,7 +8,7 @@
 #if ENABLE_METAL
 import Foundation
 import Metal
-import SPIRV_Cross_static
+import SPIRV_Cross
 
 final class MetalGraphicsDevice: GraphicsDevice {
 

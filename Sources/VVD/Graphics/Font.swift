@@ -7,7 +7,7 @@
 
 import Foundation
 import Synchronization
-import FreeType_static
+import FreeType
 
 //////////////////////////////////////////////////////////////////////////////
 // The coordinate system of the font has a positive Y value

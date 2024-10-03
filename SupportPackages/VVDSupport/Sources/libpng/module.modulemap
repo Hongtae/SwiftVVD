@@ -1,3 +1,3 @@
-module libpng_static {
+module _libpng {
     header "png.h"
 }

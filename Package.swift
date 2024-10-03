@@ -16,18 +16,18 @@ let package = Package(
     dependencies: [
         // Dependencies declare other packages that this package depends on.
         // .package(url: /* package url */, from: "1.0.0"),
-        .package(
-            name: "VVDSupport",
-            path: "SupportPackages/VVDSupport"),
-        .package(
-            name: "Vulkan",
-            path: "SupportPackages/Vulkan"),
-        .package(
-            name: "Wayland",
-            path: "SupportPackages/Wayland"),
-        .package(
-            url: "https://github.com/Hongtae/swift-openal-soft.git",
-            branch: "main"),
+        .package(name: "VVDSupport",
+                 path: "SupportPackages/VVDSupport"),
+        .package(name: "SPIRV-Cross",
+                 path: "SupportPackages/SPIRV-Cross"),
+        .package(name: "FreeType",
+                 path: "SupportPackages/FreeType"),
+        .package(name: "Vulkan",
+                 path: "SupportPackages/Vulkan"),
+        .package(name: "Wayland",
+                 path: "SupportPackages/Wayland"),
+        .package(url: "https://github.com/Hongtae/swift-openal-soft.git",
+                 branch: "main"),
     ],
     targets: [
         // Targets are the basic building blocks of a package. A target can define a module or a test suite.
@@ -35,20 +35,19 @@ let package = Package(
         .target(
             name: "VVD",
             dependencies: [
-                .product(
-                    name: "VVDSupport",
-                    package: "VVDSupport"),
-                .product(
-                    name: "Vulkan",
-                    package: "Vulkan",
-                    condition: .when(platforms: [.windows, .linux, .android])),
-                .product(
-                    name: "Wayland",
-                    package: "Wayland",
-                    condition: .when(platforms: [.linux])),
-                .product(
-                    name:"OpenAL",
-                    package: "swift-openal-soft"),
+                .product(name: "VVDSupport",
+                         package: "VVDSupport"),
+                .product(name: "SPIRV-Cross",
+                         package: "SPIRV-Cross"),
+                .product(name: "FreeType",
+                         package: "FreeType"),
+                .product(name: "Vulkan",
+                         package: "Vulkan",
+                         condition: .when(platforms: [.windows, .linux, .android])),
+                .product(name: "Wayland",
+                         package: "Wayland",
+                         condition: .when(platforms: [.linux])),
+                .product(name: "OpenAL", package: "swift-openal-soft"),
                 ],
             exclude: [],
             cSettings: [

@@ -1,4 +1,4 @@
-module lzma_static {
+module _lzma {
     header "C/LzmaEnc.h"
     header "C/LzmaDec.h"
 }

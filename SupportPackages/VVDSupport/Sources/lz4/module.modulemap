@@ -1,3 +1,3 @@
-module lz4_static {
+module _lz4 {
     header "lib/lz4.h"
 }

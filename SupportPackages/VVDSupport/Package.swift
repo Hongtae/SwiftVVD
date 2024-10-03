@@ -1,4 +1,4 @@
-// swift-tools-version: 5.6
+// swift-tools-version: 6.0
 // The swift-tools-version declares the minimum version of Swift required to build this package.
 
 import PackageDescription
@@ -9,10 +9,10 @@ let package = Package(
         // Products define the executables and libraries a package produces, and make them visible to other packages.
         .library(
             name: "VVDSupport",
+            type: .static,
             targets: [
                 "VVDHelper",
-                "SPIRV-Cross-static",
-                "FreeType-static",
+                "_zlib",
                 ]),
     ],
     dependencies: [],
@@ -20,15 +20,15 @@ let package = Package(
         .target(
             name: "VVDHelper",
             dependencies: [
-                "libpng-static",
-                "jpeg-static",
-                "zlib-static",
-                "lz4-static",
-                "lzma-static",
-                "zstd-static",
-                "libogg-static",
-                "libvorbis-static",
-                "libFLAC-static",
+                "_libpng",
+                "_jpeg",
+                "_zlib",
+                "_lz4",
+                "_lzma",
+                "_zstd",
+                "_libogg",
+                "_libvorbis",
+                "_libFLAC",
                 ],
             path: "Sources/VVDHelper",
             publicHeadersPath: ".",
@@ -43,92 +43,7 @@ let package = Package(
             ],
             linkerSettings: []),
         .target(
-            name: "SPIRV-Cross-static",
-            path: "Sources/SPIRV-Cross",
-            sources: [
-                "spirv_cfg.cpp",
-                "spirv_cpp.cpp",
-                "spirv_cross.cpp",
-                "spirv_cross_c.cpp",
-                "spirv_cross_parsed_ir.cpp",
-                "spirv_cross_util.cpp",
-                "spirv_glsl.cpp",
-                "spirv_hlsl.cpp",
-                "spirv_msl.cpp",
-                "spirv_parser.cpp",
-                "spirv_reflect.cpp"],
-            publicHeadersPath: ".",
-            cxxSettings: [
-                .define("SPIRV_CROSS_C_API_CPP", to: "1"),
-                .define("SPIRV_CROSS_C_API_GLSL", to: "1"),
-                .define("SPIRV_CROSS_C_API_HLSL", to: "1"),
-                .define("SPIRV_CROSS_C_API_MSL", to: "1"),
-                .define("SPIRV_CROSS_C_API_REFLECT", to: "1"),
-
-                .define("_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH", .when(platforms:[.windows])),
-
-                // Temporarily changed the optimization flag due to an internal compiler error
-                .unsafeFlags(["-Oz"], .when(platforms: [.windows], configuration: .release))
-            ]),
-        .target(
-            name: "FreeType-static",
-            dependencies: [.target(name: "zlib-static")],
-            path: "Sources/FreeType",
-            sources: [
-                "src/autofit/autofit.c",
-                "src/base/ftbase.c",
-                "src/base/ftbbox.c",
-                "src/base/ftbdf.c",
-                "src/base/ftbitmap.c",
-                "src/base/ftcid.c",
-                "src/base/ftdebug.c",
-                "src/base/ftfntfmt.c",
-                "src/base/ftfstype.c",
-                "src/base/ftgasp.c",
-                "src/base/ftglyph.c",
-                "src/base/ftgxval.c",
-                "src/base/ftinit.c",
-                "src/base/ftlcdfil.c",
-                "src/base/ftmm.c",
-                "src/base/ftotval.c",
-                "src/base/ftpatent.c",
-                "src/base/ftpfr.c",
-                "src/base/ftstroke.c",
-                "src/base/ftsynth.c",
-                "src/base/ftsystem.c",
-                "src/base/fttype1.c",
-                "src/base/ftwinfnt.c",
-                "src/bdf/bdf.c",
-                "src/cache/ftcache.c",
-                "src/cff/cff.c",
-                "src/cid/type1cid.c",
-                "src/gzip/ftgzip.c",
-                "src/lzw/ftlzw.c",
-                "src/pcf/pcf.c",
-                "src/pfr/pfr.c",
-                "src/psaux/psaux.c",
-                "src/pshinter/pshinter.c",
-                "src/psnames/psmodule.c",
-                "src/raster/raster.c",
-                "src/sfnt/sfnt.c",
-                "src/smooth/smooth.c",
-                "src/truetype/truetype.c",
-                "src/type1/type1.c",
-                "src/type42/type42.c",
-                "src/winfonts/winfnt.c"],
-            publicHeadersPath: "include",
-            cSettings: [
-                .define("_CRT_SECURE_NO_WARNINGS", .when(platforms:[.windows])),
-                .define("FT2_BUILD_LIBRARY"),
-                .define("FT_DEBUG_LEVEL_ERROR", .when(configuration:.debug)),
-                .define("FT_DEBUG_LEVEL_TRACE", .when(configuration:.debug)),
-                .headerSearchPath("include"),
-                .unsafeFlags([
-                    "-Wno-format"
-                ]),
-            ]),
-        .target(
-            name: "jpeg-static",
+            name: "_jpeg",
             path: "Sources/jpeg",
             sources: [
                 "jaricom.c",
@@ -183,8 +98,8 @@ let package = Package(
                 .define("_CRT_SECURE_NO_WARNINGS", .when(platforms: [.windows])),
             ]),
         .target(
-            name: "libpng-static",
-            dependencies: [.target(name: "zlib-static")],
+            name: "_libpng",
+            dependencies: [.target(name: "_zlib")],
             path: "Sources/libpng",
             sources: [
                 "png.c",
@@ -215,13 +130,13 @@ let package = Package(
                 ])
             ]),
         .target(
-            name: "libogg-static",
+            name: "_libogg",
             path: "Sources/libogg",
             sources : ["src"],
             publicHeadersPath: "include"),
         .target(
-            name: "libvorbis-static",
-            dependencies: [.target(name: "libogg-static")],
+            name: "_libvorbis",
+            dependencies: [.target(name: "_libogg")],
             path: "Sources/libvorbis",
             sources: [
                 "src/analysis.c",
@@ -252,8 +167,8 @@ let package = Package(
                 .define("HAVE_CONFIG_H"),
             ]),
         .target(
-            name: "libFLAC-static",
-            dependencies: [.target(name: "libogg-static")],
+            name: "_libFLAC",
+            dependencies: [.target(name: "_libogg")],
             path: "Sources/libFLAC",
             sources: ["src/libFLAC"],
             publicHeadersPath: ".",
@@ -272,7 +187,7 @@ let package = Package(
                 ])
             ]),
         .target(
-            name: "lz4-static",
+            name: "_lz4",
             path: "Sources/lz4",
             sources: [
                 "lib/lz4.c",
@@ -281,7 +196,7 @@ let package = Package(
                 "lib/xxhash.c"],
             publicHeadersPath: "."),
         .target(
-            name: "lzma-static",
+            name: "_lzma",
             path: "Sources/lzma",
             exclude: [],
             sources: [
@@ -331,7 +246,7 @@ let package = Package(
                 //.unsafeFlags(["-march=native"]),
             ]),
         .target(
-            name: "zlib-static",
+            name: "_zlib",
             path: "Sources/zlib",
             sources: [
                 "adler32.c",
@@ -359,7 +274,7 @@ let package = Package(
                 ])
             ]),
         .target(
-            name: "zstd-static",
+            name: "_zstd",
             path: "Sources/zstd",
             exclude: ["lib/common/xxhash.c"], // duplicated, use lz4 instead
             sources: [

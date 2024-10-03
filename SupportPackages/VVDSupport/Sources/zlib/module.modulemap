@@ -1,3 +1,3 @@
-module zlib_static {
+module _zlib {
     header "zlib.h"
 }
