@@ -125,6 +125,21 @@ let package = Package(
                 .process("Resources")
             ],
             linkerSettings: []),
+        .executableTarget(
+            name: "RenderTest",
+            dependencies: [
+                .target(name: "VVD"),
+                .product(name: "TinyGLTF",
+                         package: "TinyGLTF"),
+            ],
+            resources: [
+                .copy("Resources/Shaders"),
+                .copy("Resources/glTF"),
+            ],
+            swiftSettings: [
+                .interoperabilityMode(.Cxx),
+            ]
+        ),
     ],
     cLanguageStandard: .c11,
     cxxLanguageStandard: .cxx20
