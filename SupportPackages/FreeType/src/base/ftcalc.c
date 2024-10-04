@@ -1,43 +1,42 @@
-/***************************************************************************/
-/*                                                                         */
-/*  ftcalc.c                                                               */
-/*                                                                         */
-/*    Arithmetic computations (body).                                      */
-/*                                                                         */
-/*  Copyright 1996-2018 by                                                 */
-/*  David Turner, Robert Wilhelm, and Werner Lemberg.                      */
-/*                                                                         */
-/*  This file is part of the FreeType project, and may only be used,       */
-/*  modified, and distributed under the terms of the FreeType project      */
-/*  license, LICENSE.TXT.  By continuing to use, modify, or distribute     */
-/*  this file you indicate that you have read the license and              */
-/*  understand and accept it fully.                                        */
-/*                                                                         */
-/***************************************************************************/
+/****************************************************************************
+ *
+ * ftcalc.c
+ *
+ *   Arithmetic computations (body).
+ *
+ * Copyright (C) 1996-2024 by
+ * David Turner, Robert Wilhelm, and Werner Lemberg.
+ *
+ * This file is part of the FreeType project, and may only be used,
+ * modified, and distributed under the terms of the FreeType project
+ * license, LICENSE.TXT.  By continuing to use, modify, or distribute
+ * this file you indicate that you have read the license and
+ * understand and accept it fully.
+ *
+ */
 
-  /*************************************************************************/
-  /*                                                                       */
-  /* Support for 1-complement arithmetic has been totally dropped in this  */
-  /* release.  You can still write your own code if you need it.           */
-  /*                                                                       */
-  /*************************************************************************/
+  /**************************************************************************
+   *
+   * Support for 1-complement arithmetic has been totally dropped in this
+   * release.  You can still write your own code if you need it.
+   *
+   */
 
-  /*************************************************************************/
-  /*                                                                       */
-  /* Implementing basic computation routines.                              */
-  /*                                                                       */
-  /* FT_MulDiv(), FT_MulFix(), FT_DivFix(), FT_RoundFix(), FT_CeilFix(),   */
-  /* and FT_FloorFix() are declared in freetype.h.                         */
-  /*                                                                       */
-  /*************************************************************************/
+  /**************************************************************************
+   *
+   * Implementing basic computation routines.
+   *
+   * FT_MulDiv(), FT_MulFix(), FT_DivFix(), FT_RoundFix(), FT_CeilFix(),
+   * and FT_FloorFix() are declared in freetype.h.
+   *
+   */
 
 
-#include <ft2build.h>
-#include FT_GLYPH_H
-#include FT_TRIGONOMETRY_H
-#include FT_INTERNAL_CALC_H
-#include FT_INTERNAL_DEBUG_H
-#include FT_INTERNAL_OBJECTS_H
+#include <freetype/ftglyph.h>
+#include <freetype/fttrigon.h>
+#include <freetype/internal/ftcalc.h>
+#include <freetype/internal/ftdebug.h>
+#include <freetype/internal/ftobjs.h>
 
 
 #ifdef FT_MULFIX_ASSEMBLER
@@ -46,7 +45,7 @@
 
 /* we need to emulate a 64-bit data type if a real one isn't available */
 
-#ifndef FT_LONG64
+#ifndef FT_INT64
 
   typedef struct  FT_Int64_
   {
@@ -55,32 +54,34 @@
 
   } FT_Int64;
 
-#endif /* !FT_LONG64 */
+#endif /* !FT_INT64 */
 
 
-  /*************************************************************************/
-  /*                                                                       */
-  /* The macro FT_COMPONENT is used in trace mode.  It is an implicit      */
-  /* parameter of the FT_TRACE() and FT_ERROR() macros, used to print/log  */
-  /* messages during execution.                                            */
-  /*                                                                       */
+  /**************************************************************************
+   *
+   * The macro FT_COMPONENT is used in trace mode.  It is an implicit
+   * parameter of the FT_TRACE() and FT_ERROR() macros, used to print/log
+   * messages during execution.
+   */
 #undef  FT_COMPONENT
-#define FT_COMPONENT  trace_calc
+#define FT_COMPONENT  calc
 
 
   /* transfer sign, leaving a positive number;                        */
   /* we need an unsigned value to safely negate INT_MIN (or LONG_MIN) */
-#define FT_MOVE_SIGN( x, x_unsigned, s ) \
-  FT_BEGIN_STMNT                         \
-    if ( x < 0 )                         \
-    {                                    \
-      x_unsigned = 0U - (x_unsigned);    \
-      s          = -s;                   \
-    }                                    \
+#define FT_MOVE_SIGN( utype, x, x_unsigned, s ) \
+  FT_BEGIN_STMNT                                \
+    if ( x < 0 )                                \
+    {                                           \
+      x_unsigned = 0U - (utype)x;               \
+      s          = -s;                          \
+    }                                           \
+    else                                        \
+      x_unsigned = (utype)x;                    \
   FT_END_STMNT
 
   /* The following three functions are available regardless of whether */
-  /* FT_LONG64 is defined.                                             */
+  /* FT_INT64 is defined.                                              */
 
   /* documentation is in freetype.h */
 
@@ -110,7 +111,7 @@
 
 #ifndef FT_MSB
 
-  FT_BASE_DEF ( FT_Int )
+  FT_BASE_DEF( FT_Int )
   FT_MSB( FT_UInt32 z )
   {
     FT_Int  shift = 0;
@@ -165,7 +166,7 @@
   }
 
 
-#ifdef FT_LONG64
+#ifdef FT_INT64
 
 
   /* documentation is in freetype.h */
@@ -180,13 +181,9 @@
     FT_Long    d_;
 
 
-    a = (FT_UInt64)a_;
-    b = (FT_UInt64)b_;
-    c = (FT_UInt64)c_;
-
-    FT_MOVE_SIGN( a_, a, s );
-    FT_MOVE_SIGN( b_, b, s );
-    FT_MOVE_SIGN( c_, c, s );
+    FT_MOVE_SIGN( FT_UInt64, a_, a, s );
+    FT_MOVE_SIGN( FT_UInt64, b_, b, s );
+    FT_MOVE_SIGN( FT_UInt64, c_, c, s );
 
     d = c > 0 ? ( a * b + ( c >> 1 ) ) / c
               : 0x7FFFFFFFUL;
@@ -209,13 +206,9 @@
     FT_Long    d_;
 
 
-    a = (FT_UInt64)a_;
-    b = (FT_UInt64)b_;
-    c = (FT_UInt64)c_;
-
-    FT_MOVE_SIGN( a_, a, s );
-    FT_MOVE_SIGN( b_, b, s );
-    FT_MOVE_SIGN( c_, c, s );
+    FT_MOVE_SIGN( FT_UInt64, a_, a, s );
+    FT_MOVE_SIGN( FT_UInt64, b_, b, s );
+    FT_MOVE_SIGN( FT_UInt64, c_, c, s );
 
     d = c > 0 ? a * b / c
               : 0x7FFFFFFFUL;
@@ -258,11 +251,8 @@
     FT_Long    q_;
 
 
-    a = (FT_UInt64)a_;
-    b = (FT_UInt64)b_;
-
-    FT_MOVE_SIGN( a_, a, s );
-    FT_MOVE_SIGN( b_, b, s );
+    FT_MOVE_SIGN( FT_UInt64, a_, a, s );
+    FT_MOVE_SIGN( FT_UInt64, b_, b, s );
 
     q = b > 0 ? ( ( a << 16 ) + ( b >> 1 ) ) / b
               : 0x7FFFFFFFUL;
@@ -273,7 +263,7 @@
   }
 
 
-#else /* !FT_LONG64 */
+#else /* !FT_INT64 */
 
 
   static void
@@ -423,13 +413,9 @@
 
     /* XXX: this function does not allow 64-bit arguments */
 
-    a = (FT_UInt32)a_;
-    b = (FT_UInt32)b_;
-    c = (FT_UInt32)c_;
-
-    FT_MOVE_SIGN( a_, a, s );
-    FT_MOVE_SIGN( b_, b, s );
-    FT_MOVE_SIGN( c_, c, s );
+    FT_MOVE_SIGN( FT_UInt32, a_, a, s );
+    FT_MOVE_SIGN( FT_UInt32, b_, b, s );
+    FT_MOVE_SIGN( FT_UInt32, c_, c, s );
 
     if ( c == 0 )
       a = 0x7FFFFFFFUL;
@@ -471,13 +457,9 @@
 
     /* XXX: this function does not allow 64-bit arguments */
 
-    a = (FT_UInt32)a_;
-    b = (FT_UInt32)b_;
-    c = (FT_UInt32)c_;
-
-    FT_MOVE_SIGN( a_, a, s );
-    FT_MOVE_SIGN( b_, b, s );
-    FT_MOVE_SIGN( c_, c, s );
+    FT_MOVE_SIGN( FT_UInt32, a_, a, s );
+    FT_MOVE_SIGN( FT_UInt32, b_, b, s );
+    FT_MOVE_SIGN( FT_UInt32, c_, c, s );
 
     if ( c == 0 )
       a = 0x7FFFFFFFUL;
@@ -516,10 +498,10 @@
 #elif 0
 
     /*
-     *  This code is nonportable.  See comment below.
+     * This code is nonportable.  See comment below.
      *
-     *  However, on a platform where right-shift of a signed quantity fills
-     *  the leftmost bits by copying the sign bit, it might be faster.
+     * However, on a platform where right-shift of a signed quantity fills
+     * the leftmost bits by copying the sign bit, it might be faster.
      */
 
     FT_Long    sa, sb;
@@ -527,22 +509,22 @@
 
 
     /*
-     *  This is a clever way of converting a signed number `a' into its
-     *  absolute value (stored back into `a') and its sign.  The sign is
-     *  stored in `sa'; 0 means `a' was positive or zero, and -1 means `a'
-     *  was negative.  (Similarly for `b' and `sb').
+     * This is a clever way of converting a signed number `a' into its
+     * absolute value (stored back into `a') and its sign.  The sign is
+     * stored in `sa'; 0 means `a' was positive or zero, and -1 means `a'
+     * was negative.  (Similarly for `b' and `sb').
      *
-     *  Unfortunately, it doesn't work (at least not portably).
+     * Unfortunately, it doesn't work (at least not portably).
      *
-     *  It makes the assumption that right-shift on a negative signed value
-     *  fills the leftmost bits by copying the sign bit.  This is wrong.
-     *  According to K&R 2nd ed, section `A7.8 Shift Operators' on page 206,
-     *  the result of right-shift of a negative signed value is
-     *  implementation-defined.  At least one implementation fills the
-     *  leftmost bits with 0s (i.e., it is exactly the same as an unsigned
-     *  right shift).  This means that when `a' is negative, `sa' ends up
-     *  with the value 1 rather than -1.  After that, everything else goes
-     *  wrong.
+     * It makes the assumption that right-shift on a negative signed value
+     * fills the leftmost bits by copying the sign bit.  This is wrong.
+     * According to K&R 2nd ed, section `A7.8 Shift Operators' on page 206,
+     * the result of right-shift of a negative signed value is
+     * implementation-defined.  At least one implementation fills the
+     * leftmost bits with 0s (i.e., it is exactly the same as an unsigned
+     * right shift).  This means that when `a' is negative, `sa' ends up
+     * with the value 1 rather than -1.  After that, everything else goes
+     * wrong.
      */
     sa = ( a_ >> ( sizeof ( a_ ) * 8 - 1 ) );
     a  = ( a_ ^ sa ) - sa;
@@ -576,11 +558,8 @@
 
     /* XXX: this function does not allow 64-bit arguments */
 
-    a = (FT_UInt32)a_;
-    b = (FT_UInt32)b_;
-
-    FT_MOVE_SIGN( a_, a, s );
-    FT_MOVE_SIGN( b_, b, s );
+    FT_MOVE_SIGN( FT_UInt32, a_, a, s );
+    FT_MOVE_SIGN( FT_UInt32, b_, b, s );
 
     if ( a + ( b >> 8 ) <= 8190UL )
       a = ( a * b + 0x8000UL ) >> 16;
@@ -615,11 +594,8 @@
 
     /* XXX: this function does not allow 64-bit arguments */
 
-    a = (FT_UInt32)a_;
-    b = (FT_UInt32)b_;
-
-    FT_MOVE_SIGN( a_, a, s );
-    FT_MOVE_SIGN( b_, b, s );
+    FT_MOVE_SIGN( FT_UInt32, a_, a, s );
+    FT_MOVE_SIGN( FT_UInt32, b_, b, s );
 
     if ( b == 0 )
     {
@@ -652,7 +628,7 @@
   }
 
 
-#endif /* !FT_LONG64 */
+#endif /* !FT_INT64 */
 
 
   /* documentation is in ftglyph.h */
@@ -701,8 +677,8 @@
     if ( !delta )
       return FT_THROW( Invalid_Argument );  /* matrix can't be inverted */
 
-    matrix->xy = - FT_DivFix( matrix->xy, delta );
-    matrix->yx = - FT_DivFix( matrix->yx, delta );
+    matrix->xy = -FT_DivFix( matrix->xy, delta );
+    matrix->yx = -FT_DivFix( matrix->yx, delta );
 
     xx = matrix->xx;
     yy = matrix->yy;
@@ -747,6 +723,54 @@
 
   /* documentation is in ftcalc.h */
 
+  FT_BASE_DEF( FT_Bool )
+  FT_Matrix_Check( const FT_Matrix*  matrix )
+  {
+    FT_Fixed  xx, xy, yx, yy;
+    FT_Fixed  val;
+    FT_Int    shift;
+    FT_ULong  temp1, temp2;
+
+
+    if ( !matrix )
+      return 0;
+
+    xx  = matrix->xx;
+    xy  = matrix->xy;
+    yx  = matrix->yx;
+    yy  = matrix->yy;
+    val = FT_ABS( xx ) | FT_ABS( xy ) | FT_ABS( yx ) | FT_ABS( yy );
+
+    /* we only handle non-zero 32-bit values */
+    if ( !val || val > 0x7FFFFFFFL )
+      return 0;
+
+    /* Scale matrix to avoid the temp1 overflow, which is */
+    /* more stringent than avoiding the temp2 overflow.   */
+
+    shift = FT_MSB( val ) - 12;
+
+    if ( shift > 0 )
+    {
+      xx >>= shift;
+      xy >>= shift;
+      yx >>= shift;
+      yy >>= shift;
+    }
+
+    temp1 = 32U * (FT_ULong)FT_ABS( xx * yy - xy * yx );
+    temp2 = (FT_ULong)( xx * xx ) + (FT_ULong)( xy * xy ) +
+            (FT_ULong)( yx * yx ) + (FT_ULong)( yy * yy );
+
+    if ( temp1 <= temp2 )
+      return 0;
+
+    return 1;
+  }
+
+
+  /* documentation is in ftcalc.h */
+
   FT_BASE_DEF( void )
   FT_Vector_Transform_Scaled( FT_Vector*        vector,
                               const FT_Matrix*  matrix,
@@ -782,11 +806,8 @@
     FT_Int     sx = 1, sy = 1, shift;
 
 
-    x = (FT_UInt32)x_;
-    y = (FT_UInt32)y_;
-
-    FT_MOVE_SIGN( x_, x, sx );
-    FT_MOVE_SIGN( y_, y, sy );
+    FT_MOVE_SIGN( FT_UInt32, x_, x, sx );
+    FT_MOVE_SIGN( FT_UInt32, y_, y, sy );
 
     /* trivial cases */
     if ( x == 0 )
@@ -866,43 +887,71 @@
   }
 
 
-#if 0
-
   /* documentation is in ftcalc.h */
 
-  FT_BASE_DEF( FT_Int32 )
-  FT_SqrtFixed( FT_Int32  x )
+  FT_BASE_DEF( FT_UInt32 )
+  FT_SqrtFixed( FT_UInt32  v )
   {
-    FT_UInt32  root, rem_hi, rem_lo, test_div;
-    FT_Int     count;
+    if ( v == 0 )
+      return 0;
 
+#ifndef FT_INT64
 
-    root = 0;
-
-    if ( x > 0 )
+    /* Algorithm by Christophe Meessen (1993) with overflow fixed and     */
+    /* rounding added.  Any unsigned fixed 16.16 argument is acceptable.  */
+    /* However, this algorithm is slower than the Babylonian method with  */
+    /* a good initial guess.  We only use it for large 32-bit values when */
+    /* 64-bit computations are not desirable.                             */
+    else if ( v > 0x10000U )
     {
-      rem_hi = 0;
-      rem_lo = (FT_UInt32)x;
-      count  = 24;
+      FT_UInt32  r = v >> 1;
+      FT_UInt32  q = ( v & 1 ) << 15;
+      FT_UInt32  b = 0x20000000;
+      FT_UInt32  t;
+
+
       do
       {
-        rem_hi   = ( rem_hi << 2 ) | ( rem_lo >> 30 );
-        rem_lo <<= 2;
-        root   <<= 1;
-        test_div = ( root << 1 ) + 1;
-
-        if ( rem_hi >= test_div )
+        t = q + b;
+        if ( r >= t )
         {
-          rem_hi -= test_div;
-          root   += 1;
+          r -= t;
+          q  = t + b;  /* equivalent to q += 2*b */
         }
-      } while ( --count );
+        r <<= 1;
+        b >>= 1;
+
+      } while ( b > 0x10 );  /* exactly 25 cycles */
+
+      return ( q + 0x40 ) >> 7;
     }
+    else
+    {
+      FT_UInt32  r = ( v << 16 ) - 1;
 
-    return (FT_Int32)root;
+#else /* FT_INT64 */
+
+    else
+    {
+      FT_UInt64  r = ( (FT_UInt64)v << 16 ) - 1;
+
+#endif /* FT_INT64 */
+
+      FT_UInt32  q = 1 << ( ( 17 + FT_MSB( v ) ) >> 1 );
+      FT_UInt32  t;
+
+
+      /* Babylonian method with rounded-up division */
+      do
+      {
+        t = q;
+        q = ( t + (FT_UInt32)( r / t ) + 1 ) >> 1;
+
+      } while ( q != t );  /* less than 6 cycles */
+
+      return q;
+    }
   }
-
-#endif /* 0 */
 
 
   /* documentation is in ftcalc.h */
@@ -913,9 +962,13 @@
                          FT_Pos  out_x,
                          FT_Pos  out_y )
   {
-#ifdef FT_LONG64
+    /* we silently ignore overflow errors since such large values */
+    /* lead to even more (harmless) rendering errors later on     */
 
-    FT_Int64  delta = (FT_Int64)in_x * out_y - (FT_Int64)in_y * out_x;
+#ifdef FT_INT64
+
+    FT_Int64  delta = SUB_INT64( MUL_INT64( in_x, out_y ),
+                                 MUL_INT64( in_y, out_x ) );
 
 
     return ( delta > 0 ) - ( delta < 0 );
@@ -925,8 +978,6 @@
     FT_Int  result;
 
 
-    /* we silently ignore overflow errors, since such large values */
-    /* lead to even more (harmless) rendering errors later on      */
     if ( ADD_LONG( FT_ABS( in_x ), FT_ABS( out_y ) ) <= 131071L &&
          ADD_LONG( FT_ABS( in_y ), FT_ABS( out_x ) ) <= 131071L )
     {
@@ -990,7 +1041,7 @@
     /*                                                           */
     /* This approach has the advantage that the angle between    */
     /* `in' and `out' is not checked.  In case one of the two    */
-    /* vectors is `dominant', this is, much larger than the      */
+    /* vectors is `dominant', that is, much larger than the      */
     /* other vector, we thus always have a flat corner.          */
     /*                                                           */
     /*                hypotenuse                                 */
@@ -1011,6 +1062,64 @@
     /*   d_in + d_out < 17/16 d_hypot     */
 
     return ( d_in + d_out - d_hypot ) < ( d_hypot >> 4 );
+  }
+
+
+  FT_BASE_DEF( FT_Int32 )
+  FT_MulAddFix( FT_Fixed*  s,
+                FT_Int32*  f,
+                FT_UInt    count )
+  {
+    FT_UInt   i;
+    FT_Int64  temp;
+
+
+#ifdef FT_INT64
+    temp = 0;
+
+    for ( i = 0; i < count; ++i )
+      temp += (FT_Int64)s[i] * f[i];
+
+    return (FT_Int32)( ( temp + 0x8000 ) >> 16 );
+#else
+    temp.hi = 0;
+    temp.lo = 0;
+
+    for ( i = 0; i < count; ++i )
+    {
+      FT_Int64  multResult;
+
+      FT_Int     sign  = 1;
+      FT_UInt32  carry = 0;
+
+      FT_UInt32  scalar;
+      FT_UInt32  factor;
+
+
+      FT_MOVE_SIGN( FT_UInt32, s[i], scalar, sign );
+      FT_MOVE_SIGN( FT_UInt32, f[i], factor, sign );
+
+      ft_multo64( scalar, factor, &multResult );
+
+      if ( sign < 0 )
+      {
+        /* Emulated `FT_Int64` negation. */
+        carry = ( multResult.lo == 0 );
+
+        multResult.lo = ~multResult.lo + 1;
+        multResult.hi = ~multResult.hi + carry;
+      }
+
+      FT_Add64( &temp, &multResult, &temp );
+    }
+
+    /* Shift and round value. */
+    return (FT_Int32)( ( ( temp.hi << 16 ) | ( temp.lo >> 16 ) )
+                                     + ( 1 & ( temp.lo >> 15 ) ) );
+
+
+#endif /* !FT_INT64 */
+
   }
 
 

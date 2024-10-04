@@ -1,3 +1,7 @@
 module FreeType {
-    header "freetype_public.h"
+    header "freetype/freetype.h"
+    header "freetype/ftbitmap.h"
+    header "freetype/ftoutln.h"
+    header "freetype/ftstroke.h"
+    header "freetype/ftbbox.h"
 }

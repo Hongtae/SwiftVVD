@@ -15,17 +15,9 @@ let package = Package(
                 ]
             ),
     ],
-    dependencies: [
-        .package(
-            name: "VVDSupport",
-            path: "../VVDSupport"),
-    ],
     targets: [
         .target(
             name: "FreeType",
-            dependencies: [
-                .product(name: "VVDSupport", package: "VVDSupport"),
-            ],
             path: ".",
             sources: [
                 "src/autofit/autofit.c",
@@ -35,13 +27,11 @@ let package = Package(
                 "src/base/ftbitmap.c",
                 "src/base/ftcid.c",
                 "src/base/ftdebug.c",
-                "src/base/ftfntfmt.c",
                 "src/base/ftfstype.c",
                 "src/base/ftgasp.c",
                 "src/base/ftglyph.c",
                 "src/base/ftgxval.c",
                 "src/base/ftinit.c",
-                "src/base/ftlcdfil.c",
                 "src/base/ftmm.c",
                 "src/base/ftotval.c",
                 "src/base/ftpatent.c",
@@ -55,6 +45,7 @@ let package = Package(
                 "src/cache/ftcache.c",
                 "src/cff/cff.c",
                 "src/cid/type1cid.c",
+                "src/dlg/dlgwrap.c",
                 "src/gzip/ftgzip.c",
                 "src/lzw/ftlzw.c",
                 "src/pcf/pcf.c",
@@ -65,10 +56,13 @@ let package = Package(
                 "src/raster/raster.c",
                 "src/sfnt/sfnt.c",
                 "src/smooth/smooth.c",
+                "src/sdf/sdf.c",
+                "src/svg/svg.c",
                 "src/truetype/truetype.c",
                 "src/type1/type1.c",
                 "src/type42/type42.c",
-                "src/winfonts/winfnt.c"],
+                "src/winfonts/winfnt.c",
+            ],
             publicHeadersPath: "include",
             cSettings: [
                 .define("_CRT_SECURE_NO_WARNINGS", .when(platforms:[.windows])),
@@ -81,6 +75,5 @@ let package = Package(
                 ]),
             ]),
     ],
-    cLanguageStandard: .c11,
-    cxxLanguageStandard: .cxx17
+    cLanguageStandard: .c11
 )

@@ -1,65 +1,57 @@
-/***************************************************************************/
-/*                                                                         */
-/*  psblues.c                                                              */
-/*                                                                         */
-/*    Adobe's code for handling Blue Zones (body).                         */
-/*                                                                         */
-/*  Copyright 2009-2014 Adobe Systems Incorporated.                        */
-/*                                                                         */
-/*  This software, and all works of authorship, whether in source or       */
-/*  object code form as indicated by the copyright notice(s) included      */
-/*  herein (collectively, the "Work") is made available, and may only be   */
-/*  used, modified, and distributed under the FreeType Project License,    */
-/*  LICENSE.TXT.  Additionally, subject to the terms and conditions of the */
-/*  FreeType Project License, each contributor to the Work hereby grants   */
-/*  to any individual or legal entity exercising permissions granted by    */
-/*  the FreeType Project License and this section (hereafter, "You" or     */
-/*  "Your") a perpetual, worldwide, non-exclusive, no-charge,              */
-/*  royalty-free, irrevocable (except as stated in this section) patent    */
-/*  license to make, have made, use, offer to sell, sell, import, and      */
-/*  otherwise transfer the Work, where such license applies only to those  */
-/*  patent claims licensable by such contributor that are necessarily      */
-/*  infringed by their contribution(s) alone or by combination of their    */
-/*  contribution(s) with the Work to which such contribution(s) was        */
-/*  submitted.  If You institute patent litigation against any entity      */
-/*  (including a cross-claim or counterclaim in a lawsuit) alleging that   */
-/*  the Work or a contribution incorporated within the Work constitutes    */
-/*  direct or contributory patent infringement, then any patent licenses   */
-/*  granted to You under this License for that Work shall terminate as of  */
-/*  the date such litigation is filed.                                     */
-/*                                                                         */
-/*  By using, modifying, or distributing the Work you indicate that you    */
-/*  have read and understood the terms and conditions of the               */
-/*  FreeType Project License as well as those provided in this section,    */
-/*  and you accept them fully.                                             */
-/*                                                                         */
-/***************************************************************************/
+/****************************************************************************
+ *
+ * psblues.c
+ *
+ *   Adobe's code for handling Blue Zones (body).
+ *
+ * Copyright 2009-2014 Adobe Systems Incorporated.
+ *
+ * This software, and all works of authorship, whether in source or
+ * object code form as indicated by the copyright notice(s) included
+ * herein (collectively, the "Work") is made available, and may only be
+ * used, modified, and distributed under the FreeType Project License,
+ * LICENSE.TXT.  Additionally, subject to the terms and conditions of the
+ * FreeType Project License, each contributor to the Work hereby grants
+ * to any individual or legal entity exercising permissions granted by
+ * the FreeType Project License and this section (hereafter, "You" or
+ * "Your") a perpetual, worldwide, non-exclusive, no-charge,
+ * royalty-free, irrevocable (except as stated in this section) patent
+ * license to make, have made, use, offer to sell, sell, import, and
+ * otherwise transfer the Work, where such license applies only to those
+ * patent claims licensable by such contributor that are necessarily
+ * infringed by their contribution(s) alone or by combination of their
+ * contribution(s) with the Work to which such contribution(s) was
+ * submitted.  If You institute patent litigation against any entity
+ * (including a cross-claim or counterclaim in a lawsuit) alleging that
+ * the Work or a contribution incorporated within the Work constitutes
+ * direct or contributory patent infringement, then any patent licenses
+ * granted to You under this License for that Work shall terminate as of
+ * the date such litigation is filed.
+ *
+ * By using, modifying, or distributing the Work you indicate that you
+ * have read and understood the terms and conditions of the
+ * FreeType Project License as well as those provided in this section,
+ * and you accept them fully.
+ *
+ */
 
 
 #include "psft.h"
-#include FT_INTERNAL_DEBUG_H
+#include <freetype/internal/ftdebug.h>
 
 #include "psblues.h"
 #include "pshints.h"
 #include "psfont.h"
 
 
-  /*************************************************************************/
-  /*                                                                       */
-  /* The macro FT_COMPONENT is used in trace mode.  It is an implicit      */
-  /* parameter of the FT_TRACE() and FT_ERROR() macros, used to print/log  */
-  /* messages during execution.                                            */
-  /*                                                                       */
-#undef  FT_COMPONENT
-#define FT_COMPONENT  trace_cf2blues
-
-
-  /*
-   * For blue values, the FreeType parser produces an array of integers,
-   * while the Adobe CFF engine produces an array of fixed.
-   * Define a macro to convert FreeType to fixed.
+  /**************************************************************************
+   *
+   * The macro FT_COMPONENT is used in trace mode.  It is an implicit
+   * parameter of the FT_TRACE() and FT_ERROR() macros, used to print/log
+   * messages during execution.
    */
-#define cf2_blueToFixed( x )  cf2_intToFixed( x )
+#undef  FT_COMPONENT
+#define FT_COMPONENT  cf2blues
 
 
   FT_LOCAL_DEF( void )
@@ -78,10 +70,10 @@
     size_t  numFamilyBlues;
     size_t  numFamilyOtherBlues;
 
-    FT_Pos*  blueValues;
-    FT_Pos*  otherBlues;
-    FT_Pos*  familyBlues;
-    FT_Pos*  familyOtherBlues;
+    FT_Fixed*  blueValues;
+    FT_Fixed*  otherBlues;
+    FT_Fixed*  familyBlues;
+    FT_Fixed*  familyOtherBlues;
 
     size_t     i;
     CF2_Fixed  emBoxBottom, emBoxTop;
@@ -138,13 +130,13 @@
       emBoxTop    = CF2_ICF_Top;
     }
 
-    if ( cf2_getLanguageGroup( decoder ) == 1                   &&
-         ( numBlueValues == 0                                 ||
-           ( numBlueValues == 4                             &&
-             cf2_blueToFixed( blueValues[0] ) < emBoxBottom &&
-             cf2_blueToFixed( blueValues[1] ) < emBoxBottom &&
-             cf2_blueToFixed( blueValues[2] ) > emBoxTop    &&
-             cf2_blueToFixed( blueValues[3] ) > emBoxTop    ) ) )
+    if ( cf2_getLanguageGroup( decoder ) == 1     &&
+         ( numBlueValues == 0                   ||
+           ( numBlueValues == 4               &&
+             blueValues[0] < emBoxBottom      &&
+             blueValues[1] < emBoxBottom      &&
+             blueValues[2] > emBoxTop         &&
+             blueValues[3] > emBoxTop         ) ) )
     {
       /*
        * Construct hint edges suitable for synthetic ghost hints at top
@@ -189,10 +181,8 @@
     /* bottom zones                                                      */
     for ( i = 0; i < numBlueValues; i += 2 )
     {
-      blues->zone[blues->count].csBottomEdge =
-        cf2_blueToFixed( blueValues[i] );
-      blues->zone[blues->count].csTopEdge =
-        cf2_blueToFixed( blueValues[i + 1] );
+      blues->zone[blues->count].csBottomEdge = blueValues[i];
+      blues->zone[blues->count].csTopEdge    = blueValues[i + 1];
 
       zoneHeight = SUB_INT32( blues->zone[blues->count].csTopEdge,
                               blues->zone[blues->count].csBottomEdge );
@@ -238,10 +228,8 @@
 
     for ( i = 0; i < numOtherBlues; i += 2 )
     {
-      blues->zone[blues->count].csBottomEdge =
-        cf2_blueToFixed( otherBlues[i] );
-      blues->zone[blues->count].csTopEdge =
-        cf2_blueToFixed( otherBlues[i + 1] );
+      blues->zone[blues->count].csBottomEdge = otherBlues[i];
+      blues->zone[blues->count].csTopEdge    = otherBlues[i + 1];
 
       zoneHeight = SUB_INT32( blues->zone[blues->count].csTopEdge,
                               blues->zone[blues->count].csBottomEdge );
@@ -299,7 +287,7 @@
         for ( j = 0; j < numFamilyOtherBlues; j += 2 )
         {
           /* top edge */
-          flatFamilyEdge = cf2_blueToFixed( familyOtherBlues[j + 1] );
+          flatFamilyEdge = familyOtherBlues[j + 1];
 
           diff = cf2_fixedAbs( SUB_INT32( flatEdge, flatFamilyEdge ) );
 
@@ -317,7 +305,7 @@
         if ( numFamilyBlues >= 2 )
         {
           /* top edge */
-          flatFamilyEdge = cf2_blueToFixed( familyBlues[1] );
+          flatFamilyEdge = familyBlues[1];
 
           diff = cf2_fixedAbs( SUB_INT32( flatEdge, flatFamilyEdge ) );
 
@@ -337,7 +325,7 @@
         for ( j = 2; j < numFamilyBlues; j += 2 )
         {
           /* bottom edge */
-          flatFamilyEdge = cf2_blueToFixed( familyBlues[j] );
+          flatFamilyEdge = familyBlues[j];
 
           /* adjust edges of top zone upward by twice darkening amount */
           flatFamilyEdge += 2 * font->darkenY;      /* bottom edge */
@@ -452,13 +440,13 @@
    * zones in the same pass (see `BlueLock').  If a hint is captured,
    * return true and position the edge(s) in one of 3 ways:
    *
-   *  1) If `BlueScale' suppresses overshoot, position the captured edge
-   *     at the flat edge of the zone.
-   *  2) If overshoot is not suppressed and `BlueShift' requires
-   *     overshoot, position the captured edge a minimum of 1 device pixel
-   *     from the flat edge.
-   *  3) If overshoot is not suppressed or required, position the captured
-   *     edge at the nearest device pixel.
+   * 1) If `BlueScale' suppresses overshoot, position the captured edge
+   *    at the flat edge of the zone.
+   * 2) If overshoot is not suppressed and `BlueShift' requires
+   *    overshoot, position the captured edge a minimum of 1 device pixel
+   *    from the flat edge.
+   * 3) If overshoot is not suppressed or required, position the captured
+   *    edge at the nearest device pixel.
    *
    */
   FT_LOCAL_DEF( FT_Bool )
@@ -506,7 +494,8 @@
             /* guarantee minimum of 1 pixel overshoot */
             dsNew = FT_MIN(
                       cf2_fixedRound( bottomHintEdge->dsCoord ),
-                      blues->zone[i].dsFlatEdge - cf2_intToFixed( 1 ) );
+                      SUB_INT32( blues->zone[i].dsFlatEdge,
+                                 cf2_intToFixed( 1 ) ) );
           }
 
           else
