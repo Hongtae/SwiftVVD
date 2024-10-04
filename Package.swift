@@ -24,6 +24,8 @@ let package = Package(
                  path: "SupportPackages/FreeType"),
         .package(name: "OpenAL-Soft",
                  path: "SupportPackages/OpenAL-Soft"),
+        .package(name: "TinyGLTF",
+                 path: "SupportPackages/TinyGLTF"),
         .package(name: "Vulkan",
                  path: "SupportPackages/Vulkan"),
         .package(name: "Wayland",

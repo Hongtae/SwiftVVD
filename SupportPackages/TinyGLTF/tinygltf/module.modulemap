@@ -1,0 +1,4 @@
+module TinyGLTF {
+    header "tiny_gltf.h"
+    requires cplusplus14
+}
