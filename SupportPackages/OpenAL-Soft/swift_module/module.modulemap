@@ -1,0 +1,35 @@
+module OpenAL_backend_windows {
+    header "dummy.h"
+}
+
+module OpenAL_backend_coreaudio {
+    header "dummy.h"
+}
+
+module OpenAL_backend_dsound {
+    header "dummy.h"
+}
+
+module OpenAL_backend_alsa {
+    header "dummy.h"
+}
+
+module OpenAL_backend_oss {
+    header "dummy.h"
+}
+
+module OpenAL_backend_opensl {
+    header "dummy.h"
+}
+
+module OpenAL_backend {
+    header "dummy.h"
+}
+
+module OpenAL_mixer_neon {
+    header "dummy.h"
+}
+
+module OpenAL_mixer_sse {
+    header "dummy.h"
+}
