@@ -245,7 +245,7 @@ public struct ViewFrustum {
         }
     }
 
-    public func isSphereInside(_ sphere: Sphere) -> Bool {
+    public func intersects(_ sphere: Sphere) -> Bool {
         if sphere.radius < 0  { return false }
         let center = Vector4(sphere.center, 1)
         if self.near.dot(center)   < -sphere.radius { return false }
@@ -258,10 +258,10 @@ public struct ViewFrustum {
     }
 
     public func isPointInside(_ point: Vector3) -> Bool {
-        isSphereInside(Sphere(center: point, radius: 0))
+        intersects(Sphere(center: point, radius: 0))
     }
 
-    public func isAABBInside(_ aabb: AABB) -> Bool {
+    public func intersects(_ aabb: AABB, _ isInside: UnsafeMutablePointer<Bool>? = nil) -> Bool {
         if aabb.isNull { return false }
 
         let planes = [
@@ -272,11 +272,11 @@ public struct ViewFrustum {
             self.top,
             self.bottom
         ]
-        let minMax = [
-            aabb.min, aabb.max
-        ]
-        for i in 0..<6 {
-            let plane = planes[i]
+
+        let minMax = [ aabb.min, aabb.max ]
+
+        var intersects = isInside == nil
+        for plane in planes {
             var bx = plane.a > .zero ? 1 : 0
             var by = plane.b > .zero ? 1 : 0
             var bz = plane.c > .zero ? 1 : 0
@@ -286,14 +286,18 @@ public struct ViewFrustum {
                 return false
             }
 
-            bx = 1 - bx
-            by = 1 - by
-            bz = 1 - bz
-            d = plane.dot(Vector3(minMax[bx].x, minMax[by].y, minMax[bz].z))
-            if d <= .zero {
-                return true  // intersects
+            if intersects == false {
+                bx = 1 - bx
+                by = 1 - by
+                bz = 1 - bz
+                d = plane.dot(Vector3(minMax[bx].x, minMax[by].y, minMax[bz].z))
+                if d <= .zero {
+                    intersects = true   // intersects
+                }
             }
         }
+        isInside?.pointee = !intersects
+
         // inside
         return true
     }
