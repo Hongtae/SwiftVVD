@@ -3,20 +3,15 @@
     "dockerFile": "Dockerfile",
     "features": {
         "ghcr.io/devcontainers/features/common-utils:2": {
+            "installZsh": true,
+            "configureZshAsDefaultShell": true,
+            "installOhMyZsh": true,
+            "installOhMyZshConfig": true,
             "upgradePackages": true,
-            "username": "vscode",
+            "username": "devcontainer",
             "userUid": "automatic",
             "userGid": "automatic"
-        },
-        "ghcr.io/devcontainers/features/git:1": {
-            "ppa": true,
-            "version": "latest"
-        },
-        "ghcr.io/devcontainers/features/git-lfs:1": {
-            "autoPull": true,
-            "version": "latest"
-        },
-        "ghcr.io/wxw-matt/devcontainer-features/command_runner:0": {}
+        }
     },
     "runArgs": [
         "--cap-add=SYS_PTRACE",
@@ -41,5 +36,5 @@
     // "forwardPorts": [],
 
     // Set `remoteUser` to `root` to connect as root instead. More info: https://aka.ms/vscode-remote/containers/non-root.
-    "remoteUser": "vscode"
+    "remoteUser": "devcontainer"
 }
