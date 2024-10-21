@@ -26,6 +26,16 @@ public func lerp<T>(_ a: T, _ b: T, _ t: T) -> T where T: FloatingPoint {
     a * (1 - t) + b * t
 }
 
+extension FloatingPoint {
+    public func radianToDegree() -> Self {
+        self * Self(180) / .pi
+    }
+
+    public func degreeToRadian() -> Self {
+        self * .pi / Self(180)
+    }
+}
+
 public typealias Half2 = (Float16, Float16)
 public typealias Float2 = (Float32, Float32)
 public typealias Double2 = (Float64, Float64)

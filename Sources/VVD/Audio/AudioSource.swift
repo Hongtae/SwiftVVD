@@ -47,13 +47,13 @@ public final class AudioSource: Sendable {
     }
 
     public var coneInnerAngle: Scalar {
-        get { degreeToRadian(getSource(AL_CONE_INNER_ANGLE, 360.0)) }
-        set { setSource(AL_CONE_INNER_ANGLE, clamp(radianToDegree(newValue), min: 0.0, max: 360.0)) }
+        get { getSource(AL_CONE_INNER_ANGLE, 360.0).degreeToRadian() }
+        set { setSource(AL_CONE_INNER_ANGLE, clamp(newValue.radianToDegree(), min: 0.0, max: 360.0)) }
     }
 
     public var coneOuterAngle: Scalar {
-        get { degreeToRadian(getSource(AL_CONE_OUTER_ANGLE, 360.0)) }
-        set { setSource(AL_CONE_OUTER_ANGLE, clamp(radianToDegree(newValue), min: 0.0, max: 360.0)) }
+        get { getSource(AL_CONE_OUTER_ANGLE, 360.0).degreeToRadian() }
+        set { setSource(AL_CONE_OUTER_ANGLE, clamp(newValue.radianToDegree(), min: 0.0, max: 360.0)) }
     }
 
     public var referenceDistance: Scalar {
@@ -396,13 +396,5 @@ public final class AudioSource: Sendable {
     private func setSource(_ param: ALenum, _ vector: Vector3) {
         let v = vector.float3
         alSource3f(sourceID, param, v.0, v.1, v.2)
-    }
-
-    private func radianToDegree<T: FloatingPoint>(_ r: T) -> T {
-        r * T(180) / T.pi
-    }
-
-    private func degreeToRadian<T: FloatingPoint>(_ d: T) -> T {
-        d * T.pi / T(180)
-    }    
+    }  
 }
