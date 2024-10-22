@@ -238,6 +238,21 @@ public struct ShaderStageFlags: OptionSet, Sendable {
     }
 }
 
+extension ShaderStageFlags: CustomStringConvertible {
+    public var description: String {
+        var result: [String] = []
+        
+        if contains(.vertex) { result.append(".vertex") }
+        if contains(.tessellationControl) { result.append(".tessellationControl")}
+        if contains(.tessellationEvaluation) { result.append(".tessellationEvaluation") }
+        if contains(.geometry) { result.append(".geometry") }
+        if contains(.fragment) { result.append(".fragment") }
+        if contains(.compute) { result.append(".compute") }
+        
+        return "[\(result.joined(separator: ", "))]"
+    }
+}
+
 public struct ShaderResourceBuffer {
     public var dataType: ShaderDataType
     public var alignment: Int

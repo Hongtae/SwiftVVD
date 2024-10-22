@@ -19,7 +19,7 @@ extension EnvironmentValues {
     }
 }
 
-class SharedContext: @unchecked Sendable {
+final class SharedContext: @unchecked Sendable {
     var appContext: AppContext
 
     var window: Window?

@@ -58,6 +58,12 @@ public struct ShaderBindingLocation: Hashable {
     public let binding: Int
     public let offset: Int
 
+    public init(set: Int, binding: Int, offset: Int) {
+        self.set = set
+        self.binding = binding
+        self.offset = offset
+    }
+    
     public var isPushConstant: Bool {
         self.set == -1 && self.binding == -1
     }

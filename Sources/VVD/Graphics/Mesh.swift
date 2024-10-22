@@ -2,24 +2,38 @@
 //  File: Mesh.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 public class Mesh {
     public var material: Material?
+    public var aabb: AABB
 
     public struct VertexAttribute {
-        public let semantic: VertexAttributeSemantic
-        public let format: VertexFormat
-        public let offset: Int
-        public let name: String
+        public var semantic: VertexAttributeSemantic
+        public var format: VertexFormat
+        public var offset: Int
+        public var name: String
+        public init(semantic: VertexAttributeSemantic, format: VertexFormat, offset: Int, name: String) {
+            self.semantic = semantic
+            self.format = format
+            self.offset = offset
+            self.name = name
+        }
     }
     public struct VertexBuffer {
-        public let byteOffset: Int
-        public let byteStride: Int
-        public let vertexCount: Int
-        public let buffer: GPUBuffer
-        public let attributes: [VertexAttribute]
+        public var byteOffset: Int
+        public var byteStride: Int
+        public var vertexCount: Int
+        public var buffer: GPUBuffer
+        public var attributes: [VertexAttribute]
+        public init(byteOffset: Int, byteStride: Int, vertexCount: Int, buffer: GPUBuffer, attributes: [VertexAttribute]) {
+            self.byteOffset = byteOffset
+            self.byteStride = byteStride
+            self.vertexCount = vertexCount
+            self.buffer = buffer
+            self.attributes = attributes
+        }
     }
     public var vertexBuffers: [VertexBuffer]
     public var indexBuffer: GPUBuffer?
@@ -71,6 +85,8 @@ public class Mesh {
         self.resourceBindings = []
         self.pushConstants = []
         self.bufferResources = [:]
+
+        self.aabb = AABB()
     }
 
     public var vertexDescriptor: VertexDescriptor {
@@ -137,20 +153,23 @@ public class Mesh {
         return VertexDescriptor(attributes: attributes, layouts: layouts)
     }
 
-    func initResources(device: GraphicsDevice, bufferPolicy policy: BufferUsagePolicy) -> Bool {
+    public func initResources(device: GraphicsDevice,
+                              bufferPolicy policy: BufferUsagePolicy,
+                              alignNPOT: Bool = false) -> Bool {
         if material == nil { return false }
         if pipelineState == nil { _ = buildPipelineState(device: device) }
         if pipelineState == nil { return false }
 
-        let alignAddressNPOT = { (ptr: Int, alignment: Int) -> Int in
+        let _alignAddressNPOT = { (ptr: Int, alignment: Int) -> Int in
             if (ptr % alignment) != 0 {
                 return ptr + (alignment - (ptr % alignment))
             }
             return ptr
         }
-        let alignAddress = { (ptr: Int, alignment: Int) -> Int in
+        let _alignAddress = { (ptr: Int, alignment: Int) -> Int in
             return (ptr + alignment - 1) & ~(alignment - 1)
         }
+        let alignAddress: (Int, Int)->Int = alignNPOT ? _alignAddressNPOT : _alignAddress
 
         var numBuffersGenerated = 0
         var totalBytesAllocated = 0
@@ -311,8 +330,8 @@ public class Mesh {
         return true
     }
 
-    func buildPipelineState(device: GraphicsDevice,
-                            reflection ref: UnsafeMutablePointer<PipelineReflection>? = nil) -> Bool {
+    public func buildPipelineState(device: GraphicsDevice,
+                                   reflection ref: UnsafeMutablePointer<PipelineReflection>? = nil) -> Bool {
         guard let material else {
             Log.error("The material does not exist.")
             return false
@@ -323,6 +342,7 @@ public class Mesh {
 
         if vertexFunction == nil {
             Log.error("Materials do not have a vertex function.")
+            return false
         }
 
         let vertexDescriptor = self.vertexDescriptor
@@ -445,7 +465,7 @@ public class Mesh {
         return true
     }
 
-    func updateShadingProperties(sceneState: SceneState?) {
+    public func updateShadingProperties(sceneState: SceneState?) {
         guard let material else { return }
 
         struct StructMemberBind {
@@ -910,7 +930,8 @@ public class Mesh {
         return 0
     }
 
-    func encodeRenderCommand(encoder: RenderCommandEncoder, numInstances: Int, baseInstance: Int) -> Bool {
+    @discardableResult
+    public func encodeRenderCommand(encoder: RenderCommandEncoder, numInstances: Int = 1, baseInstance: Int = 0) -> Bool {
         if let pipelineState, let material, vertexBuffers.isEmpty == false {
             encoder.setRenderPipelineState(pipelineState)
             encoder.setFrontFacing(material.frontFace)

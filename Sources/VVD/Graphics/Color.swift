@@ -112,22 +112,6 @@ public struct Color: Hashable, Sendable {
     public func opacity(_ opacity: some BinaryFloatingPoint) -> Color {
         Color(self.r, self.g, self.b, Scalar(opacity))
     }
-
-    public static let black = Color(0.0, 0.0, 0.0)
-    public static let white = Color(1.0, 1.0, 1.0)
-    public static let blue = Color(0.0, 0.0, 1.0)
-    public static let brown = Color(0.6, 0.4, 0.2)
-    public static let cyan = Color(0.0, 1.0, 1.0)
-    public static let gray = Color(0.5, 0.5, 0.5)
-    public static let darkGray = Color(0.3, 0.3, 0.3)
-    public static let lightGray = Color(0.6, 0.6, 0.6)
-    public static let green = Color(0.0, 1.0, 0.0)
-    public static let magenta = Color(1.0, 0.0, 1.0)
-    public static let orange = Color(1.0, 0.5, 0.0)
-    public static let purple = Color(0.5, 0.0, 0.5)
-    public static let red = Color(1.0, 0.0, 0.0)
-    public static let yellow = Color(1.0, 1.0, 0.0)
-    public static let clear = Color(0, 0, 0, 0)
 }
 
 public extension Color {
@@ -166,4 +150,36 @@ public extension Color {
             self.a = Scalar(v.3)
         }
     }
+}
+
+public extension Color {
+    static let black = Color(0.0, 0.0, 0.0)
+    static let white = Color(1.0, 1.0, 1.0)
+    static let blue = Color(0.0, 0.0, 1.0)
+    static let brown = Color(0.6, 0.4, 0.2)
+    static let cyan = Color(0.0, 1.0, 1.0)
+    static let gray = Color(0.5, 0.5, 0.5)
+    static let darkGray = Color(0.3, 0.3, 0.3)
+    static let lightGray = Color(0.6, 0.6, 0.6)
+    static let green = Color(0.0, 1.0, 0.0)
+    static let magenta = Color(1.0, 0.0, 1.0)
+    static let orange = Color(1.0, 0.5, 0.0)
+    static let purple = Color(0.5, 0.0, 0.5)
+    static let red = Color(1.0, 0.0, 0.0)
+    static let yellow = Color(1.0, 1.0, 0.0)
+    static let clear = Color(0, 0, 0, 0)
+
+    static let nonLinearRed = Color(1, 0.231373, 0.188235)
+    static let nonLinearOrange = Color(1, 0.584314, 0)
+    static let nonLinearYellow = Color(1, 0.8, 0)
+    static let nonLinearGreen = Color(0.156863, 0.803922, 0.254902)
+    static let nonLinearMint = Color(0, 0.780392, 0.745098)
+    static let nonLinearTeal = Color(0.34902, 0.678431, 0.768627)
+    static let nonLinearCyan = Color(0.333333, 0.745098, 0.941176)
+    static let nonLinearBlue = Color(0, 0.478431, 1)
+    static let nonLinearIndigo = Color(0.345098, 0.337255, 0.839216)
+    static let nonLinearPurple = Color(0.686275, 0.321569, 0.870588)
+    static let nonLinearPink = Color(1, 0.176471, 0.333333)
+    static let nonLinearBrown = Color(0.635294, 0.517647, 0.368627)
+    static let nonLinearGray = Color(0.556863, 0.556863, 0.576471)
 }

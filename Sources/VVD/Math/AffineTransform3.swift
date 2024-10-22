@@ -45,6 +45,13 @@ public struct AffineTransform3: Hashable, Sendable {
         self.translation = origin
     }
 
+    public init(matrix4 m: Matrix4) {
+        self.matrix3 = .init(m.m11, m.m12, m.m13,
+                             m.m21, m.m22, m.m23,
+                             m.m31, m.m32, m.m33)
+        self.translation = .init(m.m41, m.m42, m.m43)
+    }
+
     public init(axisX x: Vector3, y: Vector3, z: Vector3, origin: Vector3) {
         self.matrix3 = .init(row1: x, row2: y, row3: z)
         self.translation = origin
@@ -104,7 +111,7 @@ public struct AffineTransform3: Hashable, Sendable {
         }
     }
 
-    public func scaled(byVector v: Vector3) -> Self {
+    public func scaled(by v: Vector3) -> Self {
         scaled(x: v.x, y: v.y, z: v.z)
     }
 

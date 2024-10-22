@@ -297,7 +297,7 @@ public struct Image {
         }
     }
 
-    init(width: Int, height: Int, pixelFormat: ImagePixelFormat, data: Data? = nil) {
+    public init<T>(width: Int, height: Int, pixelFormat: ImagePixelFormat, content: T) {
         assert(width > 0)
         assert(height > 0)
         assert(pixelFormat != .invalid)
@@ -305,11 +305,36 @@ public struct Image {
         self.width = width
         self.height = height
         self.pixelFormat = pixelFormat
+        let length = pixelFormat.bytesPerPixel * width * height
+        self.data = Data(count: length)
+        let copyBytes = MemoryLayout<T>.size.clamp(min: 0, max: length)
+        if copyBytes > 0 {
+            _=self.data.withUnsafeMutableBytes { buffer in
+                withUnsafeBytes(of: content) {
+                    $0.copyBytes(to: buffer, count: copyBytes)
+                }
+            }
+        }
+    }
+
+    public init(width: Int, height: Int, pixelFormat: ImagePixelFormat, data: (any DataProtocol)? = nil) {
+        assert(width > 0)
+        assert(height > 0)
+        assert(pixelFormat != .invalid)
+
+        self.width = width
+        self.height = height
+        self.pixelFormat = pixelFormat
+        let length = pixelFormat.bytesPerPixel * width * height
+        self.data = Data(count: length)
         if let data {
-            self.data = data
-        } else {
-            let length = pixelFormat.bytesPerPixel * width * height
-            self.data = Data(count: length)
+            let copyBytes = data.count.clamp(min: 0, max: length)
+            if copyBytes > 0 {
+                _=self.data.withUnsafeMutableBytes {
+                    (bufferPointer: UnsafeMutableRawBufferPointer) in
+                    data.copyBytes(to: bufferPointer, count: copyBytes)
+                }
+            }
         }
     }
 

@@ -9,7 +9,7 @@
 import Foundation
 import Vulkan
 
-final class VulkanCommandQueue: CommandQueue {
+final class VulkanCommandQueue: CommandQueue, @unchecked Sendable {
 
     let device: GraphicsDevice
     let flags: CommandQueueFlags

@@ -20,7 +20,7 @@ public func sharedApplication() -> Application? {
     Platform.sharedApplication()
 }
 
-@MainActor
+@MainActor @discardableResult
 public func runApplication(delegate: ApplicationDelegate?) -> Int {
     Platform.runApplication(delegate: delegate)
 }

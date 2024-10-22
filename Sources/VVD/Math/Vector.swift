@@ -55,7 +55,7 @@ public extension Vector {
 
     func dot(_ v: Self) -> Scalar   { Self.dot(self, v) }
 
-    func normalized()->Self {
+    func normalized() -> Self {
         let lengthSq = self.lengthSquared
         if lengthSq.isZero == false {
             return self * (1.0 / lengthSq.squareRoot())

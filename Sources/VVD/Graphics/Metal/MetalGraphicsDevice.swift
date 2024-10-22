@@ -482,7 +482,7 @@ final class MetalGraphicsDevice: GraphicsDevice {
         let pipelineState: MTLRenderPipelineState
         do {
             if reflection != nil {
-                let options: MTLPipelineOption = [.argumentInfo, .bufferTypeInfo]
+                let options: MTLPipelineOption = [.bindingInfo, .bufferTypeInfo]
                 pipelineState = try self.device.makeRenderPipelineState(descriptor: desc,
                                                                         options: options,
                                                                         reflection: &pipelineReflection)
