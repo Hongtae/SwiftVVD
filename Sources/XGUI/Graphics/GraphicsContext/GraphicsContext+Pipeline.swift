@@ -168,7 +168,7 @@ class GraphicsPipelineStates {
                 .init(format: .float2, offset: 0, bufferIndex: 0, location: 0 ),
             ]
             pipelineDescriptor.vertexDescriptor.layouts = [
-                .init(step: .vertex, stride: MemoryLayout<Float2>.stride, bufferIndex: 0)
+                .init(stepRate: .vertex, stride: MemoryLayout<Float2>.stride)
             ]
         } else {
             pipelineDescriptor.vertexDescriptor.attributes = [
@@ -177,7 +177,7 @@ class GraphicsPipelineStates {
                 .init(format: .float4, offset: MemoryLayout<_Vertex>.offset(of: \.color)!, bufferIndex: 0, location: 2 ),
             ]
             pipelineDescriptor.vertexDescriptor.layouts = [
-                .init(step: .vertex, stride: MemoryLayout<_Vertex>.stride, bufferIndex: 0)
+                .init(stepRate: .vertex, stride: MemoryLayout<_Vertex>.stride)
             ]
         }
         pipelineDescriptor.primitiveTopology = .triangle

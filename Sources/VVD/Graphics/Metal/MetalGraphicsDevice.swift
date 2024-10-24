@@ -191,7 +191,7 @@ final class MetalGraphicsDevice: GraphicsDevice {
             let makeMSLVersion = { (major: UInt32, minor: UInt32, patch: UInt32) in
                 return (major * 10000) + (minor * 100) + patch
             }
-            spvc_compiler_options_set_uint(spvcCompilerOptions, SPVC_COMPILER_OPTION_MSL_VERSION, makeMSLVersion(2,1,0))
+            spvc_compiler_options_set_uint(spvcCompilerOptions, SPVC_COMPILER_OPTION_MSL_VERSION, makeMSLVersion(3, 2, 0))
             spvc_compiler_options_set_bool(spvcCompilerOptions, SPVC_COMPILER_OPTION_MSL_ENABLE_POINT_SIZE_BUILTIN, SPVC_TRUE)
 
             spvc_compiler_install_compiler_options(spvcCompiler, spvcCompilerOptions)
@@ -468,10 +468,11 @@ final class MetalGraphicsDevice: GraphicsDevice {
                 attr.offset = attrDesc.offset
                 attr.bufferIndex = vertexAttributeOffset + attrDesc.bufferIndex
             }
-            for layoutDesc in descriptor.vertexDescriptor.layouts {
-                let bufferIndex = vertexAttributeOffset + layoutDesc.bufferIndex
+            descriptor.vertexDescriptor.layouts.indices.forEach { index in
+                let bufferIndex = vertexAttributeOffset + index
+                let layoutDesc = descriptor.vertexDescriptor.layouts[index]
                 let layout: MTLVertexBufferLayoutDescriptor = vertexDescriptor.layouts[bufferIndex]
-                layout.stepFunction = vertexStepFunction(layoutDesc.step)
+                layout.stepFunction = vertexStepFunction(layoutDesc.stepRate)
                 layout.stepRate = 1
                 layout.stride = layoutDesc.stride
             }
@@ -537,6 +538,9 @@ final class MetalGraphicsDevice: GraphicsDevice {
                                                                            offset: bindingMap.pushConstantOffset,
                                                                            size: bindingMap.pushConstantSize,
                                                                            stage: stage)
+
+                                assert(bindingMap.pushConstantBufferSize == buffer.bufferDataSize,
+                                       "Buffer size mismatch! \(bindingMap.pushConstantBufferSize) != \(buffer.bufferDataSize)")
 
                                 if let index = pushConstants.firstIndex(where: {
                                     $0.offset == layout.offset && $0.size == layout.size

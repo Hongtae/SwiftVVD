@@ -28,12 +28,9 @@ final class VulkanShaderBindingSet: ShaderBindingSet {
         self.poolID = poolID
         self.layoutFlags = layoutCreateInfo.flags
 
-        self.bindings = []
-        self.bindings.reserveCapacity(Int(layoutCreateInfo.bindingCount))
-
-        for i in 0..<Int(layoutCreateInfo.bindingCount) {
-            let binding = layoutCreateInfo.pBindings[i]
-            self.bindings.append(DescriptorBinding(layoutBinding: binding))
+        self.bindings = (0..<Int(layoutCreateInfo.bindingCount)).map {
+            let binding = layoutCreateInfo.pBindings[$0]
+            return DescriptorBinding(layoutBinding: binding)
         }
     }
 

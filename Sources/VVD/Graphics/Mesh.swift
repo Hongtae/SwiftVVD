@@ -89,18 +89,48 @@ public class Mesh {
         self.aabb = AABB()
     }
 
+    func availableVertexBuffers(for material: Material) -> [VertexBuffer] {
+        guard let vertexFunction = material.shader.function(stage: .vertex)
+        else { return [] }
+
+        let vertexInputs = vertexFunction.stageInputAttributes
+        let attributeSemantics = material.shader.inputAttributeSemantics
+
+        let attrs: [(semantic: VertexAttributeSemantic, name: String)] = 
+            vertexInputs.filter(\.enabled).map {
+                (semantic: attributeSemantics[$0.location, default: .userDefined],
+                 name: $0.name)                
+            }
+        return self.vertexBuffers.filter { vertexBuffer in
+            vertexBuffer.attributes.contains { attribute in
+                if attribute.semantic != .userDefined {
+                    if attrs.contains(where: { $0.semantic == attribute.semantic }) {
+                        return true
+                    }
+                }
+                if attribute.name.isEmpty == false {
+                    return attrs.contains { $0.name == attribute.name }
+                }
+                return false
+            }
+        }
+    }
+
     public var vertexDescriptor: VertexDescriptor {
         guard let material else { return .init() }
         guard let vertexFunction = material.shader.function(stage: .vertex)
         else { return .init() }
+
+        let vertexBuffers = self.availableVertexBuffers(for: material)
+        if vertexBuffers.isEmpty { return .init() }
 
         let vertexInputs = vertexFunction.stageInputAttributes
         let attributeSemantics = material.shader.inputAttributeSemantics
 
         let findBufferIndexAttribute = {
             (s: VertexAttributeSemantic) -> (Int, VertexAttribute)? in
-            for index in 0..<self.vertexBuffers.count {
-                if let attr = self.vertexBuffers[index].attributes
+            for index in 0..<vertexBuffers.count {
+                if let attr = vertexBuffers[index].attributes
                     .first(where: { $0.semantic == s }) {
                     return (index, attr)
                 }
@@ -109,8 +139,8 @@ public class Mesh {
         }
         let findBufferIndexAttributeByName = {
             (name: String) -> (Int, VertexAttribute)? in
-            for index in 0..<self.vertexBuffers.count {
-                if let attr = self.vertexBuffers[index].attributes
+            for index in 0..<vertexBuffers.count {
+                if let attr = vertexBuffers[index].attributes
                     .first(where: { $0.name == name }) {
                     return (index, attr)
                 }
@@ -132,8 +162,6 @@ public class Mesh {
                 bufferIndexAttr = findBufferIndexAttribute(semantic)
             }
             if let (bufferIndex, attr) = bufferIndexAttr {
-                _=self.vertexBuffers[bufferIndex]
-
                 let descriptor = VertexAttributeDescriptor(
                     format: attr.format,
                     offset: attr.offset,
@@ -145,10 +173,9 @@ public class Mesh {
             }
         }
 
-        let layouts = self.vertexBuffers.enumerated().map { index, buffer in
-            VertexBufferLayoutDescriptor(step: .vertex,
-                                         stride: buffer.byteStride,
-                                         bufferIndex: index)
+        let layouts = vertexBuffers.enumerated().map { index, buffer in
+            VertexBufferLayoutDescriptor(stepRate: .vertex,
+                                         stride: buffer.byteStride)
         }
         return VertexDescriptor(attributes: attributes, layouts: layouts)
     }
@@ -156,9 +183,9 @@ public class Mesh {
     public func initResources(device: GraphicsDevice,
                               bufferPolicy policy: BufferUsagePolicy,
                               alignNPOT: Bool = false) -> Bool {
-        if material == nil { return false }
-        if pipelineState == nil { _ = buildPipelineState(device: device) }
-        if pipelineState == nil { return false }
+        if self.material == nil { return false }
+        if self.pipelineState == nil { _ = buildPipelineState(device: device) }
+        if self.pipelineState == nil { return false }
 
         let _alignAddressNPOT = { (ptr: Int, alignment: Int) -> Int in
             if (ptr % alignment) != 0 {
@@ -169,7 +196,7 @@ public class Mesh {
         let _alignAddress = { (ptr: Int, alignment: Int) -> Int in
             return (ptr + alignment - 1) & ~(alignment - 1)
         }
-        let alignAddress: (Int, Int)->Int = alignNPOT ? _alignAddressNPOT : _alignAddress
+        let alignAddress = alignNPOT ? _alignAddressNPOT : _alignAddress
 
         var numBuffersGenerated = 0
         var totalBytesAllocated = 0
@@ -191,13 +218,14 @@ public class Mesh {
             }
         }
 
-        if policy == .singleBuffer {
+        switch policy {
+        case .singleBuffer:
             var bufferOffset = 0
             var bufferLength = 0
             var resourceMap: [ShaderBindingLocation: OptBufferResource] = [:]
 
-            for bset in self.resourceBindings {
-                for rb in bset.resources {
+            self.resourceBindings.forEach { bset in
+                bset.resources.forEach { rb in
                     if rb.resource.type == .buffer {
                         let bufferTypeInfo = rb.resource.bufferTypeInfo!
                         let buffers = (0..<rb.resource.count).map { _ in
@@ -234,14 +262,14 @@ public class Mesh {
                     self.bufferResources[key] = value.bufferResource(with: buffer)
                 }
             }
-        } else if policy == .singleBufferPerSet {
+        case .singleBufferPerSet:
             var bufferResourcesTmp: [ShaderBindingLocation: BufferResource] = [:]
             for bset in self.resourceBindings {
                 var bufferOffset = 0
                 var bufferLength = 0
                 var resourceMap: [ShaderBindingLocation: OptBufferResource] = [:]
 
-                for rb in bset.resources {
+                bset.resources.forEach { rb in
                     if rb.resource.type == .buffer {
                         let bufferTypeInfo = rb.resource.bufferTypeInfo!
                         let buffers = (0..<rb.resource.count).map { _ in
@@ -278,7 +306,7 @@ public class Mesh {
                 }
             }
             self.bufferResources.merge(bufferResourcesTmp) { $1 }
-        } else if policy == .singleBufferPerResource {
+        case .singleBufferPerResource:
             var bufferResourcesTmp: [ShaderBindingLocation: BufferResource] = [:]
             for bset in self.resourceBindings {
                 for rb in bset.resources {
@@ -324,7 +352,8 @@ public class Mesh {
                 }
             }
             self.bufferResources.merge(bufferResourcesTmp) { $1 }
-        } else {
+        default:
+            break
         }
         Log.debug("initResources generated \(numBuffersGenerated) buffers, \(totalBytesAllocated) bytes.")
         return true
@@ -847,7 +876,7 @@ public class Mesh {
         if data.isEmpty == false {
             if data.count > offset {
                 let s = min(data.count - offset, buffer.count)
-                buffer.copyBytes(from: data)
+                buffer.copyBytes(from: data[0..<s])
                 return s
             }
         }
@@ -877,7 +906,7 @@ public class Mesh {
                                  buffer: UnsafeMutableRawBufferPointer) -> Int {
         let bindMatrix4 = { (matrix: Matrix4) in
             if dataType == .float4x4 {
-                return withUnsafeBytes(of: matrix) {
+                return withUnsafeBytes(of: matrix.float4x4) {
                     buffer.copyBytes(from: $0)
                     return $0.count
                 }
@@ -886,7 +915,7 @@ public class Mesh {
                 let mat = Matrix3(matrix.m11, matrix.m12, matrix.m13,
                                   matrix.m21, matrix.m22, matrix.m23,
                                   matrix.m31, matrix.m32, matrix.m33)
-                return withUnsafeBytes(of: mat) {
+                return withUnsafeBytes(of: mat.float3x3) {
                     buffer.copyBytes(from: $0)
                     return $0.count
                 }
@@ -933,6 +962,9 @@ public class Mesh {
     @discardableResult
     public func encodeRenderCommand(encoder: RenderCommandEncoder, numInstances: Int = 1, baseInstance: Int = 0) -> Bool {
         if let pipelineState, let material, vertexBuffers.isEmpty == false {
+            let vertexBuffers = self.availableVertexBuffers(for: material)
+            if vertexBuffers.isEmpty { return false }
+
             encoder.setRenderPipelineState(pipelineState)
             encoder.setFrontFacing(material.frontFace)
             encoder.setCullMode(material.cullMode)
@@ -969,11 +1001,11 @@ public class Mesh {
                     encoder.pushConstant(stages: stages, offset: begin, data: buffer)
                 }
             }
-            self.vertexBuffers.enumerated().forEach { index, vb in
+            vertexBuffers.enumerated().forEach { index, vb in
                 encoder.setVertexBuffer(vb.buffer, offset: vb.byteOffset, index: index)
             }
 
-            let vertexCount = self.vertexBuffers.reduce(self.vertexBuffers[0].vertexCount) {
+            let vertexCount = vertexBuffers.reduce(vertexBuffers[0].vertexCount) {
                 count, vb in
                 min(count, vb.vertexCount)
             }
