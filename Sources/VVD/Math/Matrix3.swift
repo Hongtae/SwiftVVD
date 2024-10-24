@@ -237,7 +237,7 @@ public struct Matrix3: Matrix, Hashable {
 }
 
 public extension Matrix3 {
-    var half: Half3x3 {
+    var half3x3: Half3x3 {
         get { (self.row1.half3, self.row2.half3, self.row3.half3) }
         set(v) {
             self.row1.half3 = v.0
@@ -246,7 +246,7 @@ public extension Matrix3 {
         }
     }
 
-    var float: Float3x3 {
+    var float3x3: Float3x3 {
         get { (self.row1.float3, self.row2.float3, self.row3.float3) }
         set(v) {
             self.row1.float3 = v.0
@@ -255,7 +255,7 @@ public extension Matrix3 {
         }
     }
 
-    var double: Double3x3 {
+    var double3x3: Double3x3 {
         get { (self.row1.double3, self.row2.double3, self.row3.double3) }
         set(v) {
             self.row1.double3 = v.0
