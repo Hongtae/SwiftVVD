@@ -34,6 +34,18 @@ extension FloatingPoint {
     public func degreeToRadian() -> Self {
         self * .pi / Self(180)
     }
+
+    public func isNearlyEqual(to other: Self, inScaleOfULP scale: Self = 4, minTolerance: Self = .ulpOfOne, maxTolerance: Self = 1) -> Bool {
+        if self.isNaN || other.isNaN { return false }
+        if self.isZero && other.isZero { return true }
+        if self.isInfinite {
+            if other.isInfinite { return self.sign == other.sign }
+            return false
+        }
+        if other.isInfinite { return false }
+        let minimum = min(self.magnitude, other.magnitude)
+        return (self - other).magnitude <= (minimum.ulp * scale).clamp(min: minTolerance, max: maxTolerance)
+    }
 }
 
 public typealias Half2 = (Float16, Float16)
