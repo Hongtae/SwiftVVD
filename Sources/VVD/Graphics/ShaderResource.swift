@@ -102,97 +102,107 @@ public enum ShaderDataType {
 }
 
 public extension ShaderDataType {
-    func size() -> Int {
+    func components() -> (type: Any.Type, rows: Int, columns: Int)? {
         switch self {
-        case .bool:         return MemoryLayout<Bool>.stride
-        case .bool2:        return MemoryLayout<Bool>.stride * 2
-        case .bool3:        return MemoryLayout<Bool>.stride * 3
-        case .bool4:        return MemoryLayout<Bool>.stride * 4
+        case .bool:         return (Bool.self, 1, 1)
+        case .bool2:        return (Bool.self, 2, 1)
+        case .bool3:        return (Bool.self, 3, 1)
+        case .bool4:        return (Bool.self, 4, 1)
 
-        case .char:         return MemoryLayout<Int8>.stride
-        case .char2:        return MemoryLayout<Int8>.stride * 2
-        case .char3:        return MemoryLayout<Int8>.stride * 3
-        case .char4:        return MemoryLayout<Int8>.stride * 4
+        case .char:         return (Int8.self, 1, 1)
+        case .char2:        return (Int8.self, 2, 1)
+        case .char3:        return (Int8.self, 3, 1)
+        case .char4:        return (Int8.self, 4, 1)
 
-        case .uchar:        return MemoryLayout<UInt8>.stride
-        case .uchar2:       return MemoryLayout<UInt8>.stride * 2
-        case .uchar3:       return MemoryLayout<UInt8>.stride * 3
-        case .uchar4:       return MemoryLayout<UInt8>.stride * 4
+        case .uchar:        return (UInt8.self, 1, 1)
+        case .uchar2:       return (UInt8.self, 2, 1)
+        case .uchar3:       return (UInt8.self, 3, 1)
+        case .uchar4:       return (UInt8.self, 4, 1)
 
-        case .short:        return MemoryLayout<Int16>.stride
-        case .short2:       return MemoryLayout<Int16>.stride * 2
-        case .short3:       return MemoryLayout<Int16>.stride * 3
-        case .short4:       return MemoryLayout<Int16>.stride * 4
+        case .short:        return (Int16.self, 1, 1)
+        case .short2:       return (Int16.self, 2, 1)
+        case .short3:       return (Int16.self, 3, 1)
+        case .short4:       return (Int16.self, 4, 1)
 
-        case .ushort:       return MemoryLayout<UInt16>.stride
-        case .ushort2:      return MemoryLayout<UInt16>.stride * 2
-        case .ushort3:      return MemoryLayout<UInt16>.stride * 3
-        case .ushort4:      return MemoryLayout<UInt16>.stride * 4
+        case .ushort:       return (UInt16.self, 1, 1)
+        case .ushort2:      return (UInt16.self, 2, 1)
+        case .ushort3:      return (UInt16.self, 3, 1)
+        case .ushort4:      return (UInt16.self, 4, 1)
 
-        case .int:          return MemoryLayout<Int32>.stride
-        case .int2:         return MemoryLayout<Int32>.stride * 2
-        case .int3:         return MemoryLayout<Int32>.stride * 3
-        case .int4:         return MemoryLayout<Int32>.stride * 4
+        case .int:          return (Int32.self, 1, 1)
+        case .int2:         return (Int32.self, 2, 1)
+        case .int3:         return (Int32.self, 3, 1)
+        case .int4:         return (Int32.self, 4, 1)
 
-        case .uint:         return MemoryLayout<UInt32>.stride
-        case .uint2:        return MemoryLayout<UInt32>.stride * 2
-        case .uint3:        return MemoryLayout<UInt32>.stride * 3
-        case .uint4:        return MemoryLayout<UInt32>.stride * 4
+        case .uint:         return (UInt32.self, 1, 1)
+        case .uint2:        return (UInt32.self, 2, 1)
+        case .uint3:        return (UInt32.self, 3, 1)
+        case .uint4:        return (UInt32.self, 4, 1)
 
-        case .long:         return MemoryLayout<Int64>.stride
-        case .long2:        return MemoryLayout<Int64>.stride * 2
-        case .long3:        return MemoryLayout<Int64>.stride * 3
-        case .long4:        return MemoryLayout<Int64>.stride * 4
+        case .long:         return (Int64.self, 1, 1)
+        case .long2:        return (Int64.self, 2, 1)
+        case .long3:        return (Int64.self, 3, 1)
+        case .long4:        return (Int64.self, 4, 1)
 
-        case .ulong:        return MemoryLayout<UInt64>.stride
-        case .ulong2:       return MemoryLayout<UInt64>.stride * 2
-        case .ulong3:       return MemoryLayout<UInt64>.stride * 3
-        case .ulong4:       return MemoryLayout<UInt64>.stride * 4
+        case .ulong:        return (UInt64.self, 1, 1)
+        case .ulong2:       return (UInt64.self, 2, 1)
+        case .ulong3:       return (UInt64.self, 3, 1)
+        case .ulong4:       return (UInt64.self, 4, 1)
 
-        case .half:         return MemoryLayout<Float16>.stride
-        case .half2:        return MemoryLayout<Float16>.stride * 2
-        case .half3:        return MemoryLayout<Float16>.stride * 3
-        case .half4:        return MemoryLayout<Float16>.stride * 4
-        case .half2x2:      return MemoryLayout<Float16>.stride * 4
-        case .half2x3:      return MemoryLayout<Float16>.stride * 6
-        case .half2x4:      return MemoryLayout<Float16>.stride * 8
-        case .half3x2:      return MemoryLayout<Float16>.stride * 6
-        case .half3x3:      return MemoryLayout<Float16>.stride * 9
-        case .half3x4:      return MemoryLayout<Float16>.stride * 12
-        case .half4x2:      return MemoryLayout<Float16>.stride * 8
-        case .half4x3:      return MemoryLayout<Float16>.stride * 12
-        case .half4x4:      return MemoryLayout<Float16>.stride * 16
+        case .half:         return (Float16.self, 1, 1)
+        case .half2:        return (Float16.self, 2, 1)
+        case .half3:        return (Float16.self, 3, 1)
+        case .half4:        return (Float16.self, 4, 1)
+        case .half2x2:      return (Float16.self, 2, 2)
+        case .half2x3:      return (Float16.self, 2, 3)
+        case .half2x4:      return (Float16.self, 2, 4)
+        case .half3x2:      return (Float16.self, 3, 2)
+        case .half3x3:      return (Float16.self, 3, 3)
+        case .half3x4:      return (Float16.self, 3, 4)
+        case .half4x2:      return (Float16.self, 4, 2)
+        case .half4x3:      return (Float16.self, 4, 3)
+        case .half4x4:      return (Float16.self, 4, 4)
 
-        case .float:        return MemoryLayout<Float32>.stride
-        case .float2:       return MemoryLayout<Float32>.stride * 2
-        case .float3:       return MemoryLayout<Float32>.stride * 3
-        case .float4:       return MemoryLayout<Float32>.stride * 4
-        case .float2x2:     return MemoryLayout<Float32>.stride * 4
-        case .float2x3:     return MemoryLayout<Float32>.stride * 6
-        case .float2x4:     return MemoryLayout<Float32>.stride * 8
-        case .float3x2:     return MemoryLayout<Float32>.stride * 6
-        case .float3x3:     return MemoryLayout<Float32>.stride * 9
-        case .float3x4:     return MemoryLayout<Float32>.stride * 12
-        case .float4x2:     return MemoryLayout<Float32>.stride * 8
-        case .float4x3:     return MemoryLayout<Float32>.stride * 12
-        case .float4x4:     return MemoryLayout<Float32>.stride * 16
+        case .float:        return (Float32.self, 1, 1)
+        case .float2:       return (Float32.self, 2, 1)
+        case .float3:       return (Float32.self, 3, 1)
+        case .float4:       return (Float32.self, 4, 1)
+        case .float2x2:     return (Float32.self, 2, 2)
+        case .float2x3:     return (Float32.self, 2, 3)
+        case .float2x4:     return (Float32.self, 2, 4)
+        case .float3x2:     return (Float32.self, 3, 2)
+        case .float3x3:     return (Float32.self, 3, 3)
+        case .float3x4:     return (Float32.self, 3, 4)
+        case .float4x2:     return (Float32.self, 4, 2)
+        case .float4x3:     return (Float32.self, 4, 3)
+        case .float4x4:     return (Float32.self, 4, 4)
 
-        case .double:       return MemoryLayout<Float64>.stride
-        case .double2:      return MemoryLayout<Float64>.stride * 2
-        case .double3:      return MemoryLayout<Float64>.stride * 3
-        case .double4:      return MemoryLayout<Float64>.stride * 4
-        case .double2x2:    return MemoryLayout<Float64>.stride * 4
-        case .double2x3:    return MemoryLayout<Float64>.stride * 6
-        case .double2x4:    return MemoryLayout<Float64>.stride * 8
-        case .double3x2:    return MemoryLayout<Float64>.stride * 6
-        case .double3x3:    return MemoryLayout<Float64>.stride * 9
-        case .double3x4:    return MemoryLayout<Float64>.stride * 12
-        case .double4x2:    return MemoryLayout<Float64>.stride * 8
-        case .double4x3:    return MemoryLayout<Float64>.stride * 12
-        case .double4x4:    return MemoryLayout<Float64>.stride * 16
+        case .double:       return (Float64.self, 1, 1)
+        case .double2:      return (Float64.self, 2, 1)
+        case .double3:      return (Float64.self, 3, 1)
+        case .double4:      return (Float64.self, 4, 1)
+        case .double2x2:    return (Float64.self, 2, 2)
+        case .double2x3:    return (Float64.self, 2, 3)
+        case .double2x4:    return (Float64.self, 2, 4)
+        case .double3x2:    return (Float64.self, 3, 2)
+        case .double3x3:    return (Float64.self, 3, 3)
+        case .double3x4:    return (Float64.self, 3, 4)
+        case .double4x2:    return (Float64.self, 4, 2)
+        case .double4x3:    return (Float64.self, 4, 3)
+        case .double4x4:    return (Float64.self, 4, 4)
         default:
-            return 0
+            return nil
         }
+    }
+
+    func size() -> Int {
+        if let comp = self.components() {
+            func stride<T>(of type: T.Type) -> Int {
+                MemoryLayout<T>.stride
+            }
+            return stride(of: comp.type) * comp.rows * comp.columns
+        }
+        return 0
     }
 }
 
