@@ -48,6 +48,26 @@ extension FloatingPoint {
     }
 }
 
+extension BinaryInteger {
+    public var isPowerOfTwo: Bool {
+        self > .zero && self & (self - 1) == 0
+    }
+
+    public func alignedUp(toMultipleOf alignment: Self) -> Self {
+        assert(alignment != .zero)
+        if alignment.isPowerOfTwo {
+            return (self + alignment - 1) & ~(alignment - 1)
+        } else if (self % alignment) != .zero {
+            if self * alignment > .zero {
+                return self + (alignment - (self % alignment))
+            } else {
+                return self - (self % alignment)
+            }
+        }
+        return self
+    }
+}
+
 public typealias Half2 = (Float16, Float16)
 public typealias Float2 = (Float32, Float32)
 public typealias Double2 = (Float64, Float64)

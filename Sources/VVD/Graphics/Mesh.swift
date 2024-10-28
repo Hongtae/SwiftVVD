@@ -181,22 +181,10 @@ public class Mesh {
     }
 
     public func initResources(device: GraphicsDevice,
-                              bufferPolicy policy: BufferUsagePolicy,
-                              alignNPOT: Bool = false) -> Bool {
+                              bufferPolicy policy: BufferUsagePolicy) -> Bool {
         if self.material == nil { return false }
         if self.pipelineState == nil { _ = buildPipelineState(device: device) }
         if self.pipelineState == nil { return false }
-
-        let _alignAddressNPOT = { (ptr: Int, alignment: Int) -> Int in
-            if (ptr % alignment) != 0 {
-                return ptr + (alignment - (ptr % alignment))
-            }
-            return ptr
-        }
-        let _alignAddress = { (ptr: Int, alignment: Int) -> Int in
-            return (ptr + alignment - 1) & ~(alignment - 1)
-        }
-        let alignAddress = alignNPOT ? _alignAddressNPOT : _alignAddress
 
         var numBuffersGenerated = 0
         var totalBytesAllocated = 0
@@ -234,8 +222,8 @@ public class Mesh {
                                                  length: bufferTypeInfo.size)
                         }
                         bufferLength = bufferOffset + bufferTypeInfo.size
-                        bufferLength = alignAddress(bufferLength, 16)
-                        bufferOffset = alignAddress(bufferOffset, 16)
+                        bufferLength = bufferLength.alignedUp(toMultipleOf: 16)
+                        bufferOffset = bufferOffset.alignedUp(toMultipleOf: 16)
 
                         let location = ShaderBindingLocation(
                             set: rb.resource.set,
@@ -277,8 +265,8 @@ public class Mesh {
                             return OptBufferInfo(offset: bufferOffset, length: bufferTypeInfo.size)
                         }
                         bufferLength = bufferOffset + bufferTypeInfo.size
-                        bufferLength = alignAddress(bufferLength, 16)
-                        bufferOffset = alignAddress(bufferOffset, 16)
+                        bufferLength = bufferLength.alignedUp(toMultipleOf: 16)
+                        bufferOffset = bufferOffset.alignedUp(toMultipleOf: 16)
 
                         let location = ShaderBindingLocation(
                             set: rb.resource.set,
@@ -322,8 +310,8 @@ public class Mesh {
                                                  length: bufferTypeInfo.size)
                         }
                         bufferLength = bufferOffset + bufferTypeInfo.size
-                        bufferLength = alignAddress(bufferLength, 16)
-                        bufferOffset = alignAddress(bufferOffset, 16)
+                        bufferLength = bufferLength.alignedUp(toMultipleOf: 16)
+                        bufferOffset = bufferOffset.alignedUp(toMultipleOf: 16)
 
                         let location = ShaderBindingLocation(
                             set: rb.resource.set,
@@ -857,20 +845,27 @@ public class Mesh {
                               offset: Int,
                               buffer: UnsafeMutableRawBufferPointer) -> Int {
         guard let material else { return 0 }
+        guard let components = dataType.components() else { return 0 }
 
         var data: [UInt8] = []
+
+        func bind<T: Numeric>(as: T.Type, array: [any Numeric]) {
+            let numerics = array.map { $0 as! T }
+            numerics.withUnsafeBytes {
+                data.append(contentsOf: $0)
+            }
+        }
+
         if semantic != .userDefined {
             if let prop = material.properties[semantic] {
-                prop.withUnsafeBytes {
-                    data.append(contentsOf: $0)
-                }
+                bind(as: components.type,
+                     array: prop.castNumericArray(as: components.type))
             }
         }
         if data.isEmpty {
             if let prop = material.userDefinedProperties[location] {
-                prop.withUnsafeBytes {
-                    data.append(contentsOf: $0)
-                }
+                bind(as: components.type,
+                     array: prop.castNumericArray(as: components.type))
             }
         }
         if data.isEmpty == false {

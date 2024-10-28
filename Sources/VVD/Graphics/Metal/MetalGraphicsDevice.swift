@@ -269,12 +269,18 @@ final class MetalGraphicsDevice: GraphicsDevice {
                             // MTLArgument doesn't have an offset, save info for later use. (pipeline-reflection)
                             bindingMap.pushConstantOffset = layout.offset
                             bindingMap.pushConstantSize = layout.size
-                            bindingMap.pushConstantBufferSize = layout.size
 
-                            for member in layout.members {
-                                bindingMap.pushConstantBufferSize = max(bindingMap.pushConstantBufferSize,
-                                                                        member.offset + member.size)
+                            var bufferSize = layout.size
+                            var alignment = 1
+
+                            layout.members.forEach {
+                                alignment = max(alignment, $0.mtlAlignment)
+                                bufferSize = max(bufferSize, $0.offset + $0.size)
                             }
+                            assert(alignment.isPowerOfTwo)
+
+                            bindingMap.pushConstantBufferSize = bufferSize.alignedUp(toMultipleOf: alignment)
+
                         } else {
                             bindingMap.resourceBindings.append(b2)
                         }
@@ -637,6 +643,10 @@ final class MetalGraphicsDevice: GraphicsDevice {
                                                                        offset: bindingMap.pushConstantOffset,
                                                                        size: bindingMap.pushConstantSize,
                                                                        stage: stage)
+
+                            assert(bindingMap.pushConstantBufferSize == buffer.bufferDataSize,
+                                   "Buffer size mismatch! \(bindingMap.pushConstantBufferSize) != \(buffer.bufferDataSize)")
+
                             pushConstants.append(layout)
                         } else {
                             assertionFailure("Unable to cast buffer binding to MTLBufferBinding")
@@ -924,6 +934,5 @@ final class MetalGraphicsDevice: GraphicsDevice {
         }
         return nil
     }
-
 }
 #endif //if ENABLE_METAL

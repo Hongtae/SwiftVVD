@@ -177,8 +177,10 @@ extension ShaderDataType {
             func stride<T>(of type: T.Type) -> Int {
                 MemoryLayout<T>.stride
             }
-            let size = stride(of: components.type) * components.columns
-            return size * (components.rows == 3 ?  4 : components.rows)
+            let row = components.rows == 3 ? 4 : components.rows
+            let alignment = stride(of: components.type) * row
+            assert(alignment.isPowerOfTwo)
+            return alignment
         }
         return 0
     }
