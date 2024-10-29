@@ -560,7 +560,7 @@ public class Mesh {
                                                            buffer: buffer)
                     }
                     if copied == 0 {
-                        Log.warning("Unable to bind shader uniform struct (\(location)), arrayIndex: \(arrayIndex), name:\"\(path)\"")
+                        //Log.warning("Unable to bind shader uniform struct (\(location)), arrayIndex: \(arrayIndex), name:\"\(path)\"")
                     }
                 }
                 return copied
@@ -582,44 +582,61 @@ public class Mesh {
             let location = ShaderBindingLocation(set: set,
                                                  binding: binding,
                                                  offset: offset)
+
+            let semantic = material.shader.resourceSemantics[location] ?? .material(.userDefined)
+
             var copied = 0
             if type == .struct {
-                for member in members {
-                    if member.offset < offset { continue }
-                    if member.offset >= (offset + size) { break }
-                    if member.offset + member.size > offset + size { break }
+                if case let .material(ms) = semantic {
+                    copied = self.bindMaterialProperty(semantic: ms,
+                                                       location: location,
+                                                       dataType: type,
+                                                       name: name,
+                                                       offset: offset,
+                                                       buffer: buffer)
+                }
+                if copied != size {
+                    // The entire buffer wasn't copied,
+                    // so we split it into members of a struct and try to copy it.
+                    copied = 0
+                    for member in members {
+                        if member.offset < offset { continue }
+                        if member.offset >= (offset + size) { break }
+                        if member.offset + member.size > offset + size { break }
 
-                    let path = if name.isEmpty == false && member.name.isEmpty == false {
-                        "\(name).\(member.name)"
-                    } else {
-                        member.name
-                    }
+                        let path = if name.isEmpty == false && member.name.isEmpty == false {
+                            "\(name).\(member.name)"
+                        } else {
+                            member.name
+                        }
 
-                    if member.offset + member.size - offset > buffer.count {
-                        Log.error("Insufficient buffer for shader uniform struct at location:\(location), size:\(size), name:\"\(path)\"")
-                        break
-                    }
+                        if member.offset + member.size - offset > buffer.count {
+                            Log.error("Insufficient buffer for shader uniform struct at location:\(location), size:\(size), name:\"\(path)\"")
+                            break
+                        }
 
-                    let d = member.offset - offset
-                    let s = StructMemberBind(sceneState: sceneState,
-                                             mesh: self,
-                                             member: member,
-                                             parentPath: name,
-                                             arrayIndex: arrayIndex,
-                                             set: set,
-                                             binding: binding,
-                                             offset: 0)
-                        .bind(buffer: .init(rebasing: buffer[d...]))
+                        let d = member.offset - offset
+                        let s = StructMemberBind(sceneState: sceneState,
+                                                 mesh: self,
+                                                 member: member,
+                                                 parentPath: name,
+                                                 arrayIndex: arrayIndex,
+                                                 set: set,
+                                                 binding: binding,
+                                                 offset: 0)
+                            .bind(buffer: .init(rebasing: buffer[d...]))
 
-                    if s > 0 {
-                        copied += s
-                    } else {
-                        let loc = ShaderBindingLocation(set: set, binding: binding, offset: member.offset)
-                        Log.warning("Unable to bind shader uniform struct at location:\(loc), size:\(size), name:\"\(path)\"")
+                        if s > 0 {
+                            copied += s
+                        } else {
+                            if copied < d + member.size { // Failed to copy data.
+                                let loc = ShaderBindingLocation(set: set, binding: binding, offset: member.offset)
+                                Log.warning("Unable to bind shader uniform struct at location:\(loc), size:\(size), name:\"\(path)\"")
+                            }
+                        }
                     }
                 }
             } else {
-                let semantic = material.shader.resourceSemantics[location] ?? .material(.userDefined)
                 if case let .uniform(ss) = semantic {
                     if let sceneState {
                         copied = self.bindShaderUniformBuffer(semantic: ss,
@@ -845,27 +862,35 @@ public class Mesh {
                               offset: Int,
                               buffer: UnsafeMutableRawBufferPointer) -> Int {
         guard let material else { return 0 }
-        guard let components = dataType.components() else { return 0 }
 
         var data: [UInt8] = []
 
-        func bind<T: Numeric>(as: T.Type, array: [any Numeric]) {
+        func bindNumerics<T: Numeric>(as: T.Type, array: [any Numeric]) {
             let numerics = array.map { $0 as! T }
             numerics.withUnsafeBytes {
                 data.append(contentsOf: $0)
             }
         }
 
+        let bind = { (prop: MaterialProperty) in
+            if case let .buffer(buffer) = prop {
+                data = buffer
+            } else {
+                if let components = dataType.components() {
+                    let numerics = prop.castNumericArray(as: components.type)
+                    bindNumerics(as: components.type, array: numerics)
+                }
+            }
+        }
+
         if semantic != .userDefined {
             if let prop = material.properties[semantic] {
-                bind(as: components.type,
-                     array: prop.castNumericArray(as: components.type))
+                bind(prop)
             }
         }
         if data.isEmpty {
             if let prop = material.userDefinedProperties[location] {
-                bind(as: components.type,
-                     array: prop.castNumericArray(as: components.type))
+                bind(prop)
             }
         }
         if data.isEmpty == false {

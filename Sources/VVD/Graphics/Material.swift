@@ -5,6 +5,8 @@
 //  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
+import Foundation
+
 public enum MaterialProperty {
     public typealias CombinedTextureSampler = (texture: Texture, sampler: SamplerState)
 
@@ -103,37 +105,46 @@ public enum MaterialProperty {
         return []
     }
 
-    public func castArray<T>(as: T.Type) -> [T] {
+    public func castIntegerArray<T: FixedWidthInteger>(as: T.Type) -> [T] {
         switch self {
-        case .int8Array(let s):     return s.map { $0 as! T }
-        case .uint8Array(let s):    return s.map { $0 as! T }
-        case .int16Array(let s):    return s.map { $0 as! T }
-        case .uint16Array(let s):   return s.map { $0 as! T }
-        case .int32Array(let s):    return s.map { $0 as! T }
-        case .uint32Array(let s):   return s.map { $0 as! T }
-        case .halfArray(let s):     return s.map { $0 as! T }
-        case .floatArray(let s):    return s.map { $0 as! T }
-        case .doubleArray(let s):   return s.map { $0 as! T }
+        case .int8Array(let s):     return s.map { T($0) }
+        case .uint8Array(let s):    return s.map { T($0) }
+        case .int16Array(let s):    return s.map { T($0) }
+        case .uint16Array(let s):   return s.map { T($0) }
+        case .int32Array(let s):    return s.map { T($0) }
+        case .uint32Array(let s):   return s.map { T($0) }
+        case .halfArray(let s):     return s.map { T($0) }
+        case .floatArray(let s):    return s.map { T($0) }
+        case .doubleArray(let s):   return s.map { T($0) }
         default:
             return []
         }
     }
 
-    public func withUnsafeBytes<R>(_ body: (UnsafeRawBufferPointer) throws -> R) rethrows -> R {
+    public func castFloatArray<T: BinaryFloatingPoint>(as: T.Type) -> [T] {
         switch self {
-        case .buffer(let s):        return try s.withUnsafeBytes(body)
-        case .int8Array(let s):     return try s.withUnsafeBytes(body)
-        case .uint8Array(let s):    return try s.withUnsafeBytes(body)
-        case .int16Array(let s):    return try s.withUnsafeBytes(body)
-        case .uint16Array(let s):   return try s.withUnsafeBytes(body)
-        case .int32Array(let s):    return try s.withUnsafeBytes(body)
-        case .uint32Array(let s):   return try s.withUnsafeBytes(body)
-        case .halfArray(let s):     return try s.withUnsafeBytes(body)
-        case .floatArray(let s):    return try s.withUnsafeBytes(body)
-        case .doubleArray(let s):   return try s.withUnsafeBytes(body)
+        case .int8Array(let s):     return s.map { T($0) }
+        case .uint8Array(let s):    return s.map { T($0) }
+        case .int16Array(let s):    return s.map { T($0) }
+        case .uint16Array(let s):   return s.map { T($0) }
+        case .int32Array(let s):    return s.map { T($0) }
+        case .uint32Array(let s):   return s.map { T($0) }
+        case .halfArray(let s):     return s.map { T($0) }
+        case .floatArray(let s):    return s.map { T($0) }
+        case .doubleArray(let s):   return s.map { T($0) }
         default:
-            return try body(UnsafeRawBufferPointer(start: nil, count: 0))
+            return []
         }
+    }
+
+    public func castNumericArray<T: Numeric>(as: T.Type) -> [T] {
+        if let t = T.self as? any BinaryFloatingPoint.Type {
+            return castFloatArray(as: t).map { $0 as! T }
+        }
+        if let t = T.self as? any FixedWidthInteger.Type {
+            return castIntegerArray(as: t).map { $0 as! T }
+        }
+        return []
     }
 
     public static func texture(_ value: Texture) -> Self {
@@ -183,6 +194,15 @@ public enum MaterialProperty {
             }
         }
         return .scalars(scalars)
+    }
+
+    public static func data<T>(_ data: UnsafePointer<T>) -> Self {
+        let p = UnsafeBufferPointer(start: data, count: 1)
+        return .buffer(Array<UInt8>(UnsafeRawBufferPointer(p)))
+    }
+
+    public static func data(_ data: UnsafeRawBufferPointer) -> Self {
+        .buffer(Array<UInt8>(data))
     }
 }
 

@@ -102,12 +102,12 @@ public enum ShaderDataType {
 }
 
 public extension ShaderDataType {
-    func components() -> (type: Any.Type, rows: Int, columns: Int)? {
+    func components() -> (type: any Numeric.Type, rows: Int, columns: Int)? {
         switch self {
-        case .bool:         return (Bool.self, 1, 1)
-        case .bool2:        return (Bool.self, 2, 1)
-        case .bool3:        return (Bool.self, 3, 1)
-        case .bool4:        return (Bool.self, 4, 1)
+        case .bool:         return (UInt8.self, 1, 1)
+        case .bool2:        return (UInt8.self, 2, 1)
+        case .bool3:        return (UInt8.self, 3, 1)
+        case .bool4:        return (UInt8.self, 4, 1)
 
         case .char:         return (Int8.self, 1, 1)
         case .char2:        return (Int8.self, 2, 1)
