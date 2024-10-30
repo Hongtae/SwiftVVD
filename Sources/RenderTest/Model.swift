@@ -2,14 +2,14 @@ import Foundation
 import VVD
 import TinyGLTF
 
-struct MaterialFace {
+struct TriangleFace {
     struct Vertex {
         let pos: Vector3
         let uv: Vector2
         let color: Vector4
     }
     let vertices: (Vertex, Vertex, Vertex)
-    let material: Material
+    let material: Material?
 }
 
 struct Model {
@@ -22,10 +22,236 @@ struct Model {
     var defaultSceneIndex: Int
 
     func triangleList(scene: Int, deviceContext: GraphicsDeviceContext) -> [Triangle] {
+        func meshTriangles(mesh: Mesh, transform: Matrix4) -> [Triangle] {
+            if mesh.primitiveType != .triangle && mesh.primitiveType != .triangleStrip {
+                return []
+            }
+
+            var triangles: [Triangle] = []
+            var positions: [Vector3] = []
+
+            _ = mesh.enumerateVertexBufferContent(semantic: .position,
+                                                  context: deviceContext) {
+                data, format, index in
+                if format == .float3 {
+                    let v = data.assumingMemoryBound(to: Float3.self).pointee
+                    positions.append(Vector3(v).applying(transform, w: 1.0))
+                    return true
+                }
+                return false
+            }
+            var indices: [Int] = []
+            if mesh.indexBuffer != nil {
+                indices.reserveCapacity(mesh.indexCount)
+                _ = mesh.enumerateIndexBufferContent(context: deviceContext) {
+                    indices.append($0)
+                    return true
+                }
+            } else {
+                indices = positions.indices.map { Int($0) }
+            }
+
+            if mesh.primitiveType == .triangleStrip {
+                let numTris = indices.count > 2 ? indices.count - 2 : 0
+                triangles.reserveCapacity(numTris)
+
+                (0..<numTris).forEach { i in
+                    var idx = (indices[i], indices[i+1], indices[i+2])
+                    if i % 2 != 0 {
+                        swap(&idx.0, &idx.1)
+                    }
+                    let t = Triangle(positions[idx.0], positions[idx.1], positions[idx.2])
+                    triangles.append(t)
+                }
+            } else {
+                let numTris = indices.count / 3
+                triangles.reserveCapacity(numTris)
+                (0..<numTris).forEach { i in
+                    let idx = (indices[i*3], indices[i*3+1], indices[i*3+2])
+                    let t = Triangle(positions[idx.0], positions[idx.1], positions[idx.2])
+                    triangles.append(t)
+                }
+            }
+            return triangles
+        }
+
+        if scene >= 0 && scene < self.scenes.count {
+            var triangles: [Triangle] = []
+            self.scenes[scene].forEachNode { node, transform in
+                if let mesh = node.mesh {
+                    let tm = AffineTransform3.identity
+                        .scaled(by: node.scale)
+                        .matrix4
+                        .concatenating(transform.matrix4)
+
+                    let tris = meshTriangles(mesh: mesh, transform: tm)
+                    triangles.append(contentsOf: tris)
+                }
+            }
+            return triangles
+        }
         return []
     }
 
-    func faceList(scene: Int, deviceContext: GraphicsDeviceContext) -> [MaterialFace] {
+    func faceList(scene: Int, deviceContext: GraphicsDeviceContext) -> [TriangleFace] {
+        func meshFaces(mesh: Mesh, transform: Matrix4) -> [TriangleFace] {
+            if mesh.primitiveType != .triangle && mesh.primitiveType != .triangleStrip {
+                return []
+            }
+
+            var faces: [TriangleFace] = []
+
+            var positions: [Vector3] = []
+            _ = mesh.enumerateVertexBufferContent(semantic: .position,
+                                                  context: deviceContext) {
+                data, format, index in
+                if format == .float3 {
+                    let v = data.assumingMemoryBound(to: Float3.self).pointee
+                    positions.append(Vector3(v).applying(transform, w: 1.0))
+                    return true
+                }
+                return false
+            }
+            var uvs: [Vector2] = []
+            _ = mesh.enumerateVertexBufferContent(semantic: .textureCoordinates,
+                                                  context: deviceContext) {
+                data, format, index in
+                if format == .float2 {
+                    let v = data.assumingMemoryBound(to: Float2.self).pointee
+                    uvs.append(Vector2(v))
+                    return true
+                }
+                return false
+            }
+            var colors: [Vector4] = []
+            _ = mesh.enumerateVertexBufferContent(semantic: .color,
+                                                  context: deviceContext, {
+                data, format, index in
+                func normalize<T: FixedWidthInteger>(_ buffer: UnsafePointer<T>,
+                                                     _ count: Int) -> Vector4 {
+                    var vec = Vector4(0, 0, 0, 1)
+                    let inv = Double(1.0) / Double(T.max)
+                    (0..<(min(4, count))).forEach { i in
+                        let v = Double(buffer[i]) * inv
+                        vec[i] = Scalar(v)
+                    }
+                    return vec
+                }
+
+                switch format {
+                case .char3, .char3Normalized:
+                    let v = normalize(data.assumingMemoryBound(to: Int8.self), 3)
+                    colors.append(v)
+                case .uchar3, .uchar3Normalized:
+                    let v = normalize(data.assumingMemoryBound(to: UInt8.self), 3)
+                    colors.append(v)
+                case .char4, .char4Normalized:
+                    let v = normalize(data.assumingMemoryBound(to: Int8.self), 4)
+                    colors.append(v)
+                case .uchar4, .uchar4Normalized:
+                    let v = normalize(data.assumingMemoryBound(to: UInt8.self), 4)
+                    colors.append(v)
+                case .short3, .short3Normalized:
+                    let v = normalize(data.assumingMemoryBound(to: Int16.self), 3)
+                    colors.append(v)
+                case .ushort3, .ushort3Normalized:
+                    let v = normalize(data.assumingMemoryBound(to: UInt16.self), 3)
+                    colors.append(v)
+                case .short4, .short4Normalized:
+                    let v = normalize(data.assumingMemoryBound(to: Int16.self), 4)
+                    colors.append(v)
+                case .ushort4, .ushort4Normalized:
+                    let v = normalize(data.assumingMemoryBound(to: UInt16.self), 4)
+                    colors.append(v)
+                case .int3:
+                    let v = normalize(data.assumingMemoryBound(to: Int32.self), 3)
+                    colors.append(v)
+                case .uint3:
+                    let v = normalize(data.assumingMemoryBound(to: UInt32.self), 3)
+                    colors.append(v)
+                case .int4:
+                    let v = normalize(data.assumingMemoryBound(to: Int32.self), 4)
+                    colors.append(v)
+                case .uint4:
+                    let v = normalize(data.assumingMemoryBound(to: UInt32.self), 4)
+                    colors.append(v)
+                case .float3:
+                    let v = data.assumingMemoryBound(to: Float3.self).pointee
+                    colors.append(Vector4(v.0, v.1, v.2, 1.0))
+                case .float4:
+                    let v = data.assumingMemoryBound(to: Float4.self).pointee
+                    colors.append(Vector4(v.0, v.1, v.2, v.3))
+                default:
+                    return false
+                }
+                return true
+            })
+
+            if uvs.count < positions.count {
+                uvs.append(contentsOf: repeatElement(Vector2.zero, count: positions.count - uvs.count))
+            }
+            if colors.count < positions.count {
+                colors.append(contentsOf: repeatElement(Vector4(1, 1, 1, 1), count: positions.count - colors.count))
+            }
+
+            var indices: [Int] = []
+            if mesh.indexBuffer != nil {
+                indices.reserveCapacity(mesh.indexCount)
+                _ = mesh.enumerateIndexBufferContent(context: deviceContext) {
+                    indices.append($0)
+                    return true
+                }
+            } else {
+                indices = positions.indices.map { Int($0) }
+            }
+
+            if mesh.primitiveType == .triangleStrip {
+                let numTris = indices.count > 2 ? indices.count - 2 : 0
+                faces.reserveCapacity(numTris)
+
+                (0..<numTris).forEach { i in
+                    var idx = (indices[i], indices[i+1], indices[i+2])
+                    if i % 2 != 0 {
+                        swap(&idx.0, &idx.1)
+                    }
+                    let face = TriangleFace(
+                        vertices: (.init(pos: positions[idx.0], uv: uvs[idx.0], color: colors[idx.0]),
+                                   .init(pos: positions[idx.1], uv: uvs[idx.1], color: colors[idx.1]),
+                                   .init(pos: positions[idx.2], uv: uvs[idx.2], color: colors[idx.2])),
+                        material: mesh.material)
+                    faces.append(face)
+                }
+            } else {
+                let numTris = indices.count / 3
+                faces.reserveCapacity(numTris)
+                (0..<numTris).forEach { i in
+                    let idx = (indices[i*3], indices[i*3+1], indices[i*3+2])
+                    let face = TriangleFace(
+                        vertices: (.init(pos: positions[idx.0], uv: uvs[idx.0], color: colors[idx.0]),
+                                   .init(pos: positions[idx.1], uv: uvs[idx.1], color: colors[idx.1]),
+                                   .init(pos: positions[idx.2], uv: uvs[idx.2], color: colors[idx.2])),
+                        material: mesh.material)
+                    faces.append(face)
+                }
+            }
+            return faces
+        }
+
+        if scene >= 0 && scene < self.scenes.count {
+            var faces: [TriangleFace] = []
+            self.scenes[scene].forEachNode { node, transform in
+                if let mesh = node.mesh {
+                    let tm = AffineTransform3.identity
+                        .scaled(by: node.scale)
+                        .matrix4
+                        .concatenating(transform.matrix4)
+
+                    let f = meshFaces(mesh: mesh, transform: tm)
+                    faces.append(contentsOf: f)
+                }
+            }
+            return faces
+        }
         return []
     }
 }
