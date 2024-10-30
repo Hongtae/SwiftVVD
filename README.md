@@ -47,7 +47,9 @@ Cross-Platform Game Engine for swift programming language.
 - [minimp3](https://github.com/lieff/minimp3)
 - [zlib](https://github.com/madler/zlib)
 - [Zstd](https://github.com/facebook/zstd)
+- [TinyGLTF](https://github.com/syoyo/tinygltf)
 - [OpenAL Soft](https://github.com/kcat/openal-soft)
     - This is LGPL licensed, configured to build **dynamic-library**.
+
 
   
