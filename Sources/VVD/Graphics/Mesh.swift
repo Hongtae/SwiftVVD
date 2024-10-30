@@ -1052,9 +1052,9 @@ public class Mesh {
         return false
     }
 
-    func enumerateVertexBufferContent(semantic: VertexAttributeSemantic,
-                                      context: GraphicsDeviceContext,
-                                      _ handler: ((_:UnsafeRawPointer, _:VertexFormat, Int)-> Bool)? = nil) -> Bool {
+    public func enumerateVertexBufferContent(semantic: VertexAttributeSemantic,
+                                             context: GraphicsDeviceContext,
+                                             _ handler: ((_:UnsafeRawPointer, _:VertexFormat, Int)-> Bool)? = nil) -> Bool {
         var attrib: VertexAttribute? = nil
         var vertexBuffer: VertexBuffer? = nil
 
@@ -1085,8 +1085,8 @@ public class Mesh {
         return false
     }
 
-    func enumerateIndexBufferContent(context: GraphicsDeviceContext,
-                                     _ handler: ((_:Int)-> Bool)? = nil) -> Bool {
+    public func enumerateIndexBufferContent(context: GraphicsDeviceContext,
+                                            _ handler: ((_:Int)-> Bool)? = nil) -> Bool {
         if let indexBuffer {
             guard indexCount > 0 else { return true }
             guard let handler else { return true }
