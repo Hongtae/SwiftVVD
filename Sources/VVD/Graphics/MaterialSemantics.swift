@@ -2,7 +2,7 @@
 //  File: MaterialSemantics.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 public enum MaterialSemantic {
@@ -60,6 +60,10 @@ public struct ShaderBindingLocation: Hashable {
 
     public var isPushConstant: Bool {
         self.set == -1 && self.binding == -1
+    }
+
+    public static func location(set: Int, binding: Int, offset: Int) -> Self {
+        .init(set: set, binding: binding, offset: offset)
     }
 
     public static func pushConstant(offset: Int) -> Self {

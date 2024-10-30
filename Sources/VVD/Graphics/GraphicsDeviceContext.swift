@@ -141,6 +141,10 @@ public class GraphicsDeviceContext {
         }
         return nil
     }
+
+    public static func makeDefault() -> GraphicsDeviceContext? {
+        return makeGraphicsDeviceContext()
+    }
 }
 
 public enum GraphicsAPI {

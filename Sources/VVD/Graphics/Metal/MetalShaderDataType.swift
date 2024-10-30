@@ -171,5 +171,18 @@ extension ShaderDataType {
             return .none
         }
     }
+
+    func mtlAlignment() -> Int {
+        if let components = self.components() {
+            func stride<T>(of type: T.Type) -> Int {
+                MemoryLayout<T>.stride
+            }
+            let row = components.rows == 3 ? 4 : components.rows
+            let alignment = stride(of: components.type) * row
+            assert(alignment.isPowerOfTwo)
+            return alignment
+        }
+        return 0
+    }
 }
 #endif //if ENABLE_METAL

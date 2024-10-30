@@ -2,7 +2,7 @@
 //  File: Shader.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -33,7 +33,7 @@ public struct ShaderDescriptor {
     public var type : ShaderDescriptorType
 }
 
-private func dataTypeFromSPVC(type: spvc_type) -> ShaderDataType {
+private func dataTypeFromSPVC(type: spvc_type?) -> ShaderDataType {
 
     let basetype = spvc_type_get_basetype(type)
     let vecsize = spvc_type_get_vector_size(type)
@@ -220,13 +220,13 @@ private func descriptorFromSPVC(compiler: spvc_compiler,
 }
 
 private func resourceStructMembersFromSPVC(compiler: spvc_compiler,
-                                           type: spvc_type) throws -> [ShaderResourceStructMember] {
+                                           type: spvc_type?) throws -> [ShaderResourceStructMember] {
 
     var members: [ShaderResourceStructMember] = []
     for i in 0..<spvc_type_get_num_member_types(type) {
         let memberTypeId = spvc_type_get_member_type(type, i)
         let memberType = spvc_compiler_get_type_handle(compiler, memberTypeId)
-        let dataType = dataTypeFromSPVC(type: memberType!)
+        let dataType = dataTypeFromSPVC(type: memberType)
         assert(dataType != .unknown)
         assert(dataType != .none)
 
@@ -262,7 +262,7 @@ private func resourceStructMembersFromSPVC(compiler: spvc_compiler,
 
         var structMembers: [ShaderResourceStructMember] = []
         if dataType == .struct {
-            structMembers = try resourceStructMembersFromSPVC(compiler: compiler, type: memberType!)
+            structMembers = try resourceStructMembersFromSPVC(compiler: compiler, type: memberType)
         }
 
         members.append(ShaderResourceStructMember(dataType: dataType,
@@ -332,7 +332,7 @@ private func resourceFromSPVC(compiler: spvc_compiler,
     }
 
     let basetype = spvc_compiler_get_type_handle(compiler, resource.base_type_id)
-    let members: [ShaderResourceStructMember] = try resourceStructMembersFromSPVC(compiler: compiler, type: basetype!)
+    let members: [ShaderResourceStructMember] = try resourceStructMembersFromSPVC(compiler: compiler, type: basetype)
 
     return ShaderResource(
         set: Int(set),
@@ -356,7 +356,7 @@ private func attributeFromSPVC(compiler: spvc_compiler,
     let location = spvc_compiler_get_decoration(compiler, resource.id, SpvDecorationLocation)
     let name = String(cString: resource.name)
     let spvctype = spvc_compiler_get_type_handle(compiler, resource.type_id)
-    let type = dataTypeFromSPVC(type: spvctype!)
+    let type = dataTypeFromSPVC(type: spvctype)
     assert(type != .unknown)
 
     // get array length
@@ -528,7 +528,7 @@ public class Shader: CustomStringConvertible {
             }
 
             let enumerateResources = {
-                (_ type: spvc_resource_type, _ body: (_: UnsafeBufferPointer<spvc_reflected_resource>) throws ->Void) -> spvc_result
+                (type: spvc_resource_type, body: (_: UnsafeBufferPointer<spvc_reflected_resource>) throws ->Void) -> spvc_result
                 in
                 var list: UnsafePointer<spvc_reflected_resource>? = nil
                 var count: Int = 0
@@ -660,7 +660,7 @@ public class Shader: CustomStringConvertible {
 
                         let name = String(cString: spvc_compiler_get_name(compiler, ptr[i].id))
                         let basetype = spvc_compiler_get_type_handle(compiler, ptr[i].base_type_id)
-                        let members = try resourceStructMembersFromSPVC(compiler: compiler, type: basetype!)
+                        let members = try resourceStructMembersFromSPVC(compiler: compiler, type: basetype)
                         let layout = ShaderPushConstantLayout(name: name,
                                                             offset: rangeBegin,
                                                             size: rangeEnd - rangeBegin,

@@ -40,6 +40,12 @@ final class MetalShaderFunction: ShaderFunction {
                                        type: .from(mtlDataType: attr.attributeType),
                                        enabled: attr.isActive)
             }
+            if let attr = $0 as? MTLVertexAttribute {
+                return ShaderAttribute(name: attr.name,
+                                       location: attr.attributeIndex,
+                                       type: .from(mtlDataType: attr.attributeType),
+                                       enabled: attr.isActive)
+            }
             return nil
         }
 

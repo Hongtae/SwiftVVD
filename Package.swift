@@ -24,6 +24,8 @@ let package = Package(
                  path: "SupportPackages/FreeType"),
         .package(name: "OpenAL-Soft",
                  path: "SupportPackages/OpenAL-Soft"),
+        .package(name: "TinyGLTF",
+                 path: "SupportPackages/TinyGLTF"),
         .package(name: "Vulkan",
                  path: "SupportPackages/Vulkan"),
         .package(name: "Wayland",
@@ -123,6 +125,21 @@ let package = Package(
                 .process("Resources")
             ],
             linkerSettings: []),
+        .executableTarget(
+            name: "RenderTest",
+            dependencies: [
+                .target(name: "VVD"),
+                .product(name: "TinyGLTF",
+                         package: "TinyGLTF"),
+            ],
+            resources: [
+                .copy("Resources/Shaders"),
+                .copy("Resources/glTF"),
+            ],
+            swiftSettings: [
+                .interoperabilityMode(.Cxx),
+            ]
+        ),
     ],
     cLanguageStandard: .c11,
     cxxLanguageStandard: .cxx20

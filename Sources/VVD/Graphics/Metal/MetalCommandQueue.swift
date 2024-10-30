@@ -9,7 +9,7 @@
 import Foundation
 import Metal
 
-final class MetalCommandQueue: CommandQueue {
+final class MetalCommandQueue: CommandQueue, @unchecked Sendable {
 
     public let flags: CommandQueueFlags
     public let device: GraphicsDevice

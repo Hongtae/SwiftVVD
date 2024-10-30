@@ -29,6 +29,15 @@ struct MetalStageResourceBindingMap {
     var pushConstantBufferSize: Int     // buffer size in MSL (not spir-v)
 }
 
+extension ShaderResourceStructMember {
+    var mtlAlignment: Int {
+        let alignment = members.reduce(1) { result, member in
+            max(result, member.mtlAlignment)
+        }
+        return max(alignment, self.dataType.mtlAlignment())
+    }
+}
+
 final class MetalShaderModule: ShaderModule {
 
     public var device: GraphicsDevice

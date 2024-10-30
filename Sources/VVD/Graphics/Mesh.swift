@@ -2,24 +2,38 @@
 //  File: Mesh.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 public class Mesh {
     public var material: Material?
+    public var aabb: AABB
 
     public struct VertexAttribute {
-        public let semantic: VertexAttributeSemantic
-        public let format: VertexFormat
-        public let offset: Int
-        public let name: String
+        public var semantic: VertexAttributeSemantic
+        public var format: VertexFormat
+        public var offset: Int
+        public var name: String
+        public init(semantic: VertexAttributeSemantic, format: VertexFormat, offset: Int, name: String) {
+            self.semantic = semantic
+            self.format = format
+            self.offset = offset
+            self.name = name
+        }
     }
     public struct VertexBuffer {
-        public let byteOffset: Int
-        public let byteStride: Int
-        public let vertexCount: Int
-        public let buffer: GPUBuffer
-        public let attributes: [VertexAttribute]
+        public var byteOffset: Int
+        public var byteStride: Int
+        public var vertexCount: Int
+        public var buffer: GPUBuffer
+        public var attributes: [VertexAttribute]
+        public init(byteOffset: Int, byteStride: Int, vertexCount: Int, buffer: GPUBuffer, attributes: [VertexAttribute]) {
+            self.byteOffset = byteOffset
+            self.byteStride = byteStride
+            self.vertexCount = vertexCount
+            self.buffer = buffer
+            self.attributes = attributes
+        }
     }
     public var vertexBuffers: [VertexBuffer]
     public var indexBuffer: GPUBuffer?
@@ -71,6 +85,35 @@ public class Mesh {
         self.resourceBindings = []
         self.pushConstants = []
         self.bufferResources = [:]
+
+        self.aabb = AABB()
+    }
+
+    func availableVertexBuffers(for material: Material) -> [VertexBuffer] {
+        guard let vertexFunction = material.shader.function(stage: .vertex)
+        else { return [] }
+
+        let vertexInputs = vertexFunction.stageInputAttributes
+        let attributeSemantics = material.shader.inputAttributeSemantics
+
+        let attrs: [(semantic: VertexAttributeSemantic, name: String)] = 
+            vertexInputs.filter(\.enabled).map {
+                (semantic: attributeSemantics[$0.location, default: .userDefined],
+                 name: $0.name)                
+            }
+        return self.vertexBuffers.filter { vertexBuffer in
+            vertexBuffer.attributes.contains { attribute in
+                if attribute.semantic != .userDefined {
+                    if attrs.contains(where: { $0.semantic == attribute.semantic }) {
+                        return true
+                    }
+                }
+                if attribute.name.isEmpty == false {
+                    return attrs.contains { $0.name == attribute.name }
+                }
+                return false
+            }
+        }
     }
 
     public var vertexDescriptor: VertexDescriptor {
@@ -78,13 +121,16 @@ public class Mesh {
         guard let vertexFunction = material.shader.function(stage: .vertex)
         else { return .init() }
 
+        let vertexBuffers = self.availableVertexBuffers(for: material)
+        if vertexBuffers.isEmpty { return .init() }
+
         let vertexInputs = vertexFunction.stageInputAttributes
         let attributeSemantics = material.shader.inputAttributeSemantics
 
         let findBufferIndexAttribute = {
             (s: VertexAttributeSemantic) -> (Int, VertexAttribute)? in
-            for index in 0..<self.vertexBuffers.count {
-                if let attr = self.vertexBuffers[index].attributes
+            for index in 0..<vertexBuffers.count {
+                if let attr = vertexBuffers[index].attributes
                     .first(where: { $0.semantic == s }) {
                     return (index, attr)
                 }
@@ -93,8 +139,8 @@ public class Mesh {
         }
         let findBufferIndexAttributeByName = {
             (name: String) -> (Int, VertexAttribute)? in
-            for index in 0..<self.vertexBuffers.count {
-                if let attr = self.vertexBuffers[index].attributes
+            for index in 0..<vertexBuffers.count {
+                if let attr = vertexBuffers[index].attributes
                     .first(where: { $0.name == name }) {
                     return (index, attr)
                 }
@@ -116,8 +162,6 @@ public class Mesh {
                 bufferIndexAttr = findBufferIndexAttribute(semantic)
             }
             if let (bufferIndex, attr) = bufferIndexAttr {
-                _=self.vertexBuffers[bufferIndex]
-
                 let descriptor = VertexAttributeDescriptor(
                     format: attr.format,
                     offset: attr.offset,
@@ -129,28 +173,18 @@ public class Mesh {
             }
         }
 
-        let layouts = self.vertexBuffers.enumerated().map { index, buffer in
-            VertexBufferLayoutDescriptor(step: .vertex,
-                                         stride: buffer.byteStride,
-                                         bufferIndex: index)
+        let layouts = vertexBuffers.enumerated().map { index, buffer in
+            VertexBufferLayoutDescriptor(stepRate: .vertex,
+                                         stride: buffer.byteStride)
         }
         return VertexDescriptor(attributes: attributes, layouts: layouts)
     }
 
-    func initResources(device: GraphicsDevice, bufferPolicy policy: BufferUsagePolicy) -> Bool {
-        if material == nil { return false }
-        if pipelineState == nil { _ = buildPipelineState(device: device) }
-        if pipelineState == nil { return false }
-
-        let alignAddressNPOT = { (ptr: Int, alignment: Int) -> Int in
-            if (ptr % alignment) != 0 {
-                return ptr + (alignment - (ptr % alignment))
-            }
-            return ptr
-        }
-        let alignAddress = { (ptr: Int, alignment: Int) -> Int in
-            return (ptr + alignment - 1) & ~(alignment - 1)
-        }
+    public func initResources(device: GraphicsDevice,
+                              bufferPolicy policy: BufferUsagePolicy) -> Bool {
+        if self.material == nil { return false }
+        if self.pipelineState == nil { _ = buildPipelineState(device: device) }
+        if self.pipelineState == nil { return false }
 
         var numBuffersGenerated = 0
         var totalBytesAllocated = 0
@@ -172,13 +206,14 @@ public class Mesh {
             }
         }
 
-        if policy == .singleBuffer {
+        switch policy {
+        case .singleBuffer:
             var bufferOffset = 0
             var bufferLength = 0
             var resourceMap: [ShaderBindingLocation: OptBufferResource] = [:]
 
-            for bset in self.resourceBindings {
-                for rb in bset.resources {
+            self.resourceBindings.forEach { bset in
+                bset.resources.forEach { rb in
                     if rb.resource.type == .buffer {
                         let bufferTypeInfo = rb.resource.bufferTypeInfo!
                         let buffers = (0..<rb.resource.count).map { _ in
@@ -187,8 +222,8 @@ public class Mesh {
                                                  length: bufferTypeInfo.size)
                         }
                         bufferLength = bufferOffset + bufferTypeInfo.size
-                        bufferLength = alignAddress(bufferLength, 16)
-                        bufferOffset = alignAddress(bufferOffset, 16)
+                        bufferLength = bufferLength.alignedUp(toMultipleOf: 16)
+                        bufferOffset = bufferOffset.alignedUp(toMultipleOf: 16)
 
                         let location = ShaderBindingLocation(
                             set: rb.resource.set,
@@ -215,14 +250,14 @@ public class Mesh {
                     self.bufferResources[key] = value.bufferResource(with: buffer)
                 }
             }
-        } else if policy == .singleBufferPerSet {
+        case .singleBufferPerSet:
             var bufferResourcesTmp: [ShaderBindingLocation: BufferResource] = [:]
             for bset in self.resourceBindings {
                 var bufferOffset = 0
                 var bufferLength = 0
                 var resourceMap: [ShaderBindingLocation: OptBufferResource] = [:]
 
-                for rb in bset.resources {
+                bset.resources.forEach { rb in
                     if rb.resource.type == .buffer {
                         let bufferTypeInfo = rb.resource.bufferTypeInfo!
                         let buffers = (0..<rb.resource.count).map { _ in
@@ -230,8 +265,8 @@ public class Mesh {
                             return OptBufferInfo(offset: bufferOffset, length: bufferTypeInfo.size)
                         }
                         bufferLength = bufferOffset + bufferTypeInfo.size
-                        bufferLength = alignAddress(bufferLength, 16)
-                        bufferOffset = alignAddress(bufferOffset, 16)
+                        bufferLength = bufferLength.alignedUp(toMultipleOf: 16)
+                        bufferOffset = bufferOffset.alignedUp(toMultipleOf: 16)
 
                         let location = ShaderBindingLocation(
                             set: rb.resource.set,
@@ -259,7 +294,7 @@ public class Mesh {
                 }
             }
             self.bufferResources.merge(bufferResourcesTmp) { $1 }
-        } else if policy == .singleBufferPerResource {
+        case .singleBufferPerResource:
             var bufferResourcesTmp: [ShaderBindingLocation: BufferResource] = [:]
             for bset in self.resourceBindings {
                 for rb in bset.resources {
@@ -275,8 +310,8 @@ public class Mesh {
                                                  length: bufferTypeInfo.size)
                         }
                         bufferLength = bufferOffset + bufferTypeInfo.size
-                        bufferLength = alignAddress(bufferLength, 16)
-                        bufferOffset = alignAddress(bufferOffset, 16)
+                        bufferLength = bufferLength.alignedUp(toMultipleOf: 16)
+                        bufferOffset = bufferOffset.alignedUp(toMultipleOf: 16)
 
                         let location = ShaderBindingLocation(
                             set: rb.resource.set,
@@ -305,14 +340,15 @@ public class Mesh {
                 }
             }
             self.bufferResources.merge(bufferResourcesTmp) { $1 }
-        } else {
+        default:
+            break
         }
         Log.debug("initResources generated \(numBuffersGenerated) buffers, \(totalBytesAllocated) bytes.")
         return true
     }
 
-    func buildPipelineState(device: GraphicsDevice,
-                            reflection ref: UnsafeMutablePointer<PipelineReflection>? = nil) -> Bool {
+    public func buildPipelineState(device: GraphicsDevice,
+                                   reflection ref: UnsafeMutablePointer<PipelineReflection>? = nil) -> Bool {
         guard let material else {
             Log.error("The material does not exist.")
             return false
@@ -323,6 +359,7 @@ public class Mesh {
 
         if vertexFunction == nil {
             Log.error("Materials do not have a vertex function.")
+            return false
         }
 
         let vertexDescriptor = self.vertexDescriptor
@@ -445,7 +482,7 @@ public class Mesh {
         return true
     }
 
-    func updateShadingProperties(sceneState: SceneState?) {
+    public func updateShadingProperties(sceneState: SceneState?) {
         guard let material else { return }
 
         struct StructMemberBind {
@@ -523,7 +560,7 @@ public class Mesh {
                                                            buffer: buffer)
                     }
                     if copied == 0 {
-                        Log.warning("Unable to bind shader uniform struct (\(location)), arrayIndex: \(arrayIndex), name:\"\(path)\"")
+                        //Log.warning("Unable to bind shader uniform struct (\(location)), arrayIndex: \(arrayIndex), name:\"\(path)\"")
                     }
                 }
                 return copied
@@ -545,44 +582,61 @@ public class Mesh {
             let location = ShaderBindingLocation(set: set,
                                                  binding: binding,
                                                  offset: offset)
+
+            let semantic = material.shader.resourceSemantics[location] ?? .material(.userDefined)
+
             var copied = 0
             if type == .struct {
-                for member in members {
-                    if member.offset < offset { continue }
-                    if member.offset >= (offset + size) { break }
-                    if member.offset + member.size > offset + size { break }
+                if case let .material(ms) = semantic {
+                    copied = self.bindMaterialProperty(semantic: ms,
+                                                       location: location,
+                                                       dataType: type,
+                                                       name: name,
+                                                       offset: offset,
+                                                       buffer: buffer)
+                }
+                if copied != size {
+                    // The entire buffer wasn't copied,
+                    // so we split it into members of a struct and try to copy it.
+                    copied = 0
+                    for member in members {
+                        if member.offset < offset { continue }
+                        if member.offset >= (offset + size) { break }
+                        if member.offset + member.size > offset + size { break }
 
-                    let path = if name.isEmpty == false && member.name.isEmpty == false {
-                        "\(name).\(member.name)"
-                    } else {
-                        member.name
-                    }
+                        let path = if name.isEmpty == false && member.name.isEmpty == false {
+                            "\(name).\(member.name)"
+                        } else {
+                            member.name
+                        }
 
-                    if member.offset + member.size - offset > buffer.count {
-                        Log.error("Insufficient buffer for shader uniform struct at location:\(location), size:\(size), name:\"\(path)\"")
-                        break
-                    }
+                        if member.offset + member.size - offset > buffer.count {
+                            Log.error("Insufficient buffer for shader uniform struct at location:\(location), size:\(size), name:\"\(path)\"")
+                            break
+                        }
 
-                    let d = member.offset - offset
-                    let s = StructMemberBind(sceneState: sceneState,
-                                             mesh: self,
-                                             member: member,
-                                             parentPath: name,
-                                             arrayIndex: arrayIndex,
-                                             set: set,
-                                             binding: binding,
-                                             offset: 0)
-                        .bind(buffer: .init(rebasing: buffer[d...]))
+                        let d = member.offset - offset
+                        let s = StructMemberBind(sceneState: sceneState,
+                                                 mesh: self,
+                                                 member: member,
+                                                 parentPath: name,
+                                                 arrayIndex: arrayIndex,
+                                                 set: set,
+                                                 binding: binding,
+                                                 offset: 0)
+                            .bind(buffer: .init(rebasing: buffer[d...]))
 
-                    if s > 0 {
-                        copied += s
-                    } else {
-                        let loc = ShaderBindingLocation(set: set, binding: binding, offset: member.offset)
-                        Log.warning("Unable to bind shader uniform struct at location:\(loc), size:\(size), name:\"\(path)\"")
+                        if s > 0 {
+                            copied += s
+                        } else {
+                            if copied < d + member.size { // Failed to copy data.
+                                let loc = ShaderBindingLocation(set: set, binding: binding, offset: member.offset)
+                                Log.warning("Unable to bind shader uniform struct at location:\(loc), size:\(size), name:\"\(path)\"")
+                            }
+                        }
                     }
                 }
             } else {
-                let semantic = material.shader.resourceSemantics[location] ?? .material(.userDefined)
                 if case let .uniform(ss) = semantic {
                     if let sceneState {
                         copied = self.bindShaderUniformBuffer(semantic: ss,
@@ -810,24 +864,39 @@ public class Mesh {
         guard let material else { return 0 }
 
         var data: [UInt8] = []
+
+        func bindNumerics<T: Numeric>(as: T.Type, array: [any Numeric]) {
+            let numerics = array.map { $0 as! T }
+            numerics.withUnsafeBytes {
+                data.append(contentsOf: $0)
+            }
+        }
+
+        let bind = { (prop: MaterialProperty) in
+            if case let .buffer(buffer) = prop {
+                data = buffer
+            } else {
+                if let components = dataType.components() {
+                    let numerics = prop.castNumericArray(as: components.type)
+                    bindNumerics(as: components.type, array: numerics)
+                }
+            }
+        }
+
         if semantic != .userDefined {
             if let prop = material.properties[semantic] {
-                prop.withUnsafeBytes {
-                    data.append(contentsOf: $0)
-                }
+                bind(prop)
             }
         }
         if data.isEmpty {
             if let prop = material.userDefinedProperties[location] {
-                prop.withUnsafeBytes {
-                    data.append(contentsOf: $0)
-                }
+                bind(prop)
             }
         }
         if data.isEmpty == false {
             if data.count > offset {
                 let s = min(data.count - offset, buffer.count)
-                buffer.copyBytes(from: data)
+                buffer.copyBytes(from: data[0..<s])
                 return s
             }
         }
@@ -857,7 +926,7 @@ public class Mesh {
                                  buffer: UnsafeMutableRawBufferPointer) -> Int {
         let bindMatrix4 = { (matrix: Matrix4) in
             if dataType == .float4x4 {
-                return withUnsafeBytes(of: matrix) {
+                return withUnsafeBytes(of: matrix.float4x4) {
                     buffer.copyBytes(from: $0)
                     return $0.count
                 }
@@ -866,7 +935,7 @@ public class Mesh {
                 let mat = Matrix3(matrix.m11, matrix.m12, matrix.m13,
                                   matrix.m21, matrix.m22, matrix.m23,
                                   matrix.m31, matrix.m32, matrix.m33)
-                return withUnsafeBytes(of: mat) {
+                return withUnsafeBytes(of: mat.float3x3) {
                     buffer.copyBytes(from: $0)
                     return $0.count
                 }
@@ -910,8 +979,12 @@ public class Mesh {
         return 0
     }
 
-    func encodeRenderCommand(encoder: RenderCommandEncoder, numInstances: Int, baseInstance: Int) -> Bool {
+    @discardableResult
+    public func encodeRenderCommand(encoder: RenderCommandEncoder, numInstances: Int = 1, baseInstance: Int = 0) -> Bool {
         if let pipelineState, let material, vertexBuffers.isEmpty == false {
+            let vertexBuffers = self.availableVertexBuffers(for: material)
+            if vertexBuffers.isEmpty { return false }
+
             encoder.setRenderPipelineState(pipelineState)
             encoder.setFrontFacing(material.frontFace)
             encoder.setCullMode(material.cullMode)
@@ -948,11 +1021,11 @@ public class Mesh {
                     encoder.pushConstant(stages: stages, offset: begin, data: buffer)
                 }
             }
-            self.vertexBuffers.enumerated().forEach { index, vb in
+            vertexBuffers.enumerated().forEach { index, vb in
                 encoder.setVertexBuffer(vb.buffer, offset: vb.byteOffset, index: index)
             }
 
-            let vertexCount = self.vertexBuffers.reduce(self.vertexBuffers[0].vertexCount) {
+            let vertexCount = vertexBuffers.reduce(vertexBuffers[0].vertexCount) {
                 count, vb in
                 min(count, vb.vertexCount)
             }

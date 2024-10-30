@@ -26,6 +26,48 @@ public func lerp<T>(_ a: T, _ b: T, _ t: T) -> T where T: FloatingPoint {
     a * (1 - t) + b * t
 }
 
+extension FloatingPoint {
+    public func radianToDegree() -> Self {
+        self * Self(180) / .pi
+    }
+
+    public func degreeToRadian() -> Self {
+        self * .pi / Self(180)
+    }
+
+    public func isNearlyEqual(to other: Self, inScaleOfULP scale: Self = 4, minTolerance: Self = .ulpOfOne, maxTolerance: Self = 1) -> Bool {
+        if self.isNaN || other.isNaN { return false }
+        if self.isZero && other.isZero { return true }
+        if self.isInfinite {
+            if other.isInfinite { return self.sign == other.sign }
+            return false
+        }
+        if other.isInfinite { return false }
+        let minimum = min(self.magnitude, other.magnitude)
+        return (self - other).magnitude <= (minimum.ulp * scale).clamp(min: minTolerance, max: maxTolerance)
+    }
+}
+
+extension BinaryInteger {
+    public var isPowerOfTwo: Bool {
+        self > .zero && self & (self - 1) == 0
+    }
+
+    public func alignedUp(toMultipleOf alignment: Self) -> Self {
+        assert(alignment != .zero)
+        if alignment.isPowerOfTwo {
+            return (self + alignment - 1) & ~(alignment - 1)
+        } else if (self % alignment) != .zero {
+            if self * alignment > .zero {
+                return self + (alignment - (self % alignment))
+            } else {
+                return self - (self % alignment)
+            }
+        }
+        return self
+    }
+}
+
 public typealias Half2 = (Float16, Float16)
 public typealias Float2 = (Float32, Float32)
 public typealias Double2 = (Float64, Float64)

@@ -2,7 +2,7 @@
 //  File: MetalShaderResource.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_METAL
@@ -71,84 +71,91 @@ private func shaderResourceStructMember(from st: MTLStructType) -> [ShaderResour
 }
 
 extension ShaderResource {
-    static func from(mtlArgument arg: MTLArgument,
+    static func from(mtlBinding binding: any MTLBinding,
                      bindingMap: [MetalResourceBinding],
                      stage: ShaderStage) -> ShaderResource {
-
         var resource = ShaderResource(set: 0,
                                       binding: 0,
-                                      name: arg.name,
+                                      name: binding.name,
                                       type: .buffer,
                                       stages: .init(stage: stage),
-                                      count: arg.arrayLength,
+                                      count: 1,
                                       stride: 0,
-                                      enabled: arg.isActive,
+                                      enabled: binding.isUsed,
                                       access: .readOnly,
                                       members: [])
-
-        switch arg.access {
+        switch binding.access {
         case .readOnly:     resource.access = .readOnly
         case .writeOnly:    resource.access = .writeOnly
         case .readWrite:    resource.access = .readWrite
         @unknown default:
-            Log.warn("Unhandled access type: \(arg.access)")
+            Log.warn("Unhandled access type: \(binding.access)")
         }
 
         var indexNotFound = true
-        switch arg.type {
+        switch binding.type {
         case .buffer:
             resource.type = .buffer
-            resource.bufferTypeInfo = ShaderResourceBuffer(
-                dataType: .from(mtlDataType: arg.bufferDataType),
-                alignment: arg.bufferAlignment,
-                size: arg.bufferDataSize)
-            if arg.bufferDataType == .struct {
-                resource.members = shaderResourceStructMember(from: arg.bufferStructType!)
+            if let buffer = binding as? MTLBufferBinding {
+                resource.bufferTypeInfo = ShaderResourceBuffer(
+                    dataType: .from(mtlDataType: buffer.bufferDataType),
+                    alignment: buffer.bufferAlignment,
+                    size: buffer.bufferDataSize)
+                if let structType = buffer.bufferStructType {
+                    resource.members = shaderResourceStructMember(from: structType)
+                } else {
+                    Log.error("Unsupported buffer type: \(buffer.bufferDataType)")
+                    assertionFailure("Unsupported buffer type")
+                }
             } else {
-                Log.err("Unsupported buffer type: \(arg.bufferDataType)")
                 assertionFailure("Unsupported buffer type")
             }
 
-            if let binding = bindingMap.first(where: { $0.bufferIndex == arg.index }) {
+            if let binding = bindingMap.first(where: { $0.bufferIndex == binding.index }) {
                 resource.set = binding.set
                 resource.binding = binding.binding
                 indexNotFound = false
             }
         case .texture:
             resource.type = .texture
-            if let binding = bindingMap.first(where: { $0.textureIndex == arg.index }) {
+            if let texture = binding as? MTLTextureBinding {
+                resource.count = texture.arrayLength
+            }
+            if let binding = bindingMap.first(where: { $0.textureIndex == binding.index }) {
                 resource.set = binding.set
                 resource.binding = binding.binding
                 indexNotFound = false
             }
         case .sampler:
             resource.type = .sampler
-            if let binding = bindingMap.first(where: { $0.samplerIndex == arg.index }) {
+            if let binding = bindingMap.first(where: { $0.samplerIndex == binding.index }) {
                 resource.set = binding.set
                 resource.binding = binding.binding
                 indexNotFound = false
             }
+            break
         default:
-            assertionFailure("Unsupported shader argument type: \(arg.type)")
+            fatalError("Unsupported shader argument type: \(binding.type)")
         }
 
-        assert(indexNotFound == false)
+        assert(indexNotFound == false, "Unable to find binding index for resource: \(binding.name)")
         return resource
     }
 }
 
 extension ShaderPushConstantLayout {
-    static func from(mtlArgument arg: MTLArgument,
+    static func from(mtlBufferBinding binding: any MTLBufferBinding,
                      offset: Int,
                      size: Int,
                      stage: ShaderStage) -> ShaderPushConstantLayout {
-        var layout = ShaderPushConstantLayout(name: arg.name,
-                                        offset: offset,
-                                        size: size,
-                                        stages: .init(stage: stage),
-                                        members: [])
-        assert(arg.bufferDataType == .struct)
-        layout.members = shaderResourceStructMember(from: arg.bufferStructType!)
+        var layout = ShaderPushConstantLayout(name: binding.name,
+                                              offset: offset,
+                                              size: size,
+                                              stages: .init(stage: stage),
+                                              members: [])
+        if let structType = binding.bufferStructType {
+            layout.members = shaderResourceStructMember(from: structType)
+        }
         return layout
     }
 }

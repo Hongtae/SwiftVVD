@@ -28,8 +28,8 @@ public enum ImagePixelFormat {
     case rgba32f        // 16 bytes per pixel, float32
 }
 
-fileprivate extension ImagePixelFormat {
-    static func from(dkImagePixelFormat pf: VVDImagePixelFormat) -> ImagePixelFormat {
+private extension ImagePixelFormat {
+    static func from(foreignFormat pf: VVDImagePixelFormat) -> ImagePixelFormat {
         switch pf {
         case VVDImagePixelFormat_R8:         return .r8
         case VVDImagePixelFormat_RG8:        return .rg8
@@ -52,7 +52,7 @@ fileprivate extension ImagePixelFormat {
         }
     }
 
-    func dkImagePixelFormat() -> VVDImagePixelFormat {
+    func foreignFormat() -> VVDImagePixelFormat {
         switch self {
         case .r8:               return VVDImagePixelFormat_R8
         case .rg8:              return VVDImagePixelFormat_RG8
@@ -78,7 +78,7 @@ fileprivate extension ImagePixelFormat {
 
 public extension ImagePixelFormat {
     var bytesPerPixel: Int {
-        Int(VVDImagePixelFormatBytesPerPixel(dkImagePixelFormat()))
+        Int(VVDImagePixelFormatBytesPerPixel(foreignFormat()))
     }
 }
 
@@ -89,8 +89,8 @@ public enum ImageFormat {
     case bmp
 }
 
-fileprivate extension ImageFormat {
-    static func from(dkImageFormat f: VVDImageFormat) -> ImageFormat {
+private extension ImageFormat {
+    static func from(foreignFormat f: VVDImageFormat) -> ImageFormat {
         switch f {
         case VVDImageFormat_PNG:     return .png   
         case VVDImageFormat_JPEG:    return .jpeg
@@ -99,7 +99,7 @@ fileprivate extension ImageFormat {
             return .unknown
         }
     }
-    func dkImageFormat() -> VVDImageFormat {
+    func foreignFormat() -> VVDImageFormat {
         switch self {
         case .png:      return VVDImageFormat_PNG
         case .jpeg:     return VVDImageFormat_JPEG
@@ -284,7 +284,7 @@ public struct Image {
         if result.error == VVDImageDecodeError_Success {
             self.width = Int(result.width)
             self.height = Int(result.height)
-            self.pixelFormat = .from(dkImagePixelFormat: result.pixelFormat)
+            self.pixelFormat = .from(foreignFormat: result.pixelFormat)
             let bytesPerPixel = self.pixelFormat.bytesPerPixel
             assert(bytesPerPixel > 0)
 
@@ -297,7 +297,7 @@ public struct Image {
         }
     }
 
-    init(width: Int, height: Int, pixelFormat: ImagePixelFormat, data: Data? = nil) {
+    public init<T>(width: Int, height: Int, pixelFormat: ImagePixelFormat, content: T) {
         assert(width > 0)
         assert(height > 0)
         assert(pixelFormat != .invalid)
@@ -305,19 +305,44 @@ public struct Image {
         self.width = width
         self.height = height
         self.pixelFormat = pixelFormat
+        let length = pixelFormat.bytesPerPixel * width * height
+        self.data = Data(count: length)
+        let copyBytes = MemoryLayout<T>.size.clamp(min: 0, max: length)
+        if copyBytes > 0 {
+            _=self.data.withUnsafeMutableBytes { buffer in
+                withUnsafeBytes(of: content) {
+                    $0.copyBytes(to: buffer, count: copyBytes)
+                }
+            }
+        }
+    }
+
+    public init(width: Int, height: Int, pixelFormat: ImagePixelFormat, data: (any DataProtocol)? = nil) {
+        assert(width > 0)
+        assert(height > 0)
+        assert(pixelFormat != .invalid)
+
+        self.width = width
+        self.height = height
+        self.pixelFormat = pixelFormat
+        let length = pixelFormat.bytesPerPixel * width * height
+        self.data = Data(count: length)
         if let data {
-            self.data = data
-        } else {
-            let length = pixelFormat.bytesPerPixel * width * height
-            self.data = Data(count: length)
+            let copyBytes = data.count.clamp(min: 0, max: length)
+            if copyBytes > 0 {
+                _=self.data.withUnsafeMutableBytes {
+                    (bufferPointer: UnsafeMutableRawBufferPointer) in
+                    data.copyBytes(to: bufferPointer, count: copyBytes)
+                }
+            }
         }
     }
 
     public func canEncode(toImageFormat imageFormat: ImageFormat) -> Bool {
-        let dkImageFormat = imageFormat.dkImageFormat()
-        let dkPixelFormat = self.pixelFormat.dkImagePixelFormat()
-        let supportFormat = VVDImagePixelFormatEncodingSupported(dkImageFormat, dkPixelFormat)
-        let pf: ImagePixelFormat = .from(dkImagePixelFormat: supportFormat)
+        let imageFormat = imageFormat.foreignFormat()
+        let pixelFormat = self.pixelFormat.foreignFormat()
+        let supportFormat = VVDImagePixelFormatEncodingSupported(imageFormat, pixelFormat)
+        let pf: ImagePixelFormat = .from(foreignFormat: supportFormat)
         if pf == self.pixelFormat {
             return true
         }
@@ -325,8 +350,8 @@ public struct Image {
     }
 
     public func encode(format: ImageFormat) -> Data? {
-        let imageFormat = format.dkImageFormat()
-        let pixelFormat = self.pixelFormat.dkImagePixelFormat()
+        let imageFormat = format.foreignFormat()
+        let pixelFormat = self.pixelFormat.foreignFormat()
         let byteCount = self.bytesPerPixel * self.width * self.height
         assert(byteCount == self.data.count)
 

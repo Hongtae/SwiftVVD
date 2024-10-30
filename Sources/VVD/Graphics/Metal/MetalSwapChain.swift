@@ -10,7 +10,7 @@ import Foundation
 import Metal
 import QuartzCore
 
-final class MetalSwapChain: SwapChain {
+final class MetalSwapChain: SwapChain, @unchecked Sendable {
 
     let window: Window
     let queue: MetalCommandQueue

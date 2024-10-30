@@ -545,9 +545,7 @@ final class VulkanGraphicsDevice: GraphicsDevice, @unchecked Sendable {
             }
 #endif
             // create layout!
-            var layoutBindings: [VkDescriptorSetLayoutBinding] = []
-            layoutBindings.reserveCapacity(layout.bindings.count)
-            for binding in layout.bindings {
+            let layoutBindings: [VkDescriptorSetLayoutBinding] = layout.bindings.map { binding in
                 var layoutBinding = VkDescriptorSetLayoutBinding()
                 layoutBinding.binding = UInt32(binding.binding)
                 layoutBinding.descriptorType = binding.type.vkType()
@@ -560,10 +558,8 @@ final class VulkanGraphicsDevice: GraphicsDevice, @unchecked Sendable {
                 } else {
                     layoutBinding.stageFlags = VkShaderStageFlags(VK_SHADER_STAGE_ALL.rawValue)
                 }
-
                 //TODO: setup immutable sampler!
-
-                layoutBindings.append(layoutBinding)
+                return layoutBinding
             }
 
             let tempHolder = TemporaryBufferHolder(label: "VulkanGraphicsDevice.makeShaderBindingSet")
@@ -637,10 +633,7 @@ final class VulkanGraphicsDevice: GraphicsDevice, @unchecked Sendable {
 
         // shader stages
         let shaderFunctions = [desc.vertexFunction, desc.fragmentFunction].compactMap { $0 }
-        var shaderStageCreateInfos: [VkPipelineShaderStageCreateInfo] = []
-        shaderStageCreateInfos.reserveCapacity(shaderFunctions.count)
-
-        for fn in shaderFunctions {
+        let shaderStageCreateInfos: [VkPipelineShaderStageCreateInfo] = shaderFunctions.map { fn in
             assert(fn is VulkanShaderFunction)
             let fn = fn as! VulkanShaderFunction
             let module = fn.module
@@ -653,7 +646,7 @@ final class VulkanGraphicsDevice: GraphicsDevice, @unchecked Sendable {
             if fn.specializationInfo.mapEntryCount > 0 {
                 shaderStageCreateInfo.pSpecializationInfo = unsafePointerCopy(from: fn.specializationInfo, holder: tempHolder)
             }
-            shaderStageCreateInfos.append(shaderStageCreateInfo)
+            return shaderStageCreateInfo
         }
         pipelineCreateInfo.stageCount = UInt32(shaderStageCreateInfos.count)
         pipelineCreateInfo.pStages = unsafePointerCopy(collection: shaderStageCreateInfos, holder: tempHolder)
@@ -665,32 +658,27 @@ final class VulkanGraphicsDevice: GraphicsDevice, @unchecked Sendable {
         pipelineCreateInfo.layout = pipelineLayout
 
         // vertex input state
-        var vertexBindingDescriptions: [VkVertexInputBindingDescription] = []
-        vertexBindingDescriptions.reserveCapacity(desc.vertexDescriptor.layouts.count)
-        for layout in desc.vertexDescriptor.layouts {   // buffer layout
+        let vertexBindingDescriptions: [VkVertexInputBindingDescription] = desc.vertexDescriptor.layouts.enumerated().map {
+            index, layout in
             var binding = VkVertexInputBindingDescription()
-            binding.binding = UInt32(layout.bufferIndex)
+            binding.binding = UInt32(index)
             binding.stride = UInt32(layout.stride)
-            switch layout.step {
+            switch layout.stepRate {
             case .vertex:
                 binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX
             case .instance:
                 binding.inputRate = VK_VERTEX_INPUT_RATE_INSTANCE
             }
-            vertexBindingDescriptions.append(binding)
+            return binding
         }
-
-        var vertexAttributeDescriptions: [VkVertexInputAttributeDescription] = []
-        vertexAttributeDescriptions.reserveCapacity(desc.vertexDescriptor.attributes.count)
-        for attrDesc in desc.vertexDescriptor.attributes {
+        let vertexAttributeDescriptions: [VkVertexInputAttributeDescription] = desc.vertexDescriptor.attributes.map {
             var attr = VkVertexInputAttributeDescription()
-            attr.location = UInt32(attrDesc.location)
-            attr.binding = UInt32(attrDesc.bufferIndex)
-            attr.format = attrDesc.format.vkFormat()
-            attr.offset = UInt32(attrDesc.offset)
-            vertexAttributeDescriptions.append(attr)
+            attr.location = UInt32($0.location)
+            attr.binding = UInt32($0.bufferIndex)
+            attr.format = $0.format.vkFormat()
+            attr.offset = UInt32($0.offset)
+            return attr
         }
-
         var vertexInputState = VkPipelineVertexInputStateCreateInfo()
         vertexInputState.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO
         vertexInputState.vertexBindingDescriptionCount = UInt32(vertexBindingDescriptions.count)
@@ -829,9 +817,6 @@ final class VulkanGraphicsDevice: GraphicsDevice, @unchecked Sendable {
         }
         appendNextChain(&pipelineCreateInfo, unsafePointerCopy(from: pipelineRenderingCreateInfo, holder: tempHolder))
 
-        var colorBlendAttachmentStates: [VkPipelineColorBlendAttachmentState] = []
-        colorBlendAttachmentStates.reserveCapacity(desc.colorAttachments.count)
-
         let blendOperation = { (op: BlendOperation) -> VkBlendOp in
             switch op {
             case .add:              return VK_BLEND_OP_ADD
@@ -865,7 +850,8 @@ final class VulkanGraphicsDevice: GraphicsDevice, @unchecked Sendable {
             }
         }
 
-        for attachment in desc.colorAttachments {
+        // color blending
+        let colorBlendAttachmentStates: [VkPipelineColorBlendAttachmentState] = desc.colorAttachments.map { attachment in
             var blendState = VkPipelineColorBlendAttachmentState()
             blendState.blendEnable = attachment.blendState.enabled ? VK_TRUE : VK_FALSE
             blendState.srcColorBlendFactor = blendFactor(attachment.blendState.sourceRGBBlendFactor)
@@ -888,10 +874,8 @@ final class VulkanGraphicsDevice: GraphicsDevice, @unchecked Sendable {
             if attachment.blendState.writeMask.contains(.alpha) {
                 blendState.colorWriteMask |= VkColorComponentFlags(VK_COLOR_COMPONENT_A_BIT.rawValue)
             }
-            colorBlendAttachmentStates.append(blendState)
+            return blendState
         }
-
-        // color blending
         var colorBlendState = VkPipelineColorBlendStateCreateInfo()
         colorBlendState.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO
         colorBlendState.attachmentCount = UInt32(colorBlendAttachmentStates.count)
@@ -922,12 +906,7 @@ final class VulkanGraphicsDevice: GraphicsDevice, @unchecked Sendable {
                 maxPushConstantLayoutCount += module.pushConstantLayouts.count
 
                 if module.stage == .vertex {
-                    inputAttributes.reserveCapacity(module.inputAttributes.count)
-                    for attr in module.inputAttributes {
-                        if attr.enabled {
-                            inputAttributes.append(attr)
-                        }
-                    }
+                    inputAttributes = module.inputAttributes.filter(\.enabled)
                 }
             }
             resources.reserveCapacity(maxResourceCount)

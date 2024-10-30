@@ -5,12 +5,13 @@
 //  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
-public protocol SwapChain {
+public protocol SwapChain: Sendable {
     var pixelFormat: PixelFormat { get set }
     var maximumBufferCount: Int { get }
 
     func currentRenderPassDescriptor() -> RenderPassDescriptor
     func present(waitEvents: [GPUEvent]) -> Bool
+    @discardableResult
     func present() -> Bool
 
     var commandQueue: CommandQueue { get }

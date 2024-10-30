@@ -2,33 +2,32 @@
 //  File: Material.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
-public struct MaterialProperty {
-    public let semantic: MaterialSemantic
+import Foundation
 
+public enum MaterialProperty {
     public typealias CombinedTextureSampler = (texture: Texture, sampler: SamplerState)
-    public enum Value {
-        case none
-        case buffer(_:[UInt8])
-        case textures(_:[Texture])
-        case samplers(_:[SamplerState])
-        case combinedTextureSamplers(_:[CombinedTextureSampler])
-        case int8Array(_:[Int8])
-        case uint8Array(_:[UInt8])
-        case int16Array(_:[Int16])
-        case uint16Array(_:[UInt16])
-        case int32Array(_:[Int32])
-        case uint32Array(_:[UInt32])
-        case halfArray(_:[Float16])
-        case floatArray(_:[Float])
-        case doubleArray(_:[Double])
-    }
-    public let value: Value
+
+    case none
+    case buffer(_: [UInt8])
+    case textures(_: [Texture])
+    case samplers(_: [SamplerState])
+    case combinedTextureSamplers(_: [CombinedTextureSampler])
+    case int8Array(_: [Int8])
+    case uint8Array(_: [UInt8])
+    case int16Array(_: [Int16])
+    case uint16Array(_: [UInt16])
+    case int32Array(_: [Int32])
+    case uint32Array(_: [UInt32])
+    case halfArray(_: [Float16])
+    case floatArray(_: [Float])
+    case doubleArray(_: [Double])
+
 
     public var count: Int {
-        switch value {
+        switch self {
         case .none:                             return 0
         case .buffer(let s):                    return s.count
         case .textures(let s):                  return s.count
@@ -47,14 +46,14 @@ public struct MaterialProperty {
     }
 
     public func buffer() -> [UInt8] {
-        if case let .buffer(s) = value {
+        if case let .buffer(s) = self {
             return s
         }
         return []
     }
 
     public func integers() -> [Int] {
-        switch value {
+        switch self {
         case .int8Array(let s):     return s.map { Int($0) }
         case .uint8Array(let s):    return s.map { Int($0) }
         case .int16Array(let s):    return s.map { Int($0) }
@@ -67,7 +66,7 @@ public struct MaterialProperty {
     }
 
     public func floats() -> [Float] {
-        switch value {
+        switch self {
         case .halfArray(let s):     return s.map { Float($0) }
         case .floatArray(let s):    return s.map { Float($0) }
         case .doubleArray(let s):   return s.map { Float($0) }
@@ -76,110 +75,134 @@ public struct MaterialProperty {
         }
     }
 
+    public func doubles() -> [Double] {
+        switch self {
+        case .halfArray(let s):     return s.map { Double($0) }
+        case .floatArray(let s):    return s.map { Double($0) }
+        case .doubleArray(let s):   return s.map { Double($0) }
+        default:
+            return []
+        }
+    }
+
     public func textures() -> [Texture] {
-        if case let .textures(t) = value {
+        if case let .textures(t) = self {
             return t.map { $0 }
         }
-        if case let .combinedTextureSamplers(t) = value {
+        if case let .combinedTextureSamplers(t) = self {
             return t.map { $0.texture }
         }
         return []
     }
 
     public func samplers() -> [SamplerState] {
-        if case let .samplers(s) = value {
+        if case let .samplers(s) = self {
             return s.map { $0 }
         }
-        if case let .combinedTextureSamplers(s) = value {
+        if case let .combinedTextureSamplers(s) = self {
             return s.map { $0.sampler }
         }
         return []
     }
 
-    public func castArray<T>(as: T.Type) -> [T] {
-        switch value {
-        case .int8Array(let s):     return s.map { $0 as! T }
-        case .uint8Array(let s):    return s.map { $0 as! T }
-        case .int16Array(let s):    return s.map { $0 as! T }
-        case .uint16Array(let s):   return s.map { $0 as! T }
-        case .int32Array(let s):    return s.map { $0 as! T }
-        case .uint32Array(let s):   return s.map { $0 as! T }
-        case .halfArray(let s):     return s.map { $0 as! T }
-        case .floatArray(let s):    return s.map { $0 as! T }
-        case .doubleArray(let s):   return s.map { $0 as! T }
+    public func castIntegerArray<T: FixedWidthInteger>(as: T.Type) -> [T] {
+        switch self {
+        case .int8Array(let s):     return s.map { T($0) }
+        case .uint8Array(let s):    return s.map { T($0) }
+        case .int16Array(let s):    return s.map { T($0) }
+        case .uint16Array(let s):   return s.map { T($0) }
+        case .int32Array(let s):    return s.map { T($0) }
+        case .uint32Array(let s):   return s.map { T($0) }
+        case .halfArray(let s):     return s.map { T($0) }
+        case .floatArray(let s):    return s.map { T($0) }
+        case .doubleArray(let s):   return s.map { T($0) }
         default:
             return []
         }
     }
 
-    public func withUnsafeBytes<R>(_ body: (UnsafeRawBufferPointer) throws -> R) rethrows -> R {
-        switch value {
-        case .buffer(let s):        return try s.withUnsafeBytes(body)
-        case .int8Array(let s):     return try s.withUnsafeBytes(body)
-        case .uint8Array(let s):    return try s.withUnsafeBytes(body)
-        case .int16Array(let s):    return try s.withUnsafeBytes(body)
-        case .uint16Array(let s):   return try s.withUnsafeBytes(body)
-        case .int32Array(let s):    return try s.withUnsafeBytes(body)
-        case .uint32Array(let s):   return try s.withUnsafeBytes(body)
-        case .halfArray(let s):     return try s.withUnsafeBytes(body)
-        case .floatArray(let s):    return try s.withUnsafeBytes(body)
-        case .doubleArray(let s):   return try s.withUnsafeBytes(body)
+    public func castFloatArray<T: BinaryFloatingPoint>(as: T.Type) -> [T] {
+        switch self {
+        case .int8Array(let s):     return s.map { T($0) }
+        case .uint8Array(let s):    return s.map { T($0) }
+        case .int16Array(let s):    return s.map { T($0) }
+        case .uint16Array(let s):   return s.map { T($0) }
+        case .int32Array(let s):    return s.map { T($0) }
+        case .uint32Array(let s):   return s.map { T($0) }
+        case .halfArray(let s):     return s.map { T($0) }
+        case .floatArray(let s):    return s.map { T($0) }
+        case .doubleArray(let s):   return s.map { T($0) }
         default:
-            return try body(UnsafeRawBufferPointer(start: nil, count: 0))
+            return []
         }
     }
 
-    public init() {
-        self.semantic = .userDefined
-        self.value = .none
+    public func castNumericArray<T: Numeric>(as: T.Type) -> [T] {
+        if let t = T.self as? any BinaryFloatingPoint.Type {
+            return castFloatArray(as: t).map { $0 as! T }
+        }
+        if let t = T.self as? any FixedWidthInteger.Type {
+            return castIntegerArray(as: t).map { $0 as! T }
+        }
+        return []
     }
-    public init(semantic: MaterialSemantic, _ data: UnsafeRawBufferPointer) {
-        self.semantic = semantic
-        self.value = .buffer(.init(data))
+
+    public static func texture(_ value: Texture) -> Self {
+        .textures([value])
     }
-    public init(semantic: MaterialSemantic, _ texture: Texture) {
-        self.semantic = semantic
-        self.value = .textures([texture])
+
+    public static func sampler(_ value: SamplerState) -> Self {
+        .samplers([value])
     }
-    public init(semantic: MaterialSemantic, _ sampler: SamplerState) {
-        self.semantic = semantic
-        self.value = .samplers([sampler])
+
+    public static func scalar(_ value: some BinaryFloatingPoint) -> Self {
+        .scalars([value])
     }
-    public init(semantic: MaterialSemantic, _ textureSampler: CombinedTextureSampler) {
-        self.semantic = semantic
-        self.value = .combinedTextureSamplers([textureSampler])
+
+    public static func color(_ value: Color) -> Self {
+        .vector(value.vector4)
     }
-    public init(semantic: MaterialSemantic, _ f: [Float]) {
-        self.semantic = semantic
-        self.value = .floatArray(f)
+
+    public static func combinedTextureSampler(_ value: CombinedTextureSampler) -> Self {
+        .combinedTextureSamplers([value])
     }
-    public init(semantic: MaterialSemantic, _ d: [Double]) {
-        self.semantic = semantic
-        self.value = .doubleArray(d)
+
+    public static func scalars<V: BinaryFloatingPoint>(_ values: some Sequence<V>) -> Self {
+        switch MemoryLayout<V>.size {
+        case MemoryLayout<Float16>.size:
+            return .halfArray(values.map { Float16($0) })
+        case MemoryLayout<Float32>.size:
+            return .floatArray(values.map { Float32($0) })
+        default:
+            return .doubleArray(values.map { Double($0) })
+        }
     }
-    public init<V: Vector>(semantic: MaterialSemantic, _ vector: V) {
+
+    public static func vector<V: Vector>(_ vector: V) -> Self {
         var scalars: [V.Scalar] = []
         for n in 0..<V.components {
             scalars.append(vector[n])
         }
-        if MemoryLayout<V.Scalar>.size == MemoryLayout<Float>.size {
-            self.init(semantic: semantic, scalars.map { Float($0) })
-        } else {
-            self.init(semantic: semantic, scalars.map { Double($0) })
-        }
+        return .scalars(scalars)
     }
-    public init<M: Matrix>(semantic: MaterialSemantic, _ matrix: M) {
+
+    public static func matrix<M: Matrix>(_ matrix: M) -> Self {
         var scalars: [Scalar] = []
         for r in 0..<M.numRows {
             for c in 0..<M.numCols {
                 scalars.append(matrix[r, c])
             }
         }
-        if MemoryLayout<Scalar>.size == MemoryLayout<Float>.size {
-            self.init(semantic: semantic, scalars.map { Float($0) })
-        } else {
-            self.init(semantic: semantic, scalars.map { Double($0) })
-        }
+        return .scalars(scalars)
+    }
+
+    public static func data<T>(_ data: UnsafePointer<T>) -> Self {
+        let p = UnsafeBufferPointer(start: data, count: 1)
+        return .buffer(Array<UInt8>(UnsafeRawBufferPointer(p)))
+    }
+
+    public static func data(_ data: UnsafeRawBufferPointer) -> Self {
+        .buffer(Array<UInt8>(data))
     }
 }
 
@@ -187,8 +210,12 @@ public struct MaterialShaderMap {
     public typealias BindingLocation = ShaderBindingLocation
 
     public struct Function {
-        public let function: ShaderFunction
-        public let descriptors: [ShaderDescriptor]
+        public var function: ShaderFunction
+        public var descriptors: [ShaderDescriptor]
+        public init(function: ShaderFunction, descriptors: [ShaderDescriptor]) {
+            self.function = function
+            self.descriptors = descriptors
+        }
     }
 
     public enum Semantic {
@@ -196,9 +223,15 @@ public struct MaterialShaderMap {
         case uniform(_:ShaderUniformSemantic)
     }
 
-    public let functions: [Function]
-    public let resourceSemantics: [BindingLocation: Semantic]
-    public let inputAttributeSemantics: [Int: VertexAttributeSemantic]
+    public var functions: [Function]
+    public var resourceSemantics: [BindingLocation: Semantic]
+    public var inputAttributeSemantics: [Int: VertexAttributeSemantic]
+
+    public init(functions: [Function], resourceSemantics: [BindingLocation : Semantic], inputAttributeSemantics: [Int : VertexAttributeSemantic]) {
+        self.functions = functions
+        self.resourceSemantics = resourceSemantics
+        self.inputAttributeSemantics = inputAttributeSemantics
+    }
 
     public func function(stage: ShaderStage) -> ShaderFunction? {
         if let fn = functions.first(where: { $0.function.stage == stage }) {
@@ -227,19 +260,23 @@ public class Material {
     public typealias ShaderMap = MaterialShaderMap
     public typealias BindingLocation = ShaderBindingLocation
 
-    public init(shaderMap: ShaderMap) {
+    public init(shaderMap: ShaderMap, name: String? = nil) {
         self.shader = shaderMap
         self.attachments = [RenderPassAttachment(format: .rgba8Unorm, blendState: .alphaBlend)]
         self.depthFormat = .depth24Unorm_stencil8
         self.properties = [:]
         self.userDefinedProperties = [:]
-        self.name = ""
+        self.name = name ?? ""
     }
 
     public var name: String
     public struct RenderPassAttachment {
-        public let format: PixelFormat
-        public let blendState: BlendState
+        public var format: PixelFormat
+        public var blendState: BlendState
+        public init(format: PixelFormat, blendState: BlendState) {
+            self.format = format
+            self.blendState = blendState
+        }
     }
     public var attachments: [RenderPassAttachment]
     public var depthFormat: PixelFormat
@@ -249,7 +286,7 @@ public class Material {
 
     public var properties: [Semantic: Property]
     public var userDefinedProperties: [BindingLocation: Property]
-    public let shader: ShaderMap
+    public var shader: ShaderMap
 
     public var defaultTexture: Texture?
     public var defaultSampler: SamplerState?

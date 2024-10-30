@@ -191,7 +191,7 @@ final class MetalGraphicsDevice: GraphicsDevice {
             let makeMSLVersion = { (major: UInt32, minor: UInt32, patch: UInt32) in
                 return (major * 10000) + (minor * 100) + patch
             }
-            spvc_compiler_options_set_uint(spvcCompilerOptions, SPVC_COMPILER_OPTION_MSL_VERSION, makeMSLVersion(2,1,0))
+            spvc_compiler_options_set_uint(spvcCompilerOptions, SPVC_COMPILER_OPTION_MSL_VERSION, makeMSLVersion(3, 2, 0))
             spvc_compiler_options_set_bool(spvcCompilerOptions, SPVC_COMPILER_OPTION_MSL_ENABLE_POINT_SIZE_BUILTIN, SPVC_TRUE)
 
             spvc_compiler_install_compiler_options(spvcCompiler, spvcCompilerOptions)
@@ -269,12 +269,18 @@ final class MetalGraphicsDevice: GraphicsDevice {
                             // MTLArgument doesn't have an offset, save info for later use. (pipeline-reflection)
                             bindingMap.pushConstantOffset = layout.offset
                             bindingMap.pushConstantSize = layout.size
-                            bindingMap.pushConstantBufferSize = layout.size
 
-                            for member in layout.members {
-                                bindingMap.pushConstantBufferSize = max(bindingMap.pushConstantBufferSize,
-                                                                        member.offset + member.size)
+                            var bufferSize = layout.size
+                            var alignment = 1
+
+                            layout.members.forEach {
+                                alignment = max(alignment, $0.mtlAlignment)
+                                bufferSize = max(bufferSize, $0.offset + $0.size)
                             }
+                            assert(alignment.isPowerOfTwo)
+
+                            bindingMap.pushConstantBufferSize = bufferSize.alignedUp(toMultipleOf: alignment)
+
                         } else {
                             bindingMap.resourceBindings.append(b2)
                         }
@@ -468,10 +474,11 @@ final class MetalGraphicsDevice: GraphicsDevice {
                 attr.offset = attrDesc.offset
                 attr.bufferIndex = vertexAttributeOffset + attrDesc.bufferIndex
             }
-            for layoutDesc in descriptor.vertexDescriptor.layouts {
-                let bufferIndex = vertexAttributeOffset + layoutDesc.bufferIndex
+            descriptor.vertexDescriptor.layouts.indices.forEach { index in
+                let bufferIndex = vertexAttributeOffset + index
+                let layoutDesc = descriptor.vertexDescriptor.layouts[index]
                 let layout: MTLVertexBufferLayoutDescriptor = vertexDescriptor.layouts[bufferIndex]
-                layout.stepFunction = vertexStepFunction(layoutDesc.step)
+                layout.stepFunction = vertexStepFunction(layoutDesc.stepRate)
                 layout.stepRate = 1
                 layout.stride = layoutDesc.stride
             }
@@ -482,7 +489,7 @@ final class MetalGraphicsDevice: GraphicsDevice {
         let pipelineState: MTLRenderPipelineState
         do {
             if reflection != nil {
-                let options: MTLPipelineOption = [.argumentInfo, .bufferTypeInfo]
+                let options: MTLPipelineOption = [.bindingInfo, .bufferTypeInfo]
                 pipelineState = try self.device.makeRenderPipelineState(descriptor: desc,
                                                                         options: options,
                                                                         reflection: &pipelineReflection)
@@ -505,68 +512,59 @@ final class MetalGraphicsDevice: GraphicsDevice {
                 inputAttrs = vertexFunction.stageInputAttributes // copy all inputAttributes
             }
 
-            let numVertexArguments = pipelineReflection.vertexArguments?.count ?? 0
-            let numFragmentArguments = pipelineReflection.fragmentArguments?.count ?? 0
+            let numVertexBindings = pipelineReflection.vertexBindings.count
+            let numFragmentBindings = pipelineReflection.fragmentBindings.count
 
-            inputAttrs.reserveCapacity(numVertexArguments)
-            resources.reserveCapacity(numVertexArguments + numFragmentArguments)
+            inputAttrs.reserveCapacity(numVertexBindings)
+            resources.reserveCapacity(numVertexBindings + numFragmentBindings)
 
-            if let vertexArguments = pipelineReflection.vertexArguments {
-                let bindingMap = vertexFunction!.module.bindings
-
-                for arg in vertexArguments {
-                    if arg.isActive == false { continue }
-
-                    if arg.type == .buffer, arg.index >= bindingMap.inputAttributeIndexOffset {
-                        // This can be skipped.
-                        // We copied all inputAttrs from above.
-
-                        // The Metal pipeline-reflection provides single vertex-buffer information,
-                        // rather than separated vertex-stream component informations.
-                    } else if arg.type == .buffer, arg.index == bindingMap.pushConstantIndex {
-                        let layout: ShaderPushConstantLayout = .from(mtlArgument: arg,
-                                                                     offset: bindingMap.pushConstantOffset,
-                                                                     size: bindingMap.pushConstantSize,
-                                                                     stage: .vertex)
-                        pushConstants.append(layout)
-                    } else {
-                        let res: ShaderResource = .from(mtlArgument: arg,
-                                                        bindingMap: bindingMap.resourceBindings,
-                                                        stage: .vertex)
-                        combineShaderResources(&resources, resource: res)
-                    }
-                }
+            var shaderBindings: [(shader: MetalShaderFunction, bindings: [any MTLBinding])] = []
+            if let vertexFunction {
+                shaderBindings.append((vertexFunction, pipelineReflection.vertexBindings))
             }
-            if let fragmentArguments = pipelineReflection.fragmentArguments {
-                let stageMask = ShaderStageFlags(stage: fragmentFunction!.stage)
-                let bindingMap = fragmentFunction!.module.bindings
+            if let fragmentFunction {
+                shaderBindings.append((fragmentFunction, pipelineReflection.fragmentBindings))
+            }
+            shaderBindings.forEach { (shader, bindings) in
+                let bindingMap = shader.module.bindings
+                let stage = shader.stage
+                let stageMask = ShaderStageFlags(stage: stage)
 
-                for arg in fragmentArguments {
-                    if arg.isActive == false { continue }
+                bindings.forEach { binding in
+                    if binding.isUsed {
+                        if binding.type == .buffer && binding.index >= bindingMap.inputAttributeIndexOffset {
+                            // This can be skipped.
+                            // We copied all inputAttrs from above.
 
-                    if arg.type == .buffer, arg.index == bindingMap.pushConstantIndex {
-                        let layout: ShaderPushConstantLayout = .from(mtlArgument: arg,
-                                                                     offset: bindingMap.pushConstantOffset,
-                                                                     size: bindingMap.pushConstantSize,
-                                                                     stage: .fragment)
+                            // The Metal pipeline-reflection provides single vertex-buffer information,
+                            // rather than separated vertex-stream component informations.
+                        } else if binding.type == .buffer && binding.index == bindingMap.pushConstantIndex {
+                            if let buffer = binding as? MTLBufferBinding {
+                                let layout = ShaderPushConstantLayout.from(mtlBufferBinding: buffer,
+                                                                           offset: bindingMap.pushConstantOffset,
+                                                                           size: bindingMap.pushConstantSize,
+                                                                           stage: stage)
 
-                        var exist = false
-                        for i in 0..<pushConstants.count {
-                            var layout2 = pushConstants[i]
-                            if layout2.offset == layout.offset, layout2.size == layout.size {
-                                layout2.stages.formUnion(stageMask)
-                                pushConstants[i] = layout2
-                                exist = true
+                                assert(bindingMap.pushConstantBufferSize == buffer.bufferDataSize,
+                                       "Buffer size mismatch! \(bindingMap.pushConstantBufferSize) != \(buffer.bufferDataSize)")
+
+                                if let index = pushConstants.firstIndex(where: {
+                                    $0.offset == layout.offset && $0.size == layout.size
+                                }) {
+                                    pushConstants[index].stages.formUnion(stageMask)
+                                } else {
+                                    pushConstants.append(layout)
+                                }
+                            } else {
+                                assertionFailure("Unable to cast buffer binding to MTLBufferBinding")
                             }
+                        } else {
+                            let res = ShaderResource.from(
+                                mtlBinding: binding,
+                                bindingMap: bindingMap.resourceBindings,
+                                stage: stage)
+                            combineShaderResources(&resources, resource: res)
                         }
-                        if exist == false {
-                            pushConstants.append(layout)
-                        }
-                    } else {
-                        let res: ShaderResource = .from(mtlArgument: arg,
-                                                        bindingMap: bindingMap.resourceBindings,
-                                                        stage: .fragment)
-                        combineShaderResources(&resources, resource: res)
                     }
                 }
             }
@@ -610,7 +608,7 @@ final class MetalGraphicsDevice: GraphicsDevice {
         desc.computeFunction = computeFunction.function
         var options: MTLPipelineOption = []
         if reflection != nil {
-            options = [.argumentInfo, .bufferTypeInfo]
+            options = [.bindingInfo, .bufferTypeInfo]
         }
 
         var pipelineReflection: MTLComputePipelineReflection? = nil
@@ -630,25 +628,38 @@ final class MetalGraphicsDevice: GraphicsDevice {
             var resources: [ShaderResource] = []
             var pushConstants: [ShaderPushConstantLayout] = []
 
-            resources.reserveCapacity(pipelineReflection.arguments.count)
-            pushConstants.reserveCapacity(pipelineReflection.arguments.count)
+            resources.reserveCapacity(pipelineReflection.bindings.count)
+            pushConstants.reserveCapacity(pipelineReflection.bindings.count)
 
             let bindingMap = computeFunction.module.bindings
+            let stage = computeFunction.stage
+            pipelineReflection.bindings.forEach { binding in
+                if binding.isUsed {
+                    if binding.type == .buffer && binding.index >= bindingMap.inputAttributeIndexOffset {
+                    }
+                    else if binding.type == .buffer && binding.index == bindingMap.pushConstantIndex {
+                        if let buffer = binding as? MTLBufferBinding {
+                            let layout = ShaderPushConstantLayout.from(mtlBufferBinding: buffer,
+                                                                       offset: bindingMap.pushConstantOffset,
+                                                                       size: bindingMap.pushConstantSize,
+                                                                       stage: stage)
 
-            for arg in pipelineReflection.arguments {
-                if arg.type == .buffer, arg.index == bindingMap.pushConstantIndex {
-                    let layout: ShaderPushConstantLayout = .from(mtlArgument: arg,
-                                                                 offset: bindingMap.pushConstantOffset,
-                                                                 size: bindingMap.pushConstantSize,
-                                                                 stage: .compute)
-                    pushConstants.append(layout)
-                } else {
-                    let res: ShaderResource = .from(mtlArgument: arg,
-                                                    bindingMap: bindingMap.resourceBindings,
-                                                    stage: .compute)
-                    combineShaderResources(&resources, resource: res)
+                            assert(bindingMap.pushConstantBufferSize == buffer.bufferDataSize,
+                                   "Buffer size mismatch! \(bindingMap.pushConstantBufferSize) != \(buffer.bufferDataSize)")
+
+                            pushConstants.append(layout)
+                        } else {
+                            assertionFailure("Unable to cast buffer binding to MTLBufferBinding")
+                        }
+                    } else {
+                        let res = ShaderResource.from(mtlBinding: binding,
+                                                      bindingMap: bindingMap.resourceBindings,
+                                                      stage: stage)
+                        combineShaderResources(&resources, resource: res)
+                    }
                 }
             }
+
             reflection.pointee.resources = resources
             reflection.pointee.pushConstantLayouts = pushConstants
         }
@@ -923,6 +934,5 @@ final class MetalGraphicsDevice: GraphicsDevice {
         }
         return nil
     }
-
 }
 #endif //if ENABLE_METAL
