@@ -31,7 +31,7 @@ struct ConstantLocation<Value> : _Location {
     func setValue(_: Value, transaction: Transaction) {}
 }
 
-class LocationBox<Location: _Location> : AnyLocation<Location.Value> {
+class LocationBox<Location: _Location> : AnyLocation<Location.Value>, @unchecked Sendable {
     var location: Location
     var _value: Location.Value
     init(location: Location) {
@@ -79,6 +79,7 @@ class LocationBox<Location: _Location> : AnyLocation<Location.Value> {
         get { fatalError() }
         nonmutating set { fatalError() }
     }
+
     public var projectedValue: Binding<Value> {
         get { fatalError() }
     }
@@ -90,5 +91,17 @@ class LocationBox<Location: _Location> : AnyLocation<Location.Value> {
 
     public subscript<Subject>(dynamicMember keyPath: WritableKeyPath<Value, Subject>) -> Binding<Subject> {
         get { fatalError() }
+    }
+}
+
+extension Binding {
+    public func transaction(_ transaction: Transaction) -> Binding<Value> {
+        var binding = self
+        binding.transaction = transaction
+        return binding
+    }
+
+    public func animation(_ animation: Animation? = .default) -> Binding<Value> {
+        transaction(Transaction(animation: animation))
     }
 }

@@ -474,7 +474,7 @@ extension _VariadicView.Tree : View where Root : _VariadicView_ViewRoot, Content
                 let subviews = self.children.makeChildren(encloser: view, graph: self.graph)
                 if subviews.isEmpty { return nil }
 
-                var layout: any Layout = DefaultLayoutPropertyItem.default
+                var layout: any Layout = DefaultLayoutPropertyItem.defaultValue
                 if let layoutRoot = children as? any _VariadicView_ViewRoot_MakeChildren_LayoutRoot {
                     layout = layoutRoot.makeLayout(encloser: encloser, graph: graph)
                 } else if let layoutRoot = view.root as? any Layout {
@@ -521,7 +521,7 @@ extension _VariadicView.Tree : View where Root : _VariadicView_ViewRoot, Content
                 } else if let layoutItem = baseInputs.properties.find(type: DefaultLayoutPropertyItem.self) {
                     layout = layoutItem.layout
                 } else {
-                    layout = DefaultLayoutPropertyItem.default
+                    layout = DefaultLayoutPropertyItem.defaultValue
                 }
 
                 return ViewGroupContext(view: view,
@@ -554,7 +554,7 @@ extension _VariadicView.Tree : View where Root : _VariadicView_ViewRoot, Content
                 } else if let _layout = inputs.base.properties.find(type: DefaultLayoutPropertyItem.self)?.layout {
                     layout = _layout
                 } else {
-                    layout = DefaultLayoutPropertyItem.default
+                    layout = DefaultLayoutPropertyItem.defaultValue
                 }
 
                 let generator = GenericViewGenerator(graph: self.graph, inputs: self.inputs) { view, inputs in

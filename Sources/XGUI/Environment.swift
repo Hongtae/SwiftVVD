@@ -11,9 +11,22 @@ import VVD
 public protocol EnvironmentKey {
     associatedtype Value
     static var defaultValue: Self.Value { get }
+    static func _valuesEqual(_ lhs: Self.Value, _ rhs: Self.Value) -> Bool
 }
 
-public struct EnvironmentValues: CustomStringConvertible {
+extension EnvironmentKey {
+    public static func _valuesEqual(_ lhs: Self.Value, _ rhs: Self.Value) -> Bool {
+        false
+    }
+}
+
+extension EnvironmentKey where Self.Value : Equatable {
+    public static func _valuesEqual(_ lhs: Self.Value, _ rhs: Self.Value) -> Bool {
+        lhs == rhs
+    }
+}
+
+public struct EnvironmentValues : CustomStringConvertible {
     var values: [ObjectIdentifier: Any]
 
     public init() {
@@ -44,8 +57,8 @@ protocol _EnvironmentResolve {
     func _write(_: UnsafeMutableRawPointer)
 }
 
-@propertyWrapper public struct Environment<Value>: DynamicProperty, _EnvironmentResolve {
-    enum Content {
+@propertyWrapper public struct Environment<Value> : DynamicProperty, _EnvironmentResolve {
+    enum Content : @unchecked Sendable {
         case keyPath(KeyPath<EnvironmentValues, Value>)
         case value(Value)
     }
@@ -79,6 +92,9 @@ protocol _EnvironmentResolve {
         let env = ptr.assumingMemoryBound(to: Environment<Value>.self)
         env.pointee = self
     }
+}
+
+extension Environment : Sendable where Value : Sendable {
 }
 
 extension EnvironmentValues {

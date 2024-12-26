@@ -9,7 +9,7 @@ import Foundation
 import Synchronization
 import VVD
 
-final class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegate, @unchecked Sendable where Content: View {
+final class WindowContext<Content> : WindowProxy, Scene, _PrimitiveScene, WindowDelegate, @unchecked Sendable where Content : View {
     let contextType: Any.Type
     let identifier: String
     let title: Text

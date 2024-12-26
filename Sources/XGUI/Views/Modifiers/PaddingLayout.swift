@@ -48,7 +48,7 @@ extension _PaddingLayout: _ViewLayoutModifier {
             if let insets = self.inputs.properties.find(type: DefaultPaddingEdgeInsetsPropertyItem.self)?.insets {
                 return insets
             }
-            return DefaultPaddingEdgeInsetsPropertyItem.default
+            return DefaultPaddingEdgeInsetsPropertyItem.defaultValue
         }
 
         override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
@@ -159,8 +159,8 @@ extension _PaddingLayout: _ViewLayoutModifier {
     }
 }
 
-struct DefaultPaddingEdgeInsetsPropertyItem : PropertyItem {
-    static var `default` : EdgeInsets { .init(_all: 16) }
+struct DefaultPaddingEdgeInsetsPropertyItem: PropertyItem {
+    static var defaultValue : EdgeInsets { .init(_all: 16) }
     let insets: EdgeInsets
     var description: String {
         "DefaultPaddingEdgeInsetsPropertyItem: \(self.insets)"

@@ -254,7 +254,7 @@ public struct _LayoutRoot<L> : _VariadicView.UnaryViewRoot where L : Layout {
 }
 
 struct DefaultLayoutPropertyItem : PropertyItem {
-    static var `default` : some Layout { VStackLayout() }
+    static var defaultValue: some Layout { VStackLayout() }
     let layout: any Layout
     var description: String {
         "DefaultLayoutPropertyItem: \(self.layout)"

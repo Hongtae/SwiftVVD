@@ -80,7 +80,7 @@ public struct TupleView<T>: View {
             if subviews.count > 1 {
                 let layout = inputs.base.properties
                     .find(type: DefaultLayoutPropertyItem.self)?
-                    .layout ?? DefaultLayoutPropertyItem.default
+                    .layout ?? DefaultLayoutPropertyItem.defaultValue
                 return ViewGroupContext(view: content,
                                         subviews: subviews,
                                         layout: layout,

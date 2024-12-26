@@ -8,22 +8,65 @@
 import Foundation
 
 public struct Transaction {
-    public init() {
-        self.animation = nil
-        self.isContinuous = false
-        self.disablesAnimations = false
+    @usableFromInline
+    var plist: PropertyList
+
+    @inlinable public init() {
+        plist = PropertyList()
     }
 
-    public var isContinuous: Bool
-
-    public init(animation: Animation?) {
-        self.animation = animation
-        self.isContinuous = false
-        self.disablesAnimations = false
+    @inlinable init(plist: PropertyList) {
+        self.plist = plist
     }
 
-    public var animation: Animation?
-    public var disablesAnimations: Bool
+    public subscript<K>(key: K.Type) -> K.Value where K: TransactionKey {
+        get {
+            return K.defaultValue
+        }
+        set { fatalError() }
+    }
+
+    @inlinable var isEmpty: Bool {
+        plist.isEmpty
+    }
+}
+
+public protocol TransactionKey {
+    associatedtype Value
+    static var defaultValue: Self.Value { get }
+    static func _valuesEqual(_ lhs: Self.Value, _ rhs: Self.Value) -> Bool
+}
+
+extension TransactionKey {
+    public static func _valuesEqual(_ lhs: Self.Value, _ rhs: Self.Value) -> Bool {
+        false
+    }
+}
+
+extension TransactionKey where Self.Value: Equatable {
+    public static func _valuesEqual(_ lhs: Self.Value, _ rhs: Self.Value) -> Bool {
+        lhs == rhs
+    }
+}
+
+extension TransactionKey where Self: EnvironmentKey, Self.Value: Equatable {
+    public static func _valuesEqual(_ lhs: Self.Value, _ rhs: Self.Value) -> Bool {
+        Self._valuesEqual(lhs, rhs)
+    }
+}
+
+public func withTransaction<Result>(_ transaction: Transaction, _ body: () throws -> Result) rethrows -> Result {
+    do {
+        return try body()
+    } catch {
+        throw error
+    }
+}
+
+public func withTransaction<R, V>(_ keyPath: WritableKeyPath<Transaction, V>, _ value: V, _ body: () throws -> R) rethrows -> R {
+    var transaction = Transaction()
+    transaction[keyPath: keyPath] = value
+    return try withTransaction(transaction, body)
 }
 
 @usableFromInline

@@ -17,7 +17,7 @@ class AnyLocationBase {
 }
 
 @usableFromInline
-class AnyLocation<Value> : AnyLocationBase {
+class AnyLocation<Value> : AnyLocationBase, @unchecked Sendable {
 
     override init() {
     }

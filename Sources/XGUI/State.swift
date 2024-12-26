@@ -5,11 +5,14 @@
 //  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
-class StoredLocation<Value> : AnyLocation<Value> {
+import Foundation
+import Observation
+
+class StoredLocation<Value> : AnyLocation<Value>, @unchecked Sendable {
     var _value: Value
     let valueUpdated: (Value)->Void
-    init(_value: Value, onValueUpdated: @escaping (Value)->Void) {
-        self._value = _value
+    init(_ value: Value, onValueUpdated: @escaping (Value)->Void) {
+        self._value = value
         self.valueUpdated = onValueUpdated
     }
     override func getValue() -> Value {
@@ -18,6 +21,15 @@ class StoredLocation<Value> : AnyLocation<Value> {
     override func setValue(_ value: Value, transaction: Transaction) {
         self._value = value
         self.valueUpdated(value)
+    }
+}
+
+class ObservableLocation<Value> : AnyLocation<Value>, @unchecked Sendable {
+    init(_ value: Value, onValueUpdated: @escaping (Value)->Void) {
+        fatalError()
+    }
+    override func getValue() -> Value {
+        fatalError()
     }
 }
 
@@ -30,18 +42,36 @@ class StoredLocation<Value> : AnyLocation<Value> {
 
     public init(wrappedValue value: Value) {
         _value = value
+        _location = StoredLocation(_value, onValueUpdated: { value in
+            print("Update value: \(value)")
+        })
     }
 
-    //@_alwaysEmitIntoClient
     @inlinable
     public init(initialValue value: Value) {
         _value = value
     }
 
+    @usableFromInline
+    init(wrappedValue thunk: @autoclosure @escaping () -> Value) where Value: AnyObject, Value: Observable {
+        _value = thunk()
+        _location = ObservableLocation(_value, onValueUpdated: { value in
+            fatalError()
+        })
+    }
+
     public var wrappedValue: Value {
-        get { _value }
+        get {
+            if let _location {
+                return _location.getValue()
+            }
+            return _value
+        }
         nonmutating set {
-            // lazy update value
+            print("set value: \(newValue)")
+            if let _location {
+                _location.setValue(newValue, transaction: Transaction())
+            }
         }
     }
 
@@ -56,7 +86,8 @@ class StoredLocation<Value> : AnyLocation<Value> {
                                         container: _GraphValue<V>,
                                         fieldOffset: Int,
                                         inputs: inout _GraphInputs) {
-        fatalError()
+        print("\(Self.self)._makeProperty")
+        //fatalError()
     }
 }
 
@@ -66,18 +97,6 @@ extension State where Value : ExpressibleByNilLiteral {
     }
 }
 
-protocol _StoredLocationCallback {
-    associatedtype Value
-    mutating func _setCallback(_: @escaping ()-> Void)
+extension State : Sendable where Value : Sendable {
 }
 
-extension State : _StoredLocationCallback {
-    // setup callback from ViewProxy
-    mutating func _setCallback(_ callback: @escaping () -> Void) {
-        self._location = StoredLocation<Value>(
-            _value: self._value,
-            onValueUpdated: { _ in
-                callback()
-            })
-    }
-}

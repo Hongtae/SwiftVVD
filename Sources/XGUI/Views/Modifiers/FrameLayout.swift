@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct _FrameLayout: ViewModifier, Animatable {
+public struct _FrameLayout : ViewModifier, Animatable {
     var width: CGFloat?
     var height: CGFloat?
     var alignment: Alignment

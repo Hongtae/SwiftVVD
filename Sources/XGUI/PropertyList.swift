@@ -7,83 +7,39 @@
 
 import Foundation
 
-protocol PropertyItem : CustomStringConvertible {
-    associatedtype Item
-    static var `default`: Item { get }
+@usableFromInline
+struct PropertyList : CustomStringConvertible {
+
+    @usableFromInline
+    var elements: Element?
+
+    @inlinable init() {
+        self.elements = nil
+    }
+
+    @inlinable var data: AnyObject? {
+        elements
+    }
+
+    @inlinable var isEmpty: Bool {
+        elements === nil
+    }
+
+    @inlinable func isIdentical(to other: PropertyList) -> Bool {
+        elements === other.elements
+    }
+
+    @usableFromInline
+    var description: String {
+        if let elements {
+            return "[\(elements.description)]"
+        }
+        return "[]"
+    }
 }
 
-struct PropertyList : CustomStringConvertible {
-    class _Element {
-        let item: any PropertyItem
-        var next: _Element?
-        init(item: any PropertyItem, next: _Element? = nil) {
-            self.item = item
-            self.next = next
-        }
-    }
-
-    var elements: _Element?
-
-    init(_ item: (any PropertyItem)? = nil) {
-        if let item {
-            self.append(item)
-        }
-    }
-
-    init(_ items: (any PropertyItem)...) {
-        self.elements = nil
-        items.forEach { self.append($0) }
-    }
-
-    var description: String {
-        if self.isEmpty {
-            return "PropertyList (empty)"
-        }
-        var desc = "PropertyList (\(self.count) items)"
-        var next = elements
-        while next != nil {
-            desc += "\n    \(next!.item)"
-            next = next!.next
-        }
-        return desc
-    }
-
-    var isEmpty: Bool {
-        self.elements == nil
-    }
-
-    var count: Int {
-        var num = 0
-        var next = elements
-        if next != nil {
-            num += 1
-            next = next!.next
-        }
-        return num
-    }
-
-    mutating func append(_ item: any PropertyItem) {
-        if var list = elements {
-            while let next = list.next {
-                list = next
-            }
-            list.next = _Element(item: item)
-        } else {
-            elements = _Element(item: item)
-        }
-    }
-
-    func forEach(_ body: (any PropertyItem)->Void) {
-        if var list = elements {
-            body(list.item)
-            while let next = list.next {
-                list = next
-                body(list.item)
-            }
-        }
-    }
-
-    func find<T>(type: T.Type) -> T? where T : PropertyItem {
+extension PropertyList {
+    func find<T>(type: T.Type) -> T? where T: PropertyItem {
         if var list = elements {
             if let item = list.item as? T {
                 return item
@@ -96,6 +52,29 @@ struct PropertyList : CustomStringConvertible {
             }
         }
         return nil
+    }
+
+    mutating func replace<T>(item: T) where T: PropertyItem {
+        if self.elements?.item is T {
+            let next = self.elements!.next
+            self.elements = Element(item: item, next: next)
+            return
+        }
+        var next = self.elements?.next
+        var prev = self.elements
+        while next != nil {
+            if next!.item is T {
+                prev!.next = Element(item: item, next: next!.next)
+                return
+            }
+            prev = next
+            next = next!.next
+        }
+        if let prev {
+            prev.next = Element(item: item)
+        } else {
+            self.elements = Element(item: item)
+        }
     }
 
     mutating func remove<T>(type: T.Type) where T : PropertyItem {
@@ -116,7 +95,7 @@ struct PropertyList : CustomStringConvertible {
     }
 
     mutating func removeAll<T>(type: T.Type) where T : PropertyItem {
-        func getElementNotMatching(_ element: _Element?) -> _Element? {
+        func getElementNotMatching(_ element: Element?) -> Element? {
             if let element, element.item is T {
                 return getElementNotMatching(element.next)
             }
@@ -130,43 +109,47 @@ struct PropertyList : CustomStringConvertible {
         }
         self.elements = root
     }
+}
 
-    mutating func replace<T>(item: T) where T : PropertyItem {
-        if self.elements?.item is T {
-            let next = self.elements!.next
-            self.elements = _Element(item: item, next: next)
-            return
-        }
-        var next = self.elements?.next
-        var prev = self.elements
-        while next != nil {
-            if next!.item is T {
-                prev!.next = _Element(item: item, next: next!.next)
-                return
-            }
-            prev = next
-            next = next!.next
-        }
-        if let prev {
-            prev.next = _Element(item: item)
-        } else {
-            self.elements = _Element(item: item)
-        }
+extension PropertyList {
+    @usableFromInline
+    class Tracker {
     }
 }
 
-extension PropertyList : Sequence {
-    struct Iterator : IteratorProtocol {
-       typealias Element = PropertyItem
-        var element: PropertyList._Element?
-       mutating func next() -> (any PropertyItem)? {
-           let item = element?.item
-           self.element = element?.next
-           return item
-       }
-   }
+protocol PropertyItem : TransactionKey, CustomStringConvertible {
+    associatedtype Item
+    static var defaultValue: Item { get }
+}
 
-    func makeIterator() -> Iterator {
-        Iterator(element: self.elements)
+extension PropertyList {
+    @usableFromInline
+    class Element: CustomStringConvertible {
+        let item: any PropertyItem
+        var next: Element?
+        init(item: any PropertyItem, next: Element? = nil) {
+            self.item = item
+            self.next = next
+        }
+        @usableFromInline
+        var description: String {
+            let desc = item.description
+            if let next {
+                return "\(desc), \(next.description)"
+            }
+            return desc
+        }
+    }
+
+    init<Item: PropertyItem>(_ item: Item) {
+        self.elements = Element(item: item)
+    }
+
+    init(_ item: any PropertyItem, _ rest: (any PropertyItem)...) {
+        var restElements: Element?
+        rest.reversed().forEach {
+            restElements = Element(item: $0, next: restElements)
+        }
+        self.elements = Element(item: item, next: restElements)
     }
 }

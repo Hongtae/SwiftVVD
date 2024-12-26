@@ -410,7 +410,7 @@ extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
 
                 let layout = baseInputs.properties
                     .find(type: DefaultLayoutPropertyItem.self)?
-                    .layout ?? DefaultLayoutPropertyItem.default
+                    .layout ?? DefaultLayoutPropertyItem.defaultValue
 
                 return ViewGroupContext(view: view,
                                         subviews: subviews,

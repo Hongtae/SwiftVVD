@@ -299,10 +299,26 @@ class ViewContext {
 class GenericViewContext<Content> : ViewContext where Content : View {
     var view: Content
     var body: ViewContext
+    var dynamicProperties: [_DynamicPropertyTypeOffset]
 
     init(view: Content, body: ViewContext, inputs: _GraphInputs, graph: _GraphValue<Content>) {
         self.view = view
         self.body = body
+
+        var inputs = inputs
+        self.dynamicProperties = _getDynamicPropertyOffsets(from: Content.self)
+        self.dynamicProperties.forEach {
+            func _make<T: DynamicProperty>(_ type: T.Type,
+                                           buffer: inout _DynamicPropertyBuffer,
+                                           container: _GraphValue<Content>,
+                                           fieldOffset: Int,
+                                           inputs: inout _GraphInputs) {
+                T._makeProperty(in: &buffer, container: container, fieldOffset: fieldOffset, inputs: &inputs)
+            }
+            var buffer = _DynamicPropertyBuffer()
+            _make($0.type, buffer: &buffer, container: graph, fieldOffset: $0.offset, inputs: &inputs)
+        }
+
         super.init(inputs: inputs, graph: graph)
         self._debugDraw = false
     }
@@ -415,7 +431,7 @@ class GenericViewContext<Content> : ViewContext where Content : View {
     }
 }
 
-struct GenericViewGenerator<Content> : ViewGenerator {
+struct GenericViewGenerator<Content> : ViewGenerator where Content : View {
     let graph: _GraphValue<Content>
     var inputs: _ViewInputs
     let body: (_:Content, _:_ViewInputs) -> ViewContext?

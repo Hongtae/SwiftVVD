@@ -27,7 +27,7 @@ extension View {
             fatalError("\(Self.self) may not have Body == Never")
         }
         let outputs = Self.Body._makeView(view: view[\.body], inputs: inputs)
-        if let body = outputs.view, MemoryLayout<Self>.size > 0 && Self._hasDynamicProperty {
+        if let body = outputs.view, MemoryLayout<Self>.size > 0 && _hasDynamicProperty(self) {
             let generator = GenericViewGenerator(graph: view, inputs: inputs) { content, inputs in
                 if let body = body.makeView(encloser: content, graph: view) {
                     return GenericViewContext(view: content, body: body, inputs: inputs.base, graph: view)
