@@ -12,7 +12,7 @@ import VVD
 final class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowDelegate, @unchecked Sendable where Content: View {
     let contextType: Any.Type
     let identifier: String
-    let title: String
+    let title: Text
 
     private(set) var swapChain: SwapChain?
     private(set) var window: Window?
@@ -220,7 +220,7 @@ final class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowD
         }
     }
 
-    init(content: Content, contextType: Any.Type, identifier: String, title: String) {
+    init(content: ()->Content, contextType: Any.Type, identifier: String, title: Text) {
         self.contextType = contextType
         self.identifier = identifier
         self.title = title
@@ -242,6 +242,8 @@ final class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowD
 
         let outputs = Content._makeView(view: graph, inputs: inputs)
 
+        // initialize root-view instance
+        let content = content()
         self.view = outputs.view?.makeView(encloser: content, graph: graph)
         if let view {
             if view.validatePath(encloser: content, graph: graph) == false {
@@ -264,7 +266,8 @@ final class WindowContext<Content>: WindowProxy, Scene, _PrimitiveScene, WindowD
             self.task = nil
             self.swapChain = nil
 
-            if let window = VVD.makeWindow(name: self.title,
+            let windowTitle = self.title._resolveText(in: self.environmentValues)
+            if let window = VVD.makeWindow(name: windowTitle,
                                               style: [.genericWindow],
                                               delegate: self) {
 
