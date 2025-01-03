@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct Ellipse: Shape {
+public struct Ellipse : Shape {
     public func path(in rect: CGRect) -> Path {
         Path(ellipseIn: rect)
     }
@@ -19,13 +19,13 @@ public struct Ellipse: Shape {
     public typealias Body = _ShapeView<Ellipse, ForegroundStyle>
 }
 
-extension Ellipse: InsettableShape {
+extension Ellipse : InsettableShape {
     @inlinable public func inset(by amount: CGFloat) -> some InsettableShape {
         return _Inset(amount: amount)
     }
 
     @usableFromInline
-    @frozen struct _Inset: InsettableShape {
+    struct _Inset : InsettableShape {
         @usableFromInline
         var amount: CGFloat
 

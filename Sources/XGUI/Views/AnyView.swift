@@ -12,7 +12,7 @@ class AnyViewBox {
     }
 }
 
-public struct AnyView: View {
+public struct AnyView : View {
     var storage: AnyViewBox
 
     public init<V>(_ view: V) where V: View {
@@ -51,7 +51,7 @@ public struct AnyView: View {
     public typealias Body = Never
 }
 
-extension AnyView: _PrimitiveView {
+extension AnyView : _PrimitiveView {
 }
 
 private struct TypeErasedViewGenerator : ViewGenerator {

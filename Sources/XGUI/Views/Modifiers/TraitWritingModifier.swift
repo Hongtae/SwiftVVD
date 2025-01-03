@@ -12,7 +12,7 @@ public protocol _ViewTraitKey {
     static var defaultValue: Self.Value { get }
 }
 
-public struct _TraitWritingModifier<Trait>: ViewModifier where Trait: _ViewTraitKey {
+public struct _TraitWritingModifier<Trait> : ViewModifier where Trait : _ViewTraitKey {
     public let value: Trait.Value
     public init(value: Trait.Value) {
         self.value = value

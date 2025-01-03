@@ -65,7 +65,7 @@ extension View {
     }
 }
 
-enum BackgroundStyleEnvironmentKey: EnvironmentKey {
+enum BackgroundStyleEnvironmentKey : EnvironmentKey {
     static var defaultValue: AnyShapeStyle? { return nil }
 }
 

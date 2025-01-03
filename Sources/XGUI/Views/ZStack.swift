@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct ZStack<Content>: View where Content: View {
+public struct ZStack<Content> : View where Content : View {
     public var _tree: _VariadicView.Tree<_ZStackLayout, Content>
 
     public init(alignment: Alignment = .center, @ViewBuilder content: () -> Content) {
@@ -22,5 +22,5 @@ public struct ZStack<Content>: View where Content: View {
     public typealias Body = Never
 }
 
-extension ZStack: _PrimitiveView {
+extension ZStack : _PrimitiveView {
 }

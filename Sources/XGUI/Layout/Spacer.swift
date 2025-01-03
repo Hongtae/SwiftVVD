@@ -16,7 +16,9 @@ public struct Spacer : View {
     public typealias Body = Never
 }
 
-extension Spacer : Sendable {}
+extension Spacer : Sendable {
+}
+
 extension Spacer : _PrimitiveView {
     static func _makeView(view: _GraphValue<Self>, sharedContext: SharedContext) -> _ViewOutputs {
         let baseInputs = _GraphInputs(environment: .init(), sharedContext: sharedContext)
@@ -42,7 +44,8 @@ public struct Divider : View {
     public typealias Body = Never
 }
 
-extension Divider : _PrimitiveView {}
+extension Divider : _PrimitiveView {
+}
 
 private class SpacerViewContext : ViewContext {
     var view: Spacer

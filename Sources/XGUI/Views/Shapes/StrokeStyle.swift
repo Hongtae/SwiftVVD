@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct StrokeStyle: Equatable, Animatable, Sendable {
+public struct StrokeStyle : Equatable, Animatable, Sendable {
 
     public var lineWidth: CGFloat
     public var lineCap: CGLineCap

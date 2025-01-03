@@ -8,7 +8,7 @@
 import Foundation
 import VVD
 
-public struct _ViewModifier_Content<Modifier> where Modifier: ViewModifier {
+public struct _ViewModifier_Content<Modifier> where Modifier : ViewModifier {
     public typealias Body = Never
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
@@ -32,7 +32,7 @@ public struct _ViewModifier_Content<Modifier> where Modifier: ViewModifier {
     }
 }
 
-extension _ViewModifier_Content: View {
+extension _ViewModifier_Content : View {
     public var body: Never { neverBody() }
 
     struct _ViewGenerator : ViewGenerator {

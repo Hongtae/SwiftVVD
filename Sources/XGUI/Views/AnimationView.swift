@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct _AnimationView<Content>: View where Content: Equatable, Content: View {
+public struct _AnimationView<Content> : View where Content: Equatable, Content : View {
     public var content: Content
     public var animation: Animation?
 
@@ -26,5 +26,5 @@ public struct _AnimationView<Content>: View where Content: Equatable, Content: V
     public typealias Body = Never
 }
 
-extension _AnimationView: _PrimitiveView {
+extension _AnimationView : _PrimitiveView {
 }

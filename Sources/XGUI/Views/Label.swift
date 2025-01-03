@@ -46,7 +46,7 @@ extension Label where Title == LabelStyleConfiguration.Title, Icon == LabelStyle
     }
 }
 
-struct ResolvedLabelStyle: View {
+struct ResolvedLabelStyle : View {
 
     static let titleKey = ObjectIdentifier(LabelStyleConfiguration.Title.self)
     static let iconKey = ObjectIdentifier(LabelStyleConfiguration.Icon.self)
@@ -80,7 +80,7 @@ struct ResolvedLabelStyle: View {
     }
 
     // proxy for LabelStyle generated contents
-    struct LayoutStyleProxy<S: LabelStyle> : ViewProxy {
+    struct LayoutStyleProxy<S : LabelStyle> : ViewProxy {
         let proxy: Proxy<S>
         var content: S.Body { proxy.body }
         var contentGraph: _GraphValue<S.Body> { proxy.graph[\.body] }

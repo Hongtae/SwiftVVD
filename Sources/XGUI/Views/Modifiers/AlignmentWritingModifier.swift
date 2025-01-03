@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct _AlignmentWritingModifier: ViewModifier {
+public struct _AlignmentWritingModifier : ViewModifier {
     @usableFromInline
     let key: AlignmentKey
     @usableFromInline
@@ -24,7 +24,7 @@ public struct _AlignmentWritingModifier: ViewModifier {
     public typealias Body = Never
 }
 
-extension _AlignmentWritingModifier: _UnaryViewModifier {
+extension _AlignmentWritingModifier : _UnaryViewModifier {
 }
 
 extension View {

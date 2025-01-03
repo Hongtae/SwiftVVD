@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct _BackgroundModifier<Background>: ViewModifier where Background: View {
+public struct _BackgroundModifier<Background> : ViewModifier where Background : View {
     public var background: Background
     public var alignment: Alignment
 
@@ -32,13 +32,13 @@ public struct _BackgroundModifier<Background>: ViewModifier where Background: Vi
     public typealias Body = Never
 }
 
-extension _BackgroundModifier: Equatable where Background: Equatable {
+extension _BackgroundModifier : Equatable where Background : Equatable {
 }
 
-extension _BackgroundModifier: _UnaryViewModifier {
+extension _BackgroundModifier : _UnaryViewModifier {
 }
 
-public struct _BackgroundStyleModifier<Style>: ViewModifier where Style: ShapeStyle {
+public struct _BackgroundStyleModifier<Style> : ViewModifier where Style : ShapeStyle {
     public var style: Style
     public var ignoresSafeAreaEdges: Edge.Set
 
@@ -63,10 +63,10 @@ public struct _BackgroundStyleModifier<Style>: ViewModifier where Style: ShapeSt
     }
 }
 
-extension _BackgroundStyleModifier: _UnaryViewModifier {
+extension _BackgroundStyleModifier : _UnaryViewModifier {
 }
 
-public struct _BackgroundShapeModifier<Style, Bounds>: ViewModifier where Style: ShapeStyle, Bounds: Shape {
+public struct _BackgroundShapeModifier<Style, Bounds> : ViewModifier where Style : ShapeStyle, Bounds : Shape {
     public var style: Style
     public var shape: Bounds
     public var fillStyle: FillStyle
@@ -93,10 +93,10 @@ public struct _BackgroundShapeModifier<Style, Bounds>: ViewModifier where Style:
     }
 }
 
-extension _BackgroundShapeModifier: _UnaryViewModifier {
+extension _BackgroundShapeModifier : _UnaryViewModifier {
 }
 
-public struct _InsettableBackgroundShapeModifier<Style, Bounds>: ViewModifier where Style: ShapeStyle, Bounds: InsettableShape {
+public struct _InsettableBackgroundShapeModifier<Style, Bounds> : ViewModifier where Style : ShapeStyle, Bounds : InsettableShape {
     public var style: Style
     public var shape: Bounds
     public var fillStyle: FillStyle
@@ -123,7 +123,7 @@ public struct _InsettableBackgroundShapeModifier<Style, Bounds>: ViewModifier wh
     }
 }
 
-extension _InsettableBackgroundShapeModifier: _UnaryViewModifier {
+extension _InsettableBackgroundShapeModifier : _UnaryViewModifier {
 }
 
 extension View {

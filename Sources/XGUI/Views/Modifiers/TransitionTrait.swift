@@ -8,7 +8,7 @@
 import Foundation
 
 @usableFromInline
-struct TransitionTraitKey: _ViewTraitKey {
+struct TransitionTraitKey : _ViewTraitKey {
     @inlinable static var defaultValue: AnyTransition {
         .opacity
     }
@@ -17,7 +17,7 @@ struct TransitionTraitKey: _ViewTraitKey {
 }
 
 @usableFromInline
-struct CanTransitionTraitKey: _ViewTraitKey {
+struct CanTransitionTraitKey : _ViewTraitKey {
     @inlinable static var defaultValue: Bool {
         false
     }

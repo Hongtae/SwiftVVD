@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct LayoutPriorityTraitKey: _ViewTraitKey {
+public struct LayoutPriorityTraitKey : _ViewTraitKey {
     public static var defaultValue: Double { 0 }
 }
 

@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct VStack<Content>: View where Content: View {
+public struct VStack<Content> : View where Content : View {
     public var _tree: _VariadicView.Tree<_VStackLayout, Content>
 
     public init(alignment: HorizontalAlignment = .center, spacing: CGFloat? = nil, @ViewBuilder content: () -> Content) {
@@ -22,5 +22,5 @@ public struct VStack<Content>: View where Content: View {
     public typealias Body = Never
 }
 
-extension VStack: _PrimitiveView {
+extension VStack : _PrimitiveView {
 }

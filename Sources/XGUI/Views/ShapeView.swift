@@ -8,7 +8,7 @@
 import Foundation
 import VVD
 
-public struct _ShapeView<Content, Style>: View where Content: Shape, Style: ShapeStyle {
+public struct _ShapeView<Content, Style> : View where Content: Shape, Style : ShapeStyle {
     public var shape: Content
     public var style: Style
     public var fillStyle: FillStyle

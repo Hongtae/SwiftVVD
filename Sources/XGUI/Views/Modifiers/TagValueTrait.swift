@@ -8,7 +8,7 @@
 import Foundation
 
 @usableFromInline
-struct TagValueTraitKey<V>: _ViewTraitKey where V: Hashable {
+struct TagValueTraitKey<V> : _ViewTraitKey where V: Hashable {
     @usableFromInline
     enum Value {
         case untagged
@@ -21,7 +21,7 @@ struct TagValueTraitKey<V>: _ViewTraitKey where V: Hashable {
 }
 
 @usableFromInline
-struct IsAuxiliaryContentTraitKey: _ViewTraitKey {
+struct IsAuxiliaryContentTraitKey : _ViewTraitKey {
     @inlinable static var defaultValue: Bool {
         false
     }

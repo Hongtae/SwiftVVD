@@ -98,7 +98,7 @@ extension Button where Label == XGUI.Label<Text, Image> {
     }
 }
 
-struct ResolvedButtonStyle: View {
+struct ResolvedButtonStyle : View {
     typealias Body = Never
     let configuration: PrimitiveButtonStyleConfiguration
     init(configuration: PrimitiveButtonStyleConfiguration) {
@@ -320,5 +320,5 @@ struct ResolvedButtonStyle: View {
     }
 }
 
-extension ResolvedButtonStyle: _PrimitiveView {
+extension ResolvedButtonStyle : _PrimitiveView {
 }

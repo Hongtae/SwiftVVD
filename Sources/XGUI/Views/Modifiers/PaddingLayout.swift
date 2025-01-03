@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct _PaddingLayout: ViewModifier, Animatable {
+public struct _PaddingLayout : ViewModifier, Animatable {
     public var edges: Edge.Set
     public var insets: EdgeInsets?
     @inlinable public init(edges: Edge.Set = .all, insets: EdgeInsets?) {
@@ -33,7 +33,7 @@ extension View {
     }
 }
 
-extension _PaddingLayout: _ViewLayoutModifier {
+extension _PaddingLayout : _ViewLayoutModifier {
     private class LayoutViewContext : ViewModifierContext<_PaddingLayout> {
         var layout: _PaddingLayout { modifier }
 
@@ -159,8 +159,8 @@ extension _PaddingLayout: _ViewLayoutModifier {
     }
 }
 
-struct DefaultPaddingEdgeInsetsPropertyItem: PropertyItem {
-    static var defaultValue : EdgeInsets { .init(_all: 16) }
+struct DefaultPaddingEdgeInsetsPropertyItem : PropertyItem {
+    static var defaultValue: EdgeInsets { .init(_all: 16) }
     let insets: EdgeInsets
     var description: String {
         "DefaultPaddingEdgeInsetsPropertyItem: \(self.insets)"

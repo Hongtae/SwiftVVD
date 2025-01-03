@@ -5,7 +5,7 @@
 //  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
 //
 
-public struct EmptyModifier: ViewModifier, Sendable {
+public struct EmptyModifier : ViewModifier, Sendable {
     public typealias Body = Never
     public static let identity = EmptyModifier()
 

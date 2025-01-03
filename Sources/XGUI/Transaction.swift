@@ -70,10 +70,10 @@ public func withTransaction<R, V>(_ keyPath: WritableKeyPath<Transaction, V>, _ 
 }
 
 @usableFromInline
-class AnyTransitionBox: @unchecked Sendable {
+class AnyTransitionBox : @unchecked Sendable {
 }
 
-public struct AnyTransition: Sendable {
+public struct AnyTransition : Sendable {
     fileprivate let box: AnyTransitionBox
 
     public static var slide: AnyTransition {

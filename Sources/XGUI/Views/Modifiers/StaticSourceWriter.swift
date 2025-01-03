@@ -10,10 +10,10 @@ struct StaticSourceWriter<Source, Type> {
     let source: Type
 }
 
-extension StaticSourceWriter: ViewModifier where Source: View, Type: View {
+extension StaticSourceWriter : ViewModifier where Source: View, Type: View {
 }
 
-extension StaticSourceWriter: _ViewInputsModifier where Self: ViewModifier {
+extension StaticSourceWriter : _ViewInputsModifier where Self: ViewModifier {
     static func _makeViewInputs(modifier: _GraphValue<Self>, inputs: inout _ViewInputs) {
         let outputs = Type._makeView(view: modifier[\.source], inputs: inputs)
         if let view = outputs.view {

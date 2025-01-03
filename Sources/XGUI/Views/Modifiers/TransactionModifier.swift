@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct _TransactionModifier: ViewModifier, _GraphInputsModifier {
+public struct _TransactionModifier : ViewModifier, _GraphInputsModifier {
     public var transform: (inout Transaction) -> Void
 
     @inlinable public init(transform: @escaping (inout Transaction) -> Void) {
@@ -21,7 +21,7 @@ public struct _TransactionModifier: ViewModifier, _GraphInputsModifier {
     public typealias Body = Never
 }
 
-public struct _PushPopTransactionModifier<Content>: ViewModifier where Content: ViewModifier {
+public struct _PushPopTransactionModifier<Content> : ViewModifier where Content : ViewModifier {
     public var content: Content
     public var base: _TransactionModifier
 

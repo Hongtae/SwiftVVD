@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct Circle: Shape {
+public struct Circle : Shape {
     public func path(in rect: CGRect) -> Path {
         let radius = min(rect.width, rect.height) * 0.5
         return Path(ellipseIn: CGRect(x: rect.midX - radius,
@@ -23,13 +23,13 @@ public struct Circle: Shape {
     public typealias Body = _ShapeView<Circle, ForegroundStyle>
 }
 
-extension Circle: InsettableShape {
+extension Circle : InsettableShape {
     @inlinable public func inset(by amount: CGFloat) -> some InsettableShape {
         return _Inset(amount: amount)
     }
 
     @usableFromInline
-    @frozen struct _Inset: InsettableShape {
+    struct _Inset : InsettableShape {
         @usableFromInline
         var amount: CGFloat
 

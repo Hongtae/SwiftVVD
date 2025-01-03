@@ -13,7 +13,7 @@ public struct _ConditionalContent<TrueContent, FalseContent> {
     let storage: Storage
 }
 
-extension _ConditionalContent: View where TrueContent: View, FalseContent: View {
+extension _ConditionalContent : View where TrueContent : View, FalseContent : View {
     public typealias Body = Never
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
@@ -25,5 +25,5 @@ extension _ConditionalContent: View where TrueContent: View, FalseContent: View 
     }
 }
 
-extension _ConditionalContent: _PrimitiveView where Self: View {
+extension _ConditionalContent : _PrimitiveView where Self : View {
 }

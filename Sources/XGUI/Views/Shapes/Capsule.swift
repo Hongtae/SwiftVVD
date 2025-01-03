@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct Capsule: Shape {
+public struct Capsule : Shape {
     public var style: RoundedCornerStyle
 
     @inlinable public init(style: RoundedCornerStyle = .circular) {
@@ -25,13 +25,13 @@ public struct Capsule: Shape {
     public typealias Body = _ShapeView<Capsule, ForegroundStyle>
 }
 
-extension Capsule: InsettableShape {
+extension Capsule : InsettableShape {
     @inlinable public func inset(by amount: CGFloat) -> some InsettableShape {
         return _Inset(amount: amount)
     }
 
     @usableFromInline
-    @frozen struct _Inset: InsettableShape {
+    struct _Inset : InsettableShape {
         @usableFromInline
         var amount: CGFloat
 

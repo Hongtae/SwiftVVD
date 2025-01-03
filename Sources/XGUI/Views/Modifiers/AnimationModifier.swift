@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct _AnimationModifier<Value>: ViewModifier where Value: Equatable {
+public struct _AnimationModifier<Value> : ViewModifier where Value : Equatable {
     public var animation: Animation?
     public var value: Value
 
@@ -27,7 +27,7 @@ public struct _AnimationModifier<Value>: ViewModifier where Value: Equatable {
     public typealias Body = Never
 }
 
-extension _AnimationModifier: Equatable {
+extension _AnimationModifier : Equatable {
 }
 
 extension View {
@@ -36,7 +36,7 @@ extension View {
     }
 }
 
-extension View where Self: Equatable {
+extension View where Self : Equatable {
     @inlinable public func animation(_ animation: Animation?) -> some View {
         return _AnimationView(content: self, animation: animation)
     }

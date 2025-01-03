@@ -8,12 +8,12 @@
 import Foundation
 import VVD
 
-public enum RoundedCornerStyle: Equatable, Hashable {
+public enum RoundedCornerStyle : Equatable, Hashable {
     case circular
     case continuous
 }
 
-public struct FillStyle: Equatable, Sendable {
+public struct FillStyle : Equatable, Sendable {
     public var isEOFilled: Bool // true: even-odd rule, false: non-zero winding number rule.
     public var isAntialiased: Bool
 
@@ -23,7 +23,7 @@ public struct FillStyle: Equatable, Sendable {
     }
 }
 
-public struct Path: Equatable {
+public struct Path : Equatable {
     public init() {
     }
 

@@ -10,7 +10,7 @@ import VVD
 
 private var defaultWindowTitle: Text { Text("XGUI.WindowGroup") }
 
-public struct WindowGroup<Content>: Scene where Content: View {
+public struct WindowGroup<Content> : Scene where Content : View {
 
     let content: ()->Content
     let contextType: Any.Type

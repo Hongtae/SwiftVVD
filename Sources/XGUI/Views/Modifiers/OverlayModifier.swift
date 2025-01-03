@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct _OverlayModifier<Overlay>: ViewModifier where Overlay: View {
+public struct _OverlayModifier<Overlay> : ViewModifier where Overlay: View {
     public let overlay: Overlay
     public let alignment: Alignment
 
@@ -32,13 +32,13 @@ public struct _OverlayModifier<Overlay>: ViewModifier where Overlay: View {
     public typealias Body = Never
 }
 
-extension _OverlayModifier: Equatable where Overlay: Equatable {
+extension _OverlayModifier : Equatable where Overlay: Equatable {
 }
 
-extension _OverlayModifier: _UnaryViewModifier {
+extension _OverlayModifier : _UnaryViewModifier {
 }
 
-public struct _OverlayStyleModifier<Style>: ViewModifier where Style: ShapeStyle {
+public struct _OverlayStyleModifier<Style> : ViewModifier where Style: ShapeStyle {
     public var style: Style
     public var ignoresSafeAreaEdges: Edge.Set
 
@@ -63,10 +63,10 @@ public struct _OverlayStyleModifier<Style>: ViewModifier where Style: ShapeStyle
     }
 }
 
-extension _OverlayStyleModifier: _UnaryViewModifier {
+extension _OverlayStyleModifier : _UnaryViewModifier {
 }
 
-public struct _OverlayShapeModifier<Style, Bounds>: ViewModifier where Style: ShapeStyle, Bounds: Shape {
+public struct _OverlayShapeModifier<Style, Bounds> : ViewModifier where Style: ShapeStyle, Bounds: Shape {
     public var style: Style
     public var shape: Bounds
     public var fillStyle: FillStyle
@@ -93,7 +93,7 @@ public struct _OverlayShapeModifier<Style, Bounds>: ViewModifier where Style: Sh
     }
 }
 
-extension _OverlayShapeModifier: _UnaryViewModifier {
+extension _OverlayShapeModifier : _UnaryViewModifier {
 }
 
 extension View {

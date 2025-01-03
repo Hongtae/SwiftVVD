@@ -12,7 +12,7 @@ public protocol LayoutValueKey {
     static var defaultValue: Self.Value { get }
 }
 
-public struct _LayoutTrait<K>: _ViewTraitKey where K: LayoutValueKey {
+public struct _LayoutTrait<K> : _ViewTraitKey where K: LayoutValueKey {
     public static var defaultValue: K.Value { K.defaultValue }
     public typealias Value = K.Value
 }
