@@ -23,3 +23,5 @@ extension WeakObject: ExpressibleByNilLiteral {
 }
 
 extension WeakObject: Sendable where T: Sendable {}
+
+public typealias AnyWeakObject = WeakObject<AnyObject>
