@@ -2,15 +2,13 @@
 //  File: SceneContext.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
 import VVD
 
-protocol WindowProxy: AnyObject {
-//    associatedtype Content: View
-//    var view: Content { get }
+protocol WindowProxy : AnyObject {
     var identifier: String { get }
     var contextType: Any.Type { get }
     var window: Window? { get }
@@ -18,10 +16,10 @@ protocol WindowProxy: AnyObject {
     @MainActor func makeWindow() -> Window?
 }
 
-protocol SceneProxy: AnyObject {
+protocol SceneProxy : AnyObject {
     associatedtype Content: Scene
     var scene: Content { get }
-//    var modifiers: [any _SceneModifier] { get }
+    //var modifiers: [any _SceneModifier] { get }
     var children: [any SceneProxy] { get }
     var windows: [any WindowProxy] { get }
 }
@@ -46,7 +44,7 @@ extension SceneProxy {
     }
 }
 
-class SceneContext<Content>: SceneProxy where Content: Scene {
+class SceneContext<Content> : SceneProxy where Content : Scene {
     var scene: Content
     var modifiers: [any _SceneModifier]
     var children: [any SceneProxy]

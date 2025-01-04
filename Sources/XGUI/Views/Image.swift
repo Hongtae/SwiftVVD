@@ -2,7 +2,7 @@
 //  File: Image.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -181,7 +181,7 @@ public struct Image : Equatable, Sendable {
 }
 
 extension Image {
-    public enum Orientation: UInt8, CaseIterable, Hashable {
+    public enum Orientation : UInt8, CaseIterable, Hashable {
         case up
         case upMirrored
         case down
@@ -222,10 +222,10 @@ extension Image {
 
 extension Image : View {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let generator = GenericViewGenerator(graph: view, inputs: inputs) { content, inputs in
-            ImageViewContext(view: content, inputs: inputs.base, graph: view)
+        let view = TypedUnaryViewGenerator(baseInputs: inputs.base) { inputs in
+            ImageViewContext(graph: view, inputs: inputs)
         }
-        return _ViewOutputs(view: generator)
+        return _ViewOutputs(view: view)
     }
 
     public typealias Body = Never
@@ -238,29 +238,13 @@ extension Image {
 extension Image : _PrimitiveView {
 }
 
-class ImageViewContext : ViewContext {
-    var image: Image
+class ImageViewContext : PrimitiveViewContext<Image> {
     var resolvedImage: GraphicsContext.ResolvedImage?
 
-    init(view: Image, inputs: _GraphInputs, graph: _GraphValue<Image>) {
-        self.image = view
-        super.init(inputs: inputs, graph: graph)
-    }
-
-    override func validatePath<T>(encloser: T, graph: _GraphValue<T>) -> Bool {
-        self._validPath = false
-        if graph.value(atPath: self.graph, from: encloser) is Image {
-            self._validPath = true
-            return true
-        }
-        return false
-    }
-
-    override func updateContent<T>(encloser: T, graph: _GraphValue<T>) {
-        if let view = graph.value(atPath: self.graph, from: encloser) as? Image {
-            self.image = view
-        } else {
-            fatalError("Unable to recover Image")
+    override func loadResources(_ context: GraphicsContext) {
+        if let image = self.view {
+            self.resolvedImage = context.resolve(image)
+            self.sharedContext.needsLayout = true
         }
     }
 
@@ -268,7 +252,10 @@ class ImageViewContext : ViewContext {
         if let resolvedImage {
             return resolvedImage.size
         }
-        return super.sizeThatFits(proposal)
+        if self.view != nil {
+            return proposal.replacingUnspecifiedDimensions()
+        }
+        return .zero
     }
 
     override func draw(frame: CGRect, context: GraphicsContext) {
@@ -277,8 +264,10 @@ class ImageViewContext : ViewContext {
         let bounds = self.bounds
         if bounds.width > 0 && bounds.height > 0 {
             if self.resolvedImage == nil {
-                self.resolvedImage = context.resolve(self.image)
-                self.sharedContext.needsLayout = true
+                if let image = self.view {
+                    self.resolvedImage = context.resolve(image)
+                    self.sharedContext.needsLayout = true
+                }
             }
             if let resolvedImage {
                 context.draw(resolvedImage, in: frame)

@@ -2,13 +2,12 @@
 //  File: Animatable.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
-import VVD
 
-public protocol VectorArithmetic: AdditiveArithmetic {
+public protocol VectorArithmetic : AdditiveArithmetic {
     mutating func scale(by rhs: Double)
     var magnitudeSquared: Double { get }
 }
@@ -20,7 +19,7 @@ public protocol Animatable {
     static func _makeAnimatable(value: inout _GraphValue<Self>, inputs: _GraphInputs)
 }
 
-extension Animatable where Self: VectorArithmetic {
+extension Animatable where Self : VectorArithmetic {
     public var animatableData: Self { fatalError() }
 }
 
@@ -38,7 +37,7 @@ extension Animatable {
     }
 }
 
-extension View where Self: Animatable {
+extension View where Self : Animatable {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         fatalError()
     }
@@ -47,7 +46,7 @@ extension View where Self: Animatable {
     }
 }
 
-public struct AnimatablePair<First, Second>: VectorArithmetic where First: VectorArithmetic, Second: VectorArithmetic {
+public struct AnimatablePair<First, Second> : VectorArithmetic where First : VectorArithmetic, Second : VectorArithmetic {
     public var first: First
     public var second: Second
 

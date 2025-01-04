@@ -2,73 +2,18 @@
 //  File: ViewContext.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
 import VVD
 
-protocol ViewGenerator<Content> {
-    associatedtype Content
-    var graph: _GraphValue<Content> { get }
-    func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext?
-    mutating func mergeInputs(_ inputs: _GraphInputs)
-}
-
-extension ViewGenerator {
-    var anyGraph: _GraphValue<Any> {
-        self.graph.unsafeCast(to: Any.self)
-    }
-}
-
-protocol ViewListGenerator {
-    func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator]
-    mutating func mergeInputs(_ inputs: _GraphInputs)
-}
-
-struct StaticViewListGenerator : ViewListGenerator {
-    var viewList: [any ViewGenerator]
-    func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
-        viewList
-    }
-    mutating func mergeInputs(_ inputs: _GraphInputs) {
-        viewList.indices.forEach { viewList[$0].mergeInputs(inputs) }
-    }
-}
-
-struct DynamicViewListGenerator : ViewListGenerator {
-    var viewList: [any ViewListGenerator]
-    var mergedInputs: [_GraphInputs] = []
-    func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
-        viewList.flatMap {
-            var list = $0.makeViewList(encloser: encloser, graph: graph)
-            list.indices.forEach { index in
-                mergedInputs.forEach { inputs in
-                    list[index].mergeInputs(inputs)
-                }
-            }
-            return list
-        }
-    }
-    mutating func mergeInputs(_ inputs: _GraphInputs) {
-        mergedInputs.append(inputs)
-    }
-}
-
-extension ViewListGenerator where Self == StaticViewListGenerator {
-    static func staticList(_ list: [any ViewGenerator]) -> StaticViewListGenerator {
-        .init(viewList: list)
-    }
-    static var empty: StaticViewListGenerator {
-        .staticList([])
-    }
-}
-
-extension ViewListGenerator where Self == DynamicViewListGenerator {
-    static func dynamicList(_ list: [any ViewListGenerator]) -> DynamicViewListGenerator {
-        .init(viewList: list)
-    }
-}
+// Class hierarchy
+//
+// ViewContext
+// - PrimitiveViewContext (Body = Never)
+// - GenericViewContext (Body : View)
+// - DynamicViewContext (Optional<Body>)
 
 public struct _ViewContextDebugDraw : EnvironmentKey {
     public static var defaultValue: Bool { false }
@@ -82,7 +27,6 @@ public extension EnvironmentValues {
 }
 
 class ViewContext {
-    let graph: _GraphValue<Any>
     var inputs: _GraphInputs
     var traits: [ObjectIdentifier: Any]
     var environmentValues: EnvironmentValues {
@@ -100,27 +44,43 @@ class ViewContext {
         CGRect(x: 0, y: 0, width: frame.width, height: frame.height)
     }
 
+    unowned var superview: ViewContext?
+
     var transformToContainer: AffineTransform {         // local to container (superview)
         let local = self.transform
         let offset = AffineTransform(translationX: self.frame.minX, y: self.frame.minY)
         return local.concatenating(offset)
     }
 
-    init<Content>(inputs: _GraphInputs, graph: _GraphValue<Content>) {
-        self.graph = graph.unsafeCast(to: Any.self)
+    init(inputs: _GraphInputs) {
         self.traits = [:]
         self.frame = .zero
         self.spacing = .zero
         self.inputs = inputs.resolveMergedInputs()
     }
 
-    var _validPath = false
-    func validatePath<T>(encloser: T, graph: _GraphValue<T>) -> Bool {
-        _validPath = false
-        return _validPath
+    deinit {
+        assert(self.superview == nil)
     }
 
-    func updateContent<T>(encloser: T, graph: _GraphValue<T>) {
+    func updateContent() {
+        fatalError("Subclasses must override this method")
+    }
+
+    func value<T>(atPath graph: _GraphValue<T>) -> T? {
+        fatalError("Subclasses must override this method")
+    }
+
+    var isValid: Bool {
+        return false
+    }
+
+    @discardableResult
+    func validate() -> Bool {
+        return false
+    }
+
+    func invalidate() {
     }
 
     func merge(graphInputs inputs: _GraphInputs) {
@@ -132,31 +92,8 @@ class ViewContext {
         self.transformToRoot = self.transformToContainer.concatenating(t)
     }
 
-    func resolveGraphInputs<T>(encloser: T, graph: _GraphValue<T>) {
-        assert(self.inputs.mergedInputs.isEmpty)
-        do {
-            var modifiers = self.inputs.modifiers
-            modifiers.indices.forEach { index in
-                if modifiers[index].isResolved == false {
-                    modifiers[index].resolve(encloser: encloser, graph: graph)
-                }
-            }
-            modifiers.forEach { modifier in
-                if modifier.isResolved {
-                    modifier.apply(inputs: &self.inputs)
-                }
-            }
-            self.inputs.modifiers = modifiers
-        }
-        do {
-            var modifiers = self.inputs.viewStyleModifiers
-            modifiers.indices.forEach { index in
-                if modifiers[index].isResolved == false {
-                    modifiers[index].resolve(encloser: encloser, graph: graph)
-                }
-            }
-            self.inputs.viewStyleModifiers = modifiers
-        }
+    func update(tick: UInt64, delta: Double, date: Date) {
+        assert(self.isValid)
     }
 
     func updateEnvironment(_ environmentValues: EnvironmentValues) {
@@ -183,6 +120,13 @@ class ViewContext {
         return styles
     }
 
+    func multiViewForLayout() -> [ViewContext] {
+        return [self]
+    }
+
+    func updateFrame() {
+    }
+
     func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
         proposal.replacingUnspecifiedDimensions()
     }
@@ -207,13 +151,19 @@ class ViewContext {
     func layoutSubviews() {
     }
 
-    func update(tick: UInt64, delta: Double, date: Date) {
-        assert(self._validPath)
+    func draw(frame: CGRect, context: GraphicsContext) {
     }
 
-    var _debugDraw = true
+    func drawBackground(frame: CGRect, context: GraphicsContext) {
+    }
+
+    func drawOverlay(frame: CGRect, context: GraphicsContext){
+    }
+
+    var _debugDraw = false
     var _debugDrawShading: GraphicsContext.Shading = .color(.blue.opacity(0.6))
-    func draw(frame: CGRect, context: GraphicsContext) {
+
+    func drawDebugFrame(frame: CGRect, context: GraphicsContext) {
         if _debugDraw && self.environmentValues._viewContextDebugDraw {
             var path = Path()
             let frame = frame.insetBy(dx: 1, dy: 1).standardized
@@ -226,16 +176,11 @@ class ViewContext {
         }
     }
 
-    func drawBackground(frame: CGRect, context: GraphicsContext) {
-    }
-
-    func drawOverlay(frame: CGRect, context: GraphicsContext){
-    }
-
     final func drawView(frame: CGRect, context: GraphicsContext) {
         var context = context
         context.environment = self.environmentValues
 
+        self.drawDebugFrame(frame: frame, context: context)
         self.drawBackground(frame: frame, context: context)
         self.draw(frame: frame, context: context)
         self.drawOverlay(frame: frame, context: context)
@@ -253,7 +198,7 @@ class ViewContext {
     }
 
     func gestureHandlers(at location: CGPoint) -> GestureHandlerOutputs {
-        .init(gestures: [], simultaneousGestures: [], highPriorityGestures: [])
+        GestureHandlerOutputs(gestures: [], simultaneousGestures: [], highPriorityGestures: [])
     }
 
     func handleMouseWheel(at location: CGPoint, delta: CGPoint) -> Bool {
@@ -269,7 +214,7 @@ class ViewContext {
     }
 
     func hitTest(_ location: CGPoint) -> ViewContext? {
-        nil
+        return nil
     }
 
     @discardableResult
@@ -296,127 +241,200 @@ class ViewContext {
     }
 }
 
-class GenericViewContext<Content> : ViewContext where Content : View {
-    var view: Content
-    var body: ViewContext
-    var dynamicProperties: [_DynamicPropertyTypeOffset]
+class PrimitiveViewContext<Content> : ViewContext {
+    let graph: _GraphValue<Content>
+    var view: Content?
 
-    init(view: Content, body: ViewContext, inputs: _GraphInputs, graph: _GraphValue<Content>) {
-        self.view = view
-        self.body = body
+    init(graph: _GraphValue<Content>, inputs: _GraphInputs) {
+        self.graph = graph
+        super.init(inputs: inputs)
+    }
 
-        var inputs = inputs
-        self.dynamicProperties = _getDynamicPropertyOffsets(from: Content.self)
-        self.dynamicProperties.forEach {
-            func _make<T: DynamicProperty>(_ type: T.Type,
-                                           buffer: inout _DynamicPropertyBuffer,
-                                           container: _GraphValue<Content>,
-                                           fieldOffset: Int,
-                                           inputs: inout _GraphInputs) {
-                T._makeProperty(in: &buffer, container: container, fieldOffset: fieldOffset, inputs: &inputs)
+    override var isValid: Bool {
+        self.view != nil
+    }
+
+    override func invalidate() {
+        self.view = nil
+    }
+
+    override func validate() -> Bool {
+        isValid
+    }
+
+    final override func value<T>(atPath graph: _GraphValue<T>) -> T? {
+        if let view {
+            if graph.isDescendant(of: self.graph) {
+                return self.graph.value(atPath: graph, from: view)
             }
-            var buffer = _DynamicPropertyBuffer()
-            _make($0.type, buffer: &buffer, container: graph, fieldOffset: $0.offset, inputs: &inputs)
         }
-
-        super.init(inputs: inputs, graph: graph)
-        self._debugDraw = false
+        if let superview {
+            return superview.value(atPath: graph)
+        }
+        if let root = self.sharedContext.viewContentRoot {
+            return root.graph.value(atPath: graph, from: root.value)
+        }
+        return nil
     }
 
-    override func validatePath<T>(encloser: T, graph: _GraphValue<T>) -> Bool {
-        self._validPath = false
-        if let value = graph.value(atPath: self.graph, from: encloser) as? Content {
-            self._validPath = true
-            return body.validatePath(encloser: value, graph: self.graph)
-        }
-        return false
+    func updateView(_ view: inout Content) {
     }
 
-    override func updateContent<T>(encloser: T, graph: _GraphValue<T>) {
-        if let view = graph.value(atPath: self.graph, from: encloser) as? Content {
+    override func updateContent() {
+        if var view = value(atPath: self.graph) {
+            self.updateView(&view)
             self.view = view
-            body.updateContent(encloser: self.view, graph: self.graph)
+        }
+        if self.view == nil {
+            self.invalidate()
+            fatalError("Failed to resolve view for \(self.graph)")
+        }
+    }
+}
+
+class GenericViewContext<Content> : ViewContext {
+    let graph: _GraphValue<Content>
+    let body: ViewContext
+    var view: Content?
+
+    init(graph: _GraphValue<Content>, inputs: _GraphInputs, body: ViewContext) {
+        self.graph = graph
+        self.body = body
+        super.init(inputs: inputs)
+        body.superview = self
+    }
+
+    deinit {
+        body.superview = nil
+    }
+
+    override var isValid: Bool {
+        self.view != nil && body.isValid
+    }
+
+    override func validate() -> Bool {
+        if self.view == nil {
+            if value(atPath: self.graph) == nil {
+                Log.error("View: \(self.graph.debugDescription) validation failed")
+                return false
+            }
+            assert(body.superview === self)
+        }
+        return body.validate()
+    }
+
+    override func invalidate() {
+        self.view = nil
+        self.body.invalidate()
+    }
+
+    final override func value<T>(atPath graph: _GraphValue<T>) -> T? {
+        if let view {
+            if graph.isDescendant(of: self.graph) {
+                return self.graph.value(atPath: graph, from: view)
+            }
+        }
+        if let superview {
+            return superview.value(atPath: graph)
+        }
+        if let root = self.sharedContext.viewContentRoot {
+            return root.graph.value(atPath: graph, from: root.value)
+        }
+        return nil
+    }
+
+    func updateView(_ view: inout Content) {
+    }
+
+    override func updateContent() {
+        if var view = value(atPath: self.graph) {
+            self.updateView(&view)
+            self.view = view
+            self.body.updateContent()
         } else {
-            fatalError("Unable to recover View")
+            self.invalidate()
+            fatalError("Failed to resolve view for \(self.graph)")
         }
     }
 
-    override func resolveGraphInputs<T>(encloser: T, graph: _GraphValue<T>) {
-        super.resolveGraphInputs(encloser: encloser, graph: graph)
-        self.view = inputs.environment._resolve(view)
-        self.body.resolveGraphInputs(encloser: self.view, graph: self.graph)
+    override func updateFrame() {
+        self.body.updateFrame()
+    }
+
+    func updateDynamicProperties() {
+        assert(self.isValid)
     }
 
     override func updateEnvironment(_ environmentValues: EnvironmentValues) {
         super.updateEnvironment(environmentValues)
-        self.view = inputs.environment._resolve(view)
+        if self.isValid {
+            self.updateDynamicProperties()
+        }
         self.body.updateEnvironment(environmentValues)
     }
 
-    override func loadResources(_ context: GraphicsContext) {
-        super.loadResources(context)
-        self.body.loadResources(context)
+    override func merge(graphInputs inputs: _GraphInputs) {
+        super.merge(graphInputs: inputs)
+        body.merge(graphInputs: inputs)
     }
 
     override func update(transform t: AffineTransform) {
         super.update(transform: t)
-        self.body.update(transform: self.transformToRoot)
+        body.update(transform: self.transformToRoot)
     }
 
     override func update(tick: UInt64, delta: Double, date: Date) {
         super.update(tick: tick, delta: delta, date: date)
-        self.body.update(tick: tick, delta: delta, date: date)
+        body.update(tick: tick, delta: delta, date: date)
     }
 
-    override func draw(frame: CGRect, context: GraphicsContext) {
-        super.draw(frame: frame, context: context)
-
-        let width = self.body.frame.width
-        let height = self.body.frame.height
-        guard width > .ulpOfOne && height > .ulpOfOne else {
-            return
-        }
-
-        let drawingFrame = self.body.frame.offsetBy(dx: frame.minX,
-                                                    dy: frame.minY)
-        if frame.intersection(drawingFrame).isNull {
-            return
-        }
-        self.body.drawView(frame: drawingFrame, context: context)
+    override func loadResources(_ context: GraphicsContext) {
+        body.loadResources(context)
     }
 
-    override func hitTest(_ location: CGPoint) -> ViewContext? {
-        let loc = location.applying(self.body.transformToContainer.inverted())
-        if let view = self.body.hitTest(loc) {
-            return view
-        }
-        return super.hitTest(location)
+    override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
+        body.sizeThatFits(proposal)
     }
 
     override func setLayoutProperties(_ properties: LayoutProperties) {
         super.setLayoutProperties(properties)
-        self.body.setLayoutProperties(properties)
+        body.setLayoutProperties(properties)
     }
 
     override func layoutSubviews() {
-        super.layoutSubviews()
-
         let frame = self.bounds
         let center = CGPoint(x: frame.midX, y: frame.midY)
         let proposal = ProposedViewSize(width: frame.width, height: frame.height)
-        self.body.place(at: center, anchor: .center, proposal: proposal)
+        body.place(at: center, anchor: .center, proposal: proposal)
     }
 
-    override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
-        self.body.sizeThatFits(proposal)
+    override func draw(frame: CGRect, context: GraphicsContext) {
+        let width = body.frame.width
+        let height = body.frame.height
+        guard width > .ulpOfOne && height > .ulpOfOne else {
+            return
+        }
+
+        let drawingFrame = body.frame.offsetBy(dx: frame.minX,
+                                                dy: frame.minY)
+        if frame.intersection(drawingFrame).isNull {
+            return
+        }
+        body.drawView(frame: drawingFrame, context: context)
+    }
+
+    override func gestureHandlers(at location: CGPoint) -> GestureHandlerOutputs {
+        let outputs = super.gestureHandlers(at: location)
+        let local = location.applying(body.transformToContainer.inverted())
+        return outputs.merge(body.gestureHandlers(at: local))
     }
 
     override func handleMouseWheel(at location: CGPoint, delta: CGPoint) -> Bool {
-        if self.frame.contains(location) {
-            let frame = self.body.frame
+        if self.bounds.contains(location) {
+            let frame = body.frame
             if frame.contains(location) {
-                let loc = location - frame.origin
-                if self.body.handleMouseWheel(at: loc, delta: delta) {
+                let local = location.applying(body.transformToContainer.inverted())
+                if body.handleMouseWheel(at: local, delta: delta) {
                     return true
                 }
             }
@@ -424,26 +442,194 @@ class GenericViewContext<Content> : ViewContext where Content : View {
         return super.handleMouseWheel(at: location, delta: delta)
     }
 
-    override func gestureHandlers(at location: CGPoint) -> GestureHandlerOutputs {
-        let outputs = super.gestureHandlers(at: location)
-        let local = location.applying(self.body.transformToContainer.inverted())
-        return outputs.merge(self.body.gestureHandlers(at: local))
+    override func hitTest(_ location: CGPoint) -> ViewContext? {
+        let local = location.applying(body.transformToContainer.inverted())
+        if let view = body.hitTest(local) {
+            return view
+        }
+        return super.hitTest(location)
     }
 }
 
-struct GenericViewGenerator<Content> : ViewGenerator where Content : View {
+class DynamicViewContext<Content> : ViewContext {
     let graph: _GraphValue<Content>
-    var inputs: _ViewInputs
-    let body: (_:Content, _:_ViewInputs) -> ViewContext?
-
-    func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
-        if let content = graph.value(atPath: self.graph, from: encloser) {
-            return body(content, self.inputs)
+    var view: Content?
+    var body: ViewContext? {
+        willSet {
+            if let body, body !== newValue {
+                assert(body.superview === self)
+                body.superview = nil
+            }
         }
-        fatalError("Unable to recover content: \(self.graph.valueType)")
+        didSet {
+            if let body, body.superview != nil {
+                assert(body.superview === self)
+            }
+            body?.superview = self
+        }
     }
 
-    mutating func mergeInputs(_ inputs: _GraphInputs) {
-        self.inputs.base.mergedInputs.append(inputs)
+    init(graph: _GraphValue<Content>, inputs: _GraphInputs) {
+        self.graph = graph
+        super.init(inputs: inputs)
+
+        if let body {
+            assert(body.superview == nil)
+            body.superview = self
+        }
+    }
+
+    deinit {
+        self.body?.superview = nil
+    }
+
+    override var isValid: Bool {
+        if self.view != nil {
+            if let body {
+                return body.isValid
+            }
+        }
+        return false
+    }
+
+    override func validate() -> Bool {
+        if self.view == nil {
+            if value(atPath: self.graph) == nil {
+                Log.error("View: \(self.graph.debugDescription) validation failed")
+                return false
+            }
+        }
+        if let body {
+            assert(body.superview === self)
+            return body.validate()
+        }
+        Log.error("View: \(self.graph.debugDescription) validation failed")
+        return false
+    }
+
+    override func invalidate() {
+        self.view = nil
+        self.body?.invalidate()
+    }
+
+    final override func value<T>(atPath graph: _GraphValue<T>) -> T? {
+        if let view {
+            if graph.isDescendant(of: self.graph) {
+                return self.graph.value(atPath: graph, from: view)
+            }
+        }
+        if let superview {
+            return superview.value(atPath: graph)
+        }
+        if let root = self.sharedContext.viewContentRoot {
+            return root.graph.value(atPath: graph, from: root.value)
+        }
+        return nil
+    }
+
+    func updateView(_ view: inout Content) {
+    }
+
+    override func updateContent() {
+        if var view = value(atPath: self.graph) {
+            self.updateView(&view)
+            self.view = view
+            self.body?.updateContent()
+        } else {
+            self.invalidate()
+            fatalError("Failed to resolve view for \(self.graph)")
+        }
+    }
+
+    override func merge(graphInputs inputs: _GraphInputs) {
+        super.merge(graphInputs: inputs)
+        body?.merge(graphInputs: inputs)
+    }
+
+    override func update(transform t: AffineTransform) {
+        self.transformToRoot = self.transformToContainer.concatenating(t)
+        body?.update(transform: self.transformToRoot)
+    }
+
+    override func update(tick: UInt64, delta: Double, date: Date) {
+        super.update(tick: tick, delta: delta, date: date)
+        body?.update(tick: tick, delta: delta, date: date)
+    }
+
+    override func updateFrame() {
+        body?.updateFrame()
+    }
+
+    override func loadResources(_ context: GraphicsContext) {
+        body?.loadResources(context)
+    }
+
+    override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
+        body?.sizeThatFits(proposal) ?? .zero
+    }
+
+    override func setLayoutProperties(_ properties: LayoutProperties) {
+        super.setLayoutProperties(properties)
+        self.body?.setLayoutProperties(properties)
+    }
+
+    override func layoutSubviews() {
+        if let body {
+            let frame = self.bounds
+            let center = CGPoint(x: frame.midX, y: frame.midY)
+            let proposal = ProposedViewSize(width: frame.width, height: frame.height)
+            body.place(at: center, anchor: .center, proposal: proposal)
+        }
+    }
+
+    override func draw(frame: CGRect, context: GraphicsContext) {
+        if let body {
+            let width = body.frame.width
+            let height = body.frame.height
+            guard width > .ulpOfOne && height > .ulpOfOne else {
+                return
+            }
+
+            let drawingFrame = body.frame.offsetBy(dx: frame.minX,
+                                                   dy: frame.minY)
+            if frame.intersection(drawingFrame).isNull {
+                return
+            }
+            body.drawView(frame: drawingFrame, context: context)
+        }
+    }
+
+    override func gestureHandlers(at location: CGPoint) -> GestureHandlerOutputs {
+        let outputs = super.gestureHandlers(at: location)
+        if let body {
+            let local = location.applying(body.transformToContainer.inverted())
+            return outputs.merge(body.gestureHandlers(at: local))
+        }
+        return outputs
+    }
+
+    override func handleMouseWheel(at location: CGPoint, delta: CGPoint) -> Bool {
+        if let body {
+            if self.bounds.contains(location) {
+                let frame = body.frame
+                if frame.contains(location) {
+                    let local = location.applying(body.transformToContainer.inverted())
+                    if body.handleMouseWheel(at: local, delta: delta) {
+                        return true
+                    }
+                }
+            }
+        }
+        return super.handleMouseWheel(at: location, delta: delta)
+    }
+
+    override func hitTest(_ location: CGPoint) -> ViewContext? {
+        if let body {
+            let local = location.applying(body.transformToContainer.inverted())
+            if let view = body.hitTest(local) {
+                return view
+            }
+        }
+        return nil
     }
 }

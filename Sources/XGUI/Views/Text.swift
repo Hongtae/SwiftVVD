@@ -2,7 +2,7 @@
 //  File: Text.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -10,10 +10,10 @@ import VVD
 
 class AnyTextStorage {
     func resolve(typeFaces: [TypeFace], context: GraphicsContext) -> GraphicsContext.ResolvedText {
-        fatalError()
+        fatalError("This method should be overridden by subclasses.")
     }
     func resolveText(in environment: EnvironmentValues) -> String {
-        fatalError()
+        fatalError("This method should be overridden by subclasses.")
     }
     func isEqual(to other: AnyTextStorage) -> Bool {
         self === other
@@ -24,7 +24,7 @@ class AnyTextStorage {
 //typealias LocalizedStringKey = String.LocalizationValue
 public typealias LocalizedStringKey = String
 
-class LocalizedTextStorage: AnyTextStorage {
+class LocalizedTextStorage : AnyTextStorage {
     let key: LocalizedStringKey
     let table: String?
     let bundle: Bundle?
@@ -53,7 +53,7 @@ class LocalizedTextStorage: AnyTextStorage {
     }
 }
 
-class ConcatenatedTextStorage: AnyTextStorage {
+class ConcatenatedTextStorage : AnyTextStorage {
     let first: Text
     let second: Text
     init(first: Text, second: Text) {
@@ -102,7 +102,7 @@ class AttachmentTextStorage : AnyTextStorage {
     }
 }
 
-public struct Text: Equatable {
+public struct Text : Equatable {
     enum Storage: Equatable {
         case verbatim(String)
         case anyTextStorage(AnyTextStorage)
@@ -120,12 +120,12 @@ public struct Text: Equatable {
 
     let storage: Storage
 
-    public enum Case: Hashable {
+    public enum Case : Hashable {
         case lowercase
         case uppercase
     }
 
-    public struct LineStyle: Hashable {
+    public struct LineStyle : Hashable {
         public struct Pattern: Equatable, Sendable {
             enum UnderlineStyle {
                 case solid
@@ -156,7 +156,7 @@ public struct Text: Equatable {
         }
     }
 
-    enum Modifier: Equatable {
+    enum Modifier : Equatable {
         case font(Font)
         case fontWeight(Font.Weight)
         case foregroundColor(Color)
@@ -279,52 +279,35 @@ extension Text {
     }
 }
 
-extension Text: View {
+extension Text : View {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let generator = GenericViewGenerator(graph: view, inputs: inputs) { content, inputs in
-            TextViewContext(view: content, inputs: inputs.base, graph: view)
+        let view = TypedUnaryViewGenerator(baseInputs: inputs.base) { inputs in
+            TextViewContext(graph: view, inputs: inputs)
         }
-        return _ViewOutputs(view: generator)
+        return _ViewOutputs(view: view)
     }
 }
 
-extension Text: _PrimitiveView {
+extension Text : _PrimitiveView {
 }
 
-private class TextViewContext: ViewContext {
-    var text: Text
+private class TextViewContext : PrimitiveViewContext<Text> {
     var resolvedText: GraphicsContext.ResolvedText?
     var primaryStyle: AnyShapeStyle?
 
-    init(view: Text, inputs: _GraphInputs, graph: _GraphValue<Text>) {
-        self.text = view
-        super.init(inputs: inputs, graph: graph)
+    override func updateView(_ view: inout Text) {
+        self.resolvedText = nil
 
         if self.inputs.environment.font == nil {
             self.inputs.environment.font = .system(.body)
         }
     }
 
-    override func validatePath<T>(encloser: T, graph: _GraphValue<T>) -> Bool {
-        self._validPath = false
-        if graph.value(atPath: self.graph, from: encloser) is Text {
-            self._validPath = true
-            return true
-        }
-        return false
-    }
-
-    override func updateContent<T>(encloser: T, graph: _GraphValue<T>) {
-        if let view = graph.value(atPath: self.graph, from: encloser) as? Text {
-            self.text = view
-        } else {
-            fatalError("Unable to recover Text")
-        }
-    }
-
     override func loadResources(_ context: GraphicsContext) {
-        self.resolvedText = context.resolve(self.text)
-        self.sharedContext.needsLayout = true
+        if let text = self.view {
+            self.resolvedText = context.resolve(text)
+            self.sharedContext.needsLayout = true
+        }
         super.loadResources(context)
 
         self.primaryStyle = self.viewStyles().foregroundStyle.primary
@@ -360,8 +343,10 @@ private class TextViewContext: ViewContext {
         let bounds = self.bounds
         if bounds.width > 0 && bounds.height > 0 {
             if self.resolvedText == nil {
-                self.resolvedText = context.resolve(self.text)
-                self.sharedContext.needsLayout = true
+                if let text = self.view {
+                    self.resolvedText = context.resolve(text)
+                    self.sharedContext.needsLayout = true
+                }
             }
             if let resolvedText {
                 if let style = self.primaryStyle {

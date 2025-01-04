@@ -2,7 +2,7 @@
 //  File: BackgroundModifier.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -18,12 +18,17 @@ public struct _BackgroundModifier<Background> : ViewModifier where Background : 
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
         let outputs = body(_Graph(), inputs)
-        if let content = outputs.view {
+        if let body = outputs.view?.makeView() {
             var backgroundInputs = inputs
             backgroundInputs.base.properties.replace(item: DefaultLayoutPropertyItem(layout: ZStackLayout()))
-            if let background = makeView(view: modifier[\.background], inputs: backgroundInputs).view {
-                let generator = BackgroundViewContext.Generator(content: content, background: background, graph: modifier, baseInputs: inputs.base)
-                return _ViewOutputs(view: generator)
+            if let background = makeView(view: modifier[\.background], inputs: backgroundInputs).view?.makeView() {
+                let view = TypedUnaryViewGenerator(baseInputs: inputs.base) { inputs in
+                    BackgroundViewContext(graph: modifier,
+                                          inputs: inputs,
+                                          body: body,
+                                          background: background)
+                }
+                return _ViewOutputs(view: view)
             }
         }
         return outputs
@@ -49,9 +54,16 @@ public struct _BackgroundStyleModifier<Style> : ViewModifier where Style : Shape
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
         let outputs = body(_Graph(), inputs)
-        if let content = outputs.view, let background = makeView(view: modifier[\._shapeView], inputs: inputs).view {
-            let generator = BackgroundViewContext.Generator(content: content, background: background, graph: modifier, baseInputs: inputs.base)
-            return _ViewOutputs(view: generator)
+        if let body = outputs.view?.makeView() {
+            if let background = makeView(view: modifier[\._shapeView], inputs: inputs).view?.makeView() {
+                let view = TypedUnaryViewGenerator(baseInputs: inputs.base) { inputs in
+                    BackgroundViewContext(graph: modifier,
+                                          inputs: inputs,
+                                          body: body,
+                                          background: background)
+                }
+                return _ViewOutputs(view: view)
+            }
         }
         return outputs
     }
@@ -79,9 +91,16 @@ public struct _BackgroundShapeModifier<Style, Bounds> : ViewModifier where Style
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
         let outputs = body(_Graph(), inputs)
-        if let content = outputs.view, let background = makeView(view: modifier[\._shapeView], inputs: inputs).view {
-            let generator = BackgroundViewContext.Generator(content: content, background: background, graph: modifier, baseInputs: inputs.base)
-            return _ViewOutputs(view: generator)
+        if let body = outputs.view?.makeView() {
+            if let background = makeView(view: modifier[\._shapeView], inputs: inputs).view?.makeView() {
+                let view = TypedUnaryViewGenerator(baseInputs: inputs.base) { inputs in
+                    BackgroundViewContext(graph: modifier,
+                                          inputs: inputs,
+                                          body: body,
+                                          background: background)
+                }
+                return _ViewOutputs(view: view)
+            }
         }
         return outputs
     }
@@ -109,9 +128,16 @@ public struct _InsettableBackgroundShapeModifier<Style, Bounds> : ViewModifier w
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
         let outputs = body(_Graph(), inputs)
-        if let content = outputs.view, let background = makeView(view: modifier[\._shapeView], inputs: inputs).view {
-            let generator = BackgroundViewContext.Generator(content: content, background: background, graph: modifier, baseInputs: inputs.base)
-            return _ViewOutputs(view: generator)
+        if let body = outputs.view?.makeView() {
+            if let background = makeView(view: modifier[\._shapeView], inputs: inputs).view?.makeView() {
+                let view = TypedUnaryViewGenerator(baseInputs: inputs.base) { inputs in
+                    BackgroundViewContext(graph: modifier,
+                                          inputs: inputs,
+                                          body: body,
+                                          background: background)
+                }
+                return _ViewOutputs(view: view)
+            }
         }
         return outputs
     }
@@ -177,88 +203,76 @@ extension _BackgroundModifier : _BackgroundModifierWithAlignment {
 extension _BackgroundStyleModifier : _BackgroundModifierWithIgnoresSafeAreaEdges {
 }
 
-private class BackgroundViewContext<Modifier> : ViewModifierContext<Modifier> {
+private class BackgroundViewContext<Modifier> : ViewModifierContext<Modifier> where Modifier : ViewModifier {
     let background: ViewContext
-    let alignment: Alignment
-    let ignoresSafeAreaEdges: Edge.Set
 
-    struct Generator : ViewGenerator {
-        var content: any ViewGenerator
-        var background: any ViewGenerator
-        let graph: _GraphValue<Modifier>
-        var baseInputs: _GraphInputs
-
-        func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
-            if let content = content.makeView(encloser: encloser, graph: graph) {
-                if let modifier = graph.value(atPath: self.graph, from: encloser) {
-                    if let background = background.makeView(encloser: modifier, graph: self.graph) {
-                        return BackgroundViewContext(content: content,
-                                                     background: background,
-                                                     modifier: modifier,
-                                                     inputs: baseInputs,
-                                                     graph: self.graph)
-                    }
-                } else {
-                    fatalError("Unable to recover modifier")
-                }
-                return content
-            }
-            return nil
-        }
-
-        mutating func mergeInputs(_ inputs: _GraphInputs) {
-            content.mergeInputs(inputs)
-            background.mergeInputs(inputs)
-            baseInputs.mergedInputs.append(inputs)
-        }
-    }
-
-    init(content: ViewContext, background: ViewContext, modifier: Modifier, inputs: _GraphInputs, graph: _GraphValue<Modifier> ) {
+    init(graph: _GraphValue<Modifier>, inputs: _GraphInputs, body: ViewContext, background: ViewContext) {
         self.background = background
-        if let alignmentModifier = modifier as? _BackgroundModifierWithAlignment {
-            self.alignment = alignmentModifier.alignment
-        } else {
-            self.alignment = .center
-        }
-        if let ignoresSafeAreaEdgesModifier = modifier as? _BackgroundModifierWithIgnoresSafeAreaEdges {
-            self.ignoresSafeAreaEdges = ignoresSafeAreaEdgesModifier.ignoresSafeAreaEdges
-        } else {
-            self.ignoresSafeAreaEdges = .all
-        }
-        super.init(content: content, modifier: modifier, inputs: inputs, graph: graph)
-        self._debugDraw = false
-        self.background._debugDraw = false
+        defer { self.background.superview = self }
+
+        super.init(graph: graph, inputs: inputs, body: body)
     }
-    
-    override func loadResources(_ context: GraphicsContext) {
-        super.loadResources(context)
-        background.loadResources(context)
+
+    deinit {
+        self.background.superview = nil
+    }
+
+    override func updateContent() {
+        super.updateContent()
+        if self.view != nil {
+            background.updateContent()
+        }
+    }
+
+    override func validate() -> Bool {
+        if super.validate() {
+            background.validate()
+            return true
+        }
+        return false
     }
 
     override func layoutSubviews() {
         super.layoutSubviews()
 
+        guard let modifier else { fatalError("Invalid view modifier") }
+
+        let alignment: Alignment
+        if let alignmentModifier = modifier as? _BackgroundModifierWithAlignment {
+            alignment = alignmentModifier.alignment
+        } else {
+            alignment = .center
+        }
+
         let frame = self.bounds
         var position = frame.origin
         var anchor = UnitPoint()
-        switch self.alignment.horizontal {
-        case .leading:      position.x = frame.minX
+        switch alignment.horizontal {
+        case .leading:
+            position.x = frame.minX
             anchor.x = 0
-        case .center:       position.x = frame.midX
+        case .center:
+            position.x = frame.midX
             anchor.x = 0.5
-        case .trailing:     position.x = frame.maxX
+        case .trailing:
+            position.x = frame.maxX
             anchor.x = 1
-        default:            position.x = frame.midX
+        default:
+            position.x = frame.midX
             anchor.x = 0.5
         }
-        switch self.alignment.vertical {
-        case .top:          position.y = frame.minY
+        switch alignment.vertical {
+        case .top:
+            position.y = frame.minY
             anchor.y = 0
-        case .center:       position.y = frame.midY
+        case .center:
+            position.y = frame.midY
             anchor.y = 0.5
-        case .bottom:       position.y = frame.maxY
+        case .bottom:
+            position.y = frame.maxY
             anchor.y = 1
-        default:            position.y = frame.midY
+        default:
+            position.y = frame.midY
             anchor.y = 0.5
         }
         let proposal = ProposedViewSize(width: frame.width, height: frame.height)
@@ -274,24 +288,11 @@ private class BackgroundViewContext<Modifier> : ViewModifierContext<Modifier> {
             return
         }
 
-        let drawingFrame = self.background.frame.offsetBy(dx: frame.minX,
-                                                          dy: frame.minY)
+        let drawingFrame = background.frame.offsetBy(dx: frame.minX,
+                                                              dy: frame.minY)
         if frame.intersection(drawingFrame).isNull {
             return
         }
         background.drawView(frame: drawingFrame, context: context)
-    }
-
-    override func hitTest(_ location: CGPoint) -> ViewContext? {
-        let loc = location.applying(self.background.transformToContainer.inverted())
-        if let view = self.background.hitTest(loc) {
-            return view
-        }
-        return super.hitTest(location)
-    }
-
-    override func update(transform t: AffineTransform) {
-        super.update(transform: t)
-        self.background.update(transform: self.transformToRoot)
     }
 }

@@ -2,13 +2,12 @@
 //  File: ShapeView.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
-import VVD
 
-public struct _ShapeView<Content, Style> : View where Content: Shape, Style : ShapeStyle {
+public struct _ShapeView<Content, Style> : View where Content : Shape, Style : ShapeStyle {
     public var shape: Content
     public var style: Style
     public var fillStyle: FillStyle
@@ -20,60 +19,53 @@ public struct _ShapeView<Content, Style> : View where Content: Shape, Style : Sh
     }
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let generator = GenericViewGenerator(graph: view, inputs: inputs) { content, inputs in
-            ShapeViewContext(view: content, inputs: inputs.base, graph: view)
+        let view = TypedUnaryViewGenerator(baseInputs: inputs.base) { inputs in
+            ShapeViewContext<Content, Style>(graph: view, inputs: inputs)
         }
-        return _ViewOutputs(view: generator)
+        return _ViewOutputs(view: view)
     }
 
     public typealias Body = Never
 }
 
-extension _ShapeView: _PrimitiveView {}
+extension _ShapeView : _PrimitiveView {
+}
 
-private class ShapeViewContext<Content, Style>: ViewContext where Content: Shape, Style: ShapeStyle {
+private class ShapeViewContext<Content, Style> : PrimitiveViewContext<_ShapeView<Content, Style>> where Content : Shape, Style : ShapeStyle {
     typealias ShapeView = _ShapeView<Content, Style>
-    let view: ShapeView
-    var shape: Content          { view.shape }
-    var style: Style            { view.style }
-    var fillStyle: FillStyle    { view.fillStyle }
-
-    init(view: _ShapeView<Content, Style>, inputs: _GraphInputs, graph: _GraphValue<ShapeView>) {
-        self.view = view
-        super.init(inputs: inputs, graph: graph)
-    }
-
-    override func validatePath<T>(encloser: T, graph: _GraphValue<T>) -> Bool {
-        self._validPath = false
-        if graph.value(atPath: self.graph, from: encloser) is ShapeView {
-            self._validPath = true
-            return true
-        }
-        return false
-    }
-
-    override func updateContent<T>(encloser: T, graph: _GraphValue<T>) {
-    }
 
     override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
-        self.shape.sizeThatFits(proposal)
+        if let shape = self.view?.shape {
+            return shape.sizeThatFits(proposal)
+        }
+        return super.sizeThatFits(proposal)
     }
 
     override func draw(frame: CGRect, context: GraphicsContext) {
-        if let drawer = self.shape as? ShapeDrawer {
-            drawer._draw(in: frame, style: self.style, fillStyle: self.fillStyle, context: context)
-        } else {
-            let path = self.shape.path(in: frame)
-            context.fill(path, with: .style(self.style), style: self.fillStyle)
+        super.draw(frame: frame, context: context)
+        if let view {
+            let style = view.style
+            let fillStyle = view.fillStyle
+
+            if let drawer = view.shape as? ShapeDrawer {
+                drawer._draw(in: frame, style: style, fillStyle: fillStyle, context: context)
+            } else {
+                let path = view.shape.path(in: frame)
+                context.fill(path, with: .style(style), style: fillStyle)
+            }
         }
     }
 
     override func hitTest(_ location: CGPoint) -> ViewContext? {
         if self.bounds.contains(location) {
-            if self.shape is ShapeDrawer == false {
-                let path = self.shape.path(in: frame)
-                if path.contains(location, eoFill: self.fillStyle.isEOFilled) {
-                    return self
+            if let view {
+                let fillStyle = view.fillStyle
+
+                if view.shape is ShapeDrawer == false {
+                    let path = view.shape.path(in: frame)
+                    if path.contains(location, eoFill: fillStyle.isEOFilled) {
+                        return self
+                    }
                 }
             }
         }

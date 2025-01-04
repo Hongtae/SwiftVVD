@@ -26,6 +26,8 @@ final class SharedContext: @unchecked Sendable {
     var commandQueue: CommandQueue? // render queue for window swap-chain
     var graphicsContext: GraphicsContext?
 
+    var viewContentRoot: (value: Any, graph: _GraphValue<Any>)?
+
     var contentBounds: CGRect
     var contentScaleFactor: CGFloat
     var needsLayout: Bool

@@ -2,7 +2,7 @@
 //  File: WindowContext.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -63,7 +63,7 @@ final class WindowContext<Content> : WindowProxy, Scene, _PrimitiveScene, Window
                     ($0.state, $0.config)
                 }
 
-                guard let view = self.view
+                guard let view = self.view, view.isValid
                 else {
                     if state.visible, let swapChain {
                         var renderPass = swapChain.currentRenderPassDescriptor()
@@ -242,15 +242,16 @@ final class WindowContext<Content> : WindowProxy, Scene, _PrimitiveScene, Window
 
         let outputs = Content._makeView(view: graph, inputs: inputs)
 
+        self.sharedContext.viewContentRoot = (content(), graph.unsafeCast(to: Any.self))
+
         // initialize root-view instance
-        let content = content()
-        self.view = outputs.view?.makeView(encloser: content, graph: graph)
-        if let view {
-            if view.validatePath(encloser: content, graph: graph) == false {
-                fatalError("Invalid path")
-            }
-            view.resolveGraphInputs(encloser: content, graph: graph)
-        }
+        self.view = outputs.view?.makeView()
+         if let view {
+             view.updateContent()
+             if view.validate() == false {
+                 Log.err("View(type:\(Content.self) validation failed.")
+             }
+         }
     }
 
     deinit {
@@ -426,7 +427,7 @@ final class WindowContext<Content> : WindowProxy, Scene, _PrimitiveScene, Window
 
         if event.type == .wheel {
             _ = view.handleMouseWheel(at: event.location,
-                                                delta: event.delta)
+                                      delta: event.delta)
             return
         }
 

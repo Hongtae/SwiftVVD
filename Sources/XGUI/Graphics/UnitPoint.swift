@@ -2,7 +2,7 @@
 //  File: UnitPoint.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -33,7 +33,7 @@ public struct UnitPoint : Hashable, Sendable {
     public static let bottomTrailing    = UnitPoint(x: 1.0, y: 1.0)
 }
 
-extension UnitPoint: Animatable {
+extension UnitPoint : Animatable {
     public typealias AnimatableData = AnimatablePair<CGFloat, CGFloat>
     public var animatableData: AnimatableData {
         get { .init(x, y) }

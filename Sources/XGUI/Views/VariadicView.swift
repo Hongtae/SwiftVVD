@@ -2,7 +2,7 @@
 //  File: VariadicView.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -14,39 +14,19 @@ public struct _VariadicView_Children : View {
     public typealias Body = Never
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-
-        struct Generator : ViewListGenerator {
-            let graph: _GraphValue<_VariadicView_Children>
-            var inputs: _ViewListInputs
-
-            func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
-                if let view = graph.value(atPath: self.graph, from: encloser) {
-                    let inputs = self.inputs.inputs
-                    return (0..<view.elements.count).compactMap { index in
-                        Element._makeView(view: self.graph[\.elements[index]], inputs: inputs).view
-                    }
-                }
-                fatalError("Unable to recover _VariadicView_Children")
-                //return []
-            }
-
-            mutating func mergeInputs(_ inputs: _GraphInputs) {
-                self.inputs.base.mergedInputs.append(inputs)
-            }
-        }
-        return _ViewListOutputs(viewList: Generator(graph: view, inputs: inputs))
+        _ViewListOutputs(views: ChildrenViewListGenerator(graph: view, baseInputs: inputs.base))
     }
 
     let elements: [Element]
 }
 
 extension _VariadicView_Children : RandomAccessCollection {
-    public struct Element: View, Identifiable {
+    public struct Element : View, Identifiable {
         public var id: AnyHashable {
             viewID
         }
         public func id<ID>(as _: ID.Type = ID.self) -> ID? where ID: Hashable {
-            nil
+            return nil
         }
         public subscript<Trait>(key: Trait.Type) -> Trait.Value where Trait: _ViewTraitKey {
             get {
@@ -60,23 +40,10 @@ extension _VariadicView_Children : RandomAccessCollection {
             }
         }
         public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-            struct Generator : ViewGenerator {
-                let graph: _GraphValue<Element>
-                var inputs: _ViewInputs
-                func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
-                    if let element = graph.value(atPath: self.graph, from: encloser) {
-                        var view = element.view
-                        view.mergeInputs(self.inputs.base)
-                        return view.makeView(encloser: encloser, graph: graph)
-                    }
-                    fatalError("Unable to recover element")
-                }
-                mutating func mergeInputs(_ inputs: _GraphInputs) {
-                    self.inputs.base.mergedInputs.append(inputs)
-                }
+            let view = TypedUnaryViewGenerator(baseInputs: inputs.base) { inputs in
+                ChildrenElementViewContext(graph: view, inputs: inputs)
             }
-            let generator = Generator(graph: view, inputs: inputs)
-            return _ViewOutputs(view: generator)
+            return _ViewOutputs(view: view)
         }
 
         public typealias ID = AnyHashable
@@ -95,9 +62,9 @@ extension _VariadicView_Children : RandomAccessCollection {
     public typealias SubSequence = Slice<_VariadicView_Children>
     public typealias Indices = Range<Int>
 
-    init(_ viewList: [any ViewGenerator]) {
-        self.elements = viewList.indices.map { index in
-            Element(view: viewList[index],  traits: [:], viewID: index)
+    init(list: [any ViewGenerator]) {
+        self.elements = list.enumerated().map { index, view in
+            Element(view: view, traits: [:], viewID: index)
         }
     }
 }
@@ -109,7 +76,7 @@ extension _VariadicView_Children.Element : _PrimitiveView {
 }
 
 public protocol _VariadicView_ViewRoot : _VariadicView_Root {
-    associatedtype Body: View
+    associatedtype Body : View
     @ViewBuilder func body(children: _VariadicView.Children) -> Self.Body
 
     static func _makeView(root: _GraphValue<Self>, inputs: _ViewInputs, body: (_Graph, _ViewInputs) -> _ViewListOutputs) -> _ViewOutputs
@@ -128,288 +95,103 @@ public protocol _VariadicView_UnaryViewRoot : _VariadicView_ViewRoot {
 public protocol _VariadicView_MultiViewRoot : _VariadicView_ViewRoot {
 }
 
-private protocol _VariadicView_ViewRoot_MakeChildren {
-    func makeChildren<T>(encloser: T, graph: _GraphValue<T>) -> [ViewContext]
-    func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator]
-    mutating func mergeInputs(_ inputs: _GraphInputs)
-}
-
-private struct _VariadicView_ViewRoot_MakeChildrenProxy<Root> : _VariadicView_ViewRoot_MakeChildren where Root : _VariadicView_ViewRoot {
-    let graph: _GraphValue<Root>
-    var body: _ViewListOutputs
-    var inputs: _ViewListInputs
-
-    struct Proxy {
-        let root: Root
-        let views: [any ViewGenerator]
-        var children:  _VariadicView.Children {
-            _VariadicView.Children(views)
-        }
-        var body: Root.Body {
-            root.body(children: children)
-        }
-    }
-
-    class ProxyContext<Content> {
-        var content: Content  // original content
-        let contentGraph: _GraphValue<Content>
-        var proxy: Proxy      // proxy content (for content replacement)
-        let proxyGraph: _GraphValue<Proxy>
-
-        func validatePath<T>(encloser: T, graph: _GraphValue<T>) -> Bool {
-            graph.value(atPath: self.contentGraph, from: encloser) != nil
-        }
-
-        func updateContent<T>(encloser: T, graph: _GraphValue<T>) {
-            if let value = graph.value(atPath: self.contentGraph, from: encloser) {
-                self.content = value
-            } else {
-                fatalError("Unable to recover Content: \(Content.self)")
-            }
-        }
-
-        init(content: Content, contentGraph: _GraphValue<Content>, proxy: Proxy, proxyGraph: _GraphValue<Proxy>) {
-            self.content = content
-            self.contentGraph = contentGraph
-            self.proxy = proxy
-            self.proxyGraph = proxyGraph
-        }
-    }
-
-    private struct ApplyProxyView<Content, Generator> : ViewGenerator where Generator : ViewGenerator {
-        let proxy: ProxyContext<Content>
-        var view: Generator
-        var graph: _GraphValue<Content> { proxy.contentGraph }
-
-        struct _ViewProxy : ViewProxy {
-            let proxy: ProxyContext<Content>
-            var content: Proxy { proxy.proxy }
-            var contentGraph: _GraphValue<Proxy> { proxy.proxyGraph }
-
-            func validatePath<T>(encloser: T, graph: _GraphValue<T>) -> Bool {
-                proxy.validatePath(encloser: encloser, graph: graph)
-            }
-            func updateContent<T>(encloser: T, graph: _GraphValue<T>) {
-                proxy.updateContent(encloser: encloser, graph: graph)
-            }
-        }
-
-        func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
-            let view = view.makeView(encloser: proxy.proxy, graph: proxy.proxyGraph)
-            if let view, view.graph.isDescendant(of: proxy.proxyGraph) {
-                // this view must be validated using the proxy.
-                return ProxyViewContext(proxy: _ViewProxy(proxy: proxy),
-                                        view: view,
-                                        inputs: view.inputs,
-                                        graph: self.graph)
-            }
-            return view
-        }
-        mutating func mergeInputs(_ inputs: _GraphInputs) {
-            view.mergeInputs(inputs)
-        }
-    }
-
-    struct BypassProxyView<Content, Generator> : ViewGenerator where Generator : ViewGenerator {
-        let proxy: ProxyContext<Content>
-        var view: Generator
-        var graph: _GraphValue<Generator.Content> { view.graph }
-
-        struct _ViewProxy : ViewProxy {
-            let proxy: ProxyContext<Content>
-            var content: Content { proxy.content }
-            var contentGraph: _GraphValue<Content> { proxy.contentGraph }
-            func validatePath<T>(encloser: T, graph: _GraphValue<T>) -> Bool { true }
-            func updateContent<T>(encloser: T, graph: _GraphValue<T>) {}
-        }
-
-        func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
-            if let view = view.makeView(encloser: proxy.content, graph: proxy.contentGraph) {
-                // this view must be validated by bypassing the proxy.
-                return ProxyViewContext(proxy: _ViewProxy(proxy: proxy),
-                                        view: view,
-                                        inputs: view.inputs,
-                                        graph: proxy.contentGraph)
-            }
-            return nil
-        }
-
-        mutating func mergeInputs(_ inputs: _GraphInputs) {
-            view.mergeInputs(inputs)
-        }
-    }
-
-    func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
-        if let root = graph.value(atPath: self.graph, from: encloser) {
-            // get VariadicTree object from encloser.
-            var tree: Any = encloser
-            var treeGraph: _GraphValue<Any> = graph.unsafeCast(to: Any.self)
-            if let parent = self.graph.parent, treeGraph != parent {
-                if let view = graph.value(atPath: parent, from: encloser) {
-                    tree = view
-                    treeGraph = parent
-                } else {
-                    fatalError("Unable to recover _VariadicView.Tree")
-                }
-            }
-
-            let proxyGraph = _GraphValue<Proxy>.root()
-            let proxyContext = ProxyContext(content: tree,
-                                            contentGraph: treeGraph,
-                                            proxy: Proxy(root: root, views: []),
-                                            proxyGraph: proxyGraph)
-
-            let views: [any ViewGenerator] = body.viewList.makeViewList(encloser: tree, graph: treeGraph).map {
-                // redirect encloser to view (bypass proxy)
-                func makeGenerator<G: ViewGenerator>(gen: G) -> any ViewGenerator {
-                    BypassProxyView(proxy: proxyContext, view: gen)
-                }
-                return makeGenerator(gen: $0)
-            }
-
-            let proxy = Proxy(root: root, views: views)
-            proxyContext.proxy = proxy
-
-            if Root.Body.self is Never.Type {
-                let listOutputs = _VariadicView_Children._makeViewList(view: proxyGraph[\.children], inputs: self.inputs)
-                return listOutputs.viewList.makeViewList(encloser: proxy, graph: proxyGraph).map {
-                    func makeGenerator<G: ViewGenerator>(gen: G) -> any ViewGenerator {
-                        ApplyProxyView(proxy: proxyContext, view: gen)
-                    }
-                    return makeGenerator(gen: $0)
-                }
-            } else {
-                let listOutputs = Root.Body._makeViewList(view: proxyGraph[\.body], inputs: self.inputs)
-                return listOutputs.viewList.makeViewList(encloser: proxy, graph: proxyGraph).map {
-                    func makeGenerator<G: ViewGenerator>(gen: G) -> any ViewGenerator {
-                        ApplyProxyView(proxy: proxyContext, view: gen)
-                    }
-                    return makeGenerator(gen: $0)
-                }
-            }
-        }
-        fatalError("Unable to recover _VariadicView_ViewRoot")
-    }
-
-    func makeChildren<T>(encloser: T, graph: _GraphValue<T>) -> [ViewContext] {
-        makeViewList(encloser: encloser, graph: graph).compactMap {
-            $0.makeView(encloser: encloser, graph: graph)
-        }
-    }
-}
-
-extension _VariadicView_ViewRoot_MakeChildrenProxy : ViewGenerator {
-    func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
-        fatalError("This method should not be called.")
-    }
-
-    mutating func mergeInputs(_ inputs: _GraphInputs) {
-        self.body.viewList.mergeInputs(inputs)
-        self.inputs.base.mergedInputs.append(inputs)
-    }
-}
-
-extension _VariadicView_ViewRoot_MakeChildrenProxy : ViewListGenerator {
-}
-
-private protocol _VariadicView_ViewRoot_MakeChildren_UnaryViewRoot : ViewListGenerator {
-    func makeLayout<T>(encloser: T, graph: _GraphValue<T>) -> (any Layout)?
-}
-
-private struct _VariadicView_ViewRoot_MakeChildren_UnaryViewRootProxy<Root> : _VariadicView_ViewRoot_MakeChildren_UnaryViewRoot where Root : _VariadicView_UnaryViewRoot {
-    var graph: _GraphValue<Root>
-    var proxy: any _VariadicView_ViewRoot_MakeChildren
-
-    func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
-        proxy.makeViewList(encloser: encloser, graph: graph)
-    }
-
-    func makeLayout<T>(encloser: T, graph: _GraphValue<T>) -> (any Layout)? {
-        if let layout = proxy as? (any _VariadicView_ViewRoot_MakeChildren_LayoutRoot) {
-            return layout.makeLayout(encloser: encloser, graph: graph)
-        }
-        return nil
-    }
-
-    mutating func mergeInputs(_ inputs: _GraphInputs) {
-        proxy.mergeInputs(inputs)
-    }
-}
-
-private protocol _VariadicView_ViewRoot_MakeChildren_MultiViewRoot : ViewGenerator {
-    func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator]
-}
-
-struct _VariadicView_ViewRoot_MakeChildren_MultiViewRootProxy<Root> : _VariadicView_ViewRoot_MakeChildren_MultiViewRoot where Root : _VariadicView_MultiViewRoot {
-    private var proxy: _VariadicView_ViewRoot_MakeChildrenProxy<Root>
-    var graph: _GraphValue<Root> { proxy.graph }
-
-    init(graph: _GraphValue<Root>, body: _ViewListOutputs, inputs: _ViewListInputs) {
-        self.proxy = .init(graph: graph, body: body, inputs: inputs)
-    }
-
-    func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
-        proxy.makeViewList(encloser: encloser, graph: graph)
-    }
-
-    func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
-        fatalError("This method should not be called.")
-    }
-
-    mutating func mergeInputs(_ inputs: _GraphInputs) {
-        proxy.mergeInputs(inputs)
-    }
-}
-
-private protocol _VariadicView_ViewRoot_MakeChildren_LayoutRoot : _VariadicView_ViewRoot_MakeChildren, ViewGenerator {
-    func makeLayout<T>(encloser: T, graph: _GraphValue<T>) -> any Layout
-}
-
-struct _VariadicView_ViewRoot_MakeChildren_LayoutRootProxy<Root> : _VariadicView_ViewRoot_MakeChildren_LayoutRoot where Root :  _VariadicView.UnaryViewRoot {
-    private var proxy: _VariadicView_ViewRoot_MakeChildrenProxy<Root>
-    var graph: _GraphValue<Root> { proxy.graph }
-    let layout: (Root) -> any Layout
-
-    init(graph: _GraphValue<Root>, body: _ViewListOutputs, inputs: _ViewListInputs, layout: @escaping (Root)-> any Layout) {
-        self.proxy = .init(graph: graph, body: body, inputs: inputs)
-        self.layout = layout
-    }
-
-    func makeLayout<T>(encloser: T, graph: _GraphValue<T>) -> any Layout {
-        if let root = graph.value(atPath: self.graph, from: encloser) {
-            return layout(root)
-        }
-        fatalError("Unable to recover LayoutRoot")
-    }
-
-    func makeChildren<T>(encloser: T, graph: _GraphValue<T>) -> [ViewContext] {
-        proxy.makeChildren(encloser: encloser, graph: graph)
-    }
-
-    func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
-        proxy.makeViewList(encloser: encloser, graph: graph)
-    }
-
-    func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
-        fatalError("This method should not be called.")
-    }
-
-    mutating func mergeInputs(_ inputs: _GraphInputs) {
-        proxy.mergeInputs(inputs)
-    }
-}
-
 extension _VariadicView_ViewRoot {
+    fileprivate var _proxy: ViewRootProxy<Self> {
+        .init(root: self)
+    }
+
     public static func _makeView(root: _GraphValue<Self>, inputs: _ViewInputs, body: (_Graph, _ViewInputs) -> _ViewListOutputs) -> _ViewOutputs {
         let body = body(_Graph(), inputs)
-        let generator = _VariadicView_ViewRoot_MakeChildrenProxy(graph: root, body: body, inputs: inputs.listInputs)
-        return _ViewOutputs(view: generator)
+        let baseInputs = inputs.base
+
+        if Body.self is Never.Type { // No proxy is required.
+            typealias _UnaryViewRoot_Layout = _VariadicView_UnaryViewRoot & Layout
+            if let layoutType = self as? any _UnaryViewRoot_Layout.Type {
+                if let staticLsit = body.views as? StaticViewList {
+                    let views = staticLsit.views.map { $0.makeView() }
+                    func makeView<L : _UnaryViewRoot_Layout>(_: L.Type, inputs: _GraphInputs) -> ViewContext {
+                        UnaryViewRootLayoutStaticViewGroupContext(graph: root.unsafeCast(to: L.self),
+                                                                  inputs: inputs,
+                                                                  subviews: views)
+                    }
+                    let view = TypedUnaryViewGenerator(baseInputs: baseInputs) { inputs in
+                        makeView(layoutType, inputs: inputs)
+                    }
+                    return _ViewOutputs(view: view)
+                } else {
+                    func makeView<L : _UnaryViewRoot_Layout>(_: L.Type, inputs: _GraphInputs) -> ViewContext {
+                        UnaryViewRootLayoutDynamicViewGroupContext(graph: root.unsafeCast(to: L.self),
+                                                                   inputs: inputs,
+                                                                   body: body.views)
+                    }
+                    let view = TypedUnaryViewGenerator(baseInputs: baseInputs) { inputs in
+                        makeView(layoutType, inputs: inputs)
+                    }
+                    return _ViewOutputs(view: view)
+                }
+            } else {    // non-layout root
+                if let staticLsit = body.views as? StaticViewList {
+                    let views = staticLsit.views.map { $0.makeView() }
+                    let view = TypedUnaryViewGenerator(baseInputs: baseInputs) { inputs in
+                        StaticViewGroupContext(graph: root, inputs: inputs, subviews: views)
+                    }
+                    return _ViewOutputs(view: view)
+                } else {
+                    let view = TypedUnaryViewGenerator(baseInputs: baseInputs) { inputs in
+                        DynamicViewGroupContext(graph: root, inputs: inputs, body: body.views)
+                    }
+                    return _ViewOutputs(view: view)
+                }
+            }
+        }
+
+        let proxy = root[\._proxy]
+        let proxyBody = proxy[\.body]
+        let outputs = Body._makeViewList(view: proxyBody, inputs: inputs.listInputs)
+
+        if let staticList = outputs.views as? StaticViewListGenerator {
+            let subviews = staticList.views.map { $0.makeView() }
+            let view = TypedUnaryViewGenerator(baseInputs: baseInputs) { inputs in
+                ViewRootProxyStaticGroupContext(graph: proxy, inputs: inputs, children: body.views, subviews: subviews)
+            }
+            return _ViewOutputs(view: view)
+        } else {
+            let view = TypedUnaryViewGenerator(baseInputs: baseInputs) { inputs in
+                ViewRootProxyDynamicGroupContext(graph: proxy, inputs: inputs, children: body.views, body: outputs.views)
+            }
+            return _ViewOutputs(view: view)
+        }
     }
 
     public static func _makeViewList(root: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
         let body = body(_Graph(), inputs)
-        let generator = _VariadicView_ViewRoot_MakeChildrenProxy(graph: root, body: body, inputs: inputs)
-        return _ViewListOutputs(viewList: generator)
+
+        if Body.self is Never.Type { // No proxy is required.
+            return body
+        }
+
+        let proxy = root[\._proxy]
+        let proxyBody = proxy[\.body]
+        let outputs = Body._makeViewList(view: proxyBody, inputs: inputs)
+        let baseInputs = inputs.base
+
+        if let staticList = outputs.views as? StaticViewListGenerator {
+            let subviews = staticList.views.map {
+                let view = $0.makeView()
+                return TypedUnaryViewGenerator(baseInputs: baseInputs) { inputs in
+                    ViewElementProxyWrapper(graph: proxy, inputs: inputs, children: body.views, body: view)
+                }
+            }
+            return _ViewListOutputs(views: StaticMultiViewGenerator(graph: root,
+                                                                    baseInputs: baseInputs,
+                                                                    views: subviews))
+        } else {
+            let view = ViewRootProxyDynamicMultiViewGenerator(graph: proxy,
+                                                              baseInputs: baseInputs,
+                                                              children: body.views,
+                                                              body: outputs.views)
+            return _ViewListOutputs(views: view)
+        }
     }
 }
 
@@ -418,19 +200,48 @@ extension _VariadicView_UnaryViewRoot {
         let outputs = Self._makeView(root: root, inputs: inputs.inputs) { graph, inputs in
             body(graph, inputs.listInputs)
         }
-        if let proxy = outputs.view as? _VariadicView_ViewRoot_MakeChildren {
-            let generator = _VariadicView_ViewRoot_MakeChildren_UnaryViewRootProxy(graph: root, proxy: proxy)
-            return _ViewListOutputs(viewList: generator)
-        }
-        return _ViewListOutputs(viewList: .staticList([outputs.view].compactMap { $0 } ))
+        return _ViewListOutputs(views: .staticList(outputs.view))
     }
 }
 
 extension _VariadicView_MultiViewRoot {
     public static func _makeView(root: _GraphValue<Self>, inputs: _ViewInputs, body: (_Graph, _ViewInputs) -> _ViewListOutputs) -> _ViewOutputs {
         let body = body(_Graph(), inputs)
-        let generator = _VariadicView_ViewRoot_MakeChildren_MultiViewRootProxy(graph: root, body: body, inputs: inputs.listInputs)
-        return _ViewOutputs(view: generator)
+        let baseInputs = inputs.base
+
+        if Body.self is Never.Type { // No proxy is required.
+            if let staticLsit = body.views as? StaticViewList {
+                return _ViewOutputs(view: StaticMultiViewGenerator(graph: root,
+                                                                   baseInputs: baseInputs,
+                                                                   views: staticLsit.views))
+            } else {
+                return _ViewOutputs(view: DynamicMultiViewGenerator(graph: root,
+                                                                    baseInputs: baseInputs,
+                                                                    body: body.views))
+            }
+        }
+
+        let proxy = root[\._proxy]
+        let proxyBody = proxy[\.body]
+        let outputs = Body._makeViewList(view: proxyBody, inputs: inputs.listInputs)
+
+        if let staticList = outputs.views as? StaticViewListGenerator {
+            let subviews = staticList.views.map {
+                let view = $0.makeView()
+                return TypedUnaryViewGenerator(baseInputs: baseInputs) { inputs in
+                    ViewElementProxyWrapper(graph: proxy, inputs: inputs, children: body.views, body: view)
+                }
+            }
+            return _ViewOutputs(view: StaticMultiViewGenerator(graph: root,
+                                                               baseInputs: baseInputs,
+                                                               views: subviews))
+        } else {
+            let view = ViewRootProxyDynamicMultiViewGenerator(graph: proxy,
+                                                              baseInputs: baseInputs,
+                                                              children: body.views,
+                                                              body: outputs.views)
+            return _ViewOutputs(view: view)
+        }
     }
 }
 
@@ -457,157 +268,227 @@ public enum _VariadicView {
     }
 }
 
-protocol _VariadicView_MultiViewRootViewGenerator : ViewGenerator {
-    func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator]
-}
-
 extension _VariadicView.Tree : View where Root : _VariadicView_ViewRoot, Content : View {
     public typealias Body = Never
 
-    private struct _ViewGenerator : ViewGenerator {
-        let graph: _GraphValue<_VariadicView.Tree<Root, Content>>
-        var baseInputs: _GraphInputs
-        var children: any _VariadicView_ViewRoot_MakeChildren
-
-        func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
-            if let view = graph.value(atPath: self.graph, from: encloser) {
-                let subviews = self.children.makeChildren(encloser: view, graph: self.graph)
-                if subviews.isEmpty { return nil }
-
-                var layout: any Layout = DefaultLayoutPropertyItem.defaultValue
-                if let layoutRoot = children as? any _VariadicView_ViewRoot_MakeChildren_LayoutRoot {
-                    layout = layoutRoot.makeLayout(encloser: encloser, graph: graph)
-                } else if let layoutRoot = view.root as? any Layout {
-                    layout = layoutRoot
-                } else if let layoutItem = baseInputs.properties.find(type: DefaultLayoutPropertyItem.self) {
-                    layout = layoutItem.layout
-                }
-
-                return ViewGroupContext(view: view,
-                                        subviews: subviews,
-                                        layout: layout,
-                                        inputs: baseInputs,
-                                        graph: self.graph)
-            }
-            fatalError("Unable to recover _VariadicView.Tree")
-        }
-
-        mutating func mergeInputs(_ inputs: _GraphInputs) {
-            children.mergeInputs(inputs)
-            baseInputs.mergedInputs.append(inputs)
-        }
-    }
-
-    struct _MultiViewRootViewGenerator : _VariadicView_MultiViewRootViewGenerator {
-        let graph: _GraphValue<_VariadicView.Tree<Root, Content>>
-        var baseInputs: _GraphInputs
-        var makeView: ((ViewContext) -> ViewContext)?
-        fileprivate var children: any _VariadicView_ViewRoot_MakeChildren_MultiViewRoot
-
-        func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
-            children.makeViewList(encloser: encloser, graph: graph)
-        }
-
-        func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
-            if let view = graph.value(atPath: self.graph, from: encloser) {
-                let subviews = self.makeViewList(encloser: view, graph: self.graph).compactMap {
-                    $0.makeView(encloser: encloser, graph: graph)
-                }
-                let layout: any Layout
-                if let layoutRoot = children as? any _VariadicView_ViewRoot_MakeChildren_LayoutRoot {
-                    layout = layoutRoot.makeLayout(encloser: encloser, graph: graph)
-                } else if let layoutRoot = view.root as? any Layout {
-                    layout = layoutRoot
-                } else if let layoutItem = baseInputs.properties.find(type: DefaultLayoutPropertyItem.self) {
-                    layout = layoutItem.layout
-                } else {
-                    layout = DefaultLayoutPropertyItem.defaultValue
-                }
-
-                return ViewGroupContext(view: view,
-                                        subviews: subviews,
-                                        layout: layout,
-                                        inputs: baseInputs,
-                                        graph: self.graph)
-            }
-            fatalError("Unable to recover _VariadicView.Tree")
-        }
-
-        mutating func mergeInputs(_ inputs: _GraphInputs) {
-            children.mergeInputs(inputs)
-            baseInputs.mergedInputs.append(inputs)
-        }
-    }
-
-    struct _UnaryViewRootViewListGenerator : ViewListGenerator {
-        let graph: _GraphValue<_VariadicView.Tree<Root, Content>>
-        var inputs: _ViewInputs
-        fileprivate var children: any _VariadicView_ViewRoot_MakeChildren_UnaryViewRoot
-
-        func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
-            if let view = graph.value(atPath: self.graph, from: encloser) {
-                let subviews = children.makeViewList(encloser: view, graph: self.graph)
-
-                let layout: any Layout
-                if let _layout = children.makeLayout(encloser: encloser, graph: graph) {
-                    layout = _layout
-                } else if let _layout = inputs.base.properties.find(type: DefaultLayoutPropertyItem.self)?.layout {
-                    layout = _layout
-                } else {
-                    layout = DefaultLayoutPropertyItem.defaultValue
-                }
-
-                let generator = GenericViewGenerator(graph: self.graph, inputs: self.inputs) { view, inputs in
-                    let subviews = subviews.compactMap { $0.makeView(encloser: view, graph: self.graph) }
-                    if subviews.isEmpty == false {
-                        return ViewGroupContext(view: view,
-                                                subviews: subviews,
-                                                layout: layout,
-                                                inputs: inputs.base,
-                                                graph: self.graph)
-                    }
-                    return nil
-                }
-                return [generator]
-            }
-            fatalError("Unable to recover _VariadicView.Tree")
-        }
-
-        mutating func mergeInputs(_ inputs: _GraphInputs) {
-            self.inputs.base.mergedInputs.append(inputs)
-            self.children.mergeInputs(inputs)
-        }
-    }
-
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let outputs = Root._makeView(root: view[\.root], inputs: inputs) { graph, inputs in
-            return Content._makeViewList(view: view[\.content], inputs: inputs.listInputs)
+        Root._makeView(root: view[\.root], inputs: inputs) { _, inputs in
+            Content._makeViewList(view: view[\.content], inputs: inputs.listInputs)
         }
-
-        if let multiView = outputs.view as? any _VariadicView_ViewRoot_MakeChildren_MultiViewRoot {
-            let generator = _MultiViewRootViewGenerator(graph: view, baseInputs: inputs.base, children: multiView)
-            return _ViewOutputs(view: generator)
-        }
-        if let children = outputs.view as? _VariadicView_ViewRoot_MakeChildren {
-            let generator = _ViewGenerator(graph: view, baseInputs: inputs.base, children: children)
-            return _ViewOutputs(view: generator)
-        }
-        return outputs
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        let outputs = Root._makeViewList(root: view[\.root], inputs: inputs) { graph, inputs in
+        assert(view.isRoot == false)
+        return Root._makeViewList(root: view[\.root], inputs: inputs) { _, inputs in
             Content._makeViewList(view: view[\.content], inputs: inputs)
         }
-        if let unaryView = outputs.viewList as? any _VariadicView_ViewRoot_MakeChildren_UnaryViewRoot {
-            let generator = _UnaryViewRootViewListGenerator(graph: view,
-                                                            inputs: inputs.inputs,
-                                                            children: unaryView)
-            return _ViewListOutputs(viewList: generator)
-        }
-        return outputs
     }
 }
 
-extension _VariadicView.Tree : _PrimitiveView where Self: View {
+extension _VariadicView.Tree : _PrimitiveView where Self : View {
+}
+
+// [ViewGenerators, ViewContext types]
+//
+// 1. _VariadicView_Children._makeViewList (dynamic ViewListGenerator)
+// 2. _VariadicView_Children.ElementContext.makeView (static ViewGenerator)
+// 3. _VariadicView_ViewRoot._makeView
+//      a. Body == Never
+//          1. Root == Layout      (static ViewGenerator with Layout)
+//          2. Root != Layout      (static ViewGenerator with default layout)
+//      b. Body != Never           (dynamic ViewGenerator with Proxy)
+// 4. _VariadicView_ViewRoot._makeViewList
+//      a. Body == Never           (forward body)
+//      b. Body != Never           (dynamic ViewListGenerator with Proxy)
+//          - Requires ProxyWrapper for MultiView.
+//          - Same as 6.b
+// 5. _VariadicView_UnaryViewRoot._makeViewList (return Self._makeView)
+// 6. _VariadicView_MultiViewRoot._makeView
+//      a. Body == Never           (static MultiViewGenerator)
+//      b. Body != Never           (dynamic MultiViewGenerator with Proxy)
+//          - Requires ProxyWrapper for MultiView.
+//          - Same as 4.b (ViewGenerator, ViewListGenerator both capable)
+
+// ViewListGenerator for _VariadicView_Children (1)
+private struct ChildrenViewListGenerator : ViewListGenerator {
+    let graph: _GraphValue<_VariadicView_Children>
+    var baseInputs: _GraphInputs
+
+    func makeViewList(containerView: ViewContext) -> [any ViewGenerator] {
+        if let value = containerView.value(atPath: graph) {
+            return value.elements.map {
+                var view = $0.view
+                view.mergeInputs(baseInputs)
+                return view
+            }
+        }
+        fatalError("Unable to recover _VariadicView_Children")
+    }
+
+    mutating func mergeInputs(_ inputs: _GraphInputs) {
+        baseInputs.mergedInputs.append(inputs)
+    }
+}
+
+// ViewContext for _VariadicView_Children.Element (2)
+private class ChildrenElementViewContext : DynamicViewContext<_VariadicView_Children.Element> {
+    override func updateContent() {
+        self.body = nil
+        self.view = value(atPath: self.graph)
+        if let view = self.view?.view {
+            self.body = view.makeView()
+            self.body?.updateContent()
+        }
+    }
+}
+
+// Static View Group Context for _VariadicView_ViewRoot._makeView (3.a.1)
+private class UnaryViewRootLayoutStaticViewGroupContext<Root> : StaticViewGroupContext<Root> where Root : _VariadicView_UnaryViewRoot & Layout {
+    init(graph: _GraphValue<Root>, inputs: _GraphInputs, subviews: [ViewContext]) {
+        let layout = DefaultLayoutPropertyItem.defaultValue
+        super.init(graph: graph, inputs: inputs, subviews: subviews, layout: layout)
+
+        self.layoutProperties = Root.layoutProperties
+        self.setLayoutProperties(self.layoutProperties)
+    }
+    override func updateRoot(_ root: inout Root) {
+        super.updateRoot(&root)
+        self.layout = AnyLayout(root)
+    }
+}
+
+// Dynamic View Group Context for _VariadicView_ViewRoot._makeView (3.a.1)
+private class UnaryViewRootLayoutDynamicViewGroupContext<Root> : DynamicViewGroupContext<Root> where Root : _VariadicView_UnaryViewRoot & Layout {
+    init(graph: _GraphValue<Root>, inputs: _GraphInputs, body: any ViewListGenerator) {
+        let layout = DefaultLayoutPropertyItem.defaultValue
+        super.init(graph: graph, inputs: inputs, body: body, layout: layout)
+
+        self.layoutProperties = Root.layoutProperties
+        self.setLayoutProperties(self.layoutProperties)
+    }
+    override func updateRoot(_ root: inout Root) {
+        super.updateRoot(&root)
+        self.layout = AnyLayout(root)
+    }
+}
+
+// Proxy for _VariadicView_ViewRoot.Body subviews
+private struct ViewRootProxy<Root> where Root : _VariadicView_ViewRoot {
+    let root: Root
+    var children = _VariadicView.Children(list: [])
+    var body: Root.Body {
+        root.body(children: children)
+    }
+}
+
+// Static View Group with Proxy for 3.b
+private class ViewRootProxyStaticGroupContext<Root> : StaticViewGroupContext<ViewRootProxy<Root>> where Root : _VariadicView_ViewRoot {
+    typealias Proxy = ViewRootProxy<Root>
+    let children: any ViewListGenerator
+
+    init(graph: _GraphValue<Proxy>, inputs: _GraphInputs, children: any ViewListGenerator, subviews: [ViewContext], layout: (any Layout)? = nil) {
+        self.children = children
+        super.init(graph: graph, inputs: inputs, subviews: subviews, layout: layout)
+    }
+
+    override func updateRoot(_ root: inout ViewRootProxy<Root>) {
+        super.updateRoot(&root)
+        let views = children.makeViewList(containerView: self)
+        root.children = _VariadicView_Children(list: views)
+    }
+}
+
+// Dynamic View Group with Proxy for 3.b
+private class ViewRootProxyDynamicGroupContext<Root> : DynamicViewGroupContext<ViewRootProxy<Root>> where Root : _VariadicView_ViewRoot {
+    typealias Proxy = ViewRootProxy<Root>
+    let children: any ViewListGenerator
+
+    init(graph: _GraphValue<Proxy>, inputs: _GraphInputs, children: any ViewListGenerator, body: any ViewListGenerator, layout: (any Layout)? = nil) {
+        self.children = children
+        super.init(graph: graph, inputs: inputs, body: body, layout: layout)
+    }
+
+    override func updateRoot(_ root: inout ViewRootProxy<Root>) {
+        super.updateRoot(&root)
+        let views = children.makeViewList(containerView: self)
+        root.children = _VariadicView_Children(list: views)
+    }
+}
+
+// Element Wrapper with Proxy for 4.b, 6.b
+private class ViewElementProxyWrapper<Root> : GenericViewContext<ViewRootProxy<Root>> where Root: _VariadicView_ViewRoot {
+    typealias Proxy = ViewRootProxy<Root>
+    let children: any ViewListGenerator
+
+    init(graph: _GraphValue<Proxy>, inputs: _GraphInputs, children: any ViewListGenerator, body: ViewContext) {
+        self.children = children
+        super.init(graph: graph, inputs: inputs, body: body)
+    }
+
+    override func updateContent() {
+        self.body.invalidate()
+        // resolve proxy and replace proxy.children for its descendants.
+        self.view = value(atPath: self.graph)
+        if var proxy = self.view {
+            let views = children.makeViewList(containerView: self)
+            proxy.children = _VariadicView_Children(list: views)
+            self.view = proxy
+            self.body.updateContent()
+        }
+    }
+}
+
+// Dynamic Multi-View Context with Proxy for 4.b, 6.b
+private class ViewRootProxyDynamicMultiViewContext<Root> : DynamicMultiViewContext<ViewRootProxy<Root>> where Root: _VariadicView_ViewRoot {
+    typealias Proxy = ViewRootProxy<Root>
+    let children: any ViewListGenerator
+
+    init(graph: _GraphValue<Proxy>, inputs: _GraphInputs, children: any ViewListGenerator, body: any ViewListGenerator) {
+        self.children = children
+        super.init(graph: graph, inputs: inputs, body: body)
+    }
+
+    override func updateRoot(_ root: inout ViewRootProxy<Root>) {
+        super.updateRoot(&root)
+        let views = children.makeViewList(containerView: self)
+        root.children = _VariadicView_Children(list: views)
+    }
+}
+
+// Dynamic Multi-View Generator with Proxy for 4.b, 6.b
+private struct ViewRootProxyDynamicMultiViewGenerator<Root> : MultiViewGenerator where Root: _VariadicView_ViewRoot {
+    typealias Proxy = ViewRootProxy<Root>
+    var graph: _GraphValue<Proxy>
+    var baseInputs: _GraphInputs
+    let children: any ViewListGenerator
+    var body: any ViewListGenerator
+
+    func makeView() -> ViewContext {
+        ViewRootProxyDynamicMultiViewContext(graph: graph, inputs: baseInputs, children: children, body: body)
+    }
+
+    func makeViewList(containerView: ViewContext) -> [any ViewGenerator] {
+        let multiView = makeView() as! MultiViewContext
+        multiView.superview = containerView
+        multiView.updateContent()
+        let subviews = multiView.subviews
+        multiView.subviews = []
+        multiView.activeSubviews = []
+        multiView.superview = nil
+
+        return subviews.map { view in
+            view.superview = nil
+            return TypedUnaryViewGenerator(baseInputs: baseInputs) { inputs in
+                ViewElementProxyWrapper(graph: graph,
+                                        inputs: inputs,
+                                        children: children,
+                                        body: view)
+            }
+        }
+    }
+
+    mutating func mergeInputs(_ inputs: _GraphInputs) {
+        body.mergeInputs(inputs)
+        baseInputs.mergedInputs.append(inputs)
+    }
 }

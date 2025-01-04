@@ -2,8 +2,10 @@
 //  File: AnyView.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
+
+import Foundation
 
 class AnyViewBox {
     let view: any View
@@ -39,38 +41,44 @@ public struct AnyView : View {
     }
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let generator = TypeErasedViewGenerator(graph: view, inputs: inputs)
-        return _ViewOutputs(view: generator)
+        let view = TypedUnaryViewGenerator(baseInputs: inputs.base) { inputs in
+            TypeErasedViewContext(graph: view, inputs: inputs)
+        }
+        return _ViewOutputs(view: view)
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        let generator = TypeErasedViewGenerator(graph: view, inputs: inputs.inputs)
-        return _ViewListOutputs(viewList: .staticList([generator]))
+        let view = TypedUnaryViewGenerator(baseInputs: inputs.base) { inputs in
+            TypeErasedViewContext(graph: view, inputs: inputs)
+        }
+        return _ViewListOutputs(views: .staticList(view))
     }
 
     public typealias Body = Never
 }
 
+extension AnyView {
+    var _view: any View { storage.view }
+}
+
 extension AnyView : _PrimitiveView {
 }
 
-private struct TypeErasedViewGenerator : ViewGenerator {
-    let graph: _GraphValue<AnyView>
-    var inputs: _ViewInputs
-
-    func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
-        if let value = graph.value(atPath: self.graph, from: encloser) {
-            func make<V: View>(_ view: V, graph: _GraphValue<Any>, inputs: _ViewInputs) -> ViewContext? {
-                let graph = graph.unsafeCast(to: V.self)
-                let outputs = V._makeView(view: graph, inputs: inputs)
-                return outputs.view?.makeView(encloser: view, graph: graph)
+class TypeErasedViewContext : DynamicViewContext<AnyView> {
+    override func updateContent() {
+        self.body = nil
+        self.view = value(atPath: self.graph)
+        if let view = self.view?._view {
+            func _makeView<V : View, U>(_: V.Type, view: _GraphValue<U>, inputs: _ViewInputs) -> _ViewOutputs {
+                V._makeView(view: view.unsafeCast(to: V.self), inputs: inputs)
             }
-            return make(value.storage.view, graph: self.graph[\.storage.view].unsafeCast(to: Any.self), inputs: inputs)
+            let viewType = type(of: view)
+            let graph = self.graph.unsafeCast(to: AnyView.self)[\._view]
+            let outputs = _makeView(viewType, view: graph, inputs: _ViewInputs(base: self.inputs))
+            if let body = outputs.view?.makeView() {
+                self.body = body
+                body.updateContent()
+            }
         }
-        return nil
-    }
-
-    mutating func mergeInputs(_ inputs: _GraphInputs) {
-        self.inputs.base.mergedInputs.append(inputs)
     }
 }

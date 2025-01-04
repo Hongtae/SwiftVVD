@@ -2,7 +2,7 @@
 //  File: Layout.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -21,6 +21,14 @@ public protocol Layout : Animatable {
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Self.Subviews, cache: inout Self.Cache)
     func explicitAlignment(of guide: HorizontalAlignment, in bounds: CGRect, proposal: ProposedViewSize, subviews: Self.Subviews, cache: inout Self.Cache) -> CGFloat?
     func explicitAlignment(of guide: VerticalAlignment, in bounds: CGRect, proposal: ProposedViewSize, subviews: Self.Subviews, cache: inout Self.Cache) -> CGFloat?
+
+    static func _makeLayoutView(root: _GraphValue<Self>, inputs: _ViewInputs, body: (_Graph, _ViewInputs) -> _ViewListOutputs) -> _ViewOutputs
+}
+
+extension Layout {
+    public static func _makeLayoutView(root: _GraphValue<Self>, inputs: _ViewInputs, body: (_Graph, _ViewInputs) -> _ViewListOutputs) -> _ViewOutputs {
+        fatalError()
+    }
 }
 
 extension Layout {
@@ -243,11 +251,22 @@ public struct _LayoutRoot<L> : _VariadicView.UnaryViewRoot where L : Layout {
 
     public static func _makeView(root: _GraphValue<Self>, inputs: _ViewInputs, body: (_Graph, _ViewInputs) -> _ViewListOutputs) -> _ViewOutputs {
         let body = body(_Graph(), inputs)
-        let inputs = inputs.listInputs
-        let generator = _VariadicView_ViewRoot_MakeChildren_LayoutRootProxy(graph: root, body: body, inputs: inputs) {
-            $0.layout
+        if let staticList = body.views as? StaticViewList {
+            let views = staticList.views.map { $0.makeView() }
+            let view = TypedUnaryViewGenerator(baseInputs: inputs.base) { inputs in
+                return StaticLayoutRootContext(graph: root,
+                                               inputs: inputs,
+                                               subviews: views)
+            }
+            return _ViewOutputs(view: view)
+        } else {
+            let view = TypedUnaryViewGenerator(baseInputs: inputs.base) { inputs in
+                return DynamicLayoutRootContext(graph: root,
+                                                inputs: inputs,
+                                                body: body.views)
+            }
+            return _ViewOutputs(view: view)
         }
-        return _ViewOutputs(view: generator)
     }
 
     public typealias Body = Never
@@ -258,5 +277,33 @@ struct DefaultLayoutPropertyItem : PropertyItem {
     let layout: any Layout
     var description: String {
         "DefaultLayoutPropertyItem: \(self.layout)"
+    }
+}
+
+class StaticLayoutRootContext<L> : StaticViewGroupContext<_LayoutRoot<L>> where L : Layout {
+    init(graph: _GraphValue<_LayoutRoot<L>>, inputs: _GraphInputs, subviews: [ViewContext]) {
+        let layout = DefaultLayoutPropertyItem.defaultValue
+        super.init(graph: graph, inputs: inputs, subviews: subviews, layout: layout)
+
+        self.layoutProperties = L.layoutProperties
+        self.setLayoutProperties(self.layoutProperties)
+    }
+
+    override func updateRoot(_ root: inout _LayoutRoot<L>) {
+        self.layout = AnyLayout(root.layout)
+    }
+}
+
+class DynamicLayoutRootContext<L> : DynamicViewGroupContext<_LayoutRoot<L>> where L : Layout {
+    init(graph: _GraphValue<_LayoutRoot<L>>, inputs: _GraphInputs, body: any ViewListGenerator) {
+        let layout = DefaultLayoutPropertyItem.defaultValue
+        super.init(graph: graph, inputs: inputs, body: body, layout: layout)
+
+        self.layoutProperties = L.layoutProperties
+        self.setLayoutProperties(self.layoutProperties)
+    }
+
+    override func updateRoot(_ root: inout _LayoutRoot<L>) {
+        self.layout = AnyLayout(root.layout)
     }
 }

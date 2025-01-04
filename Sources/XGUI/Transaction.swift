@@ -2,7 +2,7 @@
 //  File: Transaction.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -49,7 +49,7 @@ extension TransactionKey where Self.Value: Equatable {
     }
 }
 
-extension TransactionKey where Self: EnvironmentKey, Self.Value: Equatable {
+extension TransactionKey where Self : EnvironmentKey, Self.Value : Equatable {
     public static func _valuesEqual(_ lhs: Self.Value, _ rhs: Self.Value) -> Bool {
         Self._valuesEqual(lhs, rhs)
     }

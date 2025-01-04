@@ -2,7 +2,7 @@
 //  File: ButtonStyle.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -30,7 +30,7 @@ typealias ButtonAction = ()->Void
 public struct PrimitiveButtonStyleConfiguration {
     public struct Label : View {
         public typealias Body = Never
-        let view: (any ViewGenerator)?
+        let view: ViewProxy?
     }
     public let role: ButtonRole?
     public let label: Label
@@ -41,54 +41,16 @@ public struct PrimitiveButtonStyleConfiguration {
 }
 
 extension PrimitiveButtonStyleConfiguration.Label {
-    init(_ view: (any ViewGenerator)? = nil) {
+    init(_ view: ViewProxy? = nil) {
         self.view = view
     }
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        struct Generator : ViewGenerator {
-            let graph: _GraphValue<PrimitiveButtonStyleConfiguration.Label>
-            var baseInputs: _GraphInputs
-
-            func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
-                if let label = graph.value(atPath: self.graph, from: encloser) {
-                    if var view = label.view {
-                        view.mergeInputs(baseInputs)
-                        return view.makeView(encloser: encloser, graph: graph)
-                    }
-                    return nil
-                }
-                fatalError("Unable to recover view: PrimitiveButtonStyleConfiguration.Label")
-            }
-
-            mutating func mergeInputs(_ inputs: _GraphInputs) {
-                baseInputs.mergedInputs.append(inputs)
-            }
-        }
-        return _ViewOutputs(view: Generator(graph: view, baseInputs: inputs.base))
+        fatalError("WIP")
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        struct Generator : ViewListGenerator {
-            let graph: _GraphValue<PrimitiveButtonStyleConfiguration.Label>
-            var baseInputs: _GraphInputs
-
-            func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
-                if let label = graph.value(atPath: self.graph, from: encloser) {
-                    if var view = label.view {
-                        view.mergeInputs(baseInputs)
-                        return [view]
-                    }
-                    return []
-                }
-                fatalError("Unable to recover view: PrimitiveButtonStyleConfiguration.Label")
-            }
-
-            mutating func mergeInputs(_ inputs: _GraphInputs) {
-                baseInputs.mergedInputs.append(inputs)
-            }
-        }
-        return _ViewListOutputs(viewList: Generator(graph: view, baseInputs: inputs.base))
+        fatalError("WIP")
     }
 }
 
@@ -235,59 +197,34 @@ struct _DefaultButtonWithButtonStyle<Style> : PrimitiveButtonStyle where Style: 
     }
 }
 
-struct PrimitiveButtonStyleContainerModifier<Style> : ViewModifier where Style: PrimitiveButtonStyle {
+struct PrimitiveButtonStyleContainerModifier<Style> : ViewModifier where Style : PrimitiveButtonStyle {
     let style: Style
     typealias Body = Never
 }
 
-extension PrimitiveButtonStyleContainerModifier {
-    private struct _ViewGenerator : ViewGenerator {
-        let graph: _GraphValue<PrimitiveButtonStyleContainerModifier>
-        let body: (_Graph, _ViewInputs)-> _ViewOutputs
-        var inputs: _ViewInputs
-        func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
-            if let modifier = graph.value(atPath: self.graph, from: encloser) {
-                var inputs = self.inputs
-                inputs.layouts.buttonStyles.append(modifier.style)
-                return body(_Graph(), inputs).view?.makeView(encloser: encloser, graph: graph)
-            }
-            fatalError("Unable to recover PrimitiveButtonStyleContainerModifier")
-        }
-        mutating func mergeInputs(_ inputs: _GraphInputs) {
-            self.inputs.base.mergedInputs.append(inputs)
-        }
+struct PrimitiveButtonStyleProxy {
+    let type: any PrimitiveButtonStyle.Type
+    let graph: _GraphValue<Any>
+    init<S : PrimitiveButtonStyle>(_ graph: _GraphValue<S>) {
+        self.type = S.self
+        self.graph = graph.unsafeCast(to: Any.self)
     }
-
-    private struct _ViewListGenerator : ViewListGenerator {
-        let graph: _GraphValue<PrimitiveButtonStyleContainerModifier>
-        let body: (_Graph, _ViewListInputs)-> _ViewListOutputs
-        var inputs: _ViewListInputs
-        func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
-            if let modifier = graph.value(atPath: self.graph, from: encloser) {
-                var inputs = self.inputs
-                inputs.layouts.buttonStyles.append(modifier.style)
-                return body(_Graph(), inputs).viewList.makeViewList(encloser: encloser, graph: graph)
-            }
-            fatalError("Unable to recover PrimitiveButtonStyleContainerModifier")
-        }
-
-        mutating func mergeInputs(_ inputs: _GraphInputs) {
-            self.inputs.base.mergedInputs.append(inputs)
-        }
-    }
-
-    static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        let view = _ViewGenerator(graph: modifier, body: body, inputs: inputs)
-        return _ViewOutputs(view: view)
-    }
-
-    static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        let viewList = _ViewListGenerator(graph: modifier, body: body, inputs: inputs)
-        return _ViewListOutputs(viewList: viewList)
+    func resolve(_ view: ViewContext) -> any PrimitiveButtonStyle {
+        fatalError()
     }
 }
 
-struct ButtonStyleContainerModifier<Style> : ViewModifier where Style: ButtonStyle {
+extension PrimitiveButtonStyleContainerModifier {
+    static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
+        fatalError("WIP")
+    }
+
+    static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
+        fatalError("WIP")
+    }
+}
+
+struct ButtonStyleContainerModifier<Style> : ViewModifier where Style : ButtonStyle {
     let style: Style
     typealias Body = Never
 
@@ -300,17 +237,11 @@ struct ButtonStyleContainerModifier<Style> : ViewModifier where Style: ButtonSty
     }
 
     static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        func make<T : ViewModifier>(modifier: _GraphValue<T>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-            T._makeView(modifier: modifier, inputs: inputs, body: body)
-        }
-        return make(modifier: modifier[\.modifier], inputs: inputs, body: body)
+        fatalError("WIP")
     }
 
     static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        func make<T : ViewModifier>(modifier: _GraphValue<T>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-            T._makeViewList(modifier: modifier, inputs: inputs, body: body)
-        }
-        return make(modifier: modifier[\.modifier], inputs: inputs, body: body)
+        fatalError("WIP")
     }
 }
 

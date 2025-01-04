@@ -2,7 +2,7 @@
 //  File: Spacer.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -22,11 +22,10 @@ extension Spacer : Sendable {
 extension Spacer : _PrimitiveView {
     static func _makeView(view: _GraphValue<Self>, sharedContext: SharedContext) -> _ViewOutputs {
         let baseInputs = _GraphInputs(environment: .init(), sharedContext: sharedContext)
-        let inputs = _ViewInputs(base: baseInputs)
-        let generator = GenericViewGenerator(graph: view, inputs: inputs) { content, inputs in
-            SpacerViewContext(view: content, inputs: inputs.base, graph: view)
+        let view = TypedUnaryViewGenerator(baseInputs: baseInputs) { inputs in
+            SpacerViewContext(graph: view, inputs: inputs)
         }
-        return _ViewOutputs(view: generator)
+        return _ViewOutputs(view: view)
     }
 }
 
@@ -35,10 +34,10 @@ public struct Divider : View {
     }
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let generator = GenericViewGenerator(graph: view, inputs: inputs) { content, inputs in
-            DividerViewContext(view: content, inputs: inputs.base, graph: view)
+        let view = TypedUnaryViewGenerator(baseInputs: inputs.base) { inputs in
+            DividerViewContext(graph: view, inputs: inputs)
         }
-        return _ViewOutputs(view: generator)
+        return _ViewOutputs(view: view)
     }
 
     public typealias Body = Never
@@ -47,31 +46,8 @@ public struct Divider : View {
 extension Divider : _PrimitiveView {
 }
 
-private class SpacerViewContext : ViewContext {
-    var view: Spacer
+private class SpacerViewContext : PrimitiveViewContext<Spacer> {
     var stackOrientation: Axis = .vertical
-
-    init(view: Spacer, inputs: _GraphInputs, graph: _GraphValue<Spacer>) {
-        self.view = view
-        super.init(inputs: inputs, graph: graph)
-    }
-
-    override func validatePath<T>(encloser: T, graph: _GraphValue<T>) -> Bool {
-        self._validPath = false
-        if graph.value(atPath: self.graph, from: encloser) is Spacer {
-            self._validPath = true
-            return true
-        }
-        return false
-    }
-
-    override func updateContent<T>(encloser: T, graph: _GraphValue<T>) {
-        if let view = graph.value(atPath: self.graph, from: encloser) as? Spacer {
-            self.view = view
-        } else {
-            fatalError("Unable to recover Spacer")
-        }
-    }
 
     override func setLayoutProperties(_ prop: LayoutProperties) {
         self.stackOrientation = prop.stackOrientation ?? .vertical
@@ -79,6 +55,7 @@ private class SpacerViewContext : ViewContext {
 
     override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
         if proposal == .zero { return .zero }
+        guard let view else { return .zero }
 
         var size: CGSize = .zero
         if let minLength = view.minLength {
@@ -98,31 +75,8 @@ private class SpacerViewContext : ViewContext {
     }
 }
 
-private class DividerViewContext : ViewContext {
-    var view: Divider
+private class DividerViewContext : PrimitiveViewContext<Divider> {
     var stackOrientation: Axis = .vertical
-
-    init(view: Divider, inputs: _GraphInputs, graph: _GraphValue<Divider>) {
-        self.view = view
-        super.init(inputs: inputs, graph: graph)
-    }
-
-    override func validatePath<T>(encloser: T, graph: _GraphValue<T>) -> Bool {
-        self._validPath = false
-        if graph.value(atPath: self.graph, from: encloser) is Divider {
-            self._validPath = true
-            return true
-        }
-        return false
-    }
-
-    override func updateContent<T>(encloser: T, graph: _GraphValue<T>) {
-        if let view = graph.value(atPath: self.graph, from: encloser) as? Divider {
-            self.view = view
-        } else {
-            fatalError("Unable to recover Divider")
-        }
-    }
 
     override func setLayoutProperties(_ prop: LayoutProperties) {
         self.stackOrientation = prop.stackOrientation ?? .vertical

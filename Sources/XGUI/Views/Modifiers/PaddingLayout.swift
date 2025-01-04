@@ -2,7 +2,7 @@
 //  File: PaddingLayout.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -33,16 +33,18 @@ extension View {
     }
 }
 
+struct DefaultPaddingEdgeInsetsPropertyItem : PropertyItem {
+    static var defaultValue: EdgeInsets { .init(_all: 16) }
+    let insets: EdgeInsets
+    var description: String {
+        "DefaultPaddingEdgeInsetsPropertyItem: \(self.insets)"
+    }
+}
+
 extension _PaddingLayout : _ViewLayoutModifier {
     private class LayoutViewContext : ViewModifierContext<_PaddingLayout> {
-        var layout: _PaddingLayout { modifier }
-
-        override init(content: ViewContext, modifier: _PaddingLayout, inputs: _GraphInputs, graph: _GraphValue<_PaddingLayout>) {
-            super.init(content: content, modifier: modifier, inputs: inputs, graph: graph)
-        }
-
         var layoutInsets : EdgeInsets {
-            if let insets = self.layout.insets {
+            if let insets = self.modifier?.insets {
                 return insets
             }
             if let insets = self.inputs.properties.find(type: DefaultPaddingEdgeInsetsPropertyItem.self)?.insets {
@@ -52,20 +54,22 @@ extension _PaddingLayout : _ViewLayoutModifier {
         }
 
         override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
+            guard let modifier else { fatalError("Invalid view modifier") }
+
             var paddingH: CGFloat = .zero
             var paddingV: CGFloat = .zero
 
             let insets = self.layoutInsets
-            if self.layout.edges.contains(.leading) {
+            if modifier.edges.contains(.leading) {
                 paddingH += insets.leading
             }
-            if self.layout.edges.contains(.trailing) {
+            if modifier.edges.contains(.trailing) {
                 paddingH += insets.trailing
             }
-            if self.layout.edges.contains(.top) {
+            if modifier.edges.contains(.top) {
                 paddingV += insets.top
             }
-            if self.layout.edges.contains(.bottom) {
+            if modifier.edges.contains(.bottom) {
                 paddingV += insets.bottom
             }
 
@@ -76,12 +80,14 @@ extension _PaddingLayout : _ViewLayoutModifier {
             if let h = proposal.height {
                 proposal.height = max(h - paddingV, 0)
             }
-            let size = self.content.sizeThatFits(proposal)
+            let size = self.body.sizeThatFits(proposal)
             return CGSize(width: max(size.width + paddingH, 0),
                           height: max(size.height + paddingV, 0))
         }
 
         override func layoutSubviews() {
+            guard let modifier else { fatalError("Invalid view modifier") }
+
             let frame = self.bounds
             var minX = frame.minX
             var maxX = frame.maxX
@@ -89,16 +95,16 @@ extension _PaddingLayout : _ViewLayoutModifier {
             var maxY = frame.maxY
 
             let insets = self.layoutInsets
-            if self.layout.edges.contains(.leading) {
+            if modifier.edges.contains(.leading) {
                 minX += insets.leading
             }
-            if self.layout.edges.contains(.trailing) {
+            if modifier.edges.contains(.trailing) {
                 maxX -= insets.trailing
             }
-            if self.layout.edges.contains(.top) {
+            if modifier.edges.contains(.top) {
                 minY += insets.top
             }
-            if self.layout.edges.contains(.bottom) {
+            if modifier.edges.contains(.bottom) {
                 maxY -= insets.bottom
             }
 
@@ -107,62 +113,16 @@ extension _PaddingLayout : _ViewLayoutModifier {
             let height = max(maxY - minY, 0)
 
             let proposal = ProposedViewSize(width: width, height: height)
-            self.content.place(at: origin,
-                               anchor: .topLeading,
-                               proposal: proposal)
+            self.body.place(at: origin,
+                            anchor: .topLeading,
+                            proposal: proposal)
         }
     }
 
-    private struct LayoutViewGenerator : ViewGenerator {
-        var content: any ViewGenerator
-        let graph: _GraphValue<_PaddingLayout>
-        var baseInputs: _GraphInputs
-
-        func makeView<T>(encloser: T, graph: _GraphValue<T>) -> ViewContext? {
-            if let content = self.content.makeView(encloser: encloser, graph: graph) {
-                if let modifier = graph.value(atPath: self.graph, from: encloser) {
-                    return LayoutViewContext(content: content, modifier: modifier, inputs: baseInputs, graph: self.graph)
-                }
-                fatalError("Unable to recover modifier")
-            }
-            return nil
+    static func _makeLayoutView(modifier: _GraphValue<Self>, inputs: _ViewInputs, content: any ViewGenerator) -> any ViewGenerator {
+        let body = content.makeView()
+        return TypedUnaryViewGenerator(baseInputs: inputs.base) { inputs in
+            LayoutViewContext(graph: modifier, inputs: inputs, body: body)
         }
-        
-        mutating func mergeInputs(_ inputs: _GraphInputs) {
-            content.mergeInputs(inputs)
-            baseInputs.mergedInputs.append(inputs)
-        }
-    }
-
-    static func _makeView(modifier: _GraphValue<_PaddingLayout>, content: any ViewGenerator, inputs: _GraphInputs) -> any ViewGenerator {
-        LayoutViewGenerator(content: content, graph: modifier, baseInputs: inputs)
-    }
-
-    static func _makeViewList(modifier: _GraphValue<_PaddingLayout>, content: any ViewListGenerator, inputs: _GraphInputs) -> any ViewListGenerator {
-        struct Generator : ViewListGenerator {
-            var content: any ViewListGenerator
-            let graph: _GraphValue<_PaddingLayout>
-            var baseInputs: _GraphInputs
-
-            func makeViewList<T>(encloser: T, graph: _GraphValue<T>) -> [any ViewGenerator] {
-                content.makeViewList(encloser: encloser, graph: graph).map {
-                    LayoutViewGenerator(content: $0, graph: self.graph, baseInputs: self.baseInputs)
-                }
-            }
-
-            mutating func mergeInputs(_ inputs: _GraphInputs) {
-                content.mergeInputs(inputs)
-                baseInputs.mergedInputs.append(inputs)
-            }
-        }
-        return Generator(content: content, graph: modifier, baseInputs: inputs)
-    }
-}
-
-struct DefaultPaddingEdgeInsetsPropertyItem : PropertyItem {
-    static var defaultValue: EdgeInsets { .init(_all: 16) }
-    let insets: EdgeInsets
-    var description: String {
-        "DefaultPaddingEdgeInsetsPropertyItem: \(self.insets)"
     }
 }

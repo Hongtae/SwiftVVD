@@ -2,19 +2,19 @@
 //  File: SceneModifier.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
-public struct _SceneModifier_Content<Modifier> where Modifier: _SceneModifier {
+public struct _SceneModifier_Content<Modifier> where Modifier : _SceneModifier {
     public typealias Body = Never
 }
 
-extension _SceneModifier_Content: Scene {
+extension _SceneModifier_Content : Scene {
     public var body: Never { neverBody() }
 }
 
 public protocol _SceneModifier {
-    associatedtype Body: Scene
+    associatedtype Body : Scene
     @SceneBuilder func body(content: Self.Content) -> Self.Body
     typealias Content = _SceneModifier_Content<Self>
 }
@@ -29,11 +29,11 @@ extension _SceneModifier {
     }
 }
 
-extension ModifiedContent: Scene where Content: Scene, Modifier: _SceneModifier {
+extension ModifiedContent : Scene where Content : Scene, Modifier : _SceneModifier {
     public var body: Never { neverBody() }
 }
 
-extension ModifiedContent: _PrimitiveScene where Content: Scene, Modifier: _SceneModifier {
+extension ModifiedContent : _PrimitiveScene where Content : Scene, Modifier : _SceneModifier {
     func makeSceneProxy(modifiers: [any _SceneModifier]) -> any SceneProxy {
         var modifiers = modifiers
         modifiers.append(self.modifier)
@@ -41,7 +41,7 @@ extension ModifiedContent: _PrimitiveScene where Content: Scene, Modifier: _Scen
     }
 }
 
-extension ModifiedContent: _SceneModifier where Content: _SceneModifier, Modifier: _SceneModifier {
+extension ModifiedContent : _SceneModifier where Content : _SceneModifier, Modifier : _SceneModifier {
 }
 
 extension Scene {

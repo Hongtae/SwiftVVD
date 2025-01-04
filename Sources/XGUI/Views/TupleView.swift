@@ -2,18 +2,22 @@
 //  File: TupleView.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
 
-public struct TupleView<T>: View {
+public struct TupleView<T> : View {
     public var value: T
 
     public init(_ value: T) {
         self.value = value
     }
 
+    public typealias Body = Never
+}
+
+extension TupleView {
     static var _subviewTypes: [(name: String, offset: Int, type: any View.Type)] {
         var types: [(name: String, offset: Int,  type: any View.Type)] = []
         _forEachField(of: T.self) { charPtr, offset, fieldType in
@@ -73,41 +77,47 @@ public struct TupleView<T>: View {
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         let outputs = Self._makeViewList(view: view, inputs: inputs.listInputs)
-        let generator = GenericViewGenerator(graph: view, inputs: inputs) { content, inputs in
-            let subviews = outputs.viewList.makeViewList(encloser: content, graph: view).compactMap {
-                $0.makeView(encloser: content, graph: view)
+
+        if let staticList = outputs.views as? StaticViewList {
+            let views = staticList.views.map { $0.makeView() }
+            let view = TypedUnaryViewGenerator(baseInputs: inputs.base) { inputs in
+                StaticViewGroupContext(graph: view, inputs: inputs, subviews: views)
             }
-            if subviews.count > 1 {
-                let layout = inputs.base.properties
-                    .find(type: DefaultLayoutPropertyItem.self)?
-                    .layout ?? DefaultLayoutPropertyItem.defaultValue
-                return ViewGroupContext(view: content,
-                                        subviews: subviews,
-                                        layout: layout,
-                                        inputs: inputs.base,
-                                        graph: view)
-            }
-            return subviews.first
+            return _ViewOutputs(view: view)
         }
-        return _ViewOutputs(view: generator)
+        else {
+            let view = TypedUnaryViewGenerator(baseInputs: inputs.base) { inputs in
+                DynamicViewGroupContext(graph: view, inputs: inputs, body: outputs.views)
+            }
+            return _ViewOutputs(view: view)
+        }
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        var children: [any ViewListGenerator] = []
+        func _makeViewList<V: View, U>(_ type: V.Type, view: _GraphValue<U>, inputs: _ViewListInputs) -> _ViewListOutputs {
+            return type._makeViewList(view: view.unsafeCast(to: V.self), inputs: inputs)
+        }
+        var subviews: [any ViewListGenerator] = []
         if let viewType = T.self as? any View.Type {
-            let outputs = makeViewList(viewType, view: view[\.value].unsafeCast(to: Any.self), inputs: inputs)
-            children.append(outputs.viewList)
+            let outputs = _makeViewList(viewType, view: view[\.value], inputs: inputs)
+            subviews.append(outputs.views)
         } else {
-            let subviews = self._subviewTypes
-            for (index, v) in subviews.enumerated() {
-                let outputs = makeViewList(v.type, view: view[\._subviews[index]].unsafeCast(to: Any.self), inputs: inputs)
-                children.append(outputs.viewList)
+            let subviewTypes = self._subviewTypes
+            for (index, v) in subviewTypes.enumerated() {
+                let outputs = _makeViewList(v.type, view: view[\._subviews[index]], inputs: inputs)
+                subviews.append(outputs.views)
             }
         }
-        return _ViewListOutputs(viewList: .dynamicList(children))
-    }
 
-    public typealias Body = Never
+        let staticList = subviews.compactMap { $0 as? StaticViewList }
+        if staticList.count == subviews.count { // all static
+            let views = staticList.flatMap(\.views)
+            return _ViewListOutputs(views: StaticViewListGenerator(views: views))
+        } else {
+            return _ViewListOutputs(views: .dynamicList(subviews))
+        }
+    }
 }
 
-extension TupleView: _PrimitiveView {}
+extension TupleView : _PrimitiveView {
+}

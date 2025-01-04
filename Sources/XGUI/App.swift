@@ -2,20 +2,20 @@
 //  File: App.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
 import VVD
 
 public protocol App {
-    associatedtype Body: Scene
+    associatedtype Body : Scene
     @SceneBuilder var body: Self.Body { get }
 
     init()
 }
 
-protocol AppContext: AnyObject {
+protocol AppContext : AnyObject {
     var graphicsDeviceContext: GraphicsDeviceContext? { get }
     var audioDeviceContext: AudioDeviceContext? { get }
 
@@ -25,7 +25,7 @@ protocol AppContext: AnyObject {
     func checkWindowActivities()
 }
 
-struct EmptyScene: Scene, _PrimitiveScene {
+struct EmptyScene : Scene, _PrimitiveScene {
     func makeSceneProxy(modifiers: [any _SceneModifier]) -> any SceneProxy {
         SceneContext(scene: self, modifiers: modifiers, children: [])
     }
@@ -33,7 +33,7 @@ struct EmptyScene: Scene, _PrimitiveScene {
 
 nonisolated(unsafe) var appContext: AppContext? = nil
 
-class AppMain<A>: ApplicationDelegate, AppContext where A: App {
+class AppMain<A> : ApplicationDelegate, AppContext where A : App {
 
     var graphicsDeviceContext: GraphicsDeviceContext?
     var audioDeviceContext: AudioDeviceContext?
@@ -51,7 +51,7 @@ class AppMain<A>: ApplicationDelegate, AppContext where A: App {
     var terminateAfterLastWindowClosed = true
 
     func checkWindowActivities() {
-        let activeWindows: [Window] = self.scene.windows.compactMap { $0.window }
+        let activeWindows: [Window] = self.scene.windows.compactMap(\.window)
         if activeWindows.isEmpty {
             if self.terminateAfterLastWindowClosed {
                 let app = sharedApplication()

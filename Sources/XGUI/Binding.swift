@@ -2,8 +2,10 @@
 //  File: Binding.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
+
+import Foundation
 
 struct FunctionalLocation<Value> : _Location {
     struct Functions {
@@ -94,6 +96,58 @@ class LocationBox<Location: _Location> : AnyLocation<Location.Value>, @unchecked
     }
 }
 
+extension Binding : @unchecked Sendable where Value : Sendable {
+}
+
+extension Binding : Identifiable where Value : Identifiable {
+    public var id: Value.ID {
+        _value.id
+    }
+    public typealias ID = Value.ID
+}
+
+extension Binding : Sequence where Value : MutableCollection {
+    public typealias Element = Binding<Value.Element>
+    public typealias Iterator = IndexingIterator<Binding<Value>>
+    public typealias SubSequence = Slice<Binding<Value>>
+}
+
+extension Binding : Collection where Value : MutableCollection {
+    public typealias Index = Value.Index
+    public typealias Indices = Value.Indices
+    public var startIndex: Binding<Value>.Index {
+        _value.startIndex
+    }
+    public var endIndex: Binding<Value>.Index {
+        _value.endIndex
+    }
+    public var indices: Value.Indices {
+        _value.indices
+    }
+    public func index(after i: Binding<Value>.Index) -> Binding<Value>.Index {
+        _value.index(after: i)
+    }
+    public func formIndex(after i: inout Binding<Value>.Index) {
+        _value.formIndex(after: &i)
+    }
+    public subscript(position: Binding<Value>.Index) -> Binding<Value>.Element {
+        fatalError()
+    }
+}
+
+extension Binding : BidirectionalCollection where Value : BidirectionalCollection, Value : MutableCollection {
+    public func index(before i: Binding<Value>.Index) -> Binding<Value>.Index {
+        _value.index(before: i)
+    }
+
+    public func formIndex(before i: inout Binding<Value>.Index) {
+        _value.formIndex(before: &i)
+    }
+}
+
+extension Binding : RandomAccessCollection where Value : MutableCollection, Value : RandomAccessCollection {
+}
+
 extension Binding {
     public func transaction(_ transaction: Transaction) -> Binding<Value> {
         var binding = self
@@ -103,5 +157,11 @@ extension Binding {
 
     public func animation(_ animation: Animation? = .default) -> Binding<Value> {
         transaction(Transaction(animation: animation))
+    }
+}
+
+extension Binding : DynamicProperty {
+    public static func _makeProperty<V>(in buffer: inout _DynamicPropertyBuffer, container: _GraphValue<V>, fieldOffset: Int, inputs: inout _GraphInputs) {
+
     }
 }

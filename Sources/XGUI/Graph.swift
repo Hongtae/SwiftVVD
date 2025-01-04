@@ -2,7 +2,7 @@
 //  File: Graph.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -97,13 +97,10 @@ protocol AnyPreferenceKey {
 }
 
 struct LayoutInputs {
-    var modifierViews: [ObjectIdentifier: (_Graph, _ViewInputs)->_ViewOutputs] = [:]
-    var modifierViewLists: [ObjectIdentifier: (_Graph, _ViewListInputs)->_ViewListOutputs] = [:]
+    var sourceWrites: [ObjectIdentifier: ViewProxy] = [:]
 
-    var sourceWrites: [ObjectIdentifier: any ViewGenerator] = [:]
-
-    var labelStyles: [any LabelStyle] = []
-    var buttonStyles: [any PrimitiveButtonStyle] = []
+    var labelStyles: [LabelStyleProxy] = []
+    var buttonStyles: [PrimitiveButtonStyleProxy] = []
 }
 
 struct PreferenceInputs {
@@ -149,7 +146,6 @@ public struct _ViewInputs {
 
 public struct _ViewOutputs {
     var view: (any ViewGenerator)?
-    var preferences: PreferenceOutputs = PreferenceOutputs(preferences: [])
 }
 
 public struct _ViewListInputs {
@@ -178,8 +174,7 @@ public struct _ViewListOutputs {
         static var none: Options { Options(rawValue: 0) }
     }
 
-    var viewList: any ViewListGenerator
-    var preferences: PreferenceOutputs = PreferenceOutputs(preferences: [])
+    var views: any ViewListGenerator
     var options: Options = .none
 }
 
@@ -242,6 +237,10 @@ public struct _GraphValue<Value> {
             return _GraphValue<Any>(self.root, rp.parent)
         }
         return nil
+    }
+
+    var isRoot: Bool {
+        self.index == 0
     }
 
     func trackRelativeGraphs<U>(to dest: _GraphValue<U>, _ callback: (_GraphValue<Any>)->Void) -> Bool {

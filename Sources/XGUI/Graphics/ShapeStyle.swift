@@ -2,7 +2,7 @@
 //  File: ShapeStyle.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 public protocol ShapeStyle : Sendable {
@@ -130,13 +130,13 @@ extension ShapeStyle where Self == Color {
     public static var clear: Color  { .clear }
 }
 
-extension ShapeStyle where Self: View, Self.Body == _ShapeView<Rectangle, Self> {
+extension ShapeStyle where Self : View, Self.Body == _ShapeView<Rectangle, Self> {
     public var body: _ShapeView<Rectangle, Self> {
         .init(shape: Rectangle(), style: self)
     }
 }
 
-public struct AnyShapeStyle: ShapeStyle {
+public struct AnyShapeStyle : ShapeStyle {
     @usableFromInline
     struct Storage: Equatable, @unchecked Sendable {
         var box: AnyShapeStyleBox
