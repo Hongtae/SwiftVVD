@@ -88,6 +88,33 @@ class ViewContext {
         self.inputs = self.inputs.resolveMergedInputs()
     }
 
+    func resolveGraphInputs() {
+        assert(self.inputs.mergedInputs.isEmpty)
+        do {
+            var modifiers = self.inputs.modifiers
+            modifiers.indices.forEach { index in
+                if modifiers[index].isResolved == false {
+                    modifiers[index].resolve(containerView: self)
+                }
+            }
+            modifiers.forEach { modifier in
+                if modifier.isResolved {
+                    modifier.apply(inputs: &self.inputs)
+                }
+            }
+            self.inputs.modifiers = modifiers
+        }
+        do {
+            var modifiers = self.inputs.viewStyleModifiers
+            modifiers.indices.forEach { index in
+                if modifiers[index].isResolved == false {
+                    modifiers[index].resolve(containerView: self)
+                }
+            }
+            self.inputs.viewStyleModifiers = modifiers
+        }
+    }
+
     func update(transform t: AffineTransform) {
         self.transformToRoot = self.transformToContainer.concatenating(t)
     }

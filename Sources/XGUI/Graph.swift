@@ -16,7 +16,7 @@ public struct _Graph {
 protocol _GraphInputResolve : Equatable {
     var isResolved: Bool { get }
     func apply(inputs: inout _GraphInputs)
-    mutating func resolve<T>(encloser: T, graph: _GraphValue<T>)
+    mutating func resolve(containerView: ViewContext)
 }
 
 extension _GraphInputResolve {
@@ -37,7 +37,7 @@ struct ViewStyles {
 protocol ViewStyleModifier : Equatable {
     var isResolved: Bool { get }
     func apply(to style: inout ViewStyles)
-    mutating func resolve<T>(encloser: T, graph: _GraphValue<T>)
+    mutating func resolve(containerView: ViewContext)
 }
 
 extension ViewStyleModifier {
