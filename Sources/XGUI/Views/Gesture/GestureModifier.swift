@@ -13,8 +13,8 @@ protocol _GestureInputsModifier {
 
 private struct _CallbackGenerator<Callback> : GestureCallbackGenerator {
     let graph: _GraphValue<Callback>
-    func _makeCallback<T>(encloser: T, graph: _GraphValue<T>) -> Any {
-        if let value = graph.value(atPath: self.graph, from: encloser) {
+    func _makeCallback(containerView: ViewContext) -> Any {
+        if let value = containerView.value(atPath: self.graph) {
             return value
         }
         fatalError("Unable to recover value: \(self.graph.valueType)")
@@ -153,20 +153,101 @@ protocol _GestureGenerator {
 
 extension AddGestureModifier : _UnaryViewModifier {
     static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        fatalError("WIP")
+        let outputs = body(_Graph(), inputs)
+        if let body = outputs.view?.makeView() {
+            let view = TypedUnaryViewGenerator(baseInputs: inputs.base) { inputs in
+                GestureViewContext(graph: modifier, inputs: inputs, body: body)
+            }
+            return _ViewOutputs(view: view)
+        }
+        return outputs
     }
 }
 
 extension SimultaneousGestureModifier : _UnaryViewModifier {
     static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        fatalError("WIP")    }
+        let outputs = body(_Graph(), inputs)
+        if let body = outputs.view?.makeView() {
+            let view = TypedUnaryViewGenerator(baseInputs: inputs.base) { inputs in
+                GestureViewContext(graph: modifier, inputs: inputs, body: body)
+            }
+            return _ViewOutputs(view: view)
+        }
+        return outputs
+    }
 }
 
 extension HighPriorityGestureModifier : _UnaryViewModifier {
     static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        fatalError("WIP")    }
+        let outputs = body(_Graph(), inputs)
+        if let body = outputs.view?.makeView() {
+            let view = TypedUnaryViewGenerator(baseInputs: inputs.base) { inputs in
+                GestureViewContext(graph: modifier, inputs: inputs, body: body)
+            }
+            return _ViewOutputs(view: view)
+        }
+        return outputs
+    }
 }
 
 extension AddGestureModifier : _GestureGenerator {}
 extension SimultaneousGestureModifier : _GestureGenerator {}
 extension HighPriorityGestureModifier : _GestureGenerator {}
+
+
+private class GestureViewContext<Modifier> : ViewModifierContext<Modifier> where Modifier : ViewModifier & _GestureGenerator  {
+
+    enum _GestureOutput {
+        case gesture(_GestureHandler)
+        case simultaneousGesture(_GestureHandler)
+        case highPriorityGesture(_GestureHandler)
+        case none
+    }
+
+    func makeGesture(target: ViewContext) -> _GestureOutput {
+        guard let modifier else { return .none }
+
+        func _makeGesture<T: _GestureGenerator>(_ generator: T, graph: _GraphValue<T>) -> _GestureOutput {
+            let gesture = graph.unsafeCast(to: T.self)[\.gesture]
+            func _make<U: Gesture>(_ gesture: _GraphValue<U>) -> _GestureOutput {
+                let inputs = _GestureInputs(view: target)
+                let outputs = U._makeGesture(gesture: gesture, inputs: inputs)
+                if let handler = outputs.generator.makeGesture(containerView: self) {
+                    if self.modifier is HighPriorityGestureModifier<U> {
+                        return .highPriorityGesture(handler)
+                    }
+                    if self.modifier is SimultaneousGestureModifier<U> {
+                        return .simultaneousGesture(handler)
+                    }
+                    return .gesture(handler)
+                }
+                return .none
+            }
+            return _make(gesture)
+        }
+        return _makeGesture(modifier, graph: self.graph)
+    }
+
+    override func gestureHandlers(at location: CGPoint) -> GestureHandlerOutputs {
+        let outputs = super.gestureHandlers(at: location)
+
+        if let target = self.hitTest(location) {
+            var gestures: [_GestureHandler] = []
+            var simGestures: [_GestureHandler] = []
+            var hpGestures: [_GestureHandler] = []
+
+            let gesture = self.makeGesture(target: target)
+            if case let .highPriorityGesture(handler) = gesture {
+                hpGestures.append(handler)
+            } else if case let .simultaneousGesture(handler) = gesture {
+                simGestures.append(handler)
+            } else if case let .gesture(handler) = gesture {
+                gestures.append(handler)
+            }
+            return outputs.merge(.init(gestures: gestures,
+                                       simultaneousGestures: simGestures,
+                                       highPriorityGestures: hpGestures))
+        }
+        return outputs
+    }
+}

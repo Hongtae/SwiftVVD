@@ -35,12 +35,12 @@ public struct ExclusiveGesture<First, Second> : Gesture where First : Gesture, S
         let first: _GestureOutputs<First.Value>
         let second: _GestureOutputs<Second.Value>
         let inputs: _GestureInputs
-        func makeGesture<T>(encloser: T, graph: _GraphValue<T>) -> _GestureRecognizer<Value>? {
-            if let gesture = graph.value(atPath: self.graph, from: encloser) {
-                let first = self.first.generator.makeGesture(encloser: gesture, graph: self.graph)
-                let second = self.second.generator.makeGesture(encloser: gesture, graph: self.graph)
+        func makeGesture(containerView: ViewContext) -> _GestureRecognizer<Value>? {
+            if let gesture = containerView.value(atPath: self.graph) {
+                let first = self.first.generator.makeGesture(containerView: containerView)
+                let second = self.second.generator.makeGesture(containerView: containerView)
                 if let first, let second {
-                    let callbacks = inputs.makeCallbacks(of: Value.self, from: encloser, graph: graph)
+                    let callbacks = inputs.makeCallbacks(of: Value.self, containerView: containerView)
                     return ExclusiveGestureRecognizer(first: first, second: second, callbacks: callbacks, target: inputs.view)
                 }
                 return nil

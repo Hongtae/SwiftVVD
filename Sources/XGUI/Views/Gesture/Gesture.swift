@@ -37,7 +37,7 @@ extension Optional : Gesture where Wrapped : Gesture {
 }
 
 protocol GestureCallbackGenerator {
-    func _makeCallback<T>(encloser: T, graph: _GraphValue<T>) -> Any
+    func _makeCallback(containerView: ViewContext) -> Any
 }
 
 public struct _GestureInputs {
@@ -46,16 +46,16 @@ public struct _GestureInputs {
     var changedCallbacks: [GestureCallbackGenerator] = []
     var pressableGestureCallbacks: [GestureCallbackGenerator] = []
 
-    func makeCallbacks<Value, T>(of: Value.Type, from encloser: T, graph: _GraphValue<T>) -> _GestureRecognizer<Value>.Callbacks {
+    func makeCallbacks<Value>(of: Value.Type, containerView: ViewContext) -> _GestureRecognizer<Value>.Callbacks {
         var callbacks = _GestureRecognizer<Value>.Callbacks()
         callbacks.endedCallbacks = self.endedCallbacks.compactMap {
-            $0._makeCallback(encloser: encloser, graph: graph) as? EndedCallbacks<Value>
+            $0._makeCallback(containerView: containerView) as? EndedCallbacks<Value>
         }
         callbacks.changedCallbacks = self.changedCallbacks.compactMap {
-            $0._makeCallback(encloser: encloser, graph: graph) as? ChangedCallbacks<Value>
+            $0._makeCallback(containerView: containerView) as? ChangedCallbacks<Value>
         }
         callbacks.pressableGestureCallbacks = self.pressableGestureCallbacks.compactMap {
-            $0._makeCallback(encloser: encloser, graph: graph) as? PressableGestureCallbacks<Value>
+            $0._makeCallback(containerView: containerView) as? PressableGestureCallbacks<Value>
         }
         return callbacks
     }
@@ -63,7 +63,7 @@ public struct _GestureInputs {
 
 protocol _GestureRecognizerGenerator<Value> {
     associatedtype Value
-    func makeGesture<T>(encloser: T, graph: _GraphValue<T>) -> _GestureRecognizer<Value>?
+    func makeGesture(containerView: ViewContext) -> _GestureRecognizer<Value>?
 }
 
 public struct _GestureOutputs<Value> {

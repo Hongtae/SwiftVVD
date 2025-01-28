@@ -100,32 +100,74 @@ extension Button where Label == XGUI.Label<Text, Image> {
 
 struct ResolvedButtonStyle : View {
     typealias Body = Never
-    let configuration: PrimitiveButtonStyleConfiguration
+    var configuration: PrimitiveButtonStyleConfiguration
     init(configuration: PrimitiveButtonStyleConfiguration) {
         self.configuration = configuration
     }
 
-    static let primitiveButtonStyleLabelKey = ObjectIdentifier(PrimitiveButtonStyleConfiguration.Label.self)
-    static let buttonStyleLabelKey = ObjectIdentifier(ButtonStyleConfiguration.Label.self)
-
-    struct Style<S : PrimitiveButtonStyle> {
-        typealias Body = S.Body
-        let style: S
-        var configuration: PrimitiveButtonStyleConfiguration
-
-        var body: Body {
-            style.makeBody(configuration: self.configuration)
-        }
+    var _style: any PrimitiveButtonStyle = DefaultButtonStyle.automatic
+    var _body: any View {
+        _style.makeBody(configuration: self.configuration)
     }
 
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        fatalError("WIP")
+        let primitiveButtonStyleLabelKey = ObjectIdentifier(PrimitiveButtonStyleConfiguration.Label.self)
+        let buttonStyleLabelKey = ObjectIdentifier(ButtonStyleConfiguration.Label.self)
+
+        var inputs = inputs
+        let label1 = inputs.layouts.sourceWrites.removeValue(forKey: primitiveButtonStyleLabelKey)
+        let label2 = inputs.layouts.sourceWrites.removeValue(forKey: buttonStyleLabelKey)
+        let label = label1 ?? label2
+        let style = inputs.layouts.buttonStyles.popLast()
+        let styleType = style?.type ?? DefaultButtonStyle.self
+
+        func makeStyleBody<S : PrimitiveButtonStyle, T>(_: S.Type, graph: _GraphValue<T>, inputs: _ViewInputs) -> _ViewOutputs {
+            S.Body._makeView(view: graph.unsafeCast(to: S.Body.self), inputs: inputs)
+        }
+        let outputs = makeStyleBody(styleType, graph: view[\._body], inputs: inputs)
+        
+        if let body = outputs.view {
+            let view = TypedUnaryViewGenerator(baseInputs: inputs.base) { inputs in
+                ResolvedButtonStyleViewContext(graph: view,
+                                               inputs: inputs,
+                                               body: body.makeView(),
+                                               buttonStyle: style,
+                                               label: label)
+            }
+            return _ViewOutputs(view: view)
+        }
+        return outputs
     }
 
     static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        fatalError("WIP")
+        let outputs = Self._makeView(view: view, inputs: inputs.inputs)
+        return _ViewListOutputs(views: .staticList(outputs.view))
     }
 }
 
 extension ResolvedButtonStyle : _PrimitiveView {
+}
+
+private class ResolvedButtonStyleViewContext : GenericViewContext<ResolvedButtonStyle> {
+    let buttonStyle: PrimitiveButtonStyleProxy?
+    let label: ViewProxy?
+
+    init(graph: _GraphValue<ResolvedButtonStyle>, inputs: _GraphInputs, body: ViewContext, buttonStyle: PrimitiveButtonStyleProxy?, label: ViewProxy?) {
+        self.buttonStyle = buttonStyle
+        self.label = label
+        super.init(graph: graph, inputs: inputs, body: body)
+    }
+
+    override func updateView(_ view: inout ResolvedButtonStyle) {
+        if let buttonStyle {
+            guard let style = buttonStyle.resolve(self) else {
+                fatalError("Unable to resolve button style")
+            }
+            view._style = style
+        }
+        let role = view.configuration.role
+        let label = PrimitiveButtonStyleConfiguration.Label(label)
+        let action = view.configuration.action
+        view.configuration = PrimitiveButtonStyleConfiguration(role: role, label: label, action: action)
+    }
 }

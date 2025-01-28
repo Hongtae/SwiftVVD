@@ -46,11 +46,17 @@ extension PrimitiveButtonStyleConfiguration.Label {
     }
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        fatalError("WIP")
+        let view = TypedUnaryViewGenerator(baseInputs: inputs.base) { inputs in
+            PrimitiveButtonStyleConfigurationLabelViewContext(graph: view, inputs: inputs)
+        }
+        return _ViewOutputs(view: view)
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        fatalError("WIP")
+        let view = TypedUnaryViewGenerator(baseInputs: inputs.base) { inputs in
+            PrimitiveButtonStyleConfigurationLabelViewContext(graph: view, inputs: inputs)
+        }
+        return _ViewListOutputs(views: .staticList(view))
     }
 }
 
@@ -209,18 +215,22 @@ struct PrimitiveButtonStyleProxy {
         self.type = S.self
         self.graph = graph.unsafeCast(to: Any.self)
     }
-    func resolve(_ view: ViewContext) -> any PrimitiveButtonStyle {
-        fatalError()
+    func resolve(_ view: ViewContext) -> (any PrimitiveButtonStyle)? {
+        view.value(atPath: graph) as? (any PrimitiveButtonStyle)
     }
 }
 
 extension PrimitiveButtonStyleContainerModifier {
     static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        fatalError("WIP")
+        var inputs = inputs
+        inputs.layouts.buttonStyles.append(PrimitiveButtonStyleProxy(modifier[\.style]))
+        return body(_Graph(), inputs)
     }
 
     static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        fatalError("WIP")
+        var inputs = inputs
+        inputs.layouts.buttonStyles.append(PrimitiveButtonStyleProxy(modifier[\.style]))
+        return body(_Graph(), inputs)
     }
 }
 
@@ -237,11 +247,17 @@ struct ButtonStyleContainerModifier<Style> : ViewModifier where Style : ButtonSt
     }
 
     static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        fatalError("WIP")
+        func make<T : ViewModifier>(modifier: _GraphValue<T>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
+            T._makeView(modifier: modifier, inputs: inputs, body: body)
+        }
+        return make(modifier: modifier[\.modifier], inputs: inputs, body: body)
     }
 
     static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        fatalError("WIP")
+        func make<T : ViewModifier>(modifier: _GraphValue<T>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
+            T._makeViewList(modifier: modifier, inputs: inputs, body: body)
+        }
+        return make(modifier: modifier[\.modifier], inputs: inputs, body: body)
     }
 }
 
@@ -252,5 +268,19 @@ extension View {
 
     public func buttonStyle<S>(_ style: S) -> some View where S : ButtonStyle {
         modifier(ButtonStyleContainerModifier(style: style))
+    }
+}
+
+private class PrimitiveButtonStyleConfigurationLabelViewContext : DynamicViewContext<PrimitiveButtonStyleConfiguration.Label> {
+    override func updateContent() {
+        self.body?.invalidate()
+        self.view = value(atPath: self.graph)
+        if let view, let proxy = view.view {
+            let outputs = proxy.makeView(_Graph(), inputs: _ViewInputs(base: self.inputs))
+            self.body = outputs.view?.makeView()
+            self.body?.updateContent()
+        } else {
+            fatalError("Unable to recover view for \(graph)")
+        }
     }
 }

@@ -159,7 +159,7 @@ struct LabelStyleProxy {
     }
 }
 
-class LabelStyleConfigurationTitleViewContext : DynamicViewContext<LabelStyleConfiguration.Title> {
+private class LabelStyleConfigurationTitleViewContext : DynamicViewContext<LabelStyleConfiguration.Title> {
     override func updateContent() {
         self.body?.invalidate()
         self.view = value(atPath: self.graph)
@@ -173,7 +173,7 @@ class LabelStyleConfigurationTitleViewContext : DynamicViewContext<LabelStyleCon
     }
 }
 
-class LabelStyleConfigurationIconViewContext : DynamicViewContext<LabelStyleConfiguration.Icon> {
+private class LabelStyleConfigurationIconViewContext : DynamicViewContext<LabelStyleConfiguration.Icon> {
     override func updateContent() {
         self.body?.invalidate()
         self.view = value(atPath: self.graph)

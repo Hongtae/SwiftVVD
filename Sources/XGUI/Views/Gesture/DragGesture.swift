@@ -54,9 +54,9 @@ public struct DragGesture : Gesture {
         struct _Generator : _GestureRecognizerGenerator {
             let graph: _GraphValue<DragGesture>
             let inputs: _GestureInputs
-            func makeGesture<T>(encloser: T, graph: _GraphValue<T>) -> _GestureRecognizer<Value>? {
-                if let gesture = graph.value(atPath: self.graph, from: encloser) {
-                    let callbacks = inputs.makeCallbacks(of: Value.self, from: encloser, graph: graph)
+            func makeGesture(containerView: ViewContext) -> _GestureRecognizer<Value>? {
+                if let gesture = containerView.value(atPath: self.graph) {
+                    let callbacks = inputs.makeCallbacks(of: Value.self, containerView: containerView)
                     return DragGestureRecognizer(gesture: gesture, callbacks: callbacks, target: inputs.view)
                 }
                 fatalError("Unable to recover gesture: \(self.graph.valueType)")
