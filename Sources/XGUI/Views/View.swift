@@ -204,7 +204,7 @@ private final class DynamicContentViewContext<Content> : GenericViewContext<Cont
 
     override func updateContent() {
         let setup = self.view == nil
-        self.body.invalidate()
+        self.invalidate()
         self.view = value(atPath: self.graph)
         if var view {
             if setup {  // initialize dynamic property
@@ -231,7 +231,7 @@ private final class DynamicContentViewContext<Content> : GenericViewContext<Cont
 
 private final class OptionalViewContext<WrappedContent> : GenericViewContext<Optional<WrappedContent>> where WrappedContent : View {
     override func updateContent() {
-        self.body.invalidate()
+        self.invalidate()
         if let opt = value(atPath: self.graph) {
             if let wrapped = opt {
                 self.view = wrapped

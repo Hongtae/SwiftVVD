@@ -273,7 +273,7 @@ extension View {
 
 private class PrimitiveButtonStyleConfigurationLabelViewContext : DynamicViewContext<PrimitiveButtonStyleConfiguration.Label> {
     override func updateContent() {
-        self.body?.invalidate()
+        self.invalidate()
         self.view = value(atPath: self.graph)
         if let view, let proxy = view.view {
             let outputs = proxy.makeView(_Graph(), inputs: _ViewInputs(base: self.inputs))

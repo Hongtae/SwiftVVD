@@ -161,7 +161,7 @@ struct LabelStyleProxy {
 
 private class LabelStyleConfigurationTitleViewContext : DynamicViewContext<LabelStyleConfiguration.Title> {
     override func updateContent() {
-        self.body?.invalidate()
+        self.invalidate()
         self.view = value(atPath: self.graph)
         if let view, let proxy = view.view {
             let outputs = proxy.makeView(_Graph(), inputs: _ViewInputs(base: self.inputs))
@@ -175,7 +175,7 @@ private class LabelStyleConfigurationTitleViewContext : DynamicViewContext<Label
 
 private class LabelStyleConfigurationIconViewContext : DynamicViewContext<LabelStyleConfiguration.Icon> {
     override func updateContent() {
-        self.body?.invalidate()
+        self.invalidate()
         self.view = value(atPath: self.graph)
         if let view, let proxy = view.view {
             let outputs = proxy.makeView(_Graph(), inputs: _ViewInputs(base: self.inputs))

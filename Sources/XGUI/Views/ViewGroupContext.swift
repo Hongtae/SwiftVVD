@@ -272,10 +272,7 @@ class StaticViewGroupContext<Content> : ViewGroupContext {
     }
 
     override func updateContent() {
-        self.subviews.forEach {
-            $0.invalidate()
-        }
-        self.activeSubviews = []
+        self.invalidate()
         self.root = value(atPath: self.graph)
         if var root = self.root {
             self.updateRoot(&root)
@@ -285,7 +282,6 @@ class StaticViewGroupContext<Content> : ViewGroupContext {
             }
             self.activeSubviews = self.subviews.filter { $0.isValid }
         } else {
-            self.invalidate()
             fatalError("Failed to resolve view for \(self.graph)")
         }
     }
@@ -309,6 +305,10 @@ class StaticViewGroupContext<Content> : ViewGroupContext {
 
     override func invalidate() {
         super.invalidate()
+        self.subviews.forEach {
+            $0.invalidate()
+        }
+        self.activeSubviews = []
         self.root = nil
     }
 }
@@ -343,12 +343,7 @@ class DynamicViewGroupContext<Content> : ViewGroupContext {
     }
 
     override func updateContent() {
-        self.subviews.forEach {
-            $0.invalidate()
-            $0.superview = nil
-        }
-        self.subviews = []
-        self.activeSubviews = []
+        self.invalidate()
         self.root = value(atPath: self.graph)
         if var root = self.root {
             updateRoot(&root)
@@ -363,7 +358,6 @@ class DynamicViewGroupContext<Content> : ViewGroupContext {
             }
             self.activeSubviews = self.subviews.filter { $0.isValid }
         } else {
-            self.invalidate()
             fatalError("Failed to resolve view for \(self.graph)")
         }
     }
@@ -391,6 +385,7 @@ class DynamicViewGroupContext<Content> : ViewGroupContext {
             $0.superview = nil
         }
         self.subviews = []
+        self.activeSubviews = []
         self.root = nil
     }
 }

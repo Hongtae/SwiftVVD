@@ -333,7 +333,7 @@ private struct ChildrenViewListGenerator : ViewListGenerator {
 // ViewContext for _VariadicView_Children.Element (2)
 private class ChildrenElementViewContext : DynamicViewContext<_VariadicView_Children.Element> {
     override func updateContent() {
-        self.body = nil
+        self.invalidate()
         self.view = value(atPath: self.graph)
         if let view = self.view?.view {
             self.body = view.makeView()
@@ -426,7 +426,7 @@ private class ViewElementProxyWrapper<Root> : GenericViewContext<ViewRootProxy<R
     }
 
     override func updateContent() {
-        self.body.invalidate()
+        self.invalidate()
         // resolve proxy and replace proxy.children for its descendants.
         self.view = value(atPath: self.graph)
         if var proxy = self.view {

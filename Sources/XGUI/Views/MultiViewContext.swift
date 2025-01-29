@@ -167,7 +167,7 @@ class StaticMultiViewContext<Content> : MultiViewContext {
     }
 
     override func updateContent() {
-        super.invalidate()
+        self.invalidate()
         self.root = value(atPath: self.graph)
         if var root = self.root {
             self.updateRoot(&root)
@@ -177,7 +177,6 @@ class StaticMultiViewContext<Content> : MultiViewContext {
             }
             self.activeSubviews = self.subviews.filter(\.isValid)
         } else {
-            self.invalidate()
             fatalError("Failed to resolve view for \(self.graph)")
         }
     }
@@ -201,6 +200,7 @@ class StaticMultiViewContext<Content> : MultiViewContext {
 
     override func invalidate() {
         super.invalidate()
+        self.activeSubviews = []
         self.root = nil
     }
 }
@@ -232,12 +232,7 @@ class DynamicMultiViewContext<Content> : MultiViewContext {
     }
 
     override func updateContent() {
-        self.subviews.forEach {
-            $0.invalidate()
-            $0.superview = nil
-        }
-        self.subviews = []
-        self.activeSubviews = []
+        self.invalidate()
         self.root = value(atPath: self.graph)
         if var root = self.root {
             updateRoot(&root)
@@ -252,7 +247,6 @@ class DynamicMultiViewContext<Content> : MultiViewContext {
             }
             self.activeSubviews = self.subviews.filter { $0.isValid }
         } else {
-            self.invalidate()
             fatalError("Failed to resolve view for \(self.graph)")
         }
     }
@@ -280,7 +274,7 @@ class DynamicMultiViewContext<Content> : MultiViewContext {
             $0.superview = nil
         }
         self.subviews = []
+        self.activeSubviews = []
         self.root = nil
     }
 }
-

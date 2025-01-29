@@ -308,12 +308,12 @@ class PrimitiveViewContext<Content> : ViewContext {
     }
 
     override func updateContent() {
+        self.invalidate()
         if var view = value(atPath: self.graph) {
             self.updateView(&view)
             self.view = view
         }
         if self.view == nil {
-            self.invalidate()
             fatalError("Failed to resolve view for \(self.graph)")
         }
     }
@@ -374,12 +374,12 @@ class GenericViewContext<Content> : ViewContext {
     }
 
     override func updateContent() {
+        self.invalidate()
         if var view = value(atPath: self.graph) {
             self.updateView(&view)
             self.view = view
             self.body.updateContent()
         } else {
-            self.invalidate()
             fatalError("Failed to resolve view for \(self.graph)")
         }
     }
@@ -537,6 +537,7 @@ class DynamicViewContext<Content> : ViewContext {
     override func invalidate() {
         self.view = nil
         self.body?.invalidate()
+        self.body = nil
     }
 
     final override func value<T>(atPath graph: _GraphValue<T>) -> T? {
@@ -558,12 +559,12 @@ class DynamicViewContext<Content> : ViewContext {
     }
 
     override func updateContent() {
+        self.invalidate()
         if var view = value(atPath: self.graph) {
             self.updateView(&view)
             self.view = view
             self.body?.updateContent()
         } else {
-            self.invalidate()
             fatalError("Failed to resolve view for \(self.graph)")
         }
     }
