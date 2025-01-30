@@ -2,7 +2,7 @@
 //  File: SharedContext.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -31,12 +31,16 @@ final class SharedContext: @unchecked Sendable {
     var contentBounds: CGRect
     var contentScaleFactor: CGFloat
     var needsLayout: Bool
+    var viewsNeedToReloadResources: [ViewContext] = []
 
     var resourceData: [String: Data] = [:]
     var resourceObjects: [String: AnyObject] = [:]
     var cachedTypeFaces: [Font: TypeFace] = [:]
 
     var focusedViews: [Int: WeakObject<ViewContext>] = [:]
+
+    var gestureHandlers: [_GestureHandler] = []
+
 
     init(appContext: AppContext) {
         self.appContext = appContext

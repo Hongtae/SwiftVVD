@@ -2,7 +2,7 @@
 //  File: SimultaneousGesture.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -42,7 +42,12 @@ public struct SimultaneousGesture<First, Second> : Gesture where First : Gesture
                 let second = self.second.generator.makeGesture(containerView: containerView)
                 if let first, let second {
                     let callbacks = inputs.makeCallbacks(of: Value.self, containerView: containerView)
-                    return SimultaneousGestureRecognizer(first: first, second: second, callbacks: callbacks, target: inputs.view)
+                    return SimultaneousGestureRecognizer(graph: graph,
+                                                         target: inputs.view,
+                                                         callbacks: callbacks,
+                                                         gesture: gesture,
+                                                         first: first,
+                                                         second: second)
                 }
                 return nil
             }
@@ -68,10 +73,16 @@ class SimultaneousGestureRecognizer<First : Gesture, Second : Gesture> : _Gestur
     let second: _GestureRecognizer<Second.Value>
     typealias Value = SimultaneousGesture<First, Second>.Value
 
-    init(first: _GestureRecognizer<First.Value>, second: _GestureRecognizer<Second.Value>, callbacks: Callbacks, target: ViewContext?) {
+    init(graph: _GraphValue<SimultaneousGesture<First, Second>>,
+         target: ViewContext?,
+         callbacks: Callbacks,
+         gesture: SimultaneousGesture<First, Second>,
+         first: _GestureRecognizer<First.Value>,
+         second: _GestureRecognizer<Second.Value>) {
+
         self.first = first
         self.second = second
-        super.init(callbacks: callbacks, target: target)
+        super.init(graph: graph, target: target, callbacks: callbacks)
 
         self.first.endedCallbacks.append(EndedCallbacks<First.Value> {
             [weak self] in

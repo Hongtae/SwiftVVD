@@ -2,7 +2,7 @@
 //  File: AnyGesture.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 public struct AnyGesture<Value> : Gesture {
@@ -25,7 +25,7 @@ class AnyGestureStorageBase<Value> {
     }
 }
 
-class AnyGestureBox<T: Gesture> : AnyGestureStorageBase<T.Value> {
+class AnyGestureBox<T : Gesture> : AnyGestureStorageBase<T.Value> {
     let gesture: T
     init(_ gesture: T) {
         self.gesture = gesture

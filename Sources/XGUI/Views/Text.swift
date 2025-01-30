@@ -295,12 +295,20 @@ private class TextViewContext : PrimitiveViewContext<Text> {
     var resolvedText: GraphicsContext.ResolvedText?
     var primaryStyle: AnyShapeStyle?
 
+    override init(graph: _GraphValue<Text>, inputs: _GraphInputs) {
+        super.init(graph: graph, inputs: inputs)
+    }
+
     override func updateView(_ view: inout Text) {
         self.resolvedText = nil
 
         if self.inputs.environment.font == nil {
             self.inputs.environment.font = .system(.body)
         }
+
+        self.reloadInputModifiers()
+        self.primaryStyle = self.viewStyles().foregroundStyle.primary
+        self.sharedContext.viewsNeedToReloadResources.append(self)
     }
 
     override func loadResources(_ context: GraphicsContext) {
@@ -309,8 +317,6 @@ private class TextViewContext : PrimitiveViewContext<Text> {
             self.sharedContext.needsLayout = true
         }
         super.loadResources(context)
-
-        self.primaryStyle = self.viewStyles().foregroundStyle.primary
     }
 
     override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {

@@ -105,9 +105,17 @@ struct ResolvedButtonStyle : View {
         self.configuration = configuration
     }
 
+    var _isPressing = false
     var _style: any PrimitiveButtonStyle = DefaultButtonStyle.automatic
+    var _pressingCallback: ((Bool) -> Void)? = nil
     var _body: any View {
-        _style.makeBody(configuration: self.configuration)
+        if let styleWithPressingBody = _style as? (any PrimitiveButtonStyleWithPressingBody) {
+            return styleWithPressingBody.makeBody(configuration: self.configuration,
+                                                  isPressing: self._isPressing,
+                                                  callback: self._pressingCallback)
+        } else {
+            return _style.makeBody(configuration: self.configuration)
+        }
     }
 
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
@@ -169,5 +177,12 @@ private class ResolvedButtonStyleViewContext : GenericViewContext<ResolvedButton
         let label = PrimitiveButtonStyleConfiguration.Label(label)
         let action = view.configuration.action
         view.configuration = PrimitiveButtonStyleConfiguration(role: role, label: label, action: action)
+        view._isPressing = false
+        view._pressingCallback = self.onButtonPressing
+    }
+
+    func onButtonPressing(_ isPressed: Bool) {
+        self.view?._isPressing = isPressed
+        self.body.updateContent()
     }
 }

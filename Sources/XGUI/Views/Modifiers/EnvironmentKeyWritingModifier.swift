@@ -2,7 +2,7 @@
 //  File: EnvironmentKeyWritingModifier.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 public struct _EnvironmentKeyWritingModifier<Value> : ViewModifier, _GraphInputsModifier, _EnvironmentValuesResolve {
@@ -45,6 +45,10 @@ public struct _EnvironmentKeyWritingModifier<Value> : ViewModifier, _GraphInputs
             }
         }
 
+        func reset() {
+            modifier = nil
+        }
+        
         func resolve(containerView: ViewContext) {
             if let modifier = containerView.value(atPath: self.graph) {
                 self.modifier = modifier

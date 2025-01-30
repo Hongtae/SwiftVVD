@@ -50,14 +50,16 @@ extension View {
         let outputs = Self.Body._makeViewList(view: view[\.body], inputs: inputs)
         if _hasDynamicProperty(self) {
             if let staticList = outputs.views as? StaticViewListGenerator {
-                let view = StaticMultiViewGenerator(graph: view,
-                                                    baseInputs: inputs.base,
-                                                    views: staticList.views)
+                let view = DynamicContentStaticMultiViewContext<Self>
+                    .Generator(graph: view,
+                               baseInputs: inputs.base,
+                               views: staticList.views)
                 return _ViewListOutputs(views: .staticList(view))
             } else {
-                let view = DynamicMultiViewGenerator(graph: view,
-                                                     baseInputs: inputs.base,
-                                                     body: outputs.views)
+                let view = DynamicContentDynamicMultiViewContext<Self>
+                    .Generator(graph: view,
+                               baseInputs: inputs.base,
+                               body: outputs.views)
                 return _ViewListOutputs(views: .staticList(view))
             }
         }
@@ -155,7 +157,7 @@ func makeView<V: View>(view: _GraphValue<V>, inputs: _ViewInputs) -> _ViewOutput
     V._makeView(view: view, inputs: inputs)
 }
 
-struct ViewProxy {
+struct ViewProxy : Equatable {
     let type: any View.Type
     let graph: _GraphValue<Any>
     init<V : View>(_ graph: _GraphValue<V>) {
@@ -174,13 +176,15 @@ struct ViewProxy {
         }
         return make(self.type)
     }
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.graph == rhs.graph
+    }
 }
 
-private final class DynamicContentViewContext<Content> : GenericViewContext<Content> where Content : View {
+private struct _DynamicPropertyData<Content> where Content : View {
     var dynamicPropertyBuffer: _DynamicPropertyBuffer
 
-    override init(graph: _GraphValue<Content>, inputs: _GraphInputs, body: ViewContext) {
-        var inputs = inputs
+    init(graph: _GraphValue<Content>, inputs: inout _GraphInputs) {
         var dynamicPropertyBuffer = _DynamicPropertyBuffer()
         _forEachField(of: Content.self) { charPtr, offset, fieldType in
             if let propertyType = fieldType as? DynamicProperty.Type {
@@ -195,49 +199,148 @@ private final class DynamicContentViewContext<Content> : GenericViewContext<Cont
             return true
         }
         self.dynamicPropertyBuffer = dynamicPropertyBuffer
-        super.init(graph: graph, inputs: inputs, body: body)
     }
 
-    override func updateDynamicProperties() {
-        assert(self.isValid)
+    func setup(view: inout Content) {
+
+    }
+
+    func update(view: inout Content) {
+        // update DynamicProperty properties.
+        func update<U : DynamicProperty>(_ ptr: UnsafeMutableRawPointer,  _: U.Type) {
+            ptr.assumingMemoryBound(to: U.self).pointee.update()
+        }
+        self.dynamicPropertyBuffer.properties.forEach {
+            let offset = $0.offset
+            let propertyType = $0.type
+            withUnsafeMutableBytes(of: &view) {
+                let ptr = $0.baseAddress!.advanced(by: offset)
+                update(ptr, propertyType)
+            }
+        }
+    }
+}
+
+private final class DynamicContentViewContext<Content> : GenericViewContext<Content> where Content : View {
+    var dynamicPropertyData: _DynamicPropertyData<Content>
+
+    override init(graph: _GraphValue<Content>, inputs: _GraphInputs, body: ViewContext) {
+        var inputs = inputs
+        self.dynamicPropertyData = _DynamicPropertyData(graph: graph, inputs: &inputs)
+        super.init(graph: graph, inputs: inputs, body: body)
     }
 
     override func updateContent() {
         let setup = self.view == nil
-        self.invalidate()
+        self.view = nil
         self.view = value(atPath: self.graph)
         if var view {
             if setup {  // initialize dynamic property
-                print("Initialize DynamicProperty properties")
+                self.dynamicPropertyData.setup(view: &view)
             }
 
-            // update DynamicProperty properties.
-            func update<U : DynamicProperty>(_ ptr: UnsafeMutableRawPointer,  _: U.Type) {
-                ptr.assumingMemoryBound(to: U.self).pointee.update()
-            }
-            self.dynamicPropertyBuffer.properties.forEach {
-                let offset = $0.offset
-                let propertyType = $0.type
-                withUnsafeMutableBytes(of: &view) {
-                    let ptr = $0.baseAddress!.advanced(by: offset)
-                    update(ptr, propertyType)
-                }
-            }
+            self.dynamicPropertyData.update(view: &view)
+
+            self.updateView(&view)
             self.view = view
             self.body.updateContent()
+        } else {
+            self.invalidate()
+            fatalError("Failed to resolve view for \(self.graph)")
+        }
+    }
+
+    override func updateEnvironment(_ environmentValues: EnvironmentValues) {
+        super.updateEnvironment(environmentValues)
+        if var view {
+            self.dynamicPropertyData.update(view: &view)
+            self.view = view
+        }
+        self.body.updateEnvironment(environmentValues)
+    }
+}
+
+private final class DynamicContentStaticMultiViewContext<Content> : StaticMultiViewContext<Content> where Content : View {
+    var dynamicPropertyData: _DynamicPropertyData<Content>
+
+    override init(graph: _GraphValue<Content>, inputs: _GraphInputs, subviews: [ViewContext]) {
+        var inputs = inputs
+        self.dynamicPropertyData = _DynamicPropertyData(graph: graph, inputs: &inputs)
+        super.init(graph: graph, inputs: inputs, subviews: subviews)
+    }
+
+    override func updateRoot(_ root: inout Content) {
+        self.dynamicPropertyData.update(view: &root)
+    }
+
+    struct Generator : MultiViewGenerator, StaticViewList {
+        var graph: _GraphValue<Content>
+        var baseInputs: _GraphInputs
+        var views: [any ViewGenerator]
+
+        func makeView() -> ViewContext {
+            let subviews = views.map { $0.makeView() }
+            return DynamicContentStaticMultiViewContext(graph: graph, inputs: baseInputs, subviews: subviews)
+        }
+
+        func makeViewList(containerView _: ViewContext) -> [any ViewGenerator] {
+            views
+        }
+
+        mutating func mergeInputs(_ inputs: _GraphInputs) {
+            views.indices.forEach {
+                views[$0].mergeInputs(inputs)
+            }
+            baseInputs.mergedInputs.append(inputs)
+        }
+    }
+}
+
+private final class DynamicContentDynamicMultiViewContext<Content> : DynamicMultiViewContext<Content> where Content : View {
+    var dynamicPropertyData: _DynamicPropertyData<Content>
+
+    override init(graph: _GraphValue<Content>, inputs: _GraphInputs, body: any ViewListGenerator) {
+        var inputs = inputs
+        self.dynamicPropertyData = _DynamicPropertyData(graph: graph, inputs: &inputs)
+        super.init(graph: graph, inputs: inputs, body: body)
+    }
+
+    override func updateRoot(_ root: inout Content) {
+        self.dynamicPropertyData.update(view: &root)
+    }
+
+    struct Generator : MultiViewGenerator {
+        var graph: _GraphValue<Content>
+        var baseInputs: _GraphInputs
+        var body: any ViewListGenerator
+
+        func makeView() -> ViewContext {
+            DynamicContentDynamicMultiViewContext(graph: graph, inputs: baseInputs, body: body)
+        }
+
+        func makeViewList(containerView: ViewContext) -> [any ViewGenerator] {
+            body.makeViewList(containerView: containerView)
+        }
+
+        mutating func mergeInputs(_ inputs: _GraphInputs) {
+            body.mergeInputs(inputs)
+            baseInputs.mergedInputs.append(inputs)
         }
     }
 }
 
 private final class OptionalViewContext<WrappedContent> : GenericViewContext<Optional<WrappedContent>> where WrappedContent : View {
     override func updateContent() {
-        self.invalidate()
+        self.view = nil
         if let opt = value(atPath: self.graph) {
             if let wrapped = opt {
                 self.view = wrapped
                 // load subview
                 self.body.updateContent()
             }
+        } else {
+            self.invalidate()
+            fatalError("Failed to resolve view for \(self.graph)")
         }
     }
 }

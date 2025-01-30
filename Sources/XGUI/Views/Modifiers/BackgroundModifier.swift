@@ -289,7 +289,7 @@ private class BackgroundViewContext<Modifier> : ViewModifierContext<Modifier> wh
         }
 
         let drawingFrame = background.frame.offsetBy(dx: frame.minX,
-                                                              dy: frame.minY)
+                                                     dy: frame.minY)
         if frame.intersection(drawingFrame).isNull {
             return
         }

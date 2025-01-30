@@ -272,7 +272,7 @@ class StaticViewGroupContext<Content> : ViewGroupContext {
     }
 
     override func updateContent() {
-        self.invalidate()
+        self.root = nil
         self.root = value(atPath: self.graph)
         if var root = self.root {
             self.updateRoot(&root)
@@ -282,6 +282,7 @@ class StaticViewGroupContext<Content> : ViewGroupContext {
             }
             self.activeSubviews = self.subviews.filter { $0.isValid }
         } else {
+            self.invalidate()
             fatalError("Failed to resolve view for \(self.graph)")
         }
     }

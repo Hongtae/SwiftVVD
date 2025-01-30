@@ -2,7 +2,7 @@
 //  File: EnvironmentKeyTransformModifier.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 public struct _EnvironmentKeyTransformModifier<Value> : ViewModifier, _GraphInputsModifier, _EnvironmentValuesResolve {
@@ -47,6 +47,10 @@ public struct _EnvironmentKeyTransformModifier<Value> : ViewModifier, _GraphInpu
             if let modifier {
                 modifier._resolve(&inputs.environment)
             }
+        }
+
+        func reset() {
+            modifier = nil
         }
 
         func resolve(containerView: ViewContext) {

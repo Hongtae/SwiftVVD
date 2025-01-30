@@ -2,7 +2,7 @@
 //  File: LongPressGesture.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -27,8 +27,12 @@ public struct LongPressGesture : Gesture {
             let inputs: _GestureInputs
             func makeGesture(containerView: ViewContext) -> _GestureRecognizer<Value>? {
                 if let gesture = containerView.value(atPath: self.graph) {
-                    let callbacks = inputs.makeCallbacks(of: Value.self, containerView: containerView)
-                    return LongPressGestureRecognizer(gesture: gesture, callbacks: callbacks, target: inputs.view)
+                    let callbacks = inputs.makeCallbacks(of: Value.self,
+                                                         containerView: containerView)
+                    return LongPressGestureRecognizer(graph: graph,
+                                                      target: inputs.view,
+                                                      callbacks: callbacks,
+                                                      gesture: gesture)
                 }
                 fatalError("Unable to recover gesture: \(self.graph.valueType)")
             }
@@ -68,13 +72,13 @@ final class LongPressGestureRecognizer : _GestureRecognizer<LongPressGesture.Val
     var timestamp: ContinuousClock.Instant
     var task: Task<Void, Never>?
 
-    init(gesture: LongPressGesture, callbacks: Callbacks, target: ViewContext?) {
+    init(graph: _GraphValue<LongPressGesture>, target: ViewContext?, callbacks: Callbacks, gesture: LongPressGesture) {
         self.gesture = gesture
         self.buttonID = 0
         self.location = .zero
         self.clock = .continuous
         self.timestamp = .now
-        super.init(callbacks: callbacks, target: target)
+        super.init(graph: graph, target: target, callbacks: callbacks)
     }
 
     override var type: _PrimitiveGestureTypes { .longPress }

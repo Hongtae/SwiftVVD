@@ -2,7 +2,7 @@
 //  File: TapGesture.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -20,7 +20,10 @@ public struct TapGesture : Gesture {
             func makeGesture(containerView: ViewContext) -> _GestureRecognizer<Value>? {
                 if let gesture = containerView.value(atPath: self.graph) {
                     let callbacks = inputs.makeCallbacks(of: Value.self, containerView: containerView)
-                    return TapGestureRecognizer(gesture: gesture, callbacks: callbacks, target: inputs.view)
+                    return TapGestureRecognizer(graph: graph,
+                                                target: inputs.view,
+                                                callbacks: callbacks,
+                                                gesture: gesture)
                 }
                 fatalError("Unable to recover gesture: \(self.graph.valueType)")
             }
@@ -49,7 +52,7 @@ class TapGestureRecognizer : _GestureRecognizer<TapGesture.Value> {
     let clock: ContinuousClock
     var timestamp: ContinuousClock.Instant
 
-    init(gesture: TapGesture, callbacks: Callbacks, target: ViewContext?) {
+    init(graph: _GraphValue<TapGesture>, target: ViewContext?, callbacks: Callbacks, gesture: TapGesture) {
         self.gesture = gesture
         self.buttonID = 0
         self.count = 0
@@ -57,7 +60,7 @@ class TapGestureRecognizer : _GestureRecognizer<TapGesture.Value> {
         self.maximumDuration = .seconds(1.0)
         self.clock = .continuous
         self.timestamp = .now
-        super.init(callbacks: callbacks, target: target)
+        super.init(graph: graph, target: target, callbacks: callbacks)
     }
 
     override var type: _PrimitiveGestureTypes { .tap }

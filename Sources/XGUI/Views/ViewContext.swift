@@ -57,6 +57,7 @@ class ViewContext {
         self.frame = .zero
         self.spacing = .zero
         self.inputs = inputs.resolveMergedInputs()
+        self._resolveGraphInputs()
     }
 
     deinit {
@@ -86,9 +87,15 @@ class ViewContext {
     func merge(graphInputs inputs: _GraphInputs) {
         self.inputs.mergedInputs.append(inputs)
         self.inputs = self.inputs.resolveMergedInputs()
+        self._resolveGraphInputs()
     }
 
-    func resolveGraphInputs() {
+    func reloadInputModifiers() {
+        self.inputs.resetModifiers()
+        self._resolveGraphInputs()
+    }
+
+    private func _resolveGraphInputs() {
         assert(self.inputs.mergedInputs.isEmpty)
         do {
             var modifiers = self.inputs.modifiers
@@ -308,12 +315,12 @@ class PrimitiveViewContext<Content> : ViewContext {
     }
 
     override func updateContent() {
-        self.invalidate()
+        self.view = nil
         if var view = value(atPath: self.graph) {
             self.updateView(&view)
             self.view = view
-        }
-        if self.view == nil {
+        } else {
+            self.invalidate()
             fatalError("Failed to resolve view for \(self.graph)")
         }
     }
@@ -374,12 +381,13 @@ class GenericViewContext<Content> : ViewContext {
     }
 
     override func updateContent() {
-        self.invalidate()
+        self.view = nil
         if var view = value(atPath: self.graph) {
             self.updateView(&view)
             self.view = view
             self.body.updateContent()
         } else {
+            self.invalidate()
             fatalError("Failed to resolve view for \(self.graph)")
         }
     }
@@ -388,15 +396,8 @@ class GenericViewContext<Content> : ViewContext {
         self.body.updateFrame()
     }
 
-    func updateDynamicProperties() {
-        assert(self.isValid)
-    }
-
     override func updateEnvironment(_ environmentValues: EnvironmentValues) {
         super.updateEnvironment(environmentValues)
-        if self.isValid {
-            self.updateDynamicProperties()
-        }
         self.body.updateEnvironment(environmentValues)
     }
 
@@ -443,7 +444,7 @@ class GenericViewContext<Content> : ViewContext {
         }
 
         let drawingFrame = body.frame.offsetBy(dx: frame.minX,
-                                                dy: frame.minY)
+                                               dy: frame.minY)
         if frame.intersection(drawingFrame).isNull {
             return
         }
@@ -559,12 +560,13 @@ class DynamicViewContext<Content> : ViewContext {
     }
 
     override func updateContent() {
-        self.invalidate()
+        self.view = nil
         if var view = value(atPath: self.graph) {
             self.updateView(&view)
             self.view = view
             self.body?.updateContent()
         } else {
+            self.invalidate()
             fatalError("Failed to resolve view for \(self.graph)")
         }
     }

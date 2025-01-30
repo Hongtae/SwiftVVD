@@ -2,7 +2,7 @@
 //  File: SequenceGesture.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -41,7 +41,12 @@ public struct SequenceGesture<First, Second> : Gesture where First : Gesture, Se
                 let second = self.second.generator.makeGesture(containerView: containerView)
                 if let first, let second {
                     let callbacks = inputs.makeCallbacks(of: Value.self, containerView: containerView)
-                    return SequenceGestureRecognizer(first: first, second: second, callbacks: callbacks, target: inputs.view)
+                    return SequenceGestureRecognizer(graph: graph,
+                                                     target: inputs.view,
+                                                     callbacks: callbacks,
+                                                     gesture: gesture,
+                                                     first: first,
+                                                     second: second)
                 }
                 return nil
             }
@@ -67,10 +72,15 @@ class SequenceGestureRecognizer<First : Gesture, Second : Gesture> : _GestureRec
     var firstGestureRecognized = false
     typealias Value = SequenceGesture<First, Second>.Value
 
-    init(first: _GestureRecognizer<First.Value>, second: _GestureRecognizer<Second.Value>, callbacks: Callbacks, target: ViewContext?) {
+    init(graph: _GraphValue<SequenceGesture<First, Second>>,
+         target: ViewContext?,
+         callbacks: Callbacks,
+         gesture: SequenceGesture<First, Second>,
+         first: _GestureRecognizer<First.Value>,
+         second: _GestureRecognizer<Second.Value>) {
         self.first = first
         self.second = second
-        super.init(callbacks: callbacks, target: target)
+        super.init(graph: graph, target: target, callbacks: callbacks)
 
         self.first.endedCallbacks.append(EndedCallbacks<First.Value> {
             [weak self] in

@@ -333,11 +333,14 @@ private struct ChildrenViewListGenerator : ViewListGenerator {
 // ViewContext for _VariadicView_Children.Element (2)
 private class ChildrenElementViewContext : DynamicViewContext<_VariadicView_Children.Element> {
     override func updateContent() {
-        self.invalidate()
+        self.view = nil
         self.view = value(atPath: self.graph)
         if let view = self.view?.view {
             self.body = view.makeView()
             self.body?.updateContent()
+        } else {
+            self.invalidate()
+            fatalError("Failed to resolve view for \(self.graph)")
         }
     }
 }
@@ -426,7 +429,7 @@ private class ViewElementProxyWrapper<Root> : GenericViewContext<ViewRootProxy<R
     }
 
     override func updateContent() {
-        self.invalidate()
+        self.view = nil
         // resolve proxy and replace proxy.children for its descendants.
         self.view = value(atPath: self.graph)
         if var proxy = self.view {
@@ -434,6 +437,9 @@ private class ViewElementProxyWrapper<Root> : GenericViewContext<ViewRootProxy<R
             proxy.children = _VariadicView_Children(list: views)
             self.view = proxy
             self.body.updateContent()
+        } else {
+            self.invalidate()
+            fatalError("Failed to resolve view for \(self.graph)")
         }
     }
 }

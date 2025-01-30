@@ -2,7 +2,7 @@
 //  File: GestureHandler.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -30,6 +30,8 @@ class _GestureHandler {
         case done
     }
     var state: State = .ready
+
+    let graph: _GraphValue<Any>
     weak var view: ViewContext?
 
     func setTypeFilter(_ f: _PrimitiveGestureTypes) -> _PrimitiveGestureTypes {
@@ -42,7 +44,8 @@ class _GestureHandler {
         self.isValid && (self.state == .ready || self.state == .processing)
     }
 
-    init(target: ViewContext?) {
+    init<T : Gesture>(graph: _GraphValue<T>, target: ViewContext?) {
+        self.graph = graph.unsafeCast(to: Any.self)
         self.view = target
     }
 
@@ -80,10 +83,10 @@ class _GestureRecognizer<Value> : _GestureHandler {
     var changedCallbacks: [ChangedCallbacks<Value>] = []
     var pressableGestureCallbacks : [PressableGestureCallbacks<Value>] = []
 
-    init(callbacks: Callbacks, target: ViewContext?) {
+    init<T : Gesture>(graph: _GraphValue<T>, target: ViewContext?, callbacks: Callbacks) {
         self.endedCallbacks = callbacks.endedCallbacks
         self.changedCallbacks = callbacks.changedCallbacks
         self.pressableGestureCallbacks = callbacks.pressableGestureCallbacks
-        super.init(target: target)
+        super.init(graph: graph, target: target)
     }
 }

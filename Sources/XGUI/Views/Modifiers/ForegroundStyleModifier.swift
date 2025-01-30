@@ -2,7 +2,7 @@
 //  File: ForegroundStyleModifier.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -34,7 +34,7 @@ public struct _ForegroundStyleModifier2<S1, S2> : ViewModifier where S1: ShapeSt
         self.secondary = secondary
     }
     public static func _makeViewInputs(modifier: _GraphValue<Self>, inputs: inout _ViewInputs) {
-        fatalError()
+        inputs.base.viewStyleModifiers.append(Modifier(graph: modifier))
     }
     public typealias Body = Never
 }
@@ -58,7 +58,7 @@ public struct _ForegroundStyleModifier3<S1, S2, S3> : ViewModifier where S1: Sha
         self.tertiary = tertiary
     }
     public static func _makeViewInputs(modifier: _GraphValue<Self>, inputs: inout _ViewInputs) {
-        fatalError()
+        inputs.base.viewStyleModifiers.append(Modifier(graph: modifier))
     }
     public typealias Body = Never
 }
@@ -104,6 +104,10 @@ class _ForegroundStyleViewStyleModifier<Modifier> : ViewStyleModifier {
         }
     }
 
+    func reset() {
+        modifier = nil
+    }
+    
     func apply(modifier: Modifier, to style: inout ViewStyles) {}
 
     func resolve(containerView: ViewContext) {

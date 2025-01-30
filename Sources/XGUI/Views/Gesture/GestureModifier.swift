@@ -2,7 +2,7 @@
 //  File: GestureModifier.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -204,11 +204,22 @@ private class GestureViewContext<Modifier> : ViewModifierContext<Modifier> where
         case none
     }
 
+    override func updateView(_ view: inout Modifier) {
+        super.updateView(&view)
+
+        // restore gesture handlers if they already exist
+        let gesture = graph[\.gesture]
+        if let handler = self.sharedContext.gestureHandlers.first(where: { handler in
+            handler.graph == gesture
+        }) {
+            handler.view = self
+        }
+    }
+
     func makeGesture(target: ViewContext) -> _GestureOutput {
         guard let modifier else { return .none }
 
         func _makeGesture<T: _GestureGenerator>(_ generator: T, graph: _GraphValue<T>) -> _GestureOutput {
-            let gesture = graph.unsafeCast(to: T.self)[\.gesture]
             func _make<U: Gesture>(_ gesture: _GraphValue<U>) -> _GestureOutput {
                 let inputs = _GestureInputs(view: target)
                 let outputs = U._makeGesture(gesture: gesture, inputs: inputs)
@@ -223,7 +234,7 @@ private class GestureViewContext<Modifier> : ViewModifierContext<Modifier> where
                 }
                 return .none
             }
-            return _make(gesture)
+            return _make(graph[\.gesture])
         }
         return _makeGesture(modifier, graph: self.graph)
     }

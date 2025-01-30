@@ -2,7 +2,7 @@
 //  File: DragGesture.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -57,7 +57,10 @@ public struct DragGesture : Gesture {
             func makeGesture(containerView: ViewContext) -> _GestureRecognizer<Value>? {
                 if let gesture = containerView.value(atPath: self.graph) {
                     let callbacks = inputs.makeCallbacks(of: Value.self, containerView: containerView)
-                    return DragGestureRecognizer(gesture: gesture, callbacks: callbacks, target: inputs.view)
+                    return DragGestureRecognizer(graph: graph,
+                                                 target: inputs.view,
+                                                 callbacks: callbacks,
+                                                 gesture: gesture)
                 }
                 fatalError("Unable to recover gesture: \(self.graph.valueType)")
             }
@@ -76,14 +79,14 @@ class DragGestureRecognizer : _GestureRecognizer<DragGesture.Value> {
     var value: DragGesture.Value
     var dragging = false
 
-    init(gesture: DragGesture, callbacks: Callbacks, target: ViewContext?) {
+    init(graph: _GraphValue<DragGesture>, target: ViewContext?, callbacks: Callbacks, gesture: DragGesture) {
         self.gesture = gesture
         self.buttonID = 0
         self.value = .init(time: .now,
                            location: .zero,
                            startLocation: .zero,
                            _velocity: _Velocity(valuePerSecond: .zero))
-        super.init(callbacks: callbacks, target: target)
+        super.init(graph: graph, target: target, callbacks: callbacks)
     }
 
     override var type: _PrimitiveGestureTypes { .drag }

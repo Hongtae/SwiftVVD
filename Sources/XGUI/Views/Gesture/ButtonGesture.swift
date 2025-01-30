@@ -2,7 +2,7 @@
 //  File: ButtonGesture.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -23,7 +23,10 @@ public struct _ButtonGesture : Gesture {
             func makeGesture(containerView: ViewContext) -> _GestureRecognizer<Value>? {
                 if let gesture = containerView.value(atPath: self.graph) {
                     let callbacks = inputs.makeCallbacks(of: Value.self, containerView: containerView)
-                    return _ButtonGestureRecognizer(gesture: gesture, callbacks: callbacks, target: inputs.view)
+                    return _ButtonGestureRecognizer(graph: graph,
+                                                    target: inputs.view,
+                                                    callbacks: callbacks,
+                                                    gesture: gesture)
                 }
                 fatalError("Unable to recover gesture: \(self.graph.valueType)")
             }
@@ -49,12 +52,12 @@ class _ButtonGestureRecognizer : _GestureRecognizer<_ButtonGesture.Value> {
     var location: CGPoint
     var hover: Bool
 
-    init(gesture: _ButtonGesture, callbacks: Callbacks, target: ViewContext?) {
+    init(graph: _GraphValue<_ButtonGesture>, target: ViewContext?, callbacks: Callbacks, gesture: _ButtonGesture) {
         self.gesture = gesture
         self.location = .zero
         self.hover = false
         self.buttonID = 0
-        super.init(callbacks: callbacks, target: target)
+        super.init(graph: graph, target: target, callbacks: callbacks)
     }
 
     override var type: _PrimitiveGestureTypes { .button }

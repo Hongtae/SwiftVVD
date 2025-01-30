@@ -17,6 +17,7 @@ protocol _GraphInputResolve : Equatable {
     var isResolved: Bool { get }
     func apply(inputs: inout _GraphInputs)
     mutating func resolve(containerView: ViewContext)
+    mutating func reset()
 }
 
 extension _GraphInputResolve {
@@ -38,6 +39,7 @@ protocol ViewStyleModifier : Equatable {
     var isResolved: Bool { get }
     func apply(to style: inout ViewStyles)
     mutating func resolve(containerView: ViewContext)
+    mutating func reset()
 }
 
 extension ViewStyleModifier {
@@ -90,6 +92,18 @@ extension _GraphInputs {
         }
         inputs.mergedInputs = []
         return inputs
+    }
+
+    mutating func resetModifiers() {
+        self.viewStyleModifiers.indices.forEach { index in
+            self.viewStyleModifiers[index].reset()
+        }
+        self.modifiers.indices.forEach { index in
+            self.modifiers[index].reset()
+        }
+        self.mergedInputs.indices.forEach { index in
+            self.mergedInputs[index].resetModifiers()
+        }
     }
 }
 

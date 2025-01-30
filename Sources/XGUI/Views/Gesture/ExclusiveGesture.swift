@@ -2,7 +2,7 @@
 //  File: ExclusiveGesture.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -41,7 +41,12 @@ public struct ExclusiveGesture<First, Second> : Gesture where First : Gesture, S
                 let second = self.second.generator.makeGesture(containerView: containerView)
                 if let first, let second {
                     let callbacks = inputs.makeCallbacks(of: Value.self, containerView: containerView)
-                    return ExclusiveGestureRecognizer(first: first, second: second, callbacks: callbacks, target: inputs.view)
+                    return ExclusiveGestureRecognizer(graph: graph,
+                                                      target: inputs.view,
+                                                      callbacks: callbacks,
+                                                      gesture: gesture,
+                                                      first: first,
+                                                      second: second)
                 }
                 return nil
             }
@@ -68,10 +73,16 @@ class ExclusiveGestureRecognizer<First : Gesture, Second : Gesture> : _GestureRe
     typealias Value = ExclusiveGesture<First, Second>.Value
     var firstGestureProcessing = false
 
-    init(first: _GestureRecognizer<First.Value>, second: _GestureRecognizer<Second.Value>, callbacks: Callbacks, target: ViewContext?) {
+    init(graph: _GraphValue<ExclusiveGesture<First, Second>>,
+         target: ViewContext?,
+         callbacks: Callbacks,
+         gesture: ExclusiveGesture<First, Second>,
+         first: _GestureRecognizer<First.Value>,
+         second: _GestureRecognizer<Second.Value>) {
+
         self.first = first
         self.second = second
-        super.init(callbacks: callbacks, target: target)
+        super.init(graph: graph, target: target, callbacks: callbacks)
 
         self.first.endedCallbacks.append(EndedCallbacks<First.Value> { [weak self] in
             if let self, self.firstGestureProcessing {

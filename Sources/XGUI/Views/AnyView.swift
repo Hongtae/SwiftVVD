@@ -66,7 +66,7 @@ extension AnyView : _PrimitiveView {
 
 class TypeErasedViewContext : DynamicViewContext<AnyView> {
     override func updateContent() {
-        self.invalidate()
+        self.view = nil
         self.view = value(atPath: self.graph)
         if let view = self.view?._view {
             func _makeView<V : View, U>(_: V.Type, view: _GraphValue<U>, inputs: _ViewInputs) -> _ViewOutputs {
@@ -79,6 +79,8 @@ class TypeErasedViewContext : DynamicViewContext<AnyView> {
                 self.body = body
                 body.updateContent()
             }
+        } else {
+            self.invalidate()
         }
     }
 }

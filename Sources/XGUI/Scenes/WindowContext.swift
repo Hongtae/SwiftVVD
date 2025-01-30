@@ -22,8 +22,6 @@ final class WindowContext<Content> : WindowProxy, Scene, _PrimitiveScene, Window
     var environmentValues: EnvironmentValues
     var sharedContext: SharedContext
 
-    var gestureHandlers: [_GestureHandler] = []
-
     struct State {
         var visible = false
         var activated = false
@@ -91,13 +89,38 @@ final class WindowContext<Content> : WindowProxy, Scene, _PrimitiveScene, Window
                 let tick = tickCounter.timestamp
                 let date = Date(timeIntervalSinceNow: 0)
 
-                if state.bounds != contentBounds || state.contentScaleFactor != contentScaleFactor {
+                var viewsToReload = sharedContext.viewsNeedToReloadResources
+                sharedContext.viewsNeedToReloadResources.removeAll()
+
+                if viewLoaded {
+                    if viewsToReload.contains(where: {
+                        $0 === view
+                    }) {
+                        viewLoaded = false
+                    } else {
+                        func getRoot(_ view: ViewContext) -> ViewContext {
+                            if let superview = view.superview {
+                                return getRoot(superview)
+                            }
+                            return view
+                        }
+                        // Unless the view is the root view, a superview must exist.
+                        viewsToReload = viewsToReload.filter { getRoot($0) === view }
+                    }
+                }
+                if viewLoaded == false {
+                    viewsToReload = [view]
+                }
+
+                if state.bounds != contentBounds || state.contentScaleFactor != contentScaleFactor ||
+                    viewsToReload.isEmpty == false {
 
                     if state.contentScaleFactor != contentScaleFactor {
                         sharedContext.contentScaleFactor = state.contentScaleFactor
                         self.environmentValues.displayScale = state.contentScaleFactor
                         view.updateEnvironment(self.environmentValues)
                         viewLoaded = false
+                        viewsToReload = [view]
                     }
 
                     contentBounds = state.bounds
@@ -107,7 +130,7 @@ final class WindowContext<Content> : WindowProxy, Scene, _PrimitiveScene, Window
                     sharedContext.contentBounds = bounds
                     sharedContext.contentScaleFactor = state.contentScaleFactor
 
-                    if viewLoaded == false {
+                    if viewsToReload.isEmpty == false {
                         if let commandBuffer = appContext?.graphicsDeviceContext?.renderQueue()?.makeCommandBuffer() {
                             let width = 4, height = 4
                             if var context = GraphicsContext(sharedContext: sharedContext,
@@ -118,7 +141,9 @@ final class WindowContext<Content> : WindowProxy, Scene, _PrimitiveScene, Window
                                                              resolution: CGSize(width: width, height: height),
                                                              commandBuffer: commandBuffer) {
                                 context.environment = view.environmentValues
-                                view.loadResources(context)
+                                viewsToReload.forEach { view in
+                                    view.loadResources(context)
+                                }
                                 commandBuffer.commit()
                             } else {
                                 Log.error("GraphicsContext failed.")
@@ -340,10 +365,10 @@ final class WindowContext<Content> : WindowProxy, Scene, _PrimitiveScene, Window
                 weakViewProxy.value?.onLostFocus(for: deviceID)
             }
             self.sharedContext.focusedViews.removeAll()
-            self.gestureHandlers.forEach {
+            self.sharedContext.gestureHandlers.forEach {
                 $0.reset()
             }
-            self.gestureHandlers.removeAll()
+            self.sharedContext.gestureHandlers.removeAll()
         }
 
         switch event.type {
@@ -431,9 +456,9 @@ final class WindowContext<Content> : WindowProxy, Scene, _PrimitiveScene, Window
             return
         }
 
-        var gestureHandlers = self.gestureHandlers
+        var gestureHandlers = self.sharedContext.gestureHandlers
         defer {
-            self.gestureHandlers = gestureHandlers
+            self.sharedContext.gestureHandlers = gestureHandlers
         }
 
         if gestureHandlers.isEmpty {
@@ -454,6 +479,7 @@ final class WindowContext<Content> : WindowProxy, Scene, _PrimitiveScene, Window
         }
 
         gestureHandlers = activeHandlers()
+        self.sharedContext.gestureHandlers = gestureHandlers
 
         if gestureHandlers.isEmpty { return }
         switch event.type {
