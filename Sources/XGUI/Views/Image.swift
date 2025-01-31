@@ -232,7 +232,8 @@ extension Image : View {
 }
 
 extension Image {
-    nonisolated(unsafe) public static var _mainNamedBundle: Bundle?
+    @TaskLocal
+    static var _mainNamedBundle: Bundle? = nil
 }
 
 extension Image : _PrimitiveView {
@@ -240,6 +241,14 @@ extension Image : _PrimitiveView {
 
 class ImageViewContext : PrimitiveViewContext<Image> {
     var resolvedImage: GraphicsContext.ResolvedImage?
+
+    override func updateContent() {
+        self.reloadInputModifiers()
+        let defaultBundle = self.environmentValues.resourceBundle
+        Image.$_mainNamedBundle.withValue(defaultBundle) {
+            super.updateContent()
+        }
+    }
 
     override func loadResources(_ context: GraphicsContext) {
         if let image = self.view {
