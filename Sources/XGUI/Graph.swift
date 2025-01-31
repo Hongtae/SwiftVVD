@@ -366,6 +366,13 @@ extension _GraphValue : Equatable {
     }
 }
 
+extension _GraphValue : Hashable {
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(ObjectIdentifier(self.root))
+        hasher.combine(self.index)
+    }
+}
+
 extension _GraphValue : CustomDebugStringConvertible {
     public var debugDescription: String {
         self.keyPath.debugDescription
