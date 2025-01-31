@@ -101,8 +101,6 @@ let package = Package(
                 .copy("Resources/Shaders/SPIRV")
             ],
             swiftSettings: [
-                .swiftLanguageMode(.v5),
-                .enableUpcomingFeature("StrictConcurrency")
             ]),
         .executableTarget(
             name: "Editor",

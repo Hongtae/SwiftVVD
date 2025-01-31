@@ -51,7 +51,7 @@ extension GestureState where Value : ExpressibleByNilLiteral {
     }
 }
 
-extension GestureState : Sendable where Value : Sendable {
+extension GestureState : @unchecked Sendable where Value : Sendable {
 }
 
 

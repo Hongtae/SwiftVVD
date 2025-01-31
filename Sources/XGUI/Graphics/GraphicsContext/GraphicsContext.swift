@@ -85,7 +85,10 @@ public struct GraphicsContext {
 
         defer {
             // contentOffset.didSet will be called.
-            self.contentOffset = contentOffset
+            let initContentOffset = { (context: inout GraphicsContext, offset: CGPoint) in
+                context.contentOffset = offset
+            }
+            initContentOffset(&self, contentOffset)
         }
     }
 
