@@ -18,15 +18,15 @@ public struct _BackgroundModifier<Background> : ViewModifier where Background : 
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
         let outputs = body(_Graph(), inputs)
-        if let body = outputs.view?.makeView() {
+        if let body = outputs.view {
             var backgroundInputs = inputs
             backgroundInputs.base.properties.replace(item: DefaultLayoutPropertyItem(layout: ZStackLayout()))
-            if let background = makeView(view: modifier[\.background], inputs: backgroundInputs).view?.makeView() {
+            if let background = makeView(view: modifier[\.background], inputs: backgroundInputs).view {
                 let view = TypedUnaryViewGenerator(baseInputs: inputs.base) { inputs in
                     BackgroundViewContext(graph: modifier,
                                           inputs: inputs,
-                                          body: body,
-                                          background: background)
+                                          body: body.makeView(),
+                                          background: background.makeView())
                 }
                 return _ViewOutputs(view: view)
             }
@@ -54,13 +54,13 @@ public struct _BackgroundStyleModifier<Style> : ViewModifier where Style : Shape
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
         let outputs = body(_Graph(), inputs)
-        if let body = outputs.view?.makeView() {
-            if let background = makeView(view: modifier[\._shapeView], inputs: inputs).view?.makeView() {
+        if let body = outputs.view {
+            if let background = makeView(view: modifier[\._shapeView], inputs: inputs).view {
                 let view = TypedUnaryViewGenerator(baseInputs: inputs.base) { inputs in
                     BackgroundViewContext(graph: modifier,
                                           inputs: inputs,
-                                          body: body,
-                                          background: background)
+                                          body: body.makeView(),
+                                          background: background.makeView())
                 }
                 return _ViewOutputs(view: view)
             }
@@ -91,13 +91,13 @@ public struct _BackgroundShapeModifier<Style, Bounds> : ViewModifier where Style
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
         let outputs = body(_Graph(), inputs)
-        if let body = outputs.view?.makeView() {
-            if let background = makeView(view: modifier[\._shapeView], inputs: inputs).view?.makeView() {
+        if let body = outputs.view {
+            if let background = makeView(view: modifier[\._shapeView], inputs: inputs).view {
                 let view = TypedUnaryViewGenerator(baseInputs: inputs.base) { inputs in
                     BackgroundViewContext(graph: modifier,
                                           inputs: inputs,
-                                          body: body,
-                                          background: background)
+                                          body: body.makeView(),
+                                          background: background.makeView())
                 }
                 return _ViewOutputs(view: view)
             }
@@ -128,13 +128,13 @@ public struct _InsettableBackgroundShapeModifier<Style, Bounds> : ViewModifier w
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
         let outputs = body(_Graph(), inputs)
-        if let body = outputs.view?.makeView() {
-            if let background = makeView(view: modifier[\._shapeView], inputs: inputs).view?.makeView() {
+        if let body = outputs.view {
+            if let background = makeView(view: modifier[\._shapeView], inputs: inputs).view {
                 let view = TypedUnaryViewGenerator(baseInputs: inputs.base) { inputs in
                     BackgroundViewContext(graph: modifier,
                                           inputs: inputs,
-                                          body: body,
-                                          background: background)
+                                          body: body.makeView(),
+                                          background: background.makeView())
                 }
                 return _ViewOutputs(view: view)
             }

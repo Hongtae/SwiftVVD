@@ -21,12 +21,12 @@ public struct _OverlayModifier<Overlay> : ViewModifier where Overlay: View {
         if let body = outputs.view {
             var overlayInputs = inputs
             overlayInputs.base.properties.replace(item: DefaultLayoutPropertyItem(layout: ZStackLayout()))
-            let overlayOutputs = makeView(view: modifier[\.overlay], inputs: overlayInputs)
-            if let overlay = overlayOutputs.view {
-                let body = body.makeView()
-                let overlay = overlay.makeView()
+            if let overlay = makeView(view: modifier[\.overlay], inputs: overlayInputs).view {
                 let view = TypedUnaryViewGenerator(baseInputs: inputs.base) { inputs in
-                    OverlayViewContext(graph: modifier, inputs: inputs, body: body, overlay: overlay)
+                    OverlayViewContext(graph: modifier,
+                                       inputs: inputs,
+                                       body: body.makeView(),
+                                       overlay: overlay.makeView())
                 }
                 return _ViewOutputs(view: view)
             }
@@ -55,12 +55,12 @@ public struct _OverlayStyleModifier<Style> : ViewModifier where Style: ShapeStyl
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
         let outputs = body(_Graph(), inputs)
         if let body = outputs.view {
-            let overlayOutputs = makeView(view: modifier[\._shapeView], inputs: inputs)
-            if let overlay = overlayOutputs.view {
-                let body = body.makeView()
-                let overlay = overlay.makeView()
+            if let overlay = makeView(view: modifier[\._shapeView], inputs: inputs).view {
                 let view = TypedUnaryViewGenerator(baseInputs: inputs.base) { inputs in
-                    OverlayViewContext(graph: modifier, inputs: inputs, body: body, overlay: overlay)
+                    OverlayViewContext(graph: modifier,
+                                       inputs: inputs,
+                                       body: body.makeView(),
+                                       overlay: overlay.makeView())
                 }
                 return _ViewOutputs(view: view)
             }
@@ -92,12 +92,12 @@ public struct _OverlayShapeModifier<Style, Bounds> : ViewModifier where Style: S
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
         let outputs = body(_Graph(), inputs)
         if let body = outputs.view {
-            let overlayOutputs = makeView(view: modifier[\._shapeView], inputs: inputs)
-            if let overlay = overlayOutputs.view {
-                let body = body.makeView()
-                let overlay = overlay.makeView()
+            if let overlay = makeView(view: modifier[\._shapeView], inputs: inputs).view {
                 let view = TypedUnaryViewGenerator(baseInputs: inputs.base) { inputs in
-                    OverlayViewContext(graph: modifier, inputs: inputs, body: body, overlay: overlay)
+                    OverlayViewContext(graph: modifier,
+                                       inputs: inputs,
+                                       body: body.makeView(),
+                                       overlay: overlay.makeView())
                 }
                 return _ViewOutputs(view: view)
             }
