@@ -16,6 +16,7 @@ public struct _Graph {
 protocol _GraphInputResolve : Equatable {
     var isResolved: Bool { get }
     func apply(to: inout EnvironmentValues)
+    func apply(to: inout PropertyList)
     mutating func resolve(container: some _GraphValueResolver)
     mutating func reset()
 }
@@ -29,6 +30,9 @@ extension _GraphInputResolve {
     }
     
     func apply(to: inout EnvironmentValues) {
+    }
+    
+    func apply(to: inout PropertyList) {
     }
 }
 

@@ -15,9 +15,7 @@ import Foundation
 
 class MultiViewContext : ViewGroupContext {
     init(subviews: [ViewContext], inputs: _GraphInputs) {
-        let layout = inputs.properties
-            .find(type: DefaultLayoutPropertyItem.self)?
-            .layout ?? DefaultLayoutPropertyItem.defaultValue
+        let layout = inputs.properties.value(forKeyPath: \DefaultLayoutPropertyItem.layout)
         super.init(subviews: subviews, layout: layout, inputs: inputs)
     }
 
@@ -168,8 +166,8 @@ class StaticMultiViewContext<Content> : MultiViewContext {
 
     override func updateContent() {
         self.root = nil
-        self.root = value(atPath: self.graph)
-        if var root = self.root {
+        if var root = value(atPath: self.graph) {
+            self.resolveGraphInputs()
             self.updateRoot(&root)
             self.root = root
             self.subviews.forEach {
@@ -234,9 +232,9 @@ class DynamicMultiViewContext<Content> : MultiViewContext {
 
     override func updateContent() {
         self.root = nil
-        self.root = value(atPath: self.graph)
-        if var root = self.root {
-            updateRoot(&root)
+        if var root = value(atPath: self.graph) {
+            self.resolveGraphInputs()
+            self.updateRoot(&root)
             self.root = root
             // generate subviews
             self.subviews = self.body.makeViewList(containerView: self).map {

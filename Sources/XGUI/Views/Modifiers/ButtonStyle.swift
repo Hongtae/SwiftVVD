@@ -339,7 +339,11 @@ private class PrimitiveButtonStyleConfigurationLabelViewContext : DynamicViewCon
     override func updateContent() {
         let oldProxy = self.view?.view
         self.view = nil
-        self.view = value(atPath: self.graph)
+        if var view = value(atPath: self.graph) {
+            self.resolveGraphInputs()
+            self.updateView(&view)
+            self.view = view
+        }
         if let view, let proxy = view.view {
             if self.body == nil || proxy != oldProxy {
                 let outputs = proxy.makeView(_Graph(), inputs: _ViewInputs(base: self.inputs))

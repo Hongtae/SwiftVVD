@@ -337,7 +337,11 @@ private class ChildrenElementViewContext : DynamicViewContext<_VariadicView_Chil
     override func updateContent() {
         let oldView = self.view?.view
         self.view = nil
-        self.view = value(atPath: self.graph)
+        if var view = value(atPath: self.graph) {
+            self.resolveGraphInputs()
+            self.updateView(&view)
+            self.view = view
+        }
         if let view = self.view?.view {
             func isEqual<T : ViewGenerator>(_ lhs: T, _ rhs: (any ViewGenerator)?) -> Bool {
                 if let rhs {
@@ -366,6 +370,7 @@ private class UnaryViewRootLayoutStaticViewGroupContext<Root> : StaticViewGroupC
         self.layoutProperties = Root.layoutProperties
         self.setLayoutProperties(self.layoutProperties)
     }
+
     override func updateRoot(_ root: inout Root) {
         super.updateRoot(&root)
         self.layout = AnyLayout(root)
@@ -381,6 +386,7 @@ private class UnaryViewRootLayoutDynamicViewGroupContext<Root> : DynamicViewGrou
         self.layoutProperties = Root.layoutProperties
         self.setLayoutProperties(self.layoutProperties)
     }
+    
     override func updateRoot(_ root: inout Root) {
         super.updateRoot(&root)
         self.layout = AnyLayout(root)
@@ -443,7 +449,11 @@ private class ViewElementProxyWrapper<Root> : GenericViewContext<ViewRootProxy<R
     override func updateContent() {
         self.view = nil
         // resolve proxy and replace proxy.children for its descendants.
-        self.view = value(atPath: self.graph)
+        if var view = value(atPath: self.graph) {
+            self.resolveGraphInputs()
+            self.updateView(&view)
+            self.view = view
+        }
         if var proxy = self.view {
             let views = children.makeViewList(containerView: self)
             proxy.children = _VariadicView_Children(list: views)

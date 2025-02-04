@@ -249,9 +249,7 @@ class StaticViewGroupContext<Content> : ViewGroupContext {
     let graph: _GraphValue<Content>
 
     init(graph: _GraphValue<Content>, subviews: [ViewContext], layout: (any Layout)? = nil, inputs: _GraphInputs) {
-        let layout = layout ?? inputs.properties
-            .find(type: DefaultLayoutPropertyItem.self)?
-            .layout ?? DefaultLayoutPropertyItem.defaultValue
+        let layout = layout ?? inputs.properties.value(forKeyPath: \DefaultLayoutPropertyItem.layout)
         self.graph = graph
         super.init(subviews: subviews, layout: layout, inputs: inputs)
     }
@@ -273,8 +271,8 @@ class StaticViewGroupContext<Content> : ViewGroupContext {
 
     override func updateContent() {
         self.root = nil
-        self.root = value(atPath: self.graph)
-        if var root = self.root {
+        if var root = value(atPath: self.graph) {
+            self.resolveGraphInputs()
             self.updateRoot(&root)
             self.root = root
             self.subviews.forEach {
@@ -320,9 +318,7 @@ class DynamicViewGroupContext<Content> : ViewGroupContext {
     let body: any ViewListGenerator
 
     init(graph: _GraphValue<Content>, body: any ViewListGenerator, layout: (any Layout)? = nil, inputs: _GraphInputs) {
-        let layout = layout ?? inputs.properties
-            .find(type: DefaultLayoutPropertyItem.self)?
-            .layout ?? DefaultLayoutPropertyItem.defaultValue
+        let layout = layout ?? inputs.properties.value(forKeyPath: \DefaultLayoutPropertyItem.layout)
         self.graph = graph
         self.body = body
         super.init(subviews: [], layout: layout, inputs: inputs)
@@ -345,9 +341,9 @@ class DynamicViewGroupContext<Content> : ViewGroupContext {
 
     override func updateContent() {
         self.invalidate()
-        self.root = value(atPath: self.graph)
-        if var root = self.root {
-            updateRoot(&root)
+        if var root = value(atPath: self.graph) {
+            self.resolveGraphInputs()
+            self.updateRoot(&root)
             self.root = root
             // generate subviews
             self.subviews = self.body.makeViewList(containerView: self).map {

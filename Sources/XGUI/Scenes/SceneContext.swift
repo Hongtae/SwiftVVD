@@ -49,6 +49,32 @@ class SceneContext : _GraphValueResolver {
         }
         return root.value(atPath: graph)
     }
+
+    func resetGraphInputModifiers() {
+        self.inputs.resetModifiers()
+    }
+
+    func resolveGraphInputs() {
+        do {
+            var modifiers = self.inputs.modifiers
+            modifiers.indices.forEach { index in
+                if modifiers[index].isResolved == false {
+                    modifiers[index].resolve(container: self)
+                }
+            }
+            modifiers.forEach { modifier in
+                if modifier.isResolved {
+                    modifier.apply(to: &self.inputs.environment)
+                }
+            }
+            modifiers.forEach { modifier in
+                if modifier.isResolved {
+                    modifier.apply(to: &self.inputs.properties)
+                }
+            }
+            self.inputs.modifiers = modifiers
+        }
+    }
 }
 
 class TypedSceneContext<Content> : SceneContext where Content : Scene {
@@ -66,6 +92,7 @@ class TypedSceneContext<Content> : SceneContext where Content : Scene {
     override func updateContent() {
         self.content = nil
         if var value = self.value(atPath: graph) {
+            self.resolveGraphInputs()
             self.updateScene(&value)
             self.content = value
         } else {

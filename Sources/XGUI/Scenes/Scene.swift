@@ -58,7 +58,16 @@ class TypedSceneRoot<Root> : SceneRoot where Root : Scene {
 public struct _SceneInputs {
     var root: any SceneRoot
     var environment: EnvironmentValues
+    var properties: PropertyList = .init()
     var modifiers: [any _GraphInputResolve] = []
+}
+
+extension _SceneInputs {
+    mutating func resetModifiers() {
+        self.modifiers.indices.forEach { index in
+            self.modifiers[index].reset()
+        }
+    }
 }
 
 public struct _SceneOutputs {

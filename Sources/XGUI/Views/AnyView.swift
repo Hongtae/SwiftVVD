@@ -71,7 +71,11 @@ class TypeErasedViewContext : DynamicViewContext<AnyView> {
             oldViewType = type(of: oldView)
         }
         self.view = nil
-        self.view = value(atPath: self.graph)
+        if var view = value(atPath: self.graph) {
+            self.resolveGraphInputs()
+            self.updateView(&view)
+            self.view = view
+        }
         if let view = self.view?._view {
             if self.body == nil || type(of: view) == oldViewType {
                 func _makeView<V : View, U>(_: V.Type, view: _GraphValue<U>, inputs: _ViewInputs) -> _ViewOutputs {

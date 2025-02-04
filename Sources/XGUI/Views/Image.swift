@@ -243,7 +243,7 @@ class ImageViewContext : PrimitiveViewContext<Image> {
     var resolvedImage: GraphicsContext.ResolvedImage?
 
     override func updateContent() {
-        self.reloadInputModifiers()
+        self.resolveGraphInputs()
         let defaultBundle = self.environmentValues.resourceBundle
         Image.$_mainNamedBundle.withValue(defaultBundle) {
             super.updateContent()

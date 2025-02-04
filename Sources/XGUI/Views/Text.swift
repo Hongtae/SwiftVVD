@@ -306,7 +306,6 @@ private class TextViewContext : PrimitiveViewContext<Text> {
             self.inputs.environment.font = .system(.body)
         }
 
-        self.reloadInputModifiers()
         self.primaryStyle = self.viewStyles().foregroundStyle.primary
         self.sharedContext.viewsNeedToReloadResources.append(.init(self))
     }

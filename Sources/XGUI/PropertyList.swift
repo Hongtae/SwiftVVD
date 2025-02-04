@@ -39,6 +39,13 @@ struct PropertyList : CustomStringConvertible {
 }
 
 extension PropertyList {
+    func value<T>(forKeyPath keyPath: KeyPath<T, T.Item>) -> T.Item where T: PropertyItem {
+        if let item = find(type: T.self) {
+            return item[keyPath: keyPath]
+        }
+        return T.defaultValue
+    }
+    
     func find<T>(type: T.Type) -> T? where T: PropertyItem {
         if var list = elements {
             if let item = list.item as? T {

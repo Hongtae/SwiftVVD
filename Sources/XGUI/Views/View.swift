@@ -241,14 +241,13 @@ private final class DynamicContentViewContext<Content> : GenericViewContext<Cont
     override func updateContent() {
         let setup = self.view == nil
         self.view = nil
-        self.view = value(atPath: self.graph)
-        if var view {
+        if var view = value(atPath: self.graph) {            
+            self.resolveGraphInputs()
             if setup {  // initialize dynamic property
                 self.dynamicPropertyData.setup(view: &view)
             }
 
             self.dynamicPropertyData.update(view: &view)
-
             self.updateView(&view)
             self.view = view
             self.body.updateContent()
@@ -340,7 +339,9 @@ private final class DynamicContentDynamicMultiViewContext<Content> : DynamicMult
 private final class OptionalViewContext<WrappedContent> : GenericViewContext<Optional<WrappedContent>> where WrappedContent : View {
     override func updateContent() {
         self.view = nil
-        if let opt = value(atPath: self.graph) {
+        if var opt = value(atPath: self.graph) {
+            self.resolveGraphInputs()
+            self.updateView(&opt)
             if let wrapped = opt {
                 self.view = wrapped
                 // load subview

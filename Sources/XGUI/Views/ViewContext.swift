@@ -59,10 +59,12 @@ class ViewContext : _GraphValueResolver {
         self.frame = .zero
         self.spacing = .zero
         self.inputs = inputs.resolveMergedInputs()
-        self._resolveGraphInputs()
+
+        Log.debug("ViewContext(\(self)) init")
     }
 
     deinit {
+        Log.debug("ViewContext(\(self)) deinit")
         assert(self.superview == nil)
     }
 
@@ -89,15 +91,19 @@ class ViewContext : _GraphValueResolver {
     func merge(graphInputs inputs: _GraphInputs) {
         self.inputs.mergedInputs.append(inputs)
         self.inputs = self.inputs.resolveMergedInputs()
-        self._resolveGraphInputs()
+        //self.resolveGraphInputs()
     }
 
     func reloadInputModifiers() {
         self.inputs.resetModifiers()
-        self._resolveGraphInputs()
+        self.resolveGraphInputs()
     }
 
-    private func _resolveGraphInputs() {
+    func resetGraphInputModifiers() {
+        self.inputs.resetModifiers()
+    }
+
+    func resolveGraphInputs() {
         assert(self.inputs.mergedInputs.isEmpty)
         do {
             var modifiers = self.inputs.modifiers
@@ -109,6 +115,11 @@ class ViewContext : _GraphValueResolver {
             modifiers.forEach { modifier in
                 if modifier.isResolved {
                     modifier.apply(to: &self.inputs.environment)
+                }
+            }
+            modifiers.forEach { modifier in
+                if modifier.isResolved {
+                    modifier.apply(to: &self.inputs.properties)
                 }
             }
             self.inputs.modifiers = modifiers
@@ -319,6 +330,7 @@ class PrimitiveViewContext<Content> : ViewContext {
     override func updateContent() {
         self.view = nil
         if var view = value(atPath: self.graph) {
+            self.resolveGraphInputs()
             self.updateView(&view)
             self.view = view
         } else {
@@ -385,6 +397,7 @@ class GenericViewContext<Content> : ViewContext {
     override func updateContent() {
         self.view = nil
         if var view = value(atPath: self.graph) {
+            self.resolveGraphInputs()
             self.updateView(&view)
             self.view = view
             self.body.updateContent()
@@ -564,6 +577,7 @@ class DynamicViewContext<Content> : ViewContext {
     override func updateContent() {
         self.view = nil
         if var view = value(atPath: self.graph) {
+            self.resolveGraphInputs()
             self.updateView(&view)
             self.view = view
             self.body?.updateContent()
