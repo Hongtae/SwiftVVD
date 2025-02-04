@@ -30,8 +30,11 @@ public final class AudioDeviceContext: @unchecked Sendable {
         self.listener = AudioListener(device: self.device)
 
         self.task = .detached(priority: .background) { [weak self] in
-            numberOfThreadsToWaitBeforeExiting.add(1, ordering: .sequentiallyConsistent)
-            defer { numberOfThreadsToWaitBeforeExiting.subtract(1, ordering: .sequentiallyConsistent) }
+            let taskID = UUID()
+            detachedServiceTasks.withLock { $0[taskID] = "AudioDeviceContext playback task" }
+            defer {
+                detachedServiceTasks.withLock { $0[taskID] = nil }
+            }
 
             Log.info("AudioDeviceContext playback task is started.")
 

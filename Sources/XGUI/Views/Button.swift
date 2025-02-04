@@ -178,7 +178,9 @@ private class ResolvedButtonStyleViewContext : GenericViewContext<ResolvedButton
         let action = view.configuration.action
         view.configuration = PrimitiveButtonStyleConfiguration(role: role, label: label, action: action)
         view._isPressing = false
-        view._pressingCallback = self.onButtonPressing
+        view._pressingCallback = { [weak self] isPressed in
+            self?.onButtonPressing(isPressed)
+        }
     }
 
     func onButtonPressing(_ isPressed: Bool) {

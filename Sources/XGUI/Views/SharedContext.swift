@@ -22,16 +22,12 @@ extension EnvironmentValues {
 final class SharedContext: @unchecked Sendable {
     var appContext: AppContext
 
-    var window: Window?
-    var commandQueue: CommandQueue? // render queue for window swap-chain
-    var graphicsContext: GraphicsContext?
-
     var viewContentRoot: (value: Any, graph: _GraphValue<Any>)?
 
     var contentBounds: CGRect
     var contentScaleFactor: CGFloat
     var needsLayout: Bool
-    var viewsNeedToReloadResources: [ViewContext] = []
+    var viewsNeedToReloadResources: [WeakObject<ViewContext>] = []
 
     var resourceData: [String: Data] = [:]
     var resourceObjects: [String: AnyObject] = [:]

@@ -17,7 +17,8 @@ public protocol PlatformFactory {
     func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?) -> Window?
 }
 
-let numberOfThreadsToWaitBeforeExiting = Atomic<Int>(0)
+typealias UUID = Foundation.UUID
+let detachedServiceTasks = Mutex<[UUID:String]>([:])
 
 func appFinalize() {
     var timer = TickCounter.now
@@ -27,10 +28,13 @@ func appFinalize() {
             continue
         }
 
-        let numThreads = numberOfThreadsToWaitBeforeExiting.load(ordering: .sequentiallyConsistent)
-        if numThreads > 0 {
-            if timer.elapsed > 1.5 {
-                Log.info("Waiting for system service threads to finish. (\(numThreads))")
+        let tasks: [UUID:String] = detachedServiceTasks.withLock { $0 }
+        if tasks.isEmpty == false {
+            if timer.elapsed > 2.5 {
+                Log.info("Waiting for system service threads to finish. (\(tasks.count))")
+                tasks.values.forEach { task in
+                    Log.debug(" -- Task: \(task)")
+                }
                 timer.reset()
             }
             Platform.threadYield()
@@ -78,6 +82,8 @@ public class Platform {
 }
 
 extension Platform {
+    public typealias ThreadID = UInt
+
     public static func threadSleep(_ d: Double) {
         VVDThreadSleep(d)
     }
@@ -86,7 +92,7 @@ extension Platform {
         VVDThreadYield()
     }
 
-    public static func currentThreadID() -> UInt {
+    public static func currentThreadID() -> ThreadID {
         return VVDThreadCurrentId()
     }
 

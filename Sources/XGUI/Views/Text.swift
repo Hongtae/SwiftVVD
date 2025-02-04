@@ -308,7 +308,7 @@ private class TextViewContext : PrimitiveViewContext<Text> {
 
         self.reloadInputModifiers()
         self.primaryStyle = self.viewStyles().foregroundStyle.primary
-        self.sharedContext.viewsNeedToReloadResources.append(self)
+        self.sharedContext.viewsNeedToReloadResources.append(.init(self))
     }
 
     override func loadResources(_ context: GraphicsContext) {

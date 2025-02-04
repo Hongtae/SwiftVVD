@@ -89,7 +89,7 @@ final class WindowContext<Content> : WindowProxy, Scene, _PrimitiveScene, Window
                 let tick = tickCounter.timestamp
                 let date = Date(timeIntervalSinceNow: 0)
 
-                var viewsToReload = sharedContext.viewsNeedToReloadResources
+                var viewsToReload = sharedContext.viewsNeedToReloadResources.compactMap { $0.value }
                 sharedContext.viewsNeedToReloadResources.removeAll()
 
                 if viewLoaded {
@@ -280,9 +280,14 @@ final class WindowContext<Content> : WindowProxy, Scene, _PrimitiveScene, Window
     }
 
     deinit {
+        Log.debug("WindowContext<\(Content.self)> deinit")
         self.task?.cancel()
+        self.sharedContext.gestureHandlers.removeAll()
+        self.sharedContext.resourceData.removeAll()
+        self.sharedContext.resourceObjects.removeAll()
         self.swapChain = nil
         self.window = nil
+        self.view = nil
     }
 
     @MainActor
@@ -325,8 +330,6 @@ final class WindowContext<Content> : WindowProxy, Scene, _PrimitiveScene, Window
                         }
 
                         self.swapChain = swapChain
-                        self.sharedContext.window = self.window
-                        self.sharedContext.commandQueue = swapChain.commandQueue
                         self.task = self.runWindowUpdateTask()
                     } else {
                         Log.error("Failed to create swapChain.")
@@ -372,10 +375,7 @@ final class WindowContext<Content> : WindowProxy, Scene, _PrimitiveScene, Window
         }
 
         switch event.type {
-        case .closed:            
-            self.sharedContext.window = nil
-            self.sharedContext.commandQueue = nil
-
+        case .closed:
             self.task?.cancel()
             self.window?.removeEventObserver(self)
 

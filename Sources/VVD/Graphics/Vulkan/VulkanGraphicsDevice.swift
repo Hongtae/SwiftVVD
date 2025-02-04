@@ -242,8 +242,11 @@ final class VulkanGraphicsDevice: GraphicsDevice, @unchecked Sendable {
         self.loadPipelineCache()
 
         self.task = .detached(priority: .background) { [weak self] in
-            numberOfThreadsToWaitBeforeExiting.add(1, ordering: .sequentiallyConsistent)
-            defer { numberOfThreadsToWaitBeforeExiting.subtract(1, ordering: .sequentiallyConsistent) }
+            let taskID = UUID()
+            detachedServiceTasks.withLock { $0[taskID] = "VulkanGraphicsDevice Helper task" }
+            defer {
+                detachedServiceTasks.withLock { $0[taskID] = nil }
+            }
 
             Log.info("VulkanGraphicsDevice Helper task is started.")
 
@@ -336,7 +339,7 @@ final class VulkanGraphicsDevice: GraphicsDevice, @unchecked Sendable {
     }
     
     deinit {
-        Log.debug("VulkanGraphicsDevice is being destroyed.")
+        //Log.debug("VulkanGraphicsDevice is being destroyed.")
 
         self.task?.cancel()
 

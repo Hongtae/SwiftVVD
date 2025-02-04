@@ -9,7 +9,14 @@ import Foundation
 
 public struct WeakObject<T: AnyObject>: Equatable {
     public weak var value: T?
-    static public func == (a: Self, b: Self) -> Bool { a.value === b.value }
+
+    static public func == (a: Self, b: Self) -> Bool {
+        a.value === b.value
+    }
+
+    static public func == (a: Self, b: T) -> Bool {
+        a.value === b
+    }
 
     public init(_ value: T? = nil) {
         self.value = value
