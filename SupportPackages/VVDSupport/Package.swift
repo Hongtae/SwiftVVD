@@ -290,6 +290,6 @@ let package = Package(
                 .headerSearchPath("lib/dictBuilder")]
         ),
     ],
-    cLanguageStandard: .c11,
+    cLanguageStandard: .c17,
     cxxLanguageStandard: .cxx17
 )

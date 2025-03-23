@@ -38,8 +38,9 @@ let package = Package(
                 .define("SPIRV_CROSS_C_API_HLSL", to: "1"),
                 .define("SPIRV_CROSS_C_API_MSL", to: "1"),
                 .define("SPIRV_CROSS_C_API_REFLECT", to: "1"),
+                .define("_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH", .when(platforms:[.windows])),
             ]),
     ],
-    cLanguageStandard: .c11,
+    cLanguageStandard: .c17,
     cxxLanguageStandard: .cxx17
 )

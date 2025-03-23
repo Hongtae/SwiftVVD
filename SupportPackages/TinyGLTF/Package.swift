@@ -22,8 +22,9 @@ let package = Package(
             cxxSettings: [
                 .define("__STDC_LIB_EXT1__", .when(platforms: [.windows])),
                 .define("NOMINMAX", .when(platforms: [.windows])),
+                .define("_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH", .when(platforms:[.windows])),
             ]
         ),
     ],
-    cxxLanguageStandard: .cxx14
+    cxxLanguageStandard: .cxx17
 )
