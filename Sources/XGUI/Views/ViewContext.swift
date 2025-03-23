@@ -26,15 +26,13 @@ public extension EnvironmentValues {
     }
 }
 
-class ViewContext {
+class ViewContext : _GraphValueResolver {
     var inputs: _GraphInputs
     var traits: [ObjectIdentifier: Any]
     var environmentValues: EnvironmentValues {
         inputs.environment
     }
-    var sharedContext: SharedContext {
-        inputs.sharedContext
-    }
+    let sharedContext: SharedContext
     var frame: CGRect
     var transform: AffineTransform = .identity          // local transform
     var transformToRoot: AffineTransform = .identity    // local to root
@@ -46,13 +44,17 @@ class ViewContext {
 
     unowned var superview: ViewContext?
 
-    var transformToContainer: AffineTransform {         // local to container (superview)
+    var transformToContainer: AffineTransform { // local to container (superview)
         let local = self.transform
         let offset = AffineTransform(translationX: self.frame.minX, y: self.frame.minY)
         return local.concatenating(offset)
     }
 
     init(inputs: _GraphInputs) {
+        guard let sharedContext = SharedContext.taskLocalContext else {
+            fatalError("SharedContext must be present to create a new ViewContext.")
+        }
+        self.sharedContext = sharedContext
         self.traits = [:]
         self.frame = .zero
         self.spacing = .zero
@@ -101,12 +103,12 @@ class ViewContext {
             var modifiers = self.inputs.modifiers
             modifiers.indices.forEach { index in
                 if modifiers[index].isResolved == false {
-                    modifiers[index].resolve(containerView: self)
+                    modifiers[index].resolve(container: self)
                 }
             }
             modifiers.forEach { modifier in
                 if modifier.isResolved {
-                    modifier.apply(inputs: &self.inputs)
+                    modifier.apply(to: &self.inputs.environment)
                 }
             }
             self.inputs.modifiers = modifiers
@@ -133,7 +135,7 @@ class ViewContext {
     func updateEnvironment(_ environmentValues: EnvironmentValues) {
         inputs.environment.values.merge(environmentValues.values) { $1 }
         inputs.modifiers.forEach {
-            $0.apply(inputs: &inputs)
+            $0.apply(to: &inputs.environment)
         }
     }
 
@@ -305,8 +307,8 @@ class PrimitiveViewContext<Content> : ViewContext {
         if let superview {
             return superview.value(atPath: graph)
         }
-        if let root = self.sharedContext.viewContentRoot {
-            return root.graph.value(atPath: graph, from: root.value)
+        if let root = self.sharedContext.root {
+            return root.value(atPath: graph)
         }
         return nil
     }
@@ -331,7 +333,7 @@ class GenericViewContext<Content> : ViewContext {
     let body: ViewContext
     var view: Content?
 
-    init(graph: _GraphValue<Content>, inputs: _GraphInputs, body: ViewContext) {
+    init(graph: _GraphValue<Content>, body: ViewContext, inputs: _GraphInputs) {
         self.graph = graph
         self.body = body
         super.init(inputs: inputs)
@@ -371,8 +373,8 @@ class GenericViewContext<Content> : ViewContext {
         if let superview {
             return superview.value(atPath: graph)
         }
-        if let root = self.sharedContext.viewContentRoot {
-            return root.graph.value(atPath: graph, from: root.value)
+        if let root = self.sharedContext.root {
+            return root.value(atPath: graph)
         }
         return nil
     }
@@ -550,8 +552,8 @@ class DynamicViewContext<Content> : ViewContext {
         if let superview {
             return superview.value(atPath: graph)
         }
-        if let root = self.sharedContext.viewContentRoot {
-            return root.graph.value(atPath: graph, from: root.value)
+        if let root = self.sharedContext.root {
+            return root.value(atPath: graph)
         }
         return nil
     }

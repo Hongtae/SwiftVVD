@@ -21,7 +21,7 @@ class ViewGroupContext : ViewContext {
     var subviews: [ViewContext]
     var activeSubviews: [ViewContext] = []
 
-    init(inputs: _GraphInputs, subviews: [ViewContext], layout: any Layout) {
+    init(subviews: [ViewContext], layout: any Layout, inputs: _GraphInputs) {
         func layoutProperties<L : Layout>(_ layout: L) -> LayoutProperties {
             L.layoutProperties
         }
@@ -132,15 +132,15 @@ class ViewGroupContext : ViewContext {
             }
             if var cache = self.layoutCache {
                 let proposal = ProposedViewSize(frame.size)
-                let size = self.layout.sizeThatFits(proposal: proposal,
+                _/*let size*/ = self.layout.sizeThatFits(proposal: proposal,
                                                     subviews: layoutSubviews,
                                                     cache: &cache)
-                let halign = self.layout.explicitAlignment(of: HorizontalAlignment.center,
+                _/*let halign*/ = self.layout.explicitAlignment(of: HorizontalAlignment.center,
                                                            in: frame,
                                                            proposal: proposal,
                                                            subviews: layoutSubviews,
                                                            cache: &cache)
-                let valign = self.layout.explicitAlignment(of: VerticalAlignment.center,
+                _/*let valign*/ = self.layout.explicitAlignment(of: VerticalAlignment.center,
                                                            in: frame,
                                                            proposal: proposal,
                                                            subviews: layoutSubviews,
@@ -248,12 +248,12 @@ class StaticViewGroupContext<Content> : ViewGroupContext {
     var root: Content?
     let graph: _GraphValue<Content>
 
-    init(graph: _GraphValue<Content>, inputs: _GraphInputs, subviews: [ViewContext], layout: (any Layout)? = nil) {
+    init(graph: _GraphValue<Content>, subviews: [ViewContext], layout: (any Layout)? = nil, inputs: _GraphInputs) {
         let layout = layout ?? inputs.properties
             .find(type: DefaultLayoutPropertyItem.self)?
             .layout ?? DefaultLayoutPropertyItem.defaultValue
         self.graph = graph
-        super.init(inputs: inputs, subviews: subviews, layout: layout)
+        super.init(subviews: subviews, layout: layout, inputs: inputs)
     }
 
     final override func value<T>(atPath graph: _GraphValue<T>) -> T? {
@@ -265,8 +265,8 @@ class StaticViewGroupContext<Content> : ViewGroupContext {
         if let superview {
             return superview.value(atPath: graph)
         }
-        if let root = self.sharedContext.viewContentRoot {
-            return root.graph.value(atPath: graph, from: root.value)
+        if let root = self.sharedContext.root {
+            return root.value(atPath: graph)
         }
         return nil
     }
@@ -319,13 +319,13 @@ class DynamicViewGroupContext<Content> : ViewGroupContext {
     let graph: _GraphValue<Content>
     let body: any ViewListGenerator
 
-    init(graph: _GraphValue<Content>, inputs: _GraphInputs, body: any ViewListGenerator, layout: (any Layout)? = nil) {
+    init(graph: _GraphValue<Content>, body: any ViewListGenerator, layout: (any Layout)? = nil, inputs: _GraphInputs) {
         let layout = layout ?? inputs.properties
             .find(type: DefaultLayoutPropertyItem.self)?
             .layout ?? DefaultLayoutPropertyItem.defaultValue
         self.graph = graph
         self.body = body
-        super.init(inputs: inputs, subviews: [], layout: layout)
+        super.init(subviews: [], layout: layout, inputs: inputs)
     }
 
     final override func value<T>(atPath graph: _GraphValue<T>) -> T? {
@@ -337,8 +337,8 @@ class DynamicViewGroupContext<Content> : ViewGroupContext {
         if let superview {
             return superview.value(atPath: graph)
         }
-        if let root = self.sharedContext.viewContentRoot {
-            return root.graph.value(atPath: graph, from: root.value)
+        if let root = self.sharedContext.root {
+            return root.value(atPath: graph)
         }
         return nil
     }
@@ -351,7 +351,7 @@ class DynamicViewGroupContext<Content> : ViewGroupContext {
             self.root = root
             // generate subviews
             self.subviews = self.body.makeViewList(containerView: self).map {
-                $0.makeView()
+                $0.makeView(sharedContext: self.sharedContext)
             }
             self.subviews.forEach {
                 $0.superview = self

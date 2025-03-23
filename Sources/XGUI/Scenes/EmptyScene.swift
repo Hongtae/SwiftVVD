@@ -6,10 +6,19 @@
 //
 
 public struct _EmptyScene : Scene {
+
+    @inlinable public init() {
+    }
+
+    public static func _makeScene(scene: _GraphValue<Self>, inputs: _SceneInputs) -> _SceneOutputs {
+        fatalError()
+    }
+
+    public typealias Body = Never
+}
+
+extension _EmptyScene : Sendable {
 }
 
 extension _EmptyScene : _PrimitiveScene {
-    func makeSceneProxy(modifiers: [any _SceneModifier]) -> any SceneProxy {
-        SceneContext(scene: self, modifiers: modifiers, children: [])
-    }
 }

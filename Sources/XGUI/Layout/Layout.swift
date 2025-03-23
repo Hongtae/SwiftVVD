@@ -253,17 +253,17 @@ public struct _LayoutRoot<L> : _VariadicView.UnaryViewRoot where L : Layout {
         let body = body(_Graph(), inputs)
         if let staticList = body.views as? StaticViewList {
             let views = staticList.views.map { $0.makeView() }
-            let view = TypedUnaryViewGenerator(baseInputs: inputs.base) { inputs in
+            let view = UnaryViewGenerator(baseInputs: inputs.base) { inputs in
                 return StaticLayoutRootContext(graph: root,
-                                               inputs: inputs,
-                                               subviews: views)
+                                               subviews: views,
+                                               inputs: inputs)
             }
             return _ViewOutputs(view: view)
         } else {
-            let view = TypedUnaryViewGenerator(baseInputs: inputs.base) { inputs in
+            let view = UnaryViewGenerator(baseInputs: inputs.base) { inputs in
                 return DynamicLayoutRootContext(graph: root,
-                                                inputs: inputs,
-                                                body: body.views)
+                                                body: body.views,
+                                                inputs: inputs)
             }
             return _ViewOutputs(view: view)
         }
@@ -281,9 +281,9 @@ struct DefaultLayoutPropertyItem : PropertyItem {
 }
 
 class StaticLayoutRootContext<L> : StaticViewGroupContext<_LayoutRoot<L>> where L : Layout {
-    init(graph: _GraphValue<_LayoutRoot<L>>, inputs: _GraphInputs, subviews: [ViewContext]) {
+    init(graph: _GraphValue<_LayoutRoot<L>>, subviews: [ViewContext], inputs: _GraphInputs) {
         let layout = DefaultLayoutPropertyItem.defaultValue
-        super.init(graph: graph, inputs: inputs, subviews: subviews, layout: layout)
+        super.init(graph: graph, subviews: subviews, layout: layout, inputs: inputs)
 
         self.layoutProperties = L.layoutProperties
         self.setLayoutProperties(self.layoutProperties)
@@ -295,9 +295,9 @@ class StaticLayoutRootContext<L> : StaticViewGroupContext<_LayoutRoot<L>> where 
 }
 
 class DynamicLayoutRootContext<L> : DynamicViewGroupContext<_LayoutRoot<L>> where L : Layout {
-    init(graph: _GraphValue<_LayoutRoot<L>>, inputs: _GraphInputs, body: any ViewListGenerator) {
+    init(graph: _GraphValue<_LayoutRoot<L>>, body: any ViewListGenerator, inputs: _GraphInputs) {
         let layout = DefaultLayoutPropertyItem.defaultValue
-        super.init(graph: graph, inputs: inputs, body: body, layout: layout)
+        super.init(graph: graph, body: body, layout: layout, inputs: inputs)
 
         self.layoutProperties = L.layoutProperties
         self.setLayoutProperties(self.layoutProperties)

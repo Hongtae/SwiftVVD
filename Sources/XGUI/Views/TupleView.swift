@@ -80,14 +80,14 @@ extension TupleView {
 
         if let staticList = outputs.views as? StaticViewList {
             let views = staticList.views.map { $0.makeView() }
-            let view = TypedUnaryViewGenerator(baseInputs: inputs.base) { inputs in
-                StaticViewGroupContext(graph: view, inputs: inputs, subviews: views)
+            let view = UnaryViewGenerator(baseInputs: inputs.base) { inputs in
+                StaticViewGroupContext(graph: view, subviews: views, inputs: inputs)
             }
             return _ViewOutputs(view: view)
         }
         else {
-            let view = TypedUnaryViewGenerator(baseInputs: inputs.base) { inputs in
-                DynamicViewGroupContext(graph: view, inputs: inputs, body: outputs.views)
+            let view = UnaryViewGenerator(baseInputs: inputs.base) { inputs in
+                DynamicViewGroupContext(graph: view, body: outputs.views, inputs: inputs)
             }
             return _ViewOutputs(view: view)
         }

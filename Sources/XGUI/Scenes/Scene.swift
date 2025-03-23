@@ -7,40 +7,60 @@
 
 import Foundation
 
+
 public protocol Scene {
     associatedtype Body : Scene
-    var body: Self.Body { get }
+    @SceneBuilder var body: Self.Body { get }
+    static func _makeScene(scene: _GraphValue<Self>, inputs: _SceneInputs) -> _SceneOutputs
+}
+
+extension Scene {
+    public static func _makeScene(scene: _GraphValue<Self>, inputs: _SceneInputs) -> _SceneOutputs {
+        Body._makeScene(scene: scene[\.body], inputs: inputs)
+    }
+}
+
+extension Never : Scene {
 }
 
 protocol _PrimitiveScene : Scene {
-    func makeSceneProxy(modifiers: [any _SceneModifier]) -> any SceneProxy
 }
 
 extension _PrimitiveScene {
     public var body: Never { neverBody() }
 }
 
-extension Never : Scene {
+protocol SceneRoot : AnyObject, _GraphValueResolver {
+    associatedtype Root : Scene
+    var root: Root { get }
+    var graph: _GraphValue<Root> { get }
+    var app: AppContext { get }
 }
 
-struct TupleScene<T> : Scene, _PrimitiveScene {
-    public var value: T
-
-    public init(_ value: T) {
-        self.value = value
+extension SceneRoot {
+    func value<T>(atPath path: _GraphValue<T>) -> T? {
+        graph.value(atPath: path, from: root)
     }
+}
 
-    subscript<U>(keyPath: KeyPath<T, U>) -> U {
-        self.value[keyPath: keyPath]
-    }
+class TypedSceneRoot<Root> : SceneRoot where Root : Scene {
+    let root: Root
+    let graph: _GraphValue<Root>
+    unowned var app: AppContext
 
-    func makeSceneProxy(modifiers: [any _SceneModifier]) -> any SceneProxy {
-        let mirror = Mirror(reflecting: value)
-        let children = mirror.children.map { child in
-            let scene = child as! (any Scene)
-            return _makeSceneProxy(scene, modifiers: modifiers)
-        }
-        let proxy = SceneContext(scene: self, modifiers: modifiers, children: children)
-        return proxy
+    init(root: Root, graph: _GraphValue<Root>, app: AppContext) {
+        self.root = root
+        self.graph = graph
+        self.app = app
     }
+}
+
+public struct _SceneInputs {
+    var root: any SceneRoot
+    var environment: EnvironmentValues
+    var modifiers: [any _GraphInputResolve] = []
+}
+
+public struct _SceneOutputs {
+    let scene: (any SceneGenerator)?
 }

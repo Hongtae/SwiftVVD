@@ -10,7 +10,7 @@ import Foundation
 // Type hierarchy
 //
 // [P] ViewGenerator
-// - [S] TypedUnaryViewGenerator
+// - [S] UnaryViewGenerator
 //
 // [P] StaticViewList
 // - [S] StaticViewListGenerator (+ ViewListGenerator)
@@ -29,6 +29,14 @@ import Foundation
 protocol ViewGenerator {
     func makeView() -> ViewContext
     mutating func mergeInputs(_ inputs: _GraphInputs)
+}
+
+extension ViewGenerator {
+    func makeView(sharedContext: SharedContext) -> ViewContext {
+        SharedContext.$taskLocalContext.withValue(sharedContext) {
+            self.makeView()
+        }
+    }
 }
 
 protocol ViewListGenerator {
@@ -101,6 +109,7 @@ struct WrapperViewListGenerator : ViewListGenerator {
             wrapper(containerView, baseInputs, $0)
         }
     }
+
     mutating func mergeInputs(_ inputs: _GraphInputs) {
         views.mergeInputs(inputs)
         baseInputs.mergedInputs.append(inputs)
@@ -114,7 +123,7 @@ extension ViewListGenerator {
     }
 }
 
-struct TypedUnaryViewGenerator : ViewGenerator {
+struct UnaryViewGenerator : ViewGenerator {
     var baseInputs: _GraphInputs
     let body: (_GraphInputs) -> ViewContext
 
@@ -137,7 +146,7 @@ struct StaticMultiViewGenerator<Content> : MultiViewGenerator, StaticViewList {
 
     func makeView() -> ViewContext {
         let subviews = views.map { $0.makeView() }
-        return StaticMultiViewContext(graph: graph, inputs: baseInputs, subviews: subviews)
+        return StaticMultiViewContext(graph: graph, subviews: subviews, inputs: baseInputs)
     }
 
     func makeViewList(containerView _: ViewContext) -> [any ViewGenerator] {
@@ -158,7 +167,7 @@ struct DynamicMultiViewGenerator<Content> : MultiViewGenerator {
     var body: any ViewListGenerator
 
     func makeView() -> ViewContext {
-        DynamicMultiViewContext(graph: graph, inputs: baseInputs, body: body)
+        DynamicMultiViewContext(graph: graph, body: body, inputs: baseInputs)
     }
 
     func makeViewList(containerView: ViewContext) -> [any ViewGenerator] {

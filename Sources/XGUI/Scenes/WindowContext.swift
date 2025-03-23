@@ -9,18 +9,33 @@ import Foundation
 import Synchronization
 import VVD
 
-final class WindowContext<Content> : WindowProxy, Scene, _PrimitiveScene, WindowDelegate, @unchecked Sendable where Content : View {
-    let contextType: Any.Type
-    let identifier: String
-    let title: Text
+protocol WindowContext : AnyObject {
+    typealias Window = VVD.Window
+
+    var scene: SceneContext { get }
+    var window: Window? { get }
+    var isValid: Bool { get }
+
+    func updateContent()
+
+    @MainActor
+    func makeWindow() -> Window?
+}
+
+class GenericWindowContext<Content> : WindowContext, WindowDelegate where Content : View {
+    typealias Window = WindowContext.Window
 
     private(set) var swapChain: SwapChain?
     private(set) var window: Window?
 
-    var modifiers: [any _SceneModifier] = []
     var view: ViewContext?
+    let title: _GraphValue<Text>
+    let content: _GraphValue<Content>
     var environmentValues: EnvironmentValues
     var sharedContext: SharedContext
+    var scene: SceneContext {
+        sharedContext.scene
+    }
 
     struct State {
         var visible = false
@@ -36,10 +51,121 @@ final class WindowContext<Content> : WindowProxy, Scene, _PrimitiveScene, Window
     }
 
     private let stateConfig = Mutex<(state: State, config: Configuration)>((state: State(), config: Configuration()))
-
     private var task: Task<Void, Never>?
 
-    private func runWindowUpdateTask() -> Task<Void, Never> {
+    init(content: _GraphValue<Content>, title: _GraphValue<Text>, scene: SceneContext) {
+        self.title = title
+        self.content = content
+        self.environmentValues = EnvironmentValues()
+        self.sharedContext = SharedContext(scene: scene)
+
+        let properties = PropertyList(
+            DefaultLayoutPropertyItem(layout: VStackLayout()),
+            DefaultPaddingEdgeInsetsPropertyItem(insets: EdgeInsets(_all: 16))
+        )
+
+        self.view = SharedContext.$taskLocalContext.withValue(sharedContext) {
+            let baseInputs = _GraphInputs(properties: properties,
+                                          environment: self.environmentValues)
+            let inputs = _ViewInputs.inputs(with: baseInputs)
+            let outputs = Content._makeView(view: content, inputs: inputs)
+            return outputs.view?.makeView()
+        }
+    }
+
+    deinit {
+        Log.debug("WindowContext<\(Content.self)> deinit")
+        self.task?.cancel()
+        self.sharedContext.gestureHandlers.removeAll()
+        self.sharedContext.resourceData.removeAll()
+        self.sharedContext.resourceObjects.removeAll()
+        self.swapChain = nil
+        self.window = nil
+        self.view = nil
+    }
+
+    func updateContent() {
+        if let content = scene.value(atPath: self.content) {
+            self.sharedContext.root = TypedViewRoot(root: content, graph: self.content, scene: self.scene)
+            if let view {
+                view.updateContent()
+                if view.validate() == false {
+                    Log.err("View(type:\(Content.self) validation failed.")
+                }
+            }
+        } else {
+            fatalError("Unable to recover view for \(content)")
+        }
+    }
+
+    var isValid: Bool {
+        if let view {
+            return view.isValid
+        }
+        return false
+    }
+
+    @MainActor
+    func makeWindow() -> Window? {
+        if self.window == nil {
+
+            self.task?.cancel()
+            self.task = nil
+            self.swapChain = nil
+
+            let title = scene.value(atPath: self.title)
+            let windowTitle = title?._resolveText(in: self.environmentValues) ?? ""
+
+            if let window = VVD.makeWindow(name: windowTitle,
+                                           style: [.genericWindow],
+                                           delegate: self) {
+
+                if let graphicsDevice = appContext?.graphicsDeviceContext {
+                    if GraphicsContext.cachePipelineContext(graphicsDevice) == false {
+                        Log.error("Failed to cache GraphicsPipelineStates")
+                    }
+                    if let swapChain = graphicsDevice.renderQueue()?.makeSwapChain(target: window) {
+                        self.stateConfig.withLock {
+                            $0.state.frame = window.windowFrame.standardized
+                            $0.state.bounds = window.contentBounds.standardized
+                            $0.state.contentScaleFactor = window.contentScaleFactor
+                            $0.state.visible = window.visible
+                            $0.state.activated = window.activated
+                        }
+                        self.window = window
+
+                        window.addEventObserver(self) {
+                            [weak self](event: WindowEvent) in
+                            if let self = self { self.onWindowEvent(event: event) }
+                        }
+                        window.addEventObserver(self) {
+                            [weak self](event: KeyboardEvent) in
+                            if let self = self { self.onKeyboardEvent(event: event) }
+                        }
+                        window.addEventObserver(self) {
+                            [weak self](event: MouseEvent) in
+                            if let self = self { self.onMouseEvent(event: event) }
+                        }
+
+                        self.swapChain = swapChain
+                        self.task = self.runUpdateTask()
+                    } else {
+                        Log.error("Failed to create swapChain.")
+                    }
+                } else {
+                    Log.error("GraphicsDeviceContext is nil")
+                }
+            }
+        }
+        self.applyModifiers()
+        return self.window
+    }
+
+    func applyModifiers() {
+        // TODO: check modifiers..
+    }
+
+    private func runUpdateTask() -> Task<Void, Never> {
         Task.detached(priority: .userInitiated) { @MainActor @Sendable [weak self] in
             Log.info("WindowContext<\(Content.self)> update task is started.")
             var tickCounter = TickCounter.now
@@ -245,117 +371,6 @@ final class WindowContext<Content> : WindowProxy, Scene, _PrimitiveScene, Window
         }
     }
 
-    init(content: ()->Content, contextType: Any.Type, identifier: String, title: Text) {
-        self.contextType = contextType
-        self.identifier = identifier
-        self.title = title
-
-        self.environmentValues = EnvironmentValues()
-        self.sharedContext = SharedContext(appContext: appContext!)
-
-        let properties = PropertyList(
-            DefaultLayoutPropertyItem(layout: VStackLayout()),
-            DefaultPaddingEdgeInsetsPropertyItem(insets: EdgeInsets(_all: 16))
-        )
-
-        let baseInputs = _GraphInputs(properties: properties,
-                                      environment: self.environmentValues,
-                                      sharedContext: self.sharedContext)
-
-        let graph = _GraphValue<Content>.root()
-        let inputs = _ViewInputs.inputs(with: baseInputs)
-
-        let outputs = Content._makeView(view: graph, inputs: inputs)
-
-        self.sharedContext.viewContentRoot = (content(), graph.unsafeCast(to: Any.self))
-
-        // initialize root-view instance
-        self.view = outputs.view?.makeView()
-         if let view {
-             view.updateContent()
-             if view.validate() == false {
-                 Log.err("View(type:\(Content.self) validation failed.")
-             }
-         }
-    }
-
-    deinit {
-        Log.debug("WindowContext<\(Content.self)> deinit")
-        self.task?.cancel()
-        self.sharedContext.gestureHandlers.removeAll()
-        self.sharedContext.resourceData.removeAll()
-        self.sharedContext.resourceObjects.removeAll()
-        self.swapChain = nil
-        self.window = nil
-        self.view = nil
-    }
-
-    @MainActor
-    func makeWindow() -> Window? {
-        if self.window == nil {
-            self.task?.cancel()
-            self.task = nil
-            self.swapChain = nil
-
-            let windowTitle = self.title._resolveText(in: self.environmentValues)
-            if let window = VVD.makeWindow(name: windowTitle,
-                                              style: [.genericWindow],
-                                              delegate: self) {
-
-                if let graphicsDevice = appContext?.graphicsDeviceContext {
-                    if GraphicsContext.cachePipelineContext(graphicsDevice) == false {
-                        Log.error("Failed to cache GraphicsPipelineStates")
-                    }
-                    if let swapChain = graphicsDevice.renderQueue()?.makeSwapChain(target: window) {
-                        self.stateConfig.withLock {
-                            $0.state.frame = window.windowFrame.standardized
-                            $0.state.bounds = window.contentBounds.standardized
-                            $0.state.contentScaleFactor = window.contentScaleFactor
-                            $0.state.visible = window.visible
-                            $0.state.activated = window.activated
-                        }
-                        self.window = window
-
-                        window.addEventObserver(self) {
-                            [weak self](event: WindowEvent) in
-                            if let self = self { self.onWindowEvent(event: event) }
-                        }
-                        window.addEventObserver(self) {
-                            [weak self](event: KeyboardEvent) in
-                            if let self = self { self.onKeyboardEvent(event: event) }
-                        }
-                        window.addEventObserver(self) {
-                            [weak self](event: MouseEvent) in
-                            if let self = self { self.onMouseEvent(event: event) }
-                        }
-
-                        self.swapChain = swapChain
-                        self.task = self.runWindowUpdateTask()
-                    } else {
-                        Log.error("Failed to create swapChain.")
-                    }
-                } else {
-                    Log.error("GraphicsDeviceContext is nil")
-                }
-            }
-        }
-        self.applyModifiers()
-        return self.window
-    }
-
-    func applyModifiers() {
-        if let frameRate = self.modifiers.first(where: { $0 is _UpdateFrameRate }) as? _UpdateFrameRate {
-            self.stateConfig.withLock {
-                $0.config.activeFrameInterval = frameRate.activeFrameRate
-                $0.config.inactiveFrameInterval = frameRate.inactiveFrameRate
-            }
-        }
-    }
-
-    func makeSceneProxy(modifiers: [any _SceneModifier]) -> any SceneProxy {
-        self.modifiers = modifiers
-        return SceneContext(scene: self, modifiers: modifiers, window: self)
-    }
 
     @MainActor
     func onWindowEvent(event: WindowEvent) {
@@ -435,9 +450,9 @@ final class WindowContext<Content> : WindowProxy, Scene, _PrimitiveScene, Window
         Log.debug("WindowContext.onKeyboardEvent: \(event)")
         if let focusedView = self.sharedContext.focusedViews[event.deviceID]?.value {
             _ = focusedView.processKeyboardEvent(type: event.type,
-                                            deviceID: event.deviceID,
-                                            key: event.key,
-                                            text: event.text)
+                                                 deviceID: event.deviceID,
+                                                 key: event.key,
+                                                 text: event.text)
         }
     }
 
@@ -500,4 +515,7 @@ final class WindowContext<Content> : WindowProxy, Scene, _PrimitiveScene, Window
         }
         gestureHandlers = activeHandlers()
     }
+}
+
+extension GenericWindowContext : @unchecked Sendable {
 }

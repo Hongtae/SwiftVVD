@@ -2,7 +2,7 @@
 //  File: Font.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -239,18 +239,18 @@ public struct Font: Hashable, Sendable {
                 return typeFace
             }
             if let typeFace = provider.makeTypeFace(
-                context.appContext,
+                context.app,
                 displayScale: self.displayScale) {
                 context.cachedTypeFaces[self] = typeFace
                 return typeFace
             }
         } else {
-            return provider.makeTypeFace(context.appContext,
+            return provider.makeTypeFace(context.app,
                                          displayScale: self.displayScale)
         }
         return nil
     }
-    
+
     var fallbackTypeFaces: [TypeFace] {
         []
     }

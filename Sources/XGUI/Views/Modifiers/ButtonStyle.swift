@@ -46,14 +46,14 @@ extension PrimitiveButtonStyleConfiguration.Label {
     }
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let view = TypedUnaryViewGenerator(baseInputs: inputs.base) { inputs in
+        let view = UnaryViewGenerator(baseInputs: inputs.base) { inputs in
             PrimitiveButtonStyleConfigurationLabelViewContext(graph: view, inputs: inputs)
         }
         return _ViewOutputs(view: view)
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        let view = TypedUnaryViewGenerator(baseInputs: inputs.base) { inputs in
+        let view = UnaryViewGenerator(baseInputs: inputs.base) { inputs in
             PrimitiveButtonStyleConfigurationLabelViewContext(graph: view, inputs: inputs)
         }
         return _ViewListOutputs(views: .staticList(view))
@@ -341,7 +341,7 @@ private class PrimitiveButtonStyleConfigurationLabelViewContext : DynamicViewCon
         self.view = value(atPath: self.graph)
         if let view, let proxy = view.view {
             let outputs = proxy.makeView(_Graph(), inputs: _ViewInputs(base: self.inputs))
-            self.body = outputs.view?.makeView()
+            self.body = outputs.view?.makeView(sharedContext: self.sharedContext)
             self.body?.updateContent()
         } else {
             self.invalidate()

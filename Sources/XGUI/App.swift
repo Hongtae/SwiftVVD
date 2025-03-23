@@ -25,12 +25,6 @@ protocol AppContext : AnyObject {
     func checkWindowActivities()
 }
 
-struct EmptyScene : Scene, _PrimitiveScene {
-    func makeSceneProxy(modifiers: [any _SceneModifier]) -> any SceneProxy {
-        SceneContext(scene: self, modifiers: modifiers, children: [])
-    }
-}
-
 nonisolated(unsafe) var appContext: AppContext? = nil
 
 class AppMain<A> : ApplicationDelegate, AppContext where A : App {
@@ -47,39 +41,37 @@ class AppMain<A> : ApplicationDelegate, AppContext where A : App {
     }
 
     let app: A
-    var scene: any SceneProxy
+    var scene: SceneContext?
     var terminateAfterLastWindowClosed = true
 
     func checkWindowActivities() {
-        let activeWindows: [Window] = self.scene.windows.compactMap(\.window)
-        if activeWindows.isEmpty {
-            if self.terminateAfterLastWindowClosed {
-                let app = sharedApplication()
-                app!.terminate(exitCode: 0)
-                Log.debug("window closed, request app exit!")
-            }
-        }
     }
 
     func initialize(application: Application) {
         self.graphicsDeviceContext = makeGraphicsDeviceContext()
         self.audioDeviceContext = makeAudioDeviceContext()
 
-        self.scene = _makeSceneProxy(self.app.body, modifiers: [])
+        let root = TypedSceneRoot(root: app.body, graph: _GraphValue<A.Body>.root(), app: self)
+        let inputs = _SceneInputs(root: root, environment: EnvironmentValues())
+        let outputs = A.Body._makeScene(scene: root.graph, inputs: inputs)
+        self.scene = outputs.scene?.makeScene()
 
-        let windows = self.scene.windows
-        Task { @MainActor in
-            for windowProxy in windows {
-                if let window = windowProxy.makeWindow() {
-                    window.activate()
-                    break
+        if let scene {
+            let primaryWindows = scene.primaryWindows
+
+            Task { @MainActor in
+                scene.updateContent()
+                for window in primaryWindows {
+                    if let win = window.makeWindow() {
+                        win.activate()
+                    }
                 }
             }
         }
     }
 
     func finalize(application: Application) {
-        self.scene = EmptyScene().makeSceneProxy(modifiers: [])
+        self.scene = nil
         self.graphicsDeviceContext = nil
         self.audioDeviceContext = nil
         self.resources = [:]
@@ -87,7 +79,6 @@ class AppMain<A> : ApplicationDelegate, AppContext where A : App {
 
     init() {
         self.app = A()
-        self.scene = EmptyScene().makeSceneProxy(modifiers: [])
     }
 }
 

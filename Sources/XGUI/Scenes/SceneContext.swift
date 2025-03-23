@@ -8,66 +8,129 @@
 import Foundation
 import VVD
 
-protocol WindowProxy : AnyObject {
-    var identifier: String { get }
-    var contextType: Any.Type { get }
-    var window: Window? { get }
-    var swapChain: SwapChain? { get }
-    @MainActor func makeWindow() -> Window?
-}
+class SceneContext : _GraphValueResolver {
+    unowned var parent: SceneContext?
+    var inputs: _SceneInputs
 
-protocol SceneProxy : AnyObject {
-    associatedtype Content: Scene
-    var scene: Content { get }
-    //var modifiers: [any _SceneModifier] { get }
-    var children: [any SceneProxy] { get }
-    var windows: [any WindowProxy] { get }
-}
+    var root: any SceneRoot {
+        inputs.root
+    }
 
-extension SceneProxy {
-    func windowProxy<D>(for type: D.Type = D.self) -> (any WindowProxy)? {
-        for window in self.windows {
-            if window.contextType == type {
-                return window
-            }
+    var app: AppContext {
+        root.app
+    }
+
+    var isValid: Bool { false }
+
+    init(inputs: _SceneInputs) {
+        self.inputs = inputs
+    }
+
+    deinit {
+        Log.debug("SceneContext(\(self)) deinit")
+        assert(self.parent == nil)
+    }
+
+    func updateContent() {
+        fatalError("This method must be overridden in subclasses.")
+    }
+
+    var windows: [WindowContext] {
+        fatalError("This method must be overridden in subclasses.")
+    }
+
+    var primaryWindows: [WindowContext] {
+        fatalError("This method must be overridden in subclasses.")
+    }
+
+    func value<T>(atPath graph: _GraphValue<T>) -> T? {
+        if let parent {
+            return parent.value(atPath: graph)
         }
-        return nil
+        return root.value(atPath: graph)
+    }
+}
+
+class TypedSceneContext<Content> : SceneContext where Content : Scene {
+    let graph: _GraphValue<Content>
+    var content: Content?
+
+    override var windows: [any WindowContext] { [] }
+    override var primaryWindows: [any WindowContext] { [] }
+
+    init(graph: _GraphValue<Content>, inputs: _SceneInputs) {
+        self.graph = graph
+        super.init(inputs: inputs)
     }
 
-    func windowProxy(forID id: String) -> (any WindowProxy)? {
-        for window in self.windows {
-            if window.identifier == id {
-                return window
-            }
+    override func updateContent() {
+        self.content = nil
+        if var value = self.value(atPath: graph) {
+            self.updateScene(&value)
+            self.content = value
+        } else {
+            fatalError("Unable to recover scene at path \(graph)")
         }
-        return nil
+    }
+
+    override var isValid: Bool {
+        self.content != nil
+    }
+
+    override func value<T>(atPath graph: _GraphValue<T>) -> T? {
+        if let content {
+            return self.graph.value(atPath: graph, from: content)
+        }
+        return super.value(atPath: graph)
+    }
+
+    func updateScene(_ scene: inout Content) {
     }
 }
 
-class SceneContext<Content> : SceneProxy where Content : Scene {
-    var scene: Content
-    var modifiers: [any _SceneModifier]
-    var children: [any SceneProxy]
-    var windows: [any WindowProxy]
-    init(scene: Content, modifiers: [any _SceneModifier], children: [any SceneProxy]) {
-        self.scene = scene
-        self.modifiers = modifiers
-        self.children = children
-        self.windows = children.flatMap { $0.windows }
+class GenericSceneContext<Content> : TypedSceneContext<Content> where Content : Scene {
+    var body: SceneContext? {
+        willSet {
+            self.body?.parent = nil
+        }
+        didSet {
+            self.body?.parent = self
+        }
     }
-    init(scene: Content, modifiers: [any _SceneModifier], window: any WindowProxy) {
-        self.scene = scene
-        self.modifiers = modifiers
-        self.children = []
-        self.windows = [window]
+
+    deinit {
+        self.body?.parent = nil
+    }
+
+    override func updateContent() {
+        super.updateContent()
+        if self.content != nil {
+            self.body?.updateContent()
+        }
+    }
+
+    override var windows: [WindowContext] {
+        self.body?.windows ?? super.windows
+    }
+
+    override var primaryWindows: [any WindowContext] {
+        self.body?.primaryWindows ?? super.primaryWindows
+    }
+
+    override var isValid: Bool {
+        self.body?.isValid ?? super.isValid
     }
 }
 
-func _makeSceneProxy<Content>(_ scene: Content,
-                              modifiers: [any _SceneModifier]) -> any SceneProxy where Content: Scene {
-    if let prim = scene as? (any _PrimitiveScene) {
-        return prim.makeSceneProxy(modifiers: modifiers)
+protocol SceneGenerator {
+    func makeScene() -> SceneContext
+}
+
+struct UnarySceneGenerator : SceneGenerator {
+    var inputs: _SceneInputs
+    let body: (_SceneInputs) -> SceneContext
+
+    func makeScene() -> SceneContext {
+        body(inputs)
     }
-    let child = _makeSceneProxy(scene.body, modifiers: modifiers)
-    return SceneContext(scene: scene, modifiers: modifiers, children: [child])
 }

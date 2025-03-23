@@ -18,7 +18,7 @@ public struct EmptyModifier : ViewModifier, Sendable {
         body(_Graph(), inputs)
     }
 
-    public func body(content: Self.Content) -> Never {
+    public func body(content: Self.Content) -> Self.Body {
         fatalError("\(Self.self) may not have Body == Never")
     }
 }

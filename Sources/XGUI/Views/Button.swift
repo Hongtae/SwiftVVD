@@ -135,12 +135,12 @@ struct ResolvedButtonStyle : View {
         let outputs = makeStyleBody(styleType, graph: view[\._body], inputs: inputs)
         
         if let body = outputs.view {
-            let view = TypedUnaryViewGenerator(baseInputs: inputs.base) { inputs in
-                ResolvedButtonStyleViewContext(graph: view,
-                                               inputs: inputs,
+            let view = UnaryViewGenerator(baseInputs: inputs.base) { inputs in
+                ResolvedButtonStyleViewContext(buttonStyle: style,
+                                               label: label,
+                                               graph: view,
                                                body: body.makeView(),
-                                               buttonStyle: style,
-                                               label: label)
+                                               inputs: inputs)
             }
             return _ViewOutputs(view: view)
         }
@@ -160,10 +160,10 @@ private class ResolvedButtonStyleViewContext : GenericViewContext<ResolvedButton
     let buttonStyle: PrimitiveButtonStyleProxy?
     let label: ViewProxy?
 
-    init(graph: _GraphValue<ResolvedButtonStyle>, inputs: _GraphInputs, body: ViewContext, buttonStyle: PrimitiveButtonStyleProxy?, label: ViewProxy?) {
+    init(buttonStyle: PrimitiveButtonStyleProxy?, label: ViewProxy?, graph: _GraphValue<ResolvedButtonStyle>, body: ViewContext, inputs: _GraphInputs) {
         self.buttonStyle = buttonStyle
         self.label = label
-        super.init(graph: graph, inputs: inputs, body: body)
+        super.init(graph: graph, body: body, inputs: inputs)
     }
 
     override func updateView(_ view: inout ResolvedButtonStyle) {

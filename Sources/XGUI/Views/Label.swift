@@ -70,12 +70,12 @@ struct ResolvedLabelStyle : View {
         }
         let outputs = makeStyleBody(styleType, graph: view[\._body], inputs: inputs)
         if let body = outputs.view {
-            let view = TypedUnaryViewGenerator(baseInputs: inputs.base) { inputs in
-                ResolvedLabelStyleViewContext(graph: view,
-                                              inputs: inputs,
+            let view = UnaryViewGenerator(baseInputs: inputs.base) { inputs in
+                ResolvedLabelStyleViewContext(labelStyle: style,
+                                              configuration: configuration,
+                                              graph: view,
                                               body: body.makeView(),
-                                              labelStyle: style,
-                                              configuration: configuration)
+                                              inputs: inputs)
             }
             return _ViewOutputs(view: view)
         }
@@ -95,10 +95,10 @@ private class ResolvedLabelStyleViewContext : GenericViewContext<ResolvedLabelSt
     let labelStyle: LabelStyleProxy?
     let configuration: LabelStyleConfiguration
 
-    init(graph: _GraphValue<ResolvedLabelStyle>, inputs: _GraphInputs, body: ViewContext, labelStyle: LabelStyleProxy?, configuration: LabelStyleConfiguration) {
+    init(labelStyle: LabelStyleProxy?, configuration: LabelStyleConfiguration, graph: _GraphValue<ResolvedLabelStyle>, body: ViewContext, inputs: _GraphInputs) {
         self.labelStyle = labelStyle
         self.configuration = configuration
-        super.init(graph: graph, inputs: inputs, body: body)
+        super.init(graph: graph, body: body, inputs: inputs)
     }
 
     override func updateView(_ view: inout ResolvedLabelStyle) {

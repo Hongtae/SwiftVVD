@@ -18,10 +18,7 @@ public struct WindowGroup<Content> : Scene where Content : View {
     let identifier: String
 
     public var body: some Scene {
-        WindowContext<Content>(content: self.content,
-                               contextType: self.contextType,
-                               identifier: self.identifier,
-                               title: self.title)
+        WindowGroupScene(content: self.content(), title: self.title)
     }
 
     public init(@ViewBuilder makeContent: @escaping () -> Content) {
@@ -67,4 +64,62 @@ extension WindowGroup {
         self.content = makeContent
         self.contextType = Never.self
     }
+}
+
+struct WindowGroupScene<Content> : _PrimitiveScene where Content : View {
+    var content: Content
+    var title: Text
+
+    static func _makeScene(scene: _GraphValue<Self>, inputs: _SceneInputs) -> _SceneOutputs {
+        _SceneOutputs(scene: UnarySceneGenerator(inputs: inputs) {
+            WindowGroupSceneContext<Content>(graph: scene, inputs: $0)
+        })
+    }
+}
+
+class WindowGroupSceneContext<Content> : TypedSceneContext<WindowGroupScene<Content>> where Content : View {
+    typealias Scene = WindowGroupScene<Content>
+    var window: WindowContext?
+
+    override init(graph: _GraphValue<Scene>, inputs: _SceneInputs) {
+        defer {
+            self.window = GroupWindowContext(dataType: nil, content: graph[\.content], title: graph[\.title], scene: self)
+        }
+        super.init(graph: graph, inputs: inputs)
+    }
+
+    override func updateContent() {
+        super.updateContent()
+        if self.content != nil {
+            self.window?.updateContent()
+        }
+    }
+
+    override var windows: [WindowContext] {
+        [window].compactMap(\.self)
+    }
+
+    override var primaryWindows: [WindowContext] {
+        [window].compactMap(\.self)
+    }
+
+    override var isValid: Bool {
+        if super.isValid {
+            if let window {
+                return window.isValid
+            }
+        }
+        return false
+    }
+}
+
+class GroupWindowContext<Content> : GenericWindowContext<Content> where Content : View {
+    let dataType: Any.Type?
+    init(dataType: Any.Type?, content: _GraphValue<Content>, title: _GraphValue<Text>, scene: SceneContext) {
+        self.dataType = dataType
+        super.init(content: content, title: title, scene: scene)
+    }
+}
+
+extension GroupWindowContext : @unchecked Sendable {
 }

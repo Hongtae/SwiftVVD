@@ -22,11 +22,11 @@ public struct _OverlayModifier<Overlay> : ViewModifier where Overlay: View {
             var overlayInputs = inputs
             overlayInputs.base.properties.replace(item: DefaultLayoutPropertyItem(layout: ZStackLayout()))
             if let overlay = makeView(view: modifier[\.overlay], inputs: overlayInputs).view {
-                let view = TypedUnaryViewGenerator(baseInputs: inputs.base) { inputs in
-                    OverlayViewContext(graph: modifier,
-                                       inputs: inputs,
+                let view = UnaryViewGenerator(baseInputs: inputs.base) { inputs in
+                    OverlayViewContext(overlay: overlay.makeView(),
+                                       graph: modifier,
                                        body: body.makeView(),
-                                       overlay: overlay.makeView())
+                                       inputs: inputs)
                 }
                 return _ViewOutputs(view: view)
             }
@@ -56,11 +56,11 @@ public struct _OverlayStyleModifier<Style> : ViewModifier where Style: ShapeStyl
         let outputs = body(_Graph(), inputs)
         if let body = outputs.view {
             if let overlay = makeView(view: modifier[\._shapeView], inputs: inputs).view {
-                let view = TypedUnaryViewGenerator(baseInputs: inputs.base) { inputs in
-                    OverlayViewContext(graph: modifier,
-                                       inputs: inputs,
+                let view = UnaryViewGenerator(baseInputs: inputs.base) { inputs in
+                    OverlayViewContext(overlay: overlay.makeView(),
+                                       graph: modifier,
                                        body: body.makeView(),
-                                       overlay: overlay.makeView())
+                                       inputs: inputs)
                 }
                 return _ViewOutputs(view: view)
             }
@@ -93,11 +93,11 @@ public struct _OverlayShapeModifier<Style, Bounds> : ViewModifier where Style: S
         let outputs = body(_Graph(), inputs)
         if let body = outputs.view {
             if let overlay = makeView(view: modifier[\._shapeView], inputs: inputs).view {
-                let view = TypedUnaryViewGenerator(baseInputs: inputs.base) { inputs in
-                    OverlayViewContext(graph: modifier,
-                                       inputs: inputs,
+                let view = UnaryViewGenerator(baseInputs: inputs.base) { inputs in
+                    OverlayViewContext(overlay: overlay.makeView(),
+                                       graph: modifier,
                                        body: body.makeView(),
-                                       overlay: overlay.makeView())
+                                       inputs: inputs)
                 }
                 return _ViewOutputs(view: view)
             }
@@ -155,11 +155,11 @@ extension _OverlayStyleModifier : _OverlayModifierWithIgnoresSafeAreaEdges {
 private class OverlayViewContext<Modifier> : ViewModifierContext<Modifier> where Modifier : ViewModifier {
     let overlay: ViewContext
 
-    init(graph: _GraphValue<Modifier>, inputs: _GraphInputs, body: ViewContext, overlay: ViewContext) {
+    init(overlay: ViewContext, graph: _GraphValue<Modifier>, body: ViewContext, inputs: _GraphInputs) {
         self.overlay = overlay
         defer { self.overlay.superview = self }
 
-        super.init(graph: graph, inputs: inputs, body: body)
+        super.init(graph: graph, body: body, inputs: inputs)
     }
 
     deinit {

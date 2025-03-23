@@ -50,7 +50,7 @@ extension Canvas where Symbols == EmptyView {
 
 extension Canvas {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let view = TypedUnaryViewGenerator(baseInputs: inputs.base) { inputs in
+        let view = UnaryViewGenerator(baseInputs: inputs.base) { inputs in
             CanvasViewContext(graph: view, inputs: inputs)
         }
         return _ViewOutputs(view: view)

@@ -18,10 +18,10 @@ public protocol View {
 extension View {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         if let prim = self as? any _PrimitiveView.Type {
-            func makeView<T: _PrimitiveView, U>(_: T.Type, view: _GraphValue<U>, sharedContext: SharedContext) -> _ViewOutputs {
-                T._makeView(view: view.unsafeCast(to: T.self), sharedContext: sharedContext)
+            func makeView<T: _PrimitiveView, U>(_: T.Type, view: _GraphValue<U>) -> _ViewOutputs {
+                T._makeView(view: view.unsafeCast(to: T.self))
             }
-            return makeView(prim, view: view, sharedContext: inputs.base.sharedContext)
+            return makeView(prim, view: view)
         }
         if Body.self is Never.Type {
             fatalError("\(Self.self) may not have Body == Never")
@@ -29,8 +29,8 @@ extension View {
         let outputs = Self.Body._makeView(view: view[\.body], inputs: inputs)
         if let body = outputs.view {
             if _hasDynamicProperty(self) {
-                let gen = TypedUnaryViewGenerator(baseInputs: inputs.base) { inputs in
-                    DynamicContentViewContext(graph: view, inputs: inputs, body: body.makeView())
+                let gen = UnaryViewGenerator(baseInputs: inputs.base) { inputs in
+                    DynamicContentViewContext(graph: view, body: body.makeView(), inputs: inputs)
                 }
                 return _ViewOutputs(view: gen)
             }
@@ -69,14 +69,14 @@ extension View {
 
 // _PrimitiveView is a View type that does not have a body. (body = Never)
 protocol _PrimitiveView {
-    static func _makeView(view: _GraphValue<Self>, sharedContext: SharedContext) -> _ViewOutputs
+    static func _makeView(view: _GraphValue<Self>) -> _ViewOutputs
 }
 
 extension _PrimitiveView {
     public var body: Never {
         fatalError("\(Self.self) may not have Body == Never")
     }
-    static func _makeView(view: _GraphValue<Self>, sharedContext: SharedContext) -> _ViewOutputs {
+    static func _makeView(view: _GraphValue<Self>) -> _ViewOutputs {
         fatalError("PrimitiveView must provide view")
     }
 }
@@ -89,8 +89,8 @@ extension Optional : View where Wrapped : View {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         var outputs = Wrapped._makeView(view: view[\._unwrap], inputs: inputs)
         if let wrapped = outputs.view {
-            outputs.view = TypedUnaryViewGenerator(baseInputs: inputs.base) { inputs in
-                OptionalViewContext(graph: view, inputs: inputs, body: wrapped.makeView())
+            outputs.view = UnaryViewGenerator(baseInputs: inputs.base) { inputs in
+                OptionalViewContext(graph: view, body: wrapped.makeView(), inputs: inputs)
             }
         }
         return outputs
@@ -99,16 +99,16 @@ extension Optional : View where Wrapped : View {
         let outputs = Wrapped._makeViewList(view: view[\._unwrap], inputs: inputs)
         if var staticList = outputs.views as? StaticViewList & ViewListGenerator {
             let views = staticList.views.map { wrapped in
-                TypedUnaryViewGenerator(baseInputs: inputs.base) { inputs in
-                    OptionalViewContext(graph: view, inputs: inputs, body: wrapped.makeView())
+                UnaryViewGenerator(baseInputs: inputs.base) { inputs in
+                    OptionalViewContext(graph: view, body: wrapped.makeView(), inputs: inputs)
                 }
             }
             staticList.views = views
             return _ViewListOutputs(views: staticList)
         }
         let views = outputs.views.wrapper(inputs: inputs.base) { _, baseInputs, viewGenerator in
-            TypedUnaryViewGenerator(baseInputs: baseInputs) { inputs in
-                OptionalViewContext(graph: view, inputs: inputs, body: viewGenerator.makeView())
+            UnaryViewGenerator(baseInputs: baseInputs) { inputs in
+                OptionalViewContext(graph: view, body: viewGenerator.makeView(), inputs: inputs)
             }
         }
         return _ViewListOutputs(views: views)
@@ -232,10 +232,10 @@ private struct _DynamicPropertyData<Content> where Content : View {
 private final class DynamicContentViewContext<Content> : GenericViewContext<Content> where Content : View {
     var dynamicPropertyData: _DynamicPropertyData<Content>
 
-    override init(graph: _GraphValue<Content>, inputs: _GraphInputs, body: ViewContext) {
+    override init(graph: _GraphValue<Content>, body: ViewContext, inputs: _GraphInputs) {
         var inputs = inputs
         self.dynamicPropertyData = _DynamicPropertyData(graph: graph, inputs: &inputs)
-        super.init(graph: graph, inputs: inputs, body: body)
+        super.init(graph: graph, body: body, inputs: inputs)
     }
 
     override func updateContent() {
@@ -271,10 +271,10 @@ private final class DynamicContentViewContext<Content> : GenericViewContext<Cont
 private final class DynamicContentStaticMultiViewContext<Content> : StaticMultiViewContext<Content> where Content : View {
     var dynamicPropertyData: _DynamicPropertyData<Content>
 
-    override init(graph: _GraphValue<Content>, inputs: _GraphInputs, subviews: [ViewContext]) {
+    override init(graph: _GraphValue<Content>, subviews: [ViewContext], inputs: _GraphInputs) {
         var inputs = inputs
         self.dynamicPropertyData = _DynamicPropertyData(graph: graph, inputs: &inputs)
-        super.init(graph: graph, inputs: inputs, subviews: subviews)
+        super.init(graph: graph, subviews: subviews, inputs: inputs)
     }
 
     override func updateRoot(_ root: inout Content) {
@@ -288,7 +288,7 @@ private final class DynamicContentStaticMultiViewContext<Content> : StaticMultiV
 
         func makeView() -> ViewContext {
             let subviews = views.map { $0.makeView() }
-            return DynamicContentStaticMultiViewContext(graph: graph, inputs: baseInputs, subviews: subviews)
+            return DynamicContentStaticMultiViewContext(graph: graph, subviews: subviews, inputs: baseInputs)
         }
 
         func makeViewList(containerView _: ViewContext) -> [any ViewGenerator] {
@@ -307,10 +307,10 @@ private final class DynamicContentStaticMultiViewContext<Content> : StaticMultiV
 private final class DynamicContentDynamicMultiViewContext<Content> : DynamicMultiViewContext<Content> where Content : View {
     var dynamicPropertyData: _DynamicPropertyData<Content>
 
-    override init(graph: _GraphValue<Content>, inputs: _GraphInputs, body: any ViewListGenerator) {
+    override init(graph: _GraphValue<Content>, body: any ViewListGenerator, inputs: _GraphInputs) {
         var inputs = inputs
         self.dynamicPropertyData = _DynamicPropertyData(graph: graph, inputs: &inputs)
-        super.init(graph: graph, inputs: inputs, body: body)
+        super.init(graph: graph, body: body, inputs: inputs)
     }
 
     override func updateRoot(_ root: inout Content) {
@@ -323,7 +323,7 @@ private final class DynamicContentDynamicMultiViewContext<Content> : DynamicMult
         var body: any ViewListGenerator
 
         func makeView() -> ViewContext {
-            DynamicContentDynamicMultiViewContext(graph: graph, inputs: baseInputs, body: body)
+            DynamicContentDynamicMultiViewContext(graph: graph, body: body, inputs: baseInputs)
         }
 
         func makeViewList(containerView: ViewContext) -> [any ViewGenerator] {

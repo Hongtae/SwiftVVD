@@ -14,11 +14,11 @@ import Foundation
 // - DynamicMultiViewContext (dynamic subviews)
 
 class MultiViewContext : ViewGroupContext {
-    init(inputs: _GraphInputs, subviews: [ViewContext]) {
+    init(subviews: [ViewContext], inputs: _GraphInputs) {
         let layout = inputs.properties
             .find(type: DefaultLayoutPropertyItem.self)?
             .layout ?? DefaultLayoutPropertyItem.defaultValue
-        super.init(inputs: inputs, subviews: subviews, layout: layout)
+        super.init(subviews: subviews, layout: layout, inputs: inputs)
     }
 
     override func invalidate() {
@@ -146,9 +146,9 @@ class StaticMultiViewContext<Content> : MultiViewContext {
     var root: Content?
     let graph: _GraphValue<Content>
 
-    init(graph: _GraphValue<Content>, inputs: _GraphInputs, subviews: [ViewContext]) {
+    init(graph: _GraphValue<Content>, subviews: [ViewContext], inputs: _GraphInputs) {
         self.graph = graph
-        super.init(inputs: inputs, subviews: subviews)
+        super.init(subviews: subviews, inputs: inputs)
     }
 
     final override func value<T>(atPath graph: _GraphValue<T>) -> T? {
@@ -160,8 +160,8 @@ class StaticMultiViewContext<Content> : MultiViewContext {
         if let superview {
             return superview.value(atPath: graph)
         }
-        if let root = self.sharedContext.viewContentRoot {
-            return root.graph.value(atPath: graph, from: root.value)
+        if let root = self.sharedContext.root {
+            return root.value(atPath: graph)
         }
         return nil
     }
@@ -211,10 +211,10 @@ class DynamicMultiViewContext<Content> : MultiViewContext {
     let graph: _GraphValue<Content>
     let body: any ViewListGenerator
 
-    init(graph: _GraphValue<Content>, inputs: _GraphInputs, body: any ViewListGenerator) {
+    init(graph: _GraphValue<Content>, body: any ViewListGenerator, inputs: _GraphInputs) {
         self.graph = graph
         self.body = body
-        super.init(inputs: inputs, subviews: [])
+        super.init(subviews: [], inputs: inputs)
     }
 
     final override func value<T>(atPath graph: _GraphValue<T>) -> T? {
@@ -226,8 +226,8 @@ class DynamicMultiViewContext<Content> : MultiViewContext {
         if let superview {
             return superview.value(atPath: graph)
         }
-        if let root = self.sharedContext.viewContentRoot {
-            return root.graph.value(atPath: graph, from: root.value)
+        if let root = self.sharedContext.root {
+            return root.value(atPath: graph)
         }
         return nil
     }
@@ -240,7 +240,7 @@ class DynamicMultiViewContext<Content> : MultiViewContext {
             self.root = root
             // generate subviews
             self.subviews = self.body.makeViewList(containerView: self).map {
-                $0.makeView()
+                $0.makeView(sharedContext: self.sharedContext)
             }
             self.subviews.forEach {
                 $0.superview = self

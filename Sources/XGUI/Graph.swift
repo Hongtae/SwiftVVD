@@ -15,8 +15,8 @@ public struct _Graph {
 
 protocol _GraphInputResolve : Equatable {
     var isResolved: Bool { get }
-    func apply(inputs: inout _GraphInputs)
-    mutating func resolve(containerView: ViewContext)
+    func apply(to: inout EnvironmentValues)
+    mutating func resolve(container: some _GraphValueResolver)
     mutating func reset()
 }
 
@@ -27,27 +27,8 @@ extension _GraphInputResolve {
         }
         return false
     }
-}
-
-struct ViewStyles {
-    var foregroundStyle: (primary: AnyShapeStyle?,
-                          secondary: AnyShapeStyle?,
-                          tertiary: AnyShapeStyle?) = (nil, nil, nil)
-}
-
-protocol ViewStyleModifier : Equatable {
-    var isResolved: Bool { get }
-    func apply(to style: inout ViewStyles)
-    mutating func resolve(containerView: ViewContext)
-    mutating func reset()
-}
-
-extension ViewStyleModifier {
-    func isEqual(to: any ViewStyleModifier) -> Bool {
-        if let other = to as? Self {
-            return self == other
-        }
-        return false
+    
+    func apply(to: inout EnvironmentValues) {
     }
 }
 
@@ -60,7 +41,6 @@ public struct _GraphInputs {
     var customInputs: [CustomInput] = []
     var properties: PropertyList = .init()
     var environment: EnvironmentValues
-    var sharedContext: SharedContext
     var options: Options = .none
     var mergedInputs: [_GraphInputs] = []
     var modifiers: [any _GraphInputResolve] = []
@@ -131,65 +111,6 @@ struct PreferenceOutputs {
         let value: Any
     }
     var preferences: [KeyValue]
-}
-
-struct ViewTraitKeys {
-    var types: Set<ObjectIdentifier> = []
-}
-
-public struct _ViewInputs {
-    var base: _GraphInputs
-    var layouts: LayoutInputs = LayoutInputs()
-    var preferences: PreferenceInputs = PreferenceInputs(preferences: [])
-    var traits: ViewTraitKeys = ViewTraitKeys()
-
-    var listInputs: _ViewListInputs {
-        _ViewListInputs(base: self.base,
-                        layouts: self.layouts,
-                        preferences: self.preferences,
-                        traits: self.traits)
-    }
-
-    static func inputs(with base: _GraphInputs) -> _ViewInputs {
-        _ViewInputs(base: base,
-                    layouts: LayoutInputs(),
-                    preferences: PreferenceInputs(preferences: []),
-                    traits: ViewTraitKeys())
-    }
-}
-
-public struct _ViewOutputs {
-    var view: (any ViewGenerator)?
-}
-
-public struct _ViewListInputs {
-    struct Options : OptionSet, Sendable {
-        let rawValue: Int
-        static var none: Options { Options(rawValue: 0) }
-    }
-
-    var base: _GraphInputs
-    var layouts: LayoutInputs = LayoutInputs()
-    var preferences: PreferenceInputs = PreferenceInputs(preferences: [])
-    var traits: ViewTraitKeys = ViewTraitKeys()
-    var options: Options = .none
-
-    var inputs: _ViewInputs {
-        _ViewInputs(base: self.base,
-                    layouts: self.layouts,
-                    preferences: self.preferences,
-                    traits: self.traits)
-    }
-}
-
-public struct _ViewListOutputs {
-    struct Options : OptionSet, Sendable {
-        let rawValue: Int
-        static var none: Options { Options(rawValue: 0) }
-    }
-
-    var views: any ViewListGenerator
-    var options: Options = .none
 }
 
 private class _GraphRoot {
@@ -377,4 +298,8 @@ extension _GraphValue : CustomDebugStringConvertible {
     public var debugDescription: String {
         self.keyPath.debugDescription
     }
+}
+
+protocol _GraphValueResolver {
+    func value<T>(atPath: _GraphValue<T>) -> T?
 }

@@ -121,8 +121,8 @@ extension _PaddingLayout : _ViewLayoutModifier {
 
     static func _makeLayoutView(modifier: _GraphValue<Self>, inputs: _ViewInputs, content: any ViewGenerator) -> any ViewGenerator {
         let body = content.makeView()
-        return TypedUnaryViewGenerator(baseInputs: inputs.base) { inputs in
-            LayoutViewContext(graph: modifier, inputs: inputs, body: body)
+        return UnaryViewGenerator(baseInputs: inputs.base) { inputs in
+            LayoutViewContext(graph: modifier, body: body, inputs: inputs)
         }
     }
 }

@@ -41,14 +41,14 @@ public struct AnyView : View {
     }
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let view = TypedUnaryViewGenerator(baseInputs: inputs.base) { inputs in
+        let view = UnaryViewGenerator(baseInputs: inputs.base) { inputs in
             TypeErasedViewContext(graph: view, inputs: inputs)
         }
         return _ViewOutputs(view: view)
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        let view = TypedUnaryViewGenerator(baseInputs: inputs.base) { inputs in
+        let view = UnaryViewGenerator(baseInputs: inputs.base) { inputs in
             TypeErasedViewContext(graph: view, inputs: inputs)
         }
         return _ViewListOutputs(views: .staticList(view))
@@ -75,7 +75,7 @@ class TypeErasedViewContext : DynamicViewContext<AnyView> {
             let viewType = type(of: view)
             let graph = self.graph.unsafeCast(to: AnyView.self)[\._view]
             let outputs = _makeView(viewType, view: graph, inputs: _ViewInputs(base: self.inputs))
-            if let body = outputs.view?.makeView() {
+            if let body = outputs.view?.makeView(sharedContext: self.sharedContext) {
                 self.body = body
                 body.updateContent()
             }

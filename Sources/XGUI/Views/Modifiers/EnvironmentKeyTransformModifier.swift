@@ -43,9 +43,9 @@ public struct _EnvironmentKeyTransformModifier<Value> : ViewModifier, _GraphInpu
             self.graph = graph
         }
 
-        func apply(inputs: inout _GraphInputs) {
+        func apply(to environment: inout EnvironmentValues) {
             if let modifier {
-                modifier._resolve(&inputs.environment)
+                modifier._resolve(&environment)
             }
         }
 
@@ -53,8 +53,8 @@ public struct _EnvironmentKeyTransformModifier<Value> : ViewModifier, _GraphInpu
             modifier = nil
         }
 
-        func resolve(containerView: ViewContext) {
-            if let modifier = containerView.value(atPath: self.graph) {
+        func resolve(container: some _GraphValueResolver) {
+            if let modifier = container.value(atPath: self.graph) {
                 self.modifier = modifier
             }
         }

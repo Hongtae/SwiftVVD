@@ -19,10 +19,38 @@ extension EnvironmentValues {
     }
 }
 
-final class SharedContext: @unchecked Sendable {
-    var appContext: AppContext
+protocol ViewRoot : AnyObject, _GraphValueResolver {
+    associatedtype Root : View
+    var root: Root { get }
+    var graph: _GraphValue<Root> { get }
+    var scene: SceneContext { get }
+}
 
-    var viewContentRoot: (value: Any, graph: _GraphValue<Any>)?
+extension ViewRoot {
+    func value<T>(atPath path: _GraphValue<T>) -> T? {
+        graph.value(atPath: path, from: root)
+    }
+}
+
+class TypedViewRoot<Root> : ViewRoot where Root : View {
+    let root: Root
+    let graph: _GraphValue<Root>
+    unowned let scene: SceneContext
+
+    init(root: Root, graph: _GraphValue<Root>, scene: SceneContext) {
+        self.root = root
+        self.graph = graph
+        self.scene = scene
+    }
+}
+
+final class SharedContext: @unchecked Sendable {
+    unowned var scene: SceneContext
+    var app: AppContext {
+        scene.app
+    }
+
+    var root: (any ViewRoot)?
 
     var contentBounds: CGRect
     var contentScaleFactor: CGFloat
@@ -37,18 +65,14 @@ final class SharedContext: @unchecked Sendable {
 
     var gestureHandlers: [_GestureHandler] = []
 
-
-    init(appContext: AppContext) {
-        self.appContext = appContext
+    init(scene: SceneContext) {
+        self.scene = scene
         self.contentBounds = .zero
         self.contentScaleFactor = 1
         self.needsLayout = true
     }
 
     func updateReferencedResourceObjects() {
-        struct WeakWrapper {
-            weak var value: AnyObject?
-        }
         let weakMap = resourceObjects.mapValues {
             WeakObject<AnyObject>($0)
         }
@@ -79,6 +103,9 @@ final class SharedContext: @unchecked Sendable {
         Log.error("cannot load resource.")
         return nil
     }
+
+    @TaskLocal
+    static var taskLocalContext: SharedContext? = nil
 }
 
 private struct ResourceBundleKey: EnvironmentKey {
