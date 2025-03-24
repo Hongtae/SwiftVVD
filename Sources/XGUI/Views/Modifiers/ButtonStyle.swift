@@ -337,15 +337,19 @@ extension View {
 
 private class PrimitiveButtonStyleConfigurationLabelViewContext : DynamicViewContext<PrimitiveButtonStyleConfiguration.Label> {
     override func updateContent() {
+        let oldProxy = self.view?.view
         self.view = nil
         self.view = value(atPath: self.graph)
         if let view, let proxy = view.view {
-            let outputs = proxy.makeView(_Graph(), inputs: _ViewInputs(base: self.inputs))
-            self.body = outputs.view?.makeView(sharedContext: self.sharedContext)
+            if self.body == nil || proxy != oldProxy {
+                let outputs = proxy.makeView(_Graph(), inputs: _ViewInputs(base: self.inputs))
+                self.body = outputs.view?.makeView(sharedContext: self.sharedContext)
+            }
             self.body?.updateContent()
         } else {
             self.invalidate()
             fatalError("Unable to recover view for \(graph)")
         }
+        self.sharedContext.needsLayout = true
     }
 }

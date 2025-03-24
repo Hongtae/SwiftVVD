@@ -161,30 +161,38 @@ struct LabelStyleProxy {
 
 private class LabelStyleConfigurationTitleViewContext : DynamicViewContext<LabelStyleConfiguration.Title> {
     override func updateContent() {
+        let oldProxy = self.view?.view
         self.view = nil
         self.view = value(atPath: self.graph)
         if let view, let proxy = view.view {
-            let outputs = proxy.makeView(_Graph(), inputs: _ViewInputs(base: self.inputs))
-            self.body = outputs.view?.makeView()
+            if self.body == nil || proxy != oldProxy {
+                let outputs = proxy.makeView(_Graph(), inputs: _ViewInputs(base: self.inputs))
+                self.body = outputs.view?.makeView()
+            }
             self.body?.updateContent()
         } else {
             self.invalidate()
             fatalError("Unable to recover view for \(graph)")
         }
+        self.sharedContext.needsLayout = true
     }
 }
 
 private class LabelStyleConfigurationIconViewContext : DynamicViewContext<LabelStyleConfiguration.Icon> {
     override func updateContent() {
+        let oldProxy = self.view?.view
         self.view = nil
         self.view = value(atPath: self.graph)
         if let view, let proxy = view.view {
-            let outputs = proxy.makeView(_Graph(), inputs: _ViewInputs(base: self.inputs))
-            self.body = outputs.view?.makeView()
+            if self.body == nil || proxy != oldProxy {
+                let outputs = proxy.makeView(_Graph(), inputs: _ViewInputs(base: self.inputs))
+                self.body = outputs.view?.makeView()
+            }
             self.body?.updateContent()
         } else {
             self.invalidate()
             fatalError("Unable to recover view for \(graph)")
         }
+        self.sharedContext.needsLayout = true
     }
 }

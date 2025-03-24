@@ -66,21 +66,26 @@ extension AnyView : _PrimitiveView {
 
 class TypeErasedViewContext : DynamicViewContext<AnyView> {
     override func updateContent() {
+        var oldViewType: (any View.Type)?
+        if let oldView = self.view?._view {
+            oldViewType = type(of: oldView)
+        }
         self.view = nil
         self.view = value(atPath: self.graph)
         if let view = self.view?._view {
-            func _makeView<V : View, U>(_: V.Type, view: _GraphValue<U>, inputs: _ViewInputs) -> _ViewOutputs {
-                V._makeView(view: view.unsafeCast(to: V.self), inputs: inputs)
+            if self.body == nil || type(of: view) == oldViewType {
+                func _makeView<V : View, U>(_: V.Type, view: _GraphValue<U>, inputs: _ViewInputs) -> _ViewOutputs {
+                    V._makeView(view: view.unsafeCast(to: V.self), inputs: inputs)
+                }
+                let viewType = type(of: view)
+                let graph = self.graph.unsafeCast(to: AnyView.self)[\._view]
+                let outputs = _makeView(viewType, view: graph, inputs: _ViewInputs(base: self.inputs))
+                self.body = outputs.view?.makeView(sharedContext: self.sharedContext)
             }
-            let viewType = type(of: view)
-            let graph = self.graph.unsafeCast(to: AnyView.self)[\._view]
-            let outputs = _makeView(viewType, view: graph, inputs: _ViewInputs(base: self.inputs))
-            if let body = outputs.view?.makeView(sharedContext: self.sharedContext) {
-                self.body = body
-                body.updateContent()
-            }
+            self.body?.updateContent()
         } else {
             self.invalidate()
         }
+        self.sharedContext.needsLayout = true
     }
 }
