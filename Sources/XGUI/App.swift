@@ -44,7 +44,33 @@ class AppMain<A> : ApplicationDelegate, AppContext where A : App {
     var scene: SceneContext?
     var terminateAfterLastWindowClosed = true
 
+    var activeWindows: [WindowContext] {
+        var windows: [WindowContext] = []
+        if let scene {
+            scene.primaryWindows.forEach { window in
+                if !windows.contains(where: { $0 === window }) {
+                    windows.append(window)
+                }
+            }
+            scene.windows.forEach { window in
+                if !windows.contains(where: { $0 === window }) {
+                    windows.append(window)
+                }
+            }
+        }
+        return windows.filter {
+            $0.isValid && $0.window != nil
+        }
+    }
+
     func checkWindowActivities() {
+        if self.activeWindows.isEmpty {
+            if self.terminateAfterLastWindowClosed {
+                let app = sharedApplication()
+                app!.terminate(exitCode: 0)
+                Log.debug("window closed, request app exit!")
+            }
+        }
     }
 
     func initialize(application: Application) {
