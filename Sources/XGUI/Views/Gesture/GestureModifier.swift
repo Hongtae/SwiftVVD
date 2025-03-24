@@ -155,8 +155,8 @@ extension AddGestureModifier : _UnaryViewModifier {
     static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
         let outputs = body(_Graph(), inputs)
         if let body = outputs.view?.makeView() {
-            let view = UnaryViewGenerator(baseInputs: inputs.base) { inputs in
-                GestureViewContext(graph: modifier, body: body, inputs: inputs)
+            let view = UnaryViewGenerator(graph: modifier, baseInputs: inputs.base) { graph, inputs in
+                GestureViewContext(graph: graph, body: body, inputs: inputs)
             }
             return _ViewOutputs(view: view)
         }
@@ -168,8 +168,8 @@ extension SimultaneousGestureModifier : _UnaryViewModifier {
     static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
         let outputs = body(_Graph(), inputs)
         if let body = outputs.view?.makeView() {
-            let view = UnaryViewGenerator(baseInputs: inputs.base) { inputs in
-                GestureViewContext(graph: modifier, body: body, inputs: inputs)
+            let view = UnaryViewGenerator(graph: modifier, baseInputs: inputs.base) { graph, inputs in
+                GestureViewContext(graph: graph, body: body, inputs: inputs)
             }
             return _ViewOutputs(view: view)
         }
@@ -181,8 +181,8 @@ extension HighPriorityGestureModifier : _UnaryViewModifier {
     static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
         let outputs = body(_Graph(), inputs)
         if let body = outputs.view?.makeView() {
-            let view = UnaryViewGenerator(baseInputs: inputs.base) { inputs in
-                GestureViewContext(graph: modifier, body: body, inputs: inputs)
+            let view = UnaryViewGenerator(graph: modifier, baseInputs: inputs.base) { graph, inputs in
+                GestureViewContext(graph: graph, body: body, inputs: inputs)
             }
             return _ViewOutputs(view: view)
         }

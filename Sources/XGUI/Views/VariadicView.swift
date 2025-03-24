@@ -40,8 +40,8 @@ extension _VariadicView_Children : RandomAccessCollection {
             }
         }
         public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-            let view = UnaryViewGenerator(baseInputs: inputs.base) { inputs in
-                ChildrenElementViewContext(graph: view, inputs: inputs)
+            let view = UnaryViewGenerator(graph: view, baseInputs: inputs.base) { graph, inputs in
+                ChildrenElementViewContext(graph: graph, inputs: inputs)
             }
             return _ViewOutputs(view: view)
         }
@@ -109,36 +109,38 @@ extension _VariadicView_ViewRoot {
             if let layoutType = self as? any _UnaryViewRoot_Layout.Type {
                 if let staticLsit = body.views as? StaticViewList {
                     let views = staticLsit.views.map { $0.makeView() }
-                    func makeView<L : _UnaryViewRoot_Layout>(_: L.Type, inputs: _GraphInputs) -> ViewContext {
-                        UnaryViewRootLayoutStaticViewGroupContext(graph: root.unsafeCast(to: L.self),
-                                                                  subviews: views,
-                                                                  inputs: inputs)
+                    func makeView<L : _UnaryViewRoot_Layout>(_: L.Type, inputs: _GraphInputs) -> any ViewGenerator {
+                        let graph = root.unsafeCast(to: L.self)
+                        return UnaryViewGenerator(graph: graph, baseInputs: baseInputs) { graph, inputs in
+                            UnaryViewRootLayoutStaticViewGroupContext(graph: graph,
+                                                                      subviews: views,
+                                                                      inputs: inputs)
+                        }
                     }
-                    let view = UnaryViewGenerator(baseInputs: baseInputs) { inputs in
-                        makeView(layoutType, inputs: inputs)
-                    }
+                    let view = makeView(layoutType, inputs: baseInputs)
                     return _ViewOutputs(view: view)
                 } else {
-                    func makeView<L : _UnaryViewRoot_Layout>(_: L.Type, inputs: _GraphInputs) -> ViewContext {
-                        UnaryViewRootLayoutDynamicViewGroupContext(graph: root.unsafeCast(to: L.self),
-                                                                   body: body.views,
-                                                                   inputs: inputs)
+                    func makeView<L : _UnaryViewRoot_Layout>(_: L.Type, inputs: _GraphInputs) -> any ViewGenerator {
+                        let graph = root.unsafeCast(to: L.self)
+                        return UnaryViewGenerator(graph: graph, baseInputs: baseInputs) { graph, inputs in
+                            UnaryViewRootLayoutDynamicViewGroupContext(graph: graph,
+                                                                       body: body.views,
+                                                                       inputs: inputs)
+                        }
                     }
-                    let view = UnaryViewGenerator(baseInputs: baseInputs) { inputs in
-                        makeView(layoutType, inputs: inputs)
-                    }
+                    let view = makeView(layoutType, inputs: baseInputs)
                     return _ViewOutputs(view: view)
                 }
             } else {    // non-layout root
                 if let staticLsit = body.views as? StaticViewList {
                     let views = staticLsit.views.map { $0.makeView() }
-                    let view = UnaryViewGenerator(baseInputs: baseInputs) { inputs in
-                        StaticViewGroupContext(graph: root, subviews: views, inputs: inputs)
+                    let view = UnaryViewGenerator(graph: root, baseInputs: baseInputs) { graph, inputs in
+                        StaticViewGroupContext(graph: graph, subviews: views, inputs: inputs)
                     }
                     return _ViewOutputs(view: view)
                 } else {
-                    let view = UnaryViewGenerator(baseInputs: baseInputs) { inputs in
-                        DynamicViewGroupContext(graph: root, body: body.views, inputs: inputs)
+                    let view = UnaryViewGenerator(graph: root, baseInputs: baseInputs) { graph, inputs in
+                        DynamicViewGroupContext(graph: graph, body: body.views, inputs: inputs)
                     }
                     return _ViewOutputs(view: view)
                 }
@@ -151,13 +153,13 @@ extension _VariadicView_ViewRoot {
 
         if let staticList = outputs.views as? StaticViewListGenerator {
             let subviews = staticList.views.map { $0.makeView() }
-            let view = UnaryViewGenerator(baseInputs: baseInputs) { inputs in
-                ViewRootProxyStaticGroupContext(children: body.views, graph: proxy, subviews: subviews, inputs: inputs)
+            let view = UnaryViewGenerator(graph: proxy, baseInputs: baseInputs) { graph, inputs in
+                ViewRootProxyStaticGroupContext(children: body.views, graph: graph, subviews: subviews, inputs: inputs)
             }
             return _ViewOutputs(view: view)
         } else {
-            let view = UnaryViewGenerator(baseInputs: baseInputs) { inputs in
-                ViewRootProxyDynamicGroupContext(children: body.views, graph: proxy, body: outputs.views, inputs: inputs)
+            let view = UnaryViewGenerator(graph: proxy, baseInputs: baseInputs) { graph, inputs in
+                ViewRootProxyDynamicGroupContext(children: body.views, graph: graph, body: outputs.views, inputs: inputs)
             }
             return _ViewOutputs(view: view)
         }
@@ -178,8 +180,8 @@ extension _VariadicView_ViewRoot {
         if let staticList = outputs.views as? StaticViewListGenerator {
             let subviews = staticList.views.map {
                 let view = $0.makeView()
-                return UnaryViewGenerator(baseInputs: baseInputs) { inputs in
-                    ViewElementProxyWrapper(children: body.views, graph: proxy, body: view, inputs: inputs)
+                return UnaryViewGenerator(graph: proxy, baseInputs: baseInputs) { graph, inputs in
+                    ViewElementProxyWrapper(children: body.views, graph: graph, body: view, inputs: inputs)
                 }
             }
             return _ViewListOutputs(views: StaticMultiViewGenerator(graph: root,
@@ -228,8 +230,8 @@ extension _VariadicView_MultiViewRoot {
         if let staticList = outputs.views as? StaticViewListGenerator {
             let subviews = staticList.views.map {
                 let view = $0.makeView()
-                return UnaryViewGenerator(baseInputs: baseInputs) { inputs in
-                    ViewElementProxyWrapper(children: body.views, graph: proxy, body: view, inputs: inputs)
+                return UnaryViewGenerator(graph: proxy, baseInputs: baseInputs) { graph, inputs in
+                    ViewElementProxyWrapper(children: body.views, graph: graph, body: view, inputs: inputs)
                 }
             }
             return _ViewOutputs(view: StaticMultiViewGenerator(graph: root,
@@ -333,15 +335,25 @@ private struct ChildrenViewListGenerator : ViewListGenerator {
 // ViewContext for _VariadicView_Children.Element (2)
 private class ChildrenElementViewContext : DynamicViewContext<_VariadicView_Children.Element> {
     override func updateContent() {
+        let oldView = self.view?.view
         self.view = nil
         self.view = value(atPath: self.graph)
         if let view = self.view?.view {
-            self.body = view.makeView(sharedContext: self.sharedContext)
+            func isEqual<T : ViewGenerator>(_ lhs: T, _ rhs: (any ViewGenerator)?) -> Bool {
+                if let rhs {
+                    return lhs == rhs
+                }
+                return false
+            }
+            if self.body == nil || isEqual(view, oldView) == false {
+                self.body = view.makeView(sharedContext: self.sharedContext)
+            }
             self.body?.updateContent()
         } else {
             self.invalidate()
             fatalError("Failed to resolve view for \(self.graph)")
         }
+        self.sharedContext.needsLayout = true
     }
 }
 
@@ -484,7 +496,7 @@ private struct ViewRootProxyDynamicMultiViewGenerator<Root> : MultiViewGenerator
 
         return subviews.map { view in
             view.superview = nil
-            return UnaryViewGenerator(baseInputs: baseInputs) { inputs in
+            return UnaryViewGenerator(graph: graph, baseInputs: baseInputs) { graph, inputs in
                 ViewElementProxyWrapper(children: children,
                                         graph: graph,
                                         body: view,

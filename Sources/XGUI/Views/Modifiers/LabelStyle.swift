@@ -42,15 +42,15 @@ extension LabelStyleConfiguration.Icon : _PrimitiveView {}
 
 extension LabelStyleConfiguration.Title {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let view = UnaryViewGenerator(baseInputs: inputs.base) { inputs in
-            LabelStyleConfigurationTitleViewContext(graph: view, inputs: inputs)
+        let view = UnaryViewGenerator(graph: view, baseInputs: inputs.base) { graph, inputs in
+            LabelStyleConfigurationTitleViewContext(graph: graph, inputs: inputs)
         }
         return _ViewOutputs(view: view)
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        let view = UnaryViewGenerator(baseInputs: inputs.base) { inputs in
-            LabelStyleConfigurationTitleViewContext(graph: view, inputs: inputs)
+        let view = UnaryViewGenerator(graph: view, baseInputs: inputs.base) { graph, inputs in
+            LabelStyleConfigurationTitleViewContext(graph: graph, inputs: inputs)
         }
         return _ViewListOutputs(views: .staticList(view))
     }
@@ -58,15 +58,15 @@ extension LabelStyleConfiguration.Title {
 
 extension LabelStyleConfiguration.Icon {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let view = UnaryViewGenerator(baseInputs: inputs.base) { inputs in
-            LabelStyleConfigurationIconViewContext(graph: view, inputs: inputs)
+        let view = UnaryViewGenerator(graph: view, baseInputs: inputs.base) { graph, inputs in
+            LabelStyleConfigurationIconViewContext(graph: graph, inputs: inputs)
         }
         return _ViewOutputs(view: view)
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        let view = UnaryViewGenerator(baseInputs: inputs.base) { inputs in
-            LabelStyleConfigurationIconViewContext(graph: view, inputs: inputs)
+        let view = UnaryViewGenerator(graph: view, baseInputs: inputs.base) { graph, inputs in
+            LabelStyleConfigurationIconViewContext(graph: graph, inputs: inputs)
         }
         return _ViewListOutputs(views: .staticList(view))
     }

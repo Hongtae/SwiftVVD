@@ -41,15 +41,15 @@ public struct AnyView : View {
     }
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let view = UnaryViewGenerator(baseInputs: inputs.base) { inputs in
-            TypeErasedViewContext(graph: view, inputs: inputs)
+        let view = UnaryViewGenerator(graph: view, baseInputs: inputs.base) { graph, inputs in
+            TypeErasedViewContext(graph: graph, inputs: inputs)
         }
         return _ViewOutputs(view: view)
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        let view = UnaryViewGenerator(baseInputs: inputs.base) { inputs in
-            TypeErasedViewContext(graph: view, inputs: inputs)
+        let view = UnaryViewGenerator(graph: view, baseInputs: inputs.base) { graph, inputs in
+            TypeErasedViewContext(graph: graph, inputs: inputs)
         }
         return _ViewListOutputs(views: .staticList(view))
     }

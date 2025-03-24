@@ -29,8 +29,8 @@ extension View {
         let outputs = Self.Body._makeView(view: view[\.body], inputs: inputs)
         if let body = outputs.view {
             if _hasDynamicProperty(self) {
-                let gen = UnaryViewGenerator(baseInputs: inputs.base) { inputs in
-                    DynamicContentViewContext(graph: view, body: body.makeView(), inputs: inputs)
+                let gen = UnaryViewGenerator(graph: view, baseInputs: inputs.base) { graph, inputs in
+                    DynamicContentViewContext(graph: graph, body: body.makeView(), inputs: inputs)
                 }
                 return _ViewOutputs(view: gen)
             }
@@ -89,8 +89,8 @@ extension Optional : View where Wrapped : View {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         var outputs = Wrapped._makeView(view: view[\._unwrap], inputs: inputs)
         if let wrapped = outputs.view {
-            outputs.view = UnaryViewGenerator(baseInputs: inputs.base) { inputs in
-                OptionalViewContext(graph: view, body: wrapped.makeView(), inputs: inputs)
+            outputs.view = UnaryViewGenerator(graph: view, baseInputs: inputs.base) { graph, inputs in
+                OptionalViewContext(graph: graph, body: wrapped.makeView(), inputs: inputs)
             }
         }
         return outputs
@@ -99,16 +99,16 @@ extension Optional : View where Wrapped : View {
         let outputs = Wrapped._makeViewList(view: view[\._unwrap], inputs: inputs)
         if var staticList = outputs.views as? StaticViewList & ViewListGenerator {
             let views = staticList.views.map { wrapped in
-                UnaryViewGenerator(baseInputs: inputs.base) { inputs in
-                    OptionalViewContext(graph: view, body: wrapped.makeView(), inputs: inputs)
+                UnaryViewGenerator(graph: view, baseInputs: inputs.base) { graph, inputs in
+                    OptionalViewContext(graph: graph, body: wrapped.makeView(), inputs: inputs)
                 }
             }
             staticList.views = views
             return _ViewListOutputs(views: staticList)
         }
         let views = outputs.views.wrapper(inputs: inputs.base) { _, baseInputs, viewGenerator in
-            UnaryViewGenerator(baseInputs: baseInputs) { inputs in
-                OptionalViewContext(graph: view, body: viewGenerator.makeView(), inputs: inputs)
+            UnaryViewGenerator(graph: view, baseInputs: baseInputs) { graph, inputs in
+                OptionalViewContext(graph: graph, body: viewGenerator.makeView(), inputs: inputs)
             }
         }
         return _ViewListOutputs(views: views)

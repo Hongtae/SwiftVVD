@@ -19,8 +19,8 @@ public struct _ShapeView<Content, Style> : View where Content : Shape, Style : S
     }
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let view = UnaryViewGenerator(baseInputs: inputs.base) { inputs in
-            ShapeViewContext<Content, Style>(graph: view, inputs: inputs)
+        let view = UnaryViewGenerator(graph: view, baseInputs: inputs.base) { graph, inputs in
+            ShapeViewContext<Content, Style>(graph: graph, inputs: inputs)
         }
         return _ViewOutputs(view: view)
     }

@@ -22,9 +22,9 @@ public struct _BackgroundModifier<Background> : ViewModifier where Background : 
             var backgroundInputs = inputs
             backgroundInputs.base.properties.replace(item: DefaultLayoutPropertyItem(layout: ZStackLayout()))
             if let background = makeView(view: modifier[\.background], inputs: backgroundInputs).view {
-                let view = UnaryViewGenerator(baseInputs: inputs.base) { inputs in
+                let view = UnaryViewGenerator(graph: modifier, baseInputs: inputs.base) { graph, inputs in
                     BackgroundViewContext(background: background.makeView(),
-                                          graph: modifier,
+                                          graph: graph,
                                           body: body.makeView(),
                                           inputs: inputs)
                 }
@@ -56,9 +56,9 @@ public struct _BackgroundStyleModifier<Style> : ViewModifier where Style : Shape
         let outputs = body(_Graph(), inputs)
         if let body = outputs.view {
             if let background = makeView(view: modifier[\._shapeView], inputs: inputs).view {
-                let view = UnaryViewGenerator(baseInputs: inputs.base) { inputs in
+                let view = UnaryViewGenerator(graph: modifier, baseInputs: inputs.base) { graph, inputs in
                     BackgroundViewContext(background: background.makeView(),
-                                          graph: modifier,
+                                          graph: graph,
                                           body: body.makeView(),
                                           inputs: inputs)
                 }
@@ -93,9 +93,9 @@ public struct _BackgroundShapeModifier<Style, Bounds> : ViewModifier where Style
         let outputs = body(_Graph(), inputs)
         if let body = outputs.view {
             if let background = makeView(view: modifier[\._shapeView], inputs: inputs).view {
-                let view = UnaryViewGenerator(baseInputs: inputs.base) { inputs in
+                let view = UnaryViewGenerator(graph: modifier, baseInputs: inputs.base) { graph, inputs in
                     BackgroundViewContext(background: background.makeView(),
-                                          graph: modifier,
+                                          graph: graph,
                                           body: body.makeView(),
                                           inputs: inputs)
                 }
@@ -130,9 +130,9 @@ public struct _InsettableBackgroundShapeModifier<Style, Bounds> : ViewModifier w
         let outputs = body(_Graph(), inputs)
         if let body = outputs.view {
             if let background = makeView(view: modifier[\._shapeView], inputs: inputs).view {
-                let view = UnaryViewGenerator(baseInputs: inputs.base) { inputs in
+                let view = UnaryViewGenerator(graph: modifier, baseInputs: inputs.base) { graph, inputs in
                     BackgroundViewContext(background: background.makeView(),
-                                          graph: modifier,
+                                          graph: graph,
                                           body: body.makeView(),
                                           inputs: inputs)
                 }

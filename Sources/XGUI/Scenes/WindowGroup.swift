@@ -71,8 +71,8 @@ struct WindowGroupScene<Content> : _PrimitiveScene where Content : View {
     var title: Text
 
     static func _makeScene(scene: _GraphValue<Self>, inputs: _SceneInputs) -> _SceneOutputs {
-        _SceneOutputs(scene: UnarySceneGenerator(inputs: inputs) {
-            WindowGroupSceneContext<Content>(graph: scene, inputs: $0)
+        _SceneOutputs(scene: UnarySceneGenerator(graph: scene, inputs: inputs) { graph, inputs in
+            WindowGroupSceneContext<Content>(graph: graph, inputs: inputs)
         })
     }
 }

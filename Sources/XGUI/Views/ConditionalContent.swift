@@ -21,8 +21,8 @@ extension _ConditionalContent : View where TrueContent : View, FalseContent : Vi
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         let trueContent = TrueContent._makeView(view: view[\._trueContent], inputs: inputs)
         let falseContent = FalseContent._makeView(view: view[\._falseContent], inputs: inputs)
-        let view = UnaryViewGenerator(baseInputs: inputs.base) { inputs in
-            ConditionalViewContext(graph: view,
+        let view = UnaryViewGenerator(graph: view, baseInputs: inputs.base) { graph, inputs in
+            ConditionalViewContext(graph: graph,
                                    inputs: inputs,
                                    trueContent: trueContent.view?.makeView(),
                                    falseContent: falseContent.view?.makeView())
@@ -34,8 +34,8 @@ extension _ConditionalContent : View where TrueContent : View, FalseContent : Vi
         let viewInputs = inputs.inputs
         let trueContent = TrueContent._makeView(view: view[\._trueContent], inputs: viewInputs)
         let falseContent = FalseContent._makeView(view: view[\._falseContent], inputs: viewInputs)
-        let view = UnaryViewGenerator(baseInputs: inputs.base) { inputs in
-            ConditionalViewContext(graph: view,
+        let view = UnaryViewGenerator(graph: view, baseInputs: inputs.base) { graph, inputs in
+            ConditionalViewContext(graph: graph,
                                    inputs: inputs,
                                    trueContent: trueContent.view?.makeView(),
                                    falseContent: falseContent.view?.makeView())

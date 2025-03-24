@@ -122,15 +122,42 @@ class GenericSceneContext<Content> : TypedSceneContext<Content> where Content : 
     }
 }
 
-protocol SceneGenerator {
+protocol SceneGenerator<Content> : Equatable {
+    associatedtype Content
+    var graph: _GraphValue<Content> { get }
     func makeScene() -> SceneContext
 }
 
-struct UnarySceneGenerator : SceneGenerator {
+extension SceneGenerator {
+    static func == (lhs: Self, rhs: some SceneGenerator) -> Bool {
+        if lhs.graph == rhs.graph {
+            assert(type(of: lhs) == type(of: rhs))
+            return true
+        }
+        return false
+    }
+}
+
+#if DEBUG
+// Ensure that the UnarySceneGenerator always returns a SceneContext of the same type.
+nonisolated(unsafe) var _debugSceneTypes: [_GraphValue<Any> : SceneContext.Type] = [:]
+#endif
+
+struct UnarySceneGenerator<Content> : SceneGenerator {
+    let graph: _GraphValue<Content>
     var inputs: _SceneInputs
-    let body: (_SceneInputs) -> SceneContext
+    let body: (_GraphValue<Content>, _SceneInputs) -> SceneContext
 
     func makeScene() -> SceneContext {
-        body(inputs)
+        let scene = body(graph, inputs)
+#if DEBUG
+        let key = graph.unsafeCast(to: Any.self)
+        if let t = _debugViewTypes[key] {
+            assert(type(of: scene) == t)
+        } else {
+            _debugSceneTypes[key] = type(of: scene)
+        }
+#endif
+        return scene        
     }
 }

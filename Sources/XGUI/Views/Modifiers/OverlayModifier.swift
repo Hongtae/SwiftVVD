@@ -22,9 +22,9 @@ public struct _OverlayModifier<Overlay> : ViewModifier where Overlay: View {
             var overlayInputs = inputs
             overlayInputs.base.properties.replace(item: DefaultLayoutPropertyItem(layout: ZStackLayout()))
             if let overlay = makeView(view: modifier[\.overlay], inputs: overlayInputs).view {
-                let view = UnaryViewGenerator(baseInputs: inputs.base) { inputs in
+                let view = UnaryViewGenerator(graph: modifier, baseInputs: inputs.base) { graph, inputs in
                     OverlayViewContext(overlay: overlay.makeView(),
-                                       graph: modifier,
+                                       graph: graph,
                                        body: body.makeView(),
                                        inputs: inputs)
                 }
@@ -56,9 +56,9 @@ public struct _OverlayStyleModifier<Style> : ViewModifier where Style: ShapeStyl
         let outputs = body(_Graph(), inputs)
         if let body = outputs.view {
             if let overlay = makeView(view: modifier[\._shapeView], inputs: inputs).view {
-                let view = UnaryViewGenerator(baseInputs: inputs.base) { inputs in
+                let view = UnaryViewGenerator(graph: modifier, baseInputs: inputs.base) { graph, inputs in
                     OverlayViewContext(overlay: overlay.makeView(),
-                                       graph: modifier,
+                                       graph: graph,
                                        body: body.makeView(),
                                        inputs: inputs)
                 }
@@ -93,9 +93,9 @@ public struct _OverlayShapeModifier<Style, Bounds> : ViewModifier where Style: S
         let outputs = body(_Graph(), inputs)
         if let body = outputs.view {
             if let overlay = makeView(view: modifier[\._shapeView], inputs: inputs).view {
-                let view = UnaryViewGenerator(baseInputs: inputs.base) { inputs in
+                let view = UnaryViewGenerator(graph: modifier, baseInputs: inputs.base) { graph, inputs in
                     OverlayViewContext(overlay: overlay.makeView(),
-                                       graph: modifier,
+                                       graph: graph,
                                        body: body.makeView(),
                                        inputs: inputs)
                 }

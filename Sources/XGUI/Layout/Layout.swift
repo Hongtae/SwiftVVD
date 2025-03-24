@@ -253,15 +253,15 @@ public struct _LayoutRoot<L> : _VariadicView.UnaryViewRoot where L : Layout {
         let body = body(_Graph(), inputs)
         if let staticList = body.views as? StaticViewList {
             let views = staticList.views.map { $0.makeView() }
-            let view = UnaryViewGenerator(baseInputs: inputs.base) { inputs in
-                return StaticLayoutRootContext(graph: root,
+            let view = UnaryViewGenerator(graph: root, baseInputs: inputs.base) { graph, inputs in
+                return StaticLayoutRootContext(graph: graph,
                                                subviews: views,
                                                inputs: inputs)
             }
             return _ViewOutputs(view: view)
         } else {
-            let view = UnaryViewGenerator(baseInputs: inputs.base) { inputs in
-                return DynamicLayoutRootContext(graph: root,
+            let view = UnaryViewGenerator(graph: root, baseInputs: inputs.base) { graph, inputs in
+                return DynamicLayoutRootContext(graph: graph,
                                                 body: body.views,
                                                 inputs: inputs)
             }

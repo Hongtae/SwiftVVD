@@ -22,8 +22,8 @@ extension Spacer : Sendable {
 extension Spacer : _PrimitiveView {
     static func _makeView(view: _GraphValue<Self>) -> _ViewOutputs {
         let baseInputs = _GraphInputs(environment: .init())
-        let view = UnaryViewGenerator(baseInputs: baseInputs) { inputs in
-            SpacerViewContext(graph: view, inputs: inputs)
+        let view = UnaryViewGenerator(graph: view, baseInputs: baseInputs) { graph, inputs in
+            SpacerViewContext(graph: graph, inputs: inputs)
         }
         return _ViewOutputs(view: view)
     }
@@ -34,8 +34,8 @@ public struct Divider : View {
     }
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let view = UnaryViewGenerator(baseInputs: inputs.base) { inputs in
-            DividerViewContext(graph: view, inputs: inputs)
+        let view = UnaryViewGenerator(graph: view, baseInputs: inputs.base) { graph, inputs in
+            DividerViewContext(graph: graph, inputs: inputs)
         }
         return _ViewOutputs(view: view)
     }

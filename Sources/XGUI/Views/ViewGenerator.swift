@@ -26,7 +26,9 @@ import Foundation
 // - [S] DynamicMultiViewGenerator
 
 
-protocol ViewGenerator {
+protocol ViewGenerator<Content> : Equatable {
+    associatedtype Content
+    var graph: _GraphValue<Content> { get }
     func makeView() -> ViewContext
     mutating func mergeInputs(_ inputs: _GraphInputs)
 }
@@ -36,6 +38,14 @@ extension ViewGenerator {
         SharedContext.$taskLocalContext.withValue(sharedContext) {
             self.makeView()
         }
+    }
+
+    static func == (lhs: Self, rhs: some ViewGenerator) -> Bool {
+        if lhs.graph == rhs.graph {
+            assert(type(of: lhs) == type(of: rhs))
+            return true
+        }
+        return false
     }
 }
 
@@ -123,12 +133,27 @@ extension ViewListGenerator {
     }
 }
 
-struct UnaryViewGenerator : ViewGenerator {
+#if DEBUG
+// Ensure that the UnaryViewGenerator always returns a ViewContext of the same type.
+nonisolated(unsafe) var _debugViewTypes: [_GraphValue<Any> : ViewContext.Type] = [:]
+#endif
+
+struct UnaryViewGenerator<Content> : ViewGenerator {
+    let graph: _GraphValue<Content>
     var baseInputs: _GraphInputs
-    let body: (_GraphInputs) -> ViewContext
+    let body: (_GraphValue<Content>, _GraphInputs) -> ViewContext
 
     func makeView() -> ViewContext {
-        body(baseInputs)
+        let view = body(graph, baseInputs)
+#if DEBUG
+        let key = graph.unsafeCast(to: Any.self)
+        if let t = _debugViewTypes[key] {
+            assert(type(of: view) == t)
+        } else {
+            _debugViewTypes[key] = type(of: view)
+        }
+#endif
+        return view
     }
 
     mutating func mergeInputs(_ inputs: _GraphInputs) {

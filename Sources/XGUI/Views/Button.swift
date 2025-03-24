@@ -135,10 +135,10 @@ struct ResolvedButtonStyle : View {
         let outputs = makeStyleBody(styleType, graph: view[\._body], inputs: inputs)
         
         if let body = outputs.view {
-            let view = UnaryViewGenerator(baseInputs: inputs.base) { inputs in
+            let view = UnaryViewGenerator(graph: view, baseInputs: inputs.base) { graph, inputs in
                 ResolvedButtonStyleViewContext(buttonStyle: style,
                                                label: label,
-                                               graph: view,
+                                               graph: graph,
                                                body: body.makeView(),
                                                inputs: inputs)
             }

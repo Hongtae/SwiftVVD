@@ -59,8 +59,8 @@ extension _FrameLayout : _ViewLayoutModifier {
 
     static func _makeLayoutView(modifier: _GraphValue<Self>, inputs: _ViewInputs, content: any ViewGenerator) -> any ViewGenerator {
         let body = content.makeView()
-        return UnaryViewGenerator(baseInputs: inputs.base) { inputs in
-            LayoutViewContext(graph: modifier, body: body, inputs: inputs)
+        return UnaryViewGenerator(graph: modifier, baseInputs: inputs.base) { graph, inputs in
+            LayoutViewContext(graph: graph, body: body, inputs: inputs)
         }
     }
 }
