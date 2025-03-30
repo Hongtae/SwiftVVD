@@ -244,7 +244,7 @@ class ImageViewContext : PrimitiveViewContext<Image> {
 
     override func updateContent() {
         self.resolveGraphInputs()
-        let defaultBundle = self.environmentValues.resourceBundle
+        let defaultBundle = self.environment.resourceBundle
         Image.$_mainNamedBundle.withValue(defaultBundle) {
             super.updateContent()
         }

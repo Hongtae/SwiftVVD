@@ -2,13 +2,13 @@
 //  File: PropertyList.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
 
 @usableFromInline
-struct PropertyList : CustomStringConvertible {
+struct PropertyList: CustomStringConvertible {
 
     @usableFromInline
     var elements: Element?
@@ -61,7 +61,65 @@ extension PropertyList {
         return nil
     }
 
-    mutating func replace<T>(item: T) where T: PropertyItem {
+    mutating func add<T>(item: T) where T: PropertyItem {
+        self.makeUnique()
+        if let elements {
+            var next = elements
+            while let nextElement = next.next {
+                next = nextElement
+            }
+            next.next = Element(item: item)
+        } else {
+            self.elements = Element(item: item)
+        }
+    }
+
+    @discardableResult
+    mutating func replace<T>(item: T) -> Bool where T: PropertyItem {
+        if self.find(type: T.self) == nil {
+            return false
+        }
+        self.makeUnique()
+        if self.elements?.item is T {
+            let next = self.elements!.next
+            self.elements = Element(item: item, next: next)
+            return true
+        }
+        var next = self.elements?.next
+        var prev = self.elements
+        while next != nil {
+            if next!.item is T {
+                prev!.next = Element(item: item, next: next!.next)
+                return true
+            }
+            prev = next
+            next = next!.next
+        }
+        return false
+    }
+
+    mutating func replaceAll<T>(item: T) where T: PropertyItem {
+        if self.find(type: T.self) == nil {
+            return
+        }
+        self.makeUnique()
+        if self.elements?.item is T {
+            let next = self.elements!.next
+            self.elements = Element(item: item, next: next)
+        }
+        var next = self.elements?.next
+        var prev = self.elements
+        while next != nil {
+            if next!.item is T {
+                prev!.next = Element(item: item, next: next!.next)
+            }
+            prev = next
+            next = next!.next
+        }
+    }
+
+    mutating func replaceOrAdd<T>(item: T) where T: PropertyItem {
+        self.makeUnique()
         if self.elements?.item is T {
             let next = self.elements!.next
             self.elements = Element(item: item, next: next)
@@ -84,9 +142,13 @@ extension PropertyList {
         }
     }
 
-    mutating func remove<T>(type: T.Type) where T : PropertyItem {
+    mutating func remove<T>(type: T.Type) where T: PropertyItem {
+        if self.find(type: T.self) == nil {
+            return
+        }
+        self.makeUnique()
         if let elements, elements.item is T {
-            self.elements = elements.next
+            self.elements = elements.next?.clone()
             return
         }
         var next = elements?.next
@@ -101,7 +163,11 @@ extension PropertyList {
         }
     }
 
-    mutating func removeAll<T>(type: T.Type) where T : PropertyItem {
+    mutating func removeAll<T>(type: T.Type) where T: PropertyItem {
+        if self.find(type: T.self) == nil {
+            return
+        }
+        self.makeUnique()
         func getElementNotMatching(_ element: Element?) -> Element? {
             if let element, element.item is T {
                 return getElementNotMatching(element.next)
@@ -116,6 +182,12 @@ extension PropertyList {
         }
         self.elements = root
     }
+
+    private mutating func makeUnique() {
+        if isKnownUniquelyReferenced(&self.elements) == false {
+            self.elements = elements?.clone()
+        }
+    }
 }
 
 extension PropertyList {
@@ -124,7 +196,7 @@ extension PropertyList {
     }
 }
 
-protocol PropertyItem : TransactionKey, CustomStringConvertible {
+protocol PropertyItem: TransactionKey, CustomStringConvertible {
     associatedtype Item
     static var defaultValue: Item { get }
 }
@@ -145,6 +217,10 @@ extension PropertyList {
                 return "\(desc), \(next.description)"
             }
             return desc
+        }
+
+        func clone() -> Element {
+            Element(item: item, next: next?.clone())
         }
     }
 

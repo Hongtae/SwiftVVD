@@ -9,7 +9,7 @@ import Foundation
 import Synchronization
 import VVD
 
-protocol WindowContext : AnyObject {
+protocol WindowContext: AnyObject {
     typealias Window = VVD.Window
 
     var scene: SceneContext { get }
@@ -22,7 +22,7 @@ protocol WindowContext : AnyObject {
     func makeWindow() -> Window?
 }
 
-class GenericWindowContext<Content> : WindowContext, WindowDelegate where Content : View {
+class GenericWindowContext<Content>: WindowContext, WindowDelegate where Content: View {
     typealias Window = WindowContext.Window
 
     private(set) var swapChain: SwapChain?
@@ -31,7 +31,7 @@ class GenericWindowContext<Content> : WindowContext, WindowDelegate where Conten
     var view: ViewContext?
     let title: _GraphValue<Text>
     let content: _GraphValue<Content>
-    var environmentValues: EnvironmentValues
+    var environment: EnvironmentValues
     var sharedContext: SharedContext
     var scene: SceneContext {
         sharedContext.scene
@@ -56,7 +56,7 @@ class GenericWindowContext<Content> : WindowContext, WindowDelegate where Conten
     init(content: _GraphValue<Content>, title: _GraphValue<Text>, scene: SceneContext) {
         self.title = title
         self.content = content
-        self.environmentValues = EnvironmentValues()
+        self.environment = EnvironmentValues()
         self.sharedContext = SharedContext(scene: scene)
 
         let properties = PropertyList(
@@ -66,7 +66,7 @@ class GenericWindowContext<Content> : WindowContext, WindowDelegate where Conten
 
         self.view = SharedContext.$taskLocalContext.withValue(sharedContext) {
             let baseInputs = _GraphInputs(properties: properties,
-                                          environment: self.environmentValues)
+                                          environment: self.environment)
             let inputs = _ViewInputs.inputs(with: baseInputs)
             let outputs = Content._makeView(view: content, inputs: inputs)
             return outputs.view?.makeView()
@@ -114,7 +114,7 @@ class GenericWindowContext<Content> : WindowContext, WindowDelegate where Conten
             self.swapChain = nil
 
             let title = scene.value(atPath: self.title)
-            let windowTitle = title?._resolveText(in: self.environmentValues) ?? ""
+            let windowTitle = title?._resolveText(in: self.environment) ?? ""
 
             if let window = VVD.makeWindow(name: windowTitle,
                                            style: [.genericWindow],
@@ -243,8 +243,8 @@ class GenericWindowContext<Content> : WindowContext, WindowDelegate where Conten
 
                     if state.contentScaleFactor != contentScaleFactor {
                         sharedContext.contentScaleFactor = state.contentScaleFactor
-                        self.environmentValues.displayScale = state.contentScaleFactor
-                        view.updateEnvironment(self.environmentValues)
+                        self.environment.displayScale = state.contentScaleFactor
+                        view.updateEnvironment(self.environment)
                         viewLoaded = false
                         viewsToReload = [view]
                     }
@@ -260,13 +260,13 @@ class GenericWindowContext<Content> : WindowContext, WindowDelegate where Conten
                         if let commandBuffer = appContext?.graphicsDeviceContext?.renderQueue()?.makeCommandBuffer() {
                             let width = 4, height = 4
                             if var context = GraphicsContext(sharedContext: sharedContext,
-                                                             environment: environmentValues,
+                                                             environment: environment,
                                                              viewport: CGRect(x: 0, y: 0, width: width, height: height),
                                                              contentOffset: .zero,
                                                              contentScaleFactor: contentScaleFactor,
                                                              resolution: CGSize(width: width, height: height),
                                                              commandBuffer: commandBuffer) {
-                                context.environment = view.environmentValues
+                                context.environment = view.environment
                                 viewsToReload.forEach { view in
                                     view.loadResources(context)
                                 }
@@ -318,7 +318,7 @@ class GenericWindowContext<Content> : WindowContext, WindowDelegate where Conten
 
                         if let context = GraphicsContext(
                             sharedContext: self.sharedContext,
-                            environment: view.environmentValues,
+                            environment: view.environment,
                             viewport: CGRect(x: 0, y: 0,
                                              width: backBuffer.width,
                                              height: backBuffer.height),
@@ -517,5 +517,5 @@ class GenericWindowContext<Content> : WindowContext, WindowDelegate where Conten
     }
 }
 
-extension GenericWindowContext : @unchecked Sendable {
+extension GenericWindowContext: @unchecked Sendable {
 }

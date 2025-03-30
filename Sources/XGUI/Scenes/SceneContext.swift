@@ -8,9 +8,11 @@
 import Foundation
 import VVD
 
-class SceneContext : _GraphValueResolver {
+class SceneContext: _GraphValueResolver {
     unowned var parent: SceneContext?
     var inputs: _SceneInputs
+    var environment: EnvironmentValues
+    var properties: PropertyList
 
     var root: any SceneRoot {
         inputs.root
@@ -24,6 +26,8 @@ class SceneContext : _GraphValueResolver {
 
     init(inputs: _SceneInputs) {
         self.inputs = inputs
+        self.environment = inputs.environment
+        self.properties = inputs.properties
     }
 
     deinit {
@@ -56,6 +60,9 @@ class SceneContext : _GraphValueResolver {
 
     func resolveGraphInputs() {
         do {
+            self.environment = self.inputs.environment
+            self.properties = self.inputs.properties
+
             var modifiers = self.inputs.modifiers
             modifiers.indices.forEach { index in
                 if modifiers[index].isResolved == false {
@@ -64,12 +71,12 @@ class SceneContext : _GraphValueResolver {
             }
             modifiers.forEach { modifier in
                 if modifier.isResolved {
-                    modifier.apply(to: &self.inputs.environment)
+                    modifier.apply(to: &self.environment)
                 }
             }
             modifiers.forEach { modifier in
                 if modifier.isResolved {
-                    modifier.apply(to: &self.inputs.properties)
+                    modifier.apply(to: &self.properties)
                 }
             }
             self.inputs.modifiers = modifiers
@@ -77,7 +84,7 @@ class SceneContext : _GraphValueResolver {
     }
 }
 
-class TypedSceneContext<Content> : SceneContext where Content : Scene {
+class TypedSceneContext<Content>: SceneContext where Content: Scene {
     let graph: _GraphValue<Content>
     var content: Content?
 
@@ -115,7 +122,7 @@ class TypedSceneContext<Content> : SceneContext where Content : Scene {
     }
 }
 
-class GenericSceneContext<Content> : TypedSceneContext<Content> where Content : Scene {
+class GenericSceneContext<Content>: TypedSceneContext<Content> where Content: Scene {
     var body: SceneContext? {
         willSet {
             self.body?.parent = nil
@@ -170,7 +177,7 @@ extension SceneGenerator {
 nonisolated(unsafe) var _debugSceneTypes: [_GraphValue<Any> : SceneContext.Type] = [:]
 #endif
 
-struct UnarySceneGenerator<Content> : SceneGenerator {
+struct UnarySceneGenerator<Content>: SceneGenerator {
     let graph: _GraphValue<Content>
     var inputs: _SceneInputs
     let body: (_GraphValue<Content>, _SceneInputs) -> SceneContext

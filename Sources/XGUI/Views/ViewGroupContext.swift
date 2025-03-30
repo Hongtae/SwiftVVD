@@ -10,11 +10,11 @@ import VVD
 
 // Class hierarchy
 //
-// ViewGroupContext : ViewContext
+// ViewGroupContext: ViewContext
 // - StaticViewGroupContext (layout with static subviews)
 // - DynamicViewGroupContext (layout with dynamic subviews)
 
-class ViewGroupContext : ViewContext {
+class ViewGroupContext: ViewContext {
     var layout: AnyLayout
     var layoutCache: AnyLayout.Cache?
     var layoutProperties: LayoutProperties
@@ -22,7 +22,7 @@ class ViewGroupContext : ViewContext {
     var activeSubviews: [ViewContext] = []
 
     init(subviews: [ViewContext], layout: any Layout, inputs: _GraphInputs) {
-        func layoutProperties<L : Layout>(_ layout: L) -> LayoutProperties {
+        func layoutProperties<L: Layout>(_ layout: L) -> LayoutProperties {
             L.layoutProperties
         }
         self.layout = AnyLayout(layout)
@@ -69,10 +69,10 @@ class ViewGroupContext : ViewContext {
         }
     }
 
-    override func updateEnvironment(_ environmentValues: EnvironmentValues) {
-        super.updateEnvironment(environmentValues)
+    override func updateEnvironment(_ environment: EnvironmentValues) {
+        super.updateEnvironment(environment)
         self.subviews.forEach {
-            $0.updateEnvironment(self.environmentValues)
+            $0.updateEnvironment(self.environment)
         }
     }
 
@@ -260,13 +260,7 @@ class StaticViewGroupContext<Content> : ViewGroupContext {
                 return self.graph.value(atPath: graph, from: root)
             }
         }
-        if let superview {
-            return superview.value(atPath: graph)
-        }
-        if let root = self.sharedContext.root {
-            return root.value(atPath: graph)
-        }
-        return nil
+        return super.value(atPath: graph)
     }
 
     override func updateContent() {
@@ -330,13 +324,7 @@ class DynamicViewGroupContext<Content> : ViewGroupContext {
                 return self.graph.value(atPath: graph, from: root)
             }
         }
-        if let superview {
-            return superview.value(atPath: graph)
-        }
-        if let root = self.sharedContext.root {
-            return root.value(atPath: graph)
-        }
-        return nil
+        return super.value(atPath: graph)
     }
 
     override func updateContent() {

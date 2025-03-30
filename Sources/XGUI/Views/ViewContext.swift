@@ -15,7 +15,7 @@ import VVD
 // - GenericViewContext (Body : View)
 // - DynamicViewContext (Optional<Body>)
 
-public struct _ViewContextDebugDraw : EnvironmentKey {
+public struct _ViewContextDebugDraw: EnvironmentKey {
     public static var defaultValue: Bool { false }
 }
 
@@ -26,12 +26,11 @@ public extension EnvironmentValues {
     }
 }
 
-class ViewContext : _GraphValueResolver {
+class ViewContext: _GraphValueResolver {
     var inputs: _GraphInputs
     var traits: [ObjectIdentifier: Any]
-    var environmentValues: EnvironmentValues {
-        inputs.environment
-    }
+    var environment: EnvironmentValues
+    var properties: PropertyList
     let sharedContext: SharedContext
     var frame: CGRect
     var transform: AffineTransform = .identity          // local transform
@@ -59,6 +58,8 @@ class ViewContext : _GraphValueResolver {
         self.frame = .zero
         self.spacing = .zero
         self.inputs = inputs.resolveMergedInputs()
+        self.environment = inputs.environment
+        self.properties = inputs.properties
 
         Log.debug("ViewContext(\(self)) init")
     }
@@ -73,7 +74,13 @@ class ViewContext : _GraphValueResolver {
     }
 
     func value<T>(atPath graph: _GraphValue<T>) -> T? {
-        fatalError("Subclasses must override this method")
+        if let superview {
+            return superview.value(atPath: graph)
+        }
+        if let root = self.sharedContext.root {
+            return root.value(atPath: graph)
+        }
+        return nil
     }
 
     var isValid: Bool {
@@ -106,6 +113,9 @@ class ViewContext : _GraphValueResolver {
     func resolveGraphInputs() {
         assert(self.inputs.mergedInputs.isEmpty)
         do {
+            self.environment = self.inputs.environment
+            self.properties = self.inputs.properties
+
             var modifiers = self.inputs.modifiers
             modifiers.indices.forEach { index in
                 if modifiers[index].isResolved == false {
@@ -114,12 +124,12 @@ class ViewContext : _GraphValueResolver {
             }
             modifiers.forEach { modifier in
                 if modifier.isResolved {
-                    modifier.apply(to: &self.inputs.environment)
+                    modifier.apply(to: &self.environment)
                 }
             }
             modifiers.forEach { modifier in
                 if modifier.isResolved {
-                    modifier.apply(to: &self.inputs.properties)
+                    modifier.apply(to: &self.properties)
                 }
             }
             self.inputs.modifiers = modifiers
@@ -211,7 +221,7 @@ class ViewContext : _GraphValueResolver {
     var _debugDrawShading: GraphicsContext.Shading = .color(.blue.opacity(0.6))
 
     func drawDebugFrame(frame: CGRect, context: GraphicsContext) {
-        if _debugDraw && self.environmentValues._viewContextDebugDraw {
+        if _debugDraw && self.environment._viewContextDebugDraw {
             var path = Path()
             let frame = frame.insetBy(dx: 1, dy: 1).standardized
             path.addRect(frame)
@@ -225,7 +235,7 @@ class ViewContext : _GraphValueResolver {
 
     final func drawView(frame: CGRect, context: GraphicsContext) {
         var context = context
-        context.environment = self.environmentValues
+        context.environment = self.environment
 
         self.drawDebugFrame(frame: frame, context: context)
         self.drawBackground(frame: frame, context: context)
@@ -288,7 +298,7 @@ class ViewContext : _GraphValueResolver {
     }
 }
 
-class PrimitiveViewContext<Content> : ViewContext {
+class PrimitiveViewContext<Content>: ViewContext {
     let graph: _GraphValue<Content>
     var view: Content?
 
@@ -315,13 +325,7 @@ class PrimitiveViewContext<Content> : ViewContext {
                 return self.graph.value(atPath: graph, from: view)
             }
         }
-        if let superview {
-            return superview.value(atPath: graph)
-        }
-        if let root = self.sharedContext.root {
-            return root.value(atPath: graph)
-        }
-        return nil
+        return super.value(atPath: graph)
     }
 
     func updateView(_ view: inout Content) {
@@ -340,7 +344,7 @@ class PrimitiveViewContext<Content> : ViewContext {
     }
 }
 
-class GenericViewContext<Content> : ViewContext {
+class GenericViewContext<Content>: ViewContext {
     let graph: _GraphValue<Content>
     let body: ViewContext
     var view: Content?
@@ -382,13 +386,7 @@ class GenericViewContext<Content> : ViewContext {
                 return self.graph.value(atPath: graph, from: view)
             }
         }
-        if let superview {
-            return superview.value(atPath: graph)
-        }
-        if let root = self.sharedContext.root {
-            return root.value(atPath: graph)
-        }
-        return nil
+        return super.value(atPath: graph)
     }
 
     func updateView(_ view: inout Content) {
@@ -494,7 +492,7 @@ class GenericViewContext<Content> : ViewContext {
     }
 }
 
-class DynamicViewContext<Content> : ViewContext {
+class DynamicViewContext<Content>: ViewContext {
     let graph: _GraphValue<Content>
     var view: Content?
     var body: ViewContext? {
@@ -562,13 +560,7 @@ class DynamicViewContext<Content> : ViewContext {
                 return self.graph.value(atPath: graph, from: view)
             }
         }
-        if let superview {
-            return superview.value(atPath: graph)
-        }
-        if let root = self.sharedContext.root {
-            return root.value(atPath: graph)
-        }
-        return nil
+        return super.value(atPath: graph)
     }
 
     func updateView(_ view: inout Content) {
