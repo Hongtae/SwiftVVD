@@ -119,6 +119,7 @@ let package = Package(
                 "pngwutil.c",
                 "arm/arm_init.c",
                 "arm/filter_neon_intrinsics.c",
+                "arm/palette_neon_intrinsics.c",
             ],
             publicHeadersPath: ".",
             cSettings: [
