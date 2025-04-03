@@ -36,6 +36,7 @@ class ViewContext: _GraphValueResolver {
     var transform: AffineTransform = .identity          // local transform
     var transformToRoot: AffineTransform = .identity    // local to root
     var spacing: ViewSpacing
+    var requiresContentUpdates: Bool = false
 
     var bounds: CGRect {
         CGRect(x: 0, y: 0, width: frame.width, height: frame.height)
@@ -151,6 +152,10 @@ class ViewContext: _GraphValueResolver {
 
     func update(tick: UInt64, delta: Double, date: Date) {
         assert(self.isValid)
+        if self.requiresContentUpdates {
+            self.requiresContentUpdates = false
+            self.updateContent()
+        }
     }
 
     func updateEnvironment(_ environmentValues: EnvironmentValues) {
@@ -336,6 +341,7 @@ class PrimitiveViewContext<Content>: ViewContext {
         if var view = value(atPath: self.graph) {
             self.resolveGraphInputs()
             self.updateView(&view)
+            self.requiresContentUpdates = false
             self.view = view
         } else {
             self.invalidate()
@@ -397,6 +403,7 @@ class GenericViewContext<Content>: ViewContext {
         if var view = value(atPath: self.graph) {
             self.resolveGraphInputs()
             self.updateView(&view)
+            self.requiresContentUpdates = false
             self.view = view
             self.body.updateContent()
         } else {
@@ -571,6 +578,7 @@ class DynamicViewContext<Content>: ViewContext {
         if var view = value(atPath: self.graph) {
             self.resolveGraphInputs()
             self.updateView(&view)
+            self.requiresContentUpdates = false
             self.view = view
             self.body?.updateContent()
         } else {

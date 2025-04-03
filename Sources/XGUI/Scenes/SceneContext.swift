@@ -6,13 +6,13 @@
 //
 
 import Foundation
-import VVD
 
 class SceneContext: _GraphValueResolver {
     unowned var parent: SceneContext?
     var inputs: _SceneInputs
     var environment: EnvironmentValues
     var properties: PropertyList
+    var requiresContentUpdates = false
 
     var root: any SceneRoot {
         inputs.root
@@ -101,6 +101,7 @@ class TypedSceneContext<Content>: SceneContext where Content: Scene {
         if var value = self.value(atPath: graph) {
             self.resolveGraphInputs()
             self.updateScene(&value)
+            self.requiresContentUpdates = false
             self.content = value
         } else {
             fatalError("Unable to recover scene at path \(graph)")

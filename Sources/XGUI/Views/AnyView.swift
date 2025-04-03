@@ -74,6 +74,7 @@ class TypeErasedViewContext : DynamicViewContext<AnyView> {
         if var view = value(atPath: self.graph) {
             self.resolveGraphInputs()
             self.updateView(&view)
+            self.requiresContentUpdates = false
             self.view = view
         }
         if let view = self.view?._view {

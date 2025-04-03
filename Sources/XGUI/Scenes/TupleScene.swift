@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import VVD
 
 struct _TupleScene<T> : Scene {
     public var value: T

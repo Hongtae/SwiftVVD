@@ -2,15 +2,15 @@
 //  File: State.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
 import Observation
 
-class StoredLocation<Value> : AnyLocation<Value>, @unchecked Sendable {
+class StoredLocation<Value>: AnyLocation<Value>, @unchecked Sendable {
     var _value: Value
-    let valueUpdated: (Value)->Void
+    var valueUpdated: (Value)->Void
     init(_ value: Value, onValueUpdated: @escaping (Value)->Void) {
         self._value = value
         self.valueUpdated = onValueUpdated
@@ -24,16 +24,19 @@ class StoredLocation<Value> : AnyLocation<Value>, @unchecked Sendable {
     }
 }
 
-class ObservableLocation<Value> : AnyLocation<Value>, @unchecked Sendable {
+class ObservableLocation<Value>: AnyLocation<Value>, @unchecked Sendable {
+    var _value: Value
+    let valueUpdated: (Value)->Void
     init(_ value: Value, onValueUpdated: @escaping (Value)->Void) {
-        fatalError()
+        self._value = value
+        self.valueUpdated = onValueUpdated
     }
     override func getValue() -> Value {
-        fatalError()
+        _value
     }
 }
 
-@propertyWrapper public struct State<Value> : DynamicProperty {
+@propertyWrapper public struct State<Value>: DynamicProperty {
     @usableFromInline
     var _value: Value
 
@@ -42,9 +45,6 @@ class ObservableLocation<Value> : AnyLocation<Value>, @unchecked Sendable {
 
     public init(wrappedValue value: Value) {
         _value = value
-        _location = StoredLocation(_value, onValueUpdated: { value in
-            print("Update value: \(value)")
-        })
     }
 
     @inlinable
@@ -79,23 +79,60 @@ class ObservableLocation<Value> : AnyLocation<Value>, @unchecked Sendable {
         if let _location {
             return Binding(location: _location)
         }
+        print("Accessing State's value outside of being installed on a View. This will result in a constant Binding of the initial value and will not update.")
         return .constant(_value)
     }
+}
 
+extension State: _DynamicPropertyStorageBinding {
     public static func _makeProperty<V>(in buffer: inout _DynamicPropertyBuffer,
                                         container: _GraphValue<V>,
                                         fieldOffset: Int,
                                         inputs: inout _GraphInputs) {
-        print("\(Self.self)._makeProperty")
-        //fatalError()
+        assert(buffer.properties.contains { $0.offset == fieldOffset } == false)
+        buffer.properties.append(.init(type: self, offset: fieldOffset))
+    }
+
+    mutating func bind(in buffer: inout _DynamicPropertyBuffer, fieldOffset: Int, view: ViewContext, tracker: @escaping Tracker) {
+        guard MemoryLayout<Self>.size > .zero else { return }
+        
+        let onValueUpdated: (Value)->Void = { value in
+            //print("Update value: \(value)")
+            tracker()
+        }
+        if let location = self._location {
+            if let context = buffer.contexts[fieldOffset] {
+                assert(context === _location)
+                self._value = location.getValue()
+            } else {
+                buffer.contexts[fieldOffset] = location
+            }
+        } else {
+            if let context = buffer.contexts[fieldOffset] {
+                guard let location = context as? StoredLocation<Value> else {
+                    fatalError("Invalid context type")
+                }
+                self._location = location
+                self._value = location.getValue()
+            } else {
+                let location = StoredLocation(self._value, onValueUpdated: onValueUpdated)
+                buffer.contexts[fieldOffset] = location
+                self._location = location
+            }
+        }
+        
+        guard let location = self._location as? StoredLocation<Value> else {
+            fatalError("Invalid context type")
+        }
+        location.valueUpdated = onValueUpdated
     }
 }
 
-extension State where Value : ExpressibleByNilLiteral {
+extension State where Value: ExpressibleByNilLiteral {
     @inlinable public init() {
         self.init(wrappedValue: nil)
     }
 }
 
-extension State : Sendable where Value : Sendable {
+extension State: Sendable where Value: Sendable {
 }

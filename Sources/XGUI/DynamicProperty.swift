@@ -34,6 +34,7 @@ public struct _DynamicPropertyBuffer {
         let offset: Int
     }
     var properties: [FieldInfo] = []
+    var contexts: [Int: AnyObject] = [:]
 }
 
 func _hasDynamicProperty<V : View>(_ view: V.Type) -> Bool {
@@ -74,4 +75,69 @@ func _getDynamicProperty<V : View>(at offset: Int, from view: V) -> any DynamicP
     }
     if let property { return property }
     fatalError("Unable to find dynamic property at offset: \(offset)")
+}
+
+protocol _DynamicPropertyStorageBinding: DynamicProperty {
+    typealias Tracker = ()->Void
+
+    mutating func bind(in buffer: inout _DynamicPropertyBuffer, fieldOffset: Int, view: ViewContext, tracker: @escaping Tracker)
+}
+
+struct _DynamicPropertyDataStorage<Container> {
+    var dynamicPropertyBuffer: _DynamicPropertyBuffer
+    typealias Tracker = _DynamicPropertyStorageBinding.Tracker
+    var tracker: Tracker
+
+    init(graph: _GraphValue<Container>, inputs: inout _GraphInputs) {
+        var dynamicPropertyBuffer = _DynamicPropertyBuffer()
+        _forEachField(of: Container.self) { charPtr, offset, fieldType in
+            if let propertyType = fieldType as? DynamicProperty.Type {
+                func make<T: DynamicProperty>(_ type: T.Type, offset: Int) {
+                    T._makeProperty(in: &dynamicPropertyBuffer,
+                                    container: graph,
+                                    fieldOffset: offset,
+                                    inputs: &inputs)
+                }
+                make(propertyType, offset: offset)
+            }
+            return true
+        }
+        self.dynamicPropertyBuffer = dynamicPropertyBuffer
+        self.tracker = {}
+    }
+
+    mutating func bind(container: inout Container, view: ViewContext) {
+        // bind properties.
+        func bind<T: _DynamicPropertyStorageBinding>(_ type: T.Type, _ offset: Int, _ ptr: UnsafeMutableRawPointer) {
+            ptr.assumingMemoryBound(to: T.self).pointee.bind(in: &self.dynamicPropertyBuffer,
+                                                             fieldOffset: offset,
+                                                             view: view,
+                                                             tracker: tracker)
+        }
+        self.dynamicPropertyBuffer.properties.forEach {
+            let offset = $0.offset
+            let propertyType = $0.type
+            if let dpType = propertyType as? _DynamicPropertyStorageBinding.Type {
+                withUnsafeMutableBytes(of: &container) {
+                    let ptr = $0.baseAddress!.advanced(by: offset)
+                    bind(dpType, offset, ptr)
+                }
+            }
+        }
+    }
+
+    func update(container: inout Container) {
+        // update DynamicProperty properties.
+        func update<T: DynamicProperty>(_: T.Type, _ ptr: UnsafeMutableRawPointer) {
+            ptr.assumingMemoryBound(to: T.self).pointee.update()
+        }
+        self.dynamicPropertyBuffer.properties.forEach {
+            let offset = $0.offset
+            let propertyType = $0.type
+            withUnsafeMutableBytes(of: &container) {
+                let ptr = $0.baseAddress!.advanced(by: offset)
+                update(propertyType, ptr)
+            }
+        }
+    }
 }

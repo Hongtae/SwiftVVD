@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import VVD
 
 public protocol PrimitiveButtonStyle {
     associatedtype Body : View
@@ -14,7 +13,7 @@ public protocol PrimitiveButtonStyle {
     typealias Configuration = PrimitiveButtonStyleConfiguration
 }
 
-public struct ButtonRole : Equatable, Sendable {
+public struct ButtonRole: Equatable, Sendable {
     public static let destructive = ButtonRole(_role: .destructive)
     public static let cancel = ButtonRole(_role: .cancel)
 
@@ -60,7 +59,7 @@ extension PrimitiveButtonStyleConfiguration.Label {
     }
 }
 
-extension PrimitiveButtonStyleConfiguration.Label : _PrimitiveView {}
+extension PrimitiveButtonStyleConfiguration.Label: _PrimitiveView {}
 
 protocol PrimitiveButtonStyleWithPressingBody {
     associatedtype PressingBody : View
@@ -69,7 +68,7 @@ protocol PrimitiveButtonStyleWithPressingBody {
                                callback: ((Bool)->Void)?) -> Self.PressingBody
 }
 
-public struct DefaultButtonStyle : PrimitiveButtonStyle, PrimitiveButtonStyleWithPressingBody {
+public struct DefaultButtonStyle: PrimitiveButtonStyle, PrimitiveButtonStyleWithPressingBody {
     public init() {}
 
     public func makeBody(configuration: Configuration) -> some View {
@@ -100,7 +99,7 @@ public struct DefaultButtonStyle : PrimitiveButtonStyle, PrimitiveButtonStyleWit
     }
 }
 
-public struct BorderlessButtonStyle : PrimitiveButtonStyle, PrimitiveButtonStyleWithPressingBody {
+public struct BorderlessButtonStyle: PrimitiveButtonStyle, PrimitiveButtonStyleWithPressingBody {
     public init() {}
 
     func textColor(isPressed: Bool) -> Color {
@@ -124,7 +123,7 @@ public struct BorderlessButtonStyle : PrimitiveButtonStyle, PrimitiveButtonStyle
     }
 }
 
-public struct LinkButtonStyle : PrimitiveButtonStyle, PrimitiveButtonStyleWithPressingBody {
+public struct LinkButtonStyle: PrimitiveButtonStyle, PrimitiveButtonStyleWithPressingBody {
     public init() {}
 
     public func makeBody(configuration: Configuration) -> some View {
@@ -145,7 +144,7 @@ public struct LinkButtonStyle : PrimitiveButtonStyle, PrimitiveButtonStyleWithPr
     }
 }
 
-public struct PlainButtonStyle : PrimitiveButtonStyle, PrimitiveButtonStyleWithPressingBody {
+public struct PlainButtonStyle: PrimitiveButtonStyle, PrimitiveButtonStyleWithPressingBody {
     public init() {}
 
     public func makeBody(configuration: Configuration) -> some View {
@@ -166,7 +165,7 @@ public struct PlainButtonStyle : PrimitiveButtonStyle, PrimitiveButtonStyleWithP
     }
 }
 
-public struct BorderedButtonStyle : PrimitiveButtonStyle, PrimitiveButtonStyleWithPressingBody {
+public struct BorderedButtonStyle: PrimitiveButtonStyle, PrimitiveButtonStyleWithPressingBody {
     public init() {}
 
     public func makeBody(configuration: Configuration) -> some View {
@@ -245,9 +244,9 @@ extension ButtonStyleConfiguration.Label {
     }
 }
 
-extension ButtonStyleConfiguration.Label : _PrimitiveView {}
+extension ButtonStyleConfiguration.Label: _PrimitiveView {}
 
-struct _DefaultButtonWithButtonStyle<Style> : PrimitiveButtonStyle, PrimitiveButtonStyleWithPressingBody where Style : ButtonStyle {
+struct _DefaultButtonWithButtonStyle<Style>: PrimitiveButtonStyle, PrimitiveButtonStyleWithPressingBody where Style : ButtonStyle {
     let style: Style
 
     func makeBody(configuration: Configuration) -> some View {
@@ -279,7 +278,7 @@ struct PrimitiveButtonStyleProxy {
     }
 }
 
-struct PrimitiveButtonStyleContainerModifier<Style> : ViewModifier where Style : PrimitiveButtonStyle {
+struct PrimitiveButtonStyleContainerModifier<Style>: ViewModifier where Style : PrimitiveButtonStyle {
     let style: Style
     typealias Body = Never
 }
@@ -298,7 +297,7 @@ extension PrimitiveButtonStyleContainerModifier {
     }
 }
 
-struct ButtonStyleContainerModifier<Style> : ViewModifier where Style : ButtonStyle {
+struct ButtonStyleContainerModifier<Style>: ViewModifier where Style : ButtonStyle {
     let style: Style
     typealias Body = Never
 
@@ -326,22 +325,23 @@ struct ButtonStyleContainerModifier<Style> : ViewModifier where Style : ButtonSt
 }
 
 extension View {
-    public func buttonStyle<S>(_ style: S) -> some View where S : PrimitiveButtonStyle {
+    public func buttonStyle<S>(_ style: S) -> some View where S: PrimitiveButtonStyle {
         modifier(PrimitiveButtonStyleContainerModifier(style: style))
     }
 
-    public func buttonStyle<S>(_ style: S) -> some View where S : ButtonStyle {
+    public func buttonStyle<S>(_ style: S) -> some View where S: ButtonStyle {
         modifier(ButtonStyleContainerModifier(style: style))
     }
 }
 
-private class PrimitiveButtonStyleConfigurationLabelViewContext : DynamicViewContext<PrimitiveButtonStyleConfiguration.Label> {
+private class PrimitiveButtonStyleConfigurationLabelViewContext: DynamicViewContext<PrimitiveButtonStyleConfiguration.Label> {
     override func updateContent() {
         let oldProxy = self.view?.view
         self.view = nil
         if var view = value(atPath: self.graph) {
             self.resolveGraphInputs()
             self.updateView(&view)
+            self.requiresContentUpdates = false
             self.view = view
         }
         if let view, let proxy = view.view {

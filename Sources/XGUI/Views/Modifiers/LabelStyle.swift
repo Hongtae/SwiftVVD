@@ -166,6 +166,7 @@ private class LabelStyleConfigurationTitleViewContext : DynamicViewContext<Label
         if var view = value(atPath: self.graph) {
             self.resolveGraphInputs()
             self.updateView(&view)
+            self.requiresContentUpdates = false
             self.view = view
         }
         if let view, let proxy = view.view {
@@ -189,6 +190,7 @@ private class LabelStyleConfigurationIconViewContext : DynamicViewContext<LabelS
         if var view = value(atPath: self.graph) {
             self.resolveGraphInputs()
             self.updateView(&view)
+            self.requiresContentUpdates = false
             self.view = view
         }
         if let view, let proxy = view.view {

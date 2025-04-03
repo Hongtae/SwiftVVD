@@ -340,6 +340,7 @@ private class ChildrenElementViewContext : DynamicViewContext<_VariadicView_Chil
         if var view = value(atPath: self.graph) {
             self.resolveGraphInputs()
             self.updateView(&view)
+            self.requiresContentUpdates = false
             self.view = view
         }
         if let view = self.view?.view {
@@ -452,6 +453,7 @@ private class ViewElementProxyWrapper<Root> : GenericViewContext<ViewRootProxy<R
         if var view = value(atPath: self.graph) {
             self.resolveGraphInputs()
             self.updateView(&view)
+            self.requiresContentUpdates = false
             self.view = view
         }
         if var proxy = self.view {

@@ -2,11 +2,10 @@
 //  File: Environment.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
-import VVD
 
 public protocol EnvironmentKey {
     associatedtype Value
@@ -20,13 +19,17 @@ extension EnvironmentKey {
     }
 }
 
-extension EnvironmentKey where Self.Value : Equatable {
+extension EnvironmentKey where Self.Value: Equatable {
     public static func _valuesEqual(_ lhs: Self.Value, _ rhs: Self.Value) -> Bool {
         lhs == rhs
     }
 }
 
-public struct EnvironmentValues : CustomStringConvertible {
+protocol _EnvironmentValuesResolve {
+    func _resolve(_ values: inout EnvironmentValues)
+}
+
+public struct EnvironmentValues: CustomStringConvertible {
     var values: [ObjectIdentifier: Any]
 
     public init() {
@@ -48,16 +51,19 @@ public struct EnvironmentValues : CustomStringConvertible {
     public var description: String { String(describing: values) }
 }
 
-protocol _EnvironmentValuesResolve {
-    func _resolve(_: EnvironmentValues) -> EnvironmentValues
+extension EnvironmentValues {
+    mutating func _resolve(modifiers: [any ViewModifier]) {
+        var environmentValues = self
+        modifiers.forEach { modifier in
+            if let env = modifier as? _EnvironmentValuesResolve {
+                env._resolve(&environmentValues)
+            }
+        }
+        self = environmentValues
+    }
 }
 
-protocol _EnvironmentResolve {
-    func _resolve(_: EnvironmentValues) -> Self
-    func _write(_: UnsafeMutableRawPointer)
-}
-
-@propertyWrapper public struct Environment<Value> : DynamicProperty, _EnvironmentResolve {
+@propertyWrapper public struct Environment<Value>: DynamicProperty {
     enum Content : @unchecked Sendable {
         case keyPath(KeyPath<EnvironmentValues, Value>)
         case value(Value)
@@ -94,45 +100,22 @@ protocol _EnvironmentResolve {
     }
 }
 
-extension Environment : Sendable where Value : Sendable {
+extension Environment: _DynamicPropertyStorageBinding {
+    public static func _makeProperty<V>(in buffer: inout _DynamicPropertyBuffer,
+                                        container: _GraphValue<V>,
+                                        fieldOffset: Int,
+                                        inputs: inout _GraphInputs) {
+        assert(buffer.properties.contains { $0.offset == fieldOffset } == false)
+        buffer.properties.append(.init(type: self, offset: fieldOffset))
+    }
+
+    mutating func bind(in buffer: inout _DynamicPropertyBuffer, fieldOffset: Int, view: ViewContext, tracker: Tracker) {
+        if case .keyPath(let keyPath) = content {
+            let value = view.environment[keyPath: keyPath]
+            self.content = .value(value)
+        }
+    }
 }
 
-extension EnvironmentValues {
-    func _resolve(modifiers: [any ViewModifier]) -> EnvironmentValues {
-        var environmentValues = self
-        modifiers.forEach { modifier in
-            if let env = modifier as? _EnvironmentValuesResolve {
-                environmentValues = env._resolve(environmentValues)
-            }
-        }
-        return environmentValues
-    }
-
-    func _resolve<Content>(_ view: Content) -> Content where Content: View {
-        var view = view
-        var resolvedEnvironments: [String: _EnvironmentResolve] = [:]
-
-        for (label, value) in Mirror(reflecting: view).children {
-            if let label, let value = value as? _EnvironmentResolve {
-                resolvedEnvironments[label] = value._resolve(self)
-            }
-        }
-        _forEachField(of: Content.self) { charPtr, offset, fieldType in
-            if fieldType is _EnvironmentResolve.Type {
-                let name = String(cString: charPtr)
-                // Log.debug("Update environment: \(Content.self).\(name) (type: \(fieldType), offset: \(offset))")
-                if let env = resolvedEnvironments[name] {
-                    assert(type(of: env) == fieldType, "object type mismatch!")
-                    withUnsafeMutableBytes(of: &view) {
-                        let ptr = $0.baseAddress!.advanced(by: offset)
-                        env._write(ptr)
-                    }
-                } else {
-                    Log.warn("Unable to update environment: \(Content.self).\(name) (type: \(fieldType))")
-                }
-            }
-            return true
-        }
-        return view
-    }
+extension Environment: Sendable where Value: Sendable {
 }

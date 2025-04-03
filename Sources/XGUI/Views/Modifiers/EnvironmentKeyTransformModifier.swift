@@ -5,7 +5,7 @@
 //  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
-public struct _EnvironmentKeyTransformModifier<Value> : ViewModifier, _GraphInputsModifier, _EnvironmentValuesResolve {
+public struct _EnvironmentKeyTransformModifier<Value>: ViewModifier, _GraphInputsModifier, _EnvironmentValuesResolve {
     public typealias Body = Never
 
     public var keyPath: WritableKeyPath<EnvironmentValues, Value>
@@ -20,21 +20,13 @@ public struct _EnvironmentKeyTransformModifier<Value> : ViewModifier, _GraphInpu
         inputs.modifiers.append(_InputModifier(graph: modifier))
     }
 
-    func _resolve(_ values: EnvironmentValues) -> EnvironmentValues {
-        var values = values
-        var value = values[keyPath: self.keyPath]
-        transform(&value)
-        values[keyPath: self.keyPath] = value
-        return values
-    }
-
     func _resolve(_ values: inout EnvironmentValues) {
         var value = values[keyPath: self.keyPath]
         transform(&value)
         values[keyPath: self.keyPath] = value
     }
 
-    class _InputModifier : _GraphInputResolve {
+    class _InputModifier: _GraphInputResolve {
         typealias Modifier = _EnvironmentKeyTransformModifier<Value>
         var isResolved: Bool {  modifier != nil }
         var modifier: Modifier?

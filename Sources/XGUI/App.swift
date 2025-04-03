@@ -8,6 +8,8 @@
 import Foundation
 import VVD
 
+typealias Log = VVD.Log
+
 public protocol App {
     associatedtype Body : Scene
     @SceneBuilder var body: Self.Body { get }

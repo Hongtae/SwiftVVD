@@ -163,6 +163,7 @@ class StaticMultiViewContext<Content>: MultiViewContext {
         if var root = value(atPath: self.graph) {
             self.resolveGraphInputs()
             self.updateRoot(&root)
+            self.requiresContentUpdates = false
             self.root = root
             self.subviews.forEach {
                 $0.updateContent()
@@ -223,6 +224,7 @@ class DynamicMultiViewContext<Content>: MultiViewContext {
         if var root = value(atPath: self.graph) {
             self.resolveGraphInputs()
             self.updateRoot(&root)
+            self.requiresContentUpdates = false
             self.root = root
             // generate subviews
             self.subviews = self.body.makeViewList(containerView: self).map {
