@@ -338,3 +338,156 @@ public class TextureFont: Font {
         return texture
     }
 }
+
+public extension TextureFont {
+    // screen space vertex (2d)
+    struct Vertex {
+        var position: Vector2
+        var texcoord: Vector2
+    }
+    struct Quad {
+        var lt: Vertex
+        var rt: Vertex
+        var lb: Vertex
+        var rb: Vertex
+    }
+    struct GlyphQuad {
+        let char: UnicodeScalar
+        let quad: Quad
+        let texture: Texture
+    }
+
+    func drawableQuads(for text: String, boundingBox: UnsafeMutablePointer<CGRect>? = nil) -> [GlyphQuad] {
+        var quads: [GlyphQuad] = []
+        let str = text.unicodeScalars
+        quads.reserveCapacity(str.count)
+
+        var bboxMin = Vector2(0, 0)
+        var bboxMax = Vector2(0, 0)
+        var offset: CGFloat = 0.0        // accumulated text width (pixel)
+
+        var c1 = UnicodeScalar(UInt8(0)) 
+        for c2 in str {
+            // get glyph info from font object
+            if let glyph = self.glyphData(for: c2) {
+                let posMin = Vector2(Scalar(glyph.offset.x + offset), Scalar(glyph.offset.y))
+                let posMax = Vector2(Scalar(glyph.frame.width), Scalar(glyph.frame.height)) + posMin
+
+                if offset > 0.0 {
+                    if (bboxMin.x > posMin.x) { bboxMin.x = posMin.x }
+                    if (bboxMin.y > posMin.y) { bboxMin.y = posMin.y }
+                    if (bboxMax.x < posMax.x) { bboxMax.x = posMax.x }
+                    if (bboxMax.y < posMax.y) { bboxMax.y = posMax.y }
+                } else {
+                    bboxMin = posMin
+                    bboxMax = posMax
+                }
+
+                if let texture = glyph.texture {
+                    let textureWidth = texture.width
+                    let textureHeight = texture.height
+                    if textureWidth > 0 && textureHeight > 0 {
+                        let invW = 1.0 / Float(textureWidth)
+                        let invH = 1.0 / Float(textureHeight)
+
+                        let uvMinX = Float(glyph.frame.minX) * invW
+                        let uvMinY = Float(glyph.frame.minY) * invH
+                        let uvMaxX = Float(glyph.frame.maxX) * invW
+                        let uvMaxY = Float(glyph.frame.maxY) * invH
+
+                        let quad = Quad(lt: Vertex(position: Vector2(posMin.x, posMin.y),
+                                                   texcoord: Vector2(uvMinX, uvMinY)),
+                                        rt: Vertex(position: Vector2(posMax.x, posMin.y),
+                                                   texcoord: Vector2(uvMaxX, uvMinY)),
+                                        lb: Vertex(position: Vector2(posMin.x, posMax.y),
+                                                   texcoord: Vector2(uvMinX, uvMaxY)),
+                                        rb: Vertex(position: Vector2(posMax.x, posMax.y),
+                                                   texcoord: Vector2(uvMaxX, uvMaxY)))
+                        let q = GlyphQuad(char: c2, quad: quad, texture: texture)
+                        quads.append(q)
+                    }
+                }
+                offset += glyph.advance.width + self.kernAdvance(left: c1, right: c2).x
+            }
+            c1 = c2
+        }
+        if let bbox = boundingBox {
+            bbox.pointee = CGRect(x: CGFloat(bboxMin.x),
+                                  y: CGFloat(bboxMin.y),
+                                  width: CGFloat(bboxMax.x - bboxMin.x),
+                                  height: CGFloat(bboxMax.y - bboxMin.y))
+        }
+        return quads
+    }
+
+    typealias DrawQuds = (_ quads: [Quad], _ texture: Texture) -> Void
+
+    func drawText(_ text: String, bounds: CGRect, transform: Matrix3 = .identity, _ draw: DrawQuds) {
+        var bbox: CGRect = .zero
+        var quads = self.drawableQuads(for: text, boundingBox: &bbox)
+        if quads.isEmpty { return }
+
+        let width = bbox.width
+        let height = bbox.height
+        if width <= .ulpOfOne || height <= .ulpOfOne { return }
+
+        // sort by texture order
+        quads.sort {
+            ObjectIdentifier($0.texture) > ObjectIdentifier($1.texture)
+        }
+
+        // calculate transform matrix
+        var trans = AffineTransform2(x: -bbox.minX, y: -bbox.minY)    // move origin
+        trans *= LinearTransform2(scaleX: 1.0 / width, y: 1.0 / height) // normalize size
+        trans *= LinearTransform2(scaleX: Scalar(bounds.width), y: Scalar(bounds.height)) // scale to bounds
+        trans.translate(x: Scalar(bounds.minX), y: Scalar(bounds.minY)) // move to bounds origin
+
+        var matrix = trans.matrix3
+        matrix *= transform         // user transform
+
+        var lastTexture: Texture? = nil
+        var drawableQuads: [Quad] = []
+        drawableQuads.reserveCapacity(quads.count * 6)
+        for q in quads {
+            if q.texture !== lastTexture {
+                if drawableQuads.count > 0 {
+                    draw(drawableQuads, lastTexture!)
+                }
+                drawableQuads.removeAll(keepingCapacity: true)
+                lastTexture = q.texture
+            }
+            var q2 = q.quad
+            q2.lt.position.apply(matrix)
+            q2.rt.position.apply(matrix)
+            q2.lb.position.apply(matrix)
+            q2.rb.position.apply(matrix)
+            drawableQuads.append(q2)
+        }
+        if drawableQuads.count > 0 {
+            draw(drawableQuads, lastTexture!)
+        }
+    }
+
+    func drawText(_ text: String, baselineBegin: CGPoint, baselineEnd: CGPoint, _ draw: DrawQuds) {
+        if text.isEmpty { return }
+        if (baselineEnd - baselineBegin).magnitude < .ulpOfOne { return }
+
+        let ascender = self.ascender
+        // let lineHeight = self.lineHeight()
+        let lineWidth = self.lineWidth(of: text)
+        let textBounds = self.bounds(of: text)
+
+        let scale = (baselineEnd - baselineBegin).magnitude
+        let baselineDir = Vector2(baselineEnd - baselineBegin).normalized().float2
+        let angle = acosf(baselineDir.0) * ((baselineDir.1 < 0) ? -1.0 : 1.0)
+
+        // calculate transform (matrix)
+        var transform = AffineTransform2(x: 0, y: Scalar(-ascender))    // move pivot to baseline
+        transform *= LinearTransform2()
+            .scaled(by: Scalar(scale / lineWidth))          // scale
+            .rotated(by: Scalar(angle))                     // rotate
+        transform.translate(by: Vector2(baselineBegin))
+
+        self.drawText(text, bounds: textBounds, transform: transform.matrix3, draw)
+    }
+}
