@@ -7,47 +7,6 @@
 
 import Foundation
 
-struct FunctionalLocation<Value> : _Location {
-    struct Functions {
-        var getValue: ()->Value
-        var setValue: (Value, Transaction)->Void
-    }
-    let functions: Functions
-
-    init(get: @escaping ()->Value, set: @escaping (Value, Transaction)->Void) {
-        self.functions = Functions(getValue: get, setValue: set)
-    }
-
-    func getValue() -> Value {
-        functions.getValue()
-    }
-
-    func setValue(_ value: Value, transaction: Transaction) {
-        functions.setValue(value, transaction)
-    }
-}
-
-struct ConstantLocation<Value> : _Location {
-    let value: Value
-    func getValue() -> Value { value }
-    func setValue(_: Value, transaction: Transaction) {}
-}
-
-class LocationBox<Location: _Location> : AnyLocation<Location.Value>, @unchecked Sendable {
-    var location: Location
-    var _value: Location.Value
-    init(location: Location) {
-        self.location = location
-        self._value = location.getValue()
-    }
-    override func getValue() -> Location.Value {
-        location.getValue()
-    }
-    override func setValue(_ value: Location.Value, transaction: Transaction) {
-        location.setValue(value, transaction: transaction)
-    }
-}
-
 @propertyWrapper @dynamicMemberLookup public struct Binding<Value> {
     public var transaction: Transaction
     var location: AnyLocation<Value>
@@ -64,7 +23,9 @@ class LocationBox<Location: _Location> : AnyLocation<Location.Value>, @unchecked
     }
 
     public init(get: @escaping () -> Value, set: @escaping (Value, Transaction) -> Void) {
-        fatalError()
+        self.transaction = Transaction()
+        self.location = LocationBox(location: FunctionalLocation(get: get, set: set))
+        self._value = self.location.getValue()
     }
 
     init(location: AnyLocation<Value>) {
@@ -78,12 +39,16 @@ class LocationBox<Location: _Location> : AnyLocation<Location.Value>, @unchecked
     }
 
     public var wrappedValue: Value {
-        get { fatalError() }
-        nonmutating set { fatalError() }
+        get {
+            location.getValue()
+        }
+        nonmutating set {
+            location.setValue(newValue, transaction: transaction)
+        }
     }
 
     public var projectedValue: Binding<Value> {
-        get { fatalError() }
+        self
     }
 
     @inlinable
@@ -92,27 +57,27 @@ class LocationBox<Location: _Location> : AnyLocation<Location.Value>, @unchecked
     }
 
     public subscript<Subject>(dynamicMember keyPath: WritableKeyPath<Value, Subject>) -> Binding<Subject> {
-        get { fatalError() }
+        .constant(_value[keyPath: keyPath])
     }
 }
 
-extension Binding : @unchecked Sendable where Value : Sendable {
+extension Binding: @unchecked Sendable where Value: Sendable {
 }
 
-extension Binding : Identifiable where Value : Identifiable {
+extension Binding: Identifiable where Value: Identifiable {
     public var id: Value.ID {
         _value.id
     }
     public typealias ID = Value.ID
 }
 
-extension Binding : Sequence where Value : MutableCollection {
+extension Binding: Sequence where Value: MutableCollection {
     public typealias Element = Binding<Value.Element>
     public typealias Iterator = IndexingIterator<Binding<Value>>
     public typealias SubSequence = Slice<Binding<Value>>
 }
 
-extension Binding : Collection where Value : MutableCollection {
+extension Binding: Collection where Value: MutableCollection {
     public typealias Index = Value.Index
     public typealias Indices = Value.Indices
     public var startIndex: Binding<Value>.Index {
@@ -131,11 +96,11 @@ extension Binding : Collection where Value : MutableCollection {
         _value.formIndex(after: &i)
     }
     public subscript(position: Binding<Value>.Index) -> Binding<Value>.Element {
-        fatalError()
+        .constant(_value[position])
     }
 }
 
-extension Binding : BidirectionalCollection where Value : BidirectionalCollection, Value : MutableCollection {
+extension Binding: BidirectionalCollection where Value: BidirectionalCollection, Value: MutableCollection {
     public func index(before i: Binding<Value>.Index) -> Binding<Value>.Index {
         _value.index(before: i)
     }
@@ -145,7 +110,7 @@ extension Binding : BidirectionalCollection where Value : BidirectionalCollectio
     }
 }
 
-extension Binding : RandomAccessCollection where Value : MutableCollection, Value : RandomAccessCollection {
+extension Binding: RandomAccessCollection where Value: MutableCollection, Value: RandomAccessCollection {
 }
 
 extension Binding {
@@ -160,8 +125,7 @@ extension Binding {
     }
 }
 
-extension Binding : DynamicProperty {
+extension Binding: DynamicProperty {
     public static func _makeProperty<V>(in buffer: inout _DynamicPropertyBuffer, container: _GraphValue<V>, fieldOffset: Int, inputs: inout _GraphInputs) {
-
     }
 }
