@@ -113,17 +113,6 @@ class MultiViewContext: ViewGroupContext {
         return super.hitTest(location)
     }
 
-    override func gestureHandlers(at location: CGPoint) -> GestureHandlerOutputs {
-        var outputs = super.gestureHandlers(at: location)
-        if self.bounds.contains(location) {
-            for subview in activeSubviews {
-                let local = location.applying(subview.transformToContainer.inverted())
-                outputs = outputs.merge(subview.gestureHandlers(at: local))
-            }
-        }
-        return outputs
-    }
-
     override func handleMouseWheel(at location: CGPoint, delta: CGPoint) -> Bool {
         if self.bounds.contains(location) {
             for subview in activeSubviews {
