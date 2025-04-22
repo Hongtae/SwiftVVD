@@ -138,7 +138,7 @@ class StaticMultiViewContext<Content>: MultiViewContext {
         super.init(subviews: subviews, inputs: inputs)
     }
 
-    final override func value<T>(atPath graph: _GraphValue<T>) -> T? {
+    override func value<T>(atPath graph: _GraphValue<T>) -> T? {
         if let root {
             if graph.isDescendant(of: self.graph) {
                 return self.graph.value(atPath: graph, from: root)
@@ -199,7 +199,7 @@ class DynamicMultiViewContext<Content>: MultiViewContext {
         super.init(subviews: [], inputs: inputs)
     }
 
-    final override func value<T>(atPath graph: _GraphValue<T>) -> T? {
+    override func value<T>(atPath graph: _GraphValue<T>) -> T? {
         if let root {
             if graph.isDescendant(of: self.graph) {
                 return self.graph.value(atPath: graph, from: root)

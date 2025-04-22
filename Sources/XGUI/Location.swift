@@ -5,10 +5,12 @@
 //  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
+import Observation
+
 protocol _Location {
     associatedtype Value
     func getValue() -> Value
-    func setValue(_: Value, transaction: Transaction)
+    mutating func setValue(_: Value, transaction: Transaction)
 }
 
 @usableFromInline
@@ -25,7 +27,6 @@ class AnyLocation<Value>: AnyLocationBase, @unchecked Sendable {
     }
 
     func setValue(_: Value, transaction: Transaction) {
-        fatalError()
     }
 }
 
@@ -55,6 +56,37 @@ struct ConstantLocation<Value>: _Location {
     func setValue(_: Value, transaction: Transaction) {}
 }
 
+struct StoredLocation<Value>: _Location {
+    var _value: Value
+    var valueUpdated: (Value)->Void
+    init(_ value: Value, onValueUpdated: @escaping (Value)->Void) {
+        self._value = value
+        self.valueUpdated = onValueUpdated
+    }
+    func getValue() -> Value {
+        _value
+    }
+    mutating func setValue(_ value: Value, transaction: Transaction) {
+        self._value = value
+        self.valueUpdated(value)
+    }
+}
+
+struct ObservableLocation<Value>: _Location {
+    let _value: Value
+    var valueUpdated: (Value)->Void
+    init(_ value: Value, onValueUpdated: @escaping (Value)->Void) {
+        self._value = value
+        self.valueUpdated = onValueUpdated
+    }
+    func getValue() -> Value {
+        _value
+    }
+    func setValue(_ value: Value, transaction: Transaction) {
+        self.valueUpdated(value)
+    }
+}
+
 class LocationBox<Location: _Location>: AnyLocation<Location.Value>, @unchecked Sendable {
     var location: Location
     var _value: Location.Value
@@ -68,4 +100,12 @@ class LocationBox<Location: _Location>: AnyLocation<Location.Value>, @unchecked 
     override func setValue(_ value: Location.Value, transaction: Transaction) {
         location.setValue(value, transaction: transaction)
     }
+}
+
+protocol AnyLocationBox {
+    associatedtype Location: _Location
+    var location: Location { get }
+}
+
+extension LocationBox: AnyLocationBox {
 }

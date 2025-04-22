@@ -8,34 +8,6 @@
 import Foundation
 import Observation
 
-class StoredLocation<Value>: AnyLocation<Value>, @unchecked Sendable {
-    var _value: Value
-    var valueUpdated: (Value)->Void
-    init(_ value: Value, onValueUpdated: @escaping (Value)->Void) {
-        self._value = value
-        self.valueUpdated = onValueUpdated
-    }
-    override func getValue() -> Value {
-        _value
-    }
-    override func setValue(_ value: Value, transaction: Transaction) {
-        self._value = value
-        self.valueUpdated(value)
-    }
-}
-
-class ObservableLocation<Value>: AnyLocation<Value>, @unchecked Sendable {
-    var _value: Value
-    let valueUpdated: (Value)->Void
-    init(_ value: Value, onValueUpdated: @escaping (Value)->Void) {
-        self._value = value
-        self.valueUpdated = onValueUpdated
-    }
-    override func getValue() -> Value {
-        _value
-    }
-}
-
 @propertyWrapper public struct State<Value>: DynamicProperty {
     @usableFromInline
     var _value: Value
@@ -55,9 +27,9 @@ class ObservableLocation<Value>: AnyLocation<Value>, @unchecked Sendable {
     @usableFromInline
     init(wrappedValue thunk: @autoclosure @escaping () -> Value) where Value: AnyObject, Value: Observable {
         _value = thunk()
-        _location = ObservableLocation(_value, onValueUpdated: { value in
+        _location = LocationBox(location: ObservableLocation(_value, onValueUpdated: { value in
             fatalError()
-        })
+        }))
     }
 
     public var wrappedValue: Value {
@@ -68,7 +40,6 @@ class ObservableLocation<Value>: AnyLocation<Value>, @unchecked Sendable {
             return _value
         }
         nonmutating set {
-            print("set value: \(newValue)")
             if let _location {
                 _location.setValue(newValue, transaction: Transaction())
             }
@@ -108,23 +79,40 @@ extension State: _DynamicPropertyStorageBinding {
                 buffer.contexts[fieldOffset] = location
             }
         } else {
+            var location: AnyLocation<Value>?
             if let context = buffer.contexts[fieldOffset] {
-                guard let location = context as? StoredLocation<Value> else {
+                location = context as? AnyLocation<Value>
+                if location == nil {
                     fatalError("Invalid context type")
                 }
+            }
+            if let location {
                 self._location = location
                 self._value = location.getValue()
             } else {
-                let location = StoredLocation(self._value, onValueUpdated: onValueUpdated)
+                let location: AnyLocation<Value>
+                if Value.self is Observable.Type {
+                    location = LocationBox(location: ObservableLocation(self._value, onValueUpdated: onValueUpdated))
+                } else {
+                    location = LocationBox(location: StoredLocation(self._value, onValueUpdated: onValueUpdated))
+                }
                 buffer.contexts[fieldOffset] = location
                 self._location = location
             }
         }
         
-        guard let location = self._location as? StoredLocation<Value> else {
-            fatalError("Invalid context type")
+        // update tracker
+        if Value.self is Observable.Type {
+            guard let location = self._location as? LocationBox<ObservableLocation<Value>> else {
+                fatalError("Invalid context type")
+            }
+            location.location.valueUpdated = onValueUpdated
+        } else {
+            guard let location = self._location as? LocationBox<StoredLocation<Value>> else {
+                fatalError("Invalid context type")
+            }
+            location.location.valueUpdated = onValueUpdated
         }
-        location.valueUpdated = onValueUpdated
     }
 }
 

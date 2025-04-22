@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import Observation
 
 public protocol View {
     associatedtype Body : View
@@ -189,7 +190,7 @@ struct ViewProxy: Hashable {
     }
 }
 
-private final class DynamicContentViewContext<Content>: GenericViewContext<Content> where Content : View {
+private final class DynamicContentViewContext<Content>: GenericViewContext<Content>, @unchecked Sendable where Content : View {
     var dynamicPropertyData: _DynamicPropertyDataStorage<Content>
 
     override init(graph: _GraphValue<Content>, body: ViewContext, inputs: _GraphInputs) {
@@ -206,6 +207,10 @@ private final class DynamicContentViewContext<Content>: GenericViewContext<Conte
         super.updateView(&view)
         self.dynamicPropertyData.bind(container: &view, view: self)
         self.dynamicPropertyData.update(container: &view)
+        
+        _ = withObservationTracking { view.body } onChange: { [weak self] in
+            self?.requiresContentUpdates = true
+        }
     }
 
     override func updateEnvironment(_ environment: EnvironmentValues) {
@@ -219,7 +224,7 @@ private final class DynamicContentViewContext<Content>: GenericViewContext<Conte
     }
 }
 
-private final class DynamicContentStaticMultiViewContext<Content>: StaticMultiViewContext<Content> where Content: View {
+private final class DynamicContentStaticMultiViewContext<Content>: StaticMultiViewContext<Content>, @unchecked Sendable where Content: View {
     var dynamicPropertyData: _DynamicPropertyDataStorage<Content>
 
     override init(graph: _GraphValue<Content>, subviews: [ViewContext], inputs: _GraphInputs) {
@@ -236,6 +241,10 @@ private final class DynamicContentStaticMultiViewContext<Content>: StaticMultiVi
         super.updateRoot(&root)
         self.dynamicPropertyData.bind(container: &root, view: self)
         self.dynamicPropertyData.update(container: &root)
+        
+        _ = withObservationTracking { root.body } onChange: { [weak self] in
+            self?.requiresContentUpdates = true
+        }
     }
 
     override func updateEnvironment(_ environment: EnvironmentValues) {
@@ -270,7 +279,7 @@ private final class DynamicContentStaticMultiViewContext<Content>: StaticMultiVi
     }
 }
 
-private final class DynamicContentDynamicMultiViewContext<Content>: DynamicMultiViewContext<Content> where Content: View {
+private final class DynamicContentDynamicMultiViewContext<Content>: DynamicMultiViewContext<Content>, @unchecked Sendable where Content: View {
     var dynamicPropertyData: _DynamicPropertyDataStorage<Content>
 
     override init(graph: _GraphValue<Content>, body: any ViewListGenerator, inputs: _GraphInputs) {
@@ -282,11 +291,15 @@ private final class DynamicContentDynamicMultiViewContext<Content>: DynamicMulti
             self?.requiresContentUpdates = true
         }
     }
-
+    
     override func updateRoot(_ root: inout Content) {
         super.updateRoot(&root)
         self.dynamicPropertyData.bind(container: &root, view: self)
         self.dynamicPropertyData.update(container: &root)
+        
+        _ = withObservationTracking { root.body } onChange: { [weak self] in
+            self?.requiresContentUpdates = true
+        }
     }
 
     override func updateEnvironment(_ environment: EnvironmentValues) {

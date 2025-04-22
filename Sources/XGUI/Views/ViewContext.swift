@@ -324,7 +324,7 @@ class PrimitiveViewContext<Content>: ViewContext {
         isValid
     }
 
-    final override func value<T>(atPath graph: _GraphValue<T>) -> T? {
+    override func value<T>(atPath graph: _GraphValue<T>) -> T? {
         if let view {
             if graph.isDescendant(of: self.graph) {
                 return self.graph.value(atPath: graph, from: view)
@@ -386,7 +386,7 @@ class GenericViewContext<Content>: ViewContext {
         self.body.invalidate()
     }
 
-    final override func value<T>(atPath graph: _GraphValue<T>) -> T? {
+    override func value<T>(atPath graph: _GraphValue<T>) -> T? {
         if let view {
             if graph.isDescendant(of: self.graph) {
                 return self.graph.value(atPath: graph, from: view)
@@ -561,7 +561,7 @@ class DynamicViewContext<Content>: ViewContext {
         self.body = nil
     }
 
-    final override func value<T>(atPath graph: _GraphValue<T>) -> T? {
+    override func value<T>(atPath graph: _GraphValue<T>) -> T? {
         if let view {
             if graph.isDescendant(of: self.graph) {
                 return self.graph.value(atPath: graph, from: view)

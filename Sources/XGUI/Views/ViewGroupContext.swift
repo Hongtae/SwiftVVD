@@ -253,7 +253,7 @@ class StaticViewGroupContext<Content> : ViewGroupContext {
         super.init(subviews: subviews, layout: layout, inputs: inputs)
     }
 
-    final override func value<T>(atPath graph: _GraphValue<T>) -> T? {
+    override func value<T>(atPath graph: _GraphValue<T>) -> T? {
         if let root {
             if graph.isDescendant(of: self.graph) {
                 return self.graph.value(atPath: graph, from: root)
@@ -318,7 +318,7 @@ class DynamicViewGroupContext<Content> : ViewGroupContext {
         super.init(subviews: [], layout: layout, inputs: inputs)
     }
 
-    final override func value<T>(atPath graph: _GraphValue<T>) -> T? {
+    override func value<T>(atPath graph: _GraphValue<T>) -> T? {
         if let root {
             if graph.isDescendant(of: self.graph) {
                 return self.graph.value(atPath: graph, from: root)

@@ -57,7 +57,13 @@ import Foundation
     }
 
     public subscript<Subject>(dynamicMember keyPath: WritableKeyPath<Value, Subject>) -> Binding<Subject> {
-        .constant(_value[keyPath: keyPath])
+        let location: AnyLocation<Value> = self.location
+        return Binding<Subject>(get: { location.getValue()[keyPath: keyPath] },
+                                set: { value, transaction in
+            var enclosingValue = location.getValue()
+            enclosingValue[keyPath: keyPath] = value
+            location.setValue(enclosingValue, transaction: transaction)
+        })
     }
 }
 
