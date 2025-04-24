@@ -11,6 +11,7 @@ import Foundation
     public var transaction: Transaction
     var location: AnyLocation<Value>
     var _value: Value
+    private var _tracker: (()->Void)?
 
     public init(get: @escaping () -> Value, set: @escaping (Value) -> Void) {
         self.transaction = Transaction()
@@ -44,6 +45,7 @@ import Foundation
         }
         nonmutating set {
             location.setValue(newValue, transaction: transaction)
+            _tracker?()
         }
     }
 
@@ -57,13 +59,18 @@ import Foundation
     }
 
     public subscript<Subject>(dynamicMember keyPath: WritableKeyPath<Value, Subject>) -> Binding<Subject> {
-        let location: AnyLocation<Value> = self.location
-        return Binding<Subject>(get: { location.getValue()[keyPath: keyPath] },
-                                set: { value, transaction in
+        let location = self.location
+        let tracker = self._tracker
+        let getter = {
+            location.getValue()[keyPath: keyPath]
+        }
+        let setter = { value, transaction in
             var enclosingValue = location.getValue()
             enclosingValue[keyPath: keyPath] = value
             location.setValue(enclosingValue, transaction: transaction)
-        })
+            tracker?()
+        }
+        return Binding<Subject>(get: getter, set: setter)
     }
 }
 
@@ -102,7 +109,18 @@ extension Binding: Collection where Value: MutableCollection {
         _value.formIndex(after: &i)
     }
     public subscript(position: Binding<Value>.Index) -> Binding<Value>.Element {
-        .constant(_value[position])
+        let location = self.location
+        let tracker = self._tracker
+        let getter = {
+            location.getValue()[position] 
+        }
+        let setter = { newValue in
+            var enclosingValue = location.getValue()
+            enclosingValue[position] = newValue
+            location.setValue(enclosingValue, transaction: Transaction())
+            tracker?()
+        }
+        return Binding<Value>.Element(get: getter, set: setter)
     }
 }
 
@@ -133,5 +151,12 @@ extension Binding {
 
 extension Binding: DynamicProperty {
     public static func _makeProperty<V>(in buffer: inout _DynamicPropertyBuffer, container: _GraphValue<V>, fieldOffset: Int, inputs: inout _GraphInputs) {
+    }
+}
+
+extension Binding: _DynamicPropertyStorageBinding {
+    mutating func bind(in buffer: inout _DynamicPropertyBuffer, fieldOffset: Int, view: ViewContext, tracker: @escaping Tracker) {
+        guard MemoryLayout<Self>.size > .zero else { return }
+        self._tracker = tracker
     }
 }

@@ -55,6 +55,15 @@ import Observation
     }
 }
 
+extension State where Value: ExpressibleByNilLiteral {
+    @inlinable public init() {
+        self.init(wrappedValue: nil)
+    }
+}
+
+extension State: Sendable where Value: Sendable {
+}
+
 extension State: _DynamicPropertyStorageBinding {
     public static func _makeProperty<V>(in buffer: inout _DynamicPropertyBuffer,
                                         container: _GraphValue<V>,
@@ -114,13 +123,4 @@ extension State: _DynamicPropertyStorageBinding {
             location.location.valueUpdated = onValueUpdated
         }
     }
-}
-
-extension State where Value: ExpressibleByNilLiteral {
-    @inlinable public init() {
-        self.init(wrappedValue: nil)
-    }
-}
-
-extension State: Sendable where Value: Sendable {
 }
