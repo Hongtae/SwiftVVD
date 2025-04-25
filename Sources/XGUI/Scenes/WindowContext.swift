@@ -22,7 +22,7 @@ protocol WindowContext: AnyObject {
     func makeWindow() -> Window?
 }
 
-class GenericWindowContext<Content>: WindowContext, WindowDelegate where Content: View {
+class GenericWindowContext<Content>: WindowContext, WindowDelegate, @unchecked Sendable where Content: View {
     typealias Window = WindowContext.Window
 
     private(set) var swapChain: SwapChain?
@@ -59,10 +59,9 @@ class GenericWindowContext<Content>: WindowContext, WindowDelegate where Content
         self.environment = EnvironmentValues()
         self.sharedContext = SharedContext(scene: scene)
 
-        let properties = PropertyList(
-            DefaultLayoutPropertyItem(layout: VStackLayout()),
-            DefaultPaddingEdgeInsetsPropertyItem(insets: EdgeInsets(_all: 16))
-        )
+        var properties = PropertyList()
+        properties.setValue(VStackLayout(), forKey: DefaultLayoutProperty.self)
+        properties.setValue(EdgeInsets(_all: 16), forKey: DefaultPaddingEdgeInsetsProperty.self)
 
         self.view = SharedContext.$taskLocalContext.withValue(sharedContext) {
             let baseInputs = _GraphInputs(properties: properties,
@@ -515,7 +514,4 @@ class GenericWindowContext<Content>: WindowContext, WindowDelegate where Content
         }
         gestureHandlers = activeHandlers()
     }
-}
-
-extension GenericWindowContext: @unchecked Sendable {
 }

@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct _PaddingLayout : ViewModifier, Animatable {
+public struct _PaddingLayout: ViewModifier, Animatable {
     public var edges: Edge.Set
     public var insets: EdgeInsets?
     @inlinable public init(edges: Edge.Set = .all, insets: EdgeInsets?) {
@@ -33,24 +33,21 @@ extension View {
     }
 }
 
-struct DefaultPaddingEdgeInsetsPropertyItem : PropertyItem {
+struct DefaultPaddingEdgeInsetsProperty: PropertyItem {
     static var defaultValue: EdgeInsets { .init(_all: 16) }
-    let insets: EdgeInsets
+
     var description: String {
-        "DefaultPaddingEdgeInsetsPropertyItem: \(self.insets)"
+        "DefaultPaddingEdgeInsetsProperty"
     }
 }
 
-extension _PaddingLayout : _ViewLayoutModifier {
-    private class LayoutViewContext : ViewModifierContext<_PaddingLayout> {
-        var layoutInsets : EdgeInsets {
+extension _PaddingLayout: _ViewLayoutModifier {
+    private class LayoutViewContext: ViewModifierContext<_PaddingLayout> {
+        var layoutInsets: EdgeInsets {
             if let insets = self.modifier?.insets {
                 return insets
             }
-            if let insets = self.inputs.properties.find(type: DefaultPaddingEdgeInsetsPropertyItem.self)?.insets {
-                return insets
-            }
-            return DefaultPaddingEdgeInsetsPropertyItem.defaultValue
+            return self.inputs.properties.value(forKey: DefaultPaddingEdgeInsetsProperty.self)
         }
 
         override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {

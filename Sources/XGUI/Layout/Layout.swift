@@ -7,7 +7,7 @@
 
 import Foundation
 
-public protocol Layout : Animatable {
+public protocol Layout: Animatable {
     static var layoutProperties: LayoutProperties { get }
 
     associatedtype Cache = Void
@@ -71,7 +71,7 @@ extension Layout where Self.Cache == () {
 }
 
 extension Layout {
-    public func callAsFunction<V>(@ViewBuilder _ content: () -> V) -> some View where V : View {
+    public func callAsFunction<V>(@ViewBuilder _ content: () -> V) -> some View where V: View {
         _VariadicView.Tree(root: _LayoutRoot(self), content: content())
     }
 }
@@ -89,7 +89,7 @@ public struct LayoutProperties {
 }
 
 extension Layout {
-    static var _defaultLayoutSpacing : CGFloat { 0 }
+    static var _defaultLayoutSpacing: CGFloat { 0 }
 }
 
 private extension Layout {
@@ -168,7 +168,7 @@ private extension Layout {
     }
 }
 
-public struct AnyLayout : Layout {
+public struct AnyLayout: Layout {
     var layout: any Layout
 
     public struct Cache {
@@ -177,7 +177,7 @@ public struct AnyLayout : Layout {
 
     public typealias AnimatableData = _AnyAnimatableData
 
-    public init<L>(_ layout: L) where L : Layout {
+    public init<L>(_ layout: L) where L: Layout {
         self.layout = layout
     }
 
@@ -242,7 +242,7 @@ public struct AnyLayout : Layout {
 }
 
 //MARK: - LayoutRoot, VariadicView Root for Layout
-public struct _LayoutRoot<L> : _VariadicView.UnaryViewRoot where L : Layout {
+public struct _LayoutRoot<L>: _VariadicView.UnaryViewRoot where L: Layout {
     @usableFromInline
     var layout: L
     @inlinable init(_ layout: L) {
@@ -272,17 +272,17 @@ public struct _LayoutRoot<L> : _VariadicView.UnaryViewRoot where L : Layout {
     public typealias Body = Never
 }
 
-struct DefaultLayoutPropertyItem : PropertyItem {
+struct DefaultLayoutProperty: PropertyItem {
     static var defaultValue: any Layout { VStackLayout() }
-    let layout: any Layout
+
     var description: String {
-        "DefaultLayoutPropertyItem: \(self.layout)"
+        "DefaultLayoutProperty"
     }
 }
 
-class StaticLayoutRootContext<L> : StaticViewGroupContext<_LayoutRoot<L>> where L : Layout {
+class StaticLayoutRootContext<L>: StaticViewGroupContext<_LayoutRoot<L>> where L: Layout {
     init(graph: _GraphValue<_LayoutRoot<L>>, subviews: [ViewContext], inputs: _GraphInputs) {
-        let layout = DefaultLayoutPropertyItem.defaultValue
+        let layout = DefaultLayoutProperty.defaultValue
         super.init(graph: graph, subviews: subviews, layout: layout, inputs: inputs)
 
         self.layoutProperties = L.layoutProperties
@@ -294,9 +294,9 @@ class StaticLayoutRootContext<L> : StaticViewGroupContext<_LayoutRoot<L>> where 
     }
 }
 
-class DynamicLayoutRootContext<L> : DynamicViewGroupContext<_LayoutRoot<L>> where L : Layout {
+class DynamicLayoutRootContext<L>: DynamicViewGroupContext<_LayoutRoot<L>> where L: Layout {
     init(graph: _GraphValue<_LayoutRoot<L>>, body: any ViewListGenerator, inputs: _GraphInputs) {
-        let layout = DefaultLayoutPropertyItem.defaultValue
+        let layout = DefaultLayoutProperty.defaultValue
         super.init(graph: graph, body: body, layout: layout, inputs: inputs)
 
         self.layoutProperties = L.layoutProperties

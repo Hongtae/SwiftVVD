@@ -39,160 +39,93 @@ struct PropertyList: CustomStringConvertible {
 }
 
 extension PropertyList {
-    func value<T>(forKeyPath keyPath: KeyPath<T, T.Item>) -> T.Item where T: PropertyItem {
-        if let item = find(type: T.self) {
-            return item[keyPath: keyPath]
-        }
-        return T.defaultValue
-    }
-    
-    func find<T>(type: T.Type) -> T? where T: PropertyItem {
-        if var list = elements {
-            if let item = list.item as? T {
-                return item
-            }
-            while let next = list.next {
-                list = next
-                if let item = list.item as? T {
-                    return item
+    mutating func setValue<T: PropertyItem>(_ value: T.Item, forKey  key: T.Type) {
+        self.makeUnique()
+        var element = self.elements
+        if var last = element {
+            while let current = element {
+                if current.item == key {
+                    current.value = value
+                    return
                 }
+                last = current
+                element = current.next
             }
+            last.next = Element(item: key, value: value)
+        } else {
+            self.elements = Element(item: key, value: value)
+        }
+    }
+
+    mutating func setValue<T: PropertyItem>(_ value: T.Item, forKey key: T.Type) where T.Item: Equatable {
+        if let item = self.nonDefaultValue(forKey: key), item == value {
+            return
+        }
+        if value == T.defaultValue {
+            self.removeValue(forKey: key)
+            return
+        }
+
+        self.makeUnique()
+        var element = self.elements
+        if var last = element {
+            while let current = element {
+                if current.item == key {
+                    current.value = value
+                    return
+                }
+                last = current
+                element = current.next
+            }
+            last.next = Element(item: key, value: value)
+        } else {
+            self.elements = Element(item: key, value: value)
+        }
+    }
+
+    mutating func removeValue<T: PropertyItem>(forKey key: T.Type) {
+        if self.nonDefaultValue(forKey: key) != nil {
+            self.makeUnique()
+
+            if let elements, elements.item is T {
+                self.elements = elements.next
+                return
+            }
+            var next = elements?.next
+            var prev = elements
+            while next != nil {
+                if next!.item == key {
+                    prev!.next = next!.next
+                    break
+                }
+                prev = next
+                next = next!.next
+            }
+        }
+    }
+
+    func nonDefaultValue<T: PropertyItem>(forKey key: T.Type) -> T.Item? {
+        var element = self.elements
+        while let current = element {
+            if current.item == key {
+                return (current.value as! T.Item)
+            }
+            element = current.next
         }
         return nil
     }
 
-    mutating func add<T>(item: T) where T: PropertyItem {
-        self.makeUnique()
-        if let elements {
-            var next = elements
-            while let nextElement = next.next {
-                next = nextElement
-            }
-            next.next = Element(item: item)
-        } else {
-            self.elements = Element(item: item)
+    func value<T: PropertyItem>(forKey key: T.Type) -> T.Item {
+        if let value = self.nonDefaultValue(forKey: key) {
+            return value
         }
-    }
-
-    @discardableResult
-    mutating func replace<T>(item: T) -> Bool where T: PropertyItem {
-        if self.find(type: T.self) == nil {
-            return false
-        }
-        self.makeUnique()
-        if self.elements?.item is T {
-            let next = self.elements!.next
-            self.elements = Element(item: item, next: next)
-            return true
-        }
-        var next = self.elements?.next
-        var prev = self.elements
-        while next != nil {
-            if next!.item is T {
-                prev!.next = Element(item: item, next: next!.next)
-                return true
-            }
-            prev = next
-            next = next!.next
-        }
-        return false
-    }
-
-    mutating func replaceAll<T>(item: T) where T: PropertyItem {
-        if self.find(type: T.self) == nil {
-            return
-        }
-        self.makeUnique()
-        if self.elements?.item is T {
-            let next = self.elements!.next
-            self.elements = Element(item: item, next: next)
-        }
-        var next = self.elements?.next
-        var prev = self.elements
-        while next != nil {
-            if next!.item is T {
-                prev!.next = Element(item: item, next: next!.next)
-            }
-            prev = next
-            next = next!.next
-        }
-    }
-
-    mutating func replaceOrAdd<T>(item: T) where T: PropertyItem {
-        self.makeUnique()
-        if self.elements?.item is T {
-            let next = self.elements!.next
-            self.elements = Element(item: item, next: next)
-            return
-        }
-        var next = self.elements?.next
-        var prev = self.elements
-        while next != nil {
-            if next!.item is T {
-                prev!.next = Element(item: item, next: next!.next)
-                return
-            }
-            prev = next
-            next = next!.next
-        }
-        if let prev {
-            prev.next = Element(item: item)
-        } else {
-            self.elements = Element(item: item)
-        }
-    }
-
-    mutating func remove<T>(type: T.Type) where T: PropertyItem {
-        if self.find(type: T.self) == nil {
-            return
-        }
-        self.makeUnique()
-        if let elements, elements.item is T {
-            self.elements = elements.next?.clone()
-            return
-        }
-        var next = elements?.next
-        var prev = elements
-        while next != nil {
-            if next!.item is T {
-                prev!.next = next!.next
-                break
-            }
-            prev = next
-            next = next!.next
-        }
-    }
-
-    mutating func removeAll<T>(type: T.Type) where T: PropertyItem {
-        if self.find(type: T.self) == nil {
-            return
-        }
-        self.makeUnique()
-        func getElementNotMatching(_ element: Element?) -> Element? {
-            if let element, element.item is T {
-                return getElementNotMatching(element.next)
-            }
-            return element
-        }
-        let root = getElementNotMatching(elements)
-        var next = root
-        while next != nil {
-            next!.next = getElementNotMatching(next!.next)
-            next = next!.next
-        }
-        self.elements = root
+        return T.defaultValue
     }
 
     private mutating func makeUnique() {
         if isKnownUniquelyReferenced(&self.elements) == false {
             self.elements = elements?.clone()
         }
-    }
-}
-
-extension PropertyList {
-    @usableFromInline
-    class Tracker {
     }
 }
 
@@ -204,15 +137,17 @@ protocol PropertyItem: TransactionKey, CustomStringConvertible {
 extension PropertyList {
     @usableFromInline
     class Element: CustomStringConvertible {
-        let item: any PropertyItem
+        let item: any PropertyItem.Type
+        var value: Any
         var next: Element?
-        init(item: any PropertyItem, next: Element? = nil) {
+        init<T: PropertyItem>(item: T.Type, value: T.Item, next: Element? = nil) {
             self.item = item
+            self.value = value
             self.next = next
         }
         @usableFromInline
         var description: String {
-            let desc = item.description
+            let desc = "\(item):\(value)"
             if let next {
                 return "\(desc), \(next.description)"
             }
@@ -220,19 +155,14 @@ extension PropertyList {
         }
 
         func clone() -> Element {
-            Element(item: item, next: next?.clone())
+            func _dup<T: PropertyItem>(_ item: T.Type, value: Any, next: Element?) -> Element {
+                Element(item: item, value: value as! T.Item, next: next)
+            }
+            return _dup(item, value: value, next: next?.clone())
         }
     }
 
-    init<Item: PropertyItem>(_ item: Item) {
-        self.elements = Element(item: item)
-    }
-
-    init(_ item: any PropertyItem, _ rest: (any PropertyItem)...) {
-        var restElements: Element?
-        rest.reversed().forEach {
-            restElements = Element(item: $0, next: restElements)
-        }
-        self.elements = Element(item: item, next: restElements)
+    init<Item: PropertyItem>(_ item: Item.Type, value: Item.Item) {
+        self.elements = Element(item: item, value: value)
     }
 }

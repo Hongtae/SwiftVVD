@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct _OverlayModifier<Overlay> : ViewModifier where Overlay: View {
+public struct _OverlayModifier<Overlay>: ViewModifier where Overlay: View {
     public let overlay: Overlay
     public let alignment: Alignment
 
@@ -20,7 +20,7 @@ public struct _OverlayModifier<Overlay> : ViewModifier where Overlay: View {
         let outputs = body(_Graph(), inputs)
         if let body = outputs.view {
             var overlayInputs = inputs
-            overlayInputs.base.properties.replace(item: DefaultLayoutPropertyItem(layout: ZStackLayout()))
+            overlayInputs.base.properties.setValue(ZStackLayout(), forKey: DefaultLayoutProperty.self)
             if let overlay = makeView(view: modifier[\.overlay], inputs: overlayInputs).view {
                 let view = UnaryViewGenerator(graph: modifier, baseInputs: inputs.base) { graph, inputs in
                     OverlayViewContext(overlay: overlay.makeView(),
@@ -37,13 +37,13 @@ public struct _OverlayModifier<Overlay> : ViewModifier where Overlay: View {
     public typealias Body = Never
 }
 
-extension _OverlayModifier : Equatable where Overlay: Equatable {
+extension _OverlayModifier: Equatable where Overlay: Equatable {
 }
 
-extension _OverlayModifier : _UnaryViewModifier {
+extension _OverlayModifier: _UnaryViewModifier {
 }
 
-public struct _OverlayStyleModifier<Style> : ViewModifier where Style: ShapeStyle {
+public struct _OverlayStyleModifier<Style>: ViewModifier where Style: ShapeStyle {
     public var style: Style
     public var ignoresSafeAreaEdges: Edge.Set
 
@@ -75,10 +75,10 @@ public struct _OverlayStyleModifier<Style> : ViewModifier where Style: ShapeStyl
     }
 }
 
-extension _OverlayStyleModifier : _UnaryViewModifier {
+extension _OverlayStyleModifier: _UnaryViewModifier {
 }
 
-public struct _OverlayShapeModifier<Style, Bounds> : ViewModifier where Style: ShapeStyle, Bounds: Shape {
+public struct _OverlayShapeModifier<Style, Bounds>: ViewModifier where Style: ShapeStyle, Bounds: Shape {
     public var style: Style
     public var shape: Bounds
     public var fillStyle: FillStyle
@@ -112,7 +112,7 @@ public struct _OverlayShapeModifier<Style, Bounds> : ViewModifier where Style: S
     }
 }
 
-extension _OverlayShapeModifier : _UnaryViewModifier {
+extension _OverlayShapeModifier: _UnaryViewModifier {
 }
 
 extension View {
@@ -146,13 +146,13 @@ private protocol _OverlayModifierWithIgnoresSafeAreaEdges {
     var ignoresSafeAreaEdges: Edge.Set { get }
 }
 
-extension _OverlayModifier : _OverlayModifierWithAlignment {
+extension _OverlayModifier: _OverlayModifierWithAlignment {
 }
 
-extension _OverlayStyleModifier : _OverlayModifierWithIgnoresSafeAreaEdges {
+extension _OverlayStyleModifier: _OverlayModifierWithIgnoresSafeAreaEdges {
 }
 
-private class OverlayViewContext<Modifier> : ViewModifierContext<Modifier> where Modifier : ViewModifier {
+private class OverlayViewContext<Modifier>: ViewModifierContext<Modifier> where Modifier: ViewModifier {
     let overlay: ViewContext
 
     init(overlay: ViewContext, graph: _GraphValue<Modifier>, body: ViewContext, inputs: _GraphInputs) {

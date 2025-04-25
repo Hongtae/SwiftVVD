@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct _BackgroundModifier<Background> : ViewModifier where Background : View {
+public struct _BackgroundModifier<Background>: ViewModifier where Background: View {
     public var background: Background
     public var alignment: Alignment
 
@@ -20,7 +20,7 @@ public struct _BackgroundModifier<Background> : ViewModifier where Background : 
         let outputs = body(_Graph(), inputs)
         if let body = outputs.view {
             var backgroundInputs = inputs
-            backgroundInputs.base.properties.replace(item: DefaultLayoutPropertyItem(layout: ZStackLayout()))
+            backgroundInputs.base.properties.setValue(ZStackLayout(), forKey: DefaultLayoutProperty.self)
             if let background = makeView(view: modifier[\.background], inputs: backgroundInputs).view {
                 let view = UnaryViewGenerator(graph: modifier, baseInputs: inputs.base) { graph, inputs in
                     BackgroundViewContext(background: background.makeView(),
@@ -37,13 +37,13 @@ public struct _BackgroundModifier<Background> : ViewModifier where Background : 
     public typealias Body = Never
 }
 
-extension _BackgroundModifier : Equatable where Background : Equatable {
+extension _BackgroundModifier: Equatable where Background: Equatable {
 }
 
-extension _BackgroundModifier : _UnaryViewModifier {
+extension _BackgroundModifier: _UnaryViewModifier {
 }
 
-public struct _BackgroundStyleModifier<Style> : ViewModifier where Style : ShapeStyle {
+public struct _BackgroundStyleModifier<Style>: ViewModifier where Style: ShapeStyle {
     public var style: Style
     public var ignoresSafeAreaEdges: Edge.Set
 
@@ -75,10 +75,10 @@ public struct _BackgroundStyleModifier<Style> : ViewModifier where Style : Shape
     }
 }
 
-extension _BackgroundStyleModifier : _UnaryViewModifier {
+extension _BackgroundStyleModifier: _UnaryViewModifier {
 }
 
-public struct _BackgroundShapeModifier<Style, Bounds> : ViewModifier where Style : ShapeStyle, Bounds : Shape {
+public struct _BackgroundShapeModifier<Style, Bounds>: ViewModifier where Style: ShapeStyle, Bounds: Shape {
     public var style: Style
     public var shape: Bounds
     public var fillStyle: FillStyle
@@ -112,10 +112,10 @@ public struct _BackgroundShapeModifier<Style, Bounds> : ViewModifier where Style
     }
 }
 
-extension _BackgroundShapeModifier : _UnaryViewModifier {
+extension _BackgroundShapeModifier: _UnaryViewModifier {
 }
 
-public struct _InsettableBackgroundShapeModifier<Style, Bounds> : ViewModifier where Style : ShapeStyle, Bounds : InsettableShape {
+public struct _InsettableBackgroundShapeModifier<Style, Bounds>: ViewModifier where Style: ShapeStyle, Bounds: InsettableShape {
     public var style: Style
     public var shape: Bounds
     public var fillStyle: FillStyle
@@ -149,7 +149,7 @@ public struct _InsettableBackgroundShapeModifier<Style, Bounds> : ViewModifier w
     }
 }
 
-extension _InsettableBackgroundShapeModifier : _UnaryViewModifier {
+extension _InsettableBackgroundShapeModifier: _UnaryViewModifier {
 }
 
 extension View {
@@ -197,13 +197,13 @@ private protocol _BackgroundModifierWithIgnoresSafeAreaEdges {
     var ignoresSafeAreaEdges: Edge.Set { get }
 }
 
-extension _BackgroundModifier : _BackgroundModifierWithAlignment {
+extension _BackgroundModifier: _BackgroundModifierWithAlignment {
 }
 
-extension _BackgroundStyleModifier : _BackgroundModifierWithIgnoresSafeAreaEdges {
+extension _BackgroundStyleModifier: _BackgroundModifierWithIgnoresSafeAreaEdges {
 }
 
-private class BackgroundViewContext<Modifier> : ViewModifierContext<Modifier> where Modifier : ViewModifier {
+private class BackgroundViewContext<Modifier>: ViewModifierContext<Modifier> where Modifier: ViewModifier {
     let background: ViewContext
 
     init(background: ViewContext, graph: _GraphValue<Modifier>, body: ViewContext, inputs: _GraphInputs) {

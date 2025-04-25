@@ -15,7 +15,7 @@ import Foundation
 
 class MultiViewContext: ViewGroupContext {
     init(subviews: [ViewContext], inputs: _GraphInputs) {
-        let layout = inputs.properties.value(forKeyPath: \DefaultLayoutPropertyItem.layout)
+        let layout = inputs.properties.value(forKey: DefaultLayoutProperty.self)
         super.init(subviews: subviews, layout: layout, inputs: inputs)
     }
 

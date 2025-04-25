@@ -243,12 +243,12 @@ class ViewGroupContext: ViewContext {
     }
 }
 
-class StaticViewGroupContext<Content> : ViewGroupContext {
+class StaticViewGroupContext<Content>: ViewGroupContext {
     var root: Content?
     let graph: _GraphValue<Content>
 
     init(graph: _GraphValue<Content>, subviews: [ViewContext], layout: (any Layout)? = nil, inputs: _GraphInputs) {
-        let layout = layout ?? inputs.properties.value(forKeyPath: \DefaultLayoutPropertyItem.layout)
+        let layout = layout ?? inputs.properties.value(forKey: DefaultLayoutProperty.self)
         self.graph = graph
         super.init(subviews: subviews, layout: layout, inputs: inputs)
     }
@@ -306,13 +306,13 @@ class StaticViewGroupContext<Content> : ViewGroupContext {
     }
 }
 
-class DynamicViewGroupContext<Content> : ViewGroupContext {
+class DynamicViewGroupContext<Content>: ViewGroupContext {
     var root: Content?
     let graph: _GraphValue<Content>
     let body: any ViewListGenerator
 
     init(graph: _GraphValue<Content>, body: any ViewListGenerator, layout: (any Layout)? = nil, inputs: _GraphInputs) {
-        let layout = layout ?? inputs.properties.value(forKeyPath: \DefaultLayoutPropertyItem.layout)
+        let layout = layout ?? inputs.properties.value(forKey: DefaultLayoutProperty.self)
         self.graph = graph
         self.body = body
         super.init(subviews: [], layout: layout, inputs: inputs)

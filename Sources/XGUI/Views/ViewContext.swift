@@ -49,6 +49,13 @@ class ViewContext: _GraphValueResolver {
         let offset = AffineTransform(translationX: self.frame.minX, y: self.frame.minY)
         return local.concatenating(offset)
     }
+    
+    var transaction: Transaction {
+        if let transaction = Transaction._current?.transaction {
+            return transaction
+        }
+        return Transaction()
+    }
 
     init(inputs: _GraphInputs) {
         guard let sharedContext = SharedContext.taskLocalContext else {

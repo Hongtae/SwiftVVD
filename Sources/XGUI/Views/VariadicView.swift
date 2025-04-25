@@ -10,7 +10,7 @@ import Foundation
 public protocol _VariadicView_Root {
 }
 
-public struct _VariadicView_Children : View {
+public struct _VariadicView_Children: View {
     public typealias Body = Never
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
@@ -20,8 +20,8 @@ public struct _VariadicView_Children : View {
     let elements: [Element]
 }
 
-extension _VariadicView_Children : RandomAccessCollection {
-    public struct Element : View, Identifiable {
+extension _VariadicView_Children: RandomAccessCollection {
+    public struct Element: View, Identifiable {
         public var id: AnyHashable {
             viewID
         }
@@ -69,14 +69,14 @@ extension _VariadicView_Children : RandomAccessCollection {
     }
 }
 
-extension _VariadicView_Children : _PrimitiveView {
+extension _VariadicView_Children: _PrimitiveView {
 }
 
-extension _VariadicView_Children.Element : _PrimitiveView {
+extension _VariadicView_Children.Element: _PrimitiveView {
 }
 
-public protocol _VariadicView_ViewRoot : _VariadicView_Root {
-    associatedtype Body : View
+public protocol _VariadicView_ViewRoot: _VariadicView_Root {
+    associatedtype Body: View
     @ViewBuilder func body(children: _VariadicView.Children) -> Self.Body
 
     static func _makeView(root: _GraphValue<Self>, inputs: _ViewInputs, body: (_Graph, _ViewInputs) -> _ViewListOutputs) -> _ViewOutputs
@@ -89,10 +89,10 @@ extension _VariadicView_ViewRoot where Body == Never {
     }
 }
 
-public protocol _VariadicView_UnaryViewRoot : _VariadicView_ViewRoot {
+public protocol _VariadicView_UnaryViewRoot: _VariadicView_ViewRoot {
 }
 
-public protocol _VariadicView_MultiViewRoot : _VariadicView_ViewRoot {
+public protocol _VariadicView_MultiViewRoot: _VariadicView_ViewRoot {
 }
 
 extension _VariadicView_ViewRoot {
@@ -254,7 +254,7 @@ public enum _VariadicView {
     public typealias UnaryViewRoot = _VariadicView_UnaryViewRoot
     public typealias MultiViewRoot = _VariadicView_MultiViewRoot
 
-    public struct Tree<Root, Content> where Root : _VariadicView_Root {
+    public struct Tree<Root, Content> where Root: _VariadicView_Root {
         public var root: Root
         public var content: Content
 
@@ -270,7 +270,7 @@ public enum _VariadicView {
     }
 }
 
-extension _VariadicView.Tree : View where Root : _VariadicView_ViewRoot, Content : View {
+extension _VariadicView.Tree: View where Root: _VariadicView_ViewRoot, Content: View {
     public typealias Body = Never
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
@@ -287,7 +287,7 @@ extension _VariadicView.Tree : View where Root : _VariadicView_ViewRoot, Content
     }
 }
 
-extension _VariadicView.Tree : _PrimitiveView where Self : View {
+extension _VariadicView.Tree: _PrimitiveView where Self: View {
 }
 
 // [ViewGenerators, ViewContext types]
@@ -312,7 +312,7 @@ extension _VariadicView.Tree : _PrimitiveView where Self : View {
 //          - Same as 4.b (ViewGenerator, ViewListGenerator both capable)
 
 // ViewListGenerator for _VariadicView_Children (1)
-private struct ChildrenViewListGenerator : ViewListGenerator {
+private struct ChildrenViewListGenerator: ViewListGenerator {
     let graph: _GraphValue<_VariadicView_Children>
     var baseInputs: _GraphInputs
 
@@ -333,7 +333,7 @@ private struct ChildrenViewListGenerator : ViewListGenerator {
 }
 
 // ViewContext for _VariadicView_Children.Element (2)
-private class ChildrenElementViewContext : DynamicViewContext<_VariadicView_Children.Element> {
+private class ChildrenElementViewContext: DynamicViewContext<_VariadicView_Children.Element> {
     override func updateContent() {
         let oldView = self.view?.view
         self.view = nil
@@ -363,9 +363,9 @@ private class ChildrenElementViewContext : DynamicViewContext<_VariadicView_Chil
 }
 
 // Static View Group Context for _VariadicView_ViewRoot._makeView (3.a.1)
-private class UnaryViewRootLayoutStaticViewGroupContext<Root> : StaticViewGroupContext<Root> where Root : _VariadicView_UnaryViewRoot & Layout {
+private class UnaryViewRootLayoutStaticViewGroupContext<Root>: StaticViewGroupContext<Root> where Root: _VariadicView_UnaryViewRoot & Layout {
     init(graph: _GraphValue<Root>, subviews: [ViewContext], inputs: _GraphInputs) {
-        let layout = DefaultLayoutPropertyItem.defaultValue
+        let layout = DefaultLayoutProperty.defaultValue
         super.init(graph: graph, subviews: subviews, layout: layout, inputs: inputs)
 
         self.layoutProperties = Root.layoutProperties
@@ -379,9 +379,9 @@ private class UnaryViewRootLayoutStaticViewGroupContext<Root> : StaticViewGroupC
 }
 
 // Dynamic View Group Context for _VariadicView_ViewRoot._makeView (3.a.1)
-private class UnaryViewRootLayoutDynamicViewGroupContext<Root> : DynamicViewGroupContext<Root> where Root : _VariadicView_UnaryViewRoot & Layout {
+private class UnaryViewRootLayoutDynamicViewGroupContext<Root>: DynamicViewGroupContext<Root> where Root: _VariadicView_UnaryViewRoot & Layout {
     init(graph: _GraphValue<Root>, body: any ViewListGenerator, inputs: _GraphInputs) {
-        let layout = DefaultLayoutPropertyItem.defaultValue
+        let layout = DefaultLayoutProperty.defaultValue
         super.init(graph: graph, body: body, layout: layout, inputs: inputs)
 
         self.layoutProperties = Root.layoutProperties
@@ -395,7 +395,7 @@ private class UnaryViewRootLayoutDynamicViewGroupContext<Root> : DynamicViewGrou
 }
 
 // Proxy for _VariadicView_ViewRoot.Body subviews
-private struct ViewRootProxy<Root> where Root : _VariadicView_ViewRoot {
+private struct ViewRootProxy<Root> where Root: _VariadicView_ViewRoot {
     let root: Root
     var children = _VariadicView.Children(list: [])
     var body: Root.Body {
@@ -404,7 +404,7 @@ private struct ViewRootProxy<Root> where Root : _VariadicView_ViewRoot {
 }
 
 // Static View Group with Proxy for 3.b
-private class ViewRootProxyStaticGroupContext<Root> : StaticViewGroupContext<ViewRootProxy<Root>> where Root : _VariadicView_ViewRoot {
+private class ViewRootProxyStaticGroupContext<Root>: StaticViewGroupContext<ViewRootProxy<Root>> where Root: _VariadicView_ViewRoot {
     typealias Proxy = ViewRootProxy<Root>
     let children: any ViewListGenerator
 
@@ -421,7 +421,7 @@ private class ViewRootProxyStaticGroupContext<Root> : StaticViewGroupContext<Vie
 }
 
 // Dynamic View Group with Proxy for 3.b
-private class ViewRootProxyDynamicGroupContext<Root> : DynamicViewGroupContext<ViewRootProxy<Root>> where Root : _VariadicView_ViewRoot {
+private class ViewRootProxyDynamicGroupContext<Root>: DynamicViewGroupContext<ViewRootProxy<Root>> where Root: _VariadicView_ViewRoot {
     typealias Proxy = ViewRootProxy<Root>
     let children: any ViewListGenerator
 
@@ -438,7 +438,7 @@ private class ViewRootProxyDynamicGroupContext<Root> : DynamicViewGroupContext<V
 }
 
 // Element Wrapper with Proxy for 4.b, 6.b
-private class ViewElementProxyWrapper<Root> : GenericViewContext<ViewRootProxy<Root>> where Root: _VariadicView_ViewRoot {
+private class ViewElementProxyWrapper<Root>: GenericViewContext<ViewRootProxy<Root>> where Root: _VariadicView_ViewRoot {
     typealias Proxy = ViewRootProxy<Root>
     let children: any ViewListGenerator
 
@@ -469,7 +469,7 @@ private class ViewElementProxyWrapper<Root> : GenericViewContext<ViewRootProxy<R
 }
 
 // Dynamic Multi-View Context with Proxy for 4.b, 6.b
-private class ViewRootProxyDynamicMultiViewContext<Root> : DynamicMultiViewContext<ViewRootProxy<Root>> where Root: _VariadicView_ViewRoot {
+private class ViewRootProxyDynamicMultiViewContext<Root>: DynamicMultiViewContext<ViewRootProxy<Root>> where Root: _VariadicView_ViewRoot {
     typealias Proxy = ViewRootProxy<Root>
     let children: any ViewListGenerator
 
@@ -486,7 +486,7 @@ private class ViewRootProxyDynamicMultiViewContext<Root> : DynamicMultiViewConte
 }
 
 // Dynamic Multi-View Generator with Proxy for 4.b, 6.b
-private struct ViewRootProxyDynamicMultiViewGenerator<Root> : MultiViewGenerator where Root: _VariadicView_ViewRoot {
+private struct ViewRootProxyDynamicMultiViewGenerator<Root>: MultiViewGenerator where Root: _VariadicView_ViewRoot {
     typealias Proxy = ViewRootProxy<Root>
     var graph: _GraphValue<Proxy>
     var baseInputs: _GraphInputs
