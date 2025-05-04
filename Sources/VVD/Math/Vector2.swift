@@ -2,12 +2,12 @@
 //  File: Vector2.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
 
-public struct Vector2: Vector, Hashable {
+public struct Vector2: Vector, Hashable, Sendable {
     public var x : Scalar
     public var y : Scalar
 
@@ -21,18 +21,15 @@ public struct Vector2: Vector, Hashable {
             case 0: return self.x
             case 1: return self.y
             default:
-                assertionFailure("Index out of range")
-                break
+                fatalError("Index out of range")
             }
-            return .zero
         }
         set (value) {
             switch index {
             case 0: self.x = value
             case 1: self.y = value
             default:
-                assertionFailure("Index out of range")
-                break
+                fatalError("Index out of range")
             }
         }
     }

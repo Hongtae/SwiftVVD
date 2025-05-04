@@ -2,7 +2,7 @@
 //  File: Material.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -189,7 +189,7 @@ public enum MaterialProperty {
     public static func matrix<M: Matrix>(_ matrix: M) -> Self {
         var scalars: [Scalar] = []
         for r in 0..<M.numRows {
-            for c in 0..<M.numCols {
+            for c in 0..<M.numColumns {
                 scalars.append(matrix[r, c])
             }
         }

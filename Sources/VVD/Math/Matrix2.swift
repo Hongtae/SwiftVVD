@@ -2,10 +2,10 @@
 //  File: Matrix2.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
-public struct Matrix2: Matrix, Hashable {
+public struct Matrix2: Matrix, Hashable, Sendable {
     public var m11, m12: Scalar
     public var m21, m22: Scalar
 
@@ -49,18 +49,15 @@ public struct Matrix2: Matrix, Hashable {
             case 0: return self.row1
             case 1: return self.row2
             default:
-                assertionFailure("Index out of range")
-                break
+                fatalError("Index out of range")
             }
-            return .zero
         }
         set (vector) {
             switch row {
             case 0: self.row1 = vector
             case 1: self.row2 = vector
             default:
-                assertionFailure("Index out of range")
-                break
+                fatalError("Index out of range")
             }
         }
     }
@@ -73,10 +70,8 @@ public struct Matrix2: Matrix, Hashable {
             case (1, 0): return m21
             case (1, 1): return m22
             default:
-                assertionFailure("Index out of range")
-                break
+                fatalError("Index out of range")
             }
-            return 0.0
         }
         set (value) {
             switch (row, column) {
@@ -85,8 +80,7 @@ public struct Matrix2: Matrix, Hashable {
             case (1, 0): m21 = value
             case (1, 1): m22 = value
             default:
-                assertionFailure("Index out of range")
-                break
+                fatalError("Index out of range")
             }
         }
     }

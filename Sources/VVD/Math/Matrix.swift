@@ -2,10 +2,10 @@
 //  File: Matrix.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
-public protocol Matrix: Equatable, Sendable {
+public protocol Matrix: Equatable {
     associatedtype Vector
 
     mutating func invert()
@@ -20,7 +20,7 @@ public protocol Matrix: Equatable, Sendable {
     var determinant: Scalar { get }
 
     static var numRows: Int { get }
-    static var numCols: Int { get }
+    static var numColumns: Int { get }
     subscript(row: Int, column: Int) -> Scalar { get set }
     subscript(row: Int) -> Self.Vector { get set }
 
@@ -65,5 +65,5 @@ public extension Matrix {
 }
 
 public extension Matrix where Self.Vector: VVD.Vector {
-    static var numCols: Int { Vector.components }
+    static var numColumns: Int { Vector.components }
 }

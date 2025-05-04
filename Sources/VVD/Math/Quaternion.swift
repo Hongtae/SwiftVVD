@@ -2,12 +2,12 @@
 //  File: Quaternion.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
 
-public struct Quaternion: Vector, Hashable {
+public struct Quaternion: Vector, Hashable, Sendable {
     public var x: Scalar
     public var y: Scalar
     public var z: Scalar
@@ -22,10 +22,8 @@ public struct Quaternion: Vector, Hashable {
             case 2: return self.z
             case 3: return self.w
             default:
-                assertionFailure("Index out of range")
-                break
+                fatalError("Index out of range")
             }
-            return .zero
         }
         set (value) {
             switch index {
@@ -34,8 +32,7 @@ public struct Quaternion: Vector, Hashable {
             case 2: self.z = value
             case 3: self.w = value
             default:
-                assertionFailure("Index out of range")
-                break
+                fatalError("Index out of range")
             }
         }
     }
