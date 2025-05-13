@@ -51,5 +51,17 @@ Cross-Platform Game Engine for swift programming language.
 - [OpenAL Soft](https://github.com/kcat/openal-soft)
     - This is LGPL licensed, configured to build **dynamic-library**.
 
+---
+## Samples
+### The UI Framework 
+Declarative UI - Similar to SwiftUI, but also runs on Windows.
+![SwiftVVD_UI](https://github.com/user-attachments/assets/08d13ba6-0d1b-4345-b746-ef07eebf4190)
+<img width="797" alt="SwiftVVD_UI_Mac" src="https://github.com/user-attachments/assets/a19a6c70-a2fa-4727-ace1-1c0696c7f615" />
 
-  
+### A very simple glTF viewer
+It reads glTF resources and renders with a graphics API similar to Apple's Metal.  
+> requires C++ Interoperability for reading glTF
+<img width="671" alt="simple glTF" src="https://github.com/user-attachments/assets/0d4571af-0b94-41fb-a611-18de87e0add1" />
+
+
+:construction_worker:  `We still have a long way to go.` 
