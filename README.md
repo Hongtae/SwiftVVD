@@ -55,11 +55,15 @@ Cross-Platform Game Engine for swift programming language.
 ## Samples
 ### The UI Framework 
 Declarative UI - Similar to SwiftUI, but also runs on Windows.
+> [!NOTE]  
+> This UI framework is built for game development, not app development, and is designed to work on top of game engines.
+
 ![SwiftVVD_UI](https://github.com/user-attachments/assets/08d13ba6-0d1b-4345-b746-ef07eebf4190)
 <img width="797" alt="SwiftVVD_UI_Mac" src="https://github.com/user-attachments/assets/a19a6c70-a2fa-4727-ace1-1c0696c7f615" />
 
 ### A very simple glTF viewer
 It reads glTF resources and renders with a graphics API similar to Apple's Metal.  
+> [!NOTE]  
 > requires C++ Interoperability for reading glTF
 <img width="671" alt="simple glTF" src="https://github.com/user-attachments/assets/0d4571af-0b94-41fb-a611-18de87e0add1" />
 
