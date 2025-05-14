@@ -58,7 +58,7 @@ Declarative UI - Similar to SwiftUI, but also runs on Windows.
 > [!NOTE]  
 > This UI framework is built for game development, not app development, and is designed to work on top of game engines.
 
-![SwiftVVD_UI](https://github.com/user-attachments/assets/08d13ba6-0d1b-4345-b746-ef07eebf4190)
+![SwiftVVD_UI](https://github.com/user-attachments/assets/d6cecf08-5f82-4cec-b509-7e5965394624)
 <img width="797" alt="SwiftVVD_UI_Mac" src="https://github.com/user-attachments/assets/a19a6c70-a2fa-4727-ace1-1c0696c7f615" />
 
 ### A very simple glTF viewer
