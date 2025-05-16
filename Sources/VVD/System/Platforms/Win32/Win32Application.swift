@@ -107,6 +107,13 @@ final class Win32Application: Application, @unchecked Sendable {
 
         let timerProc: TIMERPROC = {
             (_: HWND?, elapse: UINT, timerId: UINT_PTR, _: DWORD) in
+
+            // If any other events exist, let them dispatch.
+            var msg = MSG()
+            while (PeekMessageW(&msg, nil, 0, 0, UINT(PM_REMOVE | PM_NOYIELD))) {
+                TranslateMessage(&msg)
+                DispatchMessageW(&msg)
+            }
             processRunLoop()
         }
         let timerID = SetTimer(nil, 0, UINT(USER_TIMER_MINIMUM), timerProc)
