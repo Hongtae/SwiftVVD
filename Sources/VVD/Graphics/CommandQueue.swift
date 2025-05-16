@@ -15,7 +15,7 @@ public struct CommandQueueFlags: OptionSet, Sendable {
     public static let copy: CommandQueueFlags = [] // copy(transfer) queue, always enabled.
 }
 
-public protocol CommandQueue: Sendable {
+public protocol CommandQueue {
     func makeCommandBuffer() -> CommandBuffer?
     @MainActor
     func makeSwapChain(target: Window) -> SwapChain?

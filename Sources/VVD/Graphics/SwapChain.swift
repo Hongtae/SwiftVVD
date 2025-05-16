@@ -5,7 +5,7 @@
 //  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
 //
 
-public protocol SwapChain: Sendable {
+public protocol SwapChain {
     var pixelFormat: PixelFormat { get set }
     var maximumBufferCount: Int { get }
 
