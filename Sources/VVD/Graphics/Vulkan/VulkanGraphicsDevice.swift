@@ -2,7 +2,7 @@
 //  File: VulkanGraphicsDevice.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
@@ -10,6 +10,21 @@ import Foundation
 import Vulkan
 
 private let pipelineCacheDataKey = "_SavedSystemStates.Vulkan.PipelineCacheData"
+
+extension VkSampleCountFlagBits {
+    init?(from value: Int) {
+        switch Int32(value) {
+        case VK_SAMPLE_COUNT_1_BIT.rawValue: self = VK_SAMPLE_COUNT_1_BIT
+        case VK_SAMPLE_COUNT_2_BIT.rawValue: self = VK_SAMPLE_COUNT_2_BIT
+        case VK_SAMPLE_COUNT_4_BIT.rawValue: self = VK_SAMPLE_COUNT_4_BIT
+        case VK_SAMPLE_COUNT_8_BIT.rawValue: self = VK_SAMPLE_COUNT_8_BIT
+        case VK_SAMPLE_COUNT_16_BIT.rawValue: self = VK_SAMPLE_COUNT_16_BIT
+        case VK_SAMPLE_COUNT_32_BIT.rawValue: self = VK_SAMPLE_COUNT_32_BIT
+        case VK_SAMPLE_COUNT_64_BIT.rawValue: self = VK_SAMPLE_COUNT_64_BIT
+        default: return nil
+        }
+    }
+}
 
 final class VulkanGraphicsDevice: GraphicsDevice, @unchecked Sendable {
 
@@ -666,11 +681,9 @@ final class VulkanGraphicsDevice: GraphicsDevice, @unchecked Sendable {
             var binding = VkVertexInputBindingDescription()
             binding.binding = UInt32(index)
             binding.stride = UInt32(layout.stride)
-            switch layout.stepRate {
-            case .vertex:
-                binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX
-            case .instance:
-                binding.inputRate = VK_VERTEX_INPUT_RATE_INSTANCE
+            binding.inputRate = switch layout.stepRate {
+            case .vertex:   VK_VERTEX_INPUT_RATE_VERTEX
+            case .instance: VK_VERTEX_INPUT_RATE_INSTANCE
             }
             return binding
         }
@@ -693,12 +706,12 @@ final class VulkanGraphicsDevice: GraphicsDevice, @unchecked Sendable {
         // input assembly
         var inputAssemblyState = VkPipelineInputAssemblyStateCreateInfo()
         inputAssemblyState.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO
-        switch desc.primitiveTopology {
-        case .point:            inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST
-        case .line:             inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST
-        case .lineStrip:        inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_LINE_STRIP
-        case .triangle:         inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
-        case .triangleStrip:    inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP
+        inputAssemblyState.topology = switch desc.primitiveTopology {
+        case .point:            VK_PRIMITIVE_TOPOLOGY_POINT_LIST
+        case .line:             VK_PRIMITIVE_TOPOLOGY_LINE_LIST
+        case .lineStrip:        VK_PRIMITIVE_TOPOLOGY_LINE_STRIP
+        case .triangle:         VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
+        case .triangleStrip:    VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP
         }
         pipelineCreateInfo.pInputAssemblyState = unsafePointerCopy(from: inputAssemblyState, holder: tempHolder)
 
@@ -731,11 +744,16 @@ final class VulkanGraphicsDevice: GraphicsDevice, @unchecked Sendable {
         pipelineCreateInfo.pRasterizationState = unsafePointerCopy(from: rasterizationState, holder: tempHolder)
 
         // setup multisampling
-        var multisampleState = VkPipelineMultisampleStateCreateInfo()
-        multisampleState.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO
-        multisampleState.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT
-        multisampleState.pSampleMask = nil
-        pipelineCreateInfo.pMultisampleState = unsafePointerCopy(from: multisampleState, holder: tempHolder)
+        if let sampleCount = VkSampleCountFlagBits(from: desc.rasterSampleCount) {
+            var multisampleState = VkPipelineMultisampleStateCreateInfo()
+            multisampleState.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO
+            multisampleState.rasterizationSamples = sampleCount
+            multisampleState.pSampleMask = nil
+            pipelineCreateInfo.pMultisampleState = unsafePointerCopy(from: multisampleState, holder: tempHolder)
+        } else {
+            Log.err("VulkanGraphicsDevice.makeRenderPipeline(): Invalid sample count! (\(desc.rasterSampleCount))")
+            return nil
+        }
 
         // setup depth-stencil
         var depthStencilState = VkPipelineDepthStencilStateCreateInfo()
@@ -822,34 +840,34 @@ final class VulkanGraphicsDevice: GraphicsDevice, @unchecked Sendable {
 
         let blendOperation = { (op: BlendOperation) -> VkBlendOp in
             switch op {
-            case .add:              return VK_BLEND_OP_ADD
-            case .subtract:         return VK_BLEND_OP_SUBTRACT
-            case .reverseSubtract:  return VK_BLEND_OP_REVERSE_SUBTRACT
-            case .min:              return VK_BLEND_OP_MIN
-            case .max:              return VK_BLEND_OP_MAX
+            case .add:                      VK_BLEND_OP_ADD
+            case .subtract:                 VK_BLEND_OP_SUBTRACT
+            case .reverseSubtract:          VK_BLEND_OP_REVERSE_SUBTRACT
+            case .min:                      VK_BLEND_OP_MIN
+            case .max:                      VK_BLEND_OP_MAX
             }
         }
         let blendFactor = { (factor: BlendFactor) -> VkBlendFactor in
             switch factor {
-            case .zero:                     return VK_BLEND_FACTOR_ZERO
-            case .one:                      return VK_BLEND_FACTOR_ONE
-            case .sourceColor:              return VK_BLEND_FACTOR_SRC_COLOR
-            case .oneMinusSourceColor:      return VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR
-            case .sourceAlpha:              return VK_BLEND_FACTOR_SRC_ALPHA
-            case .oneMinusSourceAlpha:      return VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA
-            case .destinationColor:         return VK_BLEND_FACTOR_DST_COLOR
-            case .oneMinusDestinationColor: return VK_BLEND_FACTOR_ONE_MINUS_DST_COLOR
-            case .destinationAlpha:         return VK_BLEND_FACTOR_DST_ALPHA
-            case .oneMinusDestinationAlpha: return VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA
-            case .sourceAlphaSaturated:     return VK_BLEND_FACTOR_SRC_ALPHA_SATURATE
-            case .blendColor:               return VK_BLEND_FACTOR_CONSTANT_COLOR
-            case .oneMinusBlendColor:       return VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_COLOR
-            case .blendAlpha:               return VK_BLEND_FACTOR_CONSTANT_ALPHA
-            case .oneMinusBlendAlpha:       return VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_ALPHA
-            case .source1Color:             return VK_BLEND_FACTOR_SRC1_COLOR
-            case .oneMinusSource1Color:     return VK_BLEND_FACTOR_ONE_MINUS_SRC1_COLOR
-            case .source1Alpha:             return VK_BLEND_FACTOR_SRC1_ALPHA
-            case .oneMinusSource1Alpha:     return VK_BLEND_FACTOR_ONE_MINUS_SRC1_ALPHA
+            case .zero:                     VK_BLEND_FACTOR_ZERO
+            case .one:                      VK_BLEND_FACTOR_ONE
+            case .sourceColor:              VK_BLEND_FACTOR_SRC_COLOR
+            case .oneMinusSourceColor:      VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR
+            case .sourceAlpha:              VK_BLEND_FACTOR_SRC_ALPHA
+            case .oneMinusSourceAlpha:      VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA
+            case .destinationColor:         VK_BLEND_FACTOR_DST_COLOR
+            case .oneMinusDestinationColor: VK_BLEND_FACTOR_ONE_MINUS_DST_COLOR
+            case .destinationAlpha:         VK_BLEND_FACTOR_DST_ALPHA
+            case .oneMinusDestinationAlpha: VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA
+            case .sourceAlphaSaturated:     VK_BLEND_FACTOR_SRC_ALPHA_SATURATE
+            case .blendColor:               VK_BLEND_FACTOR_CONSTANT_COLOR
+            case .oneMinusBlendColor:       VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_COLOR
+            case .blendAlpha:               VK_BLEND_FACTOR_CONSTANT_ALPHA
+            case .oneMinusBlendAlpha:       VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_ALPHA
+            case .source1Color:             VK_BLEND_FACTOR_SRC1_COLOR
+            case .oneMinusSource1Color:     VK_BLEND_FACTOR_ONE_MINUS_SRC1_COLOR
+            case .source1Alpha:             VK_BLEND_FACTOR_SRC1_ALPHA
+            case .oneMinusSource1Alpha:     VK_BLEND_FACTOR_ONE_MINUS_SRC1_ALPHA
             }
         }
 
@@ -1049,30 +1067,30 @@ final class VulkanGraphicsDevice: GraphicsDevice, @unchecked Sendable {
 
         let compareOp = { (fn: CompareFunction) -> VkCompareOp in
             switch fn {
-            case .never:            return VK_COMPARE_OP_NEVER
-            case .less:             return VK_COMPARE_OP_LESS
-            case .equal:            return VK_COMPARE_OP_EQUAL
-            case .lessEqual:        return VK_COMPARE_OP_LESS_OR_EQUAL
-            case .greater:          return VK_COMPARE_OP_GREATER
-            case .notEqual:         return VK_COMPARE_OP_NOT_EQUAL
-            case .greaterEqual:     return VK_COMPARE_OP_GREATER_OR_EQUAL
-            case .always:           return VK_COMPARE_OP_ALWAYS
+            case .never:            VK_COMPARE_OP_NEVER
+            case .less:             VK_COMPARE_OP_LESS
+            case .equal:            VK_COMPARE_OP_EQUAL
+            case .lessEqual:        VK_COMPARE_OP_LESS_OR_EQUAL
+            case .greater:          VK_COMPARE_OP_GREATER
+            case .notEqual:         VK_COMPARE_OP_NOT_EQUAL
+            case .greaterEqual:     VK_COMPARE_OP_GREATER_OR_EQUAL
+            case .always:           VK_COMPARE_OP_ALWAYS
             }
         }
         let stencilOp = { (op: StencilOperation) -> VkStencilOp in
             switch op {
-            case .keep:             return VK_STENCIL_OP_KEEP
-            case .zero:             return VK_STENCIL_OP_ZERO
-            case .replace:          return VK_STENCIL_OP_REPLACE
-            case .incrementClamp:   return VK_STENCIL_OP_INCREMENT_AND_CLAMP
-            case .decrementClamp:   return VK_STENCIL_OP_DECREMENT_AND_CLAMP
-            case .invert:           return VK_STENCIL_OP_INVERT
-            case .incrementWrap:    return VK_STENCIL_OP_INCREMENT_AND_WRAP
-            case .decrementWrap:    return VK_STENCIL_OP_DECREMENT_AND_WRAP
+            case .keep:             VK_STENCIL_OP_KEEP
+            case .zero:             VK_STENCIL_OP_ZERO
+            case .replace:          VK_STENCIL_OP_REPLACE
+            case .incrementClamp:   VK_STENCIL_OP_INCREMENT_AND_CLAMP
+            case .decrementClamp:   VK_STENCIL_OP_DECREMENT_AND_CLAMP
+            case .invert:           VK_STENCIL_OP_INVERT
+            case .incrementWrap:    VK_STENCIL_OP_INCREMENT_AND_WRAP
+            case .decrementWrap:    VK_STENCIL_OP_DECREMENT_AND_WRAP
             }
         }
         let stencilOpState = { (stencil: StencilDescriptor) -> VkStencilOpState in
-            return VkStencilOpState(
+            VkStencilOpState(
                 failOp: stencilOp(stencil.stencilFailureOperation),
                 passOp: stencilOp(stencil.depthStencilPassOperation),
                 depthFailOp: stencilOp(stencil.depthFailOperation),
@@ -1137,12 +1155,11 @@ final class VulkanGraphicsDevice: GraphicsDevice, @unchecked Sendable {
             return nil
         }
 
-        var memProperties: VkMemoryPropertyFlags
-        switch storageMode {
+        let memProperties = switch storageMode {
         case .shared:
-            memProperties = VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT.rawValue | VK_MEMORY_PROPERTY_HOST_CACHED_BIT.rawValue)
+            VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT.rawValue | VK_MEMORY_PROPERTY_HOST_CACHED_BIT.rawValue)
         default:
-            memProperties = VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT.rawValue)
+            VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT.rawValue)
         }
 
         var dedicatedRequirements = VkMemoryDedicatedRequirements()
@@ -1235,8 +1252,13 @@ final class VulkanGraphicsDevice: GraphicsDevice, @unchecked Sendable {
         imageCreateInfo.extent.depth = UInt32(desc.depth)
         imageCreateInfo.mipLevels = UInt32(desc.mipmapLevels)
 
-        assert(desc.sampleCount == 1, "Multisample is not implemented.")
-        imageCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT
+        if let sampleCount = VkSampleCountFlagBits(from: desc.sampleCount) {
+            imageCreateInfo.samples = sampleCount
+        } else {
+            assertionFailure("Invalid sample count!")
+            Log.err("VulkanGraphicsDevice.makeTexture(): Invalid sample count! (\(desc.sampleCount))")
+            return nil
+        }
 
         imageCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL
 
@@ -1314,10 +1336,11 @@ final class VulkanGraphicsDevice: GraphicsDevice, @unchecked Sendable {
     }
 
     func makeTransientRenderTarget(type textureType: TextureType,
-                                          pixelFormat: PixelFormat,
-                                          width: Int,
-                                          height: Int,
-                                          depth: Int) -> Texture? {
+                                   pixelFormat: PixelFormat,
+                                   width: Int,
+                                   height: Int,
+                                   depth: Int,
+                                   sampleCount: Int) -> Texture? {
         var image: VkImage? = nil
         var memory: VulkanMemoryBlock? = nil
 
@@ -1344,12 +1367,20 @@ final class VulkanGraphicsDevice: GraphicsDevice, @unchecked Sendable {
             imageCreateInfo.flags |= UInt32(VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT.rawValue)
         default:
             assertionFailure("Invalid texture type!")
-            Log.err("VulkanGraphicsDevice.makeTransientRenderTarget(): Invalid texture type!")
+            Log.err("VulkanGraphicsDevice.makeTransientRenderTarget: Invalid texture type!")
             return nil
         }
 
         if width < 1 || height < 1 || depth < 1 {
             Log.err("Texture dimensions (width, height, depth) value must be greater than or equal to 1.")
+            return nil
+        }
+        if sampleCount.isPowerOfTwo == false {
+            Log.err("VulkanGraphicsDevice.makeTransientRenderTarget: Sample count must be a power of two.")
+            return nil
+        }
+        if sampleCount > 64 {
+            Log.err("VulkanGraphicsDevice.makeTransientRenderTarget: Sample count must be less than or equal to 64.")
             return nil
         }
 
@@ -1361,7 +1392,7 @@ final class VulkanGraphicsDevice: GraphicsDevice, @unchecked Sendable {
         imageCreateInfo.extent.height = UInt32(height)
         imageCreateInfo.extent.depth = UInt32(depth)
         imageCreateInfo.mipLevels = UInt32(1)
-        imageCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT
+        imageCreateInfo.samples = VkSampleCountFlagBits(rawValue: Int32(sampleCount))
         imageCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL
         imageCreateInfo.usage = UInt32(VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT.rawValue |
                                        VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT.rawValue)
@@ -1434,35 +1465,35 @@ final class VulkanGraphicsDevice: GraphicsDevice, @unchecked Sendable {
     func makeSamplerState(descriptor desc: SamplerDescriptor) -> SamplerState? {
         let filter = { (f: SamplerMinMagFilter) -> VkFilter in
             switch f {
-            case .nearest:      return VK_FILTER_NEAREST
-            case .linear:       return VK_FILTER_LINEAR
+            case .nearest:      VK_FILTER_NEAREST
+            case .linear:       VK_FILTER_LINEAR
             }
         }
         let mipmapMode = { (f: SamplerMipFilter) -> VkSamplerMipmapMode in
             switch f {
             case .notMipmapped,
-                 .nearest:      return VK_SAMPLER_MIPMAP_MODE_NEAREST
-            case .linear:       return VK_SAMPLER_MIPMAP_MODE_LINEAR
+                 .nearest:      VK_SAMPLER_MIPMAP_MODE_NEAREST
+            case .linear:       VK_SAMPLER_MIPMAP_MODE_LINEAR
             }
         }
         let addressMode = { (m: SamplerAddressMode) -> VkSamplerAddressMode in
             switch m {
-            case .clampToEdge:  return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE
-            case .repeat:       return VK_SAMPLER_ADDRESS_MODE_REPEAT
-            case .mirrorRepeat: return VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT
-            case .clampToZero:  return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER
+            case .clampToEdge:  VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE
+            case .repeat:       VK_SAMPLER_ADDRESS_MODE_REPEAT
+            case .mirrorRepeat: VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT
+            case .clampToZero:  VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER
             }
         }
         let compareOp = { (f: CompareFunction) -> VkCompareOp in
             switch f {
-            case .never:        return VK_COMPARE_OP_NEVER
-            case .less:         return VK_COMPARE_OP_LESS
-            case .equal:        return VK_COMPARE_OP_EQUAL
-            case .lessEqual:    return VK_COMPARE_OP_LESS_OR_EQUAL
-            case .greater:      return VK_COMPARE_OP_GREATER
-            case .notEqual:     return VK_COMPARE_OP_NOT_EQUAL
-            case .greaterEqual: return VK_COMPARE_OP_GREATER_OR_EQUAL
-            case .always:       return VK_COMPARE_OP_ALWAYS
+            case .never:        VK_COMPARE_OP_NEVER
+            case .less:         VK_COMPARE_OP_LESS
+            case .equal:        VK_COMPARE_OP_EQUAL
+            case .lessEqual:    VK_COMPARE_OP_LESS_OR_EQUAL
+            case .greater:      VK_COMPARE_OP_GREATER
+            case .notEqual:     VK_COMPARE_OP_NOT_EQUAL
+            case .greaterEqual: VK_COMPARE_OP_GREATER_OR_EQUAL
+            case .always:       VK_COMPARE_OP_ALWAYS
             }
         }
 

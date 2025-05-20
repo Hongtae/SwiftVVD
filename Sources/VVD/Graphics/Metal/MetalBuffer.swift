@@ -2,7 +2,7 @@
 //  File: MetalBuffer.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_METAL
@@ -10,8 +10,8 @@ import Foundation
 import Metal
 
 final class MetalBuffer: GPUBuffer {
-    public let device: GraphicsDevice
-    public var length: Int { buffer.length }
+    let device: GraphicsDevice
+    var length: Int { buffer.length }
 
     let buffer: MTLBuffer
 
@@ -20,11 +20,11 @@ final class MetalBuffer: GPUBuffer {
         self.buffer = buffer
     }
 
-    public func contents() -> UnsafeMutableRawPointer? {
+    func contents() -> UnsafeMutableRawPointer? {
         return self.buffer.contents()
     }
 
-    public func flush() {
+    func flush() {
 #if os(macOS) || targetEnvironment(macCatalyst)
         if buffer.storageMode == .managed {
             buffer.didModifyRange(0..<buffer.length)

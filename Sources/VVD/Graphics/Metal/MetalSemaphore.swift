@@ -2,7 +2,7 @@
 //  File: MetalSemaphore.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_METAL
@@ -10,7 +10,7 @@ import Foundation
 import Metal
 
 final class MetalSemaphore: GPUSemaphore {
-    public let device: GraphicsDevice
+    let device: GraphicsDevice
     let event: MTLEvent
 
     init(device: MetalGraphicsDevice, event: MTLEvent) {

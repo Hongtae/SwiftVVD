@@ -2,7 +2,7 @@
 //  File: VulkanBufferView.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
@@ -49,5 +49,4 @@ final class VulkanBufferView: GPUBuffer {
 
     var length: Int { self.buffer?.length ?? 0 }
 }
-
 #endif //if ENABLE_VULKAN

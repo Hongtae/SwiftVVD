@@ -2,7 +2,7 @@
 //  File: VulkanDeviceMemory.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
@@ -13,6 +13,10 @@ struct VulkanMemoryBlock {
     let offset: UInt64
     let size: UInt64
     unowned var chunk: VulkanMemoryChunk?
+
+    var propertyFlags: VkMemoryPropertyFlags {
+        return chunk?.propertyFlags ?? 0
+    }
 }
 
 struct VulkanMemoryAllocationContext {
@@ -485,5 +489,4 @@ final class VulkanMemoryPool {
         assert(dedicatedAllocations.isEmpty)
     }
 }
-
 #endif //if ENABLE_VULKAN

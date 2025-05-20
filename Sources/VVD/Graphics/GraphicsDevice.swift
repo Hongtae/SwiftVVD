@@ -2,7 +2,7 @@
 //  File: GraphicsDevice.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 public protocol GraphicsDevice {
@@ -22,7 +22,7 @@ public protocol GraphicsDevice {
 
     func makeBuffer(length: Int, storageMode: StorageMode, cpuCacheMode: CPUCacheMode) -> GPUBuffer?
     func makeTexture(descriptor: TextureDescriptor) -> Texture?
-    func makeTransientRenderTarget(type: TextureType, pixelFormat: PixelFormat, width: Int, height: Int, depth: Int) -> Texture?
+    func makeTransientRenderTarget(type: TextureType, pixelFormat: PixelFormat, width: Int, height: Int, depth: Int, sampleCount: Int) -> Texture?
     func makeSamplerState(descriptor: SamplerDescriptor) -> SamplerState?
 
     func makeEvent() -> GPUEvent?
@@ -36,5 +36,9 @@ public extension GraphicsDevice {
 
     func makeComputePipelineState(descriptor: ComputePipelineDescriptor) -> ComputePipelineState? {
         return self.makeComputePipelineState(descriptor: descriptor, reflection: nil)
+    }
+
+    func makeTransientRenderTarget(type: TextureType, pixelFormat: PixelFormat, width: Int, height: Int, depth: Int) -> Texture? {
+        return self.makeTransientRenderTarget(type: type, pixelFormat: pixelFormat, width: width, height: height, depth: depth, sampleCount: 1)
     }
 }

@@ -2,7 +2,7 @@
 //  File: MetalRenderCommandEncoder.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_METAL
@@ -70,14 +70,14 @@ final class MetalRenderCommandEncoder: RenderCommandEncoder {
     }
 
     private var encoder: Encoder?
-    public let commandBuffer: CommandBuffer
+    let commandBuffer: CommandBuffer
 
     init(buffer: MetalCommandBuffer, descriptor: MTLRenderPassDescriptor) {
         self.commandBuffer = buffer
         self.encoder = Encoder(descriptor: descriptor)
     }
 
-    public func setResource(_ bindingSet: ShaderBindingSet, index: Int) {
+    func setResource(_ bindingSet: ShaderBindingSet, index: Int) {
         assert(self.encoder != nil)
         assert(bindingSet is MetalShaderBindingSet)
 
@@ -171,7 +171,7 @@ final class MetalRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func setViewport(_ v: Viewport) {
+    func setViewport(_ v: Viewport) {
         assert(self.encoder != nil)
         let viewport = MTLViewport(originX: v.x,
                                    originY: v.y,
@@ -186,7 +186,7 @@ final class MetalRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func setScissorRect(_ r: ScissorRect) {
+    func setScissorRect(_ r: ScissorRect) {
         assert(self.encoder != nil)
         let rect = MTLScissorRect(x: r.x, y: r.y,
                                   width: r.width, height: r.height)
@@ -197,7 +197,7 @@ final class MetalRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func setRenderPipelineState(_ pipelineState: RenderPipelineState) {
+    func setRenderPipelineState(_ pipelineState: RenderPipelineState) {
         assert(self.encoder != nil)
         assert(pipelineState is MetalRenderPipelineState)
 
@@ -221,7 +221,7 @@ final class MetalRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func setVertexBuffer(_ buffer: GPUBuffer, offset: Int, index: Int) {
+    func setVertexBuffer(_ buffer: GPUBuffer, offset: Int, index: Int) {
         assert(self.encoder != nil)
         assert(buffer is MetalBuffer)
 
@@ -240,7 +240,7 @@ final class MetalRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func setVertexBuffers(_ buffers: [GPUBuffer], offsets: [Int], index: Int) {
+    func setVertexBuffers(_ buffers: [GPUBuffer], offsets: [Int], index: Int) {
         assert(self.encoder != nil)
         let count = min(buffers.count, offsets.count)
         if count > 0, let encoder = self.encoder {
@@ -257,7 +257,7 @@ final class MetalRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func setDepthStencilState(_ state: DepthStencilState?) {
+    func setDepthStencilState(_ state: DepthStencilState?) {
         assert(self.encoder != nil)
 
         var depthStencilState: MTLDepthStencilState? = nil
@@ -272,13 +272,12 @@ final class MetalRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func setDepthClipMode(_ mode: DepthClipMode) {
+    func setDepthClipMode(_ mode: DepthClipMode) {
         assert(self.encoder != nil)
 
-        let depthClipMode: MTLDepthClipMode
-        switch mode {
-        case .clip:     depthClipMode = .clip
-        case .clamp:    depthClipMode = .clamp
+        let depthClipMode: MTLDepthClipMode = switch mode {
+        case .clip:     .clip
+        case .clamp:    .clamp
         }
 
         self.encoder?.commands.append {
@@ -287,14 +286,13 @@ final class MetalRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func setCullMode(_ mode: CullMode) {
+    func setCullMode(_ mode: CullMode) {
         assert(self.encoder != nil)
 
-        let cullMode: MTLCullMode
-        switch mode {
-        case .none:     cullMode = .none
-        case .front:    cullMode = .front
-        case .back:     cullMode = .back
+        let cullMode: MTLCullMode = switch mode {
+        case .none:     .none
+        case .front:    .front
+        case .back:     .back
         }
 
         self.encoder?.commands.append {
@@ -303,13 +301,12 @@ final class MetalRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func setFrontFacing(_ front: Winding) {
+    func setFrontFacing(_ front: Winding) {
         assert(self.encoder != nil)
 
-        let frontFacingWinding: MTLWinding
-        switch front {
-        case .clockwise:        frontFacingWinding = .clockwise
-        case .counterClockwise: frontFacingWinding = .counterClockwise
+        let frontFacingWinding: MTLWinding = switch front {
+        case .clockwise:        .clockwise
+        case .counterClockwise: .counterClockwise
         }
         self.encoder?.commands.append {
             (encoder: MTLRenderCommandEncoder, state: inout EncodingState) in
@@ -317,7 +314,7 @@ final class MetalRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func setBlendColor(red: Float, green: Float, blue: Float, alpha: Float) {
+    func setBlendColor(red: Float, green: Float, blue: Float, alpha: Float) {
         assert(self.encoder != nil)
         self.encoder?.commands.append {
             (encoder: MTLRenderCommandEncoder, state: inout EncodingState) in
@@ -325,7 +322,7 @@ final class MetalRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func setStencilReferenceValue(_ value: UInt32) {
+    func setStencilReferenceValue(_ value: UInt32) {
         assert(self.encoder != nil)
         self.encoder?.commands.append {
             (encoder: MTLRenderCommandEncoder, state: inout EncodingState) in
@@ -333,7 +330,7 @@ final class MetalRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func setStencilReferenceValues(front: UInt32, back: UInt32) {
+    func setStencilReferenceValues(front: UInt32, back: UInt32) {
         assert(self.encoder != nil)
         self.encoder?.commands.append {
             (encoder: MTLRenderCommandEncoder, state: inout EncodingState) in
@@ -341,7 +338,7 @@ final class MetalRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func setDepthBias(_ depthBias: Float, slopeScale: Float, clamp: Float) {
+    func setDepthBias(_ depthBias: Float, slopeScale: Float, clamp: Float) {
         assert(self.encoder != nil)
         self.encoder?.commands.append {
             (encoder: MTLRenderCommandEncoder, state: inout EncodingState) in
@@ -349,7 +346,7 @@ final class MetalRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func pushConstant<D>(stages: ShaderStageFlags, offset: Int, data: D) where D : DataProtocol {
+    func pushConstant<D>(stages: ShaderStageFlags, offset: Int, data: D) where D : DataProtocol {
         assert(self.encoder != nil)
         let size = data.count
         if stages.intersection([.vertex, .fragment]).isEmpty == false, size > 0 {
@@ -396,7 +393,7 @@ final class MetalRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func memoryBarrier(after: RenderStages, before: RenderStages) {
+    func memoryBarrier(after: RenderStages, before: RenderStages) {
         assert(self.encoder != nil)
 
         let mtlStages = { (stages: RenderStages) in
@@ -422,7 +419,7 @@ final class MetalRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func draw(vertexStart: Int, vertexCount: Int, instanceCount: Int, baseInstance: Int) {
+    func draw(vertexStart: Int, vertexCount: Int, instanceCount: Int, baseInstance: Int) {
         assert(self.encoder != nil)
 
         self.encoder?.commands.append {
@@ -438,15 +435,14 @@ final class MetalRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func drawIndexed(indexCount: Int, indexType: IndexType, indexBuffer: GPUBuffer, indexBufferOffset: Int, instanceCount: Int, baseVertex: Int, baseInstance: Int) {
+    func drawIndexed(indexCount: Int, indexType: IndexType, indexBuffer: GPUBuffer, indexBufferOffset: Int, instanceCount: Int, baseVertex: Int, baseInstance: Int) {
         assert(self.encoder != nil)
         assert(indexBuffer is MetalBuffer)
 
         let buffer = indexBuffer as! MetalBuffer
-        let indexBufferType: MTLIndexType
-        switch indexType {
-        case .uint16:   indexBufferType = .uint16
-        case .uint32:   indexBufferType = .uint32
+        let indexBufferType: MTLIndexType = switch indexType {
+        case .uint16:   .uint16
+        case .uint32:   .uint32
         }
 
         self.encoder?.commands.append {
@@ -474,7 +470,7 @@ final class MetalRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func endEncoding() {
+    func endEncoding() {
         assert(self.encoder != nil)
         if let commandBuffer = self.commandBuffer as? MetalCommandBuffer,
            let encoder = self.encoder {
@@ -483,11 +479,11 @@ final class MetalRenderCommandEncoder: RenderCommandEncoder {
         self.encoder = nil
     }
 
-    public var isCompleted: Bool {
+    var isCompleted: Bool {
         return self.encoder == nil
     }
 
-    public func waitEvent(_ event: GPUEvent) {
+    func waitEvent(_ event: GPUEvent) {
         assert(event is MetalEvent)
         assert(self.encoder != nil)
         if let event = event as? MetalEvent, let encoder = self.encoder {
@@ -496,7 +492,7 @@ final class MetalRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func signalEvent(_ event: GPUEvent) {
+    func signalEvent(_ event: GPUEvent) {
         assert(event is MetalEvent)
         assert(self.encoder != nil)
         if let event = event as? MetalEvent, let encoder = self.encoder {
@@ -505,7 +501,7 @@ final class MetalRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func waitSemaphoreValue(_ semaphore: GPUSemaphore, value: UInt64) {
+    func waitSemaphoreValue(_ semaphore: GPUSemaphore, value: UInt64) {
         assert(semaphore is MetalSemaphore)
         assert(self.encoder != nil)
         if let semaphore = semaphore as? MetalSemaphore,
@@ -522,7 +518,7 @@ final class MetalRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 
-    public func signalSemaphoreValue(_ semaphore: GPUSemaphore, value: UInt64) {
+    func signalSemaphoreValue(_ semaphore: GPUSemaphore, value: UInt64) {
         assert(semaphore is MetalSemaphore)
         assert(self.encoder != nil)
         if let semaphore = semaphore as? MetalSemaphore,

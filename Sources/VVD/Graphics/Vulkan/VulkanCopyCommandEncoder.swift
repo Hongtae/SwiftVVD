@@ -2,7 +2,7 @@
 //  File: VulkanCopyCommandEncoder.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
@@ -79,6 +79,7 @@ final class VulkanCopyCommandEncoder: CopyCommandEncoder {
             self.encoder!.events.append(event)
         }
     }
+
     func signalEvent(_ event: GPUEvent) {
         assert(event is VulkanSemaphore)
         if let semaphore = event as? VulkanSemaphore {
@@ -96,6 +97,7 @@ final class VulkanCopyCommandEncoder: CopyCommandEncoder {
             self.encoder!.semaphores.append(sema)
         }
     }
+
     func signalSemaphoreValue(_ sema: GPUSemaphore, value: UInt64) {
         assert(sema is VulkanTimelineSemaphore)
         if let semaphore = sema as? VulkanTimelineSemaphore {
@@ -112,12 +114,12 @@ final class VulkanCopyCommandEncoder: CopyCommandEncoder {
     func signalSemaphore(_ semaphore: VkSemaphore, value: UInt64, flags: VkPipelineStageFlags2) {
         self.encoder!.addSignalSemaphore(semaphore, value: value, flags: flags)
     }
-
+    
     func copy(from src: GPUBuffer,
-                     sourceOffset srcOffset: Int,
-                     to dst: GPUBuffer,
-                     destinationOffset dstOffset: Int,
-                     size: Int) {
+              sourceOffset srcOffset: Int,
+              to dst: GPUBuffer,
+              destinationOffset dstOffset: Int,
+              size: Int) {
         assert(src is VulkanBufferView)
         assert(dst is VulkanBufferView)
 
@@ -141,10 +143,10 @@ final class VulkanCopyCommandEncoder: CopyCommandEncoder {
     }
 
     func copy(from src: GPUBuffer,
-                     sourceOffset srcOffset: BufferImageOrigin,
-                     to dst: Texture,
-                     destinationOffset dstOffset: TextureOrigin,
-                     size: TextureSize) {
+              sourceOffset srcOffset: BufferImageOrigin,
+              to dst: Texture,
+              destinationOffset dstOffset: TextureOrigin,
+              size: TextureSize) {
         assert(src is VulkanBufferView)
         assert(dst is VulkanImageView)
         assert(srcOffset.offset % 4 == 0)
@@ -210,12 +212,12 @@ final class VulkanCopyCommandEncoder: CopyCommandEncoder {
         self.encoder!.buffers.append(src)
         self.encoder!.textures.append(dst)
     }
-
+    
     func copy(from src: Texture,
-                     sourceOffset srcOffset: TextureOrigin,
-                     to dst: GPUBuffer,
-                     destinationOffset dstOffset: BufferImageOrigin,
-                     size: TextureSize) {
+              sourceOffset srcOffset: TextureOrigin,
+              to dst: GPUBuffer,
+              destinationOffset dstOffset: BufferImageOrigin,
+              size: TextureSize) {
         assert(src is VulkanImageView)
         assert(dst is VulkanBufferView)
         assert(dstOffset.offset % 4 == 0)
@@ -282,10 +284,10 @@ final class VulkanCopyCommandEncoder: CopyCommandEncoder {
     }
 
     func copy(from src: Texture,
-                     sourceOffset srcOffset: TextureOrigin,
-                     to dst: Texture,
-                     destinationOffset dstOffset: TextureOrigin,
-                     size: TextureSize) {
+              sourceOffset srcOffset: TextureOrigin,
+              to dst: Texture,
+              destinationOffset dstOffset: TextureOrigin,
+              size: TextureSize) {
         assert(src is VulkanImageView)
         assert(dst is VulkanImageView)
 
@@ -440,5 +442,4 @@ final class VulkanCopyCommandEncoder: CopyCommandEncoder {
         subresource.levelCount = UInt32(levelCount)
     }
 }
-
 #endif //if ENABLE_VULKAN

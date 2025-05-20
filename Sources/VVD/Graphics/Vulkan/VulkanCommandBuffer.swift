@@ -2,7 +2,7 @@
 //  File: VulkanCommandBuffer.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
@@ -75,9 +75,203 @@ final class VulkanCommandBuffer: CommandBuffer, @unchecked Sendable {
     }
 
     func makeRenderCommandEncoder(descriptor: RenderPassDescriptor) -> RenderCommandEncoder? {
+        if descriptor.colorAttachments.isEmpty && descriptor.depthStencilAttachment.renderTarget == nil {
+            Log.err("RenderPassDescriptor must have at least one color or depth/stencil attachment.")
+            return nil
+        }
+
+        // initialize render pass
+        let tempHolder = TemporaryBufferHolder(label: "VulkanRenderCommandEncoder.Encoder.encode")
+        var renderContext = VulkanRenderCommandEncoder.RenderContext(
+            renderingInfo: VkRenderingInfo(),
+            viewport: VkViewport(),
+            scissorRect: VkRect2D(),
+            colorAttachments: [],
+            colorResolveTargets: [],
+            depthStencilAttachment: nil,
+            depthStencilResolveTarget: nil,
+            _bufferHolder: tempHolder
+        )
+
+        renderContext.renderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO
+        renderContext.renderingInfo.flags = 0
+        renderContext.renderingInfo.layerCount = 1
+
+        var frameWidth: Int = 0
+        var frameHeight: Int = 0
+
+        var colorAttachments: [VkRenderingAttachmentInfo] = []
+        for colorAttachment in descriptor.colorAttachments {
+            var attachment = VkRenderingAttachmentInfo()
+            attachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO
+            attachment.imageView = nil
+            attachment.imageLayout = VK_IMAGE_LAYOUT_UNDEFINED
+            attachment.resolveMode = VK_RESOLVE_MODE_NONE
+            attachment.resolveImageView = nil
+            attachment.resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED 
+
+            attachment.loadOp = switch colorAttachment.loadAction {
+            case .load:     VK_ATTACHMENT_LOAD_OP_LOAD
+            case .clear:    VK_ATTACHMENT_LOAD_OP_CLEAR
+            default:        VK_ATTACHMENT_LOAD_OP_DONT_CARE
+            }
+
+            attachment.storeOp = switch colorAttachment.storeAction {
+            case .dontCare: VK_ATTACHMENT_STORE_OP_DONT_CARE
+            case .store:    VK_ATTACHMENT_STORE_OP_STORE
+            }
+
+            attachment.clearValue.color.float32 = (Float32(colorAttachment.clearColor.r),
+                                                   Float32(colorAttachment.clearColor.g),
+                                                   Float32(colorAttachment.clearColor.b),
+                                                   Float32(colorAttachment.clearColor.a))
+
+            if let renderTarget = colorAttachment.renderTarget {
+                assert(renderTarget is VulkanImageView)
+                let imageView = renderTarget as! VulkanImageView
+
+                if imageView.isTransient {
+                    // transient image cannot be loaded or stored.
+                    assert(attachment.loadOp != VK_ATTACHMENT_LOAD_OP_LOAD,  "Transient texture must not be loaded.")
+                    assert(attachment.storeOp != VK_ATTACHMENT_STORE_OP_STORE, "Transient texture must not be stored.")
+                }
+
+                attachment.imageView = imageView.imageView
+                attachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+
+                renderContext.colorAttachments.append(imageView)
+
+                if let image = imageView.image {
+                    assert(image.pixelFormat.isColorFormat)
+
+                    frameWidth = (frameWidth > 0) ? min(frameWidth, image.width) : image.width
+                    frameHeight = (frameHeight > 0) ? min(frameHeight, image.height) : image.height
+                }
+
+                if let resolveTarget = colorAttachment.resolveTarget {
+                    assert(resolveTarget is VulkanImageView)
+                    assert(resolveTarget.isTransient == false, "Resolve target must not be transient.")
+                    assert(resolveTarget.sampleCount == 1, "Resolve target must be single-sampled.")
+
+                    let imageView = resolveTarget as! VulkanImageView
+                    //attachment.resolveMode = VK_RESOLVE_MODE_AVERAGE_BIT
+                    attachment.resolveImageView = imageView.imageView
+                    attachment.resolveImageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+
+                    renderContext.colorResolveTargets.append(imageView)
+
+                    if let image = imageView.image {
+                        assert(image.pixelFormat.isColorFormat)
+
+                        if image.pixelFormat.isIntegerFormat {
+                            attachment.resolveMode = VK_RESOLVE_MODE_SAMPLE_ZERO_BIT
+                        } else {
+                            attachment.resolveMode = VK_RESOLVE_MODE_AVERAGE_BIT
+                        }
+                    }
+                }
+            }
+            colorAttachments.append(attachment)
+        }
+        if colorAttachments.isEmpty == false {
+            renderContext.renderingInfo.colorAttachmentCount = UInt32(colorAttachments.count)
+            renderContext.renderingInfo.pColorAttachments = unsafePointerCopy(collection: colorAttachments, holder: tempHolder)
+        }
+
+        if let renderTarget = descriptor.depthStencilAttachment.renderTarget {
+            assert(renderTarget is VulkanImageView)
+            let imageView = renderTarget as! VulkanImageView
+
+            var depthStencilAttachment = VkRenderingAttachmentInfo()
+            depthStencilAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO
+
+            // VUID-VkRenderingInfo-pDepthAttachment-06085
+            depthStencilAttachment.imageView = imageView.imageView
+            depthStencilAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+            depthStencilAttachment.resolveMode = VK_RESOLVE_MODE_NONE
+            depthStencilAttachment.resolveImageView = nil
+            depthStencilAttachment.resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED 
+
+            depthStencilAttachment.loadOp = switch descriptor.depthStencilAttachment.loadAction {
+            case .load:     VK_ATTACHMENT_LOAD_OP_LOAD
+            case .clear:    VK_ATTACHMENT_LOAD_OP_CLEAR
+            default:        VK_ATTACHMENT_LOAD_OP_DONT_CARE
+            }
+            
+            depthStencilAttachment.storeOp = switch descriptor.depthStencilAttachment.storeAction {
+            case .store:    VK_ATTACHMENT_STORE_OP_STORE
+            default:        VK_ATTACHMENT_STORE_OP_DONT_CARE
+            }
+
+            depthStencilAttachment.clearValue.depthStencil.depth = Float(descriptor.depthStencilAttachment.clearDepth)
+            depthStencilAttachment.clearValue.depthStencil.stencil = descriptor.depthStencilAttachment.clearStencil
+
+            renderContext.depthStencilAttachment = imageView
+
+            if let image = imageView.image {
+                assert(image.pixelFormat.isDepthFormat || image.pixelFormat.isStencilFormat)
+
+                if image.isTransient {
+                    // transient image cannot be loaded or stored.
+                    assert(depthStencilAttachment.loadOp != VK_ATTACHMENT_LOAD_OP_LOAD, "Transient texture must not be loaded.")
+                    assert(depthStencilAttachment.storeOp != VK_ATTACHMENT_STORE_OP_STORE, "Transient texture must not be stored.")
+                }
+
+                let p = unsafePointerCopy(from: depthStencilAttachment, holder: tempHolder)
+                if image.pixelFormat.isDepthFormat {
+                    renderContext.renderingInfo.pDepthAttachment = p
+                }
+                if image.pixelFormat.isStencilFormat {
+                    renderContext.renderingInfo.pStencilAttachment = p
+                }
+
+                frameWidth = (frameWidth > 0) ? min(frameWidth, image.width) : image.width
+                frameHeight = (frameHeight > 0) ? min(frameHeight, image.height) : image.height
+            }
+            if let resolveTarget = descriptor.depthStencilAttachment.resolveTarget {
+                assert(resolveTarget is VulkanImageView)
+                assert(resolveTarget.isTransient == false, "Resolve target must not be transient.")
+                assert(resolveTarget.sampleCount == 1, "Resolve target must be single-sampled.")
+
+                let imageView = resolveTarget as! VulkanImageView
+
+                let resolveFilter = descriptor.depthStencilAttachment.resolveFilter
+                depthStencilAttachment.resolveMode = switch resolveFilter {
+                case .sample0:  VK_RESOLVE_MODE_SAMPLE_ZERO_BIT
+                case .min:      VK_RESOLVE_MODE_MIN_BIT
+                case .max:      VK_RESOLVE_MODE_MAX_BIT
+                }
+                
+                depthStencilAttachment.resolveImageView = imageView.imageView
+                depthStencilAttachment.resolveImageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+
+                renderContext.depthStencilResolveTarget = imageView
+
+                if let image = imageView.image {
+                    assert(image.pixelFormat.isDepthFormat || image.pixelFormat.isStencilFormat)
+                }
+            }
+        }
+
+        assert(frameWidth > 0 && frameHeight > 0, "Render target must have a valid size.")
+
+        renderContext.renderingInfo.renderArea.offset.x = 0
+        renderContext.renderingInfo.renderArea.offset.y = 0
+        renderContext.renderingInfo.renderArea.extent.width = UInt32(frameWidth)
+        renderContext.renderingInfo.renderArea.extent.height = UInt32(frameHeight)
+        renderContext.viewport = VkViewport(x: 0.0,
+                                            y: 0.0,
+                                            width: Float(frameWidth),
+                                            height: Float(frameHeight),
+                                            minDepth: 0.0,
+                                            maxDepth: 1.0)
+        renderContext.scissorRect = VkRect2D(offset: VkOffset2D(x: 0, y: 0),
+                                             extent: VkExtent2D(width: UInt32(frameWidth),
+                                                                height: UInt32(frameHeight)))
+
         let queue = self.commandQueue as! VulkanCommandQueue
         if queue.family.properties.queueFlags & UInt32(VK_QUEUE_GRAPHICS_BIT.rawValue) != 0 {
-            return VulkanRenderCommandEncoder(buffer: self, descriptor: descriptor)
+            return VulkanRenderCommandEncoder(buffer: self, context: renderContext)
         }
         return nil
     }
@@ -235,5 +429,4 @@ final class VulkanCommandBuffer: CommandBuffer, @unchecked Sendable {
         return (self.commandQueue as! VulkanCommandQueue).family
     }
 }
-
 #endif //if ENABLE_VULKAN

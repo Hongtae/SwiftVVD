@@ -2,7 +2,7 @@
 //  File: VulkanSwapChain.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
@@ -358,15 +358,15 @@ final class VulkanSwapChain: SwapChain, @unchecked Sendable {
 
         let presentModeString = { (mode: VkPresentModeKHR) -> String in
             switch mode {
-            case VK_PRESENT_MODE_IMMEDIATE_KHR: return "VK_PRESENT_MODE_IMMEDIATE_KHR"
-            case VK_PRESENT_MODE_MAILBOX_KHR:   return "VK_PRESENT_MODE_MAILBOX_KHR"
-            case VK_PRESENT_MODE_FIFO_KHR:      return "VK_PRESENT_MODE_FIFO_KHR"
-            case VK_PRESENT_MODE_FIFO_RELAXED_KHR:  return "VK_PRESENT_MODE_FIFO_RELAXED_KHR"
-            case VK_PRESENT_MODE_SHARED_DEMAND_REFRESH_KHR: return "VK_PRESENT_MODE_SHARED_DEMAND_REFRESH_KHR"
-            case VK_PRESENT_MODE_SHARED_CONTINUOUS_REFRESH_KHR: return "VK_PRESENT_MODE_SHARED_CONTINUOUS_REFRESH_KHR"
-            default: break
+            case VK_PRESENT_MODE_IMMEDIATE_KHR:                 "VK_PRESENT_MODE_IMMEDIATE_KHR"
+            case VK_PRESENT_MODE_MAILBOX_KHR:                   "VK_PRESENT_MODE_MAILBOX_KHR"
+            case VK_PRESENT_MODE_FIFO_KHR:                      "VK_PRESENT_MODE_FIFO_KHR"
+            case VK_PRESENT_MODE_FIFO_RELAXED_KHR:              "VK_PRESENT_MODE_FIFO_RELAXED_KHR"
+            case VK_PRESENT_MODE_SHARED_DEMAND_REFRESH_KHR:     "VK_PRESENT_MODE_SHARED_DEMAND_REFRESH_KHR"
+            case VK_PRESENT_MODE_SHARED_CONTINUOUS_REFRESH_KHR: "VK_PRESENT_MODE_SHARED_CONTINUOUS_REFRESH_KHR"
+            default:
+                "## UNKNOWN ##"
             }
-            return "## UNKNOWN ##"
         }
         Log.info("VkSwapchainKHR created. (\(swapchainExtent.width) x \(swapchainExtent.height), V-sync:\(self.enableVSync), \(presentModeString(swapchainPresentMode)))")
 
@@ -666,5 +666,4 @@ final class VulkanSwapChain: SwapChain, @unchecked Sendable {
         return err == VK_SUCCESS
     }
 }
-
 #endif //if ENABLE_VULKAN

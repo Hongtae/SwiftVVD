@@ -2,7 +2,7 @@
 //  File: MetalCommandBuffer.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_METAL
@@ -18,8 +18,8 @@ class MetalCommandEncoder {
 }
 
 final class MetalCommandBuffer: CommandBuffer {
-    public let commandQueue: CommandQueue
-    public var device: GraphicsDevice   { commandQueue.device }
+    let commandQueue: CommandQueue
+    var device: GraphicsDevice   { commandQueue.device }
 
     var encoders: [MetalCommandEncoder] = []
     var completedHandlers: [CommandBufferHandler] = []
@@ -28,20 +28,24 @@ final class MetalCommandBuffer: CommandBuffer {
         self.commandQueue = queue
     }
 
-    public func makeRenderCommandEncoder(descriptor: RenderPassDescriptor) -> RenderCommandEncoder? {
+    func makeRenderCommandEncoder(descriptor: RenderPassDescriptor) -> RenderCommandEncoder? {
+        if descriptor.colorAttachments.isEmpty && descriptor.depthStencilAttachment.renderTarget == nil {
+            Log.err("RenderPassDescriptor must have at least one color or depth/stencil attachment.")
+            return nil
+        }
 
         let mtlLoadAction = { (action: RenderPassAttachmentLoadAction) -> MTLLoadAction in
             switch action {
-            case .dontCare:     return .dontCare
-            case .load:         return .load
-            case .clear:        return .clear
+            case .dontCare:     .dontCare
+            case .load:         .load
+            case .clear:        .clear
             }
         }
 
         let mtlStoreAction = { (action: RenderPassAttachmentStoreAction) -> MTLStoreAction in
             switch action {
-            case .dontCare:     return .dontCare
-            case .store:        return .store
+            case .dontCare:     .dontCare
+            case .store:        .store
             }
         }
 
@@ -50,7 +54,9 @@ final class MetalCommandBuffer: CommandBuffer {
         for (i, ca) in descriptor.colorAttachments.enumerated() {
             let attachment = MTLRenderPassColorAttachmentDescriptor()
 
-            if let rt = ca.renderTarget as? MetalTexture {
+            if let rt = ca.renderTarget {
+                assert(rt is MetalTexture)
+                let rt = rt as! MetalTexture
                 attachment.texture = rt.texture
             }
             attachment.clearColor = MTLClearColor(red: Double(ca.clearColor.r),
@@ -59,10 +65,38 @@ final class MetalCommandBuffer: CommandBuffer {
                                                   alpha: Double(ca.clearColor.a))
             attachment.loadAction = mtlLoadAction(ca.loadAction)
             attachment.storeAction = mtlStoreAction(ca.storeAction)
+
+            if let rt = ca.renderTarget, rt.isTransient {
+                assert(attachment.loadAction != .load, "Transient texture must not be loaded.")
+                assert(attachment.storeAction != .store, "Transient texture must not be stored.")
+            }
+
+            if ca.renderTarget != nil {
+                let renderTarget = ca.renderTarget as! MetalTexture
+                if let rt = ca.resolveTarget {
+                    assert(rt is MetalTexture)
+                    let resolveTarget = rt as! MetalTexture
+                    attachment.resolveTexture = resolveTarget.texture
+                    attachment.storeAction = switch ca.storeAction {
+                    case .dontCare: .multisampleResolve
+                    case .store:    .storeAndMultisampleResolve
+                    }
+
+                    assert(renderTarget !== resolveTarget,
+                           "Resolve target must be different from render target.")
+                    assert(resolveTarget.pixelFormat == renderTarget.pixelFormat,
+                           "Resolve target must have the same pixel format with render target.")
+                    assert(resolveTarget.sampleCount == 1, "Resolve target must be single-sampled.")
+                    assert(resolveTarget.isTransient == false, "Resolve target must not be transient.")
+                }
+            }
             desc.colorAttachments[i] = attachment
         }
 
-        if let rt = descriptor.depthStencilAttachment.renderTarget as? MetalTexture {
+        if let rt = descriptor.depthStencilAttachment.renderTarget {
+            assert(rt is MetalTexture)
+            let rt = rt as! MetalTexture
+            
             var hasDepth = false
             var hasStencil = false
 
@@ -95,6 +129,30 @@ final class MetalCommandBuffer: CommandBuffer {
                 attachment.clearDepth = descriptor.depthStencilAttachment.clearDepth
                 attachment.loadAction = mtlLoadAction(descriptor.depthStencilAttachment.loadAction)
                 attachment.storeAction = mtlStoreAction(descriptor.depthStencilAttachment.storeAction)
+                if let resolveTarget = descriptor.depthStencilAttachment.resolveTarget {
+                    assert(resolveTarget is MetalTexture)
+                    let resolveTarget = resolveTarget as! MetalTexture
+                    
+                    assert(resolveTarget.texture.pixelFormat == rt.texture.pixelFormat,
+                           "Resolve target must have the same pixel format with render target.")
+                    assert(resolveTarget.sampleCount == 1, "Resolve target must be single-sampled.")
+                    assert(resolveTarget.isTransient == false, "Resolve target must not be transient.")
+
+                    attachment.resolveTexture = resolveTarget.texture
+                    attachment.depthResolveFilter = switch descriptor.depthStencilAttachment.resolveFilter {
+                    case .sample0: .sample0
+                    case .min:     .min
+                    case .max:     .max
+                    }
+                    attachment.storeAction = switch descriptor.depthStencilAttachment.storeAction {
+                    case .dontCare: .multisampleResolve
+                    case .store:    .storeAndMultisampleResolve
+                    }
+                }
+                if rt.isTransient {
+                    assert(attachment.loadAction != .load, "Transient texture must not be loaded.")
+                    assert(attachment.storeAction != .store, "Transient texture must not be stored.")
+                }
                 desc.depthAttachment = attachment
             }
             if hasStencil {
@@ -103,6 +161,26 @@ final class MetalCommandBuffer: CommandBuffer {
                 attachment.clearStencil = descriptor.depthStencilAttachment.clearStencil
                 attachment.loadAction = mtlLoadAction(descriptor.depthStencilAttachment.loadAction)
                 attachment.storeAction = mtlStoreAction(descriptor.depthStencilAttachment.storeAction)
+                if let resolveTarget = descriptor.depthStencilAttachment.resolveTarget {
+                    assert(resolveTarget is MetalTexture)
+                    let resolveTarget = resolveTarget as! MetalTexture
+                    
+                    assert(resolveTarget.texture.pixelFormat == rt.texture.pixelFormat,
+                           "Resolve target must have the same pixel format with render target.")
+                    assert(resolveTarget.sampleCount == 1, "Resolve target must be single-sampled.")
+                    assert(resolveTarget.isTransient == false, "Resolve target must not be transient.")
+                    
+                    attachment.resolveTexture = resolveTarget.texture
+                    attachment.stencilResolveFilter = hasDepth ? .depthResolvedSample : .sample0
+                    attachment.storeAction = switch descriptor.depthStencilAttachment.storeAction {
+                    case .dontCare: .multisampleResolve
+                    case .store:    .storeAndMultisampleResolve
+                    }
+                }
+                if rt.isTransient {
+                    assert(attachment.loadAction != .load, "Transient texture must not be loaded.")
+                    assert(attachment.storeAction != .store, "Transient texture must not be stored.")
+                }
                 desc.stencilAttachment = attachment
             }
         }
@@ -110,19 +188,19 @@ final class MetalCommandBuffer: CommandBuffer {
         return MetalRenderCommandEncoder(buffer: self, descriptor: desc)
     }
 
-    public func makeComputeCommandEncoder() -> ComputeCommandEncoder? {
+    func makeComputeCommandEncoder() -> ComputeCommandEncoder? {
         return MetalComputeCommandEncoder(buffer: self)
     }
 
-    public func makeCopyCommandEncoder() -> CopyCommandEncoder? {
+    func makeCopyCommandEncoder() -> CopyCommandEncoder? {
         return MetalCopyCommandEncoder(buffer: self)
     }
 
-    public func addCompletedHandler(_ handler: @escaping CommandBufferHandler) {
+    func addCompletedHandler(_ handler: @escaping CommandBufferHandler) {
         self.completedHandlers.append(handler)
     }
 
-    public func commit() -> Bool {
+    func commit() -> Bool {
         if let queue = (self.commandQueue as? MetalCommandQueue)?.queue {
             if let buffer = queue.makeCommandBuffer() {
 

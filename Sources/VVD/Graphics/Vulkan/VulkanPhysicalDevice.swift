@@ -2,7 +2,7 @@
 //  File: VulkanPhysicalDevice.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
@@ -216,20 +216,12 @@ final class VulkanPhysicalDeviceDescription: CustomStringConvertible {
     }
 
     var description: String {
-
-        var deviceType = "Unknown"
-
-        switch self.properties.deviceType {
-        case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:
-            deviceType = "INTEGRATED_GPU"
-        case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:
-            deviceType = "DISCRETE_GPU"
-        case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:
-            deviceType = "VIRTUAL_GPU"
-        case VK_PHYSICAL_DEVICE_TYPE_CPU:
-            deviceType = "CPU"
-        default:
-            deviceType = "UNKNOWN"
+        let deviceType = switch self.properties.deviceType {
+        case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:    "INTEGRATED_GPU"
+        case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:      "DISCRETE_GPU"
+        case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:       "VIRTUAL_GPU"
+        case VK_PHYSICAL_DEVICE_TYPE_CPU:               "CPU"
+        default:                                        "UNKNOWN"
         }
 
         let apiVersion = String(format: "%d.%d.%d",

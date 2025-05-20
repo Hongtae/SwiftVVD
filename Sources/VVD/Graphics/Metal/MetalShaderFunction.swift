@@ -2,7 +2,7 @@
 //  File: MetalShaderFunction.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_METAL
@@ -10,12 +10,12 @@ import Foundation
 import Metal
 
 final class MetalShaderFunction: ShaderFunction {
-    public let stageInputAttributes: [ShaderAttribute]
-    public let functionConstants: [String : ShaderFunctionConstant]
-    public let functionName: String
-    public let stage: ShaderStage
+    let stageInputAttributes: [ShaderAttribute]
+    let functionConstants: [String : ShaderFunctionConstant]
+    let functionName: String
+    let stage: ShaderStage
 
-    public var device: GraphicsDevice { self.module.device }
+    var device: GraphicsDevice { self.module.device }
 
     let function: MTLFunction
     let module: MetalShaderModule

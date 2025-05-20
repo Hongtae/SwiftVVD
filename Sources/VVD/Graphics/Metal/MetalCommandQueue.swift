@@ -2,7 +2,7 @@
 //  File: MetalCommandQueue.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_METAL
@@ -11,8 +11,8 @@ import Metal
 
 final class MetalCommandQueue: CommandQueue, @unchecked Sendable {
 
-    public let flags: CommandQueueFlags
-    public let device: GraphicsDevice
+    let flags: CommandQueueFlags
+    let device: GraphicsDevice
 
     let queue: MTLCommandQueue
 
@@ -22,12 +22,12 @@ final class MetalCommandQueue: CommandQueue, @unchecked Sendable {
         self.flags = [.render, .compute, .copy]
     }
 
-    public func makeCommandBuffer() -> CommandBuffer? {
+    func makeCommandBuffer() -> CommandBuffer? {
         return MetalCommandBuffer(queue: self)
     }
 
     @MainActor
-    public func makeSwapChain(target: Window) -> SwapChain? {
+    func makeSwapChain(target: Window) -> SwapChain? {
         return MetalSwapChain(queue: self, window: target)
     }
 }

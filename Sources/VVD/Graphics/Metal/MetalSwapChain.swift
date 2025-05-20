@@ -2,7 +2,7 @@
 //  File: MetalSwapChain.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_METAL
@@ -17,7 +17,7 @@ final class MetalSwapChain: SwapChain, @unchecked Sendable {
     var layer: CAMetalLayer
 
     private var _pixelFormat: PixelFormat
-    public var pixelFormat: PixelFormat {
+    var pixelFormat: PixelFormat {
         get { _pixelFormat }
         set {
             switch newValue {
@@ -38,11 +38,11 @@ final class MetalSwapChain: SwapChain, @unchecked Sendable {
     var drawable: CAMetalDrawable?
     var renderPassDescriptor: RenderPassDescriptor
 
-    public var commandQueue: CommandQueue { queue }
-    public var maximumBufferCount: Int { self.layer.maximumDrawableCount }
+    var commandQueue: CommandQueue { queue }
+    var maximumBufferCount: Int { self.layer.maximumDrawableCount }
 
     @MainActor
-    public init?(queue: MetalCommandQueue, window: Window) {
+    init?(queue: MetalCommandQueue, window: Window) {
         self.window = window
         self.queue = queue
 
@@ -85,7 +85,7 @@ final class MetalSwapChain: SwapChain, @unchecked Sendable {
         }
     }
 
-    public func currentRenderPassDescriptor() -> RenderPassDescriptor {
+    func currentRenderPassDescriptor() -> RenderPassDescriptor {
         if self.drawable == nil {
             self.setupFrame()
         }
@@ -129,7 +129,7 @@ final class MetalSwapChain: SwapChain, @unchecked Sendable {
         }
     }
 
-    public func present(waitEvents: [GPUEvent]) -> Bool {
+    func present(waitEvents: [GPUEvent]) -> Bool {
         if waitEvents.isEmpty {
             if let drawable = drawable {
                 drawable.present()

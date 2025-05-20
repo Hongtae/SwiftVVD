@@ -2,7 +2,7 @@
 //  File: MetalShaderBindingSet.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_METAL
@@ -11,7 +11,7 @@ import Metal
 
 final class MetalShaderBindingSet: ShaderBindingSet {
 
-    public let device: GraphicsDevice
+    let device: GraphicsDevice
     let layout: [ShaderBinding]
 
     var buffers: [Int: Array<(buffer: MetalBuffer, offset: Int)>] = [:]
@@ -23,14 +23,14 @@ final class MetalShaderBindingSet: ShaderBindingSet {
         self.layout = layout
     }
 
-    public func setBuffer(_ buffer: GPUBuffer, offset: Int, length: Int, binding: Int) {
+    func setBuffer(_ buffer: GPUBuffer, offset: Int, length: Int, binding: Int) {
         self.setBufferArray([BufferBindingInfo(buffer: buffer,
                                                offset: offset,
                                                length: length)],
                             binding:binding)
     }
 
-    public func setBufferArray(_ buffers: [BufferBindingInfo], binding: Int) {
+    func setBufferArray(_ buffers: [BufferBindingInfo], binding: Int) {
         if let descriptor = self.layout.first(where: { $0.binding == binding }) {
 
             let startingIndex = 0
@@ -50,11 +50,11 @@ final class MetalShaderBindingSet: ShaderBindingSet {
         }
     }
 
-    public func setTexture(_ texture: Texture, binding: Int) {
+    func setTexture(_ texture: Texture, binding: Int) {
         self.setTextureArray([texture], binding: binding)
     }
 
-    public func setTextureArray(_ textures: [Texture], binding: Int) {
+    func setTextureArray(_ textures: [Texture], binding: Int) {
         if let descriptor = self.layout.first(where: { $0.binding == binding }) {
 
             let startingIndex = 0
@@ -74,11 +74,11 @@ final class MetalShaderBindingSet: ShaderBindingSet {
         }
     }
 
-    public func setSamplerState(_ sampler: SamplerState, binding: Int) {
+    func setSamplerState(_ sampler: SamplerState, binding: Int) {
         self.setSamplerStateArray([sampler], binding: binding)
     }
 
-    public func setSamplerStateArray(_ samplers: [SamplerState], binding: Int) {
+    func setSamplerStateArray(_ samplers: [SamplerState], binding: Int) {
         if let descriptor = self.layout.first(where: { $0.binding == binding }) {
 
             let startingIndex = 0

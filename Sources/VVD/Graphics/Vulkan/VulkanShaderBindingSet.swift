@@ -2,7 +2,7 @@
 //  File: VulkanShaderBindingSet.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
@@ -350,5 +350,4 @@ final class VulkanShaderBindingSet: ShaderBindingSet {
         }
     }
 }
-
 #endif //if ENABLE_VULKAN

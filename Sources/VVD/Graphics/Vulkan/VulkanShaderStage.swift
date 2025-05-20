@@ -2,7 +2,7 @@
 //  File: VulkanShaderStage.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
@@ -10,44 +10,46 @@ import Vulkan
 
 extension ShaderStage {
     func from(vkFlagBits: VkShaderStageFlagBits) -> Self {
-        switch vkFlagBits {
+        let stage: ShaderStage = switch vkFlagBits {
         case VK_SHADER_STAGE_VERTEX_BIT:
-            return .vertex
+                .vertex
         case VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT:
-            return .tessellationControl
+                .tessellationControl
         case VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT:
-            return .tessellationEvaluation
+                .tessellationEvaluation
         case VK_SHADER_STAGE_GEOMETRY_BIT:
-            return .geometry
+                .geometry
         case VK_SHADER_STAGE_FRAGMENT_BIT:
-            return .fragment
+                .fragment
         case VK_SHADER_STAGE_COMPUTE_BIT:
-            return .compute
+                .compute
         default:
-            assertionFailure("Unknown shader stage!")
-            return .unknown
+                .unknown
         }
+        assert(stage != .unknown, "Unknown shader stage!")
+        return stage
     }
     
     func vkFlagBits() -> VkShaderStageFlagBits
     {
-        switch self {
+        let flags: VkShaderStageFlagBits = switch self {
         case .vertex:
-            return VK_SHADER_STAGE_VERTEX_BIT
+            VK_SHADER_STAGE_VERTEX_BIT
         case .tessellationControl:
-            return VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT
+            VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT
         case .tessellationEvaluation:
-            return VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT
+            VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT
         case .geometry:
-            return VK_SHADER_STAGE_GEOMETRY_BIT
+            VK_SHADER_STAGE_GEOMETRY_BIT
         case .fragment:
-            return VK_SHADER_STAGE_FRAGMENT_BIT
+            VK_SHADER_STAGE_FRAGMENT_BIT
         case .compute:
-            return VK_SHADER_STAGE_COMPUTE_BIT
+            VK_SHADER_STAGE_COMPUTE_BIT
         default:
-            assertionFailure("Unknown shader stage!")
-            return VkShaderStageFlagBits(0)
-        }        
+            VkShaderStageFlagBits(0)
+        }
+        assert(flags != VkShaderStageFlagBits(0), "Unknown shader stage!")
+        return flags
     }
     
     func vkFlags() -> VkShaderStageFlags {
@@ -102,5 +104,4 @@ extension ShaderStageFlags {
         return flags
     }
 }
-
 #endif //if ENABLE_VULKAN

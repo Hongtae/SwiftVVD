@@ -2,7 +2,7 @@
 //  File: VulkanComputeCommandEncoder.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
@@ -99,6 +99,7 @@ final class VulkanComputeCommandEncoder: ComputeCommandEncoder {
             self.encoder!.events.append(event)
         }
     }
+
     func signalEvent(_ event: GPUEvent) {
         assert(event is VulkanSemaphore)
         if let semaphore = event as? VulkanSemaphore {
@@ -116,6 +117,7 @@ final class VulkanComputeCommandEncoder: ComputeCommandEncoder {
             self.encoder!.semaphores.append(sema)
         }
     }
+
     func signalSemaphoreValue(_ sema: GPUSemaphore, value: UInt64) {
         assert(sema is VulkanTimelineSemaphore)
         if let semaphore = sema as? VulkanTimelineSemaphore {
@@ -217,5 +219,4 @@ final class VulkanComputeCommandEncoder: ComputeCommandEncoder {
         self.encoder!.commands.append(command)
     }
 }
-
 #endif //if ENABLE_VULKAN

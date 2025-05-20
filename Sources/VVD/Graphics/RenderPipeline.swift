@@ -2,7 +2,7 @@
 //  File: RenderPipeline.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 public struct RenderPipelineColorAttachmentDescriptor {
@@ -63,6 +63,7 @@ public struct RenderPipelineDescriptor {
     public var primitiveTopology: PrimitiveType
 
     public var triangleFillMode: TriangleFillMode
+    public var rasterSampleCount: Int
     public var rasterizationEnabled: Bool
 
     public init(vertexFunction: ShaderFunction? = nil,
@@ -72,6 +73,7 @@ public struct RenderPipelineDescriptor {
                 depthStencilAttachmentPixelFormat: PixelFormat = .invalid,
                 primitiveTopology: PrimitiveType = .point,
                 triangleFillMode: TriangleFillMode = .fill,
+                rasterSampleCount: Int = 1,
                 rasterizationEnabled: Bool = true) {
         self.vertexFunction = vertexFunction
         self.fragmentFunction = fragmentFunction
@@ -80,6 +82,7 @@ public struct RenderPipelineDescriptor {
         self.depthStencilAttachmentPixelFormat = depthStencilAttachmentPixelFormat
         self.primitiveTopology = primitiveTopology
         self.triangleFillMode = triangleFillMode
+        self.rasterSampleCount = rasterSampleCount
         self.rasterizationEnabled = rasterizationEnabled
     }
 }

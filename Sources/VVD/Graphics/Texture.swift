@@ -2,7 +2,7 @@
 //  File: Texture.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 public enum TextureType {
@@ -34,9 +34,12 @@ public protocol Texture: AnyObject {
     var depth: Int { get }
     var mipmapCount: Int { get }
     var arrayLength: Int { get }
+    var sampleCount: Int { get }
 
     var type: TextureType { get }
     var pixelFormat: PixelFormat { get }
+
+    var isTransient: Bool { get }
 
     var device: GraphicsDevice { get }
 

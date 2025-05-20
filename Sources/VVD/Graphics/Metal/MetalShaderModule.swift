@@ -2,7 +2,7 @@
 //  File: MetalShaderModule.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_METAL
@@ -40,7 +40,7 @@ extension ShaderResourceStructMember {
 
 final class MetalShaderModule: ShaderModule {
 
-    public var device: GraphicsDevice
+    var device: GraphicsDevice
     let library: MTLLibrary
 
     struct NameConversion {
@@ -48,7 +48,7 @@ final class MetalShaderModule: ShaderModule {
         var cleansed: String
     }
 
-    public let functionNames: [String] // spirv names
+    let functionNames: [String] // spirv names
     let functionNameMap: [String: String]   // spirv to msl table
     var workgroupSize: MTLSize
 
@@ -87,7 +87,7 @@ final class MetalShaderModule: ShaderModule {
         }
     }
 
-    public func makeFunction(name: String) -> ShaderFunction? {
+    func makeFunction(name: String) -> ShaderFunction? {
         if let fname = functionNameMap[name] {
             if let fn = self.library.makeFunction(name: fname) {
                 return MetalShaderFunction(module: self, function: fn, workgroupSize: workgroupSize, name: name)
@@ -96,7 +96,7 @@ final class MetalShaderModule: ShaderModule {
         return nil
     }
 
-    public func makeFunction(name: String, constantValues: [ShaderFunctionConstantValue]) -> ShaderFunction? {
+    func makeFunction(name: String, constantValues: [ShaderFunctionConstantValue]) -> ShaderFunction? {
         if constantValues.isEmpty {
             return makeFunction(name: name)
         }

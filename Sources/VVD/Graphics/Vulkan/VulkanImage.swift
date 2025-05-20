@@ -2,7 +2,7 @@
 //  File: VulkanImage.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
@@ -17,10 +17,18 @@ final class VulkanImage {
     var extent: VkExtent3D
     var mipLevels: UInt32
     var arrayLayers: UInt32
+    var samples: Int32
     var usage: VkImageUsageFlags
  
     let memory: VulkanMemoryBlock?
     let device: GraphicsDevice
+
+    var isTransient: Bool {
+        if let flags = memory?.propertyFlags, flags & UInt32(VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT.rawValue) != 0 {
+            return true
+        }
+        return usage & UInt32(VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT.rawValue) != 0
+    }
 
     private struct LayoutAccessInfo {
         var layout: VkImageLayout
@@ -42,6 +50,7 @@ final class VulkanImage {
         self.extent = imageCreateInfo.extent
         self.mipLevels = imageCreateInfo.mipLevels
         self.arrayLayers = imageCreateInfo.arrayLayers
+        self.samples = imageCreateInfo.samples.rawValue
         self.usage = imageCreateInfo.usage
 
         self.layoutInfo = LayoutAccessInfo(layout: imageCreateInfo.initialLayout,
@@ -59,6 +68,7 @@ final class VulkanImage {
         assert(extent.depth > 0)
         assert(mipLevels > 0)
         assert(arrayLayers > 0)
+        assert(samples > 0)
         assert(format != VK_FORMAT_UNDEFINED)
     }
 
@@ -73,6 +83,7 @@ final class VulkanImage {
         self.extent = VkExtent3D(width: 0, height: 0, depth: 0)
         self.mipLevels = 1
         self.arrayLayers = 1
+        self.samples = 1
         self.usage = 0
 
         self.layoutInfo = LayoutAccessInfo(layout: VK_IMAGE_LAYOUT_UNDEFINED,
@@ -166,11 +177,11 @@ final class VulkanImage {
 
     @discardableResult
     func setLayout(_ layout: VkImageLayout,
-                          accessMask: VkAccessFlags2,
-                          stageBegin: VkPipelineStageFlags2, // this barrier's dst-stage
-                          stageEnd: VkPipelineStageFlags2,   // next barrier's src-stage
-                          queueFamilyIndex: UInt32 = VK_QUEUE_FAMILY_IGNORED,
-                          commandBuffer: VkCommandBuffer) -> VkImageLayout {
+                   accessMask: VkAccessFlags2,
+                   stageBegin: VkPipelineStageFlags2, // this barrier's dst-stage
+                   stageEnd: VkPipelineStageFlags2,   // next barrier's src-stage
+                   queueFamilyIndex: UInt32 = VK_QUEUE_FAMILY_IGNORED,
+                   commandBuffer: VkCommandBuffer) -> VkImageLayout {
         assert(layout != VK_IMAGE_LAYOUT_UNDEFINED)
         assert(layout != VK_IMAGE_LAYOUT_PREINITIALIZED)
 
@@ -247,47 +258,45 @@ final class VulkanImage {
     var depth: Int       { Int(self.extent.depth) }
     var mipmapCount: Int { Int(self.mipLevels) }
     var arrayLength: Int { Int(self.arrayLayers) }
+    var sampleCount: Int { Int(self.samples) }
 
     var type: TextureType {
         switch self.imageType {
-            case VK_IMAGE_TYPE_1D:  return .type1D
-            case VK_IMAGE_TYPE_2D:  return .type2D
-            case VK_IMAGE_TYPE_3D:  return .type3D
-            default:                return .unknown
+        case VK_IMAGE_TYPE_1D:  .type1D
+        case VK_IMAGE_TYPE_2D:  .type2D
+        case VK_IMAGE_TYPE_3D:  .type3D
+        default:                .unknown
         }
     }
     var pixelFormat: PixelFormat { .from(vkFormat: self.format) }
 
     static func commonAccessMask(forLayout layout: VkImageLayout) -> VkAccessFlags2 {
-        var accessMask = VK_ACCESS_2_NONE 
         switch layout {
         case VK_IMAGE_LAYOUT_UNDEFINED:
-            accessMask = VK_ACCESS_2_NONE
+            return VK_ACCESS_2_NONE
         case VK_IMAGE_LAYOUT_GENERAL:
-            accessMask = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT
+            return VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT
         case VK_IMAGE_LAYOUT_PREINITIALIZED:
-            accessMask = VK_ACCESS_2_HOST_WRITE_BIT
+            return VK_ACCESS_2_HOST_WRITE_BIT
         case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
-            accessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT
+            return VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT
         case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
-            accessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT
+            return VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT
         case VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
              VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_STENCIL_ATTACHMENT_OPTIMAL,
              VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_STENCIL_READ_ONLY_OPTIMAL:
-            accessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT
+            return VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT
         case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
-            accessMask = VK_ACCESS_2_SHADER_READ_BIT
+            return VK_ACCESS_2_SHADER_READ_BIT
         case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
-            accessMask = VK_ACCESS_2_TRANSFER_READ_BIT
+            return VK_ACCESS_2_TRANSFER_READ_BIT
         case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
-            accessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT
+            return VK_ACCESS_2_TRANSFER_WRITE_BIT
         case VK_IMAGE_LAYOUT_PRESENT_SRC_KHR:
-            accessMask = VK_ACCESS_2_NONE
+            return VK_ACCESS_2_NONE
         default:
-            accessMask = VK_ACCESS_2_NONE
+            return VK_ACCESS_2_NONE
         }
-        return accessMask
     }
 }
-
 #endif //if ENABLE_VULKAN

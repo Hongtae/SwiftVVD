@@ -2,7 +2,7 @@
 //  File: VulkanUnsafePointer.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
@@ -79,5 +79,4 @@ func appendNextChain<T>(_ s: inout T, _ pNext: UnsafeRawPointer) {
             .assumingMemoryBound(to: VkBaseOutStructure.self)
     }
 }
-
 #endif //if ENABLE_VULKAN

@@ -2,7 +2,7 @@
 //  File: PixelFormat.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 public enum PixelFormat {
@@ -104,6 +104,25 @@ public extension PixelFormat {
     var isStencilFormat: Bool {
         switch self {
         case .stencil8, .depth24Unorm_stencil8, .depth32Float_stencil8:
+            return true
+        default:
+            return false
+        }
+    }
+    var isIntegerFormat: Bool {
+        switch self {
+        case .r8Uint, .r8Sint, 
+             .r16Uint, .r16Sint,
+             .rg8Uint, .rg8Sint,
+             .r32Uint, .r32Sint,
+             .rg16Uint, .rg16Sint,
+             .rgba8Uint, .rgba8Sint,
+             .rgb10a2Uint,
+             .rg32Uint, .rg32Sint,
+             .rgba16Uint, .rgba16Sint,
+             .rgba32Uint, .rgba32Sint:
+            return true
+        case .stencil8:
             return true
         default:
             return false

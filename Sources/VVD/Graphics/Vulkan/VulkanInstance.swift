@@ -2,7 +2,7 @@
 //  File: VulkanInstance.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
@@ -468,8 +468,8 @@ final class VulkanInstance {
     }
 
     func makeDevice(identifier: String,
-                           requiredExtensions: [String] = [],
-                           optionalExtensions: [String] = []) -> VulkanGraphicsDevice? {
+                    requiredExtensions: [String] = [],
+                    optionalExtensions: [String] = []) -> VulkanGraphicsDevice? {
         for device in self.physicalDevices {
             if device.registryID == identifier {
                 return VulkanGraphicsDevice(instance: self,
@@ -482,7 +482,7 @@ final class VulkanInstance {
     }
 
     func makeDevice(requiredExtensions: [String] = [],
-                           optionalExtensions: [String] = []) -> VulkanGraphicsDevice? {
+                    optionalExtensions: [String] = []) -> VulkanGraphicsDevice? {
         for device in self.physicalDevices {
             if let vgd = VulkanGraphicsDevice(instance: self,
                                               physicalDevice: device,
@@ -492,6 +492,6 @@ final class VulkanInstance {
             }
         }
         return nil
-    }    
+    }
 }
 #endif //if ENABLE_VULKAN

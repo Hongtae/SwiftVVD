@@ -2,7 +2,7 @@
 //  File: MetalCopyCommandEncoder.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_METAL
@@ -64,14 +64,14 @@ final class MetalCopyCommandEncoder: CopyCommandEncoder {
     }
 
     private var encoder: Encoder?
-    public let commandBuffer: CommandBuffer
+    let commandBuffer: CommandBuffer
 
     init(buffer: MetalCommandBuffer) {
         self.commandBuffer = buffer
         self.encoder = Encoder()
     }
 
-    public func copy(from src: GPUBuffer, sourceOffset: Int, to dst: GPUBuffer, destinationOffset: Int, size: Int) {
+    func copy(from src: GPUBuffer, sourceOffset: Int, to dst: GPUBuffer, destinationOffset: Int, size: Int) {
         assert(self.encoder != nil)
         assert(src is MetalBuffer)
         assert(dst is MetalBuffer)
@@ -91,7 +91,7 @@ final class MetalCopyCommandEncoder: CopyCommandEncoder {
         }
     }
 
-    public func copy(from src: GPUBuffer, sourceOffset: BufferImageOrigin, to dst: Texture, destinationOffset: TextureOrigin, size: TextureSize) {
+    func copy(from src: GPUBuffer, sourceOffset: BufferImageOrigin, to dst: Texture, destinationOffset: TextureOrigin, size: TextureSize) {
         assert(self.encoder != nil)
         assert(src is MetalBuffer)
         assert(dst is MetalTexture)
@@ -129,7 +129,7 @@ final class MetalCopyCommandEncoder: CopyCommandEncoder {
         }
     }
 
-    public func copy(from src: Texture, sourceOffset: TextureOrigin, to dst: GPUBuffer, destinationOffset: BufferImageOrigin, size: TextureSize) {
+    func copy(from src: Texture, sourceOffset: TextureOrigin, to dst: GPUBuffer, destinationOffset: BufferImageOrigin, size: TextureSize) {
         assert(self.encoder != nil)
         assert(src is MetalTexture)
         assert(dst is MetalBuffer)
@@ -167,7 +167,7 @@ final class MetalCopyCommandEncoder: CopyCommandEncoder {
         }
     }
 
-    public func copy(from src: Texture, sourceOffset: TextureOrigin, to dst: Texture, destinationOffset: TextureOrigin, size: TextureSize) {
+    func copy(from src: Texture, sourceOffset: TextureOrigin, to dst: Texture, destinationOffset: TextureOrigin, size: TextureSize) {
         assert(self.encoder != nil)
         assert(src is MetalTexture)
         assert(dst is MetalTexture)
@@ -197,7 +197,7 @@ final class MetalCopyCommandEncoder: CopyCommandEncoder {
         }
     }
 
-    public func fill(buffer: GPUBuffer, offset: Int, length: Int, value: UInt8) {
+    func fill(buffer: GPUBuffer, offset: Int, length: Int, value: UInt8) {
         assert(self.encoder != nil)
         assert(buffer is MetalBuffer)
 
@@ -212,7 +212,7 @@ final class MetalCopyCommandEncoder: CopyCommandEncoder {
         }
     }
 
-    public func endEncoding() {
+    func endEncoding() {
         assert(self.encoder != nil)
         if let commandBuffer = self.commandBuffer as? MetalCommandBuffer,
            let encoder = self.encoder {
@@ -221,11 +221,11 @@ final class MetalCopyCommandEncoder: CopyCommandEncoder {
         self.encoder = nil
     }
 
-    public var isCompleted: Bool {
+    var isCompleted: Bool {
         return self.encoder == nil
     }
 
-    public func waitEvent(_ event: GPUEvent) {
+    func waitEvent(_ event: GPUEvent) {
         assert(event is MetalEvent)
         assert(self.encoder != nil)
         if let event = event as? MetalEvent, let encoder = self.encoder {
@@ -234,7 +234,7 @@ final class MetalCopyCommandEncoder: CopyCommandEncoder {
         }
     }
 
-    public func signalEvent(_ event: GPUEvent) {
+    func signalEvent(_ event: GPUEvent) {
         assert(event is MetalEvent)
         assert(self.encoder != nil)
         if let event = event as? MetalEvent, let encoder = self.encoder {
@@ -243,7 +243,7 @@ final class MetalCopyCommandEncoder: CopyCommandEncoder {
         }
     }
 
-    public func waitSemaphoreValue(_ semaphore: GPUSemaphore, value: UInt64) {
+    func waitSemaphoreValue(_ semaphore: GPUSemaphore, value: UInt64) {
         assert(semaphore is MetalSemaphore)
         assert(self.encoder != nil)
         if let semaphore = semaphore as? MetalSemaphore,
@@ -260,7 +260,7 @@ final class MetalCopyCommandEncoder: CopyCommandEncoder {
         }
     }
 
-    public func signalSemaphoreValue(_ semaphore: GPUSemaphore, value: UInt64) {
+    func signalSemaphoreValue(_ semaphore: GPUSemaphore, value: UInt64) {
         assert(semaphore is MetalSemaphore)
         assert(self.encoder != nil)
         if let semaphore = semaphore as? MetalSemaphore,

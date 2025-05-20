@@ -2,7 +2,7 @@
 //  File: VulkanImageView.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
@@ -49,13 +49,15 @@ final class VulkanImageView: Texture {
     var depth: Int       { self.image!.depth }
     var mipmapCount: Int { self.image!.mipmapCount }
     var arrayLength: Int { self.image!.arrayLength }
+    var sampleCount: Int { self.image!.sampleCount }
 
     var type: TextureType    { self.image!.type }
     var pixelFormat: PixelFormat { self.image!.pixelFormat }
+
+    var isTransient: Bool { self.image!.isTransient }
 
     func makeTextureView(pixelFormat: PixelFormat) -> Texture? {
         self.image?.makeImageView(format: pixelFormat, parent: self)
     }
 }
-
 #endif //if ENABLE_VULKAN

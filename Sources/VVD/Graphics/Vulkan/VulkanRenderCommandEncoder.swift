@@ -2,7 +2,7 @@
 //  File: VulkanRenderCommandEncoder.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
@@ -22,10 +22,21 @@ final class VulkanRenderCommandEncoder: RenderCommandEncoder {
         var imageViewLayouts: VulkanDescriptorSet.ImageViewLayoutMap = [:]
     }
     
+    struct RenderContext {
+        var renderingInfo: VkRenderingInfo
+        var viewport: VkViewport
+        var scissorRect: VkRect2D
+        var colorAttachments: [VulkanImageView]
+        var colorResolveTargets: [VulkanImageView]
+        var depthStencilAttachment: VulkanImageView?
+        var depthStencilResolveTarget: VulkanImageView?
+        var _bufferHolder: TemporaryBufferHolder
+    }
+
     final class Encoder: VulkanCommandEncoder {
-        let renderPassDescriptor: RenderPassDescriptor
         unowned let commandBuffer: VulkanCommandBuffer
         let device: VulkanGraphicsDevice
+        let context: RenderContext
 
         var pipelineStateObjects: [VulkanRenderPipelineState] = []
         var descriptorSets: [VulkanDescriptorSet] = []
@@ -44,18 +55,21 @@ final class VulkanRenderCommandEncoder: RenderCommandEncoder {
         var drawCount = 0
         var setDynamicStates: Set<VkDynamicState> = []
 
-        init(commandBuffer: VulkanCommandBuffer, descriptor: RenderPassDescriptor) {   
+        init(commandBuffer: VulkanCommandBuffer, context: RenderContext) {   
             self.commandBuffer = commandBuffer
+            self.context = context
             self.device = commandBuffer.device as! VulkanGraphicsDevice
-            self.renderPassDescriptor = descriptor
             super.init()
 
             self.commands.reserveCapacity(self.initialNumberOfCommands)
             self.setupCommands.reserveCapacity(self.initialNumberOfCommands)
             self.cleanupCommands.reserveCapacity(self.initialNumberOfCommands)
 
-            for colorAttachment in renderPassDescriptor.colorAttachments {
-                if let rt = colorAttachment.renderTarget as? VulkanImageView, rt.image != nil {
+            let colorAttachments = context.colorAttachments + context.colorResolveTargets
+            let depthStencilAttachments = [context.depthStencilAttachment, context.depthStencilResolveTarget].compactMap { $0 }
+
+            for rt in colorAttachments {
+                if rt.image != nil {
                     if let semaphore = rt.waitSemaphore {
                         self.addWaitSemaphore(semaphore, value: 0, flags: VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT)
                     }
@@ -64,12 +78,14 @@ final class VulkanRenderCommandEncoder: RenderCommandEncoder {
                     }
                 }
             }
-            if let rt = renderPassDescriptor.depthStencilAttachment.renderTarget as? VulkanImageView, rt.image != nil {
-                if let semaphore = rt.waitSemaphore {
-                    self.addWaitSemaphore(semaphore, value: 0, flags: VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT)
-                }
-                if let semaphore = rt.signalSemaphore {
-                    self.addSignalSemaphore(semaphore, value: 0, flags: VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT)
+            for rt in depthStencilAttachments {
+                if rt.image != nil {
+                    if let semaphore = rt.waitSemaphore {
+                        self.addWaitSemaphore(semaphore, value: 0, flags: VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT)
+                    }
+                    if let semaphore = rt.signalSemaphore {
+                        self.addSignalSemaphore(semaphore, value: 0, flags: VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT)
+                    }
                 }
             }
         }
@@ -107,157 +123,66 @@ final class VulkanRenderCommandEncoder: RenderCommandEncoder {
                                 commandBuffer: commandBuffer)
             }
 
-            // initialize render pass
-            var renderingInfo = VkRenderingInfo()
-            renderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO
-            renderingInfo.flags = 0
-            renderingInfo.layerCount = 1
+            // initialize attachment image layouts
+            assert(context.colorAttachments.isEmpty == false || context.depthStencilAttachment != nil,
+                   "RenderPass must have at least one color or depth/stencil attachment.")
 
-            var frameWidth: Int = 0
-            var frameHeight: Int = 0
-
-            let tempHolder = TemporaryBufferHolder(label: "VulkanRenderCommandEncoder.Encoder.encode")
-
-            var colorAttachments: [VkRenderingAttachmentInfo] = []
-            for colorAttachment in self.renderPassDescriptor.colorAttachments {
-                var attachment = VkRenderingAttachmentInfo()
-                attachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO
-                attachment.imageView = nil
-                attachment.imageLayout = VK_IMAGE_LAYOUT_UNDEFINED
-                attachment.resolveMode = VK_RESOLVE_MODE_NONE
-                attachment.resolveImageView = nil
-                attachment.resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED 
-
-                switch colorAttachment.loadAction {
-                case .load:
-                    attachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD
-                case .clear:
-                    attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR
-                default:
-                    attachment.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE
-                }
-                switch colorAttachment.storeAction {
-                case .dontCare:
-                    attachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE
-                case .store:
-                    attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE
-                }
-
-                attachment.clearValue.color.float32 = (Float32(colorAttachment.clearColor.r),
-                                                       Float32(colorAttachment.clearColor.g),
-                                                       Float32(colorAttachment.clearColor.b),
-                                                       Float32(colorAttachment.clearColor.a))
-
-                if let renderTarget = colorAttachment.renderTarget {
-                    assert(renderTarget is VulkanImageView)
-                    let imageView = renderTarget as! VulkanImageView
-
-                    attachment.imageView = imageView.imageView
-                    attachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
-
-                    if let image = imageView.image {
-                        assert(image.pixelFormat.isColorFormat)
-
-                        frameWidth = (frameWidth > 0) ? min(frameWidth, image.width) : image.width
-                        frameHeight = (frameHeight > 0) ? min(frameHeight, image.height) : image.height
-
-                        image.setLayout(
-                            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                            accessMask: VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-                            stageBegin: VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                            stageEnd: VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                            queueFamilyIndex: self.commandBuffer.queueFamily.familyIndex,
-                            commandBuffer: commandBuffer)
-                    }
-                }
-                colorAttachments.append(attachment)
-            }
-            if colorAttachments.isEmpty == false {
-                renderingInfo.colorAttachmentCount = UInt32(colorAttachments.count)
-                renderingInfo.pColorAttachments = unsafePointerCopy(collection: colorAttachments, holder: tempHolder)
-            }
-
-            if let renderTarget = self.renderPassDescriptor.depthStencilAttachment.renderTarget {
-                assert(renderTarget is VulkanImageView)
-                let imageView = renderTarget as! VulkanImageView
-
-                var depthStencilAttachment = VkRenderingAttachmentInfo()
-                depthStencilAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO
-
-                // VUID-VkRenderingInfo-pDepthAttachment-06085
-                depthStencilAttachment.imageView = imageView.imageView
-                depthStencilAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
-                depthStencilAttachment.resolveMode = VK_RESOLVE_MODE_NONE
-                depthStencilAttachment.resolveImageView = nil
-                depthStencilAttachment.resolveImageLayout = VK_IMAGE_LAYOUT_UNDEFINED 
-
-                switch self.renderPassDescriptor.depthStencilAttachment.loadAction {
-                case .load:
-                    depthStencilAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD
-                case .clear:
-                    depthStencilAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR
-                default:
-                    depthStencilAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE
-                }
-                switch self.renderPassDescriptor.depthStencilAttachment.storeAction {
-                case .store:
-                    depthStencilAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE
-                default:
-                    depthStencilAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE
-                }
-                depthStencilAttachment.clearValue.depthStencil.depth = Float(self.renderPassDescriptor.depthStencilAttachment.clearDepth)
-                depthStencilAttachment.clearValue.depthStencil.stencil = self.renderPassDescriptor.depthStencilAttachment.clearStencil
-
-                if let image = imageView.image {
-                    assert(image.pixelFormat.isDepthFormat || image.pixelFormat.isStencilFormat)
-
-                    let p = unsafePointerCopy(from: depthStencilAttachment, holder: tempHolder)
-                    if image.pixelFormat.isDepthFormat {
-                        renderingInfo.pDepthAttachment = p
-                    }
-                    if image.pixelFormat.isStencilFormat {
-                        renderingInfo.pStencilAttachment = p
-                    }
-
-                    frameWidth = (frameWidth > 0) ? min(frameWidth, image.width) : image.width
-                    frameHeight = (frameHeight > 0) ? min(frameHeight, image.height) : image.height
-
+            for colorAttachment in context.colorAttachments {
+                if let image = colorAttachment.image {
                     image.setLayout(
-                        VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-                        accessMask: VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-                        stageBegin: VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
-                        stageEnd: VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                        accessMask: VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                        stageBegin: VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                        stageEnd: VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                         queueFamilyIndex: self.commandBuffer.queueFamily.familyIndex,
                         commandBuffer: commandBuffer)
                 }
             }
+            for resolveTarget in context.colorResolveTargets {
+                if let image = resolveTarget.image {
+                    image.setLayout(
+                        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                        accessMask: VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                        stageBegin: VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                        stageEnd: VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                        queueFamilyIndex: self.commandBuffer.queueFamily.familyIndex,
+                        commandBuffer: commandBuffer)
+                }
+            }
+            if let image = context.depthStencilAttachment?.image {
+                image.setLayout(
+                    VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                    accessMask: VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                    stageBegin: VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
+                    stageEnd: VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                    queueFamilyIndex: self.commandBuffer.queueFamily.familyIndex,
+                    commandBuffer: commandBuffer)
+            }
+            if let image = context.depthStencilResolveTarget?.image {
+                image.setLayout(
+                    VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                    accessMask: VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                    stageBegin: VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
+                    stageEnd: VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                    queueFamilyIndex: self.commandBuffer.queueFamily.familyIndex,
+                    commandBuffer: commandBuffer)
+            }
 
-            renderingInfo.renderArea.offset.x = 0
-            renderingInfo.renderArea.offset.y = 0
-            renderingInfo.renderArea.extent.width = UInt32(frameWidth)
-            renderingInfo.renderArea.extent.height = UInt32(frameHeight)
-
+            // begin render pass
+            var renderingInfo = context.renderingInfo
             vkCmdBeginRendering(commandBuffer, &renderingInfo)
 
             // setup dynamic states to default.
-            // VK_DYNAMIC_STATE_VIEWPORT
-            var viewport = VkViewport(x: 0.0,
-                                      y: 0.0,
-                                      width: Float(frameWidth),
-                                      height: Float(frameHeight),
-                                      minDepth: 0.0,
-                                      maxDepth: 1.0)
-            if flipViewportY {
-                viewport.y = viewport.y + viewport.height  // set origin to lower-left.
-                viewport.height = -(viewport.height) // negative height.
-            }
             if setDynamicStates.contains(VK_DYNAMIC_STATE_VIEWPORT) == false {
+                var viewport = context.viewport
+                if flipViewportY {
+                    viewport.y = viewport.y + viewport.height  // set origin to lower-left.
+                    viewport.height = -(viewport.height) // negative height.
+                }
                 vkCmdSetViewport(commandBuffer, 0, 1, &viewport)
             }
             if setDynamicStates.contains(VK_DYNAMIC_STATE_SCISSOR) == false {
-                var scissorRect = VkRect2D(offset: VkOffset2D(x: 0, y: 0),
-                                           extent: VkExtent2D(width: UInt32(frameWidth),
-                                                              height: UInt32(frameHeight)))
+                var scissorRect = context.scissorRect
                 vkCmdSetScissor(commandBuffer, 0, 1, &scissorRect)
             }
             if setDynamicStates.contains(VK_DYNAMIC_STATE_LINE_WIDTH) == false {
@@ -314,13 +239,9 @@ final class VulkanRenderCommandEncoder: RenderCommandEncoder {
     private var encoder: Encoder?
     let commandBuffer: CommandBuffer
 
-    init(buffer: VulkanCommandBuffer, descriptor: RenderPassDescriptor) {   
+    init(buffer: VulkanCommandBuffer, context: RenderContext) {   
         self.commandBuffer = buffer
-        self.encoder = Encoder(commandBuffer: buffer, descriptor: descriptor)
-    }
-
-    func reset(descriptor: RenderPassDescriptor) {   
-        self.encoder = Encoder(commandBuffer: self.commandBuffer as! VulkanCommandBuffer, descriptor: descriptor)
+        self.encoder = Encoder(commandBuffer: buffer, context: context)
     }
 
     func endEncoding() {
@@ -339,6 +260,7 @@ final class VulkanRenderCommandEncoder: RenderCommandEncoder {
             self.encoder!.events.append(event)
         }
     }
+
     func signalEvent(_ event: GPUEvent) {
         assert(event is VulkanSemaphore)
         if let semaphore = event as? VulkanSemaphore {
@@ -356,6 +278,7 @@ final class VulkanRenderCommandEncoder: RenderCommandEncoder {
             self.encoder!.semaphores.append(sema)
         }
     }
+    
     func signalSemaphoreValue(_ sema: GPUSemaphore, value: UInt64) {
         assert(sema is VulkanTimelineSemaphore)
         if let semaphore = sema as? VulkanTimelineSemaphore {
@@ -557,11 +480,10 @@ final class VulkanRenderCommandEncoder: RenderCommandEncoder {
 
     func setCullMode(_ mode: CullMode) {
         let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
-            let flags: VkCullModeFlags
-            switch mode {
-            case .none:     flags = VkCullModeFlags(VK_CULL_MODE_NONE.rawValue)
-            case .front:    flags = VkCullModeFlags(VK_CULL_MODE_FRONT_BIT.rawValue)
-            case .back:     flags = VkCullModeFlags(VK_CULL_MODE_BACK_BIT.rawValue)
+            let flags = switch mode {
+            case .none:     VkCullModeFlags(VK_CULL_MODE_NONE.rawValue)
+            case .front:    VkCullModeFlags(VK_CULL_MODE_FRONT_BIT.rawValue)
+            case .back:     VkCullModeFlags(VK_CULL_MODE_BACK_BIT.rawValue)
             }
             vkCmdSetCullMode(commandBuffer, flags)
         }
@@ -573,10 +495,9 @@ final class VulkanRenderCommandEncoder: RenderCommandEncoder {
 
     func setFrontFacing(_ winding: Winding) {
            let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
-            let frontFace: VkFrontFace
-            switch winding {
-            case .clockwise:        frontFace = VkFrontFace(VK_FRONT_FACE_CLOCKWISE.rawValue)
-            case .counterClockwise: frontFace = VkFrontFace(VK_FRONT_FACE_COUNTER_CLOCKWISE.rawValue)
+            let frontFace = switch winding {
+            case .clockwise:        VkFrontFace(VK_FRONT_FACE_CLOCKWISE.rawValue)
+            case .counterClockwise: VkFrontFace(VK_FRONT_FACE_COUNTER_CLOCKWISE.rawValue)
             }
             vkCmdSetFrontFace(commandBuffer, frontFace)
         }
@@ -721,10 +642,9 @@ final class VulkanRenderCommandEncoder: RenderCommandEncoder {
             assert(bufferView.buffer != nil)
             guard let buffer = bufferView.buffer else { return }
 
-            var type: VkIndexType
-            switch indexType {
-                case .uint16:   type = VK_INDEX_TYPE_UINT16
-                case .uint32:   type = VK_INDEX_TYPE_UINT32
+            let type = switch indexType {
+            case .uint16:   VK_INDEX_TYPE_UINT16
+            case .uint32:   VK_INDEX_TYPE_UINT32
             }
 
             let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
@@ -742,5 +662,4 @@ final class VulkanRenderCommandEncoder: RenderCommandEncoder {
         }
     }
 }
-
 #endif //if ENABLE_VULKAN

@@ -2,7 +2,7 @@
 //  File: MetalGraphicsDevice.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_METAL
@@ -12,7 +12,7 @@ import SPIRV_Cross
 
 final class MetalGraphicsDevice: GraphicsDevice {
 
-    public var name: String { device.name }
+    var name: String { device.name }
     let device: MTLDevice
 
     init(device: MTLDevice) {
@@ -54,14 +54,14 @@ final class MetalGraphicsDevice: GraphicsDevice {
         }
     }
 
-    public func makeCommandQueue(flags: CommandQueueFlags) -> CommandQueue? {
+    func makeCommandQueue(flags: CommandQueueFlags) -> CommandQueue? {
         if let queue = self.device.makeCommandQueue() {
             return MetalCommandQueue(device: self, queue: queue)
         }
         return nil
     }
 
-    public func makeShaderModule(from shader: Shader) -> ShaderModule? {
+    func makeShaderModule(from shader: Shader) -> ShaderModule? {
         if let data = shader.spirvData {
             let stage: SpvExecutionModel
             switch shader.stage {
@@ -302,11 +302,11 @@ final class MetalGraphicsDevice: GraphicsDevice {
         return nil
     }
 
-    public func makeShaderBindingSet(layout: ShaderBindingSetLayout) -> ShaderBindingSet? {
+    func makeShaderBindingSet(layout: ShaderBindingSetLayout) -> ShaderBindingSet? {
         return MetalShaderBindingSet(device: self, layout: layout.bindings)
     }
 
-    public func makeRenderPipelineState(descriptor: RenderPipelineDescriptor, reflection: UnsafeMutablePointer<PipelineReflection>?) -> RenderPipelineState? {
+    func makeRenderPipelineState(descriptor: RenderPipelineDescriptor, reflection: UnsafeMutablePointer<PipelineReflection>?) -> RenderPipelineState? {
         var vertexFunction: MetalShaderFunction? = nil
         var fragmentFunction: MetalShaderFunction? = nil
 
@@ -336,99 +336,99 @@ final class MetalGraphicsDevice: GraphicsDevice {
 
         let vertexFormat = { (f: VertexFormat) -> MTLVertexFormat in
             switch f {
-            case .uchar:                    return .uchar
-            case .uchar2:                   return .uchar2
-            case .uchar3:                   return .uchar3
-            case .uchar4:                   return .uchar4
-            case .char:                     return .char
-            case .char2:                    return .char2
-            case .char3:                    return .char3
-            case .char4:                    return .char4
-            case .ucharNormalized:          return .ucharNormalized
-            case .uchar2Normalized:         return .uchar2Normalized
-            case .uchar3Normalized:         return .uchar3Normalized
-            case .uchar4Normalized:         return .uchar4Normalized
-            case .charNormalized:           return .charNormalized
-            case .char2Normalized:          return .char2Normalized
-            case .char3Normalized:          return .char3Normalized
-            case .char4Normalized:          return .char4Normalized
-            case .ushort:                   return .ushort
-            case .ushort2:                  return .ushort2
-            case .ushort3:                  return .ushort3
-            case .ushort4:                  return .ushort4
-            case .short:                    return .short
-            case .short2:                   return .short2
-            case .short3:                   return .short3
-            case .short4:                   return .short4
-            case .ushortNormalized:         return .ushortNormalized
-            case .ushort2Normalized:        return .ushort2Normalized
-            case .ushort3Normalized:        return .ushort3Normalized
-            case .ushort4Normalized:        return .ushort4Normalized
-            case .shortNormalized:          return .shortNormalized
-            case .short2Normalized:         return .short2Normalized
-            case .short3Normalized:         return .short3Normalized
-            case .short4Normalized:         return .short4Normalized
-            case .half:                     return .half
-            case .half2:                    return .half2
-            case .half3:                    return .half3
-            case .half4:                    return .half4
-            case .float:                    return .float
-            case .float2:                   return .float2
-            case .float3:                   return .float3
-            case .float4:                   return .float4
-            case .int:                      return .int
-            case .int2:                     return .int2
-            case .int3:                     return .int3
-            case .int4:                     return .int4
-            case .uint:                     return .uint
-            case .uint2:                    return .uint2
-            case .uint3:                    return .uint3
-            case .uint4:                    return .uint4
-            case .int1010102Normalized:     return .int1010102Normalized
-            case .uint1010102Normalized:    return .uint1010102Normalized
+            case .uchar:                    .uchar
+            case .uchar2:                   .uchar2
+            case .uchar3:                   .uchar3
+            case .uchar4:                   .uchar4
+            case .char:                     .char
+            case .char2:                    .char2
+            case .char3:                    .char3
+            case .char4:                    .char4
+            case .ucharNormalized:          .ucharNormalized
+            case .uchar2Normalized:         .uchar2Normalized
+            case .uchar3Normalized:         .uchar3Normalized
+            case .uchar4Normalized:         .uchar4Normalized
+            case .charNormalized:           .charNormalized
+            case .char2Normalized:          .char2Normalized
+            case .char3Normalized:          .char3Normalized
+            case .char4Normalized:          .char4Normalized
+            case .ushort:                   .ushort
+            case .ushort2:                  .ushort2
+            case .ushort3:                  .ushort3
+            case .ushort4:                  .ushort4
+            case .short:                    .short
+            case .short2:                   .short2
+            case .short3:                   .short3
+            case .short4:                   .short4
+            case .ushortNormalized:         .ushortNormalized
+            case .ushort2Normalized:        .ushort2Normalized
+            case .ushort3Normalized:        .ushort3Normalized
+            case .ushort4Normalized:        .ushort4Normalized
+            case .shortNormalized:          .shortNormalized
+            case .short2Normalized:         .short2Normalized
+            case .short3Normalized:         .short3Normalized
+            case .short4Normalized:         .short4Normalized
+            case .half:                     .half
+            case .half2:                    .half2
+            case .half3:                    .half3
+            case .half4:                    .half4
+            case .float:                    .float
+            case .float2:                   .float2
+            case .float3:                   .float3
+            case .float4:                   .float4
+            case .int:                      .int
+            case .int2:                     .int2
+            case .int3:                     .int3
+            case .int4:                     .int4
+            case .uint:                     .uint
+            case .uint2:                    .uint2
+            case .uint3:                    .uint3
+            case .uint4:                    .uint4
+            case .int1010102Normalized:     .int1010102Normalized
+            case .uint1010102Normalized:    .uint1010102Normalized
             case .invalid:
-                return .invalid
+                    .invalid
             }
         }
 
         let vertexStepFunction = { (step: VertexStepRate) -> MTLVertexStepFunction in
             switch step {
-            case .vertex:                   return .perVertex
-            case .instance:                 return .perInstance
+            case .vertex:                   .perVertex
+            case .instance:                 .perInstance
             }
         }
 
         let blendFactor = { (f: BlendFactor) -> MTLBlendFactor in
             switch f {
-            case .zero:                         return .zero
-            case .one:                          return .one
-            case .sourceColor:                  return .sourceColor
-            case .oneMinusSourceColor:          return .oneMinusSourceColor
-            case .sourceAlpha:                  return .sourceAlpha
-            case .oneMinusSourceAlpha:          return .oneMinusSourceAlpha
-            case .destinationColor:             return .destinationColor
-            case .oneMinusDestinationColor:     return .oneMinusDestinationColor
-            case .destinationAlpha:             return .destinationAlpha
-            case .oneMinusDestinationAlpha:     return .oneMinusDestinationAlpha
-            case .sourceAlphaSaturated:         return .sourceAlphaSaturated
-            case .blendColor:                   return .blendColor
-            case .oneMinusBlendColor:           return .oneMinusBlendColor
-            case .blendAlpha:                   return .blendAlpha
-            case .oneMinusBlendAlpha:           return .oneMinusBlendAlpha
-            case .source1Color:                 return .source1Color
-            case .oneMinusSource1Color:         return .oneMinusSource1Color
-            case .source1Alpha:                 return .source1Alpha
-            case .oneMinusSource1Alpha:         return .oneMinusSource1Alpha
+            case .zero:                         .zero
+            case .one:                          .one
+            case .sourceColor:                  .sourceColor
+            case .oneMinusSourceColor:          .oneMinusSourceColor
+            case .sourceAlpha:                  .sourceAlpha
+            case .oneMinusSourceAlpha:          .oneMinusSourceAlpha
+            case .destinationColor:             .destinationColor
+            case .oneMinusDestinationColor:     .oneMinusDestinationColor
+            case .destinationAlpha:             .destinationAlpha
+            case .oneMinusDestinationAlpha:     .oneMinusDestinationAlpha
+            case .sourceAlphaSaturated:         .sourceAlphaSaturated
+            case .blendColor:                   .blendColor
+            case .oneMinusBlendColor:           .oneMinusBlendColor
+            case .blendAlpha:                   .blendAlpha
+            case .oneMinusBlendAlpha:           .oneMinusBlendAlpha
+            case .source1Color:                 .source1Color
+            case .oneMinusSource1Color:         .oneMinusSource1Color
+            case .source1Alpha:                 .source1Alpha
+            case .oneMinusSource1Alpha:         .oneMinusSource1Alpha
             }
         }
 
         let blendOperation = { (op: BlendOperation) -> MTLBlendOperation in
             switch op {
-            case .add:                      return .add
-            case .subtract:                 return .subtract
-            case .reverseSubtract:          return .reverseSubtract
-            case .min:                      return .min
-            case .max:                      return .max
+            case .add:                      .add
+            case .subtract:                 .subtract
+            case .reverseSubtract:          .reverseSubtract
+            case .min:                      .min
+            case .max:                      .max
             }
         }
 
@@ -484,6 +484,8 @@ final class MetalGraphicsDevice: GraphicsDevice {
             }
             desc.vertexDescriptor = vertexDescriptor
         }
+        // multisampling
+        desc.rasterSampleCount = descriptor.rasterSampleCount
 
         var pipelineReflection: MTLRenderPipelineReflection? = nil
         let pipelineState: MTLRenderPipelineState
@@ -573,18 +575,18 @@ final class MetalGraphicsDevice: GraphicsDevice {
             reflection.pointee.inputAttributes = inputAttrs
             reflection.pointee.pushConstantLayouts = pushConstants
         }
-
+        
         let state = MetalRenderPipelineState(device: self, pipelineState: pipelineState)
-        switch descriptor.primitiveTopology {
-        case .point:            state.primitiveType = .point
-        case .line:             state.primitiveType = .line
-        case .lineStrip:        state.primitiveType = .lineStrip
-        case .triangle:         state.primitiveType = .triangle
-        case .triangleStrip:    state.primitiveType = .triangleStrip
+        state.primitiveType = switch descriptor.primitiveTopology {
+        case .point:            .point
+        case .line:             .line
+        case .lineStrip:        .lineStrip
+        case .triangle:         .triangle
+        case .triangleStrip:    .triangleStrip
         }
-        switch descriptor.triangleFillMode {
-        case .fill:             state.triangleFillMode = .fill
-        case .lines:            state.triangleFillMode = .lines
+        state.triangleFillMode = switch descriptor.triangleFillMode {
+        case .fill:             .fill
+        case .lines:            .lines
         }
         if let vertexFunction = vertexFunction {
             state.vertexBindings = vertexFunction.module.bindings
@@ -595,7 +597,7 @@ final class MetalGraphicsDevice: GraphicsDevice {
         return state
     }
 
-    public func makeComputePipelineState(descriptor: ComputePipelineDescriptor, reflection: UnsafeMutablePointer<PipelineReflection>?) -> ComputePipelineState? {
+    func makeComputePipelineState(descriptor: ComputePipelineDescriptor, reflection: UnsafeMutablePointer<PipelineReflection>?) -> ComputePipelineState? {
         if descriptor.computeFunction == nil {
             return nil
         }
@@ -670,29 +672,29 @@ final class MetalGraphicsDevice: GraphicsDevice {
                                          bindings: computeFunction.module.bindings)
     }
 
-    public func makeDepthStencilState(descriptor: DepthStencilDescriptor) -> DepthStencilState? {
+    func makeDepthStencilState(descriptor: DepthStencilDescriptor) -> DepthStencilState? {
         let compareFunction = { (fn: CompareFunction) -> MTLCompareFunction in
             switch fn {
-            case .never:            return .never
-            case .less:             return .less
-            case .equal:            return .equal
-            case .lessEqual:        return .lessEqual
-            case .greater:          return .greater
-            case .notEqual:         return .notEqual
-            case .greaterEqual:     return .greaterEqual
-            case .always:           return .always
+            case .never:            .never
+            case .less:             .less
+            case .equal:            .equal
+            case .lessEqual:        .lessEqual
+            case .greater:          .greater
+            case .notEqual:         .notEqual
+            case .greaterEqual:     .greaterEqual
+            case .always:           .always
             }
         }
         let stencilOperation = { (op: StencilOperation) -> MTLStencilOperation in
             switch op {
-            case .keep:            return .keep
-            case .zero:            return .zero
-            case .replace:         return .replace
-            case .incrementClamp:  return .incrementClamp
-            case .decrementClamp:  return .decrementClamp
-            case .invert:          return .invert
-            case .incrementWrap:   return .incrementWrap
-            case .decrementWrap:   return .decrementWrap
+            case .keep:             .keep
+            case .zero:             .zero
+            case .replace:          .replace
+            case .incrementClamp:   .incrementClamp
+            case .decrementClamp:   .decrementClamp
+            case .invert:           .invert
+            case .incrementWrap:    .incrementWrap
+            case .decrementWrap:    .decrementWrap
             }
         }
         let setStencilDescriptor = { (stencil: inout MTLStencilDescriptor, desc: StencilDescriptor) in
@@ -719,7 +721,7 @@ final class MetalGraphicsDevice: GraphicsDevice {
         return nil
     }
 
-    public func makeBuffer(length: Int, storageMode: StorageMode, cpuCacheMode: CPUCacheMode) -> GPUBuffer? {
+    func makeBuffer(length: Int, storageMode: StorageMode, cpuCacheMode: CPUCacheMode) -> GPUBuffer? {
         if length > 0 {
             var options: MTLResourceOptions = []
             switch storageMode {
@@ -745,7 +747,7 @@ final class MetalGraphicsDevice: GraphicsDevice {
         return nil
     }
 
-    public func makeTexture(descriptor: TextureDescriptor) -> Texture? {
+    func makeTexture(descriptor: TextureDescriptor) -> Texture? {
         let pixelFormat = descriptor.pixelFormat.mtlPixelFormat()
         let arrayLength = descriptor.arrayLength
 
@@ -767,7 +769,11 @@ final class MetalGraphicsDevice: GraphicsDevice {
         case .type1D:
             desc.textureType = (arrayLength > 1) ? .type1DArray : .type1D
         case .type2D:
-            desc.textureType = (arrayLength > 1) ? .type2DArray : .type2D
+            if descriptor.sampleCount > 1 {
+                desc.textureType = (arrayLength > 1) ? .type2DMultisampleArray : .type2DMultisample
+            } else {
+                desc.textureType = (arrayLength > 1) ? .type2DArray : .type2D
+            }
         case .typeCube:
             desc.textureType = (arrayLength > 1) ? .typeCubeArray : .typeCube
         case .type3D:
@@ -811,11 +817,12 @@ final class MetalGraphicsDevice: GraphicsDevice {
         return nil
     }
 
-    public func makeTransientRenderTarget(type textureType: TextureType,
-                                          pixelFormat: PixelFormat,
-                                          width: Int,
-                                          height: Int,
-                                          depth: Int) -> Texture? {
+    func makeTransientRenderTarget(type textureType: TextureType,
+                                   pixelFormat: PixelFormat,
+                                   width: Int,
+                                   height: Int,
+                                   depth: Int,
+                                   sampleCount: Int) -> Texture? {
         let pixelFormat = pixelFormat.mtlPixelFormat()
         if pixelFormat == .invalid {
             Log.err("MetalGraphicsDevice.makeTexture error: Invalid pixel format!")
@@ -825,11 +832,20 @@ final class MetalGraphicsDevice: GraphicsDevice {
             Log.error("Texture dimensions (width, height, depth) value must be greater than or equal to 1.")
             return nil
         }
+        if sampleCount.isPowerOfTwo == false {
+            Log.error("MetalGraphicsDevice.makeTexture error: Sample count must be a power of two!")
+            return nil
+        }
+        if sampleCount > 64 {
+            Log.error("MetalGraphicsDevice.makeTexture error: Sample count must be less than or equal to 64!")
+            return nil
+        }
 
         let desc = MTLTextureDescriptor()
         switch textureType {
         case .type1D:       desc.textureType = .type1D
-        case .type2D:       desc.textureType = .type2D
+        case .type2D:
+            desc.textureType = sampleCount > 1 ? .type2DMultisample : .type2D
         case .typeCube:     desc.textureType = .typeCube
         case .type3D:       desc.textureType = .type3D
         case .unknown:
@@ -841,7 +857,7 @@ final class MetalGraphicsDevice: GraphicsDevice {
         desc.height = height
         desc.depth = depth
         desc.mipmapLevelCount = 1
-        desc.sampleCount = 1
+        desc.sampleCount = sampleCount
         desc.arrayLength = 1
         desc.resourceOptions = .storageModeMemoryless
         desc.cpuCacheMode = .defaultCache
@@ -857,38 +873,38 @@ final class MetalGraphicsDevice: GraphicsDevice {
         return nil
     }
 
-    public func makeSamplerState(descriptor: SamplerDescriptor) -> SamplerState? {
+    func makeSamplerState(descriptor: SamplerDescriptor) -> SamplerState? {
         let addressMode = { (m: SamplerAddressMode) -> MTLSamplerAddressMode in
             switch m {
-            case .clampToEdge:      return .clampToEdge
-            case .repeat:           return .repeat
-            case .mirrorRepeat:     return .mirrorRepeat
-            case .clampToZero:      return .clampToZero
+            case .clampToEdge:      .clampToEdge
+            case .repeat:           .repeat
+            case .mirrorRepeat:     .mirrorRepeat
+            case .clampToZero:      .clampToZero
             }
         }
         let minMagFilter = { (f: SamplerMinMagFilter) -> MTLSamplerMinMagFilter in
             switch f {
-            case .nearest:      return .nearest
-            case .linear:       return .linear
+            case .nearest:          .nearest
+            case .linear:           .linear
             }
         }
         let mipFilter = { (f: SamplerMipFilter) -> MTLSamplerMipFilter in
             switch f {
-            case .notMipmapped:     return .notMipmapped
-            case .nearest:          return .nearest
-            case .linear:           return .linear
+            case .notMipmapped:     .notMipmapped
+            case .nearest:          .nearest
+            case .linear:           .linear
             }
         }
         let compareFunction = { (fn: CompareFunction) -> MTLCompareFunction in
             switch fn {
-            case .never:            return .never
-            case .less:             return .less
-            case .equal:            return .equal
-            case .lessEqual:        return .lessEqual
-            case .greater:          return .greater
-            case .notEqual:         return .notEqual
-            case .greaterEqual:     return .greaterEqual
-            case .always:           return .always
+            case .never:            .never
+            case .less:             .less
+            case .equal:            .equal
+            case .lessEqual:        .lessEqual
+            case .greater:          .greater
+            case .notEqual:         .notEqual
+            case .greaterEqual:     .greaterEqual
+            case .always:           .always
             }
         }
 
@@ -921,14 +937,14 @@ final class MetalGraphicsDevice: GraphicsDevice {
         return nil
     }
 
-    public func makeEvent() -> GPUEvent? {
+    func makeEvent() -> GPUEvent? {
         if let event = device.makeEvent() {
             return MetalEvent(device: self, event: event)
         }
         return nil
     }
 
-    public func makeSemaphore() -> GPUSemaphore? {
+    func makeSemaphore() -> GPUSemaphore? {
         if let event = device.makeEvent() {
             return MetalSemaphore(device: self, event: event)
         }
