@@ -2,7 +2,7 @@
 //  File: GraphicsContext+Pipeline.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -134,6 +134,7 @@ class GraphicsPipelineStates {
         let colorFormat: PixelFormat
         let depthFormat: PixelFormat
         let blendState: BlendState
+        let sampleCount: Int
     }
     private var renderStates: [RenderStateDescriptor: RenderPipelineState] = [:]
     private var depthStencilStates: [_Stencil: DepthStencilState] = [:]
@@ -141,14 +142,20 @@ class GraphicsPipelineStates {
     func renderState(shader: _Shader,
                      colorFormat: PixelFormat,
                      depthFormat: PixelFormat,
-                     blendState: BlendState) -> RenderPipelineState? {
+                     blendState: BlendState,
+                     sampleCount: Int) -> RenderPipelineState? {
         renderState(RenderStateDescriptor(shader: shader,
                                           colorFormat: colorFormat,
                                           depthFormat: depthFormat,
-                                          blendState: blendState))
+                                          blendState: blendState,
+                                          sampleCount: sampleCount))
     }
 
     func renderState(_ rs: RenderStateDescriptor) -> RenderPipelineState? {
+
+        assert(rs.sampleCount.isPowerOfTwo,
+               "sampleCount must be a power of two and greater than zero.")
+
         Self.lock.lock()
         defer { Self.lock.unlock() }
 
@@ -182,6 +189,7 @@ class GraphicsPipelineStates {
         }
         pipelineDescriptor.primitiveTopology = .triangle
         pipelineDescriptor.triangleFillMode = .fill
+        pipelineDescriptor.rasterSampleCount = rs.sampleCount
 
         var reflection = PipelineReflection()
         if let state = device.makeRenderPipelineState(descriptor: pipelineDescriptor,
@@ -472,6 +480,7 @@ extension GraphicsContext {
     struct RenderPass {
         let encoder: RenderCommandEncoder
         let descriptor: RenderPassDescriptor
+        let sampleCount: Int
 
         func end() {
             if self.encoder.isCompleted == false {
@@ -490,56 +499,83 @@ extension GraphicsContext {
         }
     }
 
-    func beginRenderPass(enableStencil: Bool) -> RenderPass? {
-        let stencil = enableStencil ? self.renderTargets.stencilBuffer : nil
+    func beginRenderPass(enableStencil: Bool, enableMSAA: Bool = false) -> RenderPass? {
         return beginRenderPass(viewport: self.viewport,
                                renderTarget: self.renderTargets.source,
-                               stencilBuffer: stencil,
                                loadAction: .clear,
-                               clearColor: .clear)
+                               clearColor: .clear,
+                               useStencil: enableStencil,
+                               useMSAA: enableMSAA)
     }
 
     func beginRenderPassCompositionTarget() -> RenderPass? {
         return beginRenderPass(viewport: self.viewport,
                                renderTarget: self.renderTargets.composited,
-                               stencilBuffer: nil,
                                loadAction: .dontCare,
-                               clearColor: .clear)
+                               clearColor: .clear,
+                               useStencil: false,
+                               useMSAA: false)
     }
 
     func beginRenderPassBackdropTarget(clear: Bool = false,
-                                       clearColor: VVD.Color = .clear
-    ) -> RenderPass? {
+                                       clearColor: VVD.Color = .clear) -> RenderPass? {
         let loadAction: RenderPassAttachmentLoadAction = clear ? .clear : .load
         return beginRenderPass(viewport: self.viewport,
                                renderTarget: self.renderTargets.backdrop,
-                               stencilBuffer: nil,
                                loadAction: loadAction,
-                               clearColor: clearColor)
+                               clearColor: clearColor,
+                               useStencil: false,
+                               useMSAA: false)
     }
 
     func beginRenderPass(viewport: CGRect,
                          renderTarget: Texture,
-                         stencilBuffer: Texture?,
                          loadAction: RenderPassAttachmentLoadAction,
-                         clearColor: VVD.Color) -> RenderPass? {
-        var descriptor = RenderPassDescriptor(
-            colorAttachments: [.init(renderTarget: renderTarget,
-                                     loadAction: loadAction,
-                                     storeAction: .store,
-                                     clearColor: clearColor)])
-        if let stencilBuffer {
-            descriptor.depthStencilAttachment = .init(
-                renderTarget: stencilBuffer,
+                         clearColor: VVD.Color,
+                         useStencil: Bool,
+                         useMSAA: Bool) -> RenderPass? {
+        let useMSAA = useMSAA && loadAction != .load
+
+        let colorAttachment = if useMSAA {
+            RenderPassColorAttachmentDescriptor(
+                renderTarget: self.renderTargets.renderTargetMSAA,
                 loadAction: .clear,
                 storeAction: .dontCare,
-                clearStencil: 0)
+                resolveTarget: renderTarget,
+                clearColor: clearColor)
+        } else {
+            RenderPassColorAttachmentDescriptor(
+                renderTarget: renderTarget,
+                loadAction: loadAction,
+                storeAction: .store,
+                clearColor: clearColor)
         }
-        return self.beginRenderPass(descriptor: descriptor, viewport: viewport)
+
+        var descriptor = RenderPassDescriptor(colorAttachments: [colorAttachment])
+        if useStencil {
+            descriptor.depthStencilAttachment = if useMSAA {
+                RenderPassDepthStencilAttachmentDescriptor(
+                    renderTarget: self.renderTargets.stencilBufferMSAA,
+                    loadAction: .clear,
+                    storeAction: .dontCare,
+                    clearStencil: 0)
+            } else {
+                RenderPassDepthStencilAttachmentDescriptor(
+                    renderTarget: self.renderTargets.stencilBuffer,
+                    loadAction: .clear,
+                    storeAction: .dontCare,
+                    clearStencil: 0)
+            }
+        }
+        let sampleCount = useMSAA ? self.renderTargets.msaaSampleCount : 1
+        return self.beginRenderPass(descriptor: descriptor,
+                                    viewport: viewport,
+                                    sampleCount: sampleCount)
     }
 
     func beginRenderPass(descriptor: RenderPassDescriptor,
-                         viewport: CGRect) -> RenderPass? {
+                         viewport: CGRect,
+                         sampleCount: Int = 1) -> RenderPass? {
         guard let encoder = commandBuffer.makeRenderCommandEncoder(
             descriptor: descriptor) else {
             Log.err("GraphicsContext error: makeRenderCommandEncoder failed.")
@@ -560,7 +596,8 @@ extension GraphicsContext {
                                            width: width, height: height))
 
         return RenderPass(encoder: encoder,
-                          descriptor: descriptor)
+                          descriptor: descriptor,
+                          sampleCount: sampleCount)
     }
 
     func clear(with color: VVD.Color) {
@@ -585,7 +622,8 @@ extension GraphicsContext {
             shader: shader,
             colorFormat: renderPass.colorFormat,
             depthFormat: renderPass.depthFormat,
-            blendState: blendState) else {
+            blendState: blendState,
+            sampleCount: renderPass.sampleCount) else {
             Log.err("GraphicsContext error: pipeline.renderState failed.")
             return
         }

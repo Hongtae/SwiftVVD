@@ -2,7 +2,7 @@
 //  File: GraphicsContext+Mask.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -32,9 +32,10 @@ extension GraphicsContext {
             let viewport = CGRect(x: 0, y: 0, width: width, height: height)
             if let renderPass = self.beginRenderPass(viewport: viewport,
                                                      renderTarget: maskTexture,
-                                                     stencilBuffer: self.stencilBuffer,
                                                      loadAction: .clear,
-                                                     clearColor: .clear) {
+                                                     clearColor: .clear,
+                                                     useStencil: true,
+                                                     useMSAA: false) {
                 if self.encodeStencilPathFillCommand(renderPass: renderPass,
                                                      path: path) {
                     let makeVertex = { (x: Scalar, y: Scalar) in

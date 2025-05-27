@@ -2,7 +2,7 @@
 //  File: GraphicsContext+Path.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -74,7 +74,9 @@ extension GraphicsContext {
 
     public func fill(_ path: Path, with shading: Shading, style: FillStyle = FillStyle()) {
         if shading.properties.isEmpty { return }
-        if let renderPass = self.beginRenderPass(enableStencil: true) {
+
+        let isAntialiased = self.environment.disableMSAA == false && style.isAntialiased
+        if let renderPass = self.beginRenderPass(enableStencil: true, enableMSAA: isAntialiased) {
             if self.encodeStencilPathFillCommand(renderPass: renderPass,
                                                  path: path) {
 
@@ -91,10 +93,11 @@ extension GraphicsContext {
         }
     }
 
-    public func stroke(_ path: Path, with shading: Shading, style: StrokeStyle) {
+    public func stroke(_ path: Path, with shading: Shading, style: StrokeStyle, isAntialiased: Bool) {
         if shading.properties.isEmpty { return }
-
-        if let renderPass = self.beginRenderPass(enableStencil: true) {
+        
+        let isAntialiased = self.environment.disableMSAA == false && isAntialiased
+        if let renderPass = self.beginRenderPass(enableStencil: true, enableMSAA: isAntialiased) {
             if self.encodeStencilPathStrokeCommand(renderPass: renderPass,
                                                    path: path,
                                                    style: style) {
@@ -110,8 +113,17 @@ extension GraphicsContext {
         }
     }
 
+    public func stroke(_ path: Path, with shading: Shading, style: StrokeStyle) {
+        let isAntialiased = self.environment.pathStrokeAntialiasing
+        stroke(path, with: shading, style: style, isAntialiased: isAntialiased)
+    }
+
     public func stroke(_ path: Path, with shading: Shading, lineWidth: CGFloat = 1) {
         stroke(path, with: shading, style: StrokeStyle(lineWidth: lineWidth))
+    }
+
+    public func stroke(_ path: Path, with shading: Shading, lineWidth: CGFloat = 1, isAntialiased: Bool) {
+        stroke(path, with: shading, style: StrokeStyle(lineWidth: lineWidth), isAntialiased: isAntialiased)
     }
 
     func encodeStencilPathStrokeCommand(renderPass: RenderPass,
@@ -569,7 +581,8 @@ extension GraphicsContext {
             shader: .stencil,
             colorFormat: renderPass.colorFormat,
             depthFormat: renderPass.depthFormat,
-            blendState: BlendState(writeMask: [])) else {
+            blendState: BlendState(writeMask: []),
+            sampleCount: renderPass.sampleCount) else {
             Log.err("GraphicsContext error: pipeline.renderState failed.")
             return false
         }
@@ -716,7 +729,8 @@ extension GraphicsContext {
             shader: .stencil,
             colorFormat: renderPass.colorFormat,
             depthFormat: renderPass.depthFormat,
-            blendState: BlendState(writeMask: [])) else {
+            blendState: BlendState(writeMask: []),
+            sampleCount: renderPass.sampleCount) else {
             Log.err("GraphicsContext error: pipeline.renderState failed.")
             return false
         }
@@ -1118,5 +1132,29 @@ extension GraphicsContext {
                                vertices: vertices,
                                texture: nil,
                                blendState: blendState)
+    }
+}
+
+// (default) antialiase option for path-stroke
+private struct PathStrokeAntialiasingKey: EnvironmentKey {
+    static let defaultValue: Bool = true
+}
+
+extension EnvironmentValues {
+    public var pathStrokeAntialiasing: Bool {
+        get { self[PathStrokeAntialiasingKey.self] }
+        set { self[PathStrokeAntialiasingKey.self] = newValue }
+    }
+}
+
+// Option to disable MSAA for all drawings.
+private struct DisableMSAAKey: EnvironmentKey {
+    static let defaultValue: Bool = false
+}
+
+extension EnvironmentValues {
+    public var disableMSAA: Bool {
+        get { self[DisableMSAAKey.self] }
+        set { self[DisableMSAAKey.self] = newValue }
     }
 }

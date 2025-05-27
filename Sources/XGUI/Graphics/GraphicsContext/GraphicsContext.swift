@@ -2,7 +2,7 @@
 //  File: GraphicsContext.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -134,6 +134,10 @@ extension GraphicsContext {
         var temporary: Texture  // temporary buffer for iteration (blur)
         let stencilBuffer: Texture
 
+        let renderTargetMSAA: Texture
+        let stencilBufferMSAA: Texture
+        let msaaSampleCount = 4
+
         var width: Int { backdrop.width }
         var height: Int { backdrop.height }
         var dimensions: (Int, Int, Int) { (self.width, self.height, 1) }
@@ -167,8 +171,23 @@ extension GraphicsContext {
             if let renderTarget = device.makeTransientRenderTarget(
                 type: .type2D,
                 pixelFormat: .stencil8,
-                width: width, height: height, depth: 1) {
+                width: width, height: height, depth: 1, sampleCount: 1) {
                 self.stencilBuffer = renderTarget
+            } else { return nil }
+            // msaa temporary buffers
+            if let renderTarget = device.makeTransientRenderTarget(
+                type: .type2D,
+                pixelFormat: .rgba8Unorm,
+                width: width, height: height, depth: 1,
+                sampleCount: self.msaaSampleCount) {
+                self.renderTargetMSAA = renderTarget
+            } else { return nil }
+            if let renderTarget = device.makeTransientRenderTarget(
+                type: .type2D,
+                pixelFormat: .stencil8,
+                width: width, height: height, depth: 1,
+                sampleCount: self.msaaSampleCount) {
+                self.stencilBufferMSAA = renderTarget
             } else { return nil }
         }
 

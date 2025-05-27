@@ -2,7 +2,7 @@
 //  File: GraphicsContext+Filter.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -292,9 +292,10 @@ extension GraphicsContext {
             // make solid color copy
             if let renderPass = self.beginRenderPass(viewport: self.viewport,
                                                      renderTarget: self.renderTargets.temporary,
-                                                     stencilBuffer: nil,
                                                      loadAction: .clear,
-                                                     clearColor: .clear) {
+                                                     clearColor: .clear,
+                                                     useStencil: false,
+                                                     useMSAA: false) {
                 if self.encodeColorMatrixFilter(renderPass: renderPass,
                                                 frame: frame.offsetBy(dx: offset.x, dy: offset.y),
                                                 texture: self.sourceTexture,
@@ -378,7 +379,8 @@ extension GraphicsContext {
             shader: .filterProjectionTransform,
             colorFormat: renderPass.colorFormat,
             depthFormat: renderPass.depthFormat,
-            blendState: blendState) else {
+            blendState: blendState,
+            sampleCount: renderPass.sampleCount) else {
             Log.err("GraphicsContext error: pipeline.renderState failed.")
             return false
         }
@@ -444,7 +446,8 @@ extension GraphicsContext {
             shader: .filterColorMatrix,
             colorFormat: renderPass.colorFormat,
             depthFormat: renderPass.depthFormat,
-            blendState: blendState) else {
+            blendState: blendState,
+            sampleCount: renderPass.sampleCount) else {
             Log.err("GraphicsContext error: pipeline.renderState failed.")
             return false
         }
@@ -519,7 +522,8 @@ extension GraphicsContext {
             shader: .filterBlur,
             colorFormat: renderPass.colorFormat,
             depthFormat: renderPass.depthFormat,
-            blendState: blendState) else {
+            blendState: blendState,
+            sampleCount: renderPass.sampleCount) else {
             Log.err("GraphicsContext error: pipeline.renderState failed.")
             return false
         }

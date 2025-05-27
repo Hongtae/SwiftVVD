@@ -2,7 +2,7 @@
 //  File: GraphicsContext+BlendMode.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -153,7 +153,8 @@ extension GraphicsContext {
             shader: shader,
             colorFormat: renderPass.colorFormat,
             depthFormat: renderPass.depthFormat,
-            blendState: .opaque) else {
+            blendState: .opaque,
+            sampleCount: renderPass.sampleCount) else {
             Log.err("GraphicsContext error: pipeline.renderState failed.")
             return false
         }
