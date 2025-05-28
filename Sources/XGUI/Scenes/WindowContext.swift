@@ -295,6 +295,10 @@ class GenericWindowContext<Content>: WindowContext, WindowDelegate, @unchecked S
                 }
                 view.update(tick: tick, delta: delta, date: date)
 
+                if sharedContext.needsLayout {
+                    continue // draw the root view after the layout is complete.
+                }
+
                 if state.visible, let swapChain {
                     var renderPass = swapChain.currentRenderPassDescriptor()
 
