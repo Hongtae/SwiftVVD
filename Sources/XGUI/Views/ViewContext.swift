@@ -101,20 +101,10 @@ class ViewContext: _GraphValueResolver {
     }
 
     func invalidate() {
+        self.resetGraphInputModifiers()
     }
 
-    func merge(graphInputs inputs: _GraphInputs) {
-        self.inputs.mergedInputs.append(inputs)
-        self.inputs = self.inputs.resolveMergedInputs()
-        //self.resolveGraphInputs()
-    }
-
-    func reloadInputModifiers() {
-        self.inputs.resetModifiers()
-        self.resolveGraphInputs()
-    }
-
-    func resetGraphInputModifiers() {
+    func resetGraphInputModifiers(recursively: Bool = false) {
         self.inputs.resetModifiers()
     }
 
@@ -161,6 +151,7 @@ class ViewContext: _GraphValueResolver {
         assert(self.isValid)
         if self.requiresContentUpdates {
             self.requiresContentUpdates = false
+            self.resetGraphInputModifiers(recursively: true)
             self.updateContent()
         }
     }
@@ -324,6 +315,7 @@ class PrimitiveViewContext<Content>: ViewContext {
     }
 
     override func invalidate() {
+        super.invalidate()
         self.view = nil
     }
 
@@ -389,8 +381,16 @@ class GenericViewContext<Content>: ViewContext {
     }
 
     override func invalidate() {
+        super.invalidate()
         self.view = nil
         self.body.invalidate()
+    }
+
+    override func resetGraphInputModifiers(recursively: Bool) {
+        super.resetGraphInputModifiers(recursively: false)
+        if recursively {
+            self.body.resetGraphInputModifiers(recursively: true)
+        }
     }
 
     override func value<T>(atPath graph: _GraphValue<T>) -> T? {
@@ -426,11 +426,6 @@ class GenericViewContext<Content>: ViewContext {
     override func updateEnvironment(_ environmentValues: EnvironmentValues) {
         super.updateEnvironment(environmentValues)
         self.body.updateEnvironment(environmentValues)
-    }
-
-    override func merge(graphInputs inputs: _GraphInputs) {
-        super.merge(graphInputs: inputs)
-        body.merge(graphInputs: inputs)
     }
 
     override func update(transform t: AffineTransform) {
@@ -563,9 +558,17 @@ class DynamicViewContext<Content>: ViewContext {
     }
 
     override func invalidate() {
+        super.invalidate()
         self.view = nil
         self.body?.invalidate()
         self.body = nil
+    }
+
+    override func resetGraphInputModifiers(recursively: Bool) {
+        super.resetGraphInputModifiers(recursively: false)
+        if recursively {
+            self.body?.resetGraphInputModifiers(recursively: true)
+        }
     }
 
     override func value<T>(atPath graph: _GraphValue<T>) -> T? {
@@ -592,11 +595,6 @@ class DynamicViewContext<Content>: ViewContext {
             self.invalidate()
             fatalError("Failed to resolve view for \(self.graph)")
         }
-    }
-
-    override func merge(graphInputs inputs: _GraphInputs) {
-        super.merge(graphInputs: inputs)
-        body?.merge(graphInputs: inputs)
     }
 
     override func update(transform t: AffineTransform) {

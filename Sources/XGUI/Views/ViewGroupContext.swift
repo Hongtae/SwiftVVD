@@ -55,16 +55,19 @@ class ViewGroupContext: ViewContext {
     }
 
     override func invalidate() {
+        super.invalidate()
         self.subviews.forEach {
             $0.invalidate()
         }
         self.activeSubviews = []
     }
 
-    override func merge(graphInputs inputs: _GraphInputs) {
-        super.merge(graphInputs: inputs)
-        self.subviews.forEach {
-            $0.merge(graphInputs: inputs)
+    override func resetGraphInputModifiers(recursively: Bool) {
+        super.resetGraphInputModifiers(recursively: false)
+        if recursively {
+            self.subviews.forEach {
+                $0.resetGraphInputModifiers(recursively: true)
+            }
         }
     }
 

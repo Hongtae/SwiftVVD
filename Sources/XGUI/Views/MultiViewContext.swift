@@ -20,24 +20,11 @@ class MultiViewContext: ViewGroupContext {
     }
 
     override func invalidate() {
+        super.invalidate()
         self.subviews.forEach {
             $0.invalidate()
         }
         self.activeSubviews = []
-    }
-
-    override func merge(graphInputs inputs: _GraphInputs) {
-        super.merge(graphInputs: inputs)
-        self.subviews.forEach {
-            $0.merge(graphInputs: inputs)
-        }
-    }
-
-    override func updateEnvironment(_ environment: EnvironmentValues) {
-        super.updateEnvironment(environment)
-        self.subviews.forEach {
-            $0.updateEnvironment(self.environment)
-        }
     }
 
     override func multiViewForLayout() -> [ViewContext] {
