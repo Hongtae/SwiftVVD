@@ -28,6 +28,7 @@ public struct _EnvironmentKeyTransformModifier<Value>: ViewModifier, _GraphInput
 
     class _InputModifier: _GraphInputResolve {
         typealias Modifier = _EnvironmentKeyTransformModifier<Value>
+        
         var isResolved: Bool {  modifier != nil }
         var modifier: Modifier?
         let graph: _GraphValue<Modifier>
@@ -35,14 +36,27 @@ public struct _EnvironmentKeyTransformModifier<Value>: ViewModifier, _GraphInput
             self.graph = graph
         }
 
+        var keepTransformedValue: Bool { true }
+        var value: Value?
+        
         func apply(to environment: inout EnvironmentValues) {
             if let modifier {
-                modifier._resolve(&environment)
+                if self.keepTransformedValue {
+                    if value == nil {
+                        var value = environment[keyPath: modifier.keyPath]
+                        modifier.transform(&value)
+                        self.value = value
+                    }
+                    environment[keyPath: modifier.keyPath] = self.value!
+                } else {
+                    modifier._resolve(&environment)
+                }
             }
         }
 
         func reset() {
             modifier = nil
+            value = nil
         }
 
         func resolve(container: some _GraphValueResolver) {
