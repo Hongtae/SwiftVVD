@@ -10,6 +10,7 @@ import WinSDK
 import Foundation
 
 nonisolated(unsafe) private var keyboardHook: HHOOK? = nil
+nonisolated(unsafe) private var getmsgHook: HHOOK? = nil
 nonisolated(unsafe) var numActiveWindows: Int = 0
 private let disableWindowKey: Bool = true
 
@@ -33,30 +34,26 @@ private func keyboardHookProc(_ nCode: Int32, _ wParam: WPARAM, _ lParam: LPARAM
             }
         }
     }
-
     return CallNextHookEx(keyboardHook, nCode, wParam, lParam)
 }
 
-@discardableResult
-private func processRunLoop() -> Int {
-    var processed = 0
-    while true {
-        let next = RunLoop.main.limitDate(forMode: .default)
-        let s = next?.timeIntervalSinceNow ?? 1.0
-        if s > 0.0 {
-            break
+private func getmsgHookProc(_ nCode: Int32, _ wParam: WPARAM, _ lParam: LPARAM) -> LRESULT {
+    if nCode >= 0 {
+        let msg = UnsafeMutablePointer<MSG>(bitPattern: UInt(lParam))?.pointee
+        if let msg, msg.message == UINT(WM_QUIT) {
+            Log.debug("WM_QUIT received with wParam: \(msg.wParam)")
+            if let app = Win32Application.shared {
+                app.terminate(exitCode: Int(msg.wParam))
+            }
         }
-        processed += 1
     }
-    return processed
+    return CallNextHookEx(getmsgHook, nCode, wParam, lParam)
 }
 
 final class Win32Application: Application, @unchecked Sendable {
 
-    let mainLoopMaximumInterval: Double = 0.01
-    var running: Bool = false
     var threadId: DWORD = 0
-    var exitCode: Int = 0
+    var requestExitWithCode: Int? = nil
 
     nonisolated(unsafe) static var shared: Win32Application? = nil
 
@@ -64,18 +61,18 @@ final class Win32Application: Application, @unchecked Sendable {
     }
 
     func terminate(exitCode: Int) {
-        if self.running && self.threadId != 0 {
-            self.exitCode = exitCode
-            PostThreadMessageW(threadId, UINT(WM_QUIT), 0, 0)
+        Task { @MainActor in
+            self.requestExitWithCode = exitCode
         }
     }
 
     static func run(delegate: ApplicationDelegate?) -> Int{
 
         let app: Win32Application = Win32Application()
+        let currentThreadId = GetCurrentThreadId()
         self.shared = app
-        app.running = true
-        app.threadId = GetCurrentThreadId()
+        app.requestExitWithCode = nil
+        app.threadId = currentThreadId
 
         if IsDebuggerPresent() == false {
             if keyboardHook != nil {
@@ -92,6 +89,10 @@ final class Win32Application: Application, @unchecked Sendable {
                     Log.err("SetWindowsHookEx Failed.")
                 }
             }
+        }
+        let ignoreWMQuitMessage = UserDefaults.standard.bool(forKey: "Win32.ignoreWMQuitMessage")
+        if ignoreWMQuitMessage == false {
+            getmsgHook = SetWindowsHookExW(WH_GETMESSAGE, getmsgHookProc, GetModuleHandleW(nil), currentThreadId)
         }
 
         // Setup process DPI
@@ -114,21 +115,23 @@ final class Win32Application: Application, @unchecked Sendable {
                 TranslateMessage(&msg)
                 DispatchMessageW(&msg)
             }
-            processRunLoop()
+
+            while true {
+                let next = RunLoop.main.limitDate(forMode: .default)
+                let s = next?.timeIntervalSinceNow ?? 1.0
+                if s > 0.0 {
+                    break
+                }
+            }
         }
         let timerID = SetTimer(nil, 0, UINT(USER_TIMER_MINIMUM), timerProc)
 
-        var msg = MSG()
-        mainLoop: while true {
-            while PeekMessageW(&msg, nil, 0, 0, UINT(PM_REMOVE)) {
-                if msg.message == UINT(WM_QUIT) {
-                    break mainLoop
-                }
-                TranslateMessage(&msg)
-                DispatchMessageW(&msg)
+        var exitCode: Int = 0
+        while RunLoop.main.run(mode: .default, before: Date.distantFuture) {
+            if let ec = app.requestExitWithCode {
+                exitCode = ec
+                break
             }
-            processRunLoop()
-            WaitMessage()
         }
 
         delegate?.finalize(application: app)
@@ -141,10 +144,15 @@ final class Win32Application: Application, @unchecked Sendable {
             keyboardHook = nil
         }
 
+        if getmsgHook != nil {
+            UnhookWindowsHookEx(getmsgHook)
+            getmsgHook = nil
+        }
+
+        assert(self.shared === app, "Shared application instance mismatch.")
         self.shared = nil
         app.threadId = 0
-        app.running = false
-        return app.exitCode
+        return exitCode
     }
 }
 #endif //if ENABLE_WIN32
