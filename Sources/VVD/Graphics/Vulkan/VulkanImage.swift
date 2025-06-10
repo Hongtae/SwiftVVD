@@ -50,7 +50,7 @@ final class VulkanImage {
         self.extent = imageCreateInfo.extent
         self.mipLevels = imageCreateInfo.mipLevels
         self.arrayLayers = imageCreateInfo.arrayLayers
-        self.samples = imageCreateInfo.samples.rawValue
+        self.samples = Int32(imageCreateInfo.samples.rawValue)
         self.usage = imageCreateInfo.usage
 
         self.layoutInfo = LayoutAccessInfo(layout: imageCreateInfo.initialLayout,

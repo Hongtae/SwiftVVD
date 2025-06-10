@@ -13,14 +13,14 @@ private let pipelineCacheDataKey = "_SavedSystemStates.Vulkan.PipelineCacheData"
 
 extension VkSampleCountFlagBits {
     init?(from value: Int) {
-        switch Int32(value) {
-        case VK_SAMPLE_COUNT_1_BIT.rawValue: self = VK_SAMPLE_COUNT_1_BIT
-        case VK_SAMPLE_COUNT_2_BIT.rawValue: self = VK_SAMPLE_COUNT_2_BIT
-        case VK_SAMPLE_COUNT_4_BIT.rawValue: self = VK_SAMPLE_COUNT_4_BIT
-        case VK_SAMPLE_COUNT_8_BIT.rawValue: self = VK_SAMPLE_COUNT_8_BIT
-        case VK_SAMPLE_COUNT_16_BIT.rawValue: self = VK_SAMPLE_COUNT_16_BIT
-        case VK_SAMPLE_COUNT_32_BIT.rawValue: self = VK_SAMPLE_COUNT_32_BIT
-        case VK_SAMPLE_COUNT_64_BIT.rawValue: self = VK_SAMPLE_COUNT_64_BIT
+        switch value {
+        case Int(VK_SAMPLE_COUNT_1_BIT.rawValue): self = VK_SAMPLE_COUNT_1_BIT
+        case Int(VK_SAMPLE_COUNT_2_BIT.rawValue): self = VK_SAMPLE_COUNT_2_BIT
+        case Int(VK_SAMPLE_COUNT_4_BIT.rawValue): self = VK_SAMPLE_COUNT_4_BIT
+        case Int(VK_SAMPLE_COUNT_8_BIT.rawValue): self = VK_SAMPLE_COUNT_8_BIT
+        case Int(VK_SAMPLE_COUNT_16_BIT.rawValue): self = VK_SAMPLE_COUNT_16_BIT
+        case Int(VK_SAMPLE_COUNT_32_BIT.rawValue): self = VK_SAMPLE_COUNT_32_BIT
+        case Int(VK_SAMPLE_COUNT_64_BIT.rawValue): self = VK_SAMPLE_COUNT_64_BIT
         default: return nil
         }
     }
@@ -1392,7 +1392,15 @@ final class VulkanGraphicsDevice: GraphicsDevice, @unchecked Sendable {
         imageCreateInfo.extent.height = UInt32(height)
         imageCreateInfo.extent.depth = UInt32(depth)
         imageCreateInfo.mipLevels = UInt32(1)
-        imageCreateInfo.samples = VkSampleCountFlagBits(rawValue: Int32(sampleCount))
+
+        if let sampleCount = VkSampleCountFlagBits(from: sampleCount) {
+            imageCreateInfo.samples = sampleCount
+        } else {
+            assertionFailure("Invalid sample count!")
+            Log.err("VulkanGraphicsDevice.makeTransientRenderTarget(): Invalid sample count! (\(sampleCount))")
+            return nil
+        }
+
         imageCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL
         imageCreateInfo.usage = UInt32(VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT.rawValue |
                                        VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT.rawValue)
