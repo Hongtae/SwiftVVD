@@ -2,7 +2,7 @@
 //  File: AppKitApplication.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_APPKIT
@@ -10,7 +10,7 @@ import Foundation
 import AppKit
 
 final class AppKitApplication: Application, @unchecked Sendable {
-    nonisolated(unsafe) static var shared: Application? = nil
+    nonisolated(unsafe) static var shared: AppKitApplication? = nil
 
     weak var delegate: ApplicationDelegate?
 

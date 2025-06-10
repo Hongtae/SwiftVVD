@@ -215,7 +215,7 @@ final class VulkanGraphicsDevice: GraphicsDevice, @unchecked Sendable {
             supportPresentation = true  // always true on Android
 #endif
 #if VK_USE_PLATFORM_WAYLAND_KHR
-            if let display = (WaylandApplication.shared as? WaylandApplication)?.display {
+            if let display = WaylandApplication.shared?.display {
                 supportPresentation = instance.extensionProc
                     .vkGetPhysicalDeviceWaylandPresentationSupportKHR?(
                         physicalDevice.device,

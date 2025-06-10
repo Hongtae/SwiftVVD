@@ -2,7 +2,7 @@
 //  File: WaylandApplication.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_WAYLAND
@@ -218,7 +218,7 @@ final class WaylandApplication: Application, @unchecked Sendable {
     }
     
     nonisolated(unsafe)
-    static var shared: Application? = nil
+    static var shared: WaylandApplication? = nil
 
     private struct WeakWindow {
         weak var window: WaylandWindow?

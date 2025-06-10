@@ -2,7 +2,7 @@
 //  File: UIKitApplication.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_UIKIT
@@ -38,7 +38,9 @@ final class AppLoader: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         willFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]?
     ) -> Bool {
-        let app = UIKitApplication.shared as! UIKitApplication
+        guard let app = UIKitApplication.shared else {
+            fatalError("UIKitApplication.shared is nil. Ensure UIKitApplication.run() is called before this.")
+        }
 
         if app.initialized == false {
             app.delegate?.initialize(application: app)
@@ -48,7 +50,9 @@ final class AppLoader: NSObject, UIApplicationDelegate {
     }
 
     func applicationWillTerminate(_ application: UIApplication) {
-        let app = UIKitApplication.shared as! UIKitApplication
+        guard let app = UIKitApplication.shared else {
+            fatalError("UIKitApplication.shared is nil. Ensure UIKitApplication.run() is called before this.")
+        }
 
         if app.initialized {
             app.delegate?.finalize(application: app)
@@ -71,7 +75,7 @@ final class AppLoader: NSObject, UIApplicationDelegate {
 }
 
 final class UIKitApplication: Application, @unchecked Sendable {
-    nonisolated(unsafe) public static var shared: Application? = nil
+    nonisolated(unsafe) public static var shared: UIKitApplication? = nil
 
     var delegate: ApplicationDelegate?
     var initialized = false

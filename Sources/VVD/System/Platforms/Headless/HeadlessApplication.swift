@@ -2,7 +2,7 @@
 //  File: HeadlessApplication.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -10,7 +10,7 @@ import Foundation
 final class HeadlessApplication: Application, @unchecked Sendable {
 
     private var requestExitWithCode: Int?
-    nonisolated(unsafe) static var shared: Application? = nil
+    nonisolated(unsafe) static var shared: HeadlessApplication? = nil
 
     public static func run(delegate: ApplicationDelegate?) -> Int {
         precondition(Thread.isMainThread, "\(#function) must be called on the main thread.")

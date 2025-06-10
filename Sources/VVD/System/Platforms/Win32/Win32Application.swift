@@ -2,7 +2,7 @@
 //  File: Win32Application.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_WIN32
@@ -58,7 +58,7 @@ final class Win32Application: Application, @unchecked Sendable {
     var threadId: DWORD = 0
     var exitCode: Int = 0
 
-    nonisolated(unsafe) static var shared: Application? = nil
+    nonisolated(unsafe) static var shared: Win32Application? = nil
 
     private init() {
     }

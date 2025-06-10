@@ -2,7 +2,7 @@
 //  File: WaylandWindow.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_WAYLAND
@@ -80,7 +80,7 @@ final class WaylandWindow: Window {
     fileprivate var xdgSurfaceConfigured = false
 
     required init?(name: String, style: WindowStyle, delegate: WindowDelegate?) {
-        guard let app = (WaylandApplication.shared as? WaylandApplication) else {
+        guard let app = WaylandApplication.shared else {
             Log.error("Unable to identify Application class")
             return nil
         }
@@ -123,7 +123,7 @@ final class WaylandWindow: Window {
 
     deinit {
         Task { @MainActor in 
-            if let app = (WaylandApplication.shared as? WaylandApplication) {
+            if let app = WaylandApplication.shared {
                 app.updateSurfaces()
             }
         }
