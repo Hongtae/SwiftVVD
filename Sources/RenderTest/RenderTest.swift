@@ -185,7 +185,7 @@ class RenderTestApp: ApplicationDelegate, WindowDelegate, @unchecked Sendable {
         }
 
         let frameInterval = 1.0 / 60.0  // 60fps
-        var timestamp = ContinuousClock.now
+        var timestamp = SuspendingClock.now
         var delta = 0.0
         var modelTransform: Transform = .identity
 
@@ -236,19 +236,17 @@ class RenderTestApp: ApplicationDelegate, WindowDelegate, @unchecked Sendable {
             encoder.endEncoding()
             buffer.commit()
 
-            swapchain.present()
-
-            let elapsed = (ContinuousClock.now - timestamp).seconds()
-
-            let interval: Double = max(frameInterval - elapsed, .zero)
+            let interval: Double = max(frameInterval - timestamp.elapsed, .zero)
             if interval > .zero {
                 try? await Task.sleep(for: .seconds(interval))
             } else {
                 await Task.yield()
             }
 
-            let t = ContinuousClock.now
-            delta = (t - timestamp).seconds()
+            swapchain.present()
+
+            let t = SuspendingClock.now
+            delta = (t - timestamp).seconds
             timestamp = t
         }
     }
@@ -259,9 +257,16 @@ class RenderTestApp: ApplicationDelegate, WindowDelegate, @unchecked Sendable {
     }
 }
 
-extension ContinuousClock.Duration {
-    func seconds() -> Double {
-        let nanoseconds = Double(self.components.attoseconds / 1_000_000_000) / Double(1_000_000_000)
-        return Double(self.components.seconds) + nanoseconds
+public extension Duration {
+    var seconds: Double {
+        let components = self.components
+        let nanoseconds = Double(components.attoseconds / 1_000_000_000) / Double(1_000_000_000)
+        return Double(components.seconds) + nanoseconds
+    }
+}
+
+public extension SuspendingClock.Instant {
+    var elapsed: Double {
+        self.duration(to: .now).seconds
     }
 }
