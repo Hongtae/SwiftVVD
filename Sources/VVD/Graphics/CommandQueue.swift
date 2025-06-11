@@ -2,7 +2,7 @@
 //  File: CommandQueue.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 public struct CommandQueueFlags: OptionSet, Sendable {
@@ -15,7 +15,7 @@ public struct CommandQueueFlags: OptionSet, Sendable {
     public static let copy: CommandQueueFlags = [] // copy(transfer) queue, always enabled.
 }
 
-public protocol CommandQueue {
+public protocol CommandQueue: Sendable {
     func makeCommandBuffer() -> CommandBuffer?
     @MainActor
     func makeSwapChain(target: Window) -> SwapChain?
