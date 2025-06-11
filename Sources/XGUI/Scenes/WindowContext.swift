@@ -299,6 +299,7 @@ class GenericWindowContext<Content>: WindowContext, WindowDelegate, @unchecked S
                     continue // draw the root view after the layout is complete.
                 }
 
+                var swapChainToPresent: SwapChain? = nil
                 if state.visible, let swapChain {
                     var renderPass = swapChain.currentRenderPassDescriptor()
 
@@ -353,7 +354,7 @@ class GenericWindowContext<Content>: WindowContext, WindowDelegate, @unchecked S
                         }
 
                         commandBuffer.commit()
-                        _=swapChain.present()
+                        swapChainToPresent = swapChain
                     }
                 }
 
@@ -368,6 +369,9 @@ class GenericWindowContext<Content>: WindowContext, WindowDelegate, @unchecked S
                 while tickCounter.elapsed < frameInterval {
                     if Task.isCancelled { break mainLoop }
                     Platform.threadYield()
+                }
+                if let swapChain = swapChainToPresent {
+                    _ = swapChain.present()
                 }
             }
             Log.info("WindowContext<\(Content.self)> update task is finished.")
