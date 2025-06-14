@@ -37,6 +37,9 @@ class GenericWindowContext<Content>: WindowContext, WindowDelegate, @unchecked S
         sharedContext.scene
     }
 
+    var filterGestureTypes: Bool = true
+    var allowedGestureTypes: _PrimitiveGestureTypes = .all
+
     struct State {
         var visible = false
         var activated = false
@@ -488,6 +491,15 @@ class GenericWindowContext<Content>: WindowContext, WindowDelegate, @unchecked S
                 let location = event.location.applying(view.transformToContainer.inverted())
                 let outputs = view.gestureHandlers(at: location)
                 gestureHandlers = outputs.highPriorityGestures + outputs.gestures + outputs.simultaneousGestures
+
+                if self.filterGestureTypes {
+                    var typeFilter = self.allowedGestureTypes
+                    gestureHandlers = gestureHandlers.filter {
+                        let include = typeFilter.contains($0.type)
+                        typeFilter = $0.setTypeFilter(typeFilter)
+                        return include
+                    }
+                }
             }
         }
 
@@ -501,9 +513,12 @@ class GenericWindowContext<Content>: WindowContext, WindowDelegate, @unchecked S
         }
 
         gestureHandlers = activeHandlers()
+        if gestureHandlers.isEmpty { return }
+
+        // before processing the event, copy the handlers to the shared context
+        // so that subviews can access them.
         self.sharedContext.gestureHandlers = gestureHandlers
 
-        if gestureHandlers.isEmpty { return }
         switch event.type {
         case .buttonDown:
             gestureHandlers.forEach {
