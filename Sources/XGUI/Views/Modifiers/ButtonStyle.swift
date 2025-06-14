@@ -17,7 +17,7 @@ public struct ButtonRole: Equatable, Sendable {
     public static let destructive = ButtonRole(_role: .destructive)
     public static let cancel = ButtonRole(_role: .cancel)
 
-    enum Role : UInt8 {
+    enum Role: UInt8 {
         case destructive = 1
         case cancel = 4
     }
@@ -62,7 +62,7 @@ extension PrimitiveButtonStyleConfiguration.Label {
 extension PrimitiveButtonStyleConfiguration.Label: _PrimitiveView {}
 
 protocol PrimitiveButtonStyleWithPressingBody {
-    associatedtype PressingBody : View
+    associatedtype PressingBody: View
     @ViewBuilder func makeBody(configuration: PrimitiveButtonStyleConfiguration,
                                isPressing: Bool,
                                callback: ((Bool)->Void)?) -> Self.PressingBody
@@ -246,7 +246,7 @@ extension ButtonStyleConfiguration.Label {
 
 extension ButtonStyleConfiguration.Label: _PrimitiveView {}
 
-struct _DefaultButtonWithButtonStyle<Style>: PrimitiveButtonStyle, PrimitiveButtonStyleWithPressingBody where Style : ButtonStyle {
+struct _DefaultButtonWithButtonStyle<Style>: PrimitiveButtonStyle, PrimitiveButtonStyleWithPressingBody where Style: ButtonStyle {
     let style: Style
 
     func makeBody(configuration: Configuration) -> some View {
@@ -278,7 +278,7 @@ struct PrimitiveButtonStyleProxy {
     }
 }
 
-struct PrimitiveButtonStyleContainerModifier<Style>: ViewModifier where Style : PrimitiveButtonStyle {
+struct PrimitiveButtonStyleContainerModifier<Style>: ViewModifier where Style: PrimitiveButtonStyle {
     let style: Style
     typealias Body = Never
 }
@@ -297,7 +297,7 @@ extension PrimitiveButtonStyleContainerModifier {
     }
 }
 
-struct ButtonStyleContainerModifier<Style>: ViewModifier where Style : ButtonStyle {
+struct ButtonStyleContainerModifier<Style>: ViewModifier where Style: ButtonStyle {
     let style: Style
     typealias Body = Never
 
@@ -344,7 +344,7 @@ private class PrimitiveButtonStyleConfigurationLabelViewContext: DynamicViewCont
             self.requiresContentUpdates = false
             self.view = view
         }
-        if let view, let proxy = view.view {
+        if let proxy = self.view?.view {
             if self.body == nil || proxy != oldProxy {
                 let outputs = proxy.makeView(_Graph(), inputs: _ViewInputs(base: self.inputs))
                 self.body = outputs.view?.makeView(sharedContext: self.sharedContext)

@@ -2,7 +2,7 @@
 //  File: Path.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -33,15 +33,26 @@ public struct Path : Equatable {
         var winding: Int = 0
 
         let lineCheck = { (p0: CGPoint, p1: CGPoint) in
-            if min(p0.y, p1.y) <= p.y && max(p0.y, p1.y) > p.y {
-                let a = (p1.y - p1.y) / (p0.x - p0.x)
-                let b = p1.y - a * p1.x
-                let x = (p.y - b) / a
-                if x <= p.x {
-                    if a > 0 {
-                        winding += 1
-                    } else if a < 0 {
-                        winding -= 1
+            if min(p0.y, p1.y) <= p.y && max(p0.y, p1.y) > p.y && min(p0.x, p1.x) < p.x {
+                let dy = p1.y - p0.y
+                let dx = p1.x - p0.x
+                if max(p0.x, p1.x) <= p.x || abs(dx) < .ulpOfOne {
+                    if p0.x <= p.x {
+                        if dy > 0 {
+                            winding -= 1
+                        } else {
+                            winding += 1
+                        }
+                    }
+                } else {
+                    let a = dx / dy
+                    let x = (p.y - p1.y) * a + p1.x
+                    if x <= p.x {
+                        if a < 0 {
+                            winding -= 1
+                        } else {
+                            winding += 1
+                        }
                     }
                 }
             }
@@ -55,9 +66,9 @@ public struct Path : Equatable {
                     if t < 1 && curve.interpolate(t).x <= p.x {
                         let tangent = curve.tangent(t).y
                         if tangent > 0 {
-                            winding += 1
-                        } else if tangent < 0 {
                             winding -= 1
+                        } else if tangent < 0 {
+                            winding += 1
                         }
                     }
                 }
@@ -65,16 +76,16 @@ public struct Path : Equatable {
         }
 
         let cubicBezierCheck = { (p0: CGPoint, p1: CGPoint, p2: CGPoint, p3: CGPoint) in
-            let bbox = CGRect.boundingRect(p0, p1, p2)
+            let bbox = CGRect.boundingRect(p0, p1, p2, p3)
             if bbox.minX <= p.x && bbox.minY <= p.y && bbox.maxY > p.y {
                 let curve = CubicBezier(p0: p0, p1: p1, p2: p2, p3: p3)
                 curve.intersectLineSegment(CGPoint(x: bbox.minX, y: p.y), p).forEach { t in
                     if t < 1 && curve.interpolate(t).x <= p.x {
                         let tangent = curve.tangent(t).y
                         if tangent > 0 {
-                            winding += 1
-                        } else if tangent < 0 {
                             winding -= 1
+                        } else if tangent < 0 {
+                            winding += 1
                         }
                     }
                 }

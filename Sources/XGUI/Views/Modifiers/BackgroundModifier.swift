@@ -295,4 +295,12 @@ private class BackgroundViewContext<Modifier>: ViewModifierContext<Modifier> whe
         }
         background.drawView(frame: drawingFrame, context: context)
     }
+    
+    override func hitTest(_ location: CGPoint) -> ViewContext? {
+        if let result = super.hitTest(location) {
+            return result
+        }
+        let local = location.applying(background.transformToContainer.inverted())
+        return background.hitTest(local)
+    }
 }

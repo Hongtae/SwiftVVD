@@ -11,7 +11,7 @@ protocol _GestureInputsModifier {
     static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GestureInputs)
 }
 
-private struct _CallbackGenerator<Callback> : GestureCallbackGenerator {
+private struct _CallbackGenerator<Callback>: GestureCallbackGenerator {
     let graph: _GraphValue<Callback>
     func _makeCallback(containerView: ViewContext) -> Any {
         if let value = containerView.value(atPath: self.graph) {
@@ -21,21 +21,21 @@ private struct _CallbackGenerator<Callback> : GestureCallbackGenerator {
     }
 }
 
-struct EndedCallbacks<Value> : _GestureInputsModifier {
+struct EndedCallbacks<Value>: _GestureInputsModifier {
     let ended: (Value)->Void
     static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GestureInputs) {
         inputs.endedCallbacks.append(_CallbackGenerator(graph: modifier))
     }
 }
 
-struct ChangedCallbacks<Value> : _GestureInputsModifier {
+struct ChangedCallbacks<Value>: _GestureInputsModifier {
     let changed: (Value)->Void
     static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GestureInputs) {
         inputs.endedCallbacks.append(_CallbackGenerator(graph: modifier))
     }
 }
 
-struct PressableGestureCallbacks<Value> : _GestureInputsModifier {
+struct PressableGestureCallbacks<Value>: _GestureInputsModifier {
     let pressing: ((Value)->Void)?
     let pressed: (()->Void)?
     static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GestureInputs) {
@@ -43,14 +43,14 @@ struct PressableGestureCallbacks<Value> : _GestureInputsModifier {
     }
 }
 
-struct CallbacksGesture<Callbacks> : _GestureInputsModifier where Callbacks : _GestureInputsModifier {
+struct CallbacksGesture<Callbacks>: _GestureInputsModifier where Callbacks: _GestureInputsModifier {
     let callbacks: Callbacks
     static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GestureInputs) {
         Callbacks._makeInputs(modifier: modifier[\.callbacks], inputs: &inputs)
     }
 }
 
-struct ModifierGesture<Modifier, Content> : Gesture where Modifier : _GestureInputsModifier, Content: Gesture {
+struct ModifierGesture<Modifier, Content>: Gesture where Modifier: _GestureInputsModifier, Content: Gesture {
     let content: Content
     let modifier: Modifier
 
@@ -64,7 +64,7 @@ struct ModifierGesture<Modifier, Content> : Gesture where Modifier : _GestureInp
     public typealias Value = Content.Value
 }
 
-public struct _EndedGesture<Content> where Content : Gesture {
+public struct _EndedGesture<Content> where Content: Gesture {
     public typealias Body = Never
     public typealias Value = Content.Value
 
@@ -72,13 +72,13 @@ public struct _EndedGesture<Content> where Content : Gesture {
     let _body: _Body
 }
 
-extension _EndedGesture : Gesture {
+extension _EndedGesture: Gesture {
     public static func _makeGesture(gesture: _GraphValue<Self>, inputs: _GestureInputs) -> _GestureOutputs<Content.Value> {
         _Body._makeGesture(gesture: gesture[\._body], inputs: inputs)
     }
 }
 
-public struct _ChangedGesture<Content> where Content : Gesture, Content.Value : Equatable {
+public struct _ChangedGesture<Content> where Content: Gesture, Content.Value: Equatable {
     public typealias Body = Never
     public typealias Value = Content.Value
 
@@ -86,7 +86,7 @@ public struct _ChangedGesture<Content> where Content : Gesture, Content.Value : 
     let _body: _Body
 }
 
-extension _ChangedGesture : Gesture {
+extension _ChangedGesture: Gesture {
     public static func _makeGesture(gesture: _GraphValue<Self>, inputs: _GestureInputs) -> _GestureOutputs<Content.Value> {
         _Body._makeGesture(gesture: gesture[\._body], inputs: inputs)
     }
@@ -101,7 +101,7 @@ extension Gesture {
     }
 }
 
-extension Gesture where Self.Value : Equatable {
+extension Gesture where Self.Value: Equatable {
     public func onChanged(_ action: @escaping (Self.Value) -> Void) -> _ChangedGesture<Self> {
         .init(_body: ModifierGesture(
             content: self,
@@ -110,21 +110,21 @@ extension Gesture where Self.Value : Equatable {
     }
 }
 
-struct AddGestureModifier<T> : ViewModifier where T : Gesture {
+struct AddGestureModifier<T>: ViewModifier where T: Gesture {
     let gesture: T
     let gestureMask: GestureMask
 
     typealias Body = Never
 }
 
-struct SimultaneousGestureModifier<T> : ViewModifier where T : Gesture {
+struct SimultaneousGestureModifier<T>: ViewModifier where T: Gesture {
     let gesture: T
     let gestureMask: GestureMask
 
     typealias Body = Never
 }
 
-struct HighPriorityGestureModifier<T> : ViewModifier where T : Gesture {
+struct HighPriorityGestureModifier<T>: ViewModifier where T: Gesture {
     let gesture: T
     let gestureMask: GestureMask
 
@@ -132,26 +132,26 @@ struct HighPriorityGestureModifier<T> : ViewModifier where T : Gesture {
 }
 
 extension View {
-    public func gesture<T>(_ gesture: T, including mask: GestureMask = .all) -> some View where T : Gesture {
+    public func gesture<T>(_ gesture: T, including mask: GestureMask = .all) -> some View where T: Gesture {
         self.modifier(AddGestureModifier(gesture: gesture, gestureMask: mask))
     }
 
-    public func highPriorityGesture<T>(_ gesture: T, including mask: GestureMask = .all) -> some View where T : Gesture {
+    public func highPriorityGesture<T>(_ gesture: T, including mask: GestureMask = .all) -> some View where T: Gesture {
         self.modifier(HighPriorityGestureModifier(gesture: gesture, gestureMask: mask))
     }
 
-    public func simultaneousGesture<T>(_ gesture: T, including mask: GestureMask = .all) -> some View where T : Gesture {
+    public func simultaneousGesture<T>(_ gesture: T, including mask: GestureMask = .all) -> some View where T: Gesture {
         self.modifier(SimultaneousGestureModifier(gesture: gesture, gestureMask: mask))
     }
 }
 
 protocol _GestureGenerator {
-    associatedtype T : Gesture
+    associatedtype T: Gesture
     var gesture: T { get }
     var gestureMask: GestureMask { get }
 }
 
-extension AddGestureModifier : _UnaryViewModifier {
+extension AddGestureModifier: _UnaryViewModifier {
     static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
         let outputs = body(_Graph(), inputs)
         if let body = outputs.view?.makeView() {
@@ -164,7 +164,7 @@ extension AddGestureModifier : _UnaryViewModifier {
     }
 }
 
-extension SimultaneousGestureModifier : _UnaryViewModifier {
+extension SimultaneousGestureModifier: _UnaryViewModifier {
     static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
         let outputs = body(_Graph(), inputs)
         if let body = outputs.view?.makeView() {
@@ -177,7 +177,7 @@ extension SimultaneousGestureModifier : _UnaryViewModifier {
     }
 }
 
-extension HighPriorityGestureModifier : _UnaryViewModifier {
+extension HighPriorityGestureModifier: _UnaryViewModifier {
     static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
         let outputs = body(_Graph(), inputs)
         if let body = outputs.view?.makeView() {
@@ -195,7 +195,7 @@ extension SimultaneousGestureModifier : _GestureGenerator {}
 extension HighPriorityGestureModifier : _GestureGenerator {}
 
 
-private class GestureViewContext<Modifier> : ViewModifierContext<Modifier> where Modifier : ViewModifier & _GestureGenerator  {
+private class GestureViewContext<Modifier>: ViewModifierContext<Modifier> where Modifier: ViewModifier & _GestureGenerator  {
 
     enum _GestureOutput {
         case gesture(_GestureHandler)
@@ -242,12 +242,12 @@ private class GestureViewContext<Modifier> : ViewModifierContext<Modifier> where
     override func gestureHandlers(at location: CGPoint) -> GestureHandlerOutputs {
         let outputs = super.gestureHandlers(at: location)
 
-        if let target = self.hitTest(location) {
+        if self.hitTest(location) != nil {
             var gestures: [_GestureHandler] = []
             var simGestures: [_GestureHandler] = []
             var hpGestures: [_GestureHandler] = []
 
-            let gesture = self.makeGesture(target: target)
+            let gesture = self.makeGesture(target: self.body)
             if case let .highPriorityGesture(handler) = gesture {
                 hpGestures.append(handler)
             } else if case let .simultaneousGesture(handler) = gesture {
@@ -255,9 +255,11 @@ private class GestureViewContext<Modifier> : ViewModifierContext<Modifier> where
             } else if case let .gesture(handler) = gesture {
                 gestures.append(handler)
             }
-            return outputs.merge(.init(gestures: gestures,
-                                       simultaneousGestures: simGestures,
-                                       highPriorityGestures: hpGestures))
+            // prioritize inner view higher.
+            return GestureHandlerOutputs(gestures: gestures,
+                                         simultaneousGestures: simGestures,
+                                         highPriorityGestures: hpGestures)
+                                         .merge(outputs)
         }
         return outputs
     }

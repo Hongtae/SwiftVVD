@@ -57,15 +57,13 @@ private class ShapeViewContext<Content, Style> : PrimitiveViewContext<_ShapeView
     }
 
     override func hitTest(_ location: CGPoint) -> ViewContext? {
-        if self.bounds.contains(location) {
-            if let view {
-                let fillStyle = view.fillStyle
+        if let view {
+            let fillStyle = view.fillStyle
 
-                if view.shape is ShapeDrawer == false {
-                    let path = view.shape.path(in: frame)
-                    if path.contains(location, eoFill: fillStyle.isEOFilled) {
-                        return self
-                    }
+            if view.shape is ShapeDrawer == false {
+                let path = view.shape.path(in: bounds)
+                if path.contains(location, eoFill: fillStyle.isEOFilled) {
+                    return self
                 }
             }
         }

@@ -221,10 +221,11 @@ class ViewContext: _GraphValueResolver {
     }
 
     var _debugDraw = false
+    var _debugDrawOverlay = false
     var _debugDrawShading: GraphicsContext.Shading = .color(.blue.opacity(0.6))
 
     func drawDebugFrame(frame: CGRect, context: GraphicsContext) {
-        if _debugDraw && self.environment._viewContextDebugDraw {
+        if self.environment._viewContextDebugDraw {
             var path = Path()
             let frame = frame.insetBy(dx: 1, dy: 1).standardized
             path.addRect(frame)
@@ -240,10 +241,17 @@ class ViewContext: _GraphValueResolver {
         var context = context
         context.environment = self.environment
 
-        self.drawDebugFrame(frame: frame, context: context)
+        if self._debugDraw && self._debugDrawOverlay == false {
+            self.drawDebugFrame(frame: frame, context: context)
+        }
+
         self.drawBackground(frame: frame, context: context)
         self.draw(frame: frame, context: context)
         self.drawOverlay(frame: frame, context: context)
+
+        if self._debugDraw && self._debugDrawOverlay {
+            self.drawDebugFrame(frame: frame, context: context)
+        }
     }
 
     struct GestureHandlerOutputs {

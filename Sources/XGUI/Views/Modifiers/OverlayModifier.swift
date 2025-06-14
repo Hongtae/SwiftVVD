@@ -247,4 +247,12 @@ private class OverlayViewContext<Modifier>: ViewModifierContext<Modifier> where 
         }
         overlay.drawView(frame: drawingFrame, context: context)
     }
+    
+    override func hitTest(_ location: CGPoint) -> ViewContext? {
+        let local = location.applying(overlay.transformToContainer.inverted())
+        if let result = overlay.hitTest(local) {
+            return result
+        }
+        return super.hitTest(location)
+    }
 }
