@@ -2,13 +2,13 @@
 //  File: TagValueTrait.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
 
 @usableFromInline
-struct TagValueTraitKey<V> : _ViewTraitKey where V: Hashable {
+struct TagValueTraitKey<V>: _ViewTraitKey where V: Hashable {
     @usableFromInline
     enum Value {
         case untagged
@@ -21,7 +21,7 @@ struct TagValueTraitKey<V> : _ViewTraitKey where V: Hashable {
 }
 
 @usableFromInline
-struct IsAuxiliaryContentTraitKey : _ViewTraitKey {
+struct IsAuxiliaryContentTraitKey: _ViewTraitKey {
     @inlinable static var defaultValue: Bool {
         false
     }

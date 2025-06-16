@@ -2,7 +2,7 @@
 //  File: Alignment.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -12,11 +12,11 @@ public protocol AlignmentID {
 }
 
 @usableFromInline
-struct AlignmentKey : Equatable {
+struct AlignmentKey: Equatable {
     let bits: UInt
 }
 
-public struct HorizontalAlignment : Equatable {
+public struct HorizontalAlignment: Equatable {
     public init(_ id: AlignmentID.Type) {
         self.key = AlignmentKey(bits: 0)
     }
@@ -32,7 +32,7 @@ public struct HorizontalAlignment : Equatable {
     public static let trailing = HorizontalAlignment(alignmentKey: 8)
 }
 
-public struct VerticalAlignment : Equatable {
+public struct VerticalAlignment: Equatable {
     public init(_ id: AlignmentID.Type) {
         self.key = AlignmentKey(bits: 0)
     }
@@ -50,7 +50,7 @@ public struct VerticalAlignment : Equatable {
     public static let lastTextBaseline = VerticalAlignment(alignmentKey: 17)
 }
 
-public struct Alignment : Equatable {
+public struct Alignment: Equatable {
     public var horizontal: HorizontalAlignment
     public var vertical: VerticalAlignment
 
@@ -73,7 +73,7 @@ public struct Alignment : Equatable {
     public static let bottomTrailing = Alignment(horizontal: .trailing, vertical: .bottom)
 }
 
-extension AlignmentKey : Sendable {}
-extension HorizontalAlignment : Sendable {}
-extension VerticalAlignment : Sendable {}
-extension Alignment : Sendable {}
+extension AlignmentKey: Sendable {}
+extension HorizontalAlignment: Sendable {}
+extension VerticalAlignment: Sendable {}
+extension Alignment: Sendable {}

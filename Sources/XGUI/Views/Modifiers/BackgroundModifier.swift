@@ -144,7 +144,7 @@ public struct _InsettableBackgroundShapeModifier<Style, Bounds>: ViewModifier wh
 
     public typealias Body = Never
 
-    var _shapeView : some View {
+    var _shapeView: some View {
         _ShapeView(shape: self.shape, style: self.style, fillStyle: self.fillStyle)
     }
 }

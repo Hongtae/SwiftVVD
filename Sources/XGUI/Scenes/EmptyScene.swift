@@ -5,7 +5,7 @@
 //  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
-public struct _EmptyScene : Scene {
+public struct _EmptyScene: Scene {
 
     @inlinable public init() {
     }
@@ -17,8 +17,8 @@ public struct _EmptyScene : Scene {
     public typealias Body = Never
 }
 
-extension _EmptyScene : Sendable {
+extension _EmptyScene: Sendable {
 }
 
-extension _EmptyScene : _PrimitiveScene {
+extension _EmptyScene: _PrimitiveScene {
 }

@@ -38,7 +38,7 @@ struct ViewStyles {
                           tertiary: AnyShapeStyle?) = (nil, nil, nil)
 }
 
-protocol ViewStyleModifier : Equatable {
+protocol ViewStyleModifier: Equatable {
     var isResolved: Bool { get }
     func apply(to style: inout ViewStyles)
     mutating func resolve(containerView: ViewContext)
@@ -55,7 +55,7 @@ extension ViewStyleModifier {
 }
 
 public struct _ViewListInputs {
-    struct Options : OptionSet, Sendable {
+    struct Options: OptionSet, Sendable {
         let rawValue: Int
         static var none: Options { Options(rawValue: 0) }
     }

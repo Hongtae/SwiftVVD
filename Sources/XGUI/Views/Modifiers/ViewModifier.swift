@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct _ViewModifier_Content<Modifier> where Modifier : ViewModifier {
+public struct _ViewModifier_Content<Modifier> where Modifier: ViewModifier {
     public typealias Body = Never
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
@@ -29,12 +29,12 @@ public struct _ViewModifier_Content<Modifier> where Modifier : ViewModifier {
     }
 }
 
-extension _ViewModifier_Content : View {
+extension _ViewModifier_Content: View {
     public var body: Never { neverBody() }
 }
 
 private struct _ViewModifierBodyContext {
-    struct _Body : @unchecked Sendable {
+    struct _Body: @unchecked Sendable {
         let makeView: ((_Graph, _ViewInputs) -> _ViewOutputs)?
         let makeViewList: ((_Graph, _ViewListInputs) -> _ViewListOutputs)?
     }
@@ -44,7 +44,7 @@ private struct _ViewModifierBodyContext {
 }
 
 public protocol ViewModifier {
-    associatedtype Body : View
+    associatedtype Body: View
     @ViewBuilder func body(content: Self.Content) -> Self.Body
     typealias Content = _ViewModifier_Content<Self>
 
@@ -59,13 +59,13 @@ extension ViewModifier where Self.Body == Never {
 }
 
 extension ViewModifier {
-    var _content : Self.Body {
+    var _content: Self.Body {
         body(content: _ViewModifier_Content())
     }
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
         if let modifierType = self as? any _ViewInputsModifier.Type {
-            func makeInputs<T : _ViewInputsModifier>(_: T.Type, graph: _GraphValue<Any>, inputs: inout _ViewInputs) {
+            func makeInputs<T: _ViewInputsModifier>(_: T.Type, graph: _GraphValue<Any>, inputs: inout _ViewInputs) {
                 T._makeViewInputs(modifier: graph.unsafeCast(to: T.self), inputs: &inputs)
             }
             var inputs = inputs
@@ -84,7 +84,7 @@ extension ViewModifier {
 
     public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
         if let modifierType = self as? any _ViewInputsModifier.Type {
-            func makeInputs<T : _ViewInputsModifier>(_: T.Type, graph: _GraphValue<Any>, inputs: inout _ViewListInputs) {
+            func makeInputs<T: _ViewInputsModifier>(_: T.Type, graph: _GraphValue<Any>, inputs: inout _ViewListInputs) {
                 T._makeViewListInputs(modifier: graph.unsafeCast(to: T.self), inputs: &inputs)
             }
             var inputs = inputs
@@ -132,7 +132,7 @@ protocol _ViewLayoutModifier {
     static func _makeLayoutView(modifier: _GraphValue<Self>, inputs: _ViewInputs, content: any ViewGenerator) -> any ViewGenerator
 }
 
-extension ViewModifier where Self : _GraphInputsModifier, Self.Body == Never {
+extension ViewModifier where Self: _GraphInputsModifier, Self.Body == Never {
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
         var inputs = inputs
         Self._makeInputs(modifier: modifier, inputs: &inputs.base)
@@ -146,7 +146,7 @@ extension ViewModifier where Self : _GraphInputsModifier, Self.Body == Never {
     }
 }
 
-extension ViewModifier where Self : Animatable {
+extension ViewModifier where Self: Animatable {
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
         var modifier = modifier
         Self._makeAnimatable(value: &modifier, inputs: inputs.base)
@@ -194,7 +194,7 @@ extension ViewModifier {
       }
 }
 
-extension ModifiedContent : View where Content : View, Modifier : ViewModifier {
+extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
     public var body: Never {
         fatalError("body() should not be called on \(Self.self).")
     }
@@ -269,7 +269,7 @@ extension ModifiedContent : View where Content : View, Modifier : ViewModifier {
     }
 }
 
-extension ModifiedContent : ViewModifier where Content : ViewModifier, Modifier : ViewModifier {
+extension ModifiedContent: ViewModifier where Content: ViewModifier, Modifier: ViewModifier {
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
         Modifier._makeView(modifier: modifier[\.modifier], inputs: inputs) { _, inputs in
             Content._makeView(modifier: modifier[\.content], inputs: inputs, body: body)
@@ -289,6 +289,6 @@ extension View {
     }
 }
 
-class ViewModifierContext<Modifier> : GenericViewContext<Modifier> where Modifier : ViewModifier {
+class ViewModifierContext<Modifier>: GenericViewContext<Modifier> where Modifier: ViewModifier {
     var modifier: Modifier? { self.view }
 }

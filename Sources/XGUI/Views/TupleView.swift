@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct TupleView<T> : View {
+public struct TupleView<T>: View {
     public var value: T
 
     public init(_ value: T) {
@@ -119,5 +119,5 @@ extension TupleView {
     }
 }
 
-extension TupleView : _PrimitiveView {
+extension TupleView: _PrimitiveView {
 }

@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct _ForegroundStyleModifier<Style> : ViewModifier where Style: ShapeStyle {
+public struct _ForegroundStyleModifier<Style>: ViewModifier where Style: ShapeStyle {
     public var style: Style
     @inlinable public init(style: Style) {
         self.style = style
@@ -18,15 +18,15 @@ public struct _ForegroundStyleModifier<Style> : ViewModifier where Style: ShapeS
     public typealias Body = Never
 }
 
-extension _ForegroundStyleModifier : _ViewInputsModifier {
-    class Modifier : _ForegroundStyleViewStyleModifier<_ForegroundStyleModifier> {
+extension _ForegroundStyleModifier: _ViewInputsModifier {
+    class Modifier: _ForegroundStyleViewStyleModifier<_ForegroundStyleModifier> {
         override func apply(modifier: Modifier, to style: inout ViewStyles) {
             style.foregroundStyle.primary = AnyShapeStyle(modifier.style)
         }
     }
 }
 
-public struct _ForegroundStyleModifier2<S1, S2> : ViewModifier where S1: ShapeStyle, S2: ShapeStyle {
+public struct _ForegroundStyleModifier2<S1, S2>: ViewModifier where S1: ShapeStyle, S2: ShapeStyle {
     public var primary: S1
     public var secondary: S2
     @inlinable public init(primary: S1, secondary: S2) {
@@ -39,8 +39,8 @@ public struct _ForegroundStyleModifier2<S1, S2> : ViewModifier where S1: ShapeSt
     public typealias Body = Never
 }
 
-extension _ForegroundStyleModifier2 : _ViewInputsModifier {
-    class Modifier : _ForegroundStyleViewStyleModifier<_ForegroundStyleModifier2> {
+extension _ForegroundStyleModifier2: _ViewInputsModifier {
+    class Modifier: _ForegroundStyleViewStyleModifier<_ForegroundStyleModifier2> {
         override func apply(modifier: Modifier, to style: inout ViewStyles) {
             style.foregroundStyle.primary = AnyShapeStyle(modifier.primary)
             style.foregroundStyle.secondary = AnyShapeStyle(modifier.secondary)
@@ -48,7 +48,7 @@ extension _ForegroundStyleModifier2 : _ViewInputsModifier {
     }
 }
 
-public struct _ForegroundStyleModifier3<S1, S2, S3> : ViewModifier where S1: ShapeStyle, S2: ShapeStyle, S3: ShapeStyle {
+public struct _ForegroundStyleModifier3<S1, S2, S3>: ViewModifier where S1: ShapeStyle, S2: ShapeStyle, S3: ShapeStyle {
     public var primary: S1
     public var secondary: S2
     public var tertiary: S3
@@ -63,8 +63,8 @@ public struct _ForegroundStyleModifier3<S1, S2, S3> : ViewModifier where S1: Sha
     public typealias Body = Never
 }
 
-extension _ForegroundStyleModifier3 : _ViewInputsModifier {
-    class Modifier : _ForegroundStyleViewStyleModifier<_ForegroundStyleModifier3> {
+extension _ForegroundStyleModifier3: _ViewInputsModifier {
+    class Modifier: _ForegroundStyleViewStyleModifier<_ForegroundStyleModifier3> {
         override func apply(modifier: Modifier, to style: inout ViewStyles) {
             style.foregroundStyle.primary = AnyShapeStyle(modifier.primary)
             style.foregroundStyle.secondary = AnyShapeStyle(modifier.secondary)
@@ -89,7 +89,7 @@ extension View {
     }
 }
 
-class _ForegroundStyleViewStyleModifier<Modifier> : ViewStyleModifier {
+class _ForegroundStyleViewStyleModifier<Modifier>: ViewStyleModifier {
     typealias Modifier = Modifier
     var isResolved: Bool {  modifier != nil }
     var modifier: Modifier?

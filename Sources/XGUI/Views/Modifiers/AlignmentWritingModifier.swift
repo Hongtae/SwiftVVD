@@ -2,12 +2,12 @@
 //  File: AlignmentWritingModifier.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
 
-public struct _AlignmentWritingModifier : ViewModifier {
+public struct _AlignmentWritingModifier: ViewModifier {
     @usableFromInline
     let key: AlignmentKey
     @usableFromInline
@@ -24,7 +24,7 @@ public struct _AlignmentWritingModifier : ViewModifier {
     public typealias Body = Never
 }
 
-extension _AlignmentWritingModifier : _UnaryViewModifier {
+extension _AlignmentWritingModifier: _UnaryViewModifier {
 }
 
 extension View {

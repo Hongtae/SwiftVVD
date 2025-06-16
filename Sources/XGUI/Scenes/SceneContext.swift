@@ -157,7 +157,7 @@ class GenericSceneContext<Content>: TypedSceneContext<Content> where Content: Sc
     }
 }
 
-protocol SceneGenerator<Content> : Equatable {
+protocol SceneGenerator<Content>: Equatable {
     associatedtype Content
     var graph: _GraphValue<Content> { get }
     func makeScene() -> SceneContext
@@ -175,7 +175,7 @@ extension SceneGenerator {
 
 #if DEBUG
 // Ensure that the UnarySceneGenerator always returns a SceneContext of the same type.
-nonisolated(unsafe) var _debugSceneTypes: [_GraphValue<Any> : SceneContext.Type] = [:]
+nonisolated(unsafe) var _debugSceneTypes: [_GraphValue<Any>: SceneContext.Type] = [:]
 #endif
 
 struct UnarySceneGenerator<Content>: SceneGenerator {

@@ -12,7 +12,7 @@ public struct _ViewOutputs {
 }
 
 public struct _ViewListOutputs {
-    struct Options : OptionSet, Sendable {
+    struct Options: OptionSet, Sendable {
         let rawValue: Int
         static var none: Options { Options(rawValue: 0) }
     }

@@ -7,19 +7,19 @@
 
 import Foundation
 
-public protocol VectorArithmetic : AdditiveArithmetic {
+public protocol VectorArithmetic: AdditiveArithmetic {
     mutating func scale(by rhs: Double)
     var magnitudeSquared: Double { get }
 }
 
 public protocol Animatable {
-    associatedtype AnimatableData : VectorArithmetic
+    associatedtype AnimatableData: VectorArithmetic
     var animatableData: Self.AnimatableData { get set }
 
     static func _makeAnimatable(value: inout _GraphValue<Self>, inputs: _GraphInputs)
 }
 
-extension Animatable where Self : VectorArithmetic {
+extension Animatable where Self: VectorArithmetic {
     public var animatableData: Self { fatalError() }
 }
 
@@ -37,7 +37,7 @@ extension Animatable {
     }
 }
 
-extension View where Self : Animatable {
+extension View where Self: Animatable {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         fatalError()
     }
@@ -46,7 +46,7 @@ extension View where Self : Animatable {
     }
 }
 
-public struct AnimatablePair<First, Second> : VectorArithmetic where First : VectorArithmetic, Second : VectorArithmetic {
+public struct AnimatablePair<First, Second>: VectorArithmetic where First: VectorArithmetic, Second: VectorArithmetic {
     public var first: First
     public var second: Second
 

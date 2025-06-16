@@ -109,7 +109,7 @@ extension _VariadicView_ViewRoot {
             if let layoutType = self as? any _UnaryViewRoot_Layout.Type {
                 if let staticLsit = body.views as? StaticViewList {
                     let views = staticLsit.views.map { $0.makeView() }
-                    func makeView<L : _UnaryViewRoot_Layout>(_: L.Type, inputs: _GraphInputs) -> any ViewGenerator {
+                    func makeView<L: _UnaryViewRoot_Layout>(_: L.Type, inputs: _GraphInputs) -> any ViewGenerator {
                         let graph = root.unsafeCast(to: L.self)
                         return UnaryViewGenerator(graph: graph, baseInputs: baseInputs) { graph, inputs in
                             UnaryViewRootLayoutStaticViewGroupContext(graph: graph,
@@ -120,7 +120,7 @@ extension _VariadicView_ViewRoot {
                     let view = makeView(layoutType, inputs: baseInputs)
                     return _ViewOutputs(view: view)
                 } else {
-                    func makeView<L : _UnaryViewRoot_Layout>(_: L.Type, inputs: _GraphInputs) -> any ViewGenerator {
+                    func makeView<L: _UnaryViewRoot_Layout>(_: L.Type, inputs: _GraphInputs) -> any ViewGenerator {
                         let graph = root.unsafeCast(to: L.self)
                         return UnaryViewGenerator(graph: graph, baseInputs: baseInputs) { graph, inputs in
                             UnaryViewRootLayoutDynamicViewGroupContext(graph: graph,
@@ -344,7 +344,7 @@ private class ChildrenElementViewContext: DynamicViewContext<_VariadicView_Child
             self.view = view
         }
         if let view = self.view?.view {
-            func isEqual<T : ViewGenerator>(_ lhs: T, _ rhs: (any ViewGenerator)?) -> Bool {
+            func isEqual<T: ViewGenerator>(_ lhs: T, _ rhs: (any ViewGenerator)?) -> Bool {
                 if let rhs {
                     return lhs == rhs
                 }

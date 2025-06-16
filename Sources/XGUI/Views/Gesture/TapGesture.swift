@@ -7,14 +7,14 @@
 
 import Foundation
 
-public struct TapGesture : Gesture {
+public struct TapGesture: Gesture {
     public var count: Int
     public init(count: Int = 1) {
         self.count = count
     }
 
     public static func _makeGesture(gesture: _GraphValue<TapGesture>, inputs: _GestureInputs) -> _GestureOutputs<Value> {
-        struct _Generator : _GestureRecognizerGenerator {
+        struct _Generator: _GestureRecognizerGenerator {
             let graph: _GraphValue<TapGesture>
             let inputs: _GestureInputs
             func makeGesture(containerView: ViewContext) -> _GestureRecognizer<Value>? {
@@ -41,7 +41,7 @@ extension View {
     }
 }
 
-class TapGestureRecognizer : _GestureRecognizer<TapGesture.Value> {
+class TapGestureRecognizer: _GestureRecognizer<TapGesture.Value> {
     var typeFilter: _PrimitiveGestureTypes = .all
     let gesture: TapGesture
     let buttonID: Int

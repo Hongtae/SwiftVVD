@@ -7,7 +7,7 @@
 
 import Foundation
 
-struct _PrimitiveGestureTypes : OptionSet {
+struct _PrimitiveGestureTypes: OptionSet {
     let rawValue: UInt
     static let tap              = Self(rawValue: 1 << 0)
     static let longPress        = Self(rawValue: 1 << 1)
@@ -44,7 +44,7 @@ class _GestureHandler {
         self.isValid && (self.state == .ready || self.state == .processing)
     }
 
-    init<T : Gesture>(graph: _GraphValue<T>, target: ViewContext?) {
+    init<T: Gesture>(graph: _GraphValue<T>, target: ViewContext?) {
         self.graph = graph.unsafeCast(to: Any.self)
         self.view = target
     }
@@ -73,17 +73,17 @@ class _GestureHandler {
     }
 }
 
-class _GestureRecognizer<Value> : _GestureHandler {
+class _GestureRecognizer<Value>: _GestureHandler {
     struct Callbacks {
         var endedCallbacks: [EndedCallbacks<Value>] = []
         var changedCallbacks: [ChangedCallbacks<Value>] = []
-        var pressableGestureCallbacks : [PressableGestureCallbacks<Value>] = []
+        var pressableGestureCallbacks: [PressableGestureCallbacks<Value>] = []
     }
     var endedCallbacks: [EndedCallbacks<Value>] = []
     var changedCallbacks: [ChangedCallbacks<Value>] = []
-    var pressableGestureCallbacks : [PressableGestureCallbacks<Value>] = []
+    var pressableGestureCallbacks: [PressableGestureCallbacks<Value>] = []
 
-    init<T : Gesture>(graph: _GraphValue<T>, target: ViewContext?, callbacks: Callbacks) {
+    init<T: Gesture>(graph: _GraphValue<T>, target: ViewContext?, callbacks: Callbacks) {
         self.endedCallbacks = callbacks.endedCallbacks
         self.changedCallbacks = callbacks.changedCallbacks
         self.pressableGestureCallbacks = callbacks.pressableGestureCallbacks

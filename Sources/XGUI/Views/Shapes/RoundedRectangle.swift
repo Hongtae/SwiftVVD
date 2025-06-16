@@ -2,12 +2,12 @@
 //  File: RoundedRectangle.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
 
-public struct RoundedRectangle : Shape {
+public struct RoundedRectangle: Shape {
     public var cornerSize: CGSize
     public var style: RoundedCornerStyle
 
@@ -34,13 +34,13 @@ public struct RoundedRectangle : Shape {
     public typealias Body = _ShapeView<RoundedRectangle, ForegroundStyle>
 }
 
-extension RoundedRectangle : InsettableShape {
+extension RoundedRectangle: InsettableShape {
     @inlinable public func inset(by amount: CGFloat) -> some InsettableShape {
         return _Inset(base: self, amount: amount)
     }
 
     @usableFromInline
-    struct _Inset : InsettableShape {
+    struct _Inset: InsettableShape {
         @usableFromInline
         var base: RoundedRectangle
         @usableFromInline

@@ -26,7 +26,7 @@ import Foundation
 // - [S] DynamicMultiViewGenerator
 
 
-protocol ViewGenerator<Content> : Equatable {
+protocol ViewGenerator<Content>: Equatable {
     associatedtype Content
     var graph: _GraphValue<Content> { get }
     func makeView() -> ViewContext
@@ -58,7 +58,7 @@ protocol StaticViewList {
     var views: [any ViewGenerator] { get set }
 }
 
-struct StaticViewListGenerator : ViewListGenerator, StaticViewList {
+struct StaticViewListGenerator: ViewListGenerator, StaticViewList {
     var views: [any ViewGenerator]
 
     func makeViewList(containerView _: ViewContext) -> [any ViewGenerator] {
@@ -87,7 +87,7 @@ extension ViewListGenerator where Self == StaticViewListGenerator {
     }
 }
 
-struct DynamicViewListGenerator : ViewListGenerator {
+struct DynamicViewListGenerator: ViewListGenerator {
     var views: [any ViewListGenerator]
 
     func makeViewList(containerView: ViewContext) -> [any ViewGenerator] {
@@ -109,7 +109,7 @@ extension ViewListGenerator where Self == DynamicViewListGenerator {
     }
 }
 
-struct WrapperViewListGenerator : ViewListGenerator {
+struct WrapperViewListGenerator: ViewListGenerator {
     var views: any ViewListGenerator
     var baseInputs: _GraphInputs
     let wrapper: (ViewContext, _GraphInputs, any ViewGenerator) -> any ViewGenerator
@@ -135,10 +135,10 @@ extension ViewListGenerator {
 
 #if DEBUG
 // Ensure that the UnaryViewGenerator always returns a ViewContext of the same type.
-nonisolated(unsafe) var _debugViewTypes: [_GraphValue<Any> : ViewContext.Type] = [:]
+nonisolated(unsafe) var _debugViewTypes: [_GraphValue<Any>: ViewContext.Type] = [:]
 #endif
 
-struct UnaryViewGenerator<Content> : ViewGenerator {
+struct UnaryViewGenerator<Content>: ViewGenerator {
     let graph: _GraphValue<Content>
     var baseInputs: _GraphInputs
     let body: (_GraphValue<Content>, _GraphInputs) -> ViewContext
@@ -161,10 +161,10 @@ struct UnaryViewGenerator<Content> : ViewGenerator {
     }
 }
 
-protocol MultiViewGenerator : ViewGenerator, ViewListGenerator {
+protocol MultiViewGenerator: ViewGenerator, ViewListGenerator {
 }
 
-struct StaticMultiViewGenerator<Content> : MultiViewGenerator, StaticViewList {
+struct StaticMultiViewGenerator<Content>: MultiViewGenerator, StaticViewList {
     var graph: _GraphValue<Content>
     var baseInputs: _GraphInputs
     var views: [any ViewGenerator]
@@ -186,7 +186,7 @@ struct StaticMultiViewGenerator<Content> : MultiViewGenerator, StaticViewList {
     }
 }
 
-struct DynamicMultiViewGenerator<Content> : MultiViewGenerator {
+struct DynamicMultiViewGenerator<Content>: MultiViewGenerator {
     var graph: _GraphValue<Content>
     var baseInputs: _GraphInputs
     var body: any ViewListGenerator

@@ -2,7 +2,7 @@
 //  File: WindowGroup.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -10,7 +10,7 @@ import VVD
 
 private var defaultWindowTitle: Text { Text("XGUI.WindowGroup") }
 
-public struct WindowGroup<Content> : Scene where Content : View {
+public struct WindowGroup<Content>: Scene where Content: View {
 
     let content: ()->Content
     let contextType: Any.Type
@@ -66,7 +66,7 @@ extension WindowGroup {
     }
 }
 
-struct WindowGroupScene<Content> : _PrimitiveScene where Content : View {
+struct WindowGroupScene<Content>: _PrimitiveScene where Content: View {
     var content: Content
     var title: Text
 
@@ -77,7 +77,7 @@ struct WindowGroupScene<Content> : _PrimitiveScene where Content : View {
     }
 }
 
-class WindowGroupSceneContext<Content> : TypedSceneContext<WindowGroupScene<Content>> where Content : View {
+class WindowGroupSceneContext<Content>: TypedSceneContext<WindowGroupScene<Content>> where Content: View {
     typealias Scene = WindowGroupScene<Content>
     var window: WindowContext?
 
@@ -113,7 +113,7 @@ class WindowGroupSceneContext<Content> : TypedSceneContext<WindowGroupScene<Cont
     }
 }
 
-class GroupWindowContext<Content> : GenericWindowContext<Content> where Content : View {
+class GroupWindowContext<Content>: GenericWindowContext<Content> where Content: View {
     let dataType: Any.Type?
     init(dataType: Any.Type?, content: _GraphValue<Content>, title: _GraphValue<Text>, scene: SceneContext) {
         self.dataType = dataType
@@ -121,5 +121,5 @@ class GroupWindowContext<Content> : GenericWindowContext<Content> where Content 
     }
 }
 
-extension GroupWindowContext : @unchecked Sendable {
+extension GroupWindowContext: @unchecked Sendable {
 }

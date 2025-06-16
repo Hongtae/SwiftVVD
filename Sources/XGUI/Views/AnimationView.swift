@@ -2,12 +2,12 @@
 //  File: AnimationView.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
 
-public struct _AnimationView<Content> : View where Content: Equatable, Content : View {
+public struct _AnimationView<Content>: View where Content: Equatable, Content: View {
     public var content: Content
     public var animation: Animation?
 
@@ -26,5 +26,5 @@ public struct _AnimationView<Content> : View where Content: Equatable, Content :
     public typealias Body = Never
 }
 
-extension _AnimationView : _PrimitiveView {
+extension _AnimationView: _PrimitiveView {
 }

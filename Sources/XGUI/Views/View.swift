@@ -9,7 +9,7 @@ import Foundation
 import Observation
 
 public protocol View {
-    associatedtype Body : View
+    associatedtype Body: View
     @ViewBuilder var body: Self.Body { get }
 
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs
@@ -82,10 +82,10 @@ extension _PrimitiveView {
     }
 }
 
-extension Never : View {
+extension Never: View {
 }
 
-extension Optional : View where Wrapped : View {
+extension Optional: View where Wrapped: View {
     public typealias Body = Never
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         var outputs = Wrapped._makeView(view: view[\._unwrap], inputs: inputs)
@@ -122,7 +122,7 @@ extension Optional : View where Wrapped : View {
     }
 }
 
-extension Optional : _PrimitiveView where Self : View {
+extension Optional: _PrimitiveView where Self: View {
 }
 
 //MARK: - View with ID
@@ -140,7 +140,7 @@ struct IDView<Content, ID>: View where Content: View, ID: Hashable {
 }
 
 extension View {
-    public func id<ID>(_ id: ID) -> some View where ID : Hashable {
+    public func id<ID>(_ id: ID) -> some View where ID: Hashable {
         IDView(self, id: id)
     }
 }
@@ -162,20 +162,20 @@ struct ViewProxy: Hashable {
     let type: any View.Type
     let graph: _GraphValue<Any>
 
-    init<V : View>(_ graph: _GraphValue<V>) {
+    init<V: View>(_ graph: _GraphValue<V>) {
         self.type = V.self
         self.graph = graph.unsafeCast(to: Any.self)
     }
 
     func makeView(_:_Graph, inputs: _ViewInputs) -> _ViewOutputs {
-        func make<T : View>(_ type: T.Type) -> _ViewOutputs {
+        func make<T: View>(_ type: T.Type) -> _ViewOutputs {
             T._makeView(view: self.graph.unsafeCast(to: T.self), inputs: inputs)
         }
         return make(self.type)
     }
 
     func makeViewList(_:_Graph, inputs: _ViewListInputs) -> _ViewListOutputs {
-        func make<T : View>(_ type: T.Type) -> _ViewListOutputs {
+        func make<T: View>(_ type: T.Type) -> _ViewListOutputs {
             T._makeViewList(view: self.graph.unsafeCast(to: T.self), inputs: inputs)
         }
         return make(self.type)
@@ -190,7 +190,7 @@ struct ViewProxy: Hashable {
     }
 }
 
-private final class DynamicContentViewContext<Content>: GenericViewContext<Content>, @unchecked Sendable where Content : View {
+private final class DynamicContentViewContext<Content>: GenericViewContext<Content>, @unchecked Sendable where Content: View {
     var dynamicPropertyData: _DynamicPropertyDataStorage<Content>
 
     override init(graph: _GraphValue<Content>, body: ViewContext, inputs: _GraphInputs) {
@@ -256,7 +256,7 @@ private final class DynamicContentStaticMultiViewContext<Content>: StaticMultiVi
         }
     }
 
-    struct Generator : MultiViewGenerator, StaticViewList {
+    struct Generator: MultiViewGenerator, StaticViewList {
         var graph: _GraphValue<Content>
         var baseInputs: _GraphInputs
         var views: [any ViewGenerator]
@@ -311,7 +311,7 @@ private final class DynamicContentDynamicMultiViewContext<Content>: DynamicMulti
         }
     }
 
-    struct Generator : MultiViewGenerator {
+    struct Generator: MultiViewGenerator {
         var graph: _GraphValue<Content>
         var baseInputs: _GraphInputs
         var body: any ViewListGenerator
@@ -331,7 +331,7 @@ private final class DynamicContentDynamicMultiViewContext<Content>: DynamicMulti
     }
 }
 
-private final class OptionalViewContext<WrappedContent> : GenericViewContext<Optional<WrappedContent>> where WrappedContent : View {
+private final class OptionalViewContext<WrappedContent>: GenericViewContext<Optional<WrappedContent>> where WrappedContent: View {
     override func updateContent() {
         self.view = nil
         if var opt = value(atPath: self.graph) {

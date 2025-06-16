@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct VStackLayout : Layout {
+public struct VStackLayout: Layout {
     public var alignment: HorizontalAlignment
     public var spacing: CGFloat?
 
@@ -172,10 +172,10 @@ public struct VStackLayout : Layout {
 
 
 public typealias _VStackLayout = VStackLayout
-extension _VStackLayout : _VariadicView_UnaryViewRoot {}
-extension _VStackLayout : _VariadicView_ViewRoot {}
-extension _VStackLayout : Sendable {}
+extension _VStackLayout: _VariadicView_UnaryViewRoot {}
+extension _VStackLayout: _VariadicView_ViewRoot {}
+extension _VStackLayout: Sendable {}
 
 extension _VStackLayout {
-    static var _defaultLayoutSpacing : CGFloat { 8 }
+    static var _defaultLayoutSpacing: CGFloat { 8 }
 }

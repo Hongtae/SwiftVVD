@@ -2,13 +2,13 @@
 //  File: TransitionTrait.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
 
 @usableFromInline
-struct TransitionTraitKey : _ViewTraitKey {
+struct TransitionTraitKey: _ViewTraitKey {
     @inlinable static var defaultValue: AnyTransition {
         .opacity
     }
@@ -17,7 +17,7 @@ struct TransitionTraitKey : _ViewTraitKey {
 }
 
 @usableFromInline
-struct CanTransitionTraitKey : _ViewTraitKey {
+struct CanTransitionTraitKey: _ViewTraitKey {
     @inlinable static var defaultValue: Bool {
         false
     }

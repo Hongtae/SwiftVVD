@@ -2,12 +2,12 @@
 //  File: StrokedShape.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
 
-public struct _StrokedShape<S> : Shape where S : Shape {
+public struct _StrokedShape<S>: Shape where S: Shape {
     public let shape: S
     public var style: StrokeStyle
 
@@ -50,7 +50,7 @@ protocol ShapeDrawer {
     func _draw(in frame: CGRect, style: any ShapeStyle, fillStyle: FillStyle, context: GraphicsContext)
 }
 
-extension _StrokedShape : ShapeDrawer {
+extension _StrokedShape: ShapeDrawer {
     func _draw(in frame: CGRect, style: any ShapeStyle, fillStyle: FillStyle, context: GraphicsContext) {
         if let drawer = self.shape as? ShapeDrawer {
             drawer._draw(in: frame, style: style, fillStyle: fillStyle, context: context)

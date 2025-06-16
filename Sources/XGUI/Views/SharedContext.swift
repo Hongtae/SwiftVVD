@@ -19,8 +19,8 @@ extension EnvironmentValues {
     }
 }
 
-protocol ViewRoot : AnyObject, _GraphValueResolver {
-    associatedtype Root : View
+protocol ViewRoot: AnyObject, _GraphValueResolver {
+    associatedtype Root: View
     var root: Root { get }
     var graph: _GraphValue<Root> { get }
     var scene: SceneContext { get }
@@ -32,7 +32,7 @@ extension ViewRoot {
     }
 }
 
-class TypedViewRoot<Root> : ViewRoot where Root : View {
+class TypedViewRoot<Root>: ViewRoot where Root: View {
     let root: Root
     let graph: _GraphValue<Root>
     unowned let scene: SceneContext

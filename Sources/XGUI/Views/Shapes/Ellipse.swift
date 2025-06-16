@@ -2,12 +2,12 @@
 //  File: Ellipse.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
 
-public struct Ellipse : Shape {
+public struct Ellipse: Shape {
     public func path(in rect: CGRect) -> Path {
         Path(ellipseIn: rect)
     }
@@ -19,13 +19,13 @@ public struct Ellipse : Shape {
     public typealias Body = _ShapeView<Ellipse, ForegroundStyle>
 }
 
-extension Ellipse : InsettableShape {
+extension Ellipse: InsettableShape {
     @inlinable public func inset(by amount: CGFloat) -> some InsettableShape {
         return _Inset(amount: amount)
     }
 
     @usableFromInline
-    struct _Inset : InsettableShape {
+    struct _Inset: InsettableShape {
         @usableFromInline
         var amount: CGFloat
 

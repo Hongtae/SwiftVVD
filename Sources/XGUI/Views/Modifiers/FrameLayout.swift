@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct _FrameLayout : ViewModifier, Animatable {
+public struct _FrameLayout: ViewModifier, Animatable {
     var width: CGFloat?
     var height: CGFloat?
     var alignment: Alignment
@@ -32,8 +32,8 @@ extension View {
     }
 }
 
-extension _FrameLayout : _ViewLayoutModifier {
-    private class LayoutViewContext : ViewModifierContext<_FrameLayout> {
+extension _FrameLayout: _ViewLayoutModifier {
+    private class LayoutViewContext: ViewModifierContext<_FrameLayout> {
         override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
             guard let modifier else { fatalError("Invalid view modifier") }
 

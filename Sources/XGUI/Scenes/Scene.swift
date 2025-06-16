@@ -9,7 +9,7 @@ import Foundation
 
 
 public protocol Scene {
-    associatedtype Body : Scene
+    associatedtype Body: Scene
     @SceneBuilder var body: Self.Body { get }
     static func _makeScene(scene: _GraphValue<Self>, inputs: _SceneInputs) -> _SceneOutputs
 }
@@ -20,18 +20,18 @@ extension Scene {
     }
 }
 
-extension Never : Scene {
+extension Never: Scene {
 }
 
-protocol _PrimitiveScene : Scene {
+protocol _PrimitiveScene: Scene {
 }
 
 extension _PrimitiveScene {
     public var body: Never { neverBody() }
 }
 
-protocol SceneRoot : AnyObject, _GraphValueResolver {
-    associatedtype Root : Scene
+protocol SceneRoot: AnyObject, _GraphValueResolver {
+    associatedtype Root: Scene
     var root: Root { get }
     var graph: _GraphValue<Root> { get }
     var app: AppContext { get }
@@ -43,7 +43,7 @@ extension SceneRoot {
     }
 }
 
-class TypedSceneRoot<Root> : SceneRoot where Root : Scene {
+class TypedSceneRoot<Root>: SceneRoot where Root: Scene {
     let root: Root
     let graph: _GraphValue<Root>
     unowned var app: AppContext

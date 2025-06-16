@@ -70,7 +70,7 @@ public struct _OverlayStyleModifier<Style>: ViewModifier where Style: ShapeStyle
 
     public typealias Body = Never
 
-    var _shapeView : some View {
+    var _shapeView: some View {
         _ShapeView(shape: Rectangle(), style: self.style)
     }
 }
@@ -107,7 +107,7 @@ public struct _OverlayShapeModifier<Style, Bounds>: ViewModifier where Style: Sh
 
     public typealias Body = Never
 
-    var _shapeView : some View {
+    var _shapeView: some View {
         _ShapeView(shape: self.shape, style: self.style, fillStyle: self.fillStyle)
     }
 }

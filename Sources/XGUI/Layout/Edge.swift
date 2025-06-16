@@ -2,12 +2,12 @@
 //  File: Edge.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
 
-public enum Edge : Int8, CaseIterable, Equatable, Hashable, RawRepresentable {
+public enum Edge: Int8, CaseIterable, Equatable, Hashable, RawRepresentable {
     case top
     case leading
     case bottom
@@ -39,7 +39,7 @@ extension Edge {
     }
 }
 
-public struct EdgeInsets : Equatable, Animatable, _VectorMath {
+public struct EdgeInsets: Equatable, Animatable, _VectorMath {
     public var top: CGFloat
     public var leading: CGFloat
     public var bottom: CGFloat

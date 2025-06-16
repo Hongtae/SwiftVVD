@@ -5,7 +5,7 @@
 //  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
-public struct Label<Title, Icon> : View where Title : View, Icon : View {
+public struct Label<Title, Icon>: View where Title: View, Icon: View {
     let title: Title
     let icon: Icon
     public init(@ViewBuilder title: () -> Title, @ViewBuilder icon: () -> Icon) {
@@ -29,11 +29,11 @@ extension Label where Title == Text, Icon == Image {
         self.title = Text(titleKey)
         self.icon = Image(systemName: name)
     }
-    public init<S>(_ title: S, image name: String) where S : StringProtocol {
+    public init<S>(_ title: S, image name: String) where S: StringProtocol {
         self.title = Text(title)
         self.icon = Image(name)
     }
-    public init<S>(_ title: S, systemImage name: String) where S : StringProtocol {
+    public init<S>(_ title: S, systemImage name: String) where S: StringProtocol {
         self.title = Text(title)
         self.icon = Image(systemName: name)
     }
@@ -46,7 +46,7 @@ extension Label where Title == LabelStyleConfiguration.Title, Icon == LabelStyle
     }
 }
 
-struct ResolvedLabelStyle : View {
+struct ResolvedLabelStyle: View {
     var _style: any LabelStyle = DefaultLabelStyle.automatic
     var _configuration = LabelStyleConfiguration(nil, nil)
     var _body: any View {
@@ -65,7 +65,7 @@ struct ResolvedLabelStyle : View {
         let style = inputs.layouts.labelStyles.popLast()
         let styleType = style?.type ?? DefaultLabelStyle.self
 
-        func makeStyleBody<S : LabelStyle, T>(_: S.Type, graph: _GraphValue<T>, inputs: _ViewInputs) -> _ViewOutputs {
+        func makeStyleBody<S: LabelStyle, T>(_: S.Type, graph: _GraphValue<T>, inputs: _ViewInputs) -> _ViewOutputs {
             S.Body._makeView(view: graph.unsafeCast(to: S.Body.self), inputs: inputs)
         }
         let outputs = makeStyleBody(styleType, graph: view[\._body], inputs: inputs)
@@ -88,10 +88,10 @@ struct ResolvedLabelStyle : View {
     }
 }
 
-extension ResolvedLabelStyle : _PrimitiveView {
+extension ResolvedLabelStyle: _PrimitiveView {
 }
 
-private class ResolvedLabelStyleViewContext : GenericViewContext<ResolvedLabelStyle> {
+private class ResolvedLabelStyleViewContext: GenericViewContext<ResolvedLabelStyle> {
     let labelStyle: LabelStyleProxy?
     let configuration: LabelStyleConfiguration
 

@@ -7,7 +7,7 @@
 
 @resultBuilder
 public struct SceneBuilder {
-    public static func buildExpression<Content>(_ content: Content) -> Content where Content : Scene {
+    public static func buildExpression<Content>(_ content: Content) -> Content where Content: Scene {
         content
     }
 

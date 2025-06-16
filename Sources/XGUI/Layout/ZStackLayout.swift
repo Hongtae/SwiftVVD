@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct ZStackLayout : Layout {
+public struct ZStackLayout: Layout {
     public typealias Cache = Void
     public var alignment: Alignment
 
@@ -79,9 +79,9 @@ public struct ZStackLayout : Layout {
 }
 
 public typealias _ZStackLayout = ZStackLayout
-extension _ZStackLayout : _VariadicView_UnaryViewRoot {}
-extension _ZStackLayout : Sendable {}
+extension _ZStackLayout: _VariadicView_UnaryViewRoot {}
+extension _ZStackLayout: Sendable {}
 
 extension _ZStackLayout {
-    static var _defaultLayoutSpacing : CGFloat { 0 }
+    static var _defaultLayoutSpacing: CGFloat { 0 }
 }

@@ -2,12 +2,12 @@
 //  File: TransactionModifier.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
 
-public struct _TransactionModifier : ViewModifier, _GraphInputsModifier {
+public struct _TransactionModifier: ViewModifier, _GraphInputsModifier {
     public var transform: (inout Transaction) -> Void
 
     @inlinable public init(transform: @escaping (inout Transaction) -> Void) {
@@ -21,7 +21,7 @@ public struct _TransactionModifier : ViewModifier, _GraphInputsModifier {
     public typealias Body = Never
 }
 
-public struct _PushPopTransactionModifier<Content> : ViewModifier where Content : ViewModifier {
+public struct _PushPopTransactionModifier<Content>: ViewModifier where Content: ViewModifier {
     public var content: Content
     public var base: _TransactionModifier
 

@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct Button<Label> : View where Label : View {
+public struct Button<Label>: View where Label: View {
     let role: ButtonRole?
     let action: ()->Void
     let label: Label
@@ -35,7 +35,7 @@ extension Button where Label == Text {
         self.action = action
         self.label = Text(titleKey)
     }
-    public init<S>(_ title: S, action: @escaping () -> Void) where S : StringProtocol {
+    public init<S>(_ title: S, action: @escaping () -> Void) where S: StringProtocol {
         self.role = nil
         self.action = action
         self.label = Text(title)
@@ -48,7 +48,7 @@ extension Button where Label == XGUI.Label<Text, Image> {
             Label(titleKey, systemImage: systemImage)
         }
     }
-    public init<S>(_ title: S, systemImage: String, action: @escaping () -> Void) where S : StringProtocol {
+    public init<S>(_ title: S, systemImage: String, action: @escaping () -> Void) where S: StringProtocol {
         self.init(action: action) {
             Label(title, systemImage: systemImage)
         }
@@ -78,7 +78,7 @@ extension Button where Label == Text {
         self.role = role
         self.action = action
     }
-    public init<S>(_ title: S, role: ButtonRole?, action: @escaping () -> Void) where S : StringProtocol {
+    public init<S>(_ title: S, role: ButtonRole?, action: @escaping () -> Void) where S: StringProtocol {
         self.label = Text(title)
         self.role = role
         self.action = action
@@ -91,14 +91,14 @@ extension Button where Label == XGUI.Label<Text, Image> {
             Label(titleKey, systemImage: systemImage)
         }
     }
-    public init<S>(_ title: S, systemImage: String, role: ButtonRole?, action: @escaping () -> Void) where S : StringProtocol {
+    public init<S>(_ title: S, systemImage: String, role: ButtonRole?, action: @escaping () -> Void) where S: StringProtocol {
         self.init(role: role, action: action) {
             Label(title, systemImage: systemImage)
         }
     }
 }
 
-struct ResolvedButtonStyle : View {
+struct ResolvedButtonStyle: View {
     typealias Body = Never
     var configuration: PrimitiveButtonStyleConfiguration
     init(configuration: PrimitiveButtonStyleConfiguration) {
@@ -129,7 +129,7 @@ struct ResolvedButtonStyle : View {
         let style = inputs.layouts.buttonStyles.popLast()
         let styleType = style?.type ?? DefaultButtonStyle.self
 
-        func makeStyleBody<S : PrimitiveButtonStyle, T>(_: S.Type, graph: _GraphValue<T>, inputs: _ViewInputs) -> _ViewOutputs {
+        func makeStyleBody<S: PrimitiveButtonStyle, T>(_: S.Type, graph: _GraphValue<T>, inputs: _ViewInputs) -> _ViewOutputs {
             S.Body._makeView(view: graph.unsafeCast(to: S.Body.self), inputs: inputs)
         }
         let outputs = makeStyleBody(styleType, graph: view[\._body], inputs: inputs)
@@ -153,10 +153,10 @@ struct ResolvedButtonStyle : View {
     }
 }
 
-extension ResolvedButtonStyle : _PrimitiveView {
+extension ResolvedButtonStyle: _PrimitiveView {
 }
 
-private class ResolvedButtonStyleViewContext : GenericViewContext<ResolvedButtonStyle> {
+private class ResolvedButtonStyleViewContext: GenericViewContext<ResolvedButtonStyle> {
     let buttonStyle: PrimitiveButtonStyleProxy?
     let label: ViewProxy?
 

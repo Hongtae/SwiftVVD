@@ -24,7 +24,7 @@ class AnyTextStorage {
 //typealias LocalizedStringKey = String.LocalizationValue
 public typealias LocalizedStringKey = String
 
-class LocalizedTextStorage : AnyTextStorage {
+class LocalizedTextStorage: AnyTextStorage {
     let key: LocalizedStringKey
     let table: String?
     let bundle: Bundle?
@@ -53,7 +53,7 @@ class LocalizedTextStorage : AnyTextStorage {
     }
 }
 
-class ConcatenatedTextStorage : AnyTextStorage {
+class ConcatenatedTextStorage: AnyTextStorage {
     let first: Text
     let second: Text
     init(first: Text, second: Text) {
@@ -79,7 +79,7 @@ class ConcatenatedTextStorage : AnyTextStorage {
     }
 }
 
-class AttachmentTextStorage : AnyTextStorage {
+class AttachmentTextStorage: AnyTextStorage {
     let image: Image
     init(_ image: Image) {
         self.image = image
@@ -102,7 +102,7 @@ class AttachmentTextStorage : AnyTextStorage {
     }
 }
 
-public struct Text : Equatable {
+public struct Text: Equatable {
     enum Storage: Equatable {
         case verbatim(String)
         case anyTextStorage(AnyTextStorage)
@@ -120,12 +120,12 @@ public struct Text : Equatable {
 
     let storage: Storage
 
-    public enum Case : Hashable {
+    public enum Case: Hashable {
         case lowercase
         case uppercase
     }
 
-    public struct LineStyle : Hashable {
+    public struct LineStyle: Hashable {
         public struct Pattern: Equatable, Sendable {
             enum UnderlineStyle {
                 case solid
@@ -156,7 +156,7 @@ public struct Text : Equatable {
         }
     }
 
-    enum Modifier : Equatable {
+    enum Modifier: Equatable {
         case font(Font)
         case fontWeight(Font.Weight)
         case foregroundColor(Color)
@@ -173,7 +173,7 @@ public struct Text : Equatable {
 
     let modifiers: [Modifier]
 
-    public init<S>(_ content: S) where S : StringProtocol {
+    public init<S>(_ content: S) where S: StringProtocol {
         let key = LocalizedStringKey(String(content))
         self.storage = .anyTextStorage(LocalizedTextStorage(key: key, table: nil, bundle: nil))
         self.modifiers = []
@@ -279,7 +279,7 @@ extension Text {
     }
 }
 
-extension Text : View {
+extension Text: View {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         let view = UnaryViewGenerator(graph: view, baseInputs: inputs.base) { graph, inputs in
             TextViewContext(graph: graph, inputs: inputs)
@@ -288,10 +288,10 @@ extension Text : View {
     }
 }
 
-extension Text : _PrimitiveView {
+extension Text: _PrimitiveView {
 }
 
-private class TextViewContext : PrimitiveViewContext<Text> {
+private class TextViewContext: PrimitiveViewContext<Text> {
     var resolvedText: GraphicsContext.ResolvedText?
     var primaryStyle: AnyShapeStyle?
 

@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct Window<Content> : Scene where Content : View {
+public struct Window<Content>: Scene where Content: View {
     var title: Text
     var titleKey: LocalizedStringKey?
     var id: String
@@ -29,14 +29,14 @@ public struct Window<Content> : Scene where Content : View {
         self.content = content()
     }
 
-    public init<S>(_ title: S, id: String, @ViewBuilder content: () -> Content) where S : StringProtocol {
+    public init<S>(_ title: S, id: String, @ViewBuilder content: () -> Content) where S: StringProtocol {
         self.title = Text(title)
         self.id = id
         self.content = content()
     }
 }
 
-struct SingleWindowScene<Content> : _PrimitiveScene where Content : View {
+struct SingleWindowScene<Content>: _PrimitiveScene where Content: View {
     var content: Content
     var title: Text
 
@@ -47,7 +47,7 @@ struct SingleWindowScene<Content> : _PrimitiveScene where Content : View {
     }
 }
 
-class SingleWindowSceneContext<Content> : TypedSceneContext<SingleWindowScene<Content>> where Content : View {
+class SingleWindowSceneContext<Content>: TypedSceneContext<SingleWindowScene<Content>> where Content: View {
     typealias Scene = SingleWindowScene<Content>
     var window: WindowContext?
 

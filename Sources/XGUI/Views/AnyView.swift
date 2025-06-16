@@ -14,7 +14,7 @@ class AnyViewBox {
     }
 }
 
-public struct AnyView : View {
+public struct AnyView: View {
     var storage: AnyViewBox
 
     public init<V>(_ view: V) where V: View {
@@ -61,10 +61,10 @@ extension AnyView {
     var _view: any View { storage.view }
 }
 
-extension AnyView : _PrimitiveView {
+extension AnyView: _PrimitiveView {
 }
 
-class TypeErasedViewContext : DynamicViewContext<AnyView> {
+class TypeErasedViewContext: DynamicViewContext<AnyView> {
     override func updateContent() {
         var oldViewType: (any View.Type)?
         if let oldView = self.view?._view {
@@ -79,7 +79,7 @@ class TypeErasedViewContext : DynamicViewContext<AnyView> {
         }
         if let view = self.view?._view {
             if self.body == nil || type(of: view) == oldViewType {
-                func _makeView<V : View, U>(_: V.Type, view: _GraphValue<U>, inputs: _ViewInputs) -> _ViewOutputs {
+                func _makeView<V: View, U>(_: V.Type, view: _GraphValue<U>, inputs: _ViewInputs) -> _ViewOutputs {
                     V._makeView(view: view.unsafeCast(to: V.self), inputs: inputs)
                 }
                 let viewType = type(of: view)

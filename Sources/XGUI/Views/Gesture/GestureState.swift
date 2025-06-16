@@ -2,12 +2,12 @@
 //  File: GestureState.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
 
-@propertyWrapper public struct GestureState<Value> : DynamicProperty {
+@propertyWrapper public struct GestureState<Value>: DynamicProperty {
     fileprivate var state: State<Value>
     fileprivate let reset: (Binding<Value>) -> Void
 
@@ -42,7 +42,7 @@ import Foundation
     }
 }
 
-extension GestureState where Value : ExpressibleByNilLiteral {
+extension GestureState where Value: ExpressibleByNilLiteral {
     public init(resetTransaction: Transaction = Transaction()) {
         fatalError()
     }
@@ -51,7 +51,7 @@ extension GestureState where Value : ExpressibleByNilLiteral {
     }
 }
 
-extension GestureState : @unchecked Sendable where Value : Sendable {
+extension GestureState: @unchecked Sendable where Value: Sendable {
 }
 
 
@@ -62,7 +62,7 @@ extension Gesture {
     }
 }
 
-public struct GestureStateGesture<Base, State> : Gesture where Base : Gesture {
+public struct GestureStateGesture<Base, State>: Gesture where Base: Gesture {
     public typealias Value = Base.Value
     public var base: Base
     public var state: GestureState<State>

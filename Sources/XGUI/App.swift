@@ -11,13 +11,13 @@ import VVD
 typealias Log = VVD.Log
 
 public protocol App {
-    associatedtype Body : Scene
+    associatedtype Body: Scene
     @SceneBuilder var body: Self.Body { get }
 
     init()
 }
 
-protocol AppContext : AnyObject {
+protocol AppContext: AnyObject {
     var graphicsDeviceContext: GraphicsDeviceContext? { get }
     var audioDeviceContext: AudioDeviceContext? { get }
 
@@ -29,7 +29,7 @@ protocol AppContext : AnyObject {
 
 nonisolated(unsafe) var appContext: AppContext? = nil
 
-class AppMain<A> : ApplicationDelegate, AppContext where A : App {
+class AppMain<A>: ApplicationDelegate, AppContext where A: App {
 
     var graphicsDeviceContext: GraphicsDeviceContext?
     var audioDeviceContext: AudioDeviceContext?

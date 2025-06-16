@@ -7,13 +7,13 @@
 
 import Foundation
 
-public enum ColorRenderingMode : Equatable, Hashable {
+public enum ColorRenderingMode: Equatable, Hashable {
     case nonLinear
     case linear
     case extendedLinear
 }
 
-public struct Canvas<Symbols> : View where Symbols: View {
+public struct Canvas<Symbols>: View where Symbols: View {
     public var symbols: Symbols
     public var renderer: (inout GraphicsContext, CGSize) -> Void
     public var isOpaque: Bool
@@ -57,10 +57,10 @@ extension Canvas {
     }
 }
 
-extension Canvas : _PrimitiveView {
+extension Canvas: _PrimitiveView {
 }
 
-private class CanvasViewContext<Symbols> : PrimitiveViewContext<Canvas<Symbols>> where Symbols: View {
+private class CanvasViewContext<Symbols>: PrimitiveViewContext<Canvas<Symbols>> where Symbols: View {
     typealias Content = Canvas<Symbols>
 
     override func draw(frame: CGRect, context: GraphicsContext) {

@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct Spacer : View {
+public struct Spacer: View {
     public var minLength: CGFloat?
     public init(minLength: CGFloat? = nil) {
         self.minLength = minLength
@@ -16,10 +16,10 @@ public struct Spacer : View {
     public typealias Body = Never
 }
 
-extension Spacer : Sendable {
+extension Spacer: Sendable {
 }
 
-extension Spacer : _PrimitiveView {
+extension Spacer: _PrimitiveView {
     static func _makeView(view: _GraphValue<Self>) -> _ViewOutputs {
         let baseInputs = _GraphInputs(environment: .init())
         let view = UnaryViewGenerator(graph: view, baseInputs: baseInputs) { graph, inputs in
@@ -29,7 +29,7 @@ extension Spacer : _PrimitiveView {
     }
 }
 
-public struct Divider : View {
+public struct Divider: View {
     public init() {
     }
 
@@ -43,10 +43,10 @@ public struct Divider : View {
     public typealias Body = Never
 }
 
-extension Divider : _PrimitiveView {
+extension Divider: _PrimitiveView {
 }
 
-private class SpacerViewContext : PrimitiveViewContext<Spacer> {
+private class SpacerViewContext: PrimitiveViewContext<Spacer> {
     var stackOrientation: Axis = .vertical
 
     override func setLayoutProperties(_ prop: LayoutProperties) {
@@ -75,7 +75,7 @@ private class SpacerViewContext : PrimitiveViewContext<Spacer> {
     }
 }
 
-private class DividerViewContext : PrimitiveViewContext<Divider> {
+private class DividerViewContext: PrimitiveViewContext<Divider> {
     var stackOrientation: Axis = .vertical
 
     override func setLayoutProperties(_ prop: LayoutProperties) {

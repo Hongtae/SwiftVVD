@@ -2,12 +2,12 @@
 //  File: HStack.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
 
-public struct HStack<Content> : View where Content : View {
+public struct HStack<Content>: View where Content: View {
     public var _tree: _VariadicView.Tree<_HStackLayout, Content>
 
     public init(alignment: VerticalAlignment = .center, spacing: CGFloat? = nil, @ViewBuilder content: () -> Content) {
@@ -22,5 +22,5 @@ public struct HStack<Content> : View where Content : View {
     public typealias Body = Never
 }
 
-extension HStack : _PrimitiveView {
+extension HStack: _PrimitiveView {
 }

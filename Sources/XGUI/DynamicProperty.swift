@@ -37,7 +37,7 @@ public struct _DynamicPropertyBuffer {
     var contexts: [Int: AnyObject] = [:]
 }
 
-func _hasDynamicProperty<V : View>(_ view: V.Type) -> Bool {
+func _hasDynamicProperty<V: View>(_ view: V.Type) -> Bool {
     let nonExist = _forEachField(of: view) { _, _, fieldType in
         if fieldType is DynamicProperty.Type {
             return false
@@ -47,7 +47,7 @@ func _hasDynamicProperty<V : View>(_ view: V.Type) -> Bool {
     return nonExist == false
 }
 
-func _unsafeCastDynamicProperty<V : View, T : DynamicProperty>(to propertyType: T.Type, at offset: Int, from view: V) -> any DynamicProperty {
+func _unsafeCastDynamicProperty<V: View, T: DynamicProperty>(to propertyType: T.Type, at offset: Int, from view: V) -> any DynamicProperty {
     var property: (any DynamicProperty)?
     withUnsafeBytes(of: view) {
         let ptr = $0.baseAddress!.advanced(by: offset)
@@ -57,7 +57,7 @@ func _unsafeCastDynamicProperty<V : View, T : DynamicProperty>(to propertyType: 
     fatalError("Unable to find dynamic property at offset: \(offset)")
 }
 
-func _getDynamicProperty<V : View>(at offset: Int, from view: V) -> any DynamicProperty {
+func _getDynamicProperty<V: View>(at offset: Int, from view: V) -> any DynamicProperty {
     func restore<T: DynamicProperty>(_ ptr: UnsafeRawPointer, _: T.Type) -> T {
         ptr.assumingMemoryBound(to: T.self).pointee
     }

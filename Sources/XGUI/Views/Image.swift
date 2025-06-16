@@ -8,7 +8,7 @@
 import Foundation
 import VVD
 
-class AnyImageProviderBox : @unchecked Sendable {
+class AnyImageProviderBox: @unchecked Sendable {
     func makeTexture(_ context: GraphicsContext) -> Texture? {
         nil
     }
@@ -20,7 +20,7 @@ class AnyImageProviderBox : @unchecked Sendable {
     }
 }
 
-final class NamedImageProvider : AnyImageProviderBox, @unchecked Sendable {
+final class NamedImageProvider: AnyImageProviderBox, @unchecked Sendable {
     let name: String
     let value: Float?
     let location: Bundle?
@@ -81,7 +81,7 @@ final class NamedImageProvider : AnyImageProviderBox, @unchecked Sendable {
     }
 }
 
-final class RenderedImageProviderBox : AnyImageProviderBox, @unchecked Sendable {
+final class RenderedImageProviderBox: AnyImageProviderBox, @unchecked Sendable {
     let size: CGSize
     let label: Text?
     let opaque: Bool
@@ -104,7 +104,7 @@ final class RenderedImageProviderBox : AnyImageProviderBox, @unchecked Sendable 
     }
 }
 
-final class TextureImageProvider : AnyImageProviderBox, @unchecked Sendable {
+final class TextureImageProvider: AnyImageProviderBox, @unchecked Sendable {
     let texture: Texture
     let scale: CGFloat
     let orientation: Image.Orientation
@@ -136,7 +136,7 @@ final class TextureImageProvider : AnyImageProviderBox, @unchecked Sendable {
     }
 }
 
-final class SymbolImageProvider : AnyImageProviderBox, @unchecked Sendable {
+final class SymbolImageProvider: AnyImageProviderBox, @unchecked Sendable {
     let name: String
     let variableValue: Double?
     let bundle: Bundle?
@@ -150,7 +150,7 @@ final class SymbolImageProvider : AnyImageProviderBox, @unchecked Sendable {
     }
 }
 
-public struct Image : Equatable, Sendable {
+public struct Image: Equatable, Sendable {
     var provider: AnyImageProviderBox
 
     init(provider: AnyImageProviderBox) {
@@ -181,7 +181,7 @@ public struct Image : Equatable, Sendable {
 }
 
 extension Image {
-    public enum Orientation : UInt8, CaseIterable, Hashable {
+    public enum Orientation: UInt8, CaseIterable, Hashable {
         case up
         case upMirrored
         case down
@@ -220,7 +220,7 @@ extension Image {
     }
 }
 
-extension Image : View {
+extension Image: View {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         let view = UnaryViewGenerator(graph: view, baseInputs: inputs.base) { graph, inputs in
             ImageViewContext(graph: graph, inputs: inputs)
@@ -236,10 +236,10 @@ extension Image {
     static var _mainNamedBundle: Bundle? = nil
 }
 
-extension Image : _PrimitiveView {
+extension Image: _PrimitiveView {
 }
 
-class ImageViewContext : PrimitiveViewContext<Image> {
+class ImageViewContext: PrimitiveViewContext<Image> {
     var resolvedImage: GraphicsContext.ResolvedImage?
 
     override func updateContent() {

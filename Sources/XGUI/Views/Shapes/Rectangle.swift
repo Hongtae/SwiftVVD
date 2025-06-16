@@ -2,12 +2,12 @@
 //  File: Rectangle.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
 
-public struct Rectangle : Shape {
+public struct Rectangle: Shape {
     public func path(in rect: CGRect) -> Path {
         var path = Path()
         path.addRect(rect)
@@ -21,13 +21,13 @@ public struct Rectangle : Shape {
     public typealias Body = _ShapeView<Rectangle, ForegroundStyle>
 }
 
-extension Rectangle : InsettableShape {
+extension Rectangle: InsettableShape {
     @inlinable public func inset(by amount: CGFloat) -> some InsettableShape {
         return _Inset(amount: amount)
     }
 
     @usableFromInline
-    struct _Inset : InsettableShape {
+    struct _Inset: InsettableShape {
         @usableFromInline
         var amount: CGFloat
 

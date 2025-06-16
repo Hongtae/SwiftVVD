@@ -2,17 +2,17 @@
 //  File: Animation.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
 
 @usableFromInline
-class AnimationBoxBase : @unchecked Sendable {
+class AnimationBoxBase: @unchecked Sendable {
 }
 
 
-public struct Animation : Equatable, Sendable {
+public struct Animation: Equatable, Sendable {
     var box: AnimationBoxBase
 
     public static func == (lhs: Animation, rhs: Animation) -> Bool {
@@ -20,7 +20,7 @@ public struct Animation : Equatable, Sendable {
     }
 }
 
-extension Animation : CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable {
+extension Animation: CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable {
     public var description: String {
         "Animation"
     }

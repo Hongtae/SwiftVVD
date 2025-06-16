@@ -6,7 +6,7 @@
 //
 
 
-public struct _SceneModifier_Content<Modifier> : Scene where Modifier : _SceneModifier {
+public struct _SceneModifier_Content<Modifier>: Scene where Modifier: _SceneModifier {
     public typealias Body = Never
 
     public static func _makeScene(scene: _GraphValue<Self>, inputs: _SceneInputs) -> _SceneOutputs {
@@ -17,11 +17,11 @@ public struct _SceneModifier_Content<Modifier> : Scene where Modifier : _SceneMo
     }
 }
 
-extension _SceneModifier_Content : _PrimitiveScene {
+extension _SceneModifier_Content: _PrimitiveScene {
 }
 
 private struct _SceneModifierBodyContext {
-    struct _Body : @unchecked Sendable {
+    struct _Body: @unchecked Sendable {
         let makeScene: ((_Graph, _SceneInputs) -> _SceneOutputs)?
     }
 
@@ -30,7 +30,7 @@ private struct _SceneModifierBodyContext {
 }
 
 public protocol _SceneModifier {
-    associatedtype Body : Scene
+    associatedtype Body: Scene
     @SceneBuilder func body(content: Self.SceneContent) -> Self.Body
     typealias SceneContent = _SceneModifier_Content<Self>
     static func _makeScene(modifier: _GraphValue<Self>, inputs: _SceneInputs, body: @escaping (_Graph, _SceneInputs) -> _SceneOutputs) -> _SceneOutputs
@@ -43,7 +43,7 @@ extension _SceneModifier where Self.Body == Never {
 }
 
 extension _SceneModifier {
-    var _content : Self.Body {
+    var _content: Self.Body {
         body(content: _SceneModifier_Content())
     }
 
@@ -59,7 +59,7 @@ extension _SceneModifier {
     }
 }
 
-extension _SceneModifier where Self : _GraphInputsModifier, Self.Body == Never {
+extension _SceneModifier where Self: _GraphInputsModifier, Self.Body == Never {
     public static func _makeScene(modifier: _GraphValue<Self>, inputs: _SceneInputs, body: @escaping (_Graph, _SceneInputs) -> _SceneOutputs) -> _SceneOutputs {
         var graphInputs = _GraphInputs(environment: inputs.environment)
         Self._makeInputs(modifier: modifier, inputs: &graphInputs)
@@ -70,7 +70,7 @@ extension _SceneModifier where Self : _GraphInputsModifier, Self.Body == Never {
     }
 }
 
-extension EmptyModifier : _SceneModifier {
+extension EmptyModifier: _SceneModifier {
     public static func _makeScene(modifier: _GraphValue<Self>, inputs: _SceneInputs, body: @escaping (_Graph, _SceneInputs) -> _SceneOutputs) -> _SceneOutputs {
         body(_Graph(), inputs)
     }
@@ -82,7 +82,7 @@ extension _SceneModifier {
     }
 }
 
-extension ModifiedContent : Scene where Content : Scene, Modifier : _SceneModifier {
+extension ModifiedContent: Scene where Content: Scene, Modifier: _SceneModifier {
     public var body: Never {
         fatalError("body() should not be called on \(Self.self).")
     }
@@ -94,7 +94,7 @@ extension ModifiedContent : Scene where Content : Scene, Modifier : _SceneModifi
     }
 }
 
-extension ModifiedContent : _SceneModifier where Content : _SceneModifier, Modifier : _SceneModifier {
+extension ModifiedContent: _SceneModifier where Content: _SceneModifier, Modifier: _SceneModifier {
     public static func _makeScene(modifier: _GraphValue<Self>, inputs: _SceneInputs, body: @escaping (_Graph, _SceneInputs) -> _SceneOutputs) -> _SceneOutputs {
         Modifier._makeScene(modifier: modifier[\.modifier], inputs: inputs) { _, inputs in
             Content._makeScene(modifier: modifier[\.content], inputs: inputs, body: body)

@@ -12,7 +12,7 @@ import VVD
 //
 // ViewContext
 // - PrimitiveViewContext (Body = Never)
-// - GenericViewContext (Body : View)
+// - GenericViewContext (Body: View)
 // - DynamicViewContext (Optional<Body>)
 
 public struct _ViewContextDebugDraw: EnvironmentKey {

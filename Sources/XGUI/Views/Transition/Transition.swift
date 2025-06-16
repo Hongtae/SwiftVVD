@@ -15,7 +15,7 @@ public protocol Transition {
     func _makeContentTransition(transition: inout _Transition_ContentTransition)
 }
 
-public struct PlaceholderContentView<Value> : View {
+public struct PlaceholderContentView<Value>: View {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         fatalError()
     }

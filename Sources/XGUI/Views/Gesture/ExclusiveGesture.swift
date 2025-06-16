@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct ExclusiveGesture<First, Second> : Gesture where First : Gesture, Second : Gesture {
+public struct ExclusiveGesture<First, Second>: Gesture where First: Gesture, Second: Gesture {
     public enum Value {
         case first(First.Value)
         case second(Second.Value)
@@ -30,7 +30,7 @@ public struct ExclusiveGesture<First, Second> : Gesture where First : Gesture, S
 
     public typealias Body = Never
 
-    private struct _Generator : _GestureRecognizerGenerator {
+    private struct _Generator: _GestureRecognizerGenerator {
         let graph: _GraphValue<ExclusiveGesture>
         let first: _GestureOutputs<First.Value>
         let second: _GestureOutputs<Second.Value>
@@ -55,19 +55,19 @@ public struct ExclusiveGesture<First, Second> : Gesture where First : Gesture, S
     }
 }
 
-extension ExclusiveGesture.Value : Equatable where First.Value : Equatable, Second.Value : Equatable {
+extension ExclusiveGesture.Value: Equatable where First.Value: Equatable, Second.Value: Equatable {
 }
 
-extension ExclusiveGesture.Value : Sendable where First.Value : Sendable, Second.Value : Sendable {
+extension ExclusiveGesture.Value: Sendable where First.Value: Sendable, Second.Value: Sendable {
 }
 
 extension Gesture {
-    @inlinable public func exclusively<Other>(before other: Other) -> ExclusiveGesture<Self, Other> where Other : Gesture {
+    @inlinable public func exclusively<Other>(before other: Other) -> ExclusiveGesture<Self, Other> where Other: Gesture {
         return ExclusiveGesture(self, other)
     }
 }
 
-class ExclusiveGestureRecognizer<First : Gesture, Second : Gesture> : _GestureRecognizer<ExclusiveGesture<First, Second>.Value> {
+class ExclusiveGestureRecognizer<First: Gesture, Second: Gesture>: _GestureRecognizer<ExclusiveGesture<First, Second>.Value> {
     let first: _GestureRecognizer<First.Value>
     let second: _GestureRecognizer<Second.Value>
     typealias Value = ExclusiveGesture<First, Second>.Value

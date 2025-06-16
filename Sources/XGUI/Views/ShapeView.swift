@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct _ShapeView<Content, Style> : View where Content : Shape, Style : ShapeStyle {
+public struct _ShapeView<Content, Style>: View where Content: Shape, Style: ShapeStyle {
     public var shape: Content
     public var style: Style
     public var fillStyle: FillStyle
@@ -28,10 +28,10 @@ public struct _ShapeView<Content, Style> : View where Content : Shape, Style : S
     public typealias Body = Never
 }
 
-extension _ShapeView : _PrimitiveView {
+extension _ShapeView: _PrimitiveView {
 }
 
-private class ShapeViewContext<Content, Style> : PrimitiveViewContext<_ShapeView<Content, Style>> where Content : Shape, Style : ShapeStyle {
+private class ShapeViewContext<Content, Style>: PrimitiveViewContext<_ShapeView<Content, Style>> where Content: Shape, Style: ShapeStyle {
     typealias ShapeView = _ShapeView<Content, Style>
 
     override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {

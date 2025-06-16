@@ -64,7 +64,7 @@ extension EnvironmentValues {
 }
 
 @propertyWrapper public struct Environment<Value>: DynamicProperty {
-    enum Content : @unchecked Sendable {
+    enum Content: @unchecked Sendable {
         case keyPath(KeyPath<EnvironmentValues, Value>)
         case value(Value)
     }

@@ -5,7 +5,7 @@
 //  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
-public protocol _VectorMath : Animatable {
+public protocol _VectorMath: Animatable {
 }
 
 extension _VectorMath {

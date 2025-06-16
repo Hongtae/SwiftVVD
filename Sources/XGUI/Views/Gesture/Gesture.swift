@@ -2,17 +2,17 @@
 //  File: Gesture.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 public protocol Gesture<Value> {
     associatedtype Value
     static func _makeGesture(gesture: _GraphValue<Self>, inputs: _GestureInputs) -> _GestureOutputs<Self.Value>
-    associatedtype Body : Gesture
+    associatedtype Body: Gesture
     var body: Self.Body { get }
 }
 
-extension Never : Gesture {
+extension Never: Gesture {
     public typealias Value = Never
 }
 
@@ -28,7 +28,7 @@ extension Gesture where Self.Body == Never {
     }
 }
 
-extension Optional : Gesture where Wrapped : Gesture {
+extension Optional: Gesture where Wrapped: Gesture {
     public typealias Value = Wrapped.Value
     public static func _makeGesture(gesture: _GraphValue<Self>, inputs: _GestureInputs) -> _GestureOutputs<Wrapped.Value> {
         Wrapped._makeGesture(gesture: gesture[\.unsafelyUnwrapped], inputs: inputs)
@@ -70,7 +70,7 @@ public struct _GestureOutputs<Value> {
     let generator: any _GestureRecognizerGenerator<Value>
 }
 
-public struct GestureMask : OptionSet, Sendable {
+public struct GestureMask: OptionSet, Sendable {
     public let rawValue: UInt32
     public init(rawValue: UInt32) { self.rawValue = rawValue }
     public static let none = GestureMask([])

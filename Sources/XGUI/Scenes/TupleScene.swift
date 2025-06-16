@@ -7,7 +7,7 @@
 
 import Foundation
 
-struct _TupleScene<T> : Scene {
+struct _TupleScene<T>: Scene {
     public var value: T
 
     public init(_ value: T) {
@@ -23,5 +23,5 @@ struct _TupleScene<T> : Scene {
     }
 }
 
-extension _TupleScene : _PrimitiveScene {
+extension _TupleScene: _PrimitiveScene {
 }

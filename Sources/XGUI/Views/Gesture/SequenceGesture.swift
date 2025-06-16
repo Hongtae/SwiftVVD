@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct SequenceGesture<First, Second> : Gesture where First : Gesture, Second : Gesture {
+public struct SequenceGesture<First, Second>: Gesture where First: Gesture, Second: Gesture {
     public enum Value {
         case first(First.Value)
         case second(First.Value, Second.Value?)
@@ -30,7 +30,7 @@ public struct SequenceGesture<First, Second> : Gesture where First : Gesture, Se
 
     public typealias Body = Never
 
-    private struct _Generator : _GestureRecognizerGenerator {
+    private struct _Generator: _GestureRecognizerGenerator {
         let graph: _GraphValue<SequenceGesture>
         let first: _GestureOutputs<First.Value>
         let second: _GestureOutputs<Second.Value>
@@ -55,16 +55,16 @@ public struct SequenceGesture<First, Second> : Gesture where First : Gesture, Se
     }
 }
 
-extension SequenceGesture.Value : Equatable where First.Value : Equatable, Second.Value : Equatable {
+extension SequenceGesture.Value: Equatable where First.Value: Equatable, Second.Value: Equatable {
 }
 
 extension Gesture {
-    @inlinable public func sequenced<Other>(before other: Other) -> SequenceGesture<Self, Other> where Other : Gesture {
+    @inlinable public func sequenced<Other>(before other: Other) -> SequenceGesture<Self, Other> where Other: Gesture {
         return SequenceGesture(self, other)
     }
 }
 
-class SequenceGestureRecognizer<First : Gesture, Second : Gesture> : _GestureRecognizer<SequenceGesture<First, Second>.Value> {
+class SequenceGestureRecognizer<First: Gesture, Second: Gesture>: _GestureRecognizer<SequenceGesture<First, Second>.Value> {
     let first: _GestureRecognizer<First.Value>
     let second: _GestureRecognizer<Second.Value>
     var firstValue: First.Value?

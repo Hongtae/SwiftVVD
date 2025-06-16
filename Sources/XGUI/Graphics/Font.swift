@@ -192,7 +192,7 @@ struct FixedFontProvider: TypeFaceProvider {
     var isShareable: Bool { false }
 }
 
-class AnyFontBox : @unchecked Sendable {
+class AnyFontBox: @unchecked Sendable {
     let fontBox: any TypeFaceProvider
 
     init(_ fontBox: any TypeFaceProvider) {

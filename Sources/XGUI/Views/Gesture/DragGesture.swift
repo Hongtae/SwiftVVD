@@ -8,8 +8,8 @@
 import Foundation
 import VVD
 
-public struct DragGesture : Gesture {
-    public struct Value : Equatable {
+public struct DragGesture: Gesture {
+    public struct Value: Equatable {
         public var time: Date
         public var location: CGPoint
         public var startLocation: CGPoint
@@ -38,7 +38,7 @@ public struct DragGesture : Gesture {
                           height: (loc.y - startLocation.y).magnitude)
         }
 
-        //struct Platform : Equatable {}
+        //struct Platform: Equatable {}
         //let platform = Platform()
     }
 
@@ -51,7 +51,7 @@ public struct DragGesture : Gesture {
     }
 
     public static func _makeGesture(gesture: _GraphValue<DragGesture>, inputs: _GestureInputs) -> _GestureOutputs<DragGesture.Value> {
-        struct _Generator : _GestureRecognizerGenerator {
+        struct _Generator: _GestureRecognizerGenerator {
             let graph: _GraphValue<DragGesture>
             let inputs: _GestureInputs
             func makeGesture(containerView: ViewContext) -> _GestureRecognizer<Value>? {
@@ -71,7 +71,7 @@ public struct DragGesture : Gesture {
     public typealias Body = Never
 }
 
-class DragGestureRecognizer : _GestureRecognizer<DragGesture.Value> {
+class DragGestureRecognizer: _GestureRecognizer<DragGesture.Value> {
     let gesture: DragGesture
     var typeFilter: _PrimitiveGestureTypes = .all
     let buttonID: Int

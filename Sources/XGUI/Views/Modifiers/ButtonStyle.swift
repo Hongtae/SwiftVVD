@@ -8,7 +8,7 @@
 import Foundation
 
 public protocol PrimitiveButtonStyle {
-    associatedtype Body : View
+    associatedtype Body: View
     @ViewBuilder func makeBody(configuration: Self.Configuration) -> Self.Body
     typealias Configuration = PrimitiveButtonStyleConfiguration
 }
@@ -27,7 +27,7 @@ public struct ButtonRole: Equatable, Sendable {
 typealias ButtonAction = ()->Void
 
 public struct PrimitiveButtonStyleConfiguration {
-    public struct Label : View {
+    public struct Label: View {
         public typealias Body = Never
         let view: ViewProxy?
     }
@@ -217,13 +217,13 @@ extension PrimitiveButtonStyle where Self == BorderedButtonStyle {
 }
 
 public protocol ButtonStyle {
-    associatedtype Body : View
+    associatedtype Body: View
     @ViewBuilder func makeBody(configuration: Self.Configuration) -> Self.Body
     typealias Configuration = ButtonStyleConfiguration
 }
 
 public struct ButtonStyleConfiguration {
-    public struct Label : View {
+    public struct Label: View {
         public typealias Body = Never
         let view: PrimitiveButtonStyleConfiguration.Label
     }
@@ -269,7 +269,7 @@ struct _DefaultButtonWithButtonStyle<Style>: PrimitiveButtonStyle, PrimitiveButt
 struct PrimitiveButtonStyleProxy {
     let type: any PrimitiveButtonStyle.Type
     let graph: _GraphValue<Any>
-    init<S : PrimitiveButtonStyle>(_ graph: _GraphValue<S>) {
+    init<S: PrimitiveButtonStyle>(_ graph: _GraphValue<S>) {
         self.type = S.self
         self.graph = graph.unsafeCast(to: Any.self)
     }
@@ -310,14 +310,14 @@ struct ButtonStyleContainerModifier<Style>: ViewModifier where Style: ButtonStyl
     }
 
     static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        func make<T : ViewModifier>(modifier: _GraphValue<T>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
+        func make<T: ViewModifier>(modifier: _GraphValue<T>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
             T._makeView(modifier: modifier, inputs: inputs, body: body)
         }
         return make(modifier: modifier[\.modifier], inputs: inputs, body: body)
     }
 
     static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        func make<T : ViewModifier>(modifier: _GraphValue<T>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
+        func make<T: ViewModifier>(modifier: _GraphValue<T>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
             T._makeViewList(modifier: modifier, inputs: inputs, body: body)
         }
         return make(modifier: modifier[\.modifier], inputs: inputs, body: body)

@@ -6,7 +6,7 @@
 //
 
 public protocol LabelStyle {
-    associatedtype Body : View
+    associatedtype Body: View
     @ViewBuilder func makeBody(configuration: Self.Configuration) -> Self.Body
     typealias Configuration = LabelStyleConfiguration
 }
@@ -35,10 +35,10 @@ public struct LabelStyleConfiguration {
     }
 }
 
-extension LabelStyleConfiguration.Title : View {}
-extension LabelStyleConfiguration.Icon : View {}
-extension LabelStyleConfiguration.Title : _PrimitiveView {}
-extension LabelStyleConfiguration.Icon : _PrimitiveView {}
+extension LabelStyleConfiguration.Title: View {}
+extension LabelStyleConfiguration.Icon: View {}
+extension LabelStyleConfiguration.Title: _PrimitiveView {}
+extension LabelStyleConfiguration.Icon: _PrimitiveView {}
 
 extension LabelStyleConfiguration.Title {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
@@ -72,7 +72,7 @@ extension LabelStyleConfiguration.Icon {
     }
 }
 
-public struct DefaultLabelStyle : LabelStyle {
+public struct DefaultLabelStyle: LabelStyle {
     public init() {}
     public func makeBody(configuration: Configuration) -> some View {
         HStack {
@@ -82,14 +82,14 @@ public struct DefaultLabelStyle : LabelStyle {
     }
 }
 
-public struct IconOnlyLabelStyle : LabelStyle {
+public struct IconOnlyLabelStyle: LabelStyle {
     public init() {}
     public func makeBody(configuration: Configuration) -> some View {
         configuration.icon
     }
 }
 
-public struct TitleAndIconLabelStyle : LabelStyle {
+public struct TitleAndIconLabelStyle: LabelStyle {
     public init() {}
     public func makeBody(configuration: Configuration) -> some View {
         HStack {
@@ -99,7 +99,7 @@ public struct TitleAndIconLabelStyle : LabelStyle {
     }
 }
 
-public struct TitleOnlyLabelStyle : LabelStyle {
+public struct TitleOnlyLabelStyle: LabelStyle {
     public init() {}
     public func makeBody(configuration: Configuration) -> some View {
         configuration.title
@@ -122,7 +122,7 @@ extension LabelStyle where Self == TitleOnlyLabelStyle {
     public static var titleOnly: TitleOnlyLabelStyle { .init() }
 }
 
-struct LabelStyleWritingModifier<Style> : ViewModifier where Style : LabelStyle {
+struct LabelStyleWritingModifier<Style>: ViewModifier where Style: LabelStyle {
     let style: Style
     typealias Body = Never
 }
@@ -142,7 +142,7 @@ extension LabelStyleWritingModifier {
 }
 
 extension View {
-    public func labelStyle<S>(_ style: S) -> some View where S : LabelStyle {
+    public func labelStyle<S>(_ style: S) -> some View where S: LabelStyle {
         modifier(LabelStyleWritingModifier(style: style))
     }
 }
@@ -159,7 +159,7 @@ struct LabelStyleProxy {
     }
 }
 
-private class LabelStyleConfigurationTitleViewContext : DynamicViewContext<LabelStyleConfiguration.Title> {
+private class LabelStyleConfigurationTitleViewContext: DynamicViewContext<LabelStyleConfiguration.Title> {
     override func updateContent() {
         let oldProxy = self.view?.view
         self.view = nil
@@ -183,7 +183,7 @@ private class LabelStyleConfigurationTitleViewContext : DynamicViewContext<Label
     }
 }
 
-private class LabelStyleConfigurationIconViewContext : DynamicViewContext<LabelStyleConfiguration.Icon> {
+private class LabelStyleConfigurationIconViewContext: DynamicViewContext<LabelStyleConfiguration.Icon> {
     override func updateContent() {
         let oldProxy = self.view?.view
         self.view = nil

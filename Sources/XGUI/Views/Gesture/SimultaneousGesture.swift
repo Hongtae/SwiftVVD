@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct SimultaneousGesture<First, Second> : Gesture where First : Gesture, Second : Gesture {
+public struct SimultaneousGesture<First, Second>: Gesture where First: Gesture, Second: Gesture {
     public struct Value {
         public var first: First.Value?
         public var second: Second.Value?
@@ -31,7 +31,7 @@ public struct SimultaneousGesture<First, Second> : Gesture where First : Gesture
 
     public typealias Body = Never
 
-    private struct _Generator : _GestureRecognizerGenerator {
+    private struct _Generator: _GestureRecognizerGenerator {
         let graph: _GraphValue<SimultaneousGesture>
         let first: _GestureOutputs<First.Value>
         let second: _GestureOutputs<Second.Value>
@@ -56,19 +56,19 @@ public struct SimultaneousGesture<First, Second> : Gesture where First : Gesture
     }
 }
 
-extension SimultaneousGesture.Value : Equatable where First.Value : Equatable, Second.Value : Equatable {
+extension SimultaneousGesture.Value: Equatable where First.Value: Equatable, Second.Value: Equatable {
 }
 
-extension SimultaneousGesture.Value : Hashable where First.Value : Hashable, Second.Value : Hashable {
+extension SimultaneousGesture.Value: Hashable where First.Value: Hashable, Second.Value: Hashable {
 }
 
 extension Gesture {
-    @inlinable public func simultaneously<Other>(with other: Other) -> SimultaneousGesture<Self, Other> where Other : Gesture {
+    @inlinable public func simultaneously<Other>(with other: Other) -> SimultaneousGesture<Self, Other> where Other: Gesture {
         return SimultaneousGesture(self, other)
     }
 }
 
-class SimultaneousGestureRecognizer<First : Gesture, Second : Gesture> : _GestureRecognizer<SimultaneousGesture<First, Second>.Value> {
+class SimultaneousGestureRecognizer<First: Gesture, Second: Gesture>: _GestureRecognizer<SimultaneousGesture<First, Second>.Value> {
     let first: _GestureRecognizer<First.Value>
     let second: _GestureRecognizer<Second.Value>
     typealias Value = SimultaneousGesture<First, Second>.Value

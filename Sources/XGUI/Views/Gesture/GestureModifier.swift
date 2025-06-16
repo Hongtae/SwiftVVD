@@ -190,9 +190,9 @@ extension HighPriorityGestureModifier: _UnaryViewModifier {
     }
 }
 
-extension AddGestureModifier : _GestureGenerator {}
-extension SimultaneousGestureModifier : _GestureGenerator {}
-extension HighPriorityGestureModifier : _GestureGenerator {}
+extension AddGestureModifier: _GestureGenerator {}
+extension SimultaneousGestureModifier: _GestureGenerator {}
+extension HighPriorityGestureModifier: _GestureGenerator {}
 
 
 private class GestureViewContext<Modifier>: ViewModifierContext<Modifier> where Modifier: ViewModifier & _GestureGenerator  {

@@ -13,7 +13,7 @@ protocol CustomInput {
 public struct _Graph {
 }
 
-protocol _GraphInputResolve : Equatable {
+protocol _GraphInputResolve: Equatable {
     var isResolved: Bool { get }
     func apply(to: inout EnvironmentValues)
     func apply(to: inout PropertyList)
@@ -37,7 +37,7 @@ extension _GraphInputResolve {
 }
 
 public struct _GraphInputs {
-    struct Options : OptionSet, Sendable {
+    struct Options: OptionSet, Sendable {
         let rawValue: Int
         static var none: Options { Options(rawValue: 0) }
     }
@@ -282,7 +282,7 @@ extension _GraphValue {
     }
 }
 
-extension _GraphValue : Equatable {
+extension _GraphValue: Equatable {
     public static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.index == rhs.index && lhs.root === rhs.root
     }
@@ -291,14 +291,14 @@ extension _GraphValue : Equatable {
     }
 }
 
-extension _GraphValue : Hashable {
+extension _GraphValue: Hashable {
     public func hash(into hasher: inout Hasher) {
         hasher.combine(ObjectIdentifier(self.root))
         hasher.combine(self.index)
     }
 }
 
-extension _GraphValue : CustomDebugStringConvertible {
+extension _GraphValue: CustomDebugStringConvertible {
     public var debugDescription: String {
         self.keyPath.debugDescription
     }

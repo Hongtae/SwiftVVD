@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct _ButtonGesture : Gesture {
+public struct _ButtonGesture: Gesture {
     public var action: () -> Void
     public var pressingAction: ((Bool) -> Void)?
 
@@ -17,7 +17,7 @@ public struct _ButtonGesture : Gesture {
     }
 
     public static func _makeGesture(gesture: _GraphValue<Self>, inputs: _GestureInputs) -> _GestureOutputs<Value> {
-        struct _Generator : _GestureRecognizerGenerator {
+        struct _Generator: _GestureRecognizerGenerator {
             let graph: _GraphValue<_ButtonGesture>
             let inputs: _GestureInputs
             func makeGesture(containerView: ViewContext) -> _GestureRecognizer<Value>? {
@@ -44,7 +44,7 @@ extension View {
     }
 }
 
-class _ButtonGestureRecognizer : _GestureRecognizer<_ButtonGesture.Value> {
+class _ButtonGestureRecognizer: _GestureRecognizer<_ButtonGesture.Value> {
     let gesture: _ButtonGesture
     var typeFilter: _PrimitiveGestureTypes = .all
     let buttonID: Int

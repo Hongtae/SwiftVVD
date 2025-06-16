@@ -2,7 +2,7 @@
 //  File: CoordinateSpace.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -22,14 +22,14 @@ extension CoordinateSpace {
     }
 }
 
-extension CoordinateSpace : Equatable, Hashable {
+extension CoordinateSpace: Equatable, Hashable {
 }
 
 public protocol CoordinateSpaceProtocol {
     var coordinateSpace: CoordinateSpace { get }
 }
 
-public struct NamedCoordinateSpace : CoordinateSpaceProtocol, Equatable {
+public struct NamedCoordinateSpace: CoordinateSpaceProtocol, Equatable {
     public var coordinateSpace: CoordinateSpace {
         .named(name)
     }
@@ -42,7 +42,7 @@ extension CoordinateSpaceProtocol where Self == NamedCoordinateSpace {
     }
 }
 
-public struct LocalCoordinateSpace : CoordinateSpaceProtocol {
+public struct LocalCoordinateSpace: CoordinateSpaceProtocol {
     public init() {}
     public var coordinateSpace: CoordinateSpace {
         .local
@@ -55,7 +55,7 @@ extension CoordinateSpaceProtocol where Self == LocalCoordinateSpace {
     }
 }
 
-public struct GlobalCoordinateSpace : CoordinateSpaceProtocol {
+public struct GlobalCoordinateSpace: CoordinateSpaceProtocol {
     public init() {}
     public var coordinateSpace: CoordinateSpace {
         .global

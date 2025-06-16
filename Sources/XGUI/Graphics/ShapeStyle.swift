@@ -5,17 +5,17 @@
 //  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
-public protocol ShapeStyle : Sendable {
-    static func _makeView<S>(view: _GraphValue<_ShapeView<S, Self>>, inputs: _ViewInputs) -> _ViewOutputs where S : Shape
+public protocol ShapeStyle: Sendable {
+    static func _makeView<S>(view: _GraphValue<_ShapeView<S, Self>>, inputs: _ViewInputs) -> _ViewOutputs where S: Shape
 
     func _apply(to shape: inout _ShapeStyle_Shape)
     static func _apply(to type: inout _ShapeStyle_ShapeType)
 
-    associatedtype Resolved : ShapeStyle = Never
+    associatedtype Resolved: ShapeStyle = Never
     func resolve(in environment: EnvironmentValues) -> Self.Resolved
 }
 
-extension Never : ShapeStyle {
+extension Never: ShapeStyle {
     public typealias Resolved = Never
 }
 
@@ -29,7 +29,7 @@ extension ShapeStyle where Self.Resolved == Never {
 }
 
 extension ShapeStyle {
-    public static func _makeView<S>(view: _GraphValue<_ShapeView<S, Self>>, inputs: _ViewInputs) -> _ViewOutputs where S : Shape {
+    public static func _makeView<S>(view: _GraphValue<_ShapeView<S, Self>>, inputs: _ViewInputs) -> _ViewOutputs where S: Shape {
         fatalError()
     }
     public func _apply(to shape: inout _ShapeStyle_Shape) {
@@ -47,7 +47,7 @@ public struct _ShapeStyle_Shape {
 public struct _ShapeStyle_ShapeType {
 }
 
-public struct ForegroundStyle : ShapeStyle {
+public struct ForegroundStyle: ShapeStyle {
     @inlinable public init() {}
     public static func _makeView<S>(view: _GraphValue<_ShapeView<S, ForegroundStyle>>, inputs: _ViewInputs) -> _ViewOutputs where S: Shape {
         _ShapeView<S, ForegroundStyle>._makeView(view: view, inputs: inputs)
@@ -61,7 +61,7 @@ public struct ForegroundStyle : ShapeStyle {
     public typealias Resolved = Never
 }
 
-public struct BackgroundStyle : ShapeStyle {
+public struct BackgroundStyle: ShapeStyle {
     @inlinable public init() {}
     public static func _makeView<S>(view: _GraphValue<_ShapeView<S, BackgroundStyle>>, inputs: _ViewInputs) -> _ViewOutputs where S: Shape {
         _ShapeView<S, BackgroundStyle>._makeView(view: view, inputs: inputs)
@@ -76,7 +76,7 @@ public struct BackgroundStyle : ShapeStyle {
     public typealias Resolved = Never
 }
 
-public struct SeparatorShapeStyle : ShapeStyle {
+public struct SeparatorShapeStyle: ShapeStyle {
     public init() {
     }
     public static func _makeView<S>(view: _GraphValue<_ShapeView<S, SeparatorShapeStyle>>, inputs: _ViewInputs) -> _ViewOutputs where S: Shape {
@@ -91,7 +91,7 @@ public struct SeparatorShapeStyle : ShapeStyle {
     public typealias Resolved = Never
 }
 
-public struct _ImplicitShapeStyle : ShapeStyle {
+public struct _ImplicitShapeStyle: ShapeStyle {
     @inlinable init() {}
     public func _apply(to shape: inout _ShapeStyle_Shape) {
         fatalError()
@@ -130,13 +130,13 @@ extension ShapeStyle where Self == Color {
     public static var clear: Color  { .clear }
 }
 
-extension ShapeStyle where Self : View, Self.Body == _ShapeView<Rectangle, Self> {
+extension ShapeStyle where Self: View, Self.Body == _ShapeView<Rectangle, Self> {
     public var body: _ShapeView<Rectangle, Self> {
         .init(shape: Rectangle(), style: self)
     }
 }
 
-public struct AnyShapeStyle : ShapeStyle {
+public struct AnyShapeStyle: ShapeStyle {
     @usableFromInline
     struct Storage: Equatable, @unchecked Sendable {
         var box: AnyShapeStyleBox

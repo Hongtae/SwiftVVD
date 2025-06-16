@@ -8,7 +8,7 @@
 import Foundation
 import VVD
 
-public struct LongPressGesture : Gesture {
+public struct LongPressGesture: Gesture {
     public var minimumDuration: Double
     public var maximumDistance: CGFloat {
         get { _maximumDistance }
@@ -22,7 +22,7 @@ public struct LongPressGesture : Gesture {
     }
 
     public static func _makeGesture(gesture: _GraphValue<Self>, inputs: _GestureInputs) -> _GestureOutputs<Value> {
-        struct _Generator : _GestureRecognizerGenerator {
+        struct _Generator: _GestureRecognizerGenerator {
             let graph: _GraphValue<LongPressGesture>
             let inputs: _GestureInputs
             func makeGesture(containerView: ViewContext) -> _GestureRecognizer<Value>? {
@@ -62,7 +62,7 @@ extension View {
     }
 }
 
-final class LongPressGestureRecognizer : _GestureRecognizer<LongPressGesture.Value>, @unchecked Sendable {
+final class LongPressGestureRecognizer: _GestureRecognizer<LongPressGesture.Value>, @unchecked Sendable {
     let gesture: LongPressGesture
     var typeFilter: _PrimitiveGestureTypes = .all
     let buttonID: Int
