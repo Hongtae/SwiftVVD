@@ -243,14 +243,20 @@ private class ImageViewContext: PrimitiveViewContext<Image> {
     var resolvedImage: GraphicsContext.ResolvedImage?
 
     override func updateContent() {
+        let oldImage = self.view
         self.resolveGraphInputs()
         let defaultBundle = self.environment.resourceBundle
         Image.$_mainNamedBundle.withValue(defaultBundle) {
             super.updateContent()
         }
+        if self.view != oldImage || self.resolvedImage == nil {
+            // reload image!
+            self.sharedContext.viewsNeedToReloadResources.append(.init(self))
+        }
     }
 
     override func loadResources(_ context: GraphicsContext) {
+        super.loadResources(context)
         if let image = self.view {
             self.resolvedImage = context.resolve(image)
             self.sharedContext.needsLayout = true

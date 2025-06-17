@@ -447,6 +447,7 @@ class GenericViewContext<Content>: ViewContext {
     }
 
     override func loadResources(_ context: GraphicsContext) {
+        super.loadResources(context)
         body.loadResources(context)
     }
 
@@ -620,6 +621,7 @@ class DynamicViewContext<Content>: ViewContext {
     }
 
     override func loadResources(_ context: GraphicsContext) {
+        super.loadResources(context)
         body?.loadResources(context)
     }
 

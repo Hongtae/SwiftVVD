@@ -311,11 +311,11 @@ private class TextViewContext: PrimitiveViewContext<Text> {
     }
 
     override func loadResources(_ context: GraphicsContext) {
+        super.loadResources(context)
         if let text = self.view {
             self.resolvedText = context.resolve(text)
             self.sharedContext.needsLayout = true
         }
-        super.loadResources(context)
     }
 
     override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {

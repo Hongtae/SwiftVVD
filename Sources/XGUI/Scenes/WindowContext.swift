@@ -226,14 +226,21 @@ class GenericWindowContext<Content>: WindowContext, WindowDelegate, @unchecked S
                     }) {
                         viewLoaded = false
                     } else {
-                        func getRoot(_ view: ViewContext) -> ViewContext {
-                            if let superview = view.superview {
-                                return getRoot(superview)
+                        let copiedList = viewsToReload
+                        let rootView = view
+                        let isValidToReload = { (_ view: ViewContext) -> Bool in
+                            var view = Optional(view)
+                            while let superview = view?.superview {
+                                // when the view is reloaded, its subviews are also reloaded.
+                                if copiedList.contains(where: { $0 === superview }) {
+                                    return false
+                                }
+                                view = superview
                             }
-                            return view
+                            // the root view must be the same.
+                            return view === rootView
                         }
-                        // Unless the view is the root view, a superview must exist.
-                        viewsToReload = viewsToReload.filter { getRoot($0) === view }
+                        viewsToReload = viewsToReload.filter { isValidToReload($0) }
                     }
                 }
                 if viewLoaded == false {

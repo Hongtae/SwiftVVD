@@ -48,13 +48,6 @@ class MultiViewContext: ViewGroupContext {
         }
     }
 
-    override func loadResources(_ context: GraphicsContext) {
-        super.loadResources(context)
-        self.activeSubviews.forEach {
-            $0.loadResources(context)
-        }
-    }
-
     override func update(transform t: AffineTransform) {
         super.update(transform: t)
         self.activeSubviews.forEach {
