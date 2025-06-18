@@ -239,7 +239,7 @@ extension Image {
 extension Image: _PrimitiveView {
 }
 
-class ImageViewContext: PrimitiveViewContext<Image> {
+private class ImageViewContext: PrimitiveViewContext<Image> {
     var resolvedImage: GraphicsContext.ResolvedImage?
 
     override func updateContent() {

@@ -17,7 +17,7 @@ public struct TupleView<T>: View {
     public typealias Body = Never
 }
 
-extension TupleView {
+private extension TupleView {
     static var _subviewTypes: [(name: String, offset: Int, type: any View.Type)] {
         var types: [(name: String, offset: Int,  type: any View.Type)] = []
         _forEachField(of: T.self) { charPtr, offset, fieldType in
@@ -74,7 +74,9 @@ extension TupleView {
         }
         fatalError("Field: \(name) not found!")
     }
+}
 
+extension TupleView {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         let outputs = Self._makeViewList(view: view, inputs: inputs.listInputs)
 

@@ -64,7 +64,7 @@ extension AnyView {
 extension AnyView: _PrimitiveView {
 }
 
-class TypeErasedViewContext: DynamicViewContext<AnyView> {
+private class TypeErasedViewContext: DynamicViewContext<AnyView> {
     override func updateContent() {
         var oldViewType: (any View.Type)?
         if let oldView = self.view?._view {
