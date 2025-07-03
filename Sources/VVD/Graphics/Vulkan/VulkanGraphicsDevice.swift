@@ -57,8 +57,6 @@ final class VulkanGraphicsDevice: GraphicsDevice, @unchecked Sendable {
     private var numberOfFences: UInt = 0
     private var fenceCompletionLock = NSLock()
 
-    var autoIncrementTimelineEvent = false
-
     private struct DescriptorPoolChainMap {
         var poolChainMap: [VulkanDescriptorPoolID: VulkanDescriptorPoolChain] = [:]
         let lock = NSLock()
@@ -1546,7 +1544,7 @@ final class VulkanGraphicsDevice: GraphicsDevice, @unchecked Sendable {
         return VulkanSampler(device: self, sampler: sampler!)
     }
 
-    func makeEvent() -> GPUEvent? {
+    func makeEvent(autoIncrementTimelineEvent: Bool) -> GPUEvent? {
         var createInfo = VkSemaphoreCreateInfo()
         createInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO
 
@@ -1554,7 +1552,7 @@ final class VulkanGraphicsDevice: GraphicsDevice, @unchecked Sendable {
         var typeCreateInfo = VkSemaphoreTypeCreateInfo()
         typeCreateInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO
 
-        if self.autoIncrementTimelineEvent {
+        if autoIncrementTimelineEvent {
             typeCreateInfo.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE
         } else {
             typeCreateInfo.semaphoreType = VK_SEMAPHORE_TYPE_BINARY
@@ -1573,6 +1571,10 @@ final class VulkanGraphicsDevice: GraphicsDevice, @unchecked Sendable {
             return VulkanSemaphoreAutoIncrementalTimeline(device: self, semaphore: semaphore!)            
         }
         return VulkanSemaphore(device: self, semaphore: semaphore!)
+    }
+
+    func makeEvent() -> GPUEvent? {
+        makeEvent(autoIncrementTimelineEvent: false)
     }
 
     func makeSemaphore() -> GPUSemaphore? {

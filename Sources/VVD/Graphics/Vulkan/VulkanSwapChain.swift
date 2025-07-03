@@ -574,15 +574,16 @@ final class VulkanSwapChain: SwapChain, @unchecked Sendable {
 
         for event in waitEvents {
             let s = event as! VulkanSemaphore
+            // VUID-vkQueuePresentKHR-pWaitSemaphores-03267
+            assert(s.isBinarySemaphore, "VulkanSwapChain.present(waitEvents:) The event of waitEvents must be a binary semaphore.")
             waitSemaphores.append(s.semaphore)
         }
         waitSemaphores.append(frameReady.semaphore)
 
-        var presentInfo = VkPresentInfoKHR()
-        presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR
-        presentInfo.swapchainCount = 1
-
         let err: VkResult = withUnsafePointer(to: self.swapchain) {
+            var presentInfo = VkPresentInfoKHR()
+            presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR
+            presentInfo.swapchainCount = 1
             presentInfo.pSwapchains = $0
             return withUnsafePointer(to: self.frameIndex) {
                 presentInfo.pImageIndices = $0

@@ -26,6 +26,7 @@ class VulkanSemaphore: GPUEvent {
 
     var nextWaitValue: UInt64 { 0 }
     var nextSignalValue: UInt64 { 0 }
+    var isBinarySemaphore: Bool { true }
 }
 
 final class VulkanSemaphoreAutoIncrementalTimeline: VulkanSemaphore {
@@ -38,6 +39,10 @@ final class VulkanSemaphoreAutoIncrementalTimeline: VulkanSemaphore {
     
     override var nextSignalValue: UInt64 {
         signalValue.add(1, ordering: .sequentiallyConsistent).newValue
+    }
+
+    override var isBinarySemaphore: Bool {
+        false
     }
 }
 #endif //if ENABLE_VULKAN
