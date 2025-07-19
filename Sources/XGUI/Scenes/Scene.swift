@@ -5,9 +5,6 @@
 //  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
-import Foundation
-
-
 public protocol Scene {
     associatedtype Body: Scene
     @SceneBuilder var body: Self.Body { get }
@@ -27,7 +24,9 @@ protocol _PrimitiveScene: Scene {
 }
 
 extension _PrimitiveScene {
-    public var body: Never { neverBody() }
+    public var body: Never {
+        fatalError("\(Self.self) may not have Body == Never")
+    }
 }
 
 protocol SceneRoot: AnyObject, _GraphValueResolver {

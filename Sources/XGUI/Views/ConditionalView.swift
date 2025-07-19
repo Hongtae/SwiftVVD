@@ -1,23 +1,13 @@
 //
-//  File: ConditionalContent.swift
+//  File: ConditionalView.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
 //  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
-import Foundation
-
-public struct _ConditionalContent<TrueContent, FalseContent> {
-    enum Storage {
-        case trueContent(TrueContent)
-        case falseContent(FalseContent)
-    }
-    let storage: Storage
-}
-
 extension _ConditionalContent: View where TrueContent: View, FalseContent: View {
     public typealias Body = Never
-
+    
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         let trueContent = TrueContent._makeView(view: view[\._trueContent], inputs: inputs)
         let falseContent = FalseContent._makeView(view: view[\._falseContent], inputs: inputs)
