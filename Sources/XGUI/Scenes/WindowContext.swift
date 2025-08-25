@@ -11,6 +11,7 @@ import VVD
 
 protocol WindowContext: AnyObject {
     typealias Window = VVD.Window
+    typealias WindowStyle = VVD.WindowStyle
 
     var scene: SceneContext { get }
     var window: Window? { get }
@@ -29,13 +30,14 @@ class GenericWindowContext<Content>: WindowContext, WindowDelegate, @unchecked S
     private(set) var window: Window?
 
     var view: ViewContext?
-    let title: _GraphValue<Text>
     let content: _GraphValue<Content>
     var environment: EnvironmentValues
     var sharedContext: SharedContext
     var scene: SceneContext {
         sharedContext.scene
     }
+    var title: String { "" }
+    var style: WindowStyle { .genericWindow }
 
     var filterGestureTypes: Bool = true
     var allowedGestureTypes: _PrimitiveGestureTypes = .all
@@ -56,8 +58,7 @@ class GenericWindowContext<Content>: WindowContext, WindowDelegate, @unchecked S
     private let stateConfig = Mutex<(state: State, config: Configuration)>((state: State(), config: Configuration()))
     private var task: Task<Void, Never>?
 
-    init(content: _GraphValue<Content>, title: _GraphValue<Text>, scene: SceneContext) {
-        self.title = title
+    init(content: _GraphValue<Content>, scene: SceneContext) {
         self.content = content
         self.environment = EnvironmentValues()
         self.sharedContext = SharedContext(scene: scene)
@@ -115,13 +116,12 @@ class GenericWindowContext<Content>: WindowContext, WindowDelegate, @unchecked S
             self.task = nil
             self.swapChain = nil
 
-            let title = scene.value(atPath: self.title)
-            let windowTitle = title?._resolveText(in: self.environment) ?? ""
+            let title = self.title
+            let style = self.style
 
-            if let window = VVD.makeWindow(name: windowTitle,
-                                           style: [.genericWindow],
+            if let window = VVD.makeWindow(name: title,
+                                           style: style,
                                            delegate: self) {
-
                 if let graphicsDevice = appContext?.graphicsDeviceContext {
                     if GraphicsContext.cachePipelineContext(graphicsDevice) == false {
                         Log.error("Failed to cache GraphicsPipelineStates")

@@ -117,7 +117,7 @@ class GroupWindowContext<Content>: GenericWindowContext<Content> where Content: 
     let dataType: Any.Type?
     init(dataType: Any.Type?, content: _GraphValue<Content>, title: _GraphValue<Text>, scene: SceneContext) {
         self.dataType = dataType
-        super.init(content: content, title: title, scene: scene)
+        super.init(content: content, scene: scene)
     }
 }
 

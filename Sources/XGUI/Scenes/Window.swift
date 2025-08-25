@@ -53,7 +53,7 @@ class SingleWindowSceneContext<Content>: TypedSceneContext<SingleWindowScene<Con
 
     override init(graph: _GraphValue<Scene>, inputs: _SceneInputs) {
         defer {
-            self.window = GenericWindowContext(content: graph[\.content], title: graph[\.title], scene: self)
+            self.window = SceneWindowContext(content: graph[\.content], title: graph[\.title], scene: self)
         }
         super.init(graph: graph, inputs: inputs)
     }
@@ -81,4 +81,32 @@ class SingleWindowSceneContext<Content>: TypedSceneContext<SingleWindowScene<Con
         }
         return false
     }
+}
+
+
+class SceneWindowContext<Content>: GenericWindowContext<Content> where Content: View {
+    weak var sceneContext: SceneContext?
+
+    let titleGraph: _GraphValue<Text>
+    var _title: String = ""
+
+    override var title: String { _title }
+    override var style: WindowStyle { .genericWindow }
+
+    init(content: _GraphValue<Content>, title: _GraphValue<Text>, scene: SceneContext) {
+        self.sceneContext = scene
+        self.titleGraph = title
+        super.init(content: content, scene: scene)
+    }
+
+    override func updateContent() {
+
+        let title = sceneContext?.value(atPath: self.titleGraph)
+        self._title = title?._resolveText(in: self.environment) ?? ""
+
+        super.updateContent()
+    }
+}
+
+extension SceneWindowContext: @unchecked Sendable {
 }
