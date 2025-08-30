@@ -100,11 +100,26 @@ class SceneWindowContext<Content>: GenericWindowContext<Content> where Content: 
     }
 
     override func updateContent() {
-
+        let oldTitle = _title
         let title = sceneContext?.value(atPath: self.titleGraph)
         self._title = title?._resolveText(in: self.environment) ?? ""
 
         super.updateContent()
+        
+        if oldTitle != self._title {
+            if let window {
+                let newTitle = self._title
+                if Thread.isMainThread {
+                    MainActor.assumeIsolated {
+                        window.title = newTitle
+                    }
+                } else {
+                    Task { @MainActor in
+                        window.title = newTitle
+                    }
+                }
+            }
+        }
     }
 }
 

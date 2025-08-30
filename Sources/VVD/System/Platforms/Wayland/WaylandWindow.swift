@@ -69,6 +69,17 @@ final class WaylandWindow: Window {
         set { self.resolution = newValue * self.contentScaleFactor }
     }
 
+    var title: String {
+        didSet {
+            if oldValue != title {
+                if let xdgToplevel = self.xdgToplevel {
+                    xdg_toplevel_set_title(xdgToplevel, title)
+                    wl_surface_commit(self.surface)
+                }
+            }
+        }
+    }
+
     private(set) var delegate: WindowDelegate?
 
     private(set) var display: OpaquePointer?
@@ -106,6 +117,7 @@ final class WaylandWindow: Window {
         self.contentScaleFactor = 1.0
         self.contentBounds = CGRect(origin: .zero, size: self._resolution * (1.0 / self.contentScaleFactor))
         self.windowFrame = self.contentBounds
+        self.title = name
 
         let context = unsafeBitCast(self as AnyObject, to: UnsafeMutableRawPointer.self)
         xdg_surface_add_listener(self.xdgSurface, &xdgSurfaceListener, context)

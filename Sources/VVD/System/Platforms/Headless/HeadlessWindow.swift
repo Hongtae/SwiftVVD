@@ -2,28 +2,31 @@
 //  File: HeadlessWindow.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
 
 @MainActor
 final class HeadlessWindow: Window {
-
-     var activated: Bool = false
-     var visible: Bool = false
-
-     var contentBounds: CGRect = .zero
-     var windowFrame: CGRect = .zero
-     var contentScaleFactor: CGFloat = 1.0
-     var resolution: CGSize = .zero
-
-     var origin: CGPoint = .zero
-     var contentSize: CGSize = .zero
-
-     var delegate: WindowDelegate?
-
-     required init?(name: String, style: WindowStyle, delegate: WindowDelegate?) {
+    
+    var activated: Bool = false
+    var visible: Bool = false
+    
+    var contentBounds: CGRect = .zero
+    var windowFrame: CGRect = .zero
+    var contentScaleFactor: CGFloat = 1.0
+    var resolution: CGSize = .zero
+    
+    var origin: CGPoint = .zero
+    var contentSize: CGSize = .zero
+    
+    var title: String
+    
+    var delegate: WindowDelegate?
+    
+    required init?(name: String, style: WindowStyle, delegate: WindowDelegate?) {
+        self.title = name
     }
 
     deinit {

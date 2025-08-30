@@ -131,6 +131,8 @@ public protocol Window: AnyObject {
 
     var origin: CGPoint { get set }
     var contentSize: CGSize { get set }
+    
+    var title: String { get set }
 
     var delegate: WindowDelegate? { get }
 
