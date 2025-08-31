@@ -172,7 +172,7 @@ private class LabelStyleConfigurationTitleViewContext: DynamicViewContext<LabelS
         if let view, let proxy = view.view {
             if self.body == nil || proxy != oldProxy {
                 let outputs = proxy.makeView(_Graph(), inputs: _ViewInputs(base: self.inputs))
-                self.body = outputs.view?.makeView()
+                self.body = outputs.view?.makeView(sharedContext: self.sharedContext)
             }
             self.body?.updateContent()
         } else {
@@ -196,7 +196,7 @@ private class LabelStyleConfigurationIconViewContext: DynamicViewContext<LabelSt
         if let view, let proxy = view.view {
             if self.body == nil || proxy != oldProxy {
                 let outputs = proxy.makeView(_Graph(), inputs: _ViewInputs(base: self.inputs))
-                self.body = outputs.view?.makeView()
+                self.body = outputs.view?.makeView(sharedContext: self.sharedContext)
             }
             self.body?.updateContent()
         } else {
