@@ -2,7 +2,7 @@
 //  File: Win32Window.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_WIN32
@@ -54,9 +54,9 @@ private let updateKeyboardMouseTimeInterval: UINT = 10
 private let WM_VVDWINDOW_SHOWCURSOR = (WM_USER + 0x1175)
 private let WM_VVDWINDOW_UPDATEMOUSECAPTURE = (WM_USER + 0x1180)
 
-private let HWND_TOP:HWND? = nil
-private let HWND_TOPMOST:HWND = HWND(bitPattern: -1)!
-private let HWND_NOTOPMOST:HWND = HWND(bitPattern: -2)!
+nonisolated(unsafe) private let HWND_TOP:HWND? = nil
+nonisolated(unsafe) private let HWND_TOPMOST:HWND = HWND(bitPattern: -1)!
+nonisolated(unsafe) private let HWND_NOTOPMOST:HWND = HWND(bitPattern: -2)!
 
 @MainActor
 final class Win32Window : Window {
@@ -77,6 +77,7 @@ final class Win32Window : Window {
 
     typealias HWND = WinSDK.HWND
 
+    nonisolated(unsafe) 
     private(set) var hWnd: HWND?
     private(set) var style: WindowStyle
     private(set) var contentBounds: CGRect = .null

@@ -2,7 +2,7 @@
 //  File: Font.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -107,8 +107,6 @@ private extension CGPoint {
     }
 }
 
-extension FT_Face: @unchecked @retroactive Sendable {}
-
 public class Font {
     public typealias DPI = (x: UInt32, y: UInt32)
     //public static let defaultDPI = DPI(x: 96, y: 96)
@@ -116,8 +114,11 @@ public class Font {
 
     private let library: FTLibrary
 
-    private let face: Mutex<FT_Face>
-    private let _face: FT_Face // constant data that doesn't need a lock
+    private struct NonisolatedFace: @unchecked Sendable {
+        let face: FT_Face
+    }
+
+    private let face: Mutex<NonisolatedFace>
 
     func withFaceLock<T>(_ body: () throws -> T) rethrows -> T {
         try face.withLock { _ in try body() }
@@ -127,6 +128,7 @@ public class Font {
     public let familyName: String
     public let styleName: String
     public let filePath: String
+    public let numGlyphs: Int
 
     public let maxPointSize: CGFloat = CGFloat(1<<25) - CGFloat(1.0/64.0)
 
@@ -177,8 +179,8 @@ public class Font {
         self.library = library
         self.familyName = .init(cString: face.pointee.family_name)
         self.styleName = .init(cString: face.pointee.style_name)
-        self._face = face
-        self.face = .init(face)
+        self.numGlyphs = Int(face.pointee.num_glyphs)
+        self.face = .init(.init(face: face))
         self.filePath = path
     }
 
@@ -210,13 +212,15 @@ public class Font {
         self.library = library
         self.familyName = .init(cString: face.pointee.family_name)
         self.styleName = .init(cString: face.pointee.style_name)
-        self._face = face
-        self.face = .init(face)
+        self.numGlyphs = Int(face.pointee.num_glyphs)
+        self.face = .init(.init(face: face))
         self.filePath = ""
     }
 
     deinit {
-        _ = FT_Done_Face(self._face)
+        self.face.withLock {
+            _=FT_Done_Face($0.face)
+        }
     }
 
     internal func clearCacheInternal() {
@@ -240,7 +244,8 @@ public class Font {
         let charSize: FT_F26Dot6 = FT_F26Dot6(floor(dp))
 
         if charSize != self._size26d6 || resX != self._dpi.x || resY != self._dpi.y {
-            self.face.withLock { face in
+            self.face.withLock {
+                let face = $0.face
                 if charSize != _size26d6 || resX != _dpi.x || resY != _dpi.y {
                     if FT_Set_Char_Size(face, 0, charSize, resX, resY) != 0 {
                         Log.err("FT_Set_Char_Size failed! (size:\(String(format:"0x%x", charSize)), dpi:\(resX)x\(resY))")
@@ -249,6 +254,7 @@ public class Font {
                 }
                 self._size26d6 = charSize
                 self._dpi = (resX, resY)
+                assert(self.numGlyphs == Int(face.pointee.num_glyphs))
                 self.clearCacheInternal()
             }
         }
@@ -257,7 +263,8 @@ public class Font {
     /// calculate kern advance between characters.
     public func kernAdvance(left: UnicodeScalar, right: UnicodeScalar) -> CGPoint {
         var point: CGPoint = .zero
-        self.face.withLock { face in
+        self.face.withLock {
+            let face = $0.face
             if FT_HAS_KERNING(face) {
                 let index1 = FT_Get_Char_Index(face, FT_ULong(left.value))
                 let index2 = FT_Get_Char_Index(face, FT_ULong(right.value))
@@ -296,8 +303,8 @@ public class Font {
     }
 
     var metrics: FT_Size_Metrics {
-        self.face.withLock { face in
-            face.pointee.size.pointee.metrics
+        self.face.withLock {
+            $0.face.pointee.size.pointee.metrics
         }
     }
 
@@ -355,20 +362,16 @@ public class Font {
         return Int(self.metrics.y_ppem)
     }
 
-    public var numGlyphs: Int {
-        Int(self._face.pointee.num_glyphs)
-    }
-
     public func hasGlyph(for c: UnicodeScalar) -> Bool {
-        self.face.withLock { face in
-            FT_Get_Char_Index(face, FT_ULong(c.value)) != 0
+        self.face.withLock {
+            FT_Get_Char_Index($0.face, FT_ULong(c.value)) != 0
         }
     }
 
     public func glyph(for c: UnicodeScalar) -> Glyph? {
         if c.value == 0 { return nil }
-        return self.face.withLock { face in
-
+        return self.face.withLock {
+            let face = $0.face
             if let glyph = self.loadedGlyphs[c] {
                 return glyph
             }
@@ -420,7 +423,8 @@ public class Font {
                                       BitmapInfo,
                                       SizeMetrics)->Void) -> Bool {
         if c.value == 0 { return false }
-        return self.face.withLock { face in
+        return self.face.withLock {
+            let face = $0.face
             let index = if face.pointee.charmap != nil {
                 FT_Get_Char_Index(face, FT_ULong(c.value))
             } else {
@@ -607,7 +611,7 @@ public class Font {
     }
 
     public var baseMetrics: SizeMetrics {
-        self.face.withLock { baseMetrics(for: $0) }
+        self.face.withLock { baseMetrics(for: $0.face) }
     }
 
     private func baseMetrics(for face: FT_Face) -> SizeMetrics {
@@ -631,8 +635,8 @@ public class Font {
 
     @discardableResult
     public func decompose(callback: (Path)->Void) -> Bool {
-        self.face.withLock { face in
-
+        self.face.withLock {
+            let face = $0.face
             typealias Callback = (Path)->Void
 
             var fn = FT_Outline_Funcs()
