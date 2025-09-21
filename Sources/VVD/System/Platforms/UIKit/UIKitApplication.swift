@@ -77,6 +77,7 @@ final class AppLoader: NSObject, UIApplicationDelegate {
 final class UIKitApplication: Application, @unchecked Sendable {
     nonisolated(unsafe) public static var shared: UIKitApplication? = nil
 
+    var activationPolicy: ActivationPolicy = .regular
     var delegate: ApplicationDelegate?
     var initialized = false
 

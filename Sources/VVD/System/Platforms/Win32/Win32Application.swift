@@ -52,6 +52,8 @@ private func getmsgHookProc(_ nCode: Int32, _ wParam: WPARAM, _ lParam: LPARAM) 
 
 final class Win32Application: Application, @unchecked Sendable {
 
+    var activationPolicy: ActivationPolicy = .regular
+
     var threadId: DWORD = 0
     var requestExitWithCode: Int? = nil
 

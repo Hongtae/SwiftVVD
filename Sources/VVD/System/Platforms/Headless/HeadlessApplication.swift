@@ -9,6 +9,7 @@ import Foundation
 
 final class HeadlessApplication: Application, @unchecked Sendable {
 
+    var activationPolicy: ActivationPolicy = .accessory
     private var requestExitWithCode: Int?
     nonisolated(unsafe) static var shared: HeadlessApplication? = nil
 

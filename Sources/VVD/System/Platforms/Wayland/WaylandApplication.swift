@@ -166,6 +166,8 @@ private var keyboardListener = wl_keyboard_listener(
 
 final class WaylandApplication: Application, @unchecked Sendable {
 
+    var activationPolicy: ActivationPolicy = .regular
+
     private(set) var display: OpaquePointer?
     private(set) var registry: OpaquePointer?
     fileprivate(set) var compositor: OpaquePointer?

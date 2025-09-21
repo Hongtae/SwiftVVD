@@ -95,6 +95,10 @@ class AppMain<A>: ApplicationDelegate, AppContext where A: App {
                     }
                 }
             }
+            
+            if primaryWindows.isEmpty == false {
+                application.activationPolicy = .regular
+            }
         }
     }
 

@@ -14,6 +14,7 @@ final class AppKitApplication: Application, @unchecked Sendable {
 
     weak var delegate: ApplicationDelegate?
 
+    var activationPolicy: ActivationPolicy = .accessory
     var running = false
     var exitCode: Int = 0
 
@@ -50,6 +51,14 @@ final class AppKitApplication: Application, @unchecked Sendable {
                                  Log.debug("Notification: \(notification)")
                              },
             NotificationCenter.default
+                .addObserver(forName: NSApplication.didFinishLaunchingNotification,
+                             object: nil,
+                             queue: nil) { notification in
+                                 MainActor.assumeIsolated {
+                                     NSApplication.shared.activate()
+                                 }
+                             },
+            NotificationCenter.default
                 .addObserver(forName: NSApplication.willTerminateNotification,
                              object: nil,
                              queue: nil) { notification in
@@ -64,6 +73,12 @@ final class AppKitApplication: Application, @unchecked Sendable {
         self.shared = app
 
         delegate?.initialize(application: app)
+
+        let policy: NSApplication.ActivationPolicy = switch app.activationPolicy {
+        case .regular:      .regular
+        case .accessory:    .accessory
+        }
+        NSApplication.shared.setActivationPolicy(policy)
 
         NSApplication.shared.run()
         app.running = false
