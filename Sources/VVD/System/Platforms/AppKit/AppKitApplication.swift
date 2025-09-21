@@ -7,7 +7,7 @@
 
 #if ENABLE_APPKIT
 import Foundation
-import AppKit
+@_implementationOnly import AppKit
 
 final class AppKitApplication: Application, @unchecked Sendable {
     nonisolated(unsafe) static var shared: AppKitApplication? = nil

@@ -74,6 +74,10 @@ let package = Package(
                 .define("VK_USE_PLATFORM_WAYLAND_KHR", .when(platforms:[.linux])),
             ],
             linkerSettings: [
+                .linkedFramework("AppKit",  .when(platforms: [.macOS])),
+                .linkedFramework("UIKit",   .when(platforms: [.iOS, .macCatalyst, .tvOS, .watchOS])),
+                .linkedFramework("Metal",   .when(platforms: [.macOS, .iOS, .macCatalyst, .tvOS, .watchOS])),
+
                 .linkedLibrary("User32",    .when(platforms: [.windows])),
                 .linkedLibrary("Ole32",     .when(platforms: [.windows])),
                 .linkedLibrary("Imm32",     .when(platforms: [.windows])),

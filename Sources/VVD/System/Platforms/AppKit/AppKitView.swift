@@ -2,13 +2,30 @@
 //  File: AppKitView.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_APPKIT
 import Foundation
-import AppKit
+@_implementationOnly import AppKit
 
+@MainActor
+protocol AppKitView: AnyObject {
+    var activated: Bool { get set }
+    var visible: Bool { get set }
+    var contentBounds: CGRect { get }
+    var windowFrame: CGRect { get }
+    var contentScaleFactor: CGFloat { get }
+    var mousePosition: CGPoint { get set }
+    var mouseLocked: Bool { get set }
+    var textInput: Bool { get set }
+    var proxyWindow: AppKitWindow? { get set }
+}
+
+@MainActor
+func makeAppKitView(frame: CGRect) -> AppKitView {
+    AppKitViewImpl(frame: frame)
+}
 
 private let LEFT_SHIFT_BIT = UInt(0x20002)
 private let RIGHT_SHIFT_BIT = UInt(0x20004)
@@ -19,7 +36,8 @@ private let RIGHT_ALTERNATE_BIT = UInt(0x80040)
 private let LEFT_COMMAND_BIT = UInt(0x100008)
 private let RIGHT_COMMAND_BIT = UInt(0x100010)
 
-final class AppKitView: NSView, NSTextInputClient, NSWindowDelegate {
+@MainActor
+private final class AppKitViewImpl: NSView, NSTextInputClient, NSWindowDelegate, AppKitView {
 
     var mouseLocked: Bool = false {
         didSet {
@@ -623,6 +641,6 @@ final class AppKitView: NSView, NSTextInputClient, NSWindowDelegate {
                                                    text: text))
         }
     }
-
 }
+
 #endif //if ENABLE_APPKIT

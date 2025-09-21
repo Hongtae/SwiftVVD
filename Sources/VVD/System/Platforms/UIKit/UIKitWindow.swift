@@ -2,12 +2,12 @@
 //  File: UIKitWindow.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_UIKIT
 import Foundation
-import UIKit
+@_implementationOnly import UIKit
 
 @MainActor
 final class UIKitWindow: Window {
@@ -19,56 +19,59 @@ final class UIKitWindow: Window {
     var contentScaleFactor: CGFloat { self.view.contentScaleFactor }
 
     var origin: CGPoint {
-        get { self.view.frame.origin }
-        set(value) { self.view.frame.origin = value }
+        get { uiView.frame.origin }
+        set(value) { uiView.frame.origin = value }
     }
 
     var contentSize: CGSize {
         get {
-            let bounds = self.view.bounds
+            let bounds = uiView.bounds
             return CGSize(width: bounds.width, height: bounds.height)
         }
         set(value) {
-            self.view.bounds.size = value
+            uiView.bounds.size = value
         }
     }
 
     var resolution: CGSize {
         get {
-            let bounds = self.view.bounds
+            let bounds = uiView.bounds
             let scale = self.view.contentScaleFactor
             return CGSize(width: bounds.width * scale, height: bounds.height * scale)
         }
         set(value) {
             let scale = 1.0 / self.view.contentScaleFactor
             let size = CGSize(width: value.width * scale, height: value.height * scale)
-            self.view.bounds.size = size
+            uiView.bounds.size = size
         }
     }
 
     var title: String {
-        get { self.view.window?.rootViewController?.title ?? "" }
-        set { self.view.window?.rootViewController?.title = newValue }
+        get { uiView.window?.rootViewController?.title ?? "" }
+        set { uiView.window?.rootViewController?.title = newValue }
     }
 
     var delegate: WindowDelegate?
 
-    var window: UIWindow
+    private var window: UIWindow
     var view: UIKitView
+    
+    private var uiView: UIView { self.view as! UIView }
 
     required init?(name: String, style: WindowStyle, delegate: WindowDelegate?) {
 
-        let viewController = UIKitViewController()
-        self.view = viewController.view as! UIKitView
+        let viewController = makeUIKitViewController() as! UIViewController
+        let uiView: UIView = viewController.view
+        self.view = uiView as! UIKitView
 
         if style.contains(.autoResize) {
-            view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            uiView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         } else {
-            view.autoresizingMask = [.flexibleRightMargin, .flexibleBottomMargin]
+            uiView.autoresizingMask = [.flexibleRightMargin, .flexibleBottomMargin]
         }
         viewController.title = name
 
-        if let scene = activeWindowScenes.first {
+        if let scene = anyWindowScene() as? UIWindowScene {
             self.window = UIWindow(windowScene: scene)
         } else {
             self.window = UIWindow()
@@ -77,31 +80,31 @@ final class UIKitWindow: Window {
         self.window.rootViewController = viewController
         self.view.proxyWindow = self
 
-        activeWindows.append(window)
+        setActiveWindow(window)
     }
 
     deinit {
         let window = self.window
         Task { @MainActor in window.windowScene = nil }
-        activeWindows.removeAll { $0 === window }
+        unsetActiveWindow(window)
     }
 
     func show() {
-        self.view.isHidden = false
+        uiView.isHidden = false
     }
 
     func hide() {
-        self.view.isHidden = true
+        uiView.isHidden = true
     }
 
     func activate() {
-        self.view.isHidden = false
+        uiView.isHidden = false
         self.window.makeKeyAndVisible()
-        _=self.view.becomeFirstResponder()
+        _ = uiView.becomeFirstResponder()
     }
 
     func minimize() {
-        self.view.isHidden = true
+        uiView.isHidden = true
     }
 
     func showMouse(_ show: Bool, forDeviceID deviceID: Int) {

@@ -2,14 +2,15 @@
 //  File: AppKitWindow.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_APPKIT
 import Foundation
-import AppKit
+@_implementationOnly import AppKit
 
-final class MainKeyWindow: NSWindow {
+@MainActor
+private final class MainKeyWindow: NSWindow {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
 }
@@ -21,21 +22,21 @@ final class AppKitWindow: Window {
     
     var activated: Bool { self.view.activated }
     var visible: Bool { self.view.visible }
-
+    
     var resolution: CGSize {
         get {
-            let pixelBounds = self.view.convertToBacking(self.view.bounds)
+            let pixelBounds = nsView.convertToBacking(nsView.bounds)
             return CGSize(width: pixelBounds.width, height: pixelBounds.height)
         }
         set (value) {
-            if self.view.window?.contentView === self.view {
-                let pixelBounds = self.view.window!.convertFromBacking(NSMakeRect(0, 0, value.width, value.height))
-                self.view.window?.setContentSize(CGSize(width: pixelBounds.width, height: pixelBounds.height))
-                self.view.window?.displayIfNeeded()
+            if nsView.window?.contentView === self.view {
+                let pixelBounds = nsView.window!.convertFromBacking(NSMakeRect(0, 0, value.width, value.height))
+                nsView.window?.setContentSize(CGSize(width: pixelBounds.width, height: pixelBounds.height))
+                nsView.window?.displayIfNeeded()
             } else {
-                let s = self.view.convertFromBacking(value)
-                self.view.frame.size = s
-                self.view.window?.layoutIfNeeded()
+                let s = nsView.convertFromBacking(value)
+                nsView.frame.size = s
+                nsView.window?.layoutIfNeeded()
             }
         }
     }
@@ -45,52 +46,54 @@ final class AppKitWindow: Window {
     var contentScaleFactor: CGFloat { self.view.contentScaleFactor }
 
     var title: String {
-        get { self.view.window?.title ?? "" }
-        set { self.view.window?.title = newValue }
+        get { nsView.window?.title ?? "" }
+        set { nsView.window?.title = newValue }
     }
 
-    var window: NSWindow
+    fileprivate var window: NSWindow
     var view: AppKitView
 
     var origin: CGPoint {
         get {
-            if self.view.window?.contentView === self.view {
-                return self.view.window!.frame.origin
+            if nsView.window?.contentView === self.view {
+                return nsView.window!.frame.origin
             } else {
-                return self.view.frame.origin
+                return nsView.frame.origin
             }
         }
         set(value) {
-            if self.view.window?.contentView === self.view {
-                self.view.window?.setFrameOrigin(value)
-                self.view.window?.displayIfNeeded()
+            if nsView.window?.contentView === self.view {
+                nsView.window?.setFrameOrigin(value)
+                nsView.window?.displayIfNeeded()
             } else {
-                self.view.frame.origin = origin
-                self.view.window?.layoutIfNeeded()
+                nsView.frame.origin = origin
+                nsView.window?.layoutIfNeeded()
             }
         }
     }
 
     var contentSize: CGSize {
         get {
-            var bounds = self.view.bounds
-            if self.view.window != nil {
-                bounds = view.convert(bounds, to: nil)
+            var bounds = nsView.bounds
+            if nsView.window != nil {
+                bounds = nsView.convert(bounds, to: nil)
             }
             return CGSize(width: bounds.width, height: bounds.height)
         }
         set(value) {
-            if self.view.window?.contentView === self.view {
-                self.view.window?.setContentSize(value)
-                self.view.window?.displayIfNeeded()
+            if nsView.window?.contentView === self.view {
+                nsView.window?.setContentSize(value)
+                nsView.window?.displayIfNeeded()
             } else {
-                self.view.frame.size = contentSize
-                self.view.window?.layoutIfNeeded()
+                nsView.frame.size = contentSize
+                nsView.window?.layoutIfNeeded()
             }
         }
     }
 
     var delegate: WindowDelegate?
+    
+    private var nsView: NSView { view as! NSView }
 
     required init?(name: String, style: WindowStyle, delegate: WindowDelegate?) {
         var styleMask: NSWindow.StyleMask = []
@@ -109,18 +112,18 @@ final class AppKitWindow: Window {
                                     defer: true)
 
         self.delegate = delegate
-        self.view = AppKitView(frame: contentRect)
+        self.view = makeAppKitView(frame: contentRect)
         self.view.proxyWindow = self
-
-        self.window.contentView = self.view
-        self.window.delegate = self.view
+        
+        self.window.contentView = (self.view as! NSView)
+        self.window.delegate = (self.view as! NSWindowDelegate)
         self.window.isReleasedWhenClosed = false
         self.window.acceptsMouseMovedEvents = true
         self.window.allowsConcurrentViewDrawing = true
         self.window.title = name
 
         if style.contains(.acceptFileDrop) {
-            view.registerForDraggedTypes([.fileURL])
+            (view as! NSView).registerForDraggedTypes([.fileURL])
         }
 
         self.postWindowEvent(
@@ -132,7 +135,7 @@ final class AppKitWindow: Window {
     }
 
     func show() {
-        if let window = self.view.window {
+        if let window = nsView.window {
             window.orderFront(nil)
 
             self.postWindowEvent(type: .shown)
@@ -140,7 +143,7 @@ final class AppKitWindow: Window {
     }
 
     func hide() {
-        if let window = self.view.window {
+        if let window = nsView.window {
             window.resignKey()
             window.orderOut(nil)
 
@@ -149,7 +152,7 @@ final class AppKitWindow: Window {
     }
 
     func activate() {
-        if let window = self.view.window {
+        if let window = nsView.window {
             window.makeKeyAndOrderFront(nil)
             self.view.visible = true
             self.view.activated = true
@@ -164,7 +167,7 @@ final class AppKitWindow: Window {
     }
 
     func minimize() {
-        self.view.window?.miniaturize(nil)
+        nsView.window?.miniaturize(nil)
     }
 
     func showMouse(_ show: Bool, forDeviceID deviceID: Int) {

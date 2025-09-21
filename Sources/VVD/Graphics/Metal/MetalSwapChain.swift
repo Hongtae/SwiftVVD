@@ -8,13 +8,17 @@
 #if ENABLE_METAL
 import Foundation
 import Metal
-import QuartzCore
+internal import QuartzCore
+
+#if ENABLE_APPKIT
+@_implementationOnly import AppKit
+#endif
 
 final class MetalSwapChain: SwapChain, @unchecked Sendable {
 
     let window: Window
     let queue: MetalCommandQueue
-    var layer: CAMetalLayer
+    private var layer: CAMetalLayer
 
     private var _pixelFormat: PixelFormat
     var pixelFormat: PixelFormat {
@@ -35,7 +39,7 @@ final class MetalSwapChain: SwapChain, @unchecked Sendable {
             }
         }
     }
-    var drawable: CAMetalDrawable?
+    private var drawable: CAMetalDrawable?
     var renderPassDescriptor: RenderPassDescriptor
 
     var commandQueue: CommandQueue { queue }
@@ -52,7 +56,7 @@ final class MetalSwapChain: SwapChain, @unchecked Sendable {
         var layer: CAMetalLayer? = nil
 #if ENABLE_APPKIT
         if layer == nil {
-            if let view = (self.window as? AppKitWindow)?.view {
+            if let view = (self.window as? AppKitWindow)?.view as? NSView {
                 layer = CAMetalLayer()
                 view.wantsLayer = true
                 view.layer = layer

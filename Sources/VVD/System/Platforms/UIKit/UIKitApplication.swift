@@ -7,12 +7,24 @@
 
 #if ENABLE_UIKIT
 import Foundation
-import UIKit
+@_implementationOnly import UIKit
 
-nonisolated(unsafe) var activeWindowScenes: [UIWindowScene] = []
-nonisolated(unsafe) var activeWindows: [UIWindow] = []
+nonisolated(unsafe) private var activeWindowScenes: [UIWindowScene] = []
+nonisolated(unsafe) private var activeWindows: [UIWindow] = []
 
-final class SceneDelegate: NSObject, UIWindowSceneDelegate {
+func anyWindowScene() -> AnyObject? {
+    activeWindowScenes.first
+}
+
+func setActiveWindow(_ window: AnyObject) {
+    activeWindows.append(window as! UIWindow)
+}
+
+func unsetActiveWindow(_ window: AnyObject) {
+    activeWindows.removeAll { $0 === window }
+}
+
+private final class SceneDelegate: NSObject, UIWindowSceneDelegate {
     func scene(
         _ scene: UIScene,
         willConnectTo session: UISceneSession,
@@ -33,7 +45,7 @@ final class SceneDelegate: NSObject, UIWindowSceneDelegate {
     }
 }
 
-final class AppLoader: NSObject, UIApplicationDelegate {
+private final class AppLoader: NSObject, UIApplicationDelegate {
     func application(
         _ application: UIApplication,
         willFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]?

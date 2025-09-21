@@ -2,15 +2,32 @@
 //  File: UIKitWindow.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_UIKIT
 import Foundation
-import UIKit
-import QuartzCore
+internal import QuartzCore
+@_implementationOnly import UIKit
 
-final class UIKitView: UIView, UITextFieldDelegate {
+@MainActor
+protocol UIKitView: AnyObject {
+    var contentBounds: CGRect { get }
+    var windowFrame: CGRect { get }
+    var contentScaleFactor: CGFloat { get }
+    var textInput: Bool { get set }
+    var layer: CALayer { get }
+    var proxyWindow: UIKitWindow? { get set }
+    func touchLocation(atIndex index: Int) -> CGPoint?
+}
+
+@MainActor
+func makeUIKitView() -> UIKitView {
+    UIKitViewImpl()
+}
+
+@MainActor
+private final class UIKitViewImpl: UIView, UITextFieldDelegate, UIKitView {
 
     var defaultTextFieldHeight: CGFloat { 30 }
     var defaultTextFieldMargin: CGFloat { 2 }
