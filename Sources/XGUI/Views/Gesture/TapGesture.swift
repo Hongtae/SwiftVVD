@@ -44,7 +44,7 @@ extension View {
 class TapGestureRecognizer: _GestureRecognizer<TapGesture.Value> {
     var typeFilter: _PrimitiveGestureTypes = .all
     let gesture: TapGesture
-    let buttonID: Int
+    var buttonID: Int
     var deviceID: Int?
     var count: Int
     let maximumInterval: ContinuousClock.Duration
@@ -136,6 +136,177 @@ class TapGestureRecognizer: _GestureRecognizer<TapGesture.Value> {
 
     override func reset() {
         self.deviceID = nil
+        self.state = .ready
+    }
+}
+
+class MultiTouchTapGestureRecognizer: _GestureRecognizer<TapGesture.Value> {
+    var typeFilter: _PrimitiveGestureTypes = .all
+    let gesture: TapGesture
+    var buttonID: Int
+    var numberOfTouchesRequired: Int = 1
+
+    private var activeTouches: [Int] = []
+    private var count: Int
+
+    let maximumEventInterval: ContinuousClock.Duration
+    let maximumTapInterval: ContinuousClock.Duration
+    let maximumTapDuration: ContinuousClock.Duration
+    
+    private let clock: ContinuousClock
+    private var timestamp: ContinuousClock.Instant
+    
+    private enum _Phase {
+        case touchDown
+        case touchUp
+    }
+    private var phase: _Phase = .touchDown
+
+    init(graph: _GraphValue<TapGesture>, target: ViewContext?, callbacks: Callbacks, gesture: TapGesture) {
+        self.gesture = gesture
+        self.buttonID = 0
+        self.count = 0
+        self.maximumEventInterval = .seconds(0.2)
+        self.maximumTapInterval = .seconds(0.5)
+        self.maximumTapDuration = .seconds(1.0)
+        self.clock = .continuous
+        self.timestamp = .now
+        super.init(graph: graph, target: target, callbacks: callbacks)
+    }
+
+    override var type: _PrimitiveGestureTypes { .tap }
+    override var isValid: Bool {
+        typeFilter.contains(self.type) && self.endedCallbacks.isEmpty == false
+    }
+
+    override func setTypeFilter(_ f: _PrimitiveGestureTypes) -> _PrimitiveGestureTypes {
+        self.typeFilter = f
+        return f.subtracting(.tap)
+    }
+
+    override func began(deviceID: Int, buttonID: Int, location: CGPoint) {
+        if (self.state == .ready || self.state == .processing) &&
+            self.buttonID == buttonID {
+
+            if self.state == .ready {
+                self.activeTouches = []
+                self.phase = .touchDown
+                self.count = 0
+                self.state = .processing
+                self.timestamp = .now
+                assert(self.activeTouches.isEmpty)
+            }
+            assert(self.state == .processing)
+            
+            if self.activeTouches.contains(deviceID) {
+                Log.error("Duplicated touch ID encountered: \(deviceID)")
+                self.state = .failed
+                return
+            }
+            if self.activeTouches.count >= self.numberOfTouchesRequired {
+                // No more touch events can be accepted.
+                self.state = .failed
+                return
+            }
+            if self.phase != .touchDown {
+                self.state = .failed
+                return
+            }
+
+            let ts = self.clock.now
+            let duration = self.timestamp.duration(to: ts)
+            if self.activeTouches.isEmpty {
+                if duration > self.maximumTapInterval {
+                    // The tab interval was too long.
+                    self.state = .failed
+                    return
+                }
+                // Retain the timestamp of first touch event only.
+                self.timestamp = ts
+            } else {
+                if duration > self.maximumEventInterval {
+                    // The multi-touch event was too late.
+                    self.state = .failed
+                    return
+                }
+            }
+            self.activeTouches.append(deviceID)
+            if self.activeTouches.count == self.numberOfTouchesRequired {
+                // All touch-down events received.
+                // Save timestamp for processing the next touch-up events.
+                self.phase = .touchUp
+                self.timestamp = ts
+            }
+        }
+    }
+
+    override func moved(deviceID: Int, buttonID: Int, location: CGPoint) {
+        if self.state == .processing && self.buttonID == buttonID {
+            if self.activeTouches.contains(deviceID) {
+                let d = self.timestamp.duration(to: self.clock.now)
+                if d > self.maximumTapDuration {
+                    self.state = .failed
+                }
+            }
+        }
+    }
+
+    override func ended(deviceID: Int, buttonID: Int) {
+        if self.state == .processing && self.buttonID == buttonID {
+            if let index = self.activeTouches.firstIndex(of: deviceID) {
+                if self.phase != .touchUp {
+                    self.state = .failed
+                    return
+                }
+
+                let ts = self.clock.now
+                let d = self.timestamp.duration(to: ts)
+
+                if self.activeTouches.count == self.numberOfTouchesRequired {
+                    if d > self.maximumTapDuration {
+                        self.state = .failed
+                        return
+                    }
+                    self.timestamp = ts
+                } else {
+                    if d > self.maximumEventInterval {
+                        self.state = .failed
+                        return
+                    }
+                }
+                self.activeTouches.remove(at: index)
+
+                if self.activeTouches.isEmpty {
+                    // All touch-up events received.
+                    count = count + 1
+
+                    if count == self.gesture.count {
+                        self.state = .done
+                        self.endedCallbacks.forEach {
+                            $0.ended(())
+                        }
+                    } else {
+                        // Save timestamp for processing the next touch-down events.
+                        self.phase = .touchDown
+                        self.timestamp = ts
+                    }
+                }
+            }
+        }
+    }
+
+    override func cancelled(deviceID: Int, buttonID: Int) {
+        if self.buttonID == buttonID {
+            if self.activeTouches.contains(deviceID) {
+                self.state = .cancelled
+            }
+        }
+    }
+
+    override func reset() {
+        self.activeTouches = []
+        self.phase = .touchDown
+        self.count = 0
         self.state = .ready
     }
 }
