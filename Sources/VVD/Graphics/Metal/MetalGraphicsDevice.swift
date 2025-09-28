@@ -201,7 +201,7 @@ final class MetalGraphicsDevice: GraphicsDevice {
                 return nil
             }
             let mslSource = String(cString: compilerOutputSourcePtr!)
-            Log.info("MSL Source: \(mslSource)")
+            //Log.info("MSL Source: \(mslSource)")
 
             let compileOptions = MTLCompileOptions()
             compileOptions.mathMode = .fast
