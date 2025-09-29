@@ -19,8 +19,8 @@ extension EnvironmentValues {
     }
 }
 
-protocol ViewRoot: AnyObject, _GraphValueResolver {
-    associatedtype Root: View
+protocol ViewRoot: _GraphValueResolver {
+    associatedtype Root
     var root: Root { get }
     var graph: _GraphValue<Root> { get }
     var scene: SceneContext { get }
@@ -32,24 +32,16 @@ extension ViewRoot {
     }
 }
 
-class TypedViewRoot<Root>: ViewRoot where Root: View {
+struct TypedViewRoot<Root>: ViewRoot where Root: View {
     let root: Root
     let graph: _GraphValue<Root>
     unowned let scene: SceneContext
-
-    init(root: Root, graph: _GraphValue<Root>, scene: SceneContext) {
-        self.root = root
-        self.graph = graph
-        self.scene = scene
-    }
 }
 
 final class SharedContext: @unchecked Sendable {
-    unowned var scene: SceneContext
-    var app: AppContext {
-        scene.app
-    }
+    unowned let scene: SceneContext
 
+    var app: AppContext { scene.app }
     var root: (any ViewRoot)?
 
     var contentBounds: CGRect
@@ -64,6 +56,9 @@ final class SharedContext: @unchecked Sendable {
     var focusedViews: [Int: WeakObject<ViewContext>] = [:]
 
     var gestureHandlers: [_GestureHandler] = []
+
+    var window: WindowContext { _window! }
+    weak var _window: WindowContext?
 
     init(scene: SceneContext) {
         self.scene = scene

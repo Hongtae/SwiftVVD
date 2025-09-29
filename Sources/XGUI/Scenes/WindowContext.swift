@@ -62,6 +62,7 @@ class GenericWindowContext<Content>: WindowContext, WindowDelegate, @unchecked S
         self.content = content
         self.environment = EnvironmentValues()
         self.sharedContext = SharedContext(scene: scene)
+        self.sharedContext._window = self
 
         var properties = PropertyList()
         properties.setValue(VStackLayout(), forKey: DefaultLayoutProperty.self)

@@ -29,8 +29,8 @@ extension _PrimitiveScene {
     }
 }
 
-protocol SceneRoot: AnyObject, _GraphValueResolver {
-    associatedtype Root: Scene
+protocol SceneRoot: _GraphValueResolver {
+    associatedtype Root
     var root: Root { get }
     var graph: _GraphValue<Root> { get }
     var app: AppContext { get }
@@ -42,16 +42,10 @@ extension SceneRoot {
     }
 }
 
-class TypedSceneRoot<Root>: SceneRoot where Root: Scene {
+struct TypedSceneRoot<Root>: SceneRoot where Root: Scene {
     let root: Root
     let graph: _GraphValue<Root>
     unowned var app: AppContext
-
-    init(root: Root, graph: _GraphValue<Root>, app: AppContext) {
-        self.root = root
-        self.graph = graph
-        self.app = app
-    }
 }
 
 public struct _SceneInputs {
