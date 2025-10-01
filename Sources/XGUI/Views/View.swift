@@ -203,6 +203,12 @@ private final class DynamicContentViewContext<Content>: GenericViewContext<Conte
         }
     }
 
+    deinit {
+        if let view {
+            self.dynamicPropertyData.unbind(container: view)
+        }
+    }
+    
     override func updateView(_ view: inout Content) {
         super.updateView(&view)
         self.dynamicPropertyData.bind(container: &view, view: self)
@@ -234,6 +240,12 @@ private final class DynamicContentStaticMultiViewContext<Content>: StaticMultiVi
 
         self.dynamicPropertyData.tracker = { [weak self] in
             self?.requiresContentUpdates = true
+        }
+    }
+    
+    deinit {
+        if let root {
+            self.dynamicPropertyData.unbind(container: root)
         }
     }
 
@@ -289,6 +301,12 @@ private final class DynamicContentDynamicMultiViewContext<Content>: DynamicMulti
 
         self.dynamicPropertyData.tracker = { [weak self] in
             self?.requiresContentUpdates = true
+        }
+    }
+    
+    deinit {
+        if let root {
+            self.dynamicPropertyData.unbind(container: root)
         }
     }
     

@@ -82,7 +82,10 @@ extension State: _DynamicPropertyStorageBinding {
         }
         if let location = self._location {
             if let context = buffer.contexts[fieldOffset] {
-                assert(context === _location)
+                guard let loc = context as? AnyLocation<Value> else {
+                    fatalError("Invalid context type")
+                }
+                assert(loc === location)
                 self._value = location.getValue()
             } else {
                 buffer.contexts[fieldOffset] = location
@@ -122,5 +125,8 @@ extension State: _DynamicPropertyStorageBinding {
             }
             location.location.valueUpdated = onValueUpdated
         }
+    }
+    
+    func unbind(in buffer: inout _DynamicPropertyBuffer, fieldOffset: Int) {
     }
 }

@@ -11,7 +11,6 @@ import Foundation
     public var transaction: Transaction
     var location: AnyLocation<Value>
     var _value: Value
-    private var _tracker: (()->Void)?
 
     public init(get: @escaping () -> Value, set: @escaping (Value) -> Void) {
         self.transaction = Transaction()
@@ -45,7 +44,6 @@ import Foundation
         }
         nonmutating set {
             location.setValue(newValue, transaction: transaction)
-            _tracker?()
         }
     }
 
@@ -60,7 +58,6 @@ import Foundation
 
     public subscript<Subject>(dynamicMember keyPath: WritableKeyPath<Value, Subject>) -> Binding<Subject> {
         let location = self.location
-        let tracker = self._tracker
         let getter = {
             location.getValue()[keyPath: keyPath]
         }
@@ -68,7 +65,6 @@ import Foundation
             var enclosingValue = location.getValue()
             enclosingValue[keyPath: keyPath] = value
             location.setValue(enclosingValue, transaction: transaction)
-            tracker?()
         }
         return Binding<Subject>(get: getter, set: setter)
     }
@@ -110,7 +106,6 @@ extension Binding: Collection where Value: MutableCollection {
     }
     public subscript(position: Binding<Value>.Index) -> Binding<Value>.Element {
         let location = self.location
-        let tracker = self._tracker
         let getter = {
             location.getValue()[position] 
         }
@@ -118,7 +113,6 @@ extension Binding: Collection where Value: MutableCollection {
             var enclosingValue = location.getValue()
             enclosingValue[position] = newValue
             location.setValue(enclosingValue, transaction: Transaction())
-            tracker?()
         }
         return Binding<Value>.Element(get: getter, set: setter)
     }
@@ -151,12 +145,24 @@ extension Binding {
 
 extension Binding: DynamicProperty {
     public static func _makeProperty<V>(in buffer: inout _DynamicPropertyBuffer, container: _GraphValue<V>, fieldOffset: Int, inputs: inout _GraphInputs) {
+        assert(buffer.properties.contains { $0.offset == fieldOffset } == false)
+        buffer.properties.append(.init(type: self, offset: fieldOffset))
     }
 }
 
 extension Binding: _DynamicPropertyStorageBinding {
     mutating func bind(in buffer: inout _DynamicPropertyBuffer, fieldOffset: Int, view: ViewContext, tracker: @escaping Tracker) {
-        guard MemoryLayout<Self>.size > .zero else { return }
-        self._tracker = tracker
+        let key = AnyLocation<Value>.TrackerKey(id: ObjectIdentifier(view), offset: fieldOffset)
+        self.location.addTracker(key: key, tracker: tracker)
+        buffer.contexts[fieldOffset] = key
+    }
+    
+    func unbind(in buffer: inout _DynamicPropertyBuffer, fieldOffset: Int) {
+        if let context = buffer.contexts[fieldOffset] {
+            guard let key = context as? AnyLocation<Value>.TrackerKey else {
+                fatalError("Invalid context type")
+            }
+            self.location.removeTracker(key: key)
+        }
     }
 }

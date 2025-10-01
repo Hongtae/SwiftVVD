@@ -115,6 +115,9 @@ extension Environment: _DynamicPropertyStorageBinding {
             self.content = .value(value)
         }
     }
+    
+    func unbind(in buffer: inout _DynamicPropertyBuffer, fieldOffset: Int) {
+    }
 }
 
 extension Environment: Sendable where Value: Sendable {

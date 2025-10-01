@@ -16,6 +16,22 @@ protocol _Location {
 @usableFromInline
 class AnyLocationBase {
     init() {}
+
+    struct TrackerKey: Hashable {
+        let id: ObjectIdentifier
+        let offset: Int
+    }
+    private var notificationTargets: [TrackerKey: () -> Void] = [:]
+    func addTracker(key: TrackerKey, tracker: @escaping ()->Void) {
+        notificationTargets[key] = tracker
+    }
+    func removeTracker(key: TrackerKey) {
+        notificationTargets.removeValue(forKey: key)
+    }
+    func notifyChange() {
+        notificationTargets.values.map { $0 }
+            .forEach { $0() }
+    }
 }
 
 @usableFromInline
@@ -27,6 +43,7 @@ class AnyLocation<Value>: AnyLocationBase, @unchecked Sendable {
     }
 
     func setValue(_: Value, transaction: Transaction) {
+        notifyChange()
     }
 }
 
@@ -99,6 +116,7 @@ class LocationBox<Location: _Location>: AnyLocation<Location.Value>, @unchecked 
     }
     override func setValue(_ value: Location.Value, transaction: Transaction) {
         location.setValue(value, transaction: transaction)
+        super.setValue(value, transaction: transaction)
     }
 }
 
