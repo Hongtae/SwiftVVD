@@ -56,14 +56,26 @@ final class AppKitWindow: Window {
     var origin: CGPoint {
         get {
             if nsView.window?.contentView === self.view {
-                return nsView.window!.frame.origin
+                let frame = nsView.window!.frame
+                if let screen = nsView.window?.screen {
+                    let height = screen.frame.height
+                    return CGPoint(x: frame.minX, y: height - frame.maxY)
+                }
+                return frame.origin
             } else {
                 return nsView.frame.origin
             }
         }
         set(value) {
             if nsView.window?.contentView === self.view {
-                nsView.window?.setFrameOrigin(value)
+                if let screen = nsView.window?.screen {
+                    let frame = nsView.window!.frame
+                    let height = screen.frame.height
+                    let y = height - (value.y + frame.height)
+                    nsView.window?.setFrameOrigin(NSPoint(x: value.x, y: y))
+                } else {
+                    nsView.window?.setFrameOrigin(value)
+                }
                 nsView.window?.displayIfNeeded()
             } else {
                 nsView.frame.origin = origin

@@ -68,7 +68,13 @@ private final class AppKitViewImpl: NSView, NSTextInputClient, NSWindowDelegate,
     }
 
     var windowFrame: CGRect {
-        let rect = self.window?.frame ?? self.frame
+        if let screen = self.window?.screen {
+            let frame = self.window!.frame
+            let y = screen.frame.height - frame.maxY
+            return CGRect(x: frame.minX, y: y, width: frame.width, height: frame.height)
+        }
+        //let rect = self.window?.frame ?? self.frame
+        let rect = self.frame
         return CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: rect.height)
     }
 
