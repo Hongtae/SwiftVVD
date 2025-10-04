@@ -19,8 +19,8 @@ public struct PlatformFactoryWin32: PlatformFactory {
     }
 
     @MainActor
-    public func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?) -> Window? {
-        return Win32Window(name: name, style: style, delegate: delegate)
+    public func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?, data: [String: Any]) -> Window? {
+        return Win32Window(name: name, style: style, delegate: delegate, data: data)
     }
 }
 

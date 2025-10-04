@@ -52,13 +52,17 @@ final class UIKitWindow: Window {
     }
 
     var delegate: WindowDelegate?
+    
+    var platformHandle: OpaquePointer? {
+        unsafeBitCast(view as AnyObject, to: OpaquePointer.self)
+    }
 
     private var window: UIWindow
     var view: UIKitView
     
     private var uiView: UIView { self.view as! UIView }
 
-    required init?(name: String, style: WindowStyle, delegate: WindowDelegate?) {
+    required init?(name: String, style: WindowStyle, delegate: WindowDelegate?, data: [String: Any]) {
 
         let viewController = makeUIKitViewController() as! UIViewController
         let uiView: UIView = viewController.view
@@ -230,6 +234,16 @@ final class UIKitWindow: Window {
     func removeEventObserver(_ observer: AnyObject) {
         let key = ObjectIdentifier(observer)
         self.eventObservers[key] = nil
+    }
+    
+    func convertPointToScreen(_ point: CGPoint) -> CGPoint {
+        let ptWindow = self.uiView.convert(point, to: nil)
+        return self.window.convert(ptWindow, to: nil)
+    }
+    
+    func convertPointFromScreen(_ point: CGPoint) -> CGPoint {
+        let ptWindow = self.window.convert(point, from: nil)
+        return self.uiView.convert(ptWindow, from: nil)
     }
 }
 

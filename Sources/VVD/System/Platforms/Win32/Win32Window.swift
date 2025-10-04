@@ -59,7 +59,7 @@ nonisolated(unsafe) private let HWND_TOPMOST:HWND = HWND(bitPattern: -1)!
 nonisolated(unsafe) private let HWND_NOTOPMOST:HWND = HWND(bitPattern: -2)!
 
 @MainActor
-final class Win32Window : Window {
+final class Win32Window: Window {
 
     private struct MouseButtonDownMask: OptionSet {
         let rawValue: UInt8
@@ -88,6 +88,8 @@ final class Win32Window : Window {
 
     weak var delegate: WindowDelegate?
 
+    var platformHandle: OpaquePointer? { OpaquePointer(hWnd) }
+    
     private(set) var resizing: Bool = false
     private(set) var activated: Bool = false
     private(set) var visible: Bool = false
@@ -133,7 +135,7 @@ final class Win32Window : Window {
         return atom
     }()
 
-    required init?(name: String, style: WindowStyle, delegate: WindowDelegate?) {
+    required init?(name: String, style: WindowStyle, delegate: WindowDelegate?, data: [String: Any]) {
 
         OleInitialize(nil)
 
@@ -633,6 +635,20 @@ final class Win32Window : Window {
     func removeEventObserver(_ observer: AnyObject) {
         let key = ObjectIdentifier(observer)
         self.eventObservers[key] = nil
+    }
+
+    func convertPointToScreen(_ point: CGPoint) -> CGPoint {
+        let x: LONG = LONG(point.x * self.contentScaleFactor)
+        let y: LONG = LONG(point.y * self.contentScaleFactor)
+        var pt: POINT = POINT(x: x, y: y)
+        ClientToScreen(self.hWnd, &pt)
+        return CGPoint(x: Int(pt.x), y: Int(pt.y))
+    }
+    
+    func convertPointFromScreen(_ point: CGPoint) -> CGPoint {
+        var pt: POINT = POINT(x: LONG(point.x), y: LONG(point.y))
+        ScreenToClient(self.hWnd, &pt)
+        return CGPoint(x: Int(pt.x), y: Int(pt.y)) * (1.0 / self.contentScaleFactor)
     }
 
     private static func windowProc(_ hWnd: HWND?, _ uMsg: UINT, _ wParam: WPARAM, _ lParam: LPARAM) -> LRESULT {

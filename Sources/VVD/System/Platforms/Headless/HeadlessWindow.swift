@@ -25,7 +25,9 @@ final class HeadlessWindow: Window {
     
     var delegate: WindowDelegate?
     
-    required init?(name: String, style: WindowStyle, delegate: WindowDelegate?) {
+    var platformHandle: OpaquePointer? { nil }
+    
+    required init?(name: String, style: WindowStyle, delegate: WindowDelegate?, data: [String: Any]) {
         self.title = name
     }
 
@@ -134,5 +136,13 @@ final class HeadlessWindow: Window {
     public func removeEventObserver(_ observer: AnyObject) {
         let key = ObjectIdentifier(observer)
         self.eventObservers[key] = nil
+    }
+    
+    func convertPointToScreen(_ pt: CGPoint) -> CGPoint {
+        pt + self.origin
+    }
+    
+    func convertPointFromScreen(_ pt: CGPoint) -> CGPoint {
+        pt - self.origin
     }
 }

@@ -222,9 +222,8 @@ final class WaylandApplication: Application, @unchecked Sendable {
     nonisolated(unsafe)
     static var shared: WaylandApplication? = nil
 
-    private struct WeakWindow {
-        weak var window: WaylandWindow?
-    }
+    typealias WeakWindow = WeakObject<WaylandWindow>
+
     private var windowSurfaceMap: [OpaquePointer: WeakWindow] = [:]
     func bindSurface(_ surface: OpaquePointer?, with window: WaylandWindow) {
         if let surface = surface {

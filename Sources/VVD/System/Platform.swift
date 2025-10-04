@@ -14,7 +14,7 @@ public protocol PlatformFactory {
     @MainActor
     func runApplication(delegate: ApplicationDelegate?) -> Int
     @MainActor
-    func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?) -> Window?
+    func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?, data: [String: Any]) -> Window?
 }
 
 typealias UUID = Foundation.UUID
@@ -69,8 +69,8 @@ public class Platform {
     }
 
     @MainActor
-    public class func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?) -> Window? {
-        factory.makeWindow(name: name, style: style, delegate: delegate)
+    public class func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?, data: [String: Any]) -> Window? {
+        factory.makeWindow(name: name, style: style, delegate: delegate, data: data)
     }
     @MainActor
     public class func runApplication(delegate: ApplicationDelegate?) -> Int {

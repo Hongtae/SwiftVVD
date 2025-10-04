@@ -81,6 +81,8 @@ final class WaylandWindow: Window {
     }
 
     private(set) var delegate: WindowDelegate?
+    
+    var platformHandle: OpaquePointer? { surface }
 
     private(set) var display: OpaquePointer?
     nonisolated(unsafe) private(set) var surface: OpaquePointer?
@@ -90,7 +92,7 @@ final class WaylandWindow: Window {
 
     fileprivate var xdgSurfaceConfigured = false
 
-    required init?(name: String, style: WindowStyle, delegate: WindowDelegate?) {
+    required init?(name: String, style: WindowStyle, delegate: WindowDelegate?, data: [String: Any]) {
         guard let app = WaylandApplication.shared else {
             Log.error("Unable to identify Application class")
             return nil
@@ -293,6 +295,16 @@ final class WaylandWindow: Window {
     func removeEventObserver(_ observer: AnyObject) {
         let key = ObjectIdentifier(observer)
         self.eventObservers[key] = nil
+    }
+        
+    func convertPointToScreen(_ point: CGPoint) -> CGPoint {
+        let offset = self.windowFrame.origin + self.contentBounds.origin
+        return point + offset
+    }
+    
+    func convertPointFromScreen(_ point: CGPoint) -> CGPoint {
+        let offset = self.windowFrame.origin + self.contentBounds.origin
+        return point - offset
     }
 }
 

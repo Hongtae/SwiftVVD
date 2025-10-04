@@ -9,12 +9,6 @@
 import Foundation
 @_implementationOnly import AppKit
 
-@MainActor
-private final class MainKeyWindow: NSWindow {
-    override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { true }
-}
-
 nonisolated(unsafe) private var hideCursorCount = 0
 
 @MainActor
@@ -30,9 +24,17 @@ final class AppKitWindow: Window {
         }
         set (value) {
             if nsView.window?.contentView === self.view {
+                let window = nsView.window!
+                let origin = self.origin
                 let pixelBounds = nsView.window!.convertFromBacking(NSMakeRect(0, 0, value.width, value.height))
-                nsView.window?.setContentSize(CGSize(width: pixelBounds.width, height: pixelBounds.height))
-                nsView.window?.displayIfNeeded()
+                let rect = CGRect(origin: .zero, size: CGSize(width: pixelBounds.width, height: pixelBounds.height))
+                let frame = window.frameRect(forContentRect: rect)
+                window.setContentSize(frame.size)
+                if origin == self.origin {
+                    window.displayIfNeeded()
+                } else {
+                    self.origin = origin
+                }
             } else {
                 let s = nsView.convertFromBacking(value)
                 nsView.frame.size = s
@@ -68,17 +70,17 @@ final class AppKitWindow: Window {
         }
         set(value) {
             if nsView.window?.contentView === self.view {
-                if let screen = nsView.window?.screen {
-                    let frame = nsView.window!.frame
+                let window = nsView.window!
+                if let screen = window.screen {
                     let height = screen.frame.height
-                    let y = height - (value.y + frame.height)
-                    nsView.window?.setFrameOrigin(NSPoint(x: value.x, y: y))
+                    let y = height - value.y
+                    window.setFrameTopLeftPoint(NSPoint(x: value.x, y: y))
                 } else {
-                    nsView.window?.setFrameOrigin(value)
+                    window.setFrameOrigin(value)
                 }
-                nsView.window?.displayIfNeeded()
+                window.displayIfNeeded()
             } else {
-                nsView.frame.origin = origin
+                nsView.frame.origin = value
                 nsView.window?.layoutIfNeeded()
             }
         }
@@ -94,35 +96,53 @@ final class AppKitWindow: Window {
         }
         set(value) {
             if nsView.window?.contentView === self.view {
-                nsView.window?.setContentSize(value)
-                nsView.window?.displayIfNeeded()
+                let origin = self.origin
+                let window = nsView.window!
+                let rect = CGRect(origin: .zero, size: value)
+                let frame = window.frameRect(forContentRect: rect)
+                window.setContentSize(frame.size)
+                if origin == self.origin {
+                    window.displayIfNeeded()
+                } else {
+                    self.origin = origin
+                }
             } else {
-                nsView.frame.size = contentSize
+                nsView.frame.size = value
                 nsView.window?.layoutIfNeeded()
             }
         }
     }
 
     var delegate: WindowDelegate?
-    
-    private var nsView: NSView { view as! NSView }
+    var platformHandle: OpaquePointer? {
+        unsafeBitCast(view as AnyObject, to: OpaquePointer.self)
+    }
 
-    required init?(name: String, style: WindowStyle, delegate: WindowDelegate?) {
+    private var nsView: NSView { view as! NSView }
+    
+    required init?(name: String, style: WindowStyle, delegate: WindowDelegate?, data: [String: Any]) {
         var styleMask: NSWindow.StyleMask = []
         let backingStoreType: NSWindow.BackingStoreType = .buffered
         let contentRect = NSMakeRect(0, 0, 640, 480)
-
+        
         if style.contains(.title)           { styleMask.insert(.titled) }
         if style.contains(.closeButton)     { styleMask.insert(.closable) }
         if style.contains(.minimizeButton)  { styleMask.insert(.miniaturizable) }
         if style.contains(.maximizeButton)  {  }
         if style.contains(.resizableBorder) { styleMask.insert(.resizable) }
-
-        self.window = MainKeyWindow(contentRect: contentRect,
-                                    styleMask: styleMask,
-                                    backing: backingStoreType,
-                                    defer: true)
-
+        
+        var windowType: NSWindow.Type = NSWindow.self
+        
+        if style.contains(.utilityWindow) {
+            styleMask.insert(.utilityWindow)
+            windowType = NSPanel.self
+        }
+        
+        self.window = windowType.init(contentRect: contentRect,
+                                      styleMask: styleMask,
+                                      backing: backingStoreType,
+                                      defer: true)
+        
         self.delegate = delegate
         self.view = makeAppKitView(frame: contentRect)
         self.view.proxyWindow = self
@@ -133,11 +153,16 @@ final class AppKitWindow: Window {
         self.window.acceptsMouseMovedEvents = true
         self.window.allowsConcurrentViewDrawing = true
         self.window.title = name
-
+        self.window.hasShadow = true
+        
         if style.contains(.acceptFileDrop) {
             (view as! NSView).registerForDraggedTypes([.fileURL])
         }
-
+        if style.contains(.utilityWindow) {
+            let levelKey: CGWindowLevelKey = .utilityWindow
+            self.window.level = .init(Int(levelKey.rawValue))
+        }
+        
         self.postWindowEvent(
             WindowEvent(type: .created,
                         window: self,
@@ -328,6 +353,26 @@ final class AppKitWindow: Window {
     func removeEventObserver(_ observer: AnyObject) {
         let key = ObjectIdentifier(observer)
         self.eventObservers[key] = nil
+    }
+    
+    func convertPointToScreen(_ point: CGPoint) -> CGPoint {
+        let view = self.view as! NSView
+        let ptWindow = view.convert(point, to: nil)
+        var ptScreen = self.window.convertPoint(toScreen: ptWindow)
+        if let frame = self.window.screen?.frame {
+            ptScreen.y = frame.height - ptScreen.y
+        }
+        return ptScreen
+    }
+    
+    func convertPointFromScreen(_ point: CGPoint) -> CGPoint {
+        var point = point
+        if let frame = self.window.screen?.frame {
+            point.y = frame.minY + (frame.height - point.y)
+        }
+        let ptWindow = self.window.convertPoint(fromScreen: point)
+        let view = self.view as! NSView
+        return view.convert(ptWindow, from: nil)
     }
 }
 

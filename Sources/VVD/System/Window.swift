@@ -116,6 +116,8 @@ public struct WindowStyle: OptionSet, Sendable {
 
     public static let genericWindow     = WindowStyle(rawValue: 0xff)   // includes all but StyleAcceptFileDrop
     public static let acceptFileDrop    = WindowStyle(rawValue: 1 << 8) // enables file drag & drop
+    
+    public static let utilityWindow     = WindowStyle(rawValue: 1 << 9)
 }
 
 @MainActor
@@ -136,7 +138,7 @@ public protocol Window: AnyObject {
 
     var delegate: WindowDelegate? { get }
 
-    init?(name: String, style: WindowStyle, delegate: WindowDelegate?)
+    init?(name: String, style: WindowStyle, delegate: WindowDelegate?, data: [String: Any])
 
     func show()
     func hide()
@@ -157,6 +159,11 @@ public protocol Window: AnyObject {
     func addEventObserver(_: AnyObject, handler: @escaping (_: MouseEvent)->Void)
     func addEventObserver(_: AnyObject, handler: @escaping (_: KeyboardEvent)->Void)
     func removeEventObserver(_: AnyObject)
+    
+    func convertPointToScreen(_: CGPoint) -> CGPoint
+    func convertPointFromScreen(_: CGPoint) -> CGPoint
+    
+    var platformHandle: OpaquePointer? { get }
 }
 
 extension Window {
@@ -172,6 +179,6 @@ extension Window {
 }
 
 @MainActor
-public func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?) -> Window? {
-    Platform.makeWindow(name: name, style: style, delegate: delegate)
+public func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?, data: [String: Any]? = nil) -> Window? {
+    Platform.makeWindow(name: name, style: style, delegate: delegate, data: data ?? [:])
 }
