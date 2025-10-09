@@ -34,7 +34,7 @@ class SceneContext: _GraphValueResolver {
         Log.debug("SceneContext(\(self)) deinit")
         assert(self.parent == nil)
     }
-
+ 
     func updateContent() {
         fatalError("This method must be overridden in subclasses.")
     }

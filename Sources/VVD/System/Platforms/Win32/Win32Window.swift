@@ -114,7 +114,9 @@ final class Win32Window: Window {
             var wc = WNDCLASSEXW(
                 cbSize: UINT(MemoryLayout<WNDCLASSEXW>.size),
                 style: UINT(CS_OWNDC),
-                lpfnWndProc: { (hWnd, uMsg, wParam, lParam) -> LRESULT in Win32Window.windowProc(hWnd, uMsg, wParam, lParam) },
+                lpfnWndProc: { (hWnd, uMsg, wParam, lParam) -> LRESULT in
+                    Win32Window.windowProc(hWnd, uMsg, wParam, lParam) 
+                },
                 cbClsExtra: 0,
                 cbWndExtra: 0,
                 hInstance: GetModuleHandleW(nil),
@@ -135,6 +137,12 @@ final class Win32Window: Window {
         return atom
     }()
 
+    enum NonClientAreaRenderingPolicy {
+        case `default`
+        case disabled
+        case enabled
+    }
+
     required init?(name: String, style: WindowStyle, delegate: WindowDelegate?, data: [String: Any]) {
 
         OleInitialize(nil)
@@ -145,10 +153,102 @@ final class Win32Window: Window {
 
         _ = self.registeredWindowClass
 
-        if self.create() == nil {
-            Log.err("CreateWindow failed: \(win32ErrorString(GetLastError()))")
-            return nil
+        assert(Thread.isMainThread, "A window must be created on the main thread.")
+
+        var dwStyle: DWORD = 0
+        var dwStyleEx: DWORD = 0
+        var ncRenderingPolicy: NonClientAreaRenderingPolicy = .default
+
+        if style.contains(.title)           { dwStyle |= DWORD(WS_CAPTION) }
+        if style.contains(.closeButton)     { dwStyle |= DWORD(WS_SYSMENU) }
+        if style.contains(.minimizeButton)  { dwStyle |= DWORD(WS_MINIMIZEBOX) }
+        if style.contains(.maximizeButton)  { dwStyle |= DWORD(WS_MAXIMIZEBOX) }
+        if style.contains(.resizableBorder) { dwStyle |= DWORD(WS_THICKFRAME) }
+        if style.contains(.auxiliaryWindow) {
+            dwStyle |= DWORD(WS_POPUP) 
+            dwStyleEx |= DWORD(WS_EX_NOACTIVATE)
+            dwStyleEx |= DWORD(WS_EX_TOOLWINDOW)
+            dwStyleEx |= DWORD(WS_EX_TOPMOST)
+
+            ncRenderingPolicy = .enabled // enable windows theme
         }
+
+        let hWnd = name.withCString(encodedAs: UTF16.self) { title in
+            windowClass.withCString(encodedAs: UTF16.self) { className in
+                CreateWindowExW(dwStyleEx, className, title, dwStyle,
+                CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+                nil, nil, GetModuleHandleW(nil), nil)
+            }
+        }
+        guard let hWnd else {
+            Log.err("CreateWindow failed: \(win32ErrorString(GetLastError()))")
+            return nil 
+        }
+
+        SetLastError(0)
+
+        var rc1: RECT = RECT()
+        GetClientRect(hWnd, &rc1)
+        if rc1.right - rc1.left < 1 || rc1.bottom - rc1.top < 1 {
+            SetWindowPos(hWnd, nil, 0, 0, 640, 480, UINT(SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE))
+        }
+
+        if ncRenderingPolicy != .default {
+            var policy: DWMNCRENDERINGPOLICY = switch ncRenderingPolicy {
+            case .default:      DWMNCRP_USEWINDOWSTYLE
+            case .disabled:     DWMNCRP_DISABLED
+            case .enabled:      DWMNCRP_ENABLED
+            }
+            DwmSetWindowAttribute(hWnd, DWORD(DWMWA_NCRENDERING_POLICY.rawValue), &policy, DWORD(MemoryLayout.size(ofValue: policy)));
+
+            var margins = MARGINS(cxLeftWidth: -1, cxRightWidth: 0, cyTopHeight: 0, cyBottomHeight: 0)
+            DwmExtendFrameIntoClientArea(hWnd, &margins)
+        }
+
+        if SetWindowLongPtrW(hWnd, GWLP_USERDATA, unsafeBitCast(self as AnyObject, to: LONG_PTR.self)) == 0 {
+            let err: DWORD = GetLastError()
+            if err != 0 {
+                Log.err("SetWindowLongPtr failed with error: \(win32ErrorString(err))")
+                DestroyWindow(hWnd)
+                SetLastError(err)
+                return nil
+            }
+        }
+
+        self.hWnd = hWnd
+
+        if style.contains(.acceptFileDrop) {
+            let dropTargetPtr = Win32DropTarget.makeMutablePointer(target: self)
+            let result = dropTargetPtr.withMemoryRebound(to: IDropTarget.self, capacity:1) {
+                RegisterDragDrop(hWnd, $0)
+            }
+            if result == S_OK {
+                self.dropTarget = dropTargetPtr
+            } else {
+                Log.err("RegisterDragDrop failed: \(win32ErrorString(DWORD(result)))")
+            }
+        }
+        
+        rc1 = RECT()
+        var rc2: RECT = RECT()
+        GetClientRect(hWnd, &rc1)
+        GetWindowRect(hWnd, &rc2)
+
+        self.contentScaleFactor = dpiScaleForWindow(hWnd)
+        let invScale = 1.0 / self.contentScaleFactor
+
+        self.contentBounds = CGRect(x: CGFloat(rc1.left),
+                                    y: CGFloat(rc1.top),
+                                    width: CGFloat(rc1.right - rc1.left) * invScale,
+                                    height: CGFloat(rc1.bottom - rc1.top) * invScale)
+        self.windowFrame = CGRect(x: Int(rc2.left),
+                                  y: Int(rc2.top),
+                                  width: Int(rc2.right - rc2.left),
+                                  height: Int(rc2.bottom - rc2.top))
+
+        SetWindowPos(hWnd, nil, 0, 0, 0, 0, UINT(SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED))
+        SetTimer(hWnd, updateKeyboardMouseTimerId, updateKeyboardMouseTimeInterval, nil)
+        postWindowEvent(type: .created)
     }
 
     deinit {
@@ -181,9 +281,14 @@ final class Win32Window: Window {
             if IsIconic(hWnd) {
                 ShowWindow(hWnd, SW_RESTORE)
             }
-            ShowWindow(hWnd, SW_SHOW)
-            SetWindowPos(hWnd, HWND_TOP, 0, 0, 0, 0, UINT(SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW))
-            SetForegroundWindow(hWnd)
+
+            let styleEx = DWORD(bitPattern: GetWindowLongW(hWnd, GWL_EXSTYLE))
+            if styleEx & DWORD(WS_EX_NOACTIVATE) == 0 {
+                ShowWindow(hWnd, SW_SHOW)
+                SetForegroundWindow(hWnd)
+            } else {
+                ShowWindow(hWnd, SW_SHOWNA)
+            }
         }
     }
 
@@ -214,13 +319,12 @@ final class Win32Window: Window {
                 var w = max(Int32(value.width), 1)
                 var h = max(Int32(value.height), 1)
 
-                let style: DWORD = DWORD(GetWindowLongW(hWnd, GWL_STYLE))
-                let styleEx: DWORD = DWORD(GetWindowLongW(hWnd, GWL_EXSTYLE))
+                let style = DWORD(bitPattern: GetWindowLongW(hWnd, GWL_STYLE))
+                let styleEx = DWORD(bitPattern: GetWindowLongW(hWnd, GWL_EXSTYLE))
                 let menu: Bool = GetMenu(hWnd) != nil
 
                 var rc = RECT(left: 0, top: 0, right: LONG(w), bottom: LONG(h))
                 if AdjustWindowRectEx(&rc, style, menu, styleEx) {
-
                     let size: CGSize = CGSize(width: Int(w), height: Int(h))
                     self.contentBounds.size = size * (1.0 / self.contentScaleFactor)
 
@@ -236,81 +340,6 @@ final class Win32Window: Window {
         if let hWnd = self.hWnd {
             ShowWindow(hWnd, SW_MINIMIZE)
         }
-    }
-
-    func create() -> HWND? {
-        if let hWnd = self.hWnd {
-            return hWnd
-        }
-
-        assert(Thread.isMainThread, "A window must be created on the main thread.")
-
-        var dwStyle: DWORD = 0
-        if style.contains(.title)           { dwStyle |= UInt32(WS_CAPTION) }
-        if style.contains(.closeButton)     { dwStyle |= UInt32(WS_SYSMENU) }
-        if style.contains(.minimizeButton)  { dwStyle |= UInt32(WS_MINIMIZEBOX) }
-        if style.contains(.maximizeButton)  { dwStyle |= UInt32(WS_MAXIMIZEBOX) }
-        if style.contains(.resizableBorder) { dwStyle |= UInt32(WS_THICKFRAME) }
-
-        let dwStyleEx: DWORD = 0
-
-        let hWnd = name.withCString(encodedAs: UTF16.self) { title in
-            windowClass.withCString(encodedAs: UTF16.self) { className in
-                CreateWindowExW(dwStyleEx, className, title, dwStyle,
-                CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
-                nil, nil, GetModuleHandleW(nil), nil)
-            }
-        }
-        if hWnd == nil {  return nil }
-
-        SetLastError(0)
-
-        if SetWindowLongPtrW(hWnd, GWLP_USERDATA, unsafeBitCast(self as AnyObject, to: LONG_PTR.self)) == 0 {
-            let err: DWORD = GetLastError()
-            if err != 0 {
-                Log.err("SetWindowLongPtr failed with error: \(win32ErrorString(err))")
-                DestroyWindow(hWnd)
-                SetLastError(err)
-                return nil
-            }
-        }
-
-        self.hWnd = hWnd
-
-        if style.contains(.acceptFileDrop) {
-            let dropTargetPtr = Win32DropTarget.makeMutablePointer(target: self)
-            let result = dropTargetPtr.withMemoryRebound(to: IDropTarget.self, capacity:1) {
-                RegisterDragDrop(hWnd, $0)
-            }
-            if result == S_OK {
-                self.dropTarget = dropTargetPtr
-            } else {
-                Log.err("RegisterDragDrop failed: \(win32ErrorString(DWORD(result)))")
-            }
-        }
-        
-        var rc1: RECT = RECT()
-        var rc2: RECT = RECT()
-        GetClientRect(hWnd, &rc1)
-        GetWindowRect(hWnd, &rc2)
-
-        self.contentScaleFactor = dpiScaleForWindow(hWnd!)
-        let invScale = 1.0 / self.contentScaleFactor
-
-        self.contentBounds = CGRect(x: CGFloat(rc1.left),
-                                    y: CGFloat(rc1.top),
-                                    width: CGFloat(rc1.right - rc1.left) * invScale,
-                                    height: CGFloat(rc1.bottom - rc1.top) * invScale)
-        self.windowFrame = CGRect(x: Int(rc2.left),
-                                  y: Int(rc2.top),
-                                  width: Int(rc2.right - rc2.left),
-                                  height: Int(rc2.bottom - rc2.top))
-
-        SetWindowPos(hWnd, HWND_TOP, 0, 0, 0, 0, UINT(SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED))
-        SetTimer(hWnd, updateKeyboardMouseTimerId, updateKeyboardMouseTimeInterval, nil)
-        postWindowEvent(type: .created)
-
-        return hWnd
     }
 
     func destroy() {
@@ -441,7 +470,13 @@ final class Win32Window: Window {
     }
 
     private func synchronizeMouse() {
-        guard !self.activated else { return }
+        guard self.visible else { return }
+        guard self.resizing == false else { return }
+        let styleEx = DWORD(bitPattern: GetWindowLongW(hWnd, GWL_EXSTYLE))
+        if styleEx & DWORD(WS_EX_NOACTIVATE) == 0 {
+            guard self.activated else { return }
+        }
+
         // check mouse has gone out of window region.
         if let hWnd = self.hWnd, GetCapture() != hWnd {
             var pt: POINT = POINT()
@@ -455,7 +490,7 @@ final class Win32Window: Window {
                 let MAKELPARAM = {(a:Int32, b:Int32) -> LPARAM in
                     LPARAM(a & 0xffff) | (LPARAM(b & 0xffff) << 16)
                 }
-                PostMessageW(hWnd, UINT(WM_MOUSEMOVE), 0, MAKELPARAM(pt.x, pt.y))
+                SendMessageW(hWnd, UINT(WM_MOUSEMOVE), 0, MAKELPARAM(pt.x, pt.y))
             }
         }
     }
@@ -470,7 +505,7 @@ final class Win32Window: Window {
     }
 
     private func synchronizeKeyStates() {
-        if self.activated == false { return }
+        guard self.activated else { return }
 
         var keyStates: [UInt8] = [UInt8](repeating: 0, count: 256)
         GetKeyboardState(&keyStates)
@@ -701,6 +736,12 @@ final class Win32Window: Window {
                     }
                 }
                 return 0
+            case UINT(WM_MOUSEACTIVATE):
+                let styleEx = DWORD(bitPattern: GetWindowLongW(hWnd, GWL_EXSTYLE))
+                if styleEx & DWORD(WS_EX_NOACTIVATE) != 0 {
+                    return LRESULT(MA_NOACTIVATE)
+                }
+                return LRESULT(MA_ACTIVATE)
             case UINT(WM_ENTERSIZEMOVE):
                 window.resizing = true
                 return 0
@@ -814,8 +855,8 @@ final class Win32Window: Window {
                 }
                 return 0    
             case UINT(WM_GETMINMAXINFO):
-                let style: DWORD = DWORD(GetWindowLongW(hWnd, GWL_STYLE))
-                let styleEx: DWORD = DWORD(GetWindowLongW(hWnd, GWL_EXSTYLE))
+                let style = DWORD(bitPattern: GetWindowLongW(hWnd, GWL_STYLE))
+                let styleEx = DWORD(bitPattern: GetWindowLongW(hWnd, GWL_EXSTYLE))
                 let menu: Bool = GetMenu(hWnd) != nil
 
                 var minSize: CGSize = CGSize(width: 1, height: 1)
@@ -855,16 +896,16 @@ final class Win32Window: Window {
                     return 0
                 }
             case UINT(WM_MOUSEMOVE):
-                if window.activated {
-                    let pt = MAKEPOINTS(lParam)
-                    let oldPtX = LONG((window.mousePosition.x * window.contentScaleFactor).rounded())
-                    let oldPtY = LONG((window.mousePosition.y * window.contentScaleFactor).rounded())
-                    if pt.x != oldPtX || pt.y != oldPtY {
-                        let delta: CGPoint = CGPoint(x: CGFloat(pt.x) - window.mousePosition.x,
-                                                     y: CGFloat(pt.y) - window.mousePosition.y) * (1.0 / window.contentScaleFactor)
+                let pt = MAKEPOINTS(lParam)
+                let oldPtX = LONG((window.mousePosition.x * window.contentScaleFactor).rounded())
+                let oldPtY = LONG((window.mousePosition.y * window.contentScaleFactor).rounded())
+                if pt.x != oldPtX || pt.y != oldPtY {
+                    let delta: CGPoint = CGPoint(x: CGFloat(pt.x) - window.mousePosition.x,
+                                                y: CGFloat(pt.y) - window.mousePosition.y) * (1.0 / window.contentScaleFactor)
 
-                        var postEvent = true
-                        if window.mouseLocked {
+                    var postEvent = true
+                    if window.mouseLocked {
+                        if window.activated {
                             let lockedPtX = LONG((window.lockedMousePosition.x * window.contentScaleFactor).rounded())
                             let lockedPtY = LONG((window.lockedMousePosition.y * window.contentScaleFactor).rounded())
                             if pt.x == lockedPtX && pt.y == lockedPtY {
@@ -876,18 +917,20 @@ final class Win32Window: Window {
                                 window.lockedMousePosition = window.mousePosition(forDeviceID: 0)!
                             }
                         } else {
-                            window.mousePosition = CGPoint(x: Int(pt.x), y: Int(pt.y)) * (1.0 / window.contentScaleFactor)
+                            postEvent = false
                         }
+                    } else {
+                        window.mousePosition = CGPoint(x: Int(pt.x), y: Int(pt.y)) * (1.0 / window.contentScaleFactor)
+                    }
 
-                        if postEvent {
-                            window.postMouseEvent(MouseEvent(type: .move,
-                                                             window: window,
-                                                             device: .genericMouse,
-                                                             deviceID: 0,
-                                                             buttonID: 0,
-                                                             location: window.mousePosition,
-                                                             delta: delta))
-                        }
+                    if postEvent {
+                        window.postMouseEvent(MouseEvent(type: .move,
+                                                         window: window,
+                                                         device: .genericMouse,
+                                                         deviceID: 0,
+                                                         buttonID: 0,
+                                                         location: window.mousePosition,
+                                                         delta: delta))
                     }
                 }
                 return 0

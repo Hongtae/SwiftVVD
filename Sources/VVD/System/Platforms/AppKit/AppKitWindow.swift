@@ -133,7 +133,7 @@ final class AppKitWindow: Window {
         
         var windowType: NSWindow.Type = NSWindow.self
         
-        if style.contains(.utilityWindow) {
+        if style.contains(.auxiliaryWindow) {
             styleMask.insert(.utilityWindow)
             windowType = NSPanel.self
         }
@@ -158,7 +158,7 @@ final class AppKitWindow: Window {
         if style.contains(.acceptFileDrop) {
             (view as! NSView).registerForDraggedTypes([.fileURL])
         }
-        if style.contains(.utilityWindow) {
+        if style.contains(.auxiliaryWindow) {
             let levelKey: CGWindowLevelKey = .utilityWindow
             self.window.level = .init(Int(levelKey.rawValue))
         }
@@ -190,7 +190,11 @@ final class AppKitWindow: Window {
 
     func activate() {
         if let window = nsView.window {
-            window.makeKeyAndOrderFront(nil)
+            if window.canBecomeKey {
+                window.makeKeyAndOrderFront(nil)
+            } else {
+                window.orderFront(nil)
+            }
             self.view.visible = true
             self.view.activated = true
 
