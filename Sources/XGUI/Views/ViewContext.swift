@@ -273,6 +273,10 @@ class ViewContext: _GraphValueResolver {
         return false
     }
 
+    func handleMouseHover(at location: CGPoint, deviceID: Int, isTopMost: Bool) -> Bool {
+        return false
+    }
+    
     func setFocus(for deviceID: Int) {
         let vp = self.sharedContext.focusedViews.updateValue(WeakObject(self),
                                                              forKey: deviceID)?.value

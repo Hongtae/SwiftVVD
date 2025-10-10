@@ -32,6 +32,7 @@ protocol WindowInputEventHandler {
     func handleKeyboardEvent(event: KeyboardEvent) -> Bool
     func handleMouseEvent(event: MouseEvent) -> Bool
     func handleMouseWheel(at location: CGPoint, delta: CGPoint) -> Bool
+    func handleMouseHover(at location: CGPoint, deviceID: Int, isTopMost: Bool) -> Bool
 }
 
 class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowInputEventHandler, WindowDelegate, @unchecked Sendable where Content: View {
@@ -521,7 +522,13 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
         if event.type == .wheel {
             _=self.handleMouseWheel(at: event.location, delta: event.delta)
         } else {
-            _=self.handleMouseEvent(event: event)
+            if self.handleMouseEvent(event: event) == false {
+                if event.type == .move {
+                    _=self.handleMouseHover(at: event.location,
+                                            deviceID: event.deviceID,
+                                            isTopMost: true)
+                }
+            }
         }
     }
     
@@ -697,6 +704,27 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
             return view.handleMouseWheel(at: location, delta: delta)
         }
         return false
+    }
+    
+    func handleMouseHover(at location: CGPoint, deviceID: Int, isTopMost: Bool) -> Bool {
+        var topMost = isTopMost
+        for aux in self.auxiliaryWindows.reversed() {
+            if let handler = aux.window as? WindowInputEventHandler {
+                let loc = location - aux.offset
+                if handler.handleMouseHover(at: loc,
+                                            deviceID: deviceID,
+                                            isTopMost: topMost) {
+                    topMost = false
+                }
+            }
+        }
+
+        if let view {
+            if view.handleMouseHover(at: location, deviceID: deviceID, isTopMost: topMost) {
+                topMost = false
+            }
+        }
+        return isTopMost != topMost
     }
 
     func onWindowCreated(_: Window) {}
