@@ -504,6 +504,26 @@ class GenericViewContext<Content>: ViewContext {
         }
         return super.handleMouseWheel(at: location, delta: delta)
     }
+    
+    override func handleMouseHover(at location: CGPoint, deviceID: Int, isTopMost: Bool) -> Bool {
+        let frame = body.frame
+        let local = location.applying(body.transformToContainer.inverted())
+
+        var topMost = isTopMost
+        if topMost && frame.contains(location) {
+            if body.handleMouseHover(at: local, deviceID: deviceID, isTopMost: topMost) {
+                topMost = false
+            }
+            if super.handleMouseHover(at: location, deviceID: deviceID, isTopMost: topMost) {
+                topMost = false
+            }
+            return topMost == false
+        } else {
+            _=body.handleMouseHover(at: local, deviceID: deviceID, isTopMost: false)
+            _=super.handleMouseHover(at: location, deviceID: deviceID, isTopMost: false)
+        }
+        return false
+    }
 
     override func hitTest(_ location: CGPoint) -> ViewContext? {
         let local = location.applying(body.transformToContainer.inverted())
@@ -686,6 +706,29 @@ class DynamicViewContext<Content>: ViewContext {
             }
         }
         return super.handleMouseWheel(at: location, delta: delta)
+    }
+    
+    override func handleMouseHover(at location: CGPoint, deviceID: Int, isTopMost: Bool) -> Bool {
+        if let body {
+            let frame = body.frame
+            let local = location.applying(body.transformToContainer.inverted())
+
+            var topMost = isTopMost
+            if topMost && frame.contains(location) {
+                if body.handleMouseHover(at: local, deviceID: deviceID, isTopMost: topMost) {
+                    topMost = false
+                }
+                if super.handleMouseHover(at: location, deviceID: deviceID, isTopMost: topMost) {
+                    topMost = false
+                }
+                return topMost == false
+            } else {
+                _=body.handleMouseHover(at: local, deviceID: deviceID, isTopMost: false)
+                _=super.handleMouseHover(at: location, deviceID: deviceID, isTopMost: false)
+            }
+            return false
+        }
+        return super.handleMouseHover(at: location, deviceID: deviceID, isTopMost: isTopMost)
     }
 
     override func hitTest(_ location: CGPoint) -> ViewContext? {

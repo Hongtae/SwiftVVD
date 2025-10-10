@@ -523,7 +523,7 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
             _=self.handleMouseWheel(at: event.location, delta: event.delta)
         } else {
             if self.handleMouseEvent(event: event) == false {
-                if event.type == .move {
+                if event.type == .move || event.type == .buttonUp {
                     _=self.handleMouseHover(at: event.location,
                                             deviceID: event.deviceID,
                                             isTopMost: true)
@@ -701,6 +701,7 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
         }
         
         if let view {
+            let location = location.applying(view.transformToContainer.inverted())
             return view.handleMouseWheel(at: location, delta: delta)
         }
         return false
@@ -720,6 +721,7 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
         }
 
         if let view {
+            let location = location.applying(view.transformToContainer.inverted())
             if view.handleMouseHover(at: location, deviceID: deviceID, isTopMost: topMost) {
                 topMost = false
             }

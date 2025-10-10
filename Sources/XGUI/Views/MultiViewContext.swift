@@ -19,14 +19,6 @@ class MultiViewContext: ViewGroupContext {
         super.init(subviews: subviews, layout: layout, inputs: inputs)
     }
 
-    override func invalidate() {
-        super.invalidate()
-        self.subviews.forEach {
-            $0.invalidate()
-        }
-        self.activeSubviews = []
-    }
-
     override func multiViewForLayout() -> [ViewContext] {
         activeSubviews.flatMap {
             $0.multiViewForLayout()
@@ -46,66 +38,6 @@ class MultiViewContext: ViewGroupContext {
         self.subviews.forEach {
             $0.setLayoutProperties(layoutProperties)
         }
-    }
-
-    override func update(transform t: AffineTransform) {
-        super.update(transform: t)
-        self.activeSubviews.forEach {
-            $0.update(transform: self.transformToRoot)
-        }
-    }
-
-    override func update(tick: UInt64, delta: Double, date: Date) {
-        super.update(tick: tick, delta: delta, date: date)
-        self.activeSubviews.forEach {
-            $0.update(tick: tick, delta: delta, date: date)
-        }
-    }
-
-    override func draw(frame: CGRect, context: GraphicsContext) {
-        super.draw(frame: frame, context: context)
-
-        let offsetX = frame.minX
-        let offsetY = frame.minY
-
-        self.activeSubviews.forEach { view in
-            let width = view.frame.width
-            let height = view.frame.height
-            guard width > .ulpOfOne && height > .ulpOfOne else {
-                return
-            }
-
-            let drawingFrame = view.frame.offsetBy(dx: offsetX, dy: offsetY)
-            if frame.intersection(drawingFrame).isNull {
-                return
-            }
-            view.drawView(frame: drawingFrame, context: context)
-        }
-    }
-
-    override func hitTest(_ location: CGPoint) -> ViewContext? {
-        for subview in activeSubviews {
-            let loc = location.applying(subview.transformToContainer.inverted())
-            if let view = subview.hitTest(loc) {
-                return view
-            }
-        }
-        return super.hitTest(location)
-    }
-
-    override func handleMouseWheel(at location: CGPoint, delta: CGPoint) -> Bool {
-        if self.bounds.contains(location) {
-            for subview in activeSubviews {
-                let frame = subview.frame
-                if frame.contains(location) {
-                    let local = location.applying(subview.transformToContainer.inverted())
-                    if subview.handleMouseWheel(at: local, delta: delta) {
-                        return true
-                    }
-                }
-            }
-        }
-        return super.handleMouseWheel(at: location, delta: delta)
     }
 }
 

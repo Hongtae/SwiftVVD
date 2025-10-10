@@ -183,8 +183,50 @@ private class ResolvedButtonStyleViewContext: GenericViewContext<ResolvedButtonS
         }
     }
 
+    override func updateContent() {
+        super.updateContent()
+        self.drawButtonShadowOnHover = self.environment.drawButtonShadowOnHover
+    }
+    
     func onButtonPressing(_ isPressed: Bool) {
         self.view?._isPressing = isPressed
         self.body.updateContent()
+    }
+
+    override func drawBackground(frame: CGRect, context: GraphicsContext) {
+        if self.isMouseHovered && self.drawButtonShadowOnHover {
+            let path = RoundedRectangle(cornerRadius: 4).inset(by: -1).path(in: frame)
+            var context = context
+            context.addFilter(.shadow(color: .blue.opacity(0.6), radius: 2, options: .shadowOnly))
+            context.fill(path, with: .color(.black))
+        }
+    }
+    
+    var isMouseHovered = false
+    var drawButtonShadowOnHover = false
+    override func handleMouseHover(at location: CGPoint, deviceID: Int, isTopMost: Bool) -> Bool {
+        if deviceID == 0 {
+            let hovered = self.isMouseHovered
+            if isTopMost {
+                self.isMouseHovered = self.hitTest(location) != nil
+            } else {
+                self.isMouseHovered = false
+            }
+            if hovered != self.isMouseHovered {
+                self.body.updateContent()
+            }
+        }
+        return isMouseHovered
+    }
+}
+
+private struct DrawButtonShadowOnHover: EnvironmentKey {
+    static let defaultValue: Bool = true
+}
+
+extension EnvironmentValues {
+    public var drawButtonShadowOnHover: Bool {
+        get { self[DrawButtonShadowOnHover.self] }
+        set { self[DrawButtonShadowOnHover.self] = newValue }
     }
 }

@@ -87,7 +87,7 @@ public struct DefaultButtonStyle: PrimitiveButtonStyle, PrimitiveButtonStyleWith
         configuration.label
             .padding(4)
             .background {
-                RoundedRectangle(cornerRadius:4).fill(buttonColor(isPressed: isPressing))
+                RoundedRectangle(cornerRadius:4).inset(by: 0.1).fill(buttonColor(isPressed: isPressing))
                 RoundedRectangle(cornerRadius:4).strokeBorder(.black)
             }
             .foregroundStyle(textColor(isPressed: isPressing))
@@ -184,7 +184,7 @@ public struct BorderedButtonStyle: PrimitiveButtonStyle, PrimitiveButtonStyleWit
         configuration.label
             .padding(4)
             .background {
-                RoundedRectangle(cornerRadius:4).fill(buttonColor(isPressed: isPressing))
+                RoundedRectangle(cornerRadius:4).inset(by: 0.1).fill(buttonColor(isPressed: isPressing))
                 RoundedRectangle(cornerRadius:4).strokeBorder(.black)
             }
             .foregroundStyle(textColor(isPressed: isPressing))

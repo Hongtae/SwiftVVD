@@ -210,7 +210,7 @@ class ViewGroupContext: ViewContext {
     }
 
     override func hitTest(_ location: CGPoint) -> ViewContext? {
-        for subview in activeSubviews {
+        for subview in activeSubviews.reversed() {
             let loc = location.applying(subview.transformToContainer.inverted())
             if let view = subview.hitTest(loc) {
                 return view
@@ -222,7 +222,7 @@ class ViewGroupContext: ViewContext {
     override func gestureHandlers(at location: CGPoint) -> GestureHandlerOutputs {
         var outputs = super.gestureHandlers(at: location)
         if self.bounds.contains(location) {
-            for subview in activeSubviews {
+            for subview in activeSubviews.reversed() {
                 let local = location.applying(subview.transformToContainer.inverted())
                 outputs = outputs.merge(subview.gestureHandlers(at: local))
             }
@@ -232,7 +232,7 @@ class ViewGroupContext: ViewContext {
 
     override func handleMouseWheel(at location: CGPoint, delta: CGPoint) -> Bool {
         if self.bounds.contains(location) {
-            for subview in activeSubviews {
+            for subview in activeSubviews.reversed() {
                 let frame = subview.frame
                 if frame.contains(location) {
                     let local = location.applying(subview.transformToContainer.inverted())
@@ -243,6 +243,29 @@ class ViewGroupContext: ViewContext {
             }
         }
         return super.handleMouseWheel(at: location, delta: delta)
+    }
+    
+    override func handleMouseHover(at location: CGPoint, deviceID: Int, isTopMost: Bool) -> Bool {
+        if isTopMost && self.bounds.contains(location) {
+            var topMost = isTopMost
+            for subview in activeSubviews.reversed() {
+                let local = location.applying(subview.transformToContainer.inverted())
+                if subview.handleMouseHover(at: local, deviceID: deviceID, isTopMost: topMost) {
+                    topMost = false
+                }
+            }
+            if super.handleMouseHover(at: location, deviceID: deviceID, isTopMost: topMost) {
+                topMost = false
+            }
+            return topMost != isTopMost
+        } else {
+            for subview in activeSubviews.reversed() {
+                let local = location.applying(subview.transformToContainer.inverted())
+                _=subview.handleMouseHover(at: local, deviceID: deviceID, isTopMost: false)
+            }
+            _=super.handleMouseHover(at: location, deviceID: deviceID, isTopMost: false)
+            return false
+        }
     }
 }
 
