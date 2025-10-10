@@ -10,14 +10,20 @@ import Foundation
 public struct _UpdateFrameRate: _SceneModifier {
     public typealias Body = Never
 
-    var activeFrameRate: CGFloat = 1.0 / 60.0
-    var inactiveFrameRate: CGFloat = 1.0 / 30.0
+    var active: CGFloat = 60.0
+    var inactive: CGFloat = 30.0
+    
+    public static func _makeScene(modifier: _GraphValue<Self>, inputs: _SceneInputs, body: @escaping (_Graph, _SceneInputs) -> _SceneOutputs) -> _SceneOutputs {
+        var inputs = inputs
+        inputs.setModifierTypeGraph(modifier)
+        return body(_Graph(), inputs)
+    }
 }
 
 extension Scene {
     public func updateFrameRate(forActiveState active: CGFloat,
                                 forInactiveState inactive: CGFloat) -> some Scene {
-        let modifier = _UpdateFrameRate(activeFrameRate: active, inactiveFrameRate: inactive)
+        let modifier = _UpdateFrameRate(active: active, inactive: inactive)
         return self.modifier(modifier)
     }
 }

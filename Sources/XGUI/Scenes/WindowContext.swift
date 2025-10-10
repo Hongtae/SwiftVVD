@@ -190,7 +190,17 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
     }
 
     func applyModifiers() {
-        // TODO: check modifiers..
+        if let modifier = self.scene.inputs.modifierTypeGraph(of: _UpdateFrameRate.self) {
+            if let frameRate = self.scene.value(atPath: modifier) {
+                let active = 1.0 / max(frameRate.active, 1.0)
+                let inactive = 1.0 / max(frameRate.inactive, 1.0)
+                let config = Configuration(activeFrameInterval: active,
+                                           inactiveFrameInterval: inactive)
+                self.stateConfig.withLock {
+                    $0.config = config
+                }
+            }
+        }
     }
     
     func updateView(tick: UInt64, delta: Double, date: Date) {
