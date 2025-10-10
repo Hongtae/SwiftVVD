@@ -114,7 +114,9 @@ class TypedSceneContext<Content>: SceneContext where Content: Scene {
 
     override func value<T>(atPath graph: _GraphValue<T>) -> T? {
         if let content {
-            return self.graph.value(atPath: graph, from: content)
+            if graph.isDescendant(of: self.graph) {
+                return self.graph.value(atPath: graph, from: content)
+            }
         }
         return super.value(atPath: graph)
     }

@@ -53,6 +53,7 @@ public struct _SceneInputs {
     var environment: EnvironmentValues
     var properties: PropertyList = .init()
     var modifiers: [any _GraphInputResolve] = []
+    var _modifierTypeGraphs: [ObjectIdentifier: _GraphValue<Any>] = [:]
 }
 
 extension _SceneInputs {
@@ -60,6 +61,17 @@ extension _SceneInputs {
         self.modifiers.indices.forEach { index in
             self.modifiers[index].reset()
         }
+    }
+    
+    mutating func setModifierTypeGraph<T>(_ graph: _GraphValue<T>) where T: _SceneModifier {
+        _modifierTypeGraphs[ObjectIdentifier(T.self)] = graph.unsafeCast(to: Any.self)
+    }
+    
+    func modifierTypeGraph<T>(of: T.Type) -> _GraphValue<T>? where T: _SceneModifier {
+        if let graph = _modifierTypeGraphs[ObjectIdentifier(T.self)] {
+            return graph.unsafeCast(to: T.self)
+        }
+        return nil
     }
 }
 

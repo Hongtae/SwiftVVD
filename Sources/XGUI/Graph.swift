@@ -48,6 +48,7 @@ public struct _GraphInputs {
     var options: Options = .none
     var mergedInputs: [_GraphInputs] = []
     var modifiers: [any _GraphInputResolve] = []
+    var _modifierTypeGraphs: [ObjectIdentifier: _GraphValue<Any>] = [:]
     var viewStyleModifiers: [any ViewStyleModifier] = []
 }
 
@@ -88,6 +89,17 @@ extension _GraphInputs {
         self.mergedInputs.indices.forEach { index in
             self.mergedInputs[index].resetModifiers()
         }
+    }
+    
+    mutating func setModifierTypeGraph<T>(_ graph: _GraphValue<T>) where T: _SceneModifier {
+        _modifierTypeGraphs[ObjectIdentifier(T.self)] = graph.unsafeCast(to: Any.self)
+    }
+    
+    func modifierTypeGraph<T>(of: T.Type) -> _GraphValue<T>? where T: _SceneModifier {
+        if let graph = _modifierTypeGraphs[ObjectIdentifier(T.self)] {
+            return graph.unsafeCast(to: T.self)
+        }
+        return nil
     }
 }
 
