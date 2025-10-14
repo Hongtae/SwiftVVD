@@ -42,6 +42,7 @@ final class VulkanSwapChain: SwapChain, @unchecked Sendable {
 
     private let lock = NSLock()
     private var deviceReset = false
+    private var cachedResolution: CGSize
 
     private var frameIndex: UInt32 = 0
     private var renderPassDescriptor: RenderPassDescriptor
@@ -96,10 +97,14 @@ final class VulkanSwapChain: SwapChain, @unchecked Sendable {
             colorAttachments: [],
             depthStencilAttachment: RenderPassDepthStencilAttachmentDescriptor())
 
+        self.cachedResolution = window.resolution
+
         window.addEventObserver(self) { [weak self](event: WindowEvent) in
             if event.type == .resized {
                 if let self = self {
+                    let resolution = self.window.resolution
                     self.lock.withLock {
+                        self.cachedResolution = resolution
                         self.deviceReset = true
                     }
                 }
@@ -231,13 +236,15 @@ final class VulkanSwapChain: SwapChain, @unchecked Sendable {
         return self.updateDevice()
     }
 
-    @MainActor
     func updateDevice() -> Bool {
         let device = self.queue.device as! VulkanGraphicsDevice
         //let instance = device.instance
         let physicalDevice = device.physicalDevice
 
-        let resolution = self.window.resolution
+        let resolution = self.lock.withLock { 
+            self.deviceReset = false
+            return self.cachedResolution 
+        }
         var width = UInt32(resolution.width.rounded())
         var height = UInt32(resolution.height.rounded())
 
@@ -447,7 +454,22 @@ final class VulkanSwapChain: SwapChain, @unchecked Sendable {
         return true 
     }
 
+    @inline(__always)
+    private func updateDeviceIfNeeded() {
+        let needUpdate = self.lock.withLock { self.deviceReset }
+        if needUpdate {
+            let device = self.queue.device as! VulkanGraphicsDevice
+            vkDeviceWaitIdle(device.device)
+
+            if self.updateDevice() == false {
+                Log.error("VulkanSwapChain.updateDevice() failed.")
+            }
+        }
+    }
+
     func setupFrame() {
+        self.updateDeviceIfNeeded()
+
         let device = self.queue.device as! VulkanGraphicsDevice
 
         let frameReady = self.frameReady
@@ -610,31 +632,10 @@ final class VulkanSwapChain: SwapChain, @unchecked Sendable {
 
         renderPassDescriptor.colorAttachments.removeAll(keepingCapacity: true)
 
-        var resetSwapchain = err == VK_ERROR_OUT_OF_DATE_KHR
-        // Check if a device reset is requested and update the device if necessary.
-        if resetSwapchain == false {
-            resetSwapchain = self.lock.withLock { self.deviceReset }
+        if err == VK_ERROR_OUT_OF_DATE_KHR {
+            self.lock.withLock { self.deviceReset = true }
         }
-        if resetSwapchain {
-            let device = self.queue.device as! VulkanGraphicsDevice
-            vkDeviceWaitIdle(device.device)
-            self.lock.withLock { self.deviceReset = false }
-
-            let updated = if Thread.isMainThread {
-                MainActor.assumeIsolated {
-                    self.updateDevice()
-                }
-            } else {
-                DispatchQueue.main.sync {
-                    MainActor.assumeIsolated {
-                        self.updateDevice()
-                    }
-                }
-            }
-            if updated == false {
-                Log.error("VulkanSwapChain.updateDevice() failed.")
-            }
-        }
+        self.updateDeviceIfNeeded()
 
         let frameCount = self.frameCount + 1
         if err == VK_SUCCESS {
