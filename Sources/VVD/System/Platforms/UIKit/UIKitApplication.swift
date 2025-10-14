@@ -109,7 +109,7 @@ final class UIKitApplication: Application, @unchecked Sendable {
     }
 
     static func run(delegate: ApplicationDelegate?) -> Int {
-        assert(Thread.isMainThread)
+        precondition(Thread.isMainThread, "\(#function) must be called on the main thread.")
 
         let app = UIKitApplication()
         app.delegate = delegate

@@ -179,6 +179,8 @@ final class WaylandApplication: Application, @unchecked Sendable {
     private var requestExitWithCode: Int? = nil
 
     static func run(delegate: ApplicationDelegate?) -> Int {
+        precondition(Thread.isMainThread, "\(#function) must be called on the main thread.")
+
         guard let app = WaylandApplication() else {
             Log.error("Failed to initialize wayland client.")
             return -1

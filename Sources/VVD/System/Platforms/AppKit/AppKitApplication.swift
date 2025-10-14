@@ -45,7 +45,7 @@ final class AppKitApplication: Application, @unchecked Sendable {
     let _active = Atomic<Bool>(false)
 
     static func run(delegate: ApplicationDelegate?) -> Int {
-        assert(Thread.isMainThread)
+        precondition(Thread.isMainThread, "Application must be run on the main thread.")
 
         let observers = [
             NotificationCenter.default

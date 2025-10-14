@@ -104,3 +104,35 @@ extension Platform {
         return VVDTimerSystemTick()
     }
 }
+
+extension DispatchQueue {
+    private static let _mainKey: DispatchSpecificKey<()> = {
+        let key = DispatchSpecificKey<()>()
+        DispatchQueue.main.setSpecific(key: key, value: ())
+        return key
+    }()
+
+    public static var isMain: Bool {
+        return DispatchQueue.getSpecific(key: _mainKey) != nil
+    }
+}
+
+public func isMainQueue() -> Bool {
+    DispatchQueue.isMain
+}
+
+public func isMainThreadOrQueue() -> Bool {
+    Thread.isMainThread || DispatchQueue.isMain
+}
+
+public func runOnMainQueueSync<T>(_ block: @escaping @MainActor () -> T) -> T where T: Sendable {
+    if DispatchQueue.isMain {
+        return MainActor.assumeIsolated {
+            block()
+        }
+    } else {
+        return DispatchQueue.main.sync {
+            block()
+        }
+    }
+}

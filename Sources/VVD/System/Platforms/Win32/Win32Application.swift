@@ -82,6 +82,7 @@ final class Win32Application: Application, @unchecked Sendable {
     }
 
     static func run(delegate: ApplicationDelegate?) -> Int{
+        precondition(Thread.isMainThread, "\(#function) must be called on the main thread.")
 
         let app: Win32Application = Win32Application()
         let currentThreadId = GetCurrentThreadId()

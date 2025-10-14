@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import VVD
 
 public struct Window<Content>: Scene where Content: View {
     var title: Text
@@ -109,14 +110,8 @@ class SceneWindowContext<Content>: GenericWindowContext<Content> where Content: 
         if oldTitle != self._title {
             if let window {
                 let newTitle = self._title
-                if Thread.isMainThread {
-                    MainActor.assumeIsolated {
-                        window.title = newTitle
-                    }
-                } else {
-                    Task { @MainActor in
-                        window.title = newTitle
-                    }
+                runOnMainQueueSync {
+                    window.title = newTitle
                 }
             }
         }
