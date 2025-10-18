@@ -267,8 +267,8 @@ final class VulkanGraphicsDevice: GraphicsDevice, @unchecked Sendable {
             var fences: [VkFence?] = []
             var waitingFences: [FenceCallback] = []
             var completionHandlers: [@Sendable ()->Void] = []
+            let fenceWaitInterval = 0.004
 
-            let fenceWaitInterval = 0.01
             var timer = TickCounter.now
 
             mainLoop: while true {
@@ -331,20 +331,15 @@ final class VulkanGraphicsDevice: GraphicsDevice, @unchecked Sendable {
                         fences.removeAll(keepingCapacity: true)
                     }
 
-                    if err == VK_TIMEOUT {
-                        let t = fenceWaitInterval - timer.elapsed
-                        if t > 0 {
-                            do {
-                                try await Task.sleep(until: .now + .seconds(t), clock: .suspending)
-                            } catch {
-                                break mainLoop
-                            }
-                        }
+                    if err == VK_SUCCESS {
+                        continue
                     }
-                    timer.reset()
-                } else {
-                    await Task.yield()
                 }
+                repeat {
+                    if Task.isCancelled { break mainLoop }
+                    await Task.yield()
+                } while timer.elapsed < fenceWaitInterval
+                timer.reset()
             }
             assert(completionHandlers.isEmpty, "completionHandlers must be empty!")
             Log.info("VulkanGraphicsDevice Helper task is finished.")
