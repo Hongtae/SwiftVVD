@@ -365,7 +365,6 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
                 
                 self.updateView(tick: tick, delta: delta, date: date)
                 
-                var swapChainToPresent: SwapChain? = nil
                 if state.visible, let swapChain {
                     
                     var renderPass = swapChain.currentRenderPassDescriptor()
@@ -420,25 +419,22 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
                         }
                         
                         commandBuffer.commit()
-                        swapChainToPresent = swapChain
+                        _=swapChain.present()
                     }
                 }
 
                 let frameInterval = state.activated ? config.activeFrameInterval : config.inactiveFrameInterval
-                let minTimeOfBusyState = state.activated ? 0.008 : 0.0
+                let timeForBusyWait = state.activated ? 0.001 : 0.0
+
                 repeat {
                     if Task.isCancelled { break mainLoop }
                     await Task.yield()
-                } while tickCounter.elapsed < frameInterval - minTimeOfBusyState
+                } while tickCounter.elapsed < frameInterval - timeForBusyWait
                 
-                // It's time to busy wait.
+                // busy waiting, remaining time is too short to yield.
                 while tickCounter.elapsed < frameInterval {
                     if Task.isCancelled { break mainLoop }
                     Platform.threadYield()
-                }
-                
-                if let swapChain = swapChainToPresent {
-                    _ = swapChain.present()
                 }
             }
             Log.info("WindowContext<\(Content.self)> update task is finished.")
