@@ -86,11 +86,16 @@ struct SystemFontProvider: TypeFaceProvider {
     let size: CGFloat
     let weight: Font.Weight
     let design: Font.Design
+    let outline: CGFloat
+    let forceBitmap: Bool
 
-    init(size: CGFloat, weight: Font.Weight, design: Font.Design) {
+    init(size: CGFloat, weight: Font.Weight, design: Font.Design,
+         outline: CGFloat = 0.0, forceBitmap: Bool? = nil) {
         self.size = size
         self.weight = weight
         self.design = design
+        self.outline = outline
+        self.forceBitmap = forceBitmap ?? (outline > 0.0)
     }
 
     func isEqual(to: any TypeFaceProvider) -> Bool {
@@ -106,6 +111,8 @@ struct SystemFontProvider: TypeFaceProvider {
         hasher.combine(size)
         hasher.combine(weight)
         hasher.combine(design)
+        hasher.combine(outline)
+        hasher.combine(forceBitmap)
     }
 
     func makeTypeFace(_ context: AppContext,
@@ -127,6 +134,13 @@ struct SystemFontProvider: TypeFaceProvider {
             if let data, let device = context.graphicsDeviceContext {
                 let dpi = CGFloat(defaultDPI) * displayScale
                 let font = TextureFont(deviceContext: device, data: data)
+                let emboldenFactor = 1.0
+                let embolden = { value in
+                    ((value - 400.0) / 300.0) * emboldenFactor
+                }
+                font?.embolden = embolden(self.weight.value)
+                font?.outline = outline
+                font?.forceBitmap = forceBitmap
                 font?.setStyle(pointSize: self.size,
                                dpi: (UInt32(dpi), UInt32(dpi)))
                 return font
