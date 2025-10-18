@@ -451,7 +451,7 @@ public class Font {
                     FT_Outline_Embolden(&face.pointee.glyph.pointee.outline, boldStrength)
                     var stroker: FT_Stroker? = nil
                     FT_Stroker_New(library.library, &stroker)
-                    FT_Stroker_Set(stroker, ft16d16(outline), FT_STROKER_LINECAP_ROUND, FT_STROKER_LINEJOIN_ROUND, 0)
+                    FT_Stroker_Set(stroker, ft26d6(outline), FT_STROKER_LINECAP_ROUND, FT_STROKER_LINEJOIN_ROUND, 0)
                     FT_Stroker_ParseOutline(stroker, &face.pointee.glyph.pointee.outline, 0)
                     var ftOutline = FT_Outline()
                     var points: FT_UInt = 0
