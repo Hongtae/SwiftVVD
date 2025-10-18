@@ -13,7 +13,9 @@ final class HeadlessApplication: Application, @unchecked Sendable {
     private var requestExitWithCode: Int?
     nonisolated(unsafe) static var shared: HeadlessApplication? = nil
 
-    public static func run(delegate: ApplicationDelegate?) -> Int {
+    var isActive: Bool { false }
+
+    static func run(delegate: ApplicationDelegate?) -> Int {
         precondition(Thread.isMainThread, "\(#function) must be called on the main thread.")
 
         let app = HeadlessApplication()
@@ -39,7 +41,7 @@ final class HeadlessApplication: Application, @unchecked Sendable {
         return exitCode
     }
 
-    public func terminate(exitCode: Int) {
+    func terminate(exitCode: Int) {
         Task { @MainActor in self.requestExitWithCode = exitCode }
     }
 

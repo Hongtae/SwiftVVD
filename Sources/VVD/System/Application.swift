@@ -7,7 +7,7 @@
 
 public protocol Application: AnyObject {
     var activationPolicy: ActivationPolicy { get set }
-
+    var isActive: Bool { get }
     func terminate(exitCode: Int)
     @MainActor static func run(delegate: ApplicationDelegate?) -> Int
 }

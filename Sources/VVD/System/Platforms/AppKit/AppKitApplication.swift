@@ -7,6 +7,7 @@
 
 #if ENABLE_APPKIT
 import Foundation
+import Synchronization
 @_implementationOnly import AppKit
 
 final class AppKitApplication: Application, @unchecked Sendable {
@@ -40,10 +41,25 @@ final class AppKitApplication: Application, @unchecked Sendable {
         }
     }
 
+    var isActive: Bool { _active.load(ordering: .relaxed) }
+    let _active = Atomic<Bool>(false)
+
     static func run(delegate: ApplicationDelegate?) -> Int {
         assert(Thread.isMainThread)
 
         let observers = [
+            NotificationCenter.default
+                .addObserver(forName: NSApplication.didBecomeActiveNotification,
+                             object: nil,
+                             queue: nil) { notification in
+                                shared?._active.store(true, ordering: .relaxed)
+                             },
+            NotificationCenter.default
+                .addObserver(forName: NSApplication.didResignActiveNotification,
+                             object: nil,
+                             queue: nil) { notification in
+                                shared?._active.store(false, ordering: .relaxed)
+                             },
             NotificationCenter.default
                 .addObserver(forName: NSApplication.willFinishLaunchingNotification,
                              object: nil,

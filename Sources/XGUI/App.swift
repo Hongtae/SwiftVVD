@@ -25,6 +25,14 @@ protocol AppContext: AnyObject {
     func setResource(data: (any DataProtocol)?, forURL: URL)
 
     func checkWindowActivities()
+    
+    var isActive: Bool { get }
+}
+
+extension AppContext {
+    var isActive: Bool {
+        sharedApplication()?.isActive ?? false
+    }
 }
 
 nonisolated(unsafe) var appContext: AppContext? = nil

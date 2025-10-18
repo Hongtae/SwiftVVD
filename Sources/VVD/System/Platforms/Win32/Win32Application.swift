@@ -59,13 +59,26 @@ final class Win32Application: Application, @unchecked Sendable {
 
     nonisolated(unsafe) static var shared: Win32Application? = nil
 
-    private init() {
-    }
+    private init() {}
 
     func terminate(exitCode: Int) {
         Task { @MainActor in
             self.requestExitWithCode = exitCode
         }
+    }
+
+    static var isActive: Bool {
+        let foreground = GetForegroundWindow()
+        var processID: DWORD = 0
+        let threadID = GetWindowThreadProcessId(foreground, &processID)
+        if threadID != 0 {
+            return processID == GetCurrentProcessId()
+        }
+        return false
+    }
+
+    var isActive: Bool {
+        Self.isActive
     }
 
     static func run(delegate: ApplicationDelegate?) -> Int{

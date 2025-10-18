@@ -93,7 +93,9 @@ final class UIKitApplication: Application, @unchecked Sendable {
     var delegate: ApplicationDelegate?
     var initialized = false
 
-    public func terminate(exitCode : Int) {
+    var isActive: Bool { true }
+
+    func terminate(exitCode : Int) {
         if self.initialized {
             Task { @MainActor in
                 self.delegate?.finalize(application: self)
@@ -106,7 +108,7 @@ final class UIKitApplication: Application, @unchecked Sendable {
         }
     }
 
-    public static func run(delegate: ApplicationDelegate?) -> Int {
+    static func run(delegate: ApplicationDelegate?) -> Int {
         assert(Thread.isMainThread)
 
         let app = UIKitApplication()
