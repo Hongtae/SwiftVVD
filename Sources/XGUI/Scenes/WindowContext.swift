@@ -201,6 +201,11 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
                 }
             }
         }
+        if let modifier = self.scene.inputs.modifierTypeGraph(of: _DrawDebug.self) {
+            if let drawDebug = self.scene.value(atPath: modifier) {
+                self._drawDebugInfo = drawDebug.selectedValues
+            }
+        }
     }
     
     func updateView(tick: UInt64, delta: Double, date: Date) {
@@ -294,6 +299,8 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
             window.drawFrame(context, offset: offset)
         }
     }
+    
+    private var _drawDebugInfo: _DrawDebug.Info = []
 
     private func runUpdateTask() -> Task<Void, Never> {
         Task.detached(priority: .userInitiated) { @MainActor @Sendable [weak self] in
@@ -308,6 +315,7 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
             let clearColor = VVD.Color(rgba8: (255, 255, 241, 255))
             
             var additionalDeltaTimes: Double = 0.0
+            let debugDrawEnabled = self?.style.contains(.auxiliaryWindow) == false
             
             mainLoop: while true {
                 guard let self = self else { break }
@@ -398,6 +406,32 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
                             
                             context.clear(with: clearColor)
                             self.drawFrame(context, offset: state.bounds.origin)
+
+                            if debugDrawEnabled {
+                                var offset = CGPoint(x: 5, y: 5)
+                                let drawText = { (text: Text) in
+                                    let resolvedText = context.resolve(text)
+                                    context.draw(resolvedText, at: offset, anchor: .topLeading)
+                                    offset.y += resolvedText.measure().height
+                                }
+
+                                if self._drawDebugInfo.contains(.fps) {
+                                    let d = max(delta, 0.001001) // up to 999
+                                    drawText(Text(String(format: "%.1f FPS (%f)", 1.0 / d, delta)))
+                                }
+                                if self._drawDebugInfo.contains(.thread) {
+                                    drawText(Text("thread: \(Platform.currentThreadID())"))
+                                }
+                                if self._drawDebugInfo.contains(.queue) {
+                                    drawText(Text("dispatch-queue: \(isMainQueue() ? "main" : "global")"))
+                                }
+                                if self._drawDebugInfo.contains(.appState) {
+                                    drawText(Text("app-active: \(appContext?.isActive ?? false)"))
+                                }
+                                if self._drawDebugInfo.contains(.windowState) {
+                                    drawText(Text("foreground: \(state.activated)"))
+                                }
+                            }
                             
                             if let rp = context.beginRenderPass(descriptor: renderPass,
                                                                 viewport: context.viewport) {
@@ -755,5 +789,16 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
         if let index = self.auxiliaryWindows.firstIndex(where: { $0.window === window }) {
             self.auxiliaryWindows.remove(at: index)
         }
+    }
+}
+
+public struct _WindowContextDebugDraw: EnvironmentKey {
+    public static var defaultValue: Bool { false }
+}
+
+public extension EnvironmentValues {
+    var _windowContextDebugDraw: Bool {
+        get { self[_WindowContextDebugDraw.self] }
+        set { self[_WindowContextDebugDraw.self] = newValue }
     }
 }
