@@ -326,17 +326,10 @@ private class TextViewContext: PrimitiveViewContext<Text> {
                     return glyph.advance / resolvedText.scaleFactor
                 }
             } else if proposal == .infinity {
-                return resolvedText.size()
+                return resolvedText.measure()
             } else {
-                var width: Int = .max
-                var height: Int = .max
-                if let pw = proposal.width, pw != .infinity {
-                    width = Int(pw * resolvedText.scaleFactor)
-                }
-                if let ph = proposal.height, ph != .infinity {
-                    height = Int(ph * resolvedText.scaleFactor)
-                }
-                return resolvedText.size(maxWidth: width, maxHeight: height)
+                return resolvedText.measure(maxWidth: proposal.width,
+                                            maxHeight: proposal.height)
             }
         }
         return proposal.replacingUnspecifiedDimensions()

@@ -22,15 +22,29 @@ extension GraphicsContext {
         public var shading: Shading = .foreground
 
         public func measure(in size: CGSize) -> CGSize {
-            let width = max(size.width, 0)
-            let height = max(size.height, 0)
+            let width = max(size.width, 0) * self.scaleFactor
+            let height = max(size.height, 0) * self.scaleFactor
             let maxWidth: Int = (width > CGFloat(Int.max)) ? .max : Int(width)
             let maxHeight: Int = (height > CGFloat(Int.max)) ? .max : Int(height)
-            return self.size(maxWidth: maxWidth, maxHeight: maxHeight)
+
+            let scale = 1.0 / self.scaleFactor
+            return self.sizeInPixel(maxWidth: maxWidth, maxHeight: maxHeight) * scale
+        }
+        public func measure(maxWidth: CGFloat? = nil, maxHeight: CGFloat? = nil) -> CGSize {
+            var width: Int = .max
+            var height: Int = .max
+            if let w = maxWidth {
+                width = Int(w * self.scaleFactor)
+            }
+            if let h = maxHeight {
+                height = Int(h * self.scaleFactor)
+            }
+            let scale = 1.0 / self.scaleFactor
+            return self.sizeInPixel(maxWidth: width, maxHeight: height) * scale
         }
         public func firstBaseline(in size: CGSize) -> CGFloat {
-            let width = max(size.width, 0)
-            let height = max(size.height, 0)
+            let width = max(size.width, 0) * self.scaleFactor
+            let height = max(size.height, 0) * self.scaleFactor
             let maxWidth: Int = (width > CGFloat(Int.max)) ? .max : Int(width)
             let maxHeight: Int = (height > CGFloat(Int.max)) ? .max : Int(height)
 
@@ -73,12 +87,11 @@ extension GraphicsContext {
             var height: CGFloat { ascender - descender }
         }
 
-        func size(maxWidth: Int = .max, maxHeight: Int = .max) -> CGSize {
-            let scale = 1.0 / self.scaleFactor
+        private func sizeInPixel(maxWidth: Int = .max, maxHeight: Int = .max) -> CGSize {
             return makeGlyphs(maxWidth: maxWidth, maxHeight: maxHeight)
                 .reduce(CGSize.zero) { result, line in
-                    CGSize(width: max(result.width, line.width * scale),
-                           height: result.height + line.height * scale)
+                    CGSize(width: max(result.width, line.width),
+                           height: result.height + line.height)
                 }
         }
 
@@ -491,7 +504,7 @@ extension GraphicsContext {
     public func draw(_ text: ResolvedText,
                      at point: CGPoint,
                      anchor: UnitPoint = .center) {
-        let size = text.size()
+        let size = text.measure()
         if size.width > 0 && size.height > 0 {
             let origin = CGPoint(x: point.x - size.width * anchor.x,
                                  y: point.y - size.height * anchor.y)
