@@ -170,11 +170,11 @@ extension GraphicsContext {
         let encoder = renderPass.encoder
         encoder.setRenderPipelineState(renderState)
         encoder.setDepthStencilState(depthState)
-        pipeline.defaultBindingSet2.setTexture(source, binding: 0)
-        pipeline.defaultBindingSet2.setTexture(backdrop, binding: 1)
-        pipeline.defaultBindingSet2.setSamplerState(pipeline.defaultSampler, binding: 0)
-        pipeline.defaultBindingSet2.setSamplerState(pipeline.defaultSampler, binding: 1)
-        encoder.setResource(pipeline.defaultBindingSet2, index: 0)
+        self.bindingSet2.setTexture(source, binding: 0)
+        self.bindingSet2.setTexture(backdrop, binding: 1)
+        self.bindingSet2.setSamplerState(pipeline.defaultSampler, binding: 0)
+        self.bindingSet2.setSamplerState(pipeline.defaultSampler, binding: 1)
+        encoder.setResource(self.bindingSet2, index: 0)
 
         encoder.setCullMode(.none)
         encoder.setFrontFacing(.clockwise)

@@ -15,6 +15,13 @@ public protocol CommandBuffer {
     func addCompletedHandler(_ handler: @escaping CommandBufferHandler)
     @discardableResult func commit() -> Bool
 
+    var status: CommandBufferStatus { get }
     var commandQueue: CommandQueue { get }
     var device: GraphicsDevice { get }
+}
+
+public enum CommandBufferStatus {
+    case ready
+    case encoding
+    case committed
 }

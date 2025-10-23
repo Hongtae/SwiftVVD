@@ -15,8 +15,8 @@ final class VulkanQueueFamily {
     let supportPresentation: Bool
 
     let properties: VkQueueFamilyProperties
-    var freeQueues: [VkQueue] = []
-
+    
+    private var freeQueues: [VkQueue] = []
     private let lock = NSLock()
 
     init(device: VkDevice, familyIndex: UInt32, count: UInt32, properties: VkQueueFamilyProperties, presentationSupport: Bool) {

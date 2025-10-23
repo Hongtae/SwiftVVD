@@ -106,7 +106,7 @@ final class VulkanCopyCommandEncoder: CopyCommandEncoder {
             self.encoder!.semaphores.append(sema)
         }
     }
-    
+
     func waitSemaphore(_ semaphore: VkSemaphore, value: UInt64, flags: VkPipelineStageFlags2) {
         self.encoder!.addWaitSemaphore(semaphore, value: value, flags: flags)
     }
@@ -191,11 +191,17 @@ final class VulkanCopyCommandEncoder: CopyCommandEncoder {
         region.imageExtent = VkExtent3D(width: UInt32(size.width), height: UInt32(size.height), depth: UInt32(size.depth))
         self.setupSubresource(&region.imageSubresource, origin: dstOffset, layerCount: 1, pixelFormat: pixelFormat)
 
+        let discardOldLayout = dstOffset.x == 0 && dstOffset.y == 0 && dstOffset.z == 0 &&
+                               size.width == mipDimensions.width &&
+                               size.height == mipDimensions.height &&
+                               size.depth == mipDimensions.depth
+
         let queueFamilyIndex = self.encoder!.commandBuffer.queueFamily.familyIndex
 
         let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
 
             image.setLayout(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                            discardOldLayout: discardOldLayout,
                             accessMask: VK_ACCESS_2_TRANSFER_WRITE_BIT,
                             stageBegin: VK_PIPELINE_STAGE_2_TRANSFER_BIT,
                             stageEnd: VK_PIPELINE_STAGE_2_TRANSFER_BIT,
@@ -266,6 +272,7 @@ final class VulkanCopyCommandEncoder: CopyCommandEncoder {
         let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
 
             image.setLayout(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                            discardOldLayout: false,
                             accessMask: VK_ACCESS_2_TRANSFER_READ_BIT,
                             stageBegin: VK_PIPELINE_STAGE_2_TRANSFER_BIT,
                             stageEnd: VK_PIPELINE_STAGE_2_TRANSFER_BIT,
@@ -340,11 +347,17 @@ final class VulkanCopyCommandEncoder: CopyCommandEncoder {
         region.dstOffset = VkOffset3D(x: Int32(dstOffset.x), y: Int32(dstOffset.y), z: Int32(dstOffset.z))
         region.extent = VkExtent3D(width: UInt32(size.width), height: UInt32(size.height), depth: UInt32(size.depth))
 
+        let discardOldLayout = dstOffset.x == 0 && dstOffset.y == 0 && dstOffset.z == 0 &&
+                               size.width == dstMipDimensions.width &&
+                               size.height == dstMipDimensions.height &&
+                               size.depth == dstMipDimensions.depth
+
         let queueFamilyIndex = self.encoder!.commandBuffer.queueFamily.familyIndex
 
         let command = { (commandBuffer: VkCommandBuffer, state: inout EncodingState) in
 
             srcImage.setLayout(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                               discardOldLayout: false,
                                accessMask: VK_ACCESS_2_TRANSFER_READ_BIT,
                                stageBegin: VK_PIPELINE_STAGE_2_TRANSFER_BIT,
                                stageEnd: VK_PIPELINE_STAGE_2_TRANSFER_BIT,
@@ -352,6 +365,7 @@ final class VulkanCopyCommandEncoder: CopyCommandEncoder {
                                commandBuffer: commandBuffer)
 
             dstImage.setLayout(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                               discardOldLayout: discardOldLayout,
                                accessMask: VK_ACCESS_2_TRANSFER_WRITE_BIT,
                                stageBegin: VK_PIPELINE_STAGE_2_TRANSFER_BIT,
                                stageEnd: VK_PIPELINE_STAGE_2_TRANSFER_BIT,

@@ -24,11 +24,24 @@ final class MetalCommandBuffer: CommandBuffer {
     var encoders: [MetalCommandEncoder] = []
     var completedHandlers: [CommandBufferHandler] = []
 
+    private let lock = NSLock()
+    private var _status: CommandBufferStatus
+    var status: CommandBufferStatus { self.lock.withLock { _status } }
+    
     init(queue: MetalCommandQueue) {
         self.commandQueue = queue
+        self._status = .ready
     }
 
     func makeRenderCommandEncoder(descriptor: RenderPassDescriptor) -> RenderCommandEncoder? {
+        self.lock.lock()
+        defer { self.lock.unlock() }
+
+        if self._status != .ready {
+            Log.err("CommandBuffer.makeRenderCommandEncoder failed: CommandBuffer is not in ready state.")
+            return nil
+        }
+
         if descriptor.colorAttachments.isEmpty && descriptor.depthStencilAttachment.renderTarget == nil {
             Log.err("RenderPassDescriptor must have at least one color or depth/stencil attachment.")
             return nil
@@ -185,22 +198,46 @@ final class MetalCommandBuffer: CommandBuffer {
             }
         }
 
+        self._status = .encoding
         return MetalRenderCommandEncoder(buffer: self, descriptor: desc)
     }
 
     func makeComputeCommandEncoder() -> ComputeCommandEncoder? {
+        self.lock.lock()
+        defer { self.lock.unlock() }
+        if self._status != .ready {
+            Log.err("CommandBuffer.makeComputeCommandEncoder failed: CommandBuffer is not in ready state.")
+            return nil
+        }
+        self._status = .encoding
         return MetalComputeCommandEncoder(buffer: self)
     }
 
     func makeCopyCommandEncoder() -> CopyCommandEncoder? {
+        self.lock.lock()
+        defer { self.lock.unlock() }
+        if self._status != .ready {
+            Log.err("CommandBuffer.makeCopyCommandEncoder failed: CommandBuffer is not in ready state.")
+            return nil
+        }
+        self._status = .encoding
         return MetalCopyCommandEncoder(buffer: self)
     }
 
     func addCompletedHandler(_ handler: @escaping CommandBufferHandler) {
-        self.completedHandlers.append(handler)
+        self.lock.withLock {
+            self.completedHandlers.append(handler)
+        }
     }
 
     func commit() -> Bool {
+        self.lock.lock()
+        defer { self.lock.unlock() }
+        if self._status != .ready {
+            Log.err("CommandBuffer.commit failed: CommandBuffer is not in ready state.")
+            return false
+        }
+
         if let queue = (self.commandQueue as? MetalCommandQueue)?.queue {
             if let buffer = queue.makeCommandBuffer() {
 
@@ -211,10 +248,16 @@ final class MetalCommandBuffer: CommandBuffer {
                 }
 
                 buffer.addCompletedHandler { _ in
-                    self.completedHandlers.forEach { $0(self) }
+                    let handlers = self.lock.withLock {
+                        assert(self._status == .committed)
+                        self._status = .ready
+                        return self.completedHandlers
+                    }
+                    handlers.forEach { $0(self) }
                 }
 
                 buffer.commit()
+                self._status = .committed
                 return true
             }
         }
@@ -222,7 +265,13 @@ final class MetalCommandBuffer: CommandBuffer {
     }
 
     func endEncoder(_ encoder: MetalCommandEncoder) {
-        self.encoders.append(encoder)
+        self.lock.withLock {
+            if self._status != .encoding {
+                Log.warning("CommandBuffer was not in encoding state.")
+            }
+            self._status = .ready
+            self.encoders.append(encoder)
+        }
     }
 }
 #endif //if ENABLE_METAL

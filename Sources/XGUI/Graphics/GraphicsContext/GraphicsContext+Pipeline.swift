@@ -124,8 +124,8 @@ class GraphicsPipelineStates {
     let device: GraphicsDevice
     private let shaderFunctions: [_Shader: ShaderFunctions]
 
-    let defaultBindingSet1: ShaderBindingSet    // 1 texture
-    let defaultBindingSet2: ShaderBindingSet    // 2 textures
+    let bindingLayout1: ShaderBindingSetLayout  // 1 texture layout
+    let bindingLayout2: ShaderBindingSetLayout  // 2 textures layout
     let defaultSampler: SamplerState
     let defaultMaskTexture: Texture // 2x2 r8
 
@@ -249,16 +249,24 @@ class GraphicsPipelineStates {
         return nil
     }
 
+    func makeBindingSet1() -> ShaderBindingSet? {
+        device.makeShaderBindingSet(layout: bindingLayout1)
+    }
+
+    func makeBindingSet2() -> ShaderBindingSet? {
+        device.makeShaderBindingSet(layout: bindingLayout2)
+    }
+
     private init(device: GraphicsDevice,
                  shaderFunctions: [_Shader: ShaderFunctions],
-                 defaultBindingSet1: ShaderBindingSet,
-                 defaultBindingSet2: ShaderBindingSet,
+                 bindingLayout1: ShaderBindingSetLayout,
+                 bindingLayout2: ShaderBindingSetLayout,
                  defaultSampler: SamplerState,
                  defaultMaskTexture: Texture) {
         self.device = device
         self.shaderFunctions = shaderFunctions
-        self.defaultBindingSet1 = defaultBindingSet1
-        self.defaultBindingSet2 = defaultBindingSet2
+        self.bindingLayout1 = bindingLayout1
+        self.bindingLayout2 = bindingLayout2
         self.defaultSampler = defaultSampler
         self.defaultMaskTexture = defaultMaskTexture
         self.renderStates = [:]
@@ -378,15 +386,6 @@ class GraphicsPipelineStates {
                     ShaderBinding(binding: 1, type: .textureSampler, arrayLength: 1),
                 ])
 
-            guard let defaultBindingSet1 = device.makeShaderBindingSet(layout: bindingLayout1)
-            else {
-                throw LoadError(message: "makeShaderBindingSet failed.")
-            }
-            guard let defaultBindingSet2 = device.makeShaderBindingSet(layout: bindingLayout2)
-            else {
-                throw LoadError(message: "makeShaderBindingSet failed.")
-            }
-
             let samplerDesc = SamplerDescriptor(minFilter: .linear,
                                                 magFilter: .linear)
             guard let defaultSampler = device.makeSamplerState(descriptor: samplerDesc)
@@ -448,8 +447,8 @@ class GraphicsPipelineStates {
             instance = GraphicsPipelineStates(
                 device: device,
                 shaderFunctions: shaderFunctions,
-                defaultBindingSet1: defaultBindingSet1,
-                defaultBindingSet2: defaultBindingSet2,
+                bindingLayout1: bindingLayout1,
+                bindingLayout2: bindingLayout2,
                 defaultSampler: defaultSampler,
                 defaultMaskTexture: defaultMaskTexture)
 
@@ -640,9 +639,9 @@ extension GraphicsContext {
         encoder.setRenderPipelineState(renderState)
         encoder.setDepthStencilState(depthState)
         if let texture {
-            pipeline.defaultBindingSet1.setTexture(texture, binding: 0)
-            pipeline.defaultBindingSet1.setSamplerState(pipeline.defaultSampler, binding: 0)
-            encoder.setResource(pipeline.defaultBindingSet1, index: 0)
+            self.bindingSet1.setTexture(texture, binding: 0)
+            self.bindingSet1.setSamplerState(pipeline.defaultSampler, binding: 0)
+            encoder.setResource(self.bindingSet1, index: 0)
         }
 
         encoder.setCullMode(.none)

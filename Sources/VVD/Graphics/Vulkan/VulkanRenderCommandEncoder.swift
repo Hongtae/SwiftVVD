@@ -26,9 +26,9 @@ final class VulkanRenderCommandEncoder: RenderCommandEncoder {
         var renderingInfo: VkRenderingInfo
         var viewport: VkViewport
         var scissorRect: VkRect2D
-        var colorAttachments: [VulkanImageView]
+        var colorAttachments: [(VulkanImageView, VkAttachmentLoadOp)]
         var colorResolveTargets: [VulkanImageView]
-        var depthStencilAttachment: VulkanImageView?
+        var depthStencilAttachment: (VulkanImageView, VkAttachmentLoadOp)?
         var depthStencilResolveTarget: VulkanImageView?
         var _bufferHolder: TemporaryBufferHolder
     }
@@ -65,8 +65,8 @@ final class VulkanRenderCommandEncoder: RenderCommandEncoder {
             self.setupCommands.reserveCapacity(self.initialNumberOfCommands)
             self.cleanupCommands.reserveCapacity(self.initialNumberOfCommands)
 
-            let colorAttachments = context.colorAttachments + context.colorResolveTargets
-            let depthStencilAttachments = [context.depthStencilAttachment, context.depthStencilResolveTarget].compactMap { $0 }
+            let colorAttachments = context.colorAttachments.map(\.0) + context.colorResolveTargets
+            let depthStencilAttachments = [context.depthStencilAttachment?.0, context.depthStencilResolveTarget].compactMap { $0 }
 
             for rt in colorAttachments {
                 if rt.image != nil {
@@ -116,6 +116,7 @@ final class VulkanRenderCommandEncoder: RenderCommandEncoder {
                 let accessMask = VulkanImage.commonAccessMask(forLayout: layout)
 
                 image.setLayout(layout,
+                                discardOldLayout: false,
                                 accessMask: accessMask,
                                 stageBegin: VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT,
                                 stageEnd: VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT,
@@ -127,10 +128,15 @@ final class VulkanRenderCommandEncoder: RenderCommandEncoder {
             assert(context.colorAttachments.isEmpty == false || context.depthStencilAttachment != nil,
                    "RenderPass must have at least one color or depth/stencil attachment.")
 
-            for colorAttachment in context.colorAttachments {
+            let discardOldLayoutFromLoadOp = { (loadOp: VkAttachmentLoadOp) in
+                loadOp.rawValue & (VK_ATTACHMENT_LOAD_OP_DONT_CARE.rawValue | VK_ATTACHMENT_LOAD_OP_CLEAR.rawValue) != 0
+            }
+
+            for (colorAttachment, loadOp) in context.colorAttachments {
                 if let image = colorAttachment.image {
                     image.setLayout(
                         VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                        discardOldLayout: discardOldLayoutFromLoadOp(loadOp),
                         accessMask: VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
                         stageBegin: VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                         stageEnd: VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
@@ -142,6 +148,7 @@ final class VulkanRenderCommandEncoder: RenderCommandEncoder {
                 if let image = resolveTarget.image {
                     image.setLayout(
                         VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                        discardOldLayout: true,
                         accessMask: VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
                         stageBegin: VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                         stageEnd: VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
@@ -149,18 +156,22 @@ final class VulkanRenderCommandEncoder: RenderCommandEncoder {
                         commandBuffer: commandBuffer)
                 }
             }
-            if let image = context.depthStencilAttachment?.image {
-                image.setLayout(
-                    VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-                    accessMask: VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-                    stageBegin: VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
-                    stageEnd: VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-                    queueFamilyIndex: self.commandBuffer.queueFamily.familyIndex,
-                    commandBuffer: commandBuffer)
+            if let (attachment, loadOp) = context.depthStencilAttachment {
+                if let image = attachment.image {
+                    image.setLayout(
+                        VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                        discardOldLayout: discardOldLayoutFromLoadOp(loadOp),
+                        accessMask: VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                        stageBegin: VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
+                        stageEnd: VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                        queueFamilyIndex: self.commandBuffer.queueFamily.familyIndex,
+                        commandBuffer: commandBuffer)
+                }
             }
             if let image = context.depthStencilResolveTarget?.image {
                 image.setLayout(
                     VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                    discardOldLayout: true,
                     accessMask: VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
                     stageBegin: VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
                     stageEnd: VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
@@ -606,10 +617,7 @@ final class VulkanRenderCommandEncoder: RenderCommandEncoder {
                 dependencyInfo.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO
                 dependencyInfo.memoryBarrierCount = 1
                 dependencyInfo.pMemoryBarriers = pMemoryBarriers
-
-                withUnsafePointer(to: dependencyInfo) { pDependencyInfo in
-                    vkCmdPipelineBarrier2(commandBuffer, pDependencyInfo)
-                }
+                vkCmdPipelineBarrier2(commandBuffer, &dependencyInfo)
             }
         }
         self.encoder!.commands.append(command)

@@ -55,6 +55,7 @@ final class VulkanComputeCommandEncoder: ComputeCommandEncoder {
                 let accessMask = VulkanImage.commonAccessMask(forLayout: layout)
 
                 image.setLayout(layout,
+                                discardOldLayout: false,
                                 accessMask: accessMask,
                                 stageBegin: VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                                 stageEnd: VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
@@ -68,7 +69,7 @@ final class VulkanComputeCommandEncoder: ComputeCommandEncoder {
                 cmd(commandBuffer, &state)
             }
             return true
-        }        
+        }
     }
     
     private var encoder: Encoder?
@@ -203,10 +204,7 @@ final class VulkanComputeCommandEncoder: ComputeCommandEncoder {
                 dependencyInfo.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO
                 dependencyInfo.memoryBarrierCount = 1
                 dependencyInfo.pMemoryBarriers = pMemoryBarriers
-
-                withUnsafePointer(to: dependencyInfo) { pDependencyInfo in
-                    vkCmdPipelineBarrier2(commandBuffer, pDependencyInfo)
-                }
+                vkCmdPipelineBarrier2(commandBuffer, &dependencyInfo)
             }
         }
         self.encoder!.commands.append(command)

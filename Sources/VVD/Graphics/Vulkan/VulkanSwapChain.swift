@@ -458,8 +458,7 @@ final class VulkanSwapChain: SwapChain, @unchecked Sendable {
     private func updateDeviceIfNeeded() {
         let needUpdate = self.lock.withLock { self.deviceReset }
         if needUpdate {
-            let device = self.queue.device as! VulkanGraphicsDevice
-            vkDeviceWaitIdle(device.device)
+            self.queue.waitIdle()
 
             if self.updateDevice() == false {
                 Log.error("VulkanSwapChain.updateDevice() failed.")
@@ -577,6 +576,7 @@ final class VulkanSwapChain: SwapChain, @unchecked Sendable {
                 if let encoder = buffer.makeCopyCommandEncoder() as? VulkanCopyCommandEncoder {
                     encoder.callback { commandBuffer in
                         image.setLayout(VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                                        discardOldLayout: false,
                                         accessMask: VK_ACCESS_2_NONE,
                                         stageBegin: VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                                         stageEnd: VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
@@ -616,12 +616,17 @@ final class VulkanSwapChain: SwapChain, @unchecked Sendable {
                         presentInfo.pWaitSemaphores = $0.baseAddress
                         presentInfo.waitSemaphoreCount = UInt32($0.count)
 
-                        return vkQueuePresentKHR(self.queue.queue, &presentInfo)
+                        return self.queue.withVkQueue { queue in
+                            vkQueuePresentKHR(queue, &presentInfo)
+                        }
                     }
                 } else {
                     presentInfo.pWaitSemaphores = nil
                     presentInfo.waitSemaphoreCount = 0
-                    return vkQueuePresentKHR(self.queue.queue, &presentInfo)
+
+                    return self.queue.withVkQueue { queue in
+                        vkQueuePresentKHR(queue, &presentInfo)
+                    }
                 }
             }
         }
@@ -654,7 +659,9 @@ final class VulkanSwapChain: SwapChain, @unchecked Sendable {
                 submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2
                 submitInfo.signalSemaphoreInfoCount = 1
                 submitInfo.pSignalSemaphoreInfos = pSignalSemaphoreInfo
-                return vkQueueSubmit2(self.queue.queue, 1, &submitInfo, nil)
+                return self.queue.withVkQueue { queue in
+                    vkQueueSubmit2(queue, 1, &submitInfo, nil)
+                }
             }
             if r != VK_SUCCESS {
                 Log.err("vkQueueSubmit2 failed: \(err)")            

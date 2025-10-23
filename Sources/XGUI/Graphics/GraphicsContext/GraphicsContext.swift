@@ -44,6 +44,9 @@ public struct GraphicsContext {
     let commandBuffer: CommandBuffer
     let pipeline: GraphicsPipelineStates
 
+    let bindingSet1: ShaderBindingSet // for 1-texture
+    let bindingSet2: ShaderBindingSet // for 2-textures
+
     init?(sharedContext: SharedContext,
           environment: EnvironmentValues,
           viewport: CGRect,
@@ -79,6 +82,16 @@ public struct GraphicsContext {
         }
         self.pipeline = pipeline
         self.maskTexture = pipeline.defaultMaskTexture
+        guard let bindingSet1 = pipeline.makeBindingSet1() else {
+            Log.error("Failed to make bindingSet1")
+            return nil
+        }
+        self.bindingSet1 = bindingSet1
+        guard let bindingSet2 = pipeline.makeBindingSet2() else {
+            Log.error("Failed to make bindingSet2")
+            return nil
+        }
+        self.bindingSet2 = bindingSet2
 
         self.contentOffset = .zero
         self.viewTransform = .identity

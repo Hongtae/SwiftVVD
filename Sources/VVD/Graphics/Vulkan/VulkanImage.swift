@@ -36,6 +36,7 @@ final class VulkanImage {
         var stageMaskBegin: VkPipelineStageFlags2
         var stageMaskEnd: VkPipelineStageFlags2
         var queueFamilyIndex: UInt32
+        var lastUpdatedThread: Platform.ThreadID
     }
     private let layoutLock = NSLock()
     private var layoutInfo: LayoutAccessInfo
@@ -57,7 +58,8 @@ final class VulkanImage {
                                            accessMask: VK_ACCESS_2_NONE,
                                            stageMaskBegin: VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                                            stageMaskEnd: VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                                           queueFamilyIndex: VK_QUEUE_FAMILY_IGNORED)
+                                           queueFamilyIndex: VK_QUEUE_FAMILY_IGNORED,
+                                           lastUpdatedThread: 0)
 
         if layoutInfo.layout == VK_IMAGE_LAYOUT_UNDEFINED || layoutInfo.layout == VK_IMAGE_LAYOUT_PREINITIALIZED {
             layoutInfo.stageMaskEnd = VK_PIPELINE_STAGE_2_HOST_BIT
@@ -90,7 +92,8 @@ final class VulkanImage {
                                            accessMask: VK_ACCESS_2_NONE,
                                            stageMaskBegin: VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                                            stageMaskEnd: VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                                           queueFamilyIndex: VK_QUEUE_FAMILY_IGNORED)
+                                           queueFamilyIndex: VK_QUEUE_FAMILY_IGNORED,
+                                           lastUpdatedThread: 0)
     }
 
     deinit {
@@ -174,9 +177,10 @@ final class VulkanImage {
         }
         return nil
     }
-
+    
     @discardableResult
     func setLayout(_ layout: VkImageLayout,
+                   discardOldLayout: Bool,
                    accessMask: VkAccessFlags2,
                    stageBegin: VkPipelineStageFlags2, // this barrier's dst-stage
                    stageEnd: VkPipelineStageFlags2,   // next barrier's src-stage
@@ -192,7 +196,7 @@ final class VulkanImage {
         barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2
         barrier.srcAccessMask = layoutInfo.accessMask
         barrier.dstAccessMask = accessMask
-        barrier.oldLayout = layoutInfo.layout
+        barrier.oldLayout = discardOldLayout ? VK_IMAGE_LAYOUT_UNDEFINED : layoutInfo.layout
         barrier.newLayout = layout
         barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED
         barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED
@@ -234,19 +238,30 @@ final class VulkanImage {
             dependencyInfo.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO
             dependencyInfo.imageMemoryBarrierCount = 1
             dependencyInfo.pImageMemoryBarriers = pImageMemoryBarriers
-
-            withUnsafePointer(to: dependencyInfo) { pDependencyInfo in
-                vkCmdPipelineBarrier2(commandBuffer, pDependencyInfo)
-            }
+            vkCmdPipelineBarrier2(commandBuffer, &dependencyInfo)
         }
-        
-        let oldLayout = self.layoutInfo.layout
+
+        let oldLayoutInfo = self.layoutInfo
         self.layoutInfo.layout = layout
         self.layoutInfo.stageMaskBegin = stageBegin
         self.layoutInfo.stageMaskEnd = stageEnd
         self.layoutInfo.accessMask = accessMask
         self.layoutInfo.queueFamilyIndex = queueFamilyIndex
-        return oldLayout
+        self.layoutInfo.lastUpdatedThread = Platform.currentThreadID()
+
+        if let recovery = VulkanCommandBuffer.recovery {
+            recovery.addHandler { [weak self] in
+                guard let self = self else { return }
+                self.layoutLock.withLock {
+                    if self.layoutInfo.lastUpdatedThread != Platform.currentThreadID() {
+                        Log.err("VulkanImage layout recovery failed: accessed from different thread.")
+                        return
+                    }
+                    self.layoutInfo = oldLayoutInfo
+                }
+            }
+        }
+        return oldLayoutInfo.layout
     }
 
     func layout() -> VkImageLayout {

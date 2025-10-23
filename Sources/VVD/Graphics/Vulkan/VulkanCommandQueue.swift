@@ -13,10 +13,9 @@ final class VulkanCommandQueue: CommandQueue, @unchecked Sendable {
 
     let device: GraphicsDevice
     let flags: CommandQueueFlags
-
-    let queue: VkQueue
     let family: VulkanQueueFamily
 
+    private let queue: VkQueue
     private let lock = NSLock()
 
     init(device: VulkanGraphicsDevice, family: VulkanQueueFamily, queue: VkQueue) {
@@ -105,7 +104,13 @@ final class VulkanCommandQueue: CommandQueue, @unchecked Sendable {
 
     @discardableResult
     func waitIdle() -> Bool { 
-        self.lock.withLock { vkQueueWaitIdle(self.queue) == VK_SUCCESS }
+        self.lock.withLock { vkQueueWaitIdle(self.queue) } == VK_SUCCESS
+    }
+
+    func withVkQueue<T>(_ body: (VkQueue) throws -> T) rethrows -> T {
+        try self.lock.withLock {
+            try body(self.queue)
+        }
     }
 }
 #endif //if ENABLE_VULKAN
