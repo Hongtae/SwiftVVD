@@ -21,7 +21,9 @@ typealias UUID = Foundation.UUID
 let detachedServiceTasks = Mutex<[UUID:String]>([:])
 
 func appFinalize() {
-    var timer = TickCounter.now
+    let timeout = DispatchTimeInterval.milliseconds(2500)
+    var timestamp = DispatchTime.now()
+
     while true {
         let next = RunLoop.main.limitDate(forMode: .default)
         if let next = next, next.timeIntervalSinceNow <= 0.0 {
@@ -30,12 +32,12 @@ func appFinalize() {
 
         let tasks: [UUID:String] = detachedServiceTasks.withLock { $0 }
         if tasks.isEmpty == false {
-            if timer.elapsed > 2.5 {
+            if DispatchTime.now() > timestamp + timeout {
                 Log.info("Waiting for system service threads to finish. (\(tasks.count))")
                 tasks.values.forEach { task in
                     Log.debug(" -- Task: \(task)")
                 }
-                timer.reset()
+                timestamp = DispatchTime.now()
             }
             Platform.threadYield()
             continue
@@ -94,14 +96,6 @@ extension Platform {
 
     public static func currentThreadID() -> ThreadID {
         return VVDThreadCurrentId()
-    }
-
-    public static func tickFrequency() -> UInt64 {
-        return VVDTimerSystemTickFrequency()
-    }
-
-    public static func tick() -> UInt64 {
-        return VVDTimerSystemTick()
     }
 }
 

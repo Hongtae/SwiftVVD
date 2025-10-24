@@ -305,8 +305,21 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
     private func runUpdateTask() -> Task<Void, Never> {
         Task.detached(priority: .userInitiated) { @MainActor @Sendable [weak self] in
             Log.info("WindowContext<\(Content.self)> update task is started.")
-            var tickCounter = TickCounter.now
-            
+
+            var timestamp = DispatchTime.now()
+
+            let elapsed = {
+                let now = DispatchTime.now()
+                let delta = Double(now.uptimeNanoseconds - timestamp.uptimeNanoseconds)
+                return delta * 0.000_000_001
+            }
+            let resetTimestamp = {
+                let now = DispatchTime.now()
+                let delta = Double(now.uptimeNanoseconds - timestamp.uptimeNanoseconds)
+                timestamp = now
+                return delta * 0.000_000_001
+            }
+
             var contentBounds: CGRect = .null
             var contentScaleFactor: CGFloat = 1
             var renderTargets: GraphicsContext.RenderTargets? = nil
@@ -325,12 +338,12 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
                 let (state, config) = self.stateConfig.withLock {
                     ($0.state, $0.config)
                 }
-                
-                let delta = tickCounter.reset() + additionalDeltaTimes
-                let tick = tickCounter.timestamp
+
+                let delta = resetTimestamp() + additionalDeltaTimes
+                let tick = timestamp.uptimeNanoseconds
                 let date = Date(timeIntervalSinceNow: 0)
                 additionalDeltaTimes = 0.0
-                
+
                 guard let view = self.view, view.isValid
                 else {
                     if state.visible, let swapChain {
@@ -350,7 +363,7 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
                     repeat {
                         if Task.isCancelled { break mainLoop }
                         await Task.yield()
-                    } while tickCounter.elapsed < frameInterval
+                    } while elapsed() < frameInterval
                     continue
                 }
 
@@ -463,10 +476,10 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
                 repeat {
                     if Task.isCancelled { break mainLoop }
                     await Task.yield()
-                } while tickCounter.elapsed < frameInterval - timeForBusyWait
+                } while elapsed() < frameInterval - timeForBusyWait
                 
                 // busy waiting, remaining time is too short to yield.
-                while tickCounter.elapsed < frameInterval {
+                while elapsed() < frameInterval {
                     if Task.isCancelled { break mainLoop }
                     Platform.threadYield()
                 }
