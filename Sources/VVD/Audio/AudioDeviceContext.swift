@@ -21,7 +21,6 @@ public final class AudioDeviceContext: @unchecked Sendable {
         nonisolated(unsafe) weak var player: AudioPlayer?
     }
     private let players = Mutex<[Player]>([])
-    private let lock = NSLock()
 
     private var task: Task<Void, Never>?
 
