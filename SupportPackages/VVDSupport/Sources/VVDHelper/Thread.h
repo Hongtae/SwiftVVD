@@ -14,7 +14,6 @@ extern "C"
 {
 #endif /* __cplusplus */
 
-void VVDThreadSleep(double d);
 void VVDThreadYield();
 uintptr_t VVDThreadCurrentId();
 

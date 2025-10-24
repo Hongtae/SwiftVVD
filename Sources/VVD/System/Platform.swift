@@ -86,10 +86,6 @@ public class Platform {
 extension Platform {
     public typealias ThreadID = UInt
 
-    public static func threadSleep(_ d: Double) {
-        VVDThreadSleep(d)
-    }
-
     public static func threadYield() {
         VVDThreadYield()
     }
