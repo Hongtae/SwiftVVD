@@ -24,4 +24,15 @@ public struct PlatformFactoryWayland: PlatformFactory {
     }
 }
 
+#if os(Linux)
+#if swift(>=6.3)
+#else
+// https://github.com/swiftlang/swift/issues/75670
+@_cdecl("_ZN5swift9threading5fatalEPKcz")
+func swiftThreadingFatal() {
+    fatalError("swiftThreadingFatal")
+}
+#endif
+#endif
+
 #endif //if ENABLE_WAYLAND

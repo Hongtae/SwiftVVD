@@ -20,6 +20,7 @@ var xdgSurfaceListener = xdg_surface_listener(
 
         Task { @MainActor in 
             window.xdgSurfaceConfigured = true
+            window.postWindowEvent(type: .resized)
         }
     }
 )
@@ -37,6 +38,10 @@ var xdgToplevelListener = xdg_toplevel_listener(
     configure_bounds: { data, topLevel, width, height in
         let window = unsafeBitCast(data, to: AnyObject.self) as! WaylandWindow
         Log.debug("xdg_toplevel_listener.configure_bounds (width:\(width), height:\(height))")
+    },
+    wm_capabilities: { data, topLevel, capabilities in
+        let window = unsafeBitCast(data, to: AnyObject.self) as! WaylandWindow
+        Log.debug("xdg_toplevel_listener.wm_capabilities")
     }
 )
 

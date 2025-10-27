@@ -87,7 +87,8 @@ private var seatListener = wl_seat_listener(
         }
     },
     name: { data, seat, name in
-        Log.debug("wl_seat_listener.name: \(String(describing: name))")
+        let n = if let name { String(cString: name) } else { "" }
+        Log.debug("wl_seat_listener.name: \(n)")
     }
 )
 
@@ -167,6 +168,9 @@ private var keyboardListener = wl_keyboard_listener(
 final class WaylandApplication: Application, @unchecked Sendable {
 
     var activationPolicy: ActivationPolicy = .regular
+    var isActive: Bool {
+        return true
+    }
 
     private(set) var display: OpaquePointer?
     private(set) var registry: OpaquePointer?
@@ -193,13 +197,15 @@ final class WaylandApplication: Application, @unchecked Sendable {
         var result = 0
 
         while true {
+            wl_display_flush(display)
+
             while wl_display_prepare_read(display) != 0 {
                 wl_display_dispatch_pending(display)
             }
-            wl_display_flush(display)
+
             wl_display_read_events(display)
             wl_display_dispatch_pending(display)
-
+            
             if let code = app.requestExitWithCode {
                 result = code
                 break
@@ -225,20 +231,20 @@ final class WaylandApplication: Application, @unchecked Sendable {
     static var shared: WaylandApplication? = nil
 
     typealias WeakWindow = WeakObject<WaylandWindow>
-
     private var windowSurfaceMap: [OpaquePointer: WeakWindow] = [:]
+
     func bindSurface(_ surface: OpaquePointer?, with window: WaylandWindow) {
         if let surface = surface {
-            windowSurfaceMap[surface] = WeakWindow(window: window)
+            windowSurfaceMap[surface] = WeakWindow(window)
         }
     }
     func window(forSurface surface: OpaquePointer?) -> WaylandWindow? {
-        if let surface = surface { return windowSurfaceMap[surface]?.window }
+        if let surface = surface { return windowSurfaceMap[surface]?.value }
         return nil
     }
     func updateSurfaces() {
-        let activeWindows = self.windowSurfaceMap.compactMapValues { $0.window }
-        self.windowSurfaceMap = activeWindows.mapValues { WeakWindow(window: $0) }
+        let activeWindows = self.windowSurfaceMap.compactMapValues { $0.value }
+        self.windowSurfaceMap = activeWindows.mapValues { WeakWindow($0) }
     }
 
     private init?() {
@@ -256,7 +262,6 @@ final class WaylandApplication: Application, @unchecked Sendable {
         }
 
         wl_registry_add_listener(registry, &registryListener, unsafeBitCast(self as AnyObject, to: UnsafeMutableRawPointer.self))
-        // wl_display_dispatch(display)
         wl_display_roundtrip(display)
 
         if self.compositor == nil || self.shell == nil {
