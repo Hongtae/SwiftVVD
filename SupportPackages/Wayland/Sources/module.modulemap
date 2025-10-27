@@ -1,0 +1,3 @@
+module Wayland {
+    header "wayland.h"
+}

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "xdg-shell-client-protocol.h"
+#include "protocols/xdg-shell-client.h"
 
 /*
   Helper macro for Swift.

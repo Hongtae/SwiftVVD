@@ -1,3 +1,3 @@
 #ifdef ENABLE_WAYLAND
-#include "xdg-shell-protocol.c"
+#include "protocols/xdg-shell-private.c"
 #endif

@@ -6,15 +6,14 @@ import PackageDescription
 let package = Package(
     name: "Wayland",
     products: [
-        .library(name: "Wayland", targets: ["Wayland"]),
+        .library(name: "Wayland", type: .static, targets: ["Wayland"]),
     ],
-    dependencies: [],
     targets: [
         .target(name: "Wayland",
-            path: ".",
-            exclude: ["Sources/xdg-shell-protocol.c"],
-            sources: ["Sources"],
-            publicHeadersPath: "Sources",
+            path: "Sources",
+            exclude: ["protocols"],
+            sources: ["wayland.c"],
+            publicHeadersPath: ".",
             cSettings: [
                 .define("ENABLE_WAYLAND", .when(platforms: [.linux]))
             ]
