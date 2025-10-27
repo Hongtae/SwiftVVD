@@ -148,7 +148,7 @@ public class GraphicsDeviceContext {
 }
 
 public enum GraphicsAPI {
-    case auto, vulkan, metal, d3d12
+    case auto, vulkan, metal
 }
 
 public func makeGraphicsDeviceContext(api: GraphicsAPI = .auto) -> GraphicsDeviceContext? {
