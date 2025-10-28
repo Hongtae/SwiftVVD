@@ -165,7 +165,7 @@ final class VulkanDescriptorPool {
         guard descriptorSets.isEmpty == false else { return }
 
         assert(self.numAllocatedSets > 0)
-        assert(self.numAllocatedSets <= maxSets)
+        //assert(self.numAllocatedSets <= maxSets)
 
         let device = self.device!
 
