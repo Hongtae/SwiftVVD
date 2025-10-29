@@ -12,7 +12,18 @@ public protocol CommandBuffer {
     func makeComputeCommandEncoder() -> ComputeCommandEncoder?
     func makeCopyCommandEncoder() -> CopyCommandEncoder?
 
+    // Encodes a command that blocks all subsequent passes until the event is signaled.
+    // The command buffer state must be ready.
+    func encodeWaitEvent(_ event: GPUEvent)
+    func encodeSignalEvent(_ event: GPUEvent)
+
+    // Encodes a command that blocks all subsequent passes until the semaphore equals or exceeds a value.
+    // The command buffer state must be ready.
+    func encodeWaitSemaphore(_ semaphore: GPUSemaphore, value: UInt64)
+    func encodeSignalSemaphore(_ semaphore: GPUSemaphore, value: UInt64)
+
     func addCompletedHandler(_ handler: @escaping CommandBufferHandler)
+    
     @discardableResult func commit() -> Bool
 
     var status: CommandBufferStatus { get }

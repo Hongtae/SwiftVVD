@@ -17,12 +17,19 @@ class MetalCommandEncoder {
     }
 }
 
-final class MetalCommandBuffer: CommandBuffer {
+final class MetalCommandBuffer: CommandBuffer, @unchecked Sendable {
     let commandQueue: CommandQueue
     var device: GraphicsDevice   { commandQueue.device }
 
-    var encoders: [MetalCommandEncoder] = []
-    var completedHandlers: [CommandBufferHandler] = []
+    private enum Encoding {
+        case encoder(MetalCommandEncoder)
+        case waitEvent(MetalEvent)
+        case signalEvent(MetalEvent)
+        case waitSemaphore(MetalSemaphore, UInt64)
+        case signalSemaphore(MetalSemaphore, UInt64)
+    }
+    private var encodings: [Encoding] = []
+    private var completedHandlers: [CommandBufferHandler] = []
 
     private let lock = NSLock()
     private var _status: CommandBufferStatus
@@ -224,6 +231,50 @@ final class MetalCommandBuffer: CommandBuffer {
         return MetalCopyCommandEncoder(buffer: self)
     }
 
+    func encodeWaitEvent(_ event: any GPUEvent) {
+        assert(event is MetalEvent)
+        self.lock.lock()
+        defer { self.lock.unlock() }
+
+        assert(self._status == .ready, "CommandBuffer must be in ready state.")
+        if let event = event as? MetalEvent {
+            self.encodings.append(.waitEvent(event))
+        }
+    }
+    
+    func encodeSignalEvent(_ event: any GPUEvent) {
+        assert(event is MetalEvent)
+        self.lock.lock()
+        defer { self.lock.unlock() }
+
+        assert(self._status == .ready, "CommandBuffer must be in ready state.")
+        if let event = event as? MetalEvent {
+            self.encodings.append(.signalEvent(event))
+        }
+    }
+    
+    func encodeWaitSemaphore(_ sema: any GPUSemaphore, value: UInt64) {
+        assert(sema is MetalSemaphore)
+        self.lock.lock()
+        defer { self.lock.unlock() }
+
+        assert(self._status == .ready, "CommandBuffer must be in ready state.")
+        if let semaphore = sema as? MetalSemaphore {
+            self.encodings.append(.waitSemaphore(semaphore, value))
+        }
+    }
+    
+    func encodeSignalSemaphore(_ sema: any GPUSemaphore, value: UInt64) {
+        assert(sema is MetalSemaphore)
+        self.lock.lock()
+        defer { self.lock.unlock() }
+
+        assert(self._status == .ready, "CommandBuffer must be in ready state.")
+        if let semaphore = sema as? MetalSemaphore {
+            self.encodings.append(.signalSemaphore(semaphore, value))
+        }
+    }
+
     func addCompletedHandler(_ handler: @escaping CommandBufferHandler) {
         self.lock.withLock {
             self.completedHandlers.append(handler)
@@ -241,9 +292,22 @@ final class MetalCommandBuffer: CommandBuffer {
         if let queue = (self.commandQueue as? MetalCommandQueue)?.queue {
             if let buffer = queue.makeCommandBuffer() {
 
-                for enc in self.encoders {
-                    if enc.encode(buffer) == false {
-                        return false
+                for encoding in self.encodings {
+                    switch encoding {
+                    case .waitEvent(let event):
+                        buffer.encodeWaitForEvent(event.event,
+                                                  value: event.nextWaitValue())
+                    case .signalEvent(let event):
+                        buffer.encodeSignalEvent(event.event,
+                                                 value: event.nextSignalValue())
+                    case .waitSemaphore(let semaphore, let value):
+                        buffer.encodeWaitForEvent(semaphore.event, value: value)
+                    case .signalSemaphore(let semaphore, let value):
+                        buffer.encodeSignalEvent(semaphore.event, value: value)
+                    case .encoder(let encoder):
+                        if encoder.encode(buffer) == false {
+                            return false
+                        }
                     }
                 }
 
@@ -270,7 +334,7 @@ final class MetalCommandBuffer: CommandBuffer {
                 Log.warning("CommandBuffer was not in encoding state.")
             }
             self._status = .ready
-            self.encoders.append(encoder)
+            self.encodings.append(.encoder(encoder))
         }
     }
 }

@@ -49,18 +49,21 @@ final class VulkanCommandBuffer: CommandBuffer, @unchecked Sendable {
     let device: GraphicsDevice   
     private let lock = NSLock()
 
-    // parallel execution for each encoder (separated command buffers)
-    var useParallelExecution: Bool = false
-
     private let commandPool: VkCommandPool
-
-    private var encoders: [VulkanCommandEncoder] = []
     private var retainedCommandBuffers: [VkCommandBuffer] = []
-
     private var completedHandlers: [CommandBufferHandler] = []
 
     private var _status: CommandBufferStatus
     var status: CommandBufferStatus { self.lock.withLock { _status } }
+
+    private enum Encoding {
+        case encoder(VulkanCommandEncoder)
+        case waitSemaphore(VulkanSemaphore)
+        case signalSemaphore(VulkanSemaphore)
+        case waitTimelineSemaphore(VulkanTimelineSemaphore, UInt64)
+        case signalTimelineSemaphore(VulkanTimelineSemaphore, UInt64)
+    }
+    private var encodings: [Encoding] = []
 
     class Recovery: @unchecked Sendable {
         var handlers: [() -> Void] = []
@@ -327,6 +330,50 @@ final class VulkanCommandBuffer: CommandBuffer, @unchecked Sendable {
         return VulkanCopyCommandEncoder(buffer: self)
     }
 
+    func encodeWaitEvent(_ event: GPUEvent) {
+        assert(event is VulkanSemaphore)
+        self.lock.lock()
+        defer { self.lock.unlock() }
+
+        assert(self._status == .ready, "CommandBuffer must be in ready state.")
+        if let semaphore = event as? VulkanSemaphore {
+            self.encodings.append(.waitSemaphore(semaphore))
+        }
+    }
+
+    func encodeSignalEvent(_ event: GPUEvent) {
+        assert(event is VulkanSemaphore)
+        self.lock.lock()
+        defer { self.lock.unlock() }
+
+        assert(self._status == .ready, "CommandBuffer must be in ready state.")
+        if let semaphore = event as? VulkanSemaphore {
+            self.encodings.append(.signalSemaphore(semaphore))
+        }
+    }
+
+    func encodeWaitSemaphore(_ sema: GPUSemaphore, value: UInt64) {
+        assert(sema is VulkanTimelineSemaphore)
+        self.lock.lock()
+        defer { self.lock.unlock() }
+
+        assert(self._status == .ready, "CommandBuffer must be in ready state.")
+        if let semaphore = sema as? VulkanTimelineSemaphore {
+            self.encodings.append(.waitTimelineSemaphore(semaphore, value))
+        }
+    }
+
+    func encodeSignalSemaphore(_ sema: GPUSemaphore, value: UInt64) {    
+        assert(sema is VulkanTimelineSemaphore)
+        self.lock.lock()
+        defer { self.lock.unlock() }
+
+        assert(self._status == .ready, "CommandBuffer must be in ready state.")
+        if let semaphore = sema as? VulkanTimelineSemaphore {
+            self.encodings.append(.signalTimelineSemaphore(semaphore, value))
+        }
+    }
+
     func addCompletedHandler(_ handler: @escaping CommandBufferHandler) {
         self.lock.withLock {
             completedHandlers.append(handler)
@@ -363,12 +410,13 @@ final class VulkanCommandBuffer: CommandBuffer, @unchecked Sendable {
             recovery.handlers.removeAll()
         }
 
+        // for use across multiple submissions
         var waitSemaphores: [VkSemaphore: VulkanCommandEncoder.TimelineSemaphoreStageValue] = [:]
         var signalSemaphores: [VkSemaphore: VulkanCommandEncoder.TimelineSemaphoreStageValue] = [:]
 
-        // reserve storage for semaphores.
-        let numWaitSemaphores = self.encoders.reduce(0) { max($0, $1.waitSemaphores.count) }
-        waitSemaphores.reserveCapacity(numWaitSemaphores)
+        // for use within a single submission (batch)
+        var batchWaitSemaphores: [VkSemaphore: VulkanCommandEncoder.TimelineSemaphoreStageValue] = [:]
+        var batchSignalSemaphores: [VkSemaphore: VulkanCommandEncoder.TimelineSemaphoreStageValue] = [:]
 
         let closeSubmission = {
             var commandBufferSubmitInfos: [VkCommandBufferSubmitInfo] = []
@@ -384,7 +432,15 @@ final class VulkanCommandBuffer: CommandBuffer, @unchecked Sendable {
                 commandBuffer = nil
             }
 
-            if commandBufferSubmitInfos.isEmpty == false || signalSemaphores.isEmpty == false {
+            var batchSignal = signalSemaphores
+            batchSignal.merge(batchSignalSemaphores) { (current, new) in
+                var merged = current
+                merged.value = max(current.value, new.value)
+                merged.stages |= new.stages
+                return merged
+            }
+
+            if commandBufferSubmitInfos.isEmpty == false || batchSignal.isEmpty == false {
                 var submitInfo = VkSubmitInfo2()
                 submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2
 
@@ -408,71 +464,126 @@ final class VulkanCommandBuffer: CommandBuffer, @unchecked Sendable {
                     semaphoreSubmitInfo.deviceIndex = 0
                     return semaphoreSubmitInfo
                 }
-                if waitSemaphores.isEmpty == false {
-                    let waitSemaphoreInfos = waitSemaphores.map(transformSemaphoreSubmitInfo)
+
+                var batchWait = waitSemaphores
+                batchWait.merge(batchWaitSemaphores) { (current, new) in
+                    var merged = current
+                    merged.value = max(current.value, new.value)
+                    merged.stages |= new.stages
+                    return merged
+                }
+
+                if batchWait.isEmpty == false {
+                    let waitSemaphoreInfos = batchWait.map(transformSemaphoreSubmitInfo)
                     submitInfo.waitSemaphoreInfoCount = UInt32(waitSemaphoreInfos.count)
                     submitInfo.pWaitSemaphoreInfos = unsafePointerCopy(collection: waitSemaphoreInfos, holder: bufferHolder)
                 }
-                if signalSemaphores.isEmpty == false {
-                    let signalSemaphoreInfos = signalSemaphores.map(transformSemaphoreSubmitInfo)
+                if batchSignal.isEmpty == false {
+                    let signalSemaphoreInfos = batchSignal.map(transformSemaphoreSubmitInfo)
                     submitInfo.signalSemaphoreInfoCount = UInt32(signalSemaphoreInfos.count)
                     submitInfo.pSignalSemaphoreInfos = unsafePointerCopy(collection: signalSemaphoreInfos, holder: bufferHolder)
                 }
                 submitInfos.append(submitInfo)
+
+                batchWaitSemaphores.removeAll(keepingCapacity: true)
+                batchSignalSemaphores.removeAll(keepingCapacity: true)
                 signalSemaphores.removeAll(keepingCapacity: true)
             }
         }
 
         cleanup()
-        for encoder in self.encoders {
-            if encoder.waitSemaphores.isEmpty == false || encoder.signalSemaphores.isEmpty == false {
-                closeSubmission()
-            }
+        for encoding in self.encodings {
+            switch encoding {
+            case .waitSemaphore(let semaphore):
+                if signalSemaphores.isEmpty == false {
+                    closeSubmission()
+                }
+                waitSemaphores[semaphore.semaphore] = .init(
+                    stages: VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                    value: 0)
+            case .signalSemaphore(let semaphore):
+                signalSemaphores[semaphore.semaphore] = .init(
+                    stages: VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                    value: 0)
+            case .waitTimelineSemaphore(let semaphore, let value):
+                if signalSemaphores.isEmpty == false {
+                    closeSubmission()
+                }
+                if var p = waitSemaphores[semaphore.semaphore] {
+                    p.value = max(p.value, value)
+                    p.stages |= VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT
+                    waitSemaphores[semaphore.semaphore] = p
+                } else {
+                    waitSemaphores[semaphore.semaphore] = .init(
+                        stages: VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                        value: value)
+                }
+            case .signalTimelineSemaphore(let semaphore, let value):
+                if var p = signalSemaphores[semaphore.semaphore] {
+                    p.value = max(p.value, value)
+                    p.stages |= VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT
+                    signalSemaphores[semaphore.semaphore] = p
+                } else {
+                    signalSemaphores[semaphore.semaphore] = .init(
+                        stages: VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                        value: value)
+                }
+            case .encoder(let encoder):
+                if signalSemaphores.isEmpty == false {
+                    closeSubmission()
+                }
+                if encoder.waitSemaphores.isEmpty == false {
+                    closeSubmission()
+                }
 
-            // merge wait semaphores
-            waitSemaphores.merge(encoder.waitSemaphores) { (current, new) in
-                var merged = current
-                merged.value = max(current.value, new.value)
-                merged.stages |= new.stages
-                return merged
-            }
-            signalSemaphores = encoder.signalSemaphores
+                assert(signalSemaphores.isEmpty)
+                assert(batchSignalSemaphores.isEmpty)
 
-            if commandBuffer == nil {
-                var bufferInfo = VkCommandBufferAllocateInfo()
-                bufferInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO
-                bufferInfo.commandPool = self.commandPool
-                bufferInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY
-                bufferInfo.commandBufferCount = 1
+                // merge wait semaphores
+                batchWaitSemaphores.merge(encoder.waitSemaphores) { (current, new) in
+                    var merged = current
+                    merged.value = max(current.value, new.value)
+                    merged.stages |= new.stages
+                    return merged
+                }
+                batchSignalSemaphores = encoder.signalSemaphores
 
-                let err = vkAllocateCommandBuffers(device.device, &bufferInfo, &commandBuffer)
-                if err != VK_SUCCESS {
-                    Log.err("vkAllocateCommandBuffers failed: \(err)")
+                if commandBuffer == nil {
+                    var bufferInfo = VkCommandBufferAllocateInfo()
+                    bufferInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO
+                    bufferInfo.commandPool = self.commandPool
+                    bufferInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY
+                    bufferInfo.commandBufferCount = 1
+
+                    let err = vkAllocateCommandBuffers(device.device, &bufferInfo, &commandBuffer)
+                    if err != VK_SUCCESS {
+                        Log.err("vkAllocateCommandBuffers failed: \(err)")
+                        revertChanges()
+                        cleanup()
+                        return false
+                    }
+
+                    self.retainedCommandBuffers.append(commandBuffer!)
+
+                    var commandBufferBeginInfo = VkCommandBufferBeginInfo()
+                    commandBufferBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
+                    commandBufferBeginInfo.flags = .init(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT.rawValue)
+                    vkBeginCommandBuffer(commandBuffer, &commandBufferBeginInfo)
+                }
+
+                let result = Self.$recovery.withValue(recovery) {
+                    encoder.encode(commandBuffer: commandBuffer!)
+                }
+                if result == false {
+                    Log.err("CommandBuffer commit failed: Encoder error.")
                     revertChanges()
                     cleanup()
                     return false
                 }
 
-                self.retainedCommandBuffers.append(commandBuffer!)
-
-                var commandBufferBeginInfo = VkCommandBufferBeginInfo()
-                commandBufferBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
-                commandBufferBeginInfo.flags = .init(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT.rawValue)
-                vkBeginCommandBuffer(commandBuffer, &commandBufferBeginInfo)
-            }
-
-            let result = Self.$recovery.withValue(recovery) {
-                encoder.encode(commandBuffer: commandBuffer!)
-            }
-            if result == false {
-                Log.err("CommandBuffer commit failed: Encoder error.")
-                revertChanges()
-                cleanup()
-                return false
-            }
-
-            if useParallelExecution {
-                closeSubmission()
+                if batchSignalSemaphores.isEmpty == false {
+                    closeSubmission()
+                }
             }
         }
         closeSubmission()
@@ -507,7 +618,7 @@ final class VulkanCommandBuffer: CommandBuffer, @unchecked Sendable {
                 Log.warning("CommandBuffer was not in encoding state.")
             }
             self._status = .ready
-            self.encoders.append(encoder)
+            self.encodings.append(.encoder(encoder))
         }
     }
 
