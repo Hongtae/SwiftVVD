@@ -16,13 +16,13 @@
 #define HAVE_SSE3
 #define HAVE_SSE4_1
 #define HAVE_SSE_INTRINSICS
+#define HAVE_CPUID_H
 #endif
 
 #define HAVE_OSS
 #define HAVE_WAVE
 #define HAVE_DLFCN_H
 #define HAVE_MALLOC_H
-#define HAVE_CPUID_H
 #define HAVE_GCC_GET_CPUID
 
 #define HAVE_PTHREAD_SETSCHEDPARAM
