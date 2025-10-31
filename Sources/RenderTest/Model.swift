@@ -632,13 +632,17 @@ fileprivate func loadMeshes(_ context: LoaderContext) {
                 let buffer = context.model.buffers[bufferView.buffer]
 
                 let vertexStride = accessor.ByteStride(bufferView)
-                let bufferOffset = bufferView.byteOffset
+                var bufferOffset = bufferView.byteOffset
                 var attribOffset = 0
-                if accessor.byteOffset < vertexStride {
-                    attribOffset = accessor.byteOffset  // interleaved
+                if bufferView.byteStride > 0 {
+                    // separate
+                    bufferOffset += accessor.byteOffset
                 } else {
-                    attribOffset += accessor.byteOffset
+                    // packed (interleaved)
+                    attribOffset = accessor.byteOffset
                 }
+                assert(vertexStride > 0)
+                assert(attribOffset < vertexStride)
 
                 if accessor.componentType == TINYGLTF_COMPONENT_TYPE_DOUBLE {
                     Log.error("Vertex component type for Double(Float64) is not supported!")

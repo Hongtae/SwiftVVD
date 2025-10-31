@@ -53,7 +53,7 @@ class RenderTestApp: ApplicationDelegate, WindowDelegate, @unchecked Sendable {
         CGSize(width: 100, height: 100)
     }
 
-    func shouldCloseWindow(_ window: Window) -> Bool {
+    func shouldClose(window: Window) -> Bool {
         // stop render thread
         sharedApplication()?.terminate(exitCode: 1234)
         return true
@@ -71,8 +71,8 @@ class RenderTestApp: ApplicationDelegate, WindowDelegate, @unchecked Sendable {
         let device = queue.device
 
         // load shader
-        let vsPath = appResourcesRoot + "/shaders/sample.vert.spv"
-        let fsPath = appResourcesRoot + "/shaders/sample.frag.spv"
+        let vsPath = appResourcesRoot + "/Shaders/sample.vert.spv"
+        let fsPath = appResourcesRoot + "/Shaders/sample.frag.spv"
         guard let vertexShader = loadShader(from: vsPath, device: device) else {
             fatalError("Failed to load vertex shader")
         }
