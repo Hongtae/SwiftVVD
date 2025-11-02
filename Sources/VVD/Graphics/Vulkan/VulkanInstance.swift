@@ -261,8 +261,10 @@ final class VulkanInstance {
         if enableValidation {
             requiredLayers.append("VK_LAYER_KHRONOS_validation")
             requiredExtensions.append(VK_EXT_DEBUG_UTILS_EXTENSION_NAME)
+            optionalExtensions.append(VK_EXT_DEVICE_ADDRESS_BINDING_REPORT_EXTENSION_NAME)
         } else if enableDebugUtils {
             requiredExtensions.append(VK_EXT_DEBUG_UTILS_EXTENSION_NAME)
+            optionalExtensions.append(VK_EXT_DEVICE_ADDRESS_BINDING_REPORT_EXTENSION_NAME)
         }
 
         requiredExtensions.append(VK_KHR_SURFACE_EXTENSION_NAME)
@@ -337,6 +339,7 @@ final class VulkanInstance {
             let enabledFeatures: [VkValidationFeatureEnableEXT] = [
                 VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_EXT,
                 VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_RESERVE_BINDING_SLOT_EXT,
+                VK_VALIDATION_FEATURE_ENABLE_DEBUG_PRINTF_EXT,
                 VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT,
             ]
 
@@ -408,7 +411,8 @@ final class VulkanInstance {
             debugUtilsMessengerCreateInfo.messageType = UInt32(
                 VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT.rawValue |
                 VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT.rawValue |
-                VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT.rawValue)
+                VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT.rawValue |
+                VK_DEBUG_UTILS_MESSAGE_TYPE_DEVICE_ADDRESS_BINDING_BIT_EXT.rawValue )
 
             debugUtilsMessengerCreateInfo.pUserData = nil
             debugUtilsMessengerCreateInfo.pfnUserCallback = debugUtilsMessengerCallback
