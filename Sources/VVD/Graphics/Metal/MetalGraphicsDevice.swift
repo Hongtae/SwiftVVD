@@ -27,6 +27,25 @@ final class MetalGraphicsDevice: GraphicsDevice {
         }
     }
 
+    init?(_ selector: (String) -> Bool) {
+        var device: MTLDevice? = nil
+
+#if os(macOS) || targetEnvironment(macCatalyst)
+        let devices = MTLCopyAllDevices()
+        for dev in devices {
+            if selector(dev.name) {
+                device = dev
+                break
+            }
+        }
+#endif
+        if let device {
+            self.device = device
+        } else {
+            return nil
+        }
+    }
+
     init?(name: String) {
         var device: MTLDevice? = nil
 
@@ -47,7 +66,7 @@ final class MetalGraphicsDevice: GraphicsDevice {
             }
         }
 
-        if let device = device {
+        if let device {
             self.device = device
         } else {
             return nil

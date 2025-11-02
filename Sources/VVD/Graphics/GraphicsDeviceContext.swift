@@ -151,6 +151,17 @@ public enum GraphicsAPI {
     case auto, vulkan, metal
 }
 
+nonisolated(unsafe)
+fileprivate var deviceNamePrefix: String? = {
+    if let arg = CommandLine.arguments.first(where: { $0.lowercased().hasPrefix("--gpu-device-prefix=")}) {
+        let parts = arg.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+        if parts.count == 2 {
+            return String(parts[1]).lowercased()
+        }
+    }
+    return nil
+}()
+
 public func makeGraphicsDeviceContext(api: GraphicsAPI = .auto) -> GraphicsDeviceContext? {
     if api == .vulkan || api == .auto {
 #if ENABLE_VULKAN
@@ -161,7 +172,19 @@ public func makeGraphicsDeviceContext(api: GraphicsAPI = .auto) -> GraphicsDevic
         }
 #endif
         if let instance = VulkanInstance(enableValidation: enableValidation) {
-            if let device = instance.makeDevice() {
+            var device: VulkanGraphicsDevice? = nil
+            if let deviceNamePrefix {
+                for physicalDevice in instance.physicalDevices {
+                    if physicalDevice.name.lowercased().hasPrefix(deviceNamePrefix) {
+                        device = instance.makeDevice(identifier: physicalDevice.registryID)
+                        break
+                    }
+                }
+            }
+            if device == nil {
+                device = instance.makeDevice()
+            }                    
+            if let device {
                 return GraphicsDeviceContext(device: device)
             }
         }
@@ -169,7 +192,16 @@ public func makeGraphicsDeviceContext(api: GraphicsAPI = .auto) -> GraphicsDevic
     }
     if api == .metal || api == .auto {
 #if ENABLE_METAL
-        if let device = MetalGraphicsDevice() {
+        var device: MetalGraphicsDevice? = nil
+        if let deviceNamePrefix {
+            device = MetalGraphicsDevice { name in
+                name.lowercased().hasPrefix(deviceNamePrefix)
+            }
+        }
+        if device == nil {
+            device = MetalGraphicsDevice()
+        }
+        if let device {
             return GraphicsDeviceContext(device: device)
         }
 #endif        
