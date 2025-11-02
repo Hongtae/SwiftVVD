@@ -270,7 +270,7 @@ final class VulkanSwapChain: SwapChain, @unchecked Sendable {
         }
 
         // Determine the number of images
-        var desiredNumberOfSwapchainImages: UInt32 = surfaceCaps.minImageCount + 1
+        var desiredNumberOfSwapchainImages: UInt32 = max(surfaceCaps.minImageCount, 2)
         if surfaceCaps.maxImageCount > 0 && desiredNumberOfSwapchainImages > surfaceCaps.maxImageCount {
             desiredNumberOfSwapchainImages = surfaceCaps.maxImageCount
         }

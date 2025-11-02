@@ -25,7 +25,7 @@ final class VulkanPhysicalDeviceDescription: CustomStringConvertible {
             String(cString: $0.baseAddress!.assumingMemoryBound(to: CChar.self))
         }
     }()
-    var venderID: UInt32 { self.properties.vendorID }
+    var vendorID: UInt32 { self.properties.vendorID }
     var deviceID: UInt32 { self.properties.deviceID }
 
     private(set) lazy var registryID: String = {
@@ -53,6 +53,16 @@ final class VulkanPhysicalDeviceDescription: CustomStringConvertible {
     private(set) var extensions: [String: UInt32]
 
     func hasExtension(_ name: String) -> Bool { self.extensions[name] != nil }
+
+    var deviceType: DeviceType {
+        switch self.properties.deviceType {
+        case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:    return .integratedGPU
+        case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:      return .discreteGPU
+        case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:       return .virtualGPU
+        case VK_PHYSICAL_DEVICE_TYPE_CPU:               return .cpu
+        default:                                        return .unknown
+        }
+    }
 
     init(device: VkPhysicalDevice) {
         self.device = device
