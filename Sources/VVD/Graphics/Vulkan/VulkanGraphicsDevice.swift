@@ -242,7 +242,9 @@ final class VulkanGraphicsDevice: GraphicsDevice, @unchecked Sendable {
         }
 
         // init memory pools
-        let memoryAllocationContext = VulkanMemoryAllocationContext(device: self.device) {
+        let memoryAllocationContext = VulkanMemoryAllocationContext(
+            device: self.device, 
+            atomSize: self.properties.limits.nonCoherentAtomSize) {
             instance.allocationCallbacks
         }
         self.memoryPools = self.deviceMemoryTypes.enumerated().map { index, type in

@@ -21,6 +21,7 @@ struct VulkanMemoryBlock {
 
 struct VulkanMemoryAllocationContext {
     let device: VkDevice
+    let atomSize: VkDeviceSize
     let allocationCallbacks: ()->UnsafePointer<VkAllocationCallbacks>?
 }
 
@@ -45,14 +46,23 @@ final class VulkanMemoryChunk {
         if self.mapped != nil &&
            (propertyFlags & UInt32(VK_MEMORY_PROPERTY_HOST_COHERENT_BIT.rawValue)) == 0 {
             if offset < chunkSize {
+                let atomSize = context.atomSize
+                let alignUp = { (value: UInt64) -> UInt64 in
+                    return value % atomSize == 0 ? value : value + atomSize - (value % atomSize)
+                }
+
                 var range = VkMappedMemoryRange()
                 range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE
                 range.memory = memory
-                range.offset = offset
+                // VUID-VkMappedMemoryRange-offset-00687
+                range.offset = alignUp(offset)
                 if size == VK_WHOLE_SIZE {
                     range.size = size
                 } else {
-                    range.size = min(size, chunkSize - offset)
+                    // VUID-VkMappedMemoryRange-size-01390
+                    let begin = alignUp(offset)
+                    let end = alignUp(offset + size)
+                    range.size = min(end - begin, chunkSize - begin)
                 }
                 let result = vkInvalidateMappedMemoryRanges(context.device, 1, &range)
                 if result == VK_SUCCESS {
@@ -73,14 +83,23 @@ final class VulkanMemoryChunk {
            (propertyFlags & UInt32(VK_MEMORY_PROPERTY_HOST_COHERENT_BIT.rawValue)) == 0 {
            
             if offset < chunkSize {
+                let atomSize = context.atomSize
+                let alignUp = { (value: UInt64) -> UInt64 in
+                    return value % atomSize == 0 ? value : value + atomSize - (value % atomSize)
+                }
+
                 var range = VkMappedMemoryRange()
                 range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE
                 range.memory = memory
-                range.offset = offset
+                // VUID-VkMappedMemoryRange-offset-00687
+                range.offset = alignUp(offset)
                 if size == VK_WHOLE_SIZE {
                     range.size = size
                 } else {
-                    range.size = min(size, chunkSize - offset)
+                    // VUID-VkMappedMemoryRange-size-01389
+                    let begin = alignUp(offset)
+                    let end = alignUp(offset + size)
+                    range.size = min(end - begin, chunkSize - begin)
                 }
                 let result = vkFlushMappedMemoryRanges(context.device, 1, &range)
                 if result == VK_SUCCESS {
@@ -120,6 +139,9 @@ final class VulkanMemoryChunk {
          blockSize: UInt64,
          totalBlocks: UInt64,
          dedicated: Bool) {
+        let atomSize = context.atomSize
+        assert(chunkSize % atomSize == 0)
+
         self.context = context
         self.pool = pool
         self.allocator = allocator
