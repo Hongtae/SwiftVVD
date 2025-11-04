@@ -38,6 +38,8 @@ final class VulkanPhysicalDeviceDescription: CustomStringConvertible {
     private(set) var maxQueues: UInt
 
     private(set) var properties: VkPhysicalDeviceProperties
+    private(set) var deviceIDProperties: VkPhysicalDeviceIDProperties
+    private(set) var deviceDriverProperties: VkPhysicalDeviceDriverProperties
     private(set) var extendedDynamicState3Properties: VkPhysicalDeviceExtendedDynamicState3PropertiesEXT 
 
     private(set) var features: VkPhysicalDeviceFeatures
@@ -53,6 +55,27 @@ final class VulkanPhysicalDeviceDescription: CustomStringConvertible {
     private(set) var extensions: [String: UInt32]
 
     func hasExtension(_ name: String) -> Bool { self.extensions[name] != nil }
+
+    var deviceUUID: UUID {
+        UUID(uuid: self.deviceIDProperties.deviceUUID)
+    }
+    var driverUUID: UUID {
+        UUID(uuid: self.deviceIDProperties.driverUUID)
+    }
+    var driverName: String {
+        withUnsafeBytes(of: self.deviceDriverProperties.driverName) {
+            String(cString: $0.baseAddress!.assumingMemoryBound(to: CChar.self))
+        }
+    }
+    var driverInfo: String {
+        withUnsafeBytes(of: self.deviceDriverProperties.driverInfo) {
+            String(cString: $0.baseAddress!.assumingMemoryBound(to: CChar.self))
+        }
+    }
+    var conformanceVersion: (major: UInt8, minor: UInt8, subminor: UInt8, patch: UInt8) {
+        let v = self.deviceDriverProperties.conformanceVersion
+        return (v.major, v.minor, v.subminor, v.patch)
+    }
 
     var deviceType: DeviceType {
         switch self.properties.deviceType {
@@ -72,6 +95,10 @@ final class VulkanPhysicalDeviceDescription: CustomStringConvertible {
         self.devicePriority = 0
 
         self.properties = VkPhysicalDeviceProperties()
+        self.deviceIDProperties = VkPhysicalDeviceIDProperties()
+        self.deviceIDProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES
+        self.deviceDriverProperties = VkPhysicalDeviceDriverProperties()
+        self.deviceDriverProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES
         self.extendedDynamicState3Properties = VkPhysicalDeviceExtendedDynamicState3PropertiesEXT()
         self.extendedDynamicState3Properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_3_PROPERTIES_EXT
 
@@ -115,7 +142,9 @@ final class VulkanPhysicalDeviceDescription: CustomStringConvertible {
 
         var properties = VkPhysicalDeviceProperties2()
         properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2
-        properties.pNext = UnsafeMutableRawPointer(mutating: unsafePointerCopy(from: self.extendedDynamicState3Properties, holder: tempHolder))
+        appendNextChain(&properties, unsafePointerCopy(from: self.extendedDynamicState3Properties, holder: tempHolder))
+        appendNextChain(&properties, unsafePointerCopy(from: self.deviceIDProperties, holder: tempHolder))
+        appendNextChain(&properties, unsafePointerCopy(from: self.deviceDriverProperties, holder: tempHolder))
 
         vkGetPhysicalDeviceProperties2(device, &properties)
         self.properties = properties.properties
@@ -124,6 +153,12 @@ final class VulkanPhysicalDeviceDescription: CustomStringConvertible {
             if sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_3_PROPERTIES_EXT {
                 self.extendedDynamicState3Properties =
                     ptr.bindMemory(to: VkPhysicalDeviceExtendedDynamicState3PropertiesEXT.self, capacity: 1).pointee
+            }
+            if sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES {
+                self.deviceIDProperties = ptr.bindMemory(to: VkPhysicalDeviceIDProperties.self, capacity: 1).pointee
+            }
+            if sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES {
+                self.deviceDriverProperties = ptr.bindMemory(to: VkPhysicalDeviceDriverProperties.self, capacity: 1).pointee
             }
         }
 
@@ -252,6 +287,14 @@ final class VulkanPhysicalDeviceDescription: CustomStringConvertible {
         for (index, name) in self.extensions.keys.sorted().enumerated() {
             desc += "\n -- Device Extension[\(index)]: \"\(name)\" (Version: \(self.extensions[name]!))"
         }
+        desc += "\n -- Device UUID: \(self.deviceUUID.uuidString)"
+        desc += "\n -- Driver UUID: \(self.driverUUID.uuidString)"
+        var driverInfo = self.driverName
+        if !self.driverInfo.isEmpty {
+            driverInfo += " (\(self.driverInfo))"
+        }
+        let cv = self.conformanceVersion
+        desc += "\n -- Driver: \(driverInfo), Conformance Version: \(cv.major).\(cv.minor).\(cv.subminor).\(cv.patch)"
         return desc
     }
 }
