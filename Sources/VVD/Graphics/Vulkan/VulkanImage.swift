@@ -145,10 +145,10 @@ final class VulkanImage {
 
             imageViewCreateInfo.format = format.vkFormat()
             imageViewCreateInfo.components = VkComponentMapping(
-                r: VK_COMPONENT_SWIZZLE_R,
-                g: VK_COMPONENT_SWIZZLE_G,
-                b: VK_COMPONENT_SWIZZLE_B,
-                a: VK_COMPONENT_SWIZZLE_A)
+                r: VK_COMPONENT_SWIZZLE_IDENTITY,
+                g: VK_COMPONENT_SWIZZLE_IDENTITY,
+                b: VK_COMPONENT_SWIZZLE_IDENTITY,
+                a: VK_COMPONENT_SWIZZLE_IDENTITY)
 
             let pixelFormat = self.pixelFormat
             if pixelFormat.isColorFormat {

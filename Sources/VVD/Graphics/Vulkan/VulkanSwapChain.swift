@@ -368,10 +368,10 @@ final class VulkanSwapChain: SwapChain, @unchecked Sendable {
             imageViewCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO
             imageViewCreateInfo.format = self.surfaceFormat.format
             imageViewCreateInfo.components = VkComponentMapping(
-                r: VK_COMPONENT_SWIZZLE_R,
-                g: VK_COMPONENT_SWIZZLE_G,
-                b: VK_COMPONENT_SWIZZLE_B,
-                a: VK_COMPONENT_SWIZZLE_A)
+                r: VK_COMPONENT_SWIZZLE_IDENTITY,
+                g: VK_COMPONENT_SWIZZLE_IDENTITY,
+                b: VK_COMPONENT_SWIZZLE_IDENTITY,
+                a: VK_COMPONENT_SWIZZLE_IDENTITY)
 
             imageViewCreateInfo.subresourceRange.aspectMask = VkImageAspectFlags(VK_IMAGE_ASPECT_COLOR_BIT.rawValue)
             imageViewCreateInfo.subresourceRange.baseMipLevel = 0

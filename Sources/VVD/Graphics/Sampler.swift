@@ -39,6 +39,9 @@ public struct SamplerDescriptor {
     public var normalizedCoordinates: Bool
 
     // comparison function used when sampling texels from a depth texture.
+    // NOTE: Some drivers have bugs that cause them to perform comparisons even
+    //       when the texture is not a depth texture.
+    //       Therefore, we will set the default value to .always.
     public var compareFunction: CompareFunction
 
     public init(addressModeU: SamplerAddressMode = .clampToEdge,
@@ -51,7 +54,7 @@ public struct SamplerDescriptor {
                 lodMaxClamp: Float = .greatestFiniteMagnitude, // 3.402823466e+38 // FLT_MAX
                 maxAnisotropy: Int = 1,
                 normalizedCoordinates: Bool = true,
-                compareFunction: CompareFunction = .never) {
+                compareFunction: CompareFunction = .always) {
         self.addressModeU = addressModeU
         self.addressModeV = addressModeV
         self.addressModeW = addressModeW
