@@ -45,6 +45,19 @@ var xdgToplevelListener = xdg_toplevel_listener(
     }
 )
 
+nonisolated(unsafe)
+var xdgToplevelDecorationListener = zxdg_toplevel_decoration_v1_listener(
+    configure: { data, decoration, mode in
+        let window = unsafeBitCast(data, to: AnyObject.self) as! WaylandWindow
+        let modeStr = mode == ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE.rawValue ? "server-side" : "client-side"
+        Log.debug("zxdg_toplevel_decoration_v1_listener.configure (mode: \(modeStr))")
+        
+        Task { @MainActor in
+            window.decorationMode = mode
+        }
+    }
+)
+
 
 @MainActor
 final class WaylandWindow: Window {
@@ -94,8 +107,10 @@ final class WaylandWindow: Window {
 
     nonisolated(unsafe) private var xdgSurface: OpaquePointer?
     nonisolated(unsafe) private var xdgToplevel: OpaquePointer?
+    nonisolated(unsafe) private var xdgToplevelDecoration: OpaquePointer?
 
     fileprivate var xdgSurfaceConfigured = false
+    fileprivate var decorationMode: UInt32 = ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE.rawValue
 
     required init?(name: String, style: WindowStyle, delegate: WindowDelegate?, data: [String: Any]) {
         guard let app = WaylandApplication.shared else {
@@ -132,6 +147,17 @@ final class WaylandWindow: Window {
         self.xdgToplevel = xdg_surface_get_toplevel(self.xdgSurface)
         xdg_toplevel_add_listener(self.xdgToplevel, &xdgToplevelListener, context)
         xdg_toplevel_set_title(self.xdgToplevel, name)
+        
+        // Request server-side decoration if available
+        if let decorationManager = app.decorationManager {
+            self.xdgToplevelDecoration = zxdg_decoration_manager_v1_get_toplevel_decoration(decorationManager, self.xdgToplevel)
+            if let decoration = self.xdgToplevelDecoration {
+                zxdg_toplevel_decoration_v1_add_listener(decoration, &xdgToplevelDecorationListener, context)
+                zxdg_toplevel_decoration_v1_set_mode(decoration, ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE.rawValue)
+                Log.debug("Requested server-side decoration for window: \(name)")
+            }
+        }
+        
         wl_surface_commit(self.surface)
 
         Task { @MainActor in
@@ -147,6 +173,11 @@ final class WaylandWindow: Window {
             }
         }
 
+        // Destroy in reverse order of creation
+        // The decoration object must be destroyed before the toplevel
+        if let decoration = self.xdgToplevelDecoration {
+            zxdg_toplevel_decoration_v1_destroy(decoration)
+        }
         xdg_toplevel_destroy(self.xdgToplevel)
         xdg_surface_destroy(self.xdgSurface)
         wl_surface_destroy(self.surface)

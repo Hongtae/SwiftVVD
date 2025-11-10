@@ -1,6 +1,7 @@
 #pragma once
 
 #include "protocols/xdg-shell-client.h"
+#include "protocols/xdg-decoration-client.h"
 
 /*
   Helper macro for Swift.
@@ -33,3 +34,7 @@ WL_INTERFACE_PTR(wl_subsurface_interface);
 
 /* xdg-shell */
 WL_INTERFACE_PTR(xdg_wm_base_interface);
+
+/* xdg-decoration */
+WL_INTERFACE_PTR(zxdg_decoration_manager_v1_interface);
+WL_INTERFACE_PTR(zxdg_toplevel_decoration_v1_interface);

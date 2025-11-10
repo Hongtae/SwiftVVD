@@ -37,6 +37,10 @@ private var registryListener = wl_registry_listener(
             app.shell = .init(shell)
             xdg_wm_base_add_listener(app.shell, &xdgWmBaseListener, data)
         }
+        else if strcmp(interface!, zxdg_decoration_manager_v1_interface.name) == 0 {
+            let decorationManager = wl_registry_bind(registry, name, zxdg_decoration_manager_v1_interface_ptr, min(version, 1))
+            app.decorationManager = .init(decorationManager)
+        }
         else if strcmp(interface!, wl_seat_interface.name) == 0 {
             let seat = wl_registry_bind(registry, name, wl_seat_interface_ptr, min(version, 5))
             app.seat = .init(seat)
@@ -176,6 +180,7 @@ final class WaylandApplication: Application, @unchecked Sendable {
     private(set) var registry: OpaquePointer?
     fileprivate(set) var compositor: OpaquePointer?
     fileprivate(set) var shell: OpaquePointer?
+    fileprivate(set) var decorationManager: OpaquePointer?
     fileprivate(set) var seat: OpaquePointer?
     fileprivate(set) var pointer: OpaquePointer?
     fileprivate(set) var keyboard: OpaquePointer?
@@ -284,6 +289,7 @@ final class WaylandApplication: Application, @unchecked Sendable {
         if pointer != nil { wl_pointer_destroy(pointer) }
         if keyboard != nil { wl_keyboard_destroy(keyboard) }
         if seat != nil { wl_seat_destroy(seat) }
+        if decorationManager != nil { zxdg_decoration_manager_v1_destroy(decorationManager) }
         if shell != nil { xdg_wm_base_destroy(shell) }
 
         if compositor != nil { wl_compositor_destroy(compositor) }
