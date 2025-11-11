@@ -3,6 +3,20 @@
 
 import PackageDescription
 
+let arch = {
+#if arch(i386) 
+    return "i386"
+#elseif arch(x86_64)
+    return "x86_64"
+#elseif arch(arm)
+    return "arm"
+#elseif arch(arm64)
+    return "aarch64"
+#else
+    return "unknown"
+#endif
+}()
+
 let package = Package(
     name: "VVD",
     platforms: [.macOS(.v15), .iOS(.v18), .macCatalyst(.v18)],
@@ -83,10 +97,10 @@ let package = Package(
                 .linkedLibrary("Imm32",     .when(platforms: [.windows])),
                 .linkedLibrary("Shcore",    .when(platforms: [.windows])),
 
-                .linkedLibrary("SupportPackages/Vulkan/libs/Win32/x86_64/vulkan-1", .when(platforms: [.windows])),
+                .linkedLibrary("SupportPackages/Vulkan/lib/Win32/\(arch)/vulkan-1", .when(platforms: [.windows])),
 
                 .unsafeFlags([
-                    "-LSupportPackages/Vulkan/libs/Linux/x86_64",
+                    "-LSupportPackages/Vulkan/lib/Linux/\(arch)",
                     "-lvulkan",
                     "-lwayland-client"
                 ], .when(platforms: [.linux])),
