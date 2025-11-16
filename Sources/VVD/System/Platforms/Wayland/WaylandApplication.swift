@@ -144,27 +144,33 @@ nonisolated(unsafe)
 private var keyboardListener = wl_keyboard_listener(
     keymap: { data, keyboard, format, fd, size in
         let app = unsafeBitCast(data, to: AnyObject.self) as! WaylandApplication
-        Log.debug("wl_keyboard_listener.keymap (format:\(format), fd:\(fd), size:\(size))")
+        app.keyboardKeymap(format: format, fd: fd, size: size)
     },
     enter: { data, keyboard, serial, surface, keys in
         let app = unsafeBitCast(data, to: AnyObject.self) as! WaylandApplication
-        Log.debug("wl_keyboard_listener.enter (serial:\(serial))")
+        var keyArray: [UInt8] = []
+        let keyCount = keys?.pointee.size ?? 0
+        if keyCount > 0 {
+            let ptr = keys?.pointee.data.assumingMemoryBound(to: UInt8.self)
+            keyArray = Array(UnsafeBufferPointer(start: ptr, count: Int(keyCount)))
+        }
+        app.keyboardEnter(serial: serial, surface: surface, keys: keyArray)
     },
     leave: { data, keyboard, serial, surface in
         let app = unsafeBitCast(data, to: AnyObject.self) as! WaylandApplication
-        Log.debug("wl_keyboard_listener.leave (serial:\(serial))")
+        app.keyboardLeave(serial: serial, surface: surface)
     },
     key: { data, keyboard, serial, time, key, state in
         let app = unsafeBitCast(data, to: AnyObject.self) as! WaylandApplication
-        Log.debug("wl_keyboard_listener.key (serial:\(serial), time:\(time), key:\(key), state:\(state))")
+        app.keyboardKey(serial: serial, time: time, key: key, state: state)
     },
     modifiers: { data, keyboard, serial, depressed, latched, locked, group in
         let app = unsafeBitCast(data, to: AnyObject.self) as! WaylandApplication
-        Log.debug("wl_keyboard_listener.modifiers (serial:\(serial), depressed:\(depressed), latched:\(latched), locked:\(locked), group:\(group))")
+        app.keyboardModifiers(serial: serial, depressed: depressed, latched: latched, locked: locked, group: group)
     },
     repeat_info: { data, keyboard, rate, delay in
         let app = unsafeBitCast(data, to: AnyObject.self) as! WaylandApplication
-        Log.debug("wl_keyboard_listener.repeat_info (rate:\(rate), delay:\(delay))")
+        app.keyboardRepeatInfo(rate: rate, delay: delay)
     }
 )
 
@@ -184,6 +190,8 @@ final class WaylandApplication: Application, @unchecked Sendable {
     fileprivate(set) var seat: OpaquePointer?
     fileprivate(set) var pointer: OpaquePointer?
     fileprivate(set) var keyboard: OpaquePointer?
+    
+    private var xkbContext: XKBContext? = nil
 
     private var requestExitWithCode: Int? = nil
 
@@ -266,6 +274,8 @@ final class WaylandApplication: Application, @unchecked Sendable {
             return nil
         }
 
+        self.xkbContext = XKBContext()
+
         wl_registry_add_listener(registry, &registryListener, unsafeBitCast(self as AnyObject, to: UnsafeMutableRawPointer.self))
         wl_display_roundtrip(display)
 
@@ -302,18 +312,18 @@ final class WaylandApplication: Application, @unchecked Sendable {
 
     fileprivate func pointerEnter(serial: UInt32, surface: OpaquePointer?, x: Double, y: Double) {
         pointerTarget = self.window(forSurface: surface)
-        //Log.debug("wl_pointer_listener.enter (serial:\(serial), x:\(x), y:\(y))")
+        Log.debug("wl_pointer_listener.enter (serial:\(serial), x:\(x), y:\(y))")
     }
 
     fileprivate func pointerLeave(serial: UInt32, surface: OpaquePointer?) {
         pointerTarget = nil
-        //Log.debug("wl_pointer_listener.leave (serial:\(serial))")
+        Log.debug("wl_pointer_listener.leave (serial:\(serial))")
     }
 
     fileprivate func pointerMotion(time: UInt32, x: Double, y: Double) {
         if let target = pointerTarget {
             pointerLocation = CGPoint(x: x, y: y)
-            Task { @MainActor in
+            MainActor.assumeIsolated {
                 target.postMouseEvent(MouseEvent(type: .move,
                                       window: target,
                                       device: .genericMouse,
@@ -327,9 +337,22 @@ final class WaylandApplication: Application, @unchecked Sendable {
 
     fileprivate func pointerButton(serial: UInt32, time: UInt32, button: UInt32, state: UInt32) {
         if let target = pointerTarget {
+
+            // ctrl+alt+L-click to move window if server-side decoration is not used.
+            if target.isServerSideDecoration == false {
+                if (button == BTN_LEFT && state == WL_POINTER_BUTTON_STATE_PRESSED.rawValue) {
+                    let ctrl = self.xkbContext?.isModifierActive(XKB_MOD_NAME_CTRL)
+                    let alt = self.xkbContext?.isModifierActive(XKB_MOD_NAME_ALT)
+                    if ctrl == true && alt == true {
+                        xdg_toplevel_move(target.xdgToplevel, self.seat, serial)
+                        return
+                    }
+                }
+            }
+
             let buttonID = Int(button) - BTN_MOUSE
             let type: MouseEventType = state == 0 ? .buttonUp : .buttonDown
-            Task { @MainActor in
+            MainActor.assumeIsolated {
                 target.postMouseEvent(MouseEvent(type: type,
                                                  window: target,
                                                  device: .genericMouse,
@@ -338,13 +361,13 @@ final class WaylandApplication: Application, @unchecked Sendable {
                                                  location: pointerLocation))
             }
         }
-        //Log.debug("wl_pointer_listener.button (serial:\(serial), time:\(time), button:\(button), state:\(state))")
+        Log.debug("wl_pointer_listener.button (serial:\(serial), time:\(time), button:\(button), state:\(state))")
     }
 
     fileprivate func pointerAxis(time: UInt32, axis: UInt32, value: Double) {
         if let target = pointerTarget {
             let delta = CGPoint(x: 0, y: value)
-            Task { @MainActor in
+            MainActor.assumeIsolated {
                 target.postMouseEvent(MouseEvent(type: .wheel,
                                                  window: target,
                                                  device: .genericMouse,
@@ -358,19 +381,64 @@ final class WaylandApplication: Application, @unchecked Sendable {
     }
 
     fileprivate func pointerFrame() { // end of single-frame of event sequence.
-        // Log.debug("wl_pointer_listener.frame")
+        //Log.debug("wl_pointer_listener.frame")
     }
 
     fileprivate func pointerAxis(source: UInt32) {
-        //Log.debug("wl_pointer_listener.axis_source (source:\(source))")
+        Log.debug("wl_pointer_listener.axis_source (source:\(source))")
     }
 
     fileprivate func pointerAxisStop(time: UInt32, axis: UInt32) {
-        //Log.debug("wl_pointer_listener.axis_top (time:\(time), axis:\(axis))")
+        Log.debug("wl_pointer_listener.axis_top (time:\(time), axis:\(axis))")
     }
 
     fileprivate func pointerAxis(_ axis: UInt32, discrete: Int32) {
-        //Log.debug("wl_pointer_listener.axis_discrete (axis:\(axis), discrete:\(discrete))")
+        Log.debug("wl_pointer_listener.axis_discrete (axis:\(axis), discrete:\(discrete))")
+    }
+
+    fileprivate func keyboardKeymap(format: UInt32, fd: Int32, size: UInt32) {
+        self.xkbContext?.updateKeyMap(fromFD: fd, size: Int(size))
+        Log.debug("wl_keyboard_listener.keymap (format:\(format), fd:\(fd), size:\(size))")
+    }
+
+    fileprivate func keyboardEnter(serial: UInt32, surface: OpaquePointer?, keys: [UInt8]) {
+        let symbols = keys.map {
+            self.xkbContext?.symbol(forKey: UInt32($0))
+        }
+        symbols.indices.forEach {
+            let symbol = symbols[$0]
+            Log.debug("Symbol[\($0)]: \(String(describing: symbol))")
+        }
+        Log.debug("wl_keyboard_listener.enter (serial:\(serial))")
+    }
+
+    fileprivate func keyboardLeave(serial: UInt32, surface: OpaquePointer?) {
+        Log.debug("wl_keyboard_listener.leave (serial:\(serial))")
+    }
+
+    fileprivate func keyboardKey(serial: UInt32, time: UInt32, key: UInt32, state: UInt32) {
+        if let state = self.xkbContext?.updateKey(key, state: state) {
+            Log.debug("xkb_state_component: \(state)")
+        }
+        if let symbol = self.xkbContext?.symbol(forKey: key) {
+            let code = VirtualKey.from(scanCode: key)
+            let pressed = state == WL_KEYBOARD_KEY_STATE_PRESSED.rawValue
+            Log.debug("Key: \(key), Symbol: \(String(describing: symbol)), VirtualKey: \(code), pressed: \(pressed)")
+        } else {
+            Log.debug("Key: \(key), Symbol: nil, VirtualKey: .none")
+        }
+        Log.debug("wl_keyboard_listener.key (serial:\(serial), time:\(time), key:\(key), state:\(state))")
+    }
+
+    fileprivate func keyboardModifiers(serial: UInt32, depressed: UInt32, latched: UInt32, locked: UInt32, group: UInt32) {
+        if let state = self.xkbContext?.updateModifiers(depressed: depressed, latched: latched, locked: locked, group: group) {
+            Log.debug("xkb_state_component: \(state)")
+        }
+        Log.debug("wl_keyboard_listener.modifiers (serial:\(serial), depressed:\(depressed), latched:\(latched), locked:\(locked), group:\(group))")
+    }
+
+    fileprivate func keyboardRepeatInfo(rate: Int32, delay: Int32) {
+        Log.debug("wl_keyboard_listener.repeat_info (rate:\(rate), delay:\(delay))")
     }
 }
 

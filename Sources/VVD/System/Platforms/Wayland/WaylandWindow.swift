@@ -106,11 +106,15 @@ final class WaylandWindow: Window {
     nonisolated(unsafe) private(set) var surface: OpaquePointer?
 
     nonisolated(unsafe) private var xdgSurface: OpaquePointer?
-    nonisolated(unsafe) private var xdgToplevel: OpaquePointer?
+    nonisolated(unsafe) private(set) var xdgToplevel: OpaquePointer?
     nonisolated(unsafe) private var xdgToplevelDecoration: OpaquePointer?
 
     fileprivate var xdgSurfaceConfigured = false
-    fileprivate var decorationMode: UInt32 = ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE.rawValue
+    nonisolated(unsafe) fileprivate var decorationMode: UInt32 = ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE.rawValue
+
+    nonisolated var isServerSideDecoration: Bool {
+        return decorationMode == ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE.rawValue
+    }
 
     required init?(name: String, style: WindowStyle, delegate: WindowDelegate?, data: [String: Any]) {
         guard let app = WaylandApplication.shared else {

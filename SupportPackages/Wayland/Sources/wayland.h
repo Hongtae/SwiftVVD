@@ -2,6 +2,8 @@
 
 #include "protocols/xdg-shell-client.h"
 #include "protocols/xdg-decoration-client.h"
+#include <xkbcommon/xkbcommon.h>
+#include <linux/input.h>
 
 /*
   Helper macro for Swift.
