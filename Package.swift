@@ -102,7 +102,8 @@ let package = Package(
                 .unsafeFlags([
                     "-LSupportPackages/Vulkan/lib/Linux/\(arch)",
                     "-lvulkan",
-                    "-lwayland-client"
+                    "-lwayland-client",
+                    "-lxkbcommon"
                 ], .when(platforms: [.linux])),
             ]),
         .target(

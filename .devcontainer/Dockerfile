@@ -10,8 +10,10 @@ RUN apt-get install -y git-lfs
 
 # Install system dependencies
 RUN apt-get install -y vulkan-tools
+RUN apt-get install -y wayland-protocols
 RUN apt-get install -y libwayland-dev
 RUN apt-get install -y libasound2-dev
+RUN apt-get install -y libxkbcommon-dev
 
 # Install tools for downloading and extracting Vulkan SDK
 RUN apt-get install -y xz-utils curl jq
