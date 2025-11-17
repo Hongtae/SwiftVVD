@@ -22,6 +22,16 @@ public struct PlatformFactoryWayland: PlatformFactory {
     public func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?, data: [String: Any]) -> Window? {
         return WaylandWindow(name: name, style: style, delegate: delegate, data: data)
     }
+
+    public func supportedWindowStyles(_ style: WindowStyle) -> WindowStyle {    
+        var supported: WindowStyle = [.autoResize]
+        if let app = WaylandApplication.shared {
+            if app.decorationManager != nil {
+                supported.formUnion([.genericWindow])
+            }
+        }
+        return style.intersection(supported)
+    }
 }
 
 #if os(Linux)

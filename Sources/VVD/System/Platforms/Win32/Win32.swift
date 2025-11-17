@@ -22,6 +22,10 @@ public struct PlatformFactoryWin32: PlatformFactory {
     public func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?, data: [String: Any]) -> Window? {
         return Win32Window(name: name, style: style, delegate: delegate, data: data)
     }
+
+    public func supportedWindowStyles(_ style: WindowStyle) -> WindowStyle {
+        style
+    }
 }
 
 #endif //ENABLE_WIN32

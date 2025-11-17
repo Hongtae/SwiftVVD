@@ -22,6 +22,10 @@ public struct PlatformFactoryAppKit: PlatformFactory {
     public func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?, data: [String: Any]) -> Window? {
         return AppKitWindow(name: name, style: style, delegate: delegate, data: data)
     }
+
+    public func supportedWindowStyles(_ style: WindowStyle) -> WindowStyle {
+        style
+    }
 }
 
 #endif //if ENABLE_APPKIT

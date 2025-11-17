@@ -22,6 +22,11 @@ public struct PlatformFactoryUIKit: PlatformFactory {
     public func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?, data: [String: Any]) -> Window? {
         return UIKitWindow(name: name, style: style, delegate: delegate, data: data)
     }
+
+    public func supportedWindowStyles(_ style: WindowStyle) -> WindowStyle {
+        let supported = [.autoResize, .auxiliaryWindow]
+        return style.intersection(supported)
+    }
 }
 
 #endif //if ENABLE_UIKIT

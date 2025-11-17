@@ -15,6 +15,8 @@ public protocol PlatformFactory {
     func runApplication(delegate: ApplicationDelegate?) -> Int
     @MainActor
     func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?, data: [String: Any]) -> Window?
+
+    func supportedWindowStyles(_ style: WindowStyle) -> WindowStyle
 }
 
 typealias UUID = Foundation.UUID
