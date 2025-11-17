@@ -25,23 +25,28 @@ private var registryListener = wl_registry_listener(
     global: { data, registry, name, interface, version in
         let app = unsafeBitCast(data, to: AnyObject.self) as! WaylandApplication
 
-        let interfaceName = String(utf8String: interface!)!
+        let interface = interface!
+        let interfaceName = String(utf8String: interface)!
         Log.debug("wl_registry_listener.global (interface:\"\(interfaceName)\", version:\(version))")
 
-        if strcmp(interface!, wl_compositor_interface.name) == 0 {
+        if strcmp(interface, wl_compositor_interface.name) == 0 {
             let compositor = wl_registry_bind(registry, name, wl_compositor_interface_ptr, min(version, 4))
             app.compositor = .init(compositor)
         }
-        else if strcmp(interface!, xdg_wm_base_interface.name) == 0 {
+        else if strcmp(interface, xdg_wm_base_interface.name) == 0 {
             let shell = wl_registry_bind(registry, name, xdg_wm_base_interface_ptr, min(version, 4))
             app.shell = .init(shell)
             xdg_wm_base_add_listener(app.shell, &xdgWmBaseListener, data)
         }
-        else if strcmp(interface!, zxdg_decoration_manager_v1_interface.name) == 0 {
+        else if strcmp(interface, wp_fractional_scale_manager_v1_interface.name) == 0 {
+            let fractionalScaleManager = wl_registry_bind(registry, name, wp_fractional_scale_manager_v1_interface_ptr, min(version, 1))
+            app.fractionalScaleManager = .init(fractionalScaleManager)
+        }
+        else if strcmp(interface, zxdg_decoration_manager_v1_interface.name) == 0 {
             let decorationManager = wl_registry_bind(registry, name, zxdg_decoration_manager_v1_interface_ptr, min(version, 1))
             app.decorationManager = .init(decorationManager)
         }
-        else if strcmp(interface!, wl_seat_interface.name) == 0 {
+        else if strcmp(interface, wl_seat_interface.name) == 0 {
             let seat = wl_registry_bind(registry, name, wl_seat_interface_ptr, min(version, 5))
             app.seat = .init(seat)
             wl_seat_add_listener(app.seat, &seatListener, data)
@@ -186,6 +191,7 @@ final class WaylandApplication: Application, @unchecked Sendable {
     private(set) var registry: OpaquePointer?
     fileprivate(set) var compositor: OpaquePointer?
     fileprivate(set) var shell: OpaquePointer?
+    fileprivate(set) var fractionalScaleManager: OpaquePointer?
     fileprivate(set) var decorationManager: OpaquePointer?
     fileprivate(set) var seat: OpaquePointer?
     fileprivate(set) var pointer: OpaquePointer?
@@ -299,6 +305,7 @@ final class WaylandApplication: Application, @unchecked Sendable {
         if pointer != nil { wl_pointer_destroy(pointer) }
         if keyboard != nil { wl_keyboard_destroy(keyboard) }
         if seat != nil { wl_seat_destroy(seat) }
+        if fractionalScaleManager != nil { wp_fractional_scale_manager_v1_destroy(fractionalScaleManager) }
         if decorationManager != nil { zxdg_decoration_manager_v1_destroy(decorationManager) }
         if shell != nil { xdg_wm_base_destroy(shell) }
 
@@ -338,16 +345,19 @@ final class WaylandApplication: Application, @unchecked Sendable {
     fileprivate func pointerButton(serial: UInt32, time: UInt32, button: UInt32, state: UInt32) {
         if let target = pointerTarget {
 
-            // ctrl+alt+L-click to move window if server-side decoration is not used.
-            if target.isServerSideDecoration == false {
+            // alt+ctrl+click to move window if server-side decoration is not used.
+            if self.decorationManager == nil && target.isServerSideDecoration == false {
                 if (button == BTN_LEFT && state == WL_POINTER_BUTTON_STATE_PRESSED.rawValue) {
-                    let ctrl = self.xkbContext?.isModifierActive(XKB_MOD_NAME_CTRL)
                     let alt = self.xkbContext?.isModifierActive(XKB_MOD_NAME_ALT)
-                    if ctrl == true && alt == true {
-                        xdg_toplevel_move(target.xdgToplevel, self.seat, serial)
-                        return
+                    let ctrl = self.xkbContext?.isModifierActive(XKB_MOD_NAME_CTRL)
+                    if alt == true && ctrl == true {
+                        let movable: WindowStyle = [.title, .closeButton, .minimizeButton, .maximizeButton]
+                        if target.style.intersection(movable).isEmpty == false {
+                            xdg_toplevel_move(target.xdgToplevel, self.seat, serial)
+                            return
+                        }
                     }
-                }
+                }                
             }
 
             let buttonID = Int(button) - BTN_MOUSE

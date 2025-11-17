@@ -9,6 +9,7 @@
 import Foundation
 import Wayland
 
+
 nonisolated(unsafe)
 var xdgSurfaceListener = xdg_surface_listener(
     configure: { data, surface, serial in
@@ -18,7 +19,7 @@ var xdgSurfaceListener = xdg_surface_listener(
 
         xdg_surface_ack_configure(surface, serial)
 
-        Task { @MainActor in 
+        MainActor.assumeIsolated {
             window.xdgSurfaceConfigured = true
             window.postWindowEvent(type: .resized)
         }
@@ -29,6 +30,11 @@ nonisolated(unsafe)
 var xdgToplevelListener = xdg_toplevel_listener(
     configure: { data, topLevel, width, height, states in
         let window = unsafeBitCast(data, to: AnyObject.self) as! WaylandWindow
+        if width > 0 && height > 0 {
+            MainActor.assumeIsolated {
+                window.contentSize = CGSize(width: CGFloat(width), height: CGFloat(height))
+            }
+        }
         Log.debug("xdg_toplevel_listener.configure (width:\(width), height:\(height))")
     },
     close: { data, topLevel in
@@ -52,12 +58,26 @@ var xdgToplevelDecorationListener = zxdg_toplevel_decoration_v1_listener(
         let modeStr = mode == ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE.rawValue ? "server-side" : "client-side"
         Log.debug("zxdg_toplevel_decoration_v1_listener.configure (mode: \(modeStr))")
         
-        Task { @MainActor in
+        MainActor.assumeIsolated {
             window.decorationMode = mode
         }
     }
 )
 
+nonisolated(unsafe)
+var fractionalScaleListener = wp_fractional_scale_v1_listener(
+    preferred_scale: { data, fractionalScale, scale in
+        let window = unsafeBitCast(data, to: AnyObject.self) as! WaylandWindow
+        // The scale is the numerator of a fraction with a denominator of 120
+        let scaleFactor = Double(scale) / 120.0
+        Log.debug("wp_fractional_scale_v1_listener.preferred_scale (scale: \(scale)/120 = \(scaleFactor))")
+        
+        MainActor.assumeIsolated {
+            let newScaleFactor = CGFloat(scaleFactor)
+            window.contentScaleFactor = newScaleFactor
+        }
+    }
+)
 
 @MainActor
 final class WaylandWindow: Window {
@@ -67,7 +87,17 @@ final class WaylandWindow: Window {
 
     private(set) var contentBounds: CGRect = .null
     private(set) var windowFrame: CGRect = .null
-    private(set) var contentScaleFactor: CGFloat = 1
+    fileprivate(set) var contentScaleFactor: CGFloat = 1 {
+        didSet {
+            if oldValue != contentScaleFactor {
+                assert(contentScaleFactor > 0)
+                let size = self.contentSize
+                self.contentSize = size
+            }
+        }
+    }
+
+    let style: WindowStyle
 
     var resolution: CGSize {
         get { _resolution }
@@ -76,6 +106,9 @@ final class WaylandWindow: Window {
     private var _resolution: CGSize {
         didSet {
             if oldValue != _resolution {
+                assert(_resolution.width >= 1 && _resolution.height >= 1)
+                self.contentBounds.size = _resolution * (1.0 / self.contentScaleFactor)
+                self.windowFrame.size = self.contentBounds.size
                 self.postWindowEvent(type: .resized)
             }
         }
@@ -108,6 +141,7 @@ final class WaylandWindow: Window {
     nonisolated(unsafe) private var xdgSurface: OpaquePointer?
     nonisolated(unsafe) private(set) var xdgToplevel: OpaquePointer?
     nonisolated(unsafe) private var xdgToplevelDecoration: OpaquePointer?
+    nonisolated(unsafe) private var fractionalScaleObject: OpaquePointer?
 
     fileprivate var xdgSurfaceConfigured = false
     nonisolated(unsafe) fileprivate var decorationMode: UInt32 = ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE.rawValue
@@ -139,6 +173,7 @@ final class WaylandWindow: Window {
         }
 
         self.delegate = delegate
+        self.style = style
         self._resolution = CGSize(width: 800, height: 600)
         self.contentScaleFactor = 1.0
         self.contentBounds = CGRect(origin: .zero, size: self._resolution * (1.0 / self.contentScaleFactor))
@@ -152,22 +187,32 @@ final class WaylandWindow: Window {
         xdg_toplevel_add_listener(self.xdgToplevel, &xdgToplevelListener, context)
         xdg_toplevel_set_title(self.xdgToplevel, name)
         
-        // Request server-side decoration if available
-        if let decorationManager = app.decorationManager {
-            self.xdgToplevelDecoration = zxdg_decoration_manager_v1_get_toplevel_decoration(decorationManager, self.xdgToplevel)
-            if let decoration = self.xdgToplevelDecoration {
-                zxdg_toplevel_decoration_v1_add_listener(decoration, &xdgToplevelDecorationListener, context)
-                zxdg_toplevel_decoration_v1_set_mode(decoration, ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE.rawValue)
-                Log.debug("Requested server-side decoration for window: \(name)")
+        // Request fractional scale if available
+        if let fractionalScaleManager = app.fractionalScaleManager {
+            self.fractionalScaleObject = wp_fractional_scale_manager_v1_get_fractional_scale(fractionalScaleManager, self.surface)
+            if let fractionalScale = self.fractionalScaleObject {
+                wp_fractional_scale_v1_add_listener(fractionalScale, &fractionalScaleListener, context)
+                Log.debug("Requested fractional scale for window: \(name)")
+            }
+        }
+
+        let decorationStyles: WindowStyle = [.title, .closeButton, .minimizeButton, .maximizeButton, .resizableBorder]
+        if style.intersection(decorationStyles).isEmpty == false {
+            // Request server-side decoration if available
+            if let decorationManager = app.decorationManager {
+                self.xdgToplevelDecoration = zxdg_decoration_manager_v1_get_toplevel_decoration(decorationManager, self.xdgToplevel)
+                if let decoration = self.xdgToplevelDecoration {
+                    zxdg_toplevel_decoration_v1_add_listener(decoration, &xdgToplevelDecorationListener, context)
+                    zxdg_toplevel_decoration_v1_set_mode(decoration, ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE.rawValue)
+                    Log.debug("Requested server-side decoration for window: \(name)")
+                }
             }
         }
         
         wl_surface_commit(self.surface)
-
-        Task { @MainActor in
-            app.bindSurface(self.surface, with: self)
-            self.postWindowEvent(type: .created) 
-        }
+    
+        app.bindSurface(self.surface, with: self)
+        self.postWindowEvent(type: .created) 
     }
 
     deinit {
@@ -178,9 +223,12 @@ final class WaylandWindow: Window {
         }
 
         // Destroy in reverse order of creation
-        // The decoration object must be destroyed before the toplevel
+        // The decoration and fractional scale objects must be destroyed before their associated objects
         if let decoration = self.xdgToplevelDecoration {
             zxdg_toplevel_decoration_v1_destroy(decoration)
+        }
+        if let fractionalScale = self.fractionalScaleObject {
+            wp_fractional_scale_v1_destroy(fractionalScale)
         }
         xdg_toplevel_destroy(self.xdgToplevel)
         xdg_surface_destroy(self.xdgSurface)

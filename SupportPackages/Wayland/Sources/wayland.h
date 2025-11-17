@@ -1,6 +1,7 @@
 #pragma once
 
 #include "protocols/xdg-shell-client.h"
+#include "protocols/fractional-scale-client.h"
 #include "protocols/xdg-decoration-client.h"
 #include <xkbcommon/xkbcommon.h>
 #include <linux/input.h>
@@ -36,6 +37,10 @@ WL_INTERFACE_PTR(wl_subsurface_interface);
 
 /* xdg-shell */
 WL_INTERFACE_PTR(xdg_wm_base_interface);
+
+/* fractional-scale */
+WL_INTERFACE_PTR(wp_fractional_scale_manager_v1_interface);
+WL_INTERFACE_PTR(wp_fractional_scale_v1_interface);
 
 /* xdg-decoration */
 WL_INTERFACE_PTR(zxdg_decoration_manager_v1_interface);
