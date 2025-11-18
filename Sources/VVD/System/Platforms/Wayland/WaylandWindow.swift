@@ -29,7 +29,7 @@ nonisolated(unsafe)
 var xdgToplevelListener = xdg_toplevel_listener(
     configure: { data, topLevel, width, height, states in
         let window = unsafeBitCast(data, to: AnyObject.self) as! WaylandWindow
-        if width > 0 && height > 0 {
+        if width > 0 && height > 0 && window.style.contains(.resizableBorder) {
             MainActor.assumeIsolated {
                 window.contentSize = CGSize(width: CGFloat(width), height: CGFloat(height))
             }
@@ -38,7 +38,10 @@ var xdgToplevelListener = xdg_toplevel_listener(
     },
     close: { data, topLevel in
         let window = unsafeBitCast(data, to: AnyObject.self) as! WaylandWindow
-        Log.debug("xdg_toplevel_listener.close")
+        let closed = MainActor.assumeIsolated {
+            window.requestToClose()
+        }
+        Log.debug("xdg_toplevel_listener.close (closed: \(closed))")
     },
     configure_bounds: { data, topLevel, width, height in
         let window = unsafeBitCast(data, to: AnyObject.self) as! WaylandWindow
@@ -133,6 +136,7 @@ final class WaylandWindow: Window {
     private(set) var delegate: WindowDelegate?
     
     var platformHandle: OpaquePointer? { surface }
+    var isValid: Bool { surface != nil }
 
     private(set) var display: OpaquePointer?
     nonisolated(unsafe) private(set) var surface: OpaquePointer?
@@ -210,14 +214,27 @@ final class WaylandWindow: Window {
         wl_surface_commit(self.surface)
     
         app.bindSurface(self.surface, with: self)
-        self.postWindowEvent(type: .created) 
+        self.postWindowEvent(type: .created)
+
+        Task { @MainActor [weak self] in
+            if let self, self.surface != nil {
+                if let minSize = self.delegate?.minimumContentSize(window: self) {
+                    xdg_toplevel_set_min_size(self.xdgToplevel, Int32(minSize.width), Int32(minSize.height))
+                }
+                if let maxSize = self.delegate?.maximumContentSize(window: self) {
+                    xdg_toplevel_set_max_size(self.xdgToplevel, Int32(maxSize.width), Int32(maxSize.height))
+                }
+            }
+        }
     }
 
     deinit {
-        Task { @MainActor in 
-            if let app = WaylandApplication.shared {
-                app.updateSurfaces()
-            }
+        self.destroy()
+    }
+
+    nonisolated func destroy() {
+        if self.surface == nil {
+            return
         }
 
         // Destroy in reverse order of creation
@@ -231,6 +248,21 @@ final class WaylandWindow: Window {
         xdg_toplevel_destroy(self.xdgToplevel)
         xdg_surface_destroy(self.xdgSurface)
         wl_surface_destroy(self.surface)
+
+        self.fractionalScaleObject = nil
+        self.xdgToplevelDecoration = nil
+        self.xdgToplevel = nil
+        self.xdgSurface = nil
+        self.surface = nil
+
+        Task { @MainActor [weak self] in 
+            if let app = WaylandApplication.shared {
+                app.updateSurfaces()
+            }
+            if let self {
+                self.postWindowEvent(type: .closed)
+            }
+        }
     }
 
     func show() {
@@ -254,6 +286,18 @@ final class WaylandWindow: Window {
         self.activated = false
         self.visible = false
         Task { self.postWindowEvent(type: .minimized) }
+    }
+
+    @discardableResult
+    func requestToClose() -> Bool {
+        var close = true
+        if let answer = self.delegate?.shouldClose(window: self) {
+            close = answer
+        }
+        if close {
+            self.destroy()
+        }
+        return close
     }
 
     func showMouse(_: Bool, forDeviceID: Int) {

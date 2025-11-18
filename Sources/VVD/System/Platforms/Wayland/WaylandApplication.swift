@@ -258,11 +258,20 @@ final class WaylandApplication: Application, @unchecked Sendable {
         }
     }
     func window(forSurface surface: OpaquePointer?) -> WaylandWindow? {
-        if let surface = surface { return windowSurfaceMap[surface]?.value }
+        if let surface = surface {
+            if let window = windowSurfaceMap[surface]?.value, window.surface == surface {
+                return window
+            }
+        }
         return nil
     }
     func updateSurfaces() {
-        let activeWindows = self.windowSurfaceMap.compactMapValues { $0.value }
+        let activeWindows = self.windowSurfaceMap.compactMapValues {
+            if let window = $0.value, window.surface != nil {
+                return window
+            }
+            return nil
+        }
         self.windowSurfaceMap = activeWindows.mapValues { WeakWindow($0) }
     }
 
