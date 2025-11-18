@@ -56,6 +56,7 @@ final class UIKitWindow: Window {
     var platformHandle: OpaquePointer? {
         unsafeBitCast(view as AnyObject, to: OpaquePointer.self)
     }
+    var isValid: Bool { true }
 
     private var window: UIWindow
     var view: UIKitView

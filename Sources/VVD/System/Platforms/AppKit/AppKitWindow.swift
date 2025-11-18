@@ -117,6 +117,7 @@ final class AppKitWindow: Window {
     var platformHandle: OpaquePointer? {
         unsafeBitCast(view as AnyObject, to: OpaquePointer.self)
     }
+    var isValid: Bool { true }
 
     private var nsView: NSView { view as! NSView }
     

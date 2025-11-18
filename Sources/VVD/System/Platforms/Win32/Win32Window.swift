@@ -89,6 +89,7 @@ final class Win32Window: Window {
     weak var delegate: WindowDelegate?
 
     var platformHandle: OpaquePointer? { OpaquePointer(hWnd) }
+    var isValid: Bool { hWnd != nil }
     
     private(set) var resizing: Bool = false
     private(set) var activated: Bool = false

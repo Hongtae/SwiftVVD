@@ -163,6 +163,7 @@ public protocol Window: AnyObject {
     func convertPointToScreen(_: CGPoint) -> CGPoint
     func convertPointFromScreen(_: CGPoint) -> CGPoint
     
+    var isValid: Bool { get }
     var platformHandle: OpaquePointer? { get }
 }
 

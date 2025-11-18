@@ -31,6 +31,7 @@ final class VulkanSwapChain: SwapChain, @unchecked Sendable {
 
     private let lock = NSLock()
     private var deviceReset = false
+    private var validWindow = false
     private var cachedResolution: CGSize
 
     private var renderPassDescriptor: RenderPassDescriptor? = nil
@@ -49,6 +50,7 @@ final class VulkanSwapChain: SwapChain, @unchecked Sendable {
         self.queue = queue
         self.window = window
         self.cachedResolution = window.resolution
+        self.validWindow = window.isValid
 
         window.addEventObserver(self) { [weak self](event: WindowEvent) in
             if event.type == .resized {
@@ -57,6 +59,13 @@ final class VulkanSwapChain: SwapChain, @unchecked Sendable {
                     self.lock.withLock {
                         self.cachedResolution = resolution
                         self.deviceReset = true
+                    }
+                }
+            }
+            else if event.type == .closed {
+                if let self = self {
+                    self.lock.withLock {
+                        self.validWindow = false
                     }
                 }
             }
@@ -98,6 +107,11 @@ final class VulkanSwapChain: SwapChain, @unchecked Sendable {
         let physicalDevice = device.physicalDevice
 
         let queueFamilyIndex: UInt32 = self.queue.family.familyIndex
+
+        if self.window.isValid == false {
+            Log.err("VulkanSwapChain.setup() failed: invalid window.")
+            return false
+        }
 
         var err: VkResult = VK_SUCCESS
 
@@ -547,6 +561,12 @@ final class VulkanSwapChain: SwapChain, @unchecked Sendable {
 
     @discardableResult
     func present(waitEvents: [GPUEvent]) -> Bool {
+        let validWindow = self.lock.withLock { self.validWindow }
+        if validWindow == false {
+            Log.err("VulkanSwapChain.present(waitEvents:) failed: invalid window.")
+            return false
+        }
+
         let frameIndex = self.frameCount % UInt64(self.numberOfSwapchainImages)
         let waitSemaphore = self.acquireSemaphores[Int(frameIndex)]
         let submitSemaphore = self.submitSemaphores[Int(self.imageIndex)]

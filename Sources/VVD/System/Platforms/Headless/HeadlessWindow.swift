@@ -26,6 +26,7 @@ final class HeadlessWindow: Window {
     var delegate: WindowDelegate?
     
     var platformHandle: OpaquePointer? { nil }
+    var isValid: Bool { true }
     
     required init?(name: String, style: WindowStyle, delegate: WindowDelegate?, data: [String: Any]) {
         self.title = name
