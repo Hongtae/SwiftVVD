@@ -20,7 +20,6 @@ var xdgSurfaceListener = xdg_surface_listener(
         xdg_surface_ack_configure(surface, serial)
 
         MainActor.assumeIsolated {
-            window.xdgSurfaceConfigured = true
             window.postWindowEvent(type: .resized)
         }
     }
@@ -143,7 +142,6 @@ final class WaylandWindow: Window {
     nonisolated(unsafe) private var xdgToplevelDecoration: OpaquePointer?
     nonisolated(unsafe) private var fractionalScaleObject: OpaquePointer?
 
-    fileprivate var xdgSurfaceConfigured = false
     nonisolated(unsafe) fileprivate var decorationMode: UInt32 = ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE.rawValue
 
     nonisolated var isServerSideDecoration: Bool {
