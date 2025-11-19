@@ -114,7 +114,13 @@ class AuxiliaryWindowSceneContext<Content>: TypedSceneContext<AuxiliaryWindowSce
     func activate(at location: CGPoint, parent: WindowContext) -> Bool {
         self.updateContent()
 
-        let popupWindow = self.environment.auxiliaryWindowPopupWindow
+        var popupWindow = self.environment.auxiliaryWindowPopupWindow
+        if popupWindow && parent is AuxiliaryWindowHost {
+            if Platform.factory.supportedWindowStyles([.auxiliaryWindow]).contains(.auxiliaryWindow) == false {
+                Log.error("AuxiliaryWindowContext: Auxiliary windows are not supported on this platform.")
+                popupWindow = false
+            }
+        }
         if popupWindow, let window = parent.window {
             let position = window.convertPointToScreen(location)
             return self.makeWindow(position: position) != nil
