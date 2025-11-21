@@ -5,6 +5,9 @@ PROTOCOL_DIR=`pkg-config wayland-protocols --variable=pkgdatadir`
 wayland-scanner private-code ${PROTOCOL_DIR}/stable/xdg-shell/xdg-shell.xml Sources/protocols/xdg-shell-private.c
 wayland-scanner client-header ${PROTOCOL_DIR}/stable/xdg-shell/xdg-shell.xml Sources/protocols/xdg-shell-client.h
 
+wayland-scanner private-code ${PROTOCOL_DIR}/staging/xdg-activation/xdg-activation-v1.xml Sources/protocols/xdg-activation-private.c
+wayland-scanner client-header ${PROTOCOL_DIR}/staging/xdg-activation/xdg-activation-v1.xml Sources/protocols/xdg-activation-client.h
+
 wayland-scanner private-code ${PROTOCOL_DIR}/staging/fractional-scale/fractional-scale-v1.xml Sources/protocols/fractional-scale-private.c
 wayland-scanner client-header ${PROTOCOL_DIR}/staging/fractional-scale/fractional-scale-v1.xml Sources/protocols/fractional-scale-client.h
 

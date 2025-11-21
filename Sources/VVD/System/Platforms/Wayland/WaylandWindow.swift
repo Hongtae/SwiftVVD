@@ -19,8 +19,11 @@ var xdgSurfaceListener = xdg_surface_listener(
 
         xdg_surface_ack_configure(surface, serial)
 
-        MainActor.assumeIsolated {
-            window.postWindowEvent(type: .resized)
+        if let newSize = window.pendingSurfaceResize {
+            window.pendingSurfaceResize = nil
+            MainActor.assumeIsolated {
+                window.contentSize = newSize
+            }
         }
     }
 )
@@ -29,12 +32,49 @@ nonisolated(unsafe)
 var xdgToplevelListener = xdg_toplevel_listener(
     configure: { data, topLevel, width, height, states in
         let window = unsafeBitCast(data, to: AnyObject.self) as! WaylandWindow
+
+        // convert states pointer to Array for convenience.
+        let states: [UInt32] = {
+            let count = states?.pointee.size ?? 0
+            if count > 0 {
+                let ptr = states?.pointee.data.assumingMemoryBound(to: UInt32.self)
+                return Array(UnsafeBufferPointer(start: ptr, count: Int(count)))
+            }
+            return []
+        }()
+
+        // check window size change
         if width > 0 && height > 0 && window.style.contains(.resizableBorder) {
-            MainActor.assumeIsolated {
-                window.contentSize = CGSize(width: CGFloat(width), height: CGFloat(height))
+            window.pendingSurfaceResize = CGSize(width: CGFloat(width), height: CGFloat(height))
+        }
+        
+        // Check if window is activated from the states array
+        var isActivated = false
+        for state in states {
+            if state == XDG_TOPLEVEL_STATE_ACTIVATED.rawValue {
+                isActivated = true
+                break
             }
         }
-        Log.debug("xdg_toplevel_listener.configure (width:\(width), height:\(height))")
+        
+        MainActor.assumeIsolated {
+            let wasActivated = window.activated
+            window.activated = isActivated
+            if wasActivated != isActivated {
+                WaylandApplication.shared?.updateActivation()
+                if isActivated {
+                    if window.visible == false {
+                        window.visible = true
+                        window.postWindowEvent(type: .shown)
+                    }
+                    window.postWindowEvent(type: .activated)
+                } else {
+                    window.postWindowEvent(type: .inactivated)
+                }
+            }
+        }
+        
+        Log.debug("xdg_toplevel_listener.configure (width:\(width), height:\(height), activated:\(isActivated))")
     },
     close: { data, topLevel in
         let window = unsafeBitCast(data, to: AnyObject.self) as! WaylandWindow
@@ -81,11 +121,23 @@ var fractionalScaleListener = wp_fractional_scale_v1_listener(
     }
 )
 
+nonisolated(unsafe)
+var xdgActivationTokenListener = xdg_activation_token_v1_listener(
+    done: { data, activationToken, token in
+        let window = unsafeBitCast(data, to: AnyObject.self) as! WaylandWindow
+        if let tokenStr = token {
+            let tokenString = String(cString: tokenStr)
+            window.activationTokenString = tokenString
+            Log.debug("Received activation token: \(tokenString)")
+        }
+    }
+)
+
 @MainActor
 final class WaylandWindow: Window {
 
-    private(set) var activated: Bool = false
-    private(set) var visible: Bool = false
+    fileprivate(set) var activated: Bool = false
+    fileprivate(set) var visible: Bool = false
 
     private(set) var contentBounds: CGRect = .null
     private(set) var windowFrame: CGRect = .null
@@ -145,12 +197,16 @@ final class WaylandWindow: Window {
     nonisolated(unsafe) private(set) var xdgToplevel: OpaquePointer?
     nonisolated(unsafe) private var xdgToplevelDecoration: OpaquePointer?
     nonisolated(unsafe) private var fractionalScaleObject: OpaquePointer?
+    nonisolated(unsafe) private var activationToken: OpaquePointer?
+    nonisolated(unsafe) fileprivate var activationTokenString: String? = nil
 
     nonisolated(unsafe) fileprivate var decorationMode: UInt32 = ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE.rawValue
 
     nonisolated var isServerSideDecoration: Bool {
         return decorationMode == ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE.rawValue
     }
+
+    nonisolated(unsafe) fileprivate var pendingSurfaceResize: CGSize? = nil
 
     required init?(name: String, style: WindowStyle, delegate: WindowDelegate?, data: [String: Any]) {
         guard let app = WaylandApplication.shared else {
@@ -211,7 +267,19 @@ final class WaylandWindow: Window {
             }
         }
         
+        // Create activation token if available
+        if let activationManager = app.activationManager {
+            self.activationToken = xdg_activation_v1_get_activation_token(activationManager)
+            if let token = self.activationToken {
+                xdg_activation_token_v1_add_listener(token, &xdgActivationTokenListener, context)
+                xdg_activation_token_v1_set_surface(token, self.surface)
+                xdg_activation_token_v1_commit(token)
+                Log.debug("Created activation token for window: \(name)")
+            }
+        }
+        
         wl_surface_commit(self.surface)
+        wl_display_roundtrip(app.display)
     
         app.bindSurface(self.surface, with: self)
         self.postWindowEvent(type: .created)
@@ -245,10 +313,14 @@ final class WaylandWindow: Window {
         if let fractionalScale = self.fractionalScaleObject {
             wp_fractional_scale_v1_destroy(fractionalScale)
         }
+        if let token = self.activationToken {
+            xdg_activation_token_v1_destroy(token)
+        }
         xdg_toplevel_destroy(self.xdgToplevel)
         xdg_surface_destroy(self.xdgSurface)
         wl_surface_destroy(self.surface)
 
+        self.activationToken = nil
         self.fractionalScaleObject = nil
         self.xdgToplevelDecoration = nil
         self.xdgToplevel = nil
@@ -266,26 +338,51 @@ final class WaylandWindow: Window {
     }
 
     func show() {
-        self.visible = true
-        Task { self.postWindowEvent(type: .shown) }
+        if self.visible == false {
+            self.activate()
+        }
     }
 
     func hide() {
-        self.activated = false
-        self.visible = false
-        Task { self.postWindowEvent(type: .hidden) }
+        if self.visible {
+            xdg_toplevel_set_minimized(self.xdgToplevel)
+        }
     }
 
     func activate() {
+        guard let app = WaylandApplication.shared else { return }
+        
+        // Use xdg-activation protocol if available
+        if let activationManager = app.activationManager, let surface {
+            // Use the token string if available (received from init via done callback)
+            if let tokenString = self.activationTokenString {
+                xdg_activation_v1_activate(activationManager, tokenString, surface)
+            } else {
+                // Fallback to empty token for self-activation if no token received yet
+                xdg_activation_v1_activate(activationManager, "", surface)
+            }
+            
+            wl_display_roundtrip(app.display)
+            if self.activated {
+                Log.debug("Window activated using xdg-activation protocol")
+                return 
+            }
+            // Fallback to manual activation if not activated, maybe refused by compositor
+        }
+        let wasVisible = self.visible
         self.activated = true
         self.visible = true
-        Task { self.postWindowEvent(type: .activated) }
+        app.updateActivation()
+        Task {
+            if wasVisible == false {
+                self.postWindowEvent(type: .shown)
+            }
+            self.postWindowEvent(type: .activated)
+        }
     }
 
     func minimize() {
-        self.activated = false
-        self.visible = false
-        Task { self.postWindowEvent(type: .minimized) }
+        xdg_toplevel_set_minimized(self.xdgToplevel)
     }
 
     @discardableResult
@@ -301,15 +398,13 @@ final class WaylandWindow: Window {
     }
 
     func showMouse(_: Bool, forDeviceID: Int) {
-
     }
 
     func isMouseVisible(forDeviceID: Int) -> Bool {
-        false 
+        false
     }
 
     func lockMouse(_: Bool, forDeviceID: Int) {
-
     }
 
     func isMouseLocked(forDeviceID: Int) -> Bool {
@@ -326,7 +421,6 @@ final class WaylandWindow: Window {
 
     func enableTextInput(_ enable: Bool, forDeviceID deviceID: Int) {
         if deviceID == 0 {
-            
         }
     }
 

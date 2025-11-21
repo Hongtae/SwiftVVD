@@ -27,7 +27,9 @@ public struct PlatformFactoryWayland: PlatformFactory {
         var supported: WindowStyle = [.autoResize]
         if let app = WaylandApplication.shared {
             if app.decorationManager != nil {
-                supported.formUnion([.genericWindow])
+                supported.formUnion([
+                    .title, .closeButton, .minimizeButton, .maximizeButton, .resizableBorder
+                ])
             }
         }
         return style.intersection(supported)

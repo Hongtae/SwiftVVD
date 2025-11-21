@@ -25,28 +25,31 @@ private var registryListener = wl_registry_listener(
     global: { data, registry, name, interface, version in
         let app = unsafeBitCast(data, to: AnyObject.self) as! WaylandApplication
 
-        let interface = interface!
-        let interfaceName = String(utf8String: interface)!
+        let interfaceName = String(utf8String: interface!)!
         Log.debug("wl_registry_listener.global (interface:\"\(interfaceName)\", version:\(version))")
 
-        if strcmp(interface, wl_compositor_interface.name) == 0 {
+        if strcmp(interface!, wl_compositor_interface.name) == 0 {
             let compositor = wl_registry_bind(registry, name, wl_compositor_interface_ptr, min(version, 4))
             app.compositor = .init(compositor)
         }
-        else if strcmp(interface, xdg_wm_base_interface.name) == 0 {
+        else if strcmp(interface!, xdg_wm_base_interface.name) == 0 {
             let shell = wl_registry_bind(registry, name, xdg_wm_base_interface_ptr, min(version, 4))
             app.shell = .init(shell)
             xdg_wm_base_add_listener(app.shell, &xdgWmBaseListener, data)
         }
-        else if strcmp(interface, wp_fractional_scale_manager_v1_interface.name) == 0 {
+        else if strcmp(interface!, xdg_activation_v1_interface.name) == 0 {
+            let activationManager = wl_registry_bind(registry, name, xdg_activation_v1_interface_ptr, min(version, 1))
+            app.activationManager = .init(activationManager)
+        }
+        else if strcmp(interface!, wp_fractional_scale_manager_v1_interface.name) == 0 {
             let fractionalScaleManager = wl_registry_bind(registry, name, wp_fractional_scale_manager_v1_interface_ptr, min(version, 1))
             app.fractionalScaleManager = .init(fractionalScaleManager)
         }
-        else if strcmp(interface, zxdg_decoration_manager_v1_interface.name) == 0 {
+        else if strcmp(interface!, zxdg_decoration_manager_v1_interface.name) == 0 {
             let decorationManager = wl_registry_bind(registry, name, zxdg_decoration_manager_v1_interface_ptr, min(version, 1))
             app.decorationManager = .init(decorationManager)
         }
-        else if strcmp(interface, wl_seat_interface.name) == 0 {
+        else if strcmp(interface!, wl_seat_interface.name) == 0 {
             let seat = wl_registry_bind(registry, name, wl_seat_interface_ptr, min(version, 5))
             app.seat = .init(seat)
             wl_seat_add_listener(app.seat, &seatListener, data)
@@ -184,13 +187,14 @@ final class WaylandApplication: Application, @unchecked Sendable {
 
     var activationPolicy: ActivationPolicy = .regular
     var isActive: Bool {
-        return true
+        activeWindow != nil
     }
 
     private(set) var display: OpaquePointer?
     private(set) var registry: OpaquePointer?
     fileprivate(set) var compositor: OpaquePointer?
     fileprivate(set) var shell: OpaquePointer?
+    fileprivate(set) var activationManager: OpaquePointer?
     fileprivate(set) var fractionalScaleManager: OpaquePointer?
     fileprivate(set) var decorationManager: OpaquePointer?
     fileprivate(set) var seat: OpaquePointer?
@@ -258,21 +262,29 @@ final class WaylandApplication: Application, @unchecked Sendable {
         }
     }
     func window(forSurface surface: OpaquePointer?) -> WaylandWindow? {
-        if let surface = surface {
-            if let window = windowSurfaceMap[surface]?.value, window.surface == surface {
-                return window
-            }
-        }
+        if let surface = surface { return windowSurfaceMap[surface]?.value }
         return nil
     }
     func updateSurfaces() {
-        let activeWindows = self.windowSurfaceMap.compactMapValues {
-            if let window = $0.value, window.surface != nil {
-                return window
-            }
-            return nil
-        }
+        let activeWindows = self.windowSurfaceMap.compactMapValues { $0.value }
         self.windowSurfaceMap = activeWindows.mapValues { WeakWindow($0) }
+    }
+
+    @MainActor
+    func updateActivation() {
+        let active = self.windowSurfaceMap.values.first {
+            $0.value?.activated ?? false
+        }
+        let wasActive = self.isActive
+        if let active = active?.value {
+            self.activeWindow = active
+        } else {
+            self.activeWindow = nil            
+        }
+        let nowActive = self.isActive
+        if nowActive != wasActive {
+            Log.info("Application activation state changed: \(nowActive)")
+        }
     }
 
     private init?() {
@@ -314,6 +326,7 @@ final class WaylandApplication: Application, @unchecked Sendable {
         if pointer != nil { wl_pointer_destroy(pointer) }
         if keyboard != nil { wl_keyboard_destroy(keyboard) }
         if seat != nil { wl_seat_destroy(seat) }
+        if activationManager != nil { xdg_activation_v1_destroy(activationManager) }
         if fractionalScaleManager != nil { wp_fractional_scale_manager_v1_destroy(fractionalScaleManager) }
         if decorationManager != nil { zxdg_decoration_manager_v1_destroy(decorationManager) }
         if shell != nil { xdg_wm_base_destroy(shell) }
@@ -325,6 +338,7 @@ final class WaylandApplication: Application, @unchecked Sendable {
 
     var pointerTarget: WaylandWindow? = nil
     var pointerLocation: CGPoint = .zero    // location in target surface
+    weak var activeWindow: WaylandWindow? = nil
 
     fileprivate func pointerEnter(serial: UInt32, surface: OpaquePointer?, x: Double, y: Double) {
         pointerTarget = self.window(forSurface: surface)
@@ -443,6 +457,14 @@ final class WaylandApplication: Application, @unchecked Sendable {
             let code = VirtualKey.from(scanCode: key)
             let pressed = state == WL_KEYBOARD_KEY_STATE_PRESSED.rawValue
             Log.debug("Key: \(key), Symbol: \(String(describing: symbol)), VirtualKey: \(code), pressed: \(pressed)")
+            let keyEvent = KeyboardEvent(type: pressed ? .keyDown : .keyUp,
+                                         window: self.activeWindow,
+                                         deviceID: 0,
+                                         key: code,
+                                         text: "")
+            MainActor.assumeIsolated {
+                self.activeWindow?.postKeyboardEvent(keyEvent)
+            }
         } else {
             Log.debug("Key: \(key), Symbol: nil, VirtualKey: .none")
         }
