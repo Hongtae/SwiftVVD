@@ -305,35 +305,45 @@ final class WaylandWindow: Window {
             return
         }
 
-        // Destroy in reverse order of creation
-        // The decoration and fractional scale objects must be destroyed before their associated objects
-        if let decoration = self.xdgToplevelDecoration {
-            zxdg_toplevel_decoration_v1_destroy(decoration)
-        }
-        if let fractionalScale = self.fractionalScaleObject {
-            wp_fractional_scale_v1_destroy(fractionalScale)
-        }
-        if let token = self.activationToken {
-            xdg_activation_token_v1_destroy(token)
-        }
-        xdg_toplevel_destroy(self.xdgToplevel)
-        xdg_surface_destroy(self.xdgSurface)
-        wl_surface_destroy(self.surface)
+        let xdgToplevelDecoration = self.xdgToplevelDecoration
+        let fractionalScale = self.fractionalScaleObject
+        let activationToken = self.activationToken
+        let xdgToplevel = self.xdgToplevel
+        let xdgSurface = self.xdgSurface
+        let surface = self.surface
 
-        self.activationToken = nil
-        self.fractionalScaleObject = nil
         self.xdgToplevelDecoration = nil
+        self.fractionalScaleObject = nil
+        self.activationToken = nil
         self.xdgToplevel = nil
         self.xdgSurface = nil
         self.surface = nil
 
-        Task { @MainActor [weak self] in 
-            if let app = WaylandApplication.shared {
-                app.updateSurfaces()
+        let cleanup = { @MainActor in
+            if let xdgToplevelDecoration {
+                zxdg_toplevel_decoration_v1_destroy(xdgToplevelDecoration)
             }
-            if let self {
-                self.postWindowEvent(type: .closed)
+            if let fractionalScale  {
+                wp_fractional_scale_v1_destroy(fractionalScale)
             }
+            if let activationToken  {
+                xdg_activation_token_v1_destroy(activationToken)
+            }
+            xdg_toplevel_destroy(xdgToplevel)
+            xdg_surface_destroy(xdgSurface)
+            wl_surface_destroy(surface)
+        }
+
+        if let app = WaylandApplication.shared {
+            app.updateSurfaces()
+        }
+
+        runOnMainQueueSync { [weak self] in
+            self?.postWindowEvent(type: .closed)
+        }
+
+        Task { @MainActor in
+            cleanup()
         }
     }
 
@@ -355,12 +365,8 @@ final class WaylandWindow: Window {
         // Use xdg-activation protocol if available
         if let activationManager = app.activationManager, let surface {
             // Use the token string if available (received from init via done callback)
-            if let tokenString = self.activationTokenString {
-                xdg_activation_v1_activate(activationManager, tokenString, surface)
-            } else {
-                // Fallback to empty token for self-activation if no token received yet
-                xdg_activation_v1_activate(activationManager, "", surface)
-            }
+            let tokenString = self.activationTokenString ?? ""
+            xdg_activation_v1_activate(activationManager, tokenString, surface)
             
             wl_display_roundtrip(app.display)
             if self.activated {
@@ -373,12 +379,11 @@ final class WaylandWindow: Window {
         self.activated = true
         self.visible = true
         app.updateActivation()
-        Task {
-            if wasVisible == false {
-                self.postWindowEvent(type: .shown)
-            }
-            self.postWindowEvent(type: .activated)
+
+        if wasVisible == false {
+            self.postWindowEvent(type: .shown)
         }
+        self.postWindowEvent(type: .activated)
     }
 
     func minimize() {
@@ -388,11 +393,13 @@ final class WaylandWindow: Window {
     @discardableResult
     func requestToClose() -> Bool {
         var close = true
-        if let answer = self.delegate?.shouldClose(window: self) {
-            close = answer
-        }
-        if close {
-            self.destroy()
+        if self.isValid {
+            if let answer = self.delegate?.shouldClose(window: self) {
+                close = answer
+            }
+            if close {
+                self.destroy()
+            }
         }
         return close
     }

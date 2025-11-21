@@ -63,7 +63,7 @@ private var registryListener = wl_registry_listener(
 nonisolated(unsafe)
 private var xdgWmBaseListener = xdg_wm_base_listener(
     ping: { data, shell, serial in
-        Log.debug("xdg_wm_base_listener.ping (serial:\(serial))")
+        //Log.debug("xdg_wm_base_listener.ping (serial:\(serial))")
         xdg_wm_base_pong(shell, serial)
     }
 )
@@ -435,12 +435,11 @@ final class WaylandApplication: Application, @unchecked Sendable {
     }
 
     fileprivate func keyboardEnter(serial: UInt32, surface: OpaquePointer?, keys: [UInt8]) {
-        let symbols = keys.map {
-            self.xkbContext?.symbol(forKey: UInt32($0))
-        }
-        symbols.indices.forEach {
-            let symbol = symbols[$0]
-            Log.debug("Symbol[\($0)]: \(String(describing: symbol))")
+        Log.debug("wl_keyboard_listener.enter (num keys: \(keys.count))")
+        keys.indices.forEach { index in
+            let key = keys[index]
+            let symbol = self.xkbContext?.symbol(forKey: UInt32(key))
+            Log.debug(" + Key[\(index)]: \(key), Symbol: \(String(describing: symbol))")
         }
         Log.debug("wl_keyboard_listener.enter (serial:\(serial))")
     }
