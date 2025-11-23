@@ -194,16 +194,23 @@ private class ResolvedButtonStyleViewContext: GenericViewContext<ResolvedButtonS
     }
 
     override func drawBackground(frame: CGRect, context: GraphicsContext) {
-        if self.isMouseHovered && self.drawButtonShadowOnHover {
-            let path = RoundedRectangle(cornerRadius: 4).inset(by: -1).path(in: frame)
-            var context = context
-            context.addFilter(.shadow(color: .blue.opacity(0.6), radius: 2, options: .shadowOnly))
-            context.fill(path, with: .color(.black))
+        if self.isMouseHovered {
+            let dropShadow = switch self.drawButtonShadowOnHover {
+            case .default: view?._style is DefaultButtonStyle
+            case .any: true
+            case .none: false
+            }
+            if dropShadow {
+                let path = RoundedRectangle(cornerRadius: 4).inset(by: -1).path(in: frame)
+                var context = context
+                context.addFilter(.shadow(color: .blue.opacity(0.6), radius: 2, options: .shadowOnly))
+                context.fill(path, with: .color(.black))
+            }
         }
     }
     
     var isMouseHovered = false
-    var drawButtonShadowOnHover = false
+    var drawButtonShadowOnHover: DrawButtonShadowOnHoverForButtonStyle = .none
     override func handleMouseHover(at location: CGPoint, deviceID: Int, isTopMost: Bool) -> Bool {
         if deviceID == 0 {
             let hovered = self.isMouseHovered
@@ -220,12 +227,18 @@ private class ResolvedButtonStyleViewContext: GenericViewContext<ResolvedButtonS
     }
 }
 
+public enum DrawButtonShadowOnHoverForButtonStyle: Sendable{
+    case none
+    case any
+    case `default`
+}
+
 private struct DrawButtonShadowOnHover: EnvironmentKey {
-    static let defaultValue: Bool = true
+    static let defaultValue: DrawButtonShadowOnHoverForButtonStyle = .default
 }
 
 extension EnvironmentValues {
-    public var drawButtonShadowOnHover: Bool {
+    public var drawButtonShadowOnHover: DrawButtonShadowOnHoverForButtonStyle {
         get { self[DrawButtonShadowOnHover.self] }
         set { self[DrawButtonShadowOnHover.self] = newValue }
     }
