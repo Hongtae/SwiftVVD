@@ -33,10 +33,10 @@ extension GraphicsContext {
         public func measure(maxWidth: CGFloat? = nil, maxHeight: CGFloat? = nil) -> CGSize {
             var width: Int = .max
             var height: Int = .max
-            if let w = maxWidth {
+            if let w = maxWidth, w < CGFloat(width) {
                 width = Int(w * self.scaleFactor)
             }
-            if let h = maxHeight {
+            if let h = maxHeight, h < CGFloat(height) {
                 height = Int(h * self.scaleFactor)
             }
             let scale = 1.0 / self.scaleFactor
