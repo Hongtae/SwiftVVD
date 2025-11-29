@@ -10,10 +10,6 @@ import Foundation
 import Metal
 internal import QuartzCore
 
-#if ENABLE_APPKIT
-@_implementationOnly import AppKit
-#endif
-
 final class MetalSwapChain: SwapChain, @unchecked Sendable {
 
     let window: Window
@@ -56,7 +52,7 @@ final class MetalSwapChain: SwapChain, @unchecked Sendable {
         var layer: CAMetalLayer? = nil
 #if ENABLE_APPKIT
         if layer == nil {
-            if let view = (self.window as? AppKitWindow)?.view as? NSView {
+            if let view = (self.window as? AppKitWindow)?.nsView {
                 layer = CAMetalLayer()
                 view.wantsLayer = true
                 view.layer = layer
@@ -69,8 +65,8 @@ final class MetalSwapChain: SwapChain, @unchecked Sendable {
 #endif
 #if ENABLE_UIKIT
         if layer == nil {
-            if let window = self.window as? UIKitWindow {
-                layer = window.view.layer as? CAMetalLayer
+            if let view = (self.window as? UIKitWindow)?.uiView {
+                layer = view.layer as? CAMetalLayer
             }
         }
 #endif

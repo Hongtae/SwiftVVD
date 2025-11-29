@@ -9,18 +9,21 @@
 import Foundation
 @_implementationOnly import UIKit
 
-nonisolated(unsafe) private var activeWindowScenes: [UIWindowScene] = []
-nonisolated(unsafe) private var activeWindows: [UIWindow] = []
+@MainActor private var activeWindowScenes: [UIWindowScene] = []
+@MainActor private var activeWindows: [UIWindow] = []
 
+@MainActor
 func anyWindowScene() -> AnyObject? {
     activeWindowScenes.first
 }
 
-func setActiveWindow(_ window: AnyObject) {
-    activeWindows.append(window as! UIWindow)
+@MainActor
+func setActiveWindow(_ window: UIWindow) {
+    activeWindows.append(window)
 }
 
-func unsetActiveWindow(_ window: AnyObject) {
+@MainActor
+func unsetActiveWindow(_ window: UIWindow) {
     activeWindows.removeAll { $0 === window }
 }
 

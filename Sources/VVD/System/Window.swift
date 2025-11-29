@@ -145,6 +145,10 @@ public protocol Window: AnyObject {
     func activate()
     func minimize()
 
+    @discardableResult
+    func requestToClose() -> Bool
+    func close()
+
     func showMouse(_: Bool, forDeviceID: Int)
     func isMouseVisible(forDeviceID: Int) -> Bool
     func lockMouse(_: Bool, forDeviceID: Int)

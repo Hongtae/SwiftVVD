@@ -20,6 +20,10 @@ protocol AppKitView: AnyObject {
     var mouseLocked: Bool { get set }
     var textInput: Bool { get set }
     var proxyWindow: AppKitWindow? { get set }
+    
+    var wantsLayer: Bool { get set }
+    var layer: CALayer? { get set }
+    var bounds: CGRect { get }
 }
 
 @MainActor

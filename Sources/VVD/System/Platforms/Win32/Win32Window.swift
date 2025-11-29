@@ -343,7 +343,18 @@ final class Win32Window: Window {
         }
     }
 
-    func destroy() {
+    func requestToClose() -> Bool {
+        var close = true
+        if self.isValid {
+            close = self.delegate?.shouldClose(window: self) ?? true
+        }
+        if close {
+            self.close()
+        }
+        return close
+    }
+    
+    func close() {
         if let hWnd = self.hWnd {
             if let dt = self.dropTarget {
                 RevokeDragDrop(hWnd)
@@ -1160,7 +1171,7 @@ final class Win32Window: Window {
                     close = answer
                 }
                 if close {
-                    window.destroy()
+                    window.close()
                 }
                 return 0
             case UINT(WM_COMMAND):

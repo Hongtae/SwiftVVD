@@ -22,31 +22,37 @@ final class HeadlessWindow: Window {
     var contentSize: CGSize = .zero
     
     var title: String
-    
-    var delegate: WindowDelegate?
-    
+
+    weak var delegate: WindowDelegate?
+
     var platformHandle: OpaquePointer? { nil }
     var isValid: Bool { true }
-    
+
     required init?(name: String, style: WindowStyle, delegate: WindowDelegate?, data: [String: Any]) {
         self.title = name
+        self.delegate = delegate
     }
 
     deinit {
     }
 
-     func show() {
+    func show() {
     }
 
-     func hide() {
-
+    func hide() {
+    }
+    
+    func activate() {
     }
 
-     func activate() {
+    func minimize() {
+    }
+    
+    func requestToClose() -> Bool {
+        true
     }
 
-     func minimize() {
-
+    func close() {
     }
 
     func postWindowEvent(type: WindowEventType) {

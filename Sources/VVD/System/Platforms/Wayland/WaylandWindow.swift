@@ -297,54 +297,7 @@ final class WaylandWindow: Window {
     }
 
     deinit {
-        self.destroy()
-    }
-
-    nonisolated func destroy() {
-        if self.surface == nil {
-            return
-        }
-
-        let xdgToplevelDecoration = self.xdgToplevelDecoration
-        let fractionalScale = self.fractionalScaleObject
-        let activationToken = self.activationToken
-        let xdgToplevel = self.xdgToplevel
-        let xdgSurface = self.xdgSurface
-        let surface = self.surface
-
-        self.xdgToplevelDecoration = nil
-        self.fractionalScaleObject = nil
-        self.activationToken = nil
-        self.xdgToplevel = nil
-        self.xdgSurface = nil
-        self.surface = nil
-
-        let cleanup = { @MainActor in
-            if let xdgToplevelDecoration {
-                zxdg_toplevel_decoration_v1_destroy(xdgToplevelDecoration)
-            }
-            if let fractionalScale  {
-                wp_fractional_scale_v1_destroy(fractionalScale)
-            }
-            if let activationToken  {
-                xdg_activation_token_v1_destroy(activationToken)
-            }
-            xdg_toplevel_destroy(xdgToplevel)
-            xdg_surface_destroy(xdgSurface)
-            wl_surface_destroy(surface)
-        }
-
-        if let app = WaylandApplication.shared {
-            app.updateSurfaces()
-        }
-
-        runOnMainQueueSync { [weak self] in
-            self?.postWindowEvent(type: .closed)
-        }
-
-        Task { @MainActor in
-            cleanup()
-        }
+        self.close()
     }
 
     func show() {
@@ -390,7 +343,6 @@ final class WaylandWindow: Window {
         xdg_toplevel_set_minimized(self.xdgToplevel)
     }
 
-    @discardableResult
     func requestToClose() -> Bool {
         var close = true
         if self.isValid {
@@ -398,10 +350,57 @@ final class WaylandWindow: Window {
                 close = answer
             }
             if close {
-                self.destroy()
+                self.close()
             }
         }
         return close
+    }
+
+    nonisolated func close() {
+        if self.surface == nil {
+            return
+        }
+
+        let xdgToplevelDecoration = self.xdgToplevelDecoration
+        let fractionalScale = self.fractionalScaleObject
+        let activationToken = self.activationToken
+        let xdgToplevel = self.xdgToplevel
+        let xdgSurface = self.xdgSurface
+        let surface = self.surface
+
+        self.xdgToplevelDecoration = nil
+        self.fractionalScaleObject = nil
+        self.activationToken = nil
+        self.xdgToplevel = nil
+        self.xdgSurface = nil
+        self.surface = nil
+
+        let cleanup = { @MainActor in
+            if let xdgToplevelDecoration {
+                zxdg_toplevel_decoration_v1_destroy(xdgToplevelDecoration)
+            }
+            if let fractionalScale  {
+                wp_fractional_scale_v1_destroy(fractionalScale)
+            }
+            if let activationToken  {
+                xdg_activation_token_v1_destroy(activationToken)
+            }
+            xdg_toplevel_destroy(xdgToplevel)
+            xdg_surface_destroy(xdgSurface)
+            wl_surface_destroy(surface)
+        }
+
+        if let app = WaylandApplication.shared {
+            app.updateSurfaces()
+        }
+
+        runOnMainQueue { [weak self] in
+            self?.postWindowEvent(type: .closed)
+        }
+
+        Task { @MainActor in
+            cleanup()
+        }
     }
 
     func showMouse(_: Bool, forDeviceID: Int) {
