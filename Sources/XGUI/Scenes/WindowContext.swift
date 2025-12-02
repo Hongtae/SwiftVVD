@@ -672,16 +672,16 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
                 }
             }
 
-            let activeHandlers = {
+            let activeHandlers = { (states: _GestureHandler.State...) -> [_GestureHandler] in
                 gestureHandlers.compactMap {
-                    if $0.state == .ready || $0.state == .processing {
+                    if states.contains($0.state) {
                         return $0
                     }
                     return nil
                 }
             }
 
-            gestureHandlers = activeHandlers()
+            gestureHandlers = activeHandlers(.ready, .processing)
             if gestureHandlers.isEmpty {
                 return false
             }
@@ -706,7 +706,12 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
             default:
                 break
             }
-            gestureHandlers = activeHandlers()
+            
+            if event.type == .move {
+                gestureHandlers = activeHandlers(.ready, .processing)
+            } else {
+                gestureHandlers = activeHandlers(.processing)
+            }
             return gestureHandlers.isEmpty == false
         }
 
