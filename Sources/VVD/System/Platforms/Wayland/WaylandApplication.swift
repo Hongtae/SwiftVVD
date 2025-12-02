@@ -380,7 +380,7 @@ final class WaylandApplication: Application, @unchecked Sendable {
                             return
                         }
                     }
-                }                
+                }
             }
 
             let buttonID = Int(button) - BTN_MOUSE
@@ -452,10 +452,10 @@ final class WaylandApplication: Application, @unchecked Sendable {
         if let state = self.xkbContext?.updateKey(key, state: state) {
             Log.debug("xkb_state_component: \(state)")
         }
-        if let symbol = self.xkbContext?.symbol(forKey: key) {
-            let code = VirtualKey.from(scanCode: key)
-            let pressed = state == WL_KEYBOARD_KEY_STATE_PRESSED.rawValue
-            Log.debug("Key: \(key), Symbol: \(String(describing: symbol)), VirtualKey: \(code), pressed: \(pressed)")
+
+        let code = VirtualKey.from(scanCode: key)
+        let pressed = state == WL_KEYBOARD_KEY_STATE_PRESSED.rawValue
+        if code != .none {
             let keyEvent = KeyboardEvent(type: pressed ? .keyDown : .keyUp,
                                          window: self.activeWindow,
                                          deviceID: 0,
@@ -464,8 +464,12 @@ final class WaylandApplication: Application, @unchecked Sendable {
             MainActor.assumeIsolated {
                 self.activeWindow?.postKeyboardEvent(keyEvent)
             }
+        }
+
+        if let symbol = self.xkbContext?.symbol(forKey: key) {
+            Log.debug("Key: \(key), Symbol: \(String(describing: symbol)), VirtualKey: \(code), pressed: \(pressed)")
         } else {
-            Log.debug("Key: \(key), Symbol: nil, VirtualKey: .none")
+            Log.debug("Key: \(key), Symbol: nil, VirtualKey: \(code), pressed: \(pressed)")
         }
         Log.debug("wl_keyboard_listener.key (serial:\(serial), time:\(time), key:\(key), state:\(state))")
     }
