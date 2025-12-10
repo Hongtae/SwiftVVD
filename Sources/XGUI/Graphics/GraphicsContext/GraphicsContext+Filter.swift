@@ -9,7 +9,7 @@ import Foundation
 import VVD
 
 extension GraphicsContext {
-        public struct Filter {
+    public struct Filter: Sendable {
         enum FilterStyle {
             case projectionTransform(matrix: ProjectionTransform)
             case colorMatrix(matrix: ColorMatrix)
