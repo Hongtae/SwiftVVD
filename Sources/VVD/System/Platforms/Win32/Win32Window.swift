@@ -90,7 +90,9 @@ final class Win32Window: Window {
 
     var platformHandle: OpaquePointer? { OpaquePointer(hWnd) }
     var isValid: Bool { hWnd != nil }
-    
+
+    var eventObservers = WindowEventObserverContainer()
+
     private(set) var resizing: Bool = false
     private(set) var activated: Bool = false
     private(set) var visible: Bool = false
@@ -419,7 +421,7 @@ final class Win32Window: Window {
 
     func isMouseVisible(forDeviceID deviceID: Int) -> Bool {
         if deviceID == 0 {
-            var info: CURSORINFO = CURSORINFO()
+            var info = CURSORINFO()
             if GetCursorInfo(&info) {
                 return info.flags != 0
             }
@@ -447,7 +449,7 @@ final class Win32Window: Window {
 
     func mousePosition(forDeviceID deviceID: Int) -> CGPoint? {
         if let hWnd = self.hWnd, deviceID == 0 {
-            var pt: POINT = POINT()
+            var pt = POINT()
             GetCursorPos(&pt)
             ScreenToClient(hWnd, &pt)
             return CGPoint(x: Int(pt.x), y: Int(pt.y)) * (1.0 / self.contentScaleFactor)
@@ -457,9 +459,7 @@ final class Win32Window: Window {
 
     func setMousePosition(_ pos: CGPoint, forDeviceID deviceID: Int) {
         if let hWnd = self.hWnd, deviceID == 0 {
-            var pt: POINT = POINT()
-            pt.x = LONG(pos.x)
-            pt.y = LONG(pos.y)
+            var pt = POINT(x: LONG(pos.x), y: LONG(pos.y))
             ClientToScreen(hWnd, &pt)
             let v = CGPoint(x: Int(pt.x), y: Int(pt.y)) * self.contentScaleFactor
             SetCursorPos(Int32(v.x.rounded()), Int32(v.y.rounded()))
@@ -491,11 +491,11 @@ final class Win32Window: Window {
 
         // check mouse has gone out of window region.
         if let hWnd = self.hWnd, GetCapture() != hWnd {
-            var pt: POINT = POINT()
+            var pt = POINT()
             GetCursorPos(&pt)
             ScreenToClient(hWnd, &pt)
 
-            var rc: RECT = RECT()
+            var rc = RECT()
             GetClientRect(hWnd, &rc)
             if pt.x < rc.left || pt.x > rc.right || pt.y > rc.bottom || pt.y < rc.top {
 
@@ -509,7 +509,7 @@ final class Win32Window: Window {
 
     private func resetMouse() {
         if let hWnd = self.hWnd {
-            var pt: POINT = POINT()
+            var pt = POINT()
             GetCursorPos(&pt)
             ScreenToClient(hWnd, &pt)
             mousePosition = CGPoint(x: Int(pt.x), y: Int(pt.y)) * (1.0 / self.contentScaleFactor)
@@ -597,103 +597,16 @@ final class Win32Window: Window {
         self.keyboardStates = [UInt8](repeating: 0, count: 256)
     }
 
-    func postWindowEvent(type: WindowEventType) {
-        self.postWindowEvent(WindowEvent(type: type,
-                                         window: self,
-                                         windowFrame: self.windowFrame,
-                                         contentBounds: self.contentBounds,
-                                         contentScaleFactor: self.contentScaleFactor))
-    }
-
-    func postWindowEvent(_ event: WindowEvent) {
-        assert(event.window === self)
-        var invalidHandlers: [ObjectIdentifier] = []
-        self.eventObservers.forEach { key, handlers in
-            if let _ = handlers.observer {
-                handlers.windowEventHandler?(event)
-            } else {
-                invalidHandlers.append(key)
-            }
-        }
-        for key in invalidHandlers { self.eventObservers[key] = nil }
-    }
-
-    func postKeyboardEvent(_ event: KeyboardEvent) {
-        assert(event.window === self)
-        var invalidHandlers: [ObjectIdentifier] = []
-        self.eventObservers.forEach { key, handlers in
-            if let _ = handlers.observer {
-                handlers.keyboardEventHandler?(event)
-            } else {
-                invalidHandlers.append(key)
-            }
-        }
-        for key in invalidHandlers { self.eventObservers[key] = nil }
-    }
-
-    func postMouseEvent(_ event: MouseEvent) {        
-        assert(event.window === self)
-        var invalidHandlers: [ObjectIdentifier] = []
-        self.eventObservers.forEach { key, handlers in
-            if let _ = handlers.observer {
-                handlers.mouseEventHandler?(event)
-            } else {
-                invalidHandlers.append(key)
-            }
-        }
-        for key in invalidHandlers { self.eventObservers[key] = nil }
-    }
-
-    private struct EventHandlers {
-        weak var observer: AnyObject?
-        var windowEventHandler: ((_: WindowEvent)->Void)?
-        var mouseEventHandler: ((_: MouseEvent)->Void)?
-        var keyboardEventHandler: ((_: KeyboardEvent)->Void)?
-    }
-    private var eventObservers: [ObjectIdentifier: EventHandlers] = [:]
-
-    func addEventObserver(_ observer: AnyObject, handler: @escaping (_: WindowEvent)->Void) {
-        let key = ObjectIdentifier(observer)
-        if var handlers = self.eventObservers[key] {
-            handlers.windowEventHandler = handler
-            self.eventObservers[key] = handlers
-        } else {
-            self.eventObservers[key] = EventHandlers(observer: observer, windowEventHandler: handler)
-        }
-    }
-    func addEventObserver(_ observer: AnyObject, handler: @escaping (_: MouseEvent)->Void) {
-        let key = ObjectIdentifier(observer)
-        if var handlers = self.eventObservers[key] {
-            handlers.mouseEventHandler = handler
-            self.eventObservers[key] = handlers
-        } else {
-            self.eventObservers[key] = EventHandlers(observer: observer, mouseEventHandler: handler)
-        }
-    }
-    func addEventObserver(_ observer: AnyObject, handler: @escaping (_: KeyboardEvent)->Void) {
-        let key = ObjectIdentifier(observer)
-        if var handlers = self.eventObservers[key] {
-            handlers.keyboardEventHandler = handler
-            self.eventObservers[key] = handlers
-        } else {
-            self.eventObservers[key] = EventHandlers(observer: observer, keyboardEventHandler: handler)
-        }
-    }
-    func removeEventObserver(_ observer: AnyObject) {
-        let key = ObjectIdentifier(observer)
-        self.eventObservers[key] = nil
-    }
-
     func convertPointToScreen(_ point: CGPoint) -> CGPoint {
-        let x: LONG = LONG(point.x * self.contentScaleFactor)
-        let y: LONG = LONG(point.y * self.contentScaleFactor)
-        var pt: POINT = POINT(x: x, y: y)
+        let x = LONG(point.x * self.contentScaleFactor)
+        let y = LONG(point.y * self.contentScaleFactor)
+        var pt = POINT(x: x, y: y)
         ClientToScreen(self.hWnd, &pt)
         return CGPoint(x: Int(pt.x), y: Int(pt.y))
     }
     
     func convertPointFromScreen(_ point: CGPoint) -> CGPoint {
-        var pt: POINT = POINT(x: LONG(point.x), y: LONG(point.y))
+        var pt = POINT(x: LONG(point.x), y: LONG(point.y))
         ScreenToClient(self.hWnd, &pt)
         return CGPoint(x: Int(pt.x), y: Int(pt.y)) * (1.0 / self.contentScaleFactor)
     }
@@ -711,27 +624,63 @@ final class Win32Window: Window {
             return pt
         }
 
+        func HIWORD(_ value: LPARAM) -> WORD {
+            return WORD((value >> 16) & 0xffff)
+        }
+        func HIWORD(_ value: WPARAM) -> WORD {
+            return WORD((value >> 16) & 0xffff)
+        }
+        func LOWORD(_ value: LPARAM) -> WORD {
+            return WORD(value & 0xffff)
+        }
+        func LOWORD(_ value: WPARAM) -> WORD {
+            return WORD(value & 0xffff)
+        }
+
         if let window = window, window.hWnd == hWnd {
+            let activateWindow = {
+                if window.activated == false {
+                    window.activated = true
+                    numActiveWindows += 1
+                    window.postWindowEvent(type: .activated)
+                    window.resetKeyStates()
+                    window.resetMouse()
+                    Log.debug("VVD.numActiveWindows: \(numActiveWindows)")
+                }
+            }
+            let inactivateWindow = {
+                if window.activated {
+                    numActiveWindows -= 1
+                    window.resetKeyStates()
+                    window.resetMouse()
+                    window.activated = false
+                    window.postWindowEvent(type: .inactivated)                            
+                    Log.debug("VVD.numActiveWindows: \(numActiveWindows)")
+                }
+            }
+
             switch uMsg {
-            case UINT(WM_ACTIVATE):
-                if wParam == WA_ACTIVE || wParam == WA_CLICKACTIVE {
-                    if window.activated == false {
-                        numActiveWindows += 1
-                        window.activated = true
-                        window.postWindowEvent(type: .activated)
-                        window.resetKeyStates()
-                        window.resetMouse()
-                        Log.debug("VVD.numActiveWindows: \(numActiveWindows)")
+            case UINT(WM_NCACTIVATE):
+                let activated = wParam != 0
+                if activated {
+                    let foreground = GetForegroundWindow() == hWnd
+                    if foreground {
+                        activateWindow()
                     }
                 } else {
-                    if window.activated {
-                        numActiveWindows -= 1
-                        window.resetKeyStates()
-                        window.resetMouse()
-                        window.activated = false
-                        window.postWindowEvent(type: .inactivated)                            
-                        Log.debug("VVD.numActiveWindows: \(numActiveWindows)")
+                    inactivateWindow()
+                }
+                return DefWindowProcW(hWnd, uMsg, wParam, lParam)
+            case UINT(WM_ACTIVATE):
+                let activation = LOWORD(wParam)
+                if activation == WA_ACTIVE || activation == WA_CLICKACTIVE {
+                    let minimized = HIWORD(wParam) != 0
+                    let foreground = GetForegroundWindow() == hWnd
+                    if foreground && minimized == false {
+                        activateWindow()
                     }
+                } else {
+                    inactivateWindow()
                 }
                 return 0
             case UINT(WM_SHOWWINDOW):
@@ -807,9 +756,9 @@ final class Win32Window: Window {
                         window.visible = true
                         window.postWindowEvent(type: .shown)
                     } else {
-                        let w: Int = Int(lParam & 0xffff)
-                        let h: Int = Int((lParam >> 16) & 0xffff)
-                        let size: CGSize = CGSize(width: w, height: h)  // pixel size
+                        let w = Int(LOWORD(lParam))
+                        let h = Int(HIWORD(lParam))
+                        let size = CGSize(width: w, height: h)  // pixel size
                         window.contentBounds.size = size * (1.0 / window.contentScaleFactor) // DPI scaled
 
                         var rc = RECT()
@@ -824,8 +773,8 @@ final class Win32Window: Window {
                 return 0
             case UINT(WM_MOVE):
                 if window.resizing == false {
-                    let x: Int = Int(lParam & 0xffff)         // horizontal position 
-                    let y: Int = Int((lParam >> 16) & 0xffff) // vertical position 
+                    let x = Int(LOWORD(lParam))     // horizontal position 
+                    let y = Int(HIWORD(lParam))     // vertical position 
 
                     window.windowFrame.origin = CGPoint(x: x, y: y)
                     window.postWindowEvent(type: .moved)
@@ -833,8 +782,8 @@ final class Win32Window: Window {
                 return 0
             case UINT(WM_DPICHANGED):
                 // Note: xDPI, yDPI are identical for Windows apps
-                let xDPI: Int = Int(wParam & 0xffff)
-                let yDPI: Int = Int((wParam >> 16) & 0xffff)
+                let xDPI = LOWORD(wParam)
+                let yDPI = HIWORD(wParam)
 
                 let tmp: UnsafePointer<RECT>? = UnsafePointer<RECT>(bitPattern: UInt(lParam))
                 let suggestedWindowFrame: RECT = tmp!.pointee
@@ -844,11 +793,11 @@ final class Win32Window: Window {
 
                 if window.style.contains(.autoResize) {
                     SetWindowPos(hWnd, nil,
-                        suggestedWindowFrame.left,
-                        suggestedWindowFrame.top,
-                        suggestedWindowFrame.right - suggestedWindowFrame.left,
-                        suggestedWindowFrame.bottom - suggestedWindowFrame.top,
-                        UINT(SWP_NOZORDER | SWP_NOACTIVATE))
+                                 suggestedWindowFrame.left,
+                                 suggestedWindowFrame.top,
+                                 suggestedWindowFrame.right - suggestedWindowFrame.left,
+                                 suggestedWindowFrame.bottom - suggestedWindowFrame.top,
+                                 UINT(SWP_NOZORDER | SWP_NOACTIVATE))
                 } else {
                     var rcClient = RECT(), rcWindow = RECT()
                     GetClientRect(hWnd, &rcClient)
@@ -871,25 +820,19 @@ final class Win32Window: Window {
                 let styleEx = DWORD(bitPattern: GetWindowLongW(hWnd, GWL_EXSTYLE))
                 let menu: Bool = GetMenu(hWnd) != nil
 
-                var minSize: CGSize = CGSize(width: 1, height: 1)
+                var minSize = CGSize(width: 1, height: 1)
                 if let size = window.delegate?.minimumContentSize(window: window) {
                     minSize.width = size.width
                     minSize.height = size.height
                 }
-                var rc = RECT(left: 0,
-                                top: 0,
-                                right: LONG(max(minSize.width, 1)),
-                                bottom: LONG(max(minSize.height, 1)))
+                var rc = RECT(left: 0, top: 0, right: LONG(max(minSize.width, 1)), bottom: LONG(max(minSize.height, 1)))
                 if AdjustWindowRectEx(&rc, style, menu, styleEx) {
                     let tmp: UnsafeMutablePointer<MINMAXINFO> = UnsafeMutablePointer<MINMAXINFO>(bitPattern: UInt(lParam))!
                     tmp.pointee.ptMinTrackSize.x = rc.right - rc.left
                     tmp.pointee.ptMinTrackSize.y = rc.bottom - rc.top
                 }
                 if let maxSize = window.delegate?.maximumContentSize(window: window) {
-                    rc = RECT(left: 0,
-                                top: 0,
-                                right: LONG(max(maxSize.width, 1)),
-                                bottom: LONG(max(maxSize.height, 1)))
+                    rc = RECT(left: 0, top: 0, right: LONG(max(maxSize.width, 1)), bottom: LONG(max(maxSize.height, 1)))
                     if AdjustWindowRectEx(&rc, style, menu, styleEx) {
                         let tmp: UnsafeMutablePointer<MINMAXINFO> = UnsafeMutablePointer<MINMAXINFO>(bitPattern: UInt(lParam))!
                         if maxSize.width > 0 {
@@ -912,8 +855,8 @@ final class Win32Window: Window {
                 let oldPtX = LONG((window.mousePosition.x * window.contentScaleFactor).rounded())
                 let oldPtY = LONG((window.mousePosition.y * window.contentScaleFactor).rounded())
                 if pt.x != oldPtX || pt.y != oldPtY {
-                    let delta: CGPoint = CGPoint(x: CGFloat(pt.x) - window.mousePosition.x,
-                                                y: CGFloat(pt.y) - window.mousePosition.y) * (1.0 / window.contentScaleFactor)
+                    let delta = CGPoint(x: CGFloat(pt.x) - window.mousePosition.x,
+                                        y: CGFloat(pt.y) - window.mousePosition.y) * (1.0 / window.contentScaleFactor)
 
                     var postEvent = true
                     if window.mouseLocked {
@@ -949,7 +892,7 @@ final class Win32Window: Window {
             case UINT(WM_LBUTTONDOWN):
                 window.mouseButtonDownMask.insert(.button1)
                 let pts = MAKEPOINTS(lParam)
-                let pos: CGPoint = CGPoint(x: Int(pts.x), y: Int(pts.y)) * (1.0 / window.contentScaleFactor)
+                let pos = CGPoint(x: Int(pts.x), y: Int(pts.y)) * (1.0 / window.contentScaleFactor)
 
                 window.postMouseEvent(MouseEvent(type: .buttonDown,
                                                  window: window,
@@ -962,7 +905,7 @@ final class Win32Window: Window {
             case UINT(WM_LBUTTONUP):
                 window.mouseButtonDownMask.remove(.button1)
                 let pts = MAKEPOINTS(lParam)
-                let pos: CGPoint = CGPoint(x: Int(pts.x), y: Int(pts.y)) * (1.0 / window.contentScaleFactor)
+                let pos = CGPoint(x: Int(pts.x), y: Int(pts.y)) * (1.0 / window.contentScaleFactor)
 
                 window.postMouseEvent(MouseEvent(type: .buttonUp,
                                                  window: window,
@@ -975,7 +918,7 @@ final class Win32Window: Window {
             case UINT(WM_RBUTTONDOWN):
                 window.mouseButtonDownMask.insert(.button2)
                 let pts = MAKEPOINTS(lParam)
-                let pos: CGPoint = CGPoint(x: Int(pts.x), y: Int(pts.y)) * (1.0 / window.contentScaleFactor)
+                let pos = CGPoint(x: Int(pts.x), y: Int(pts.y)) * (1.0 / window.contentScaleFactor)
 
                 window.postMouseEvent(MouseEvent(type: .buttonDown,
                                                  window: window,
@@ -988,7 +931,7 @@ final class Win32Window: Window {
             case UINT(WM_RBUTTONUP):
                 window.mouseButtonDownMask.remove(.button2)
                 let pts = MAKEPOINTS(lParam)
-                let pos: CGPoint = CGPoint(x: Int(pts.x), y: Int(pts.y)) * (1.0 / window.contentScaleFactor)
+                let pos = CGPoint(x: Int(pts.x), y: Int(pts.y)) * (1.0 / window.contentScaleFactor)
 
                 window.postMouseEvent(MouseEvent(type: .buttonUp,
                                                  window: window,
@@ -1001,7 +944,7 @@ final class Win32Window: Window {
             case UINT(WM_MBUTTONDOWN):
                 window.mouseButtonDownMask.insert(.button3)
                 let pts = MAKEPOINTS(lParam)
-                let pos: CGPoint = CGPoint(x: Int(pts.x), y: Int(pts.y)) * (1.0 / window.contentScaleFactor)
+                let pos = CGPoint(x: Int(pts.x), y: Int(pts.y)) * (1.0 / window.contentScaleFactor)
 
                 window.postMouseEvent(MouseEvent(type: .buttonDown,
                                                  window: window,
@@ -1014,7 +957,7 @@ final class Win32Window: Window {
             case UINT(WM_MBUTTONUP):
                 window.mouseButtonDownMask.remove(.button3)
                 let pts = MAKEPOINTS(lParam)
-                let pos: CGPoint = CGPoint(x: Int(pts.x), y: Int(pts.y)) * (1.0 / window.contentScaleFactor)
+                let pos = CGPoint(x: Int(pts.x), y: Int(pts.y)) * (1.0 / window.contentScaleFactor)
 
                 window.postMouseEvent(MouseEvent(type: .buttonUp,
                                                  window: window,
@@ -1026,9 +969,9 @@ final class Win32Window: Window {
                 return 0
             case UINT(WM_XBUTTONDOWN):
                 let pts = MAKEPOINTS(lParam)
-                let pos: CGPoint = CGPoint(x: Int(pts.x), y: Int(pts.y)) * (1.0 / window.contentScaleFactor)
+                let pos = CGPoint(x: Int(pts.x), y: Int(pts.y)) * (1.0 / window.contentScaleFactor)
 
-                let xButton = DWORD_PTR(wParam) >> 16 & 0xffff
+                let xButton = HIWORD(wParam)
                 if xButton == XBUTTON1 {
                     window.mouseButtonDownMask.insert(.button4)
 
@@ -1052,9 +995,9 @@ final class Win32Window: Window {
                 return 1 // should return TRUE
             case UINT(WM_XBUTTONUP):
                 let pts = MAKEPOINTS(lParam)
-                let pos: CGPoint = CGPoint(x: Int(pts.x), y: Int(pts.y)) * (1.0 / window.contentScaleFactor)
+                let pos = CGPoint(x: Int(pts.x), y: Int(pts.y)) * (1.0 / window.contentScaleFactor)
 
-                let xButton = DWORD_PTR(wParam) >> 16 & 0xffff
+                let xButton = HIWORD(wParam)
                 if xButton == XBUTTON1 {
                     window.mouseButtonDownMask.remove(.button4)
 
@@ -1081,9 +1024,9 @@ final class Win32Window: Window {
                 ClientToScreen(hWnd, &origin)
 
                 let pts = MAKEPOINTS(lParam)
-                let pos: CGPoint = CGPoint(x: Int(pts.x), y: Int(pts.y)) * (1.0 / window.contentScaleFactor)
+                let pos = CGPoint(x: Int(pts.x), y: Int(pts.y)) * (1.0 / window.contentScaleFactor)
 
-                let deltaY: Int16 = Int16(bitPattern: UInt16(DWORD_PTR(wParam) >> 16 & 0xffff))
+                let deltaY = Int16(bitPattern: UInt16(HIWORD(wParam)))
                 let deltaYScaled = CGFloat(deltaY) / window.contentScaleFactor
 
                 window.postMouseEvent(MouseEvent(type: .wheel,

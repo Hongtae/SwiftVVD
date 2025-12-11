@@ -2,7 +2,7 @@
 //  File: Window.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -120,6 +120,13 @@ public struct WindowStyle: OptionSet, Sendable {
     public static let auxiliaryWindow   = WindowStyle(rawValue: 1 << 9)
 }
 
+public protocol WindowEventObserver {
+    mutating func addEventObserver(_: AnyObject, handler: @escaping (_: WindowEvent)->Void)
+    mutating func addEventObserver(_: AnyObject, handler: @escaping (_: MouseEvent)->Void)
+    mutating func addEventObserver(_: AnyObject, handler: @escaping (_: KeyboardEvent)->Void)
+    mutating func removeEventObserver(_: AnyObject)
+}
+
 @MainActor
 public protocol Window: AnyObject {
 
@@ -159,16 +166,14 @@ public protocol Window: AnyObject {
     func enableTextInput(_: Bool, forDeviceID: Int)
     func isTextInputEnabled(forDeviceID: Int) -> Bool
 
-    func addEventObserver(_: AnyObject, handler: @escaping (_: WindowEvent)->Void)
-    func addEventObserver(_: AnyObject, handler: @escaping (_: MouseEvent)->Void)
-    func addEventObserver(_: AnyObject, handler: @escaping (_: KeyboardEvent)->Void)
-    func removeEventObserver(_: AnyObject)
-    
     func convertPointToScreen(_: CGPoint) -> CGPoint
     func convertPointFromScreen(_: CGPoint) -> CGPoint
     
     var isValid: Bool { get }
     var platformHandle: OpaquePointer? { get }
+
+    associatedtype EventObserver: WindowEventObserver
+    var eventObservers: Self.EventObserver { get set }
 }
 
 extension Window {
@@ -183,7 +188,112 @@ extension Window {
     public func isTextInputEnabled(forDeviceID: Int) -> Bool { false }
 }
 
+public extension Window {
+    func addEventObserver(_ observer: AnyObject, handler: @escaping (_: WindowEvent)->Void) {
+        self.eventObservers.addEventObserver(observer, handler: handler)
+    }
+
+    func addEventObserver(_ observer: AnyObject, handler: @escaping (_: MouseEvent)->Void) {
+        self.eventObservers.addEventObserver(observer, handler: handler)
+    }
+
+    func addEventObserver(_ observer: AnyObject, handler: @escaping (_: KeyboardEvent)->Void) {
+        self.eventObservers.addEventObserver(observer, handler: handler)
+    }
+
+    func removeEventObserver(_ observer: AnyObject) {
+        self.eventObservers.removeEventObserver(observer)
+    }
+}
+
 @MainActor
 public func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?, data: [String: Any]? = nil) -> (any Window)? {
     Platform.makeWindow(name: name, style: style, delegate: delegate, data: data ?? [:])
+}
+
+public struct WindowEventObserverContainer: WindowEventObserver {
+    fileprivate struct Handler {
+        weak var observer: AnyObject?
+        var windowEventHandler: ((_ event: WindowEvent) -> Void)? = nil
+        var mouseEventHandler: ((_ event: MouseEvent) -> Void)? = nil
+        var keyboardEventHandler: ((_ event: KeyboardEvent) -> Void)? = nil
+    }
+    private var handlers: [ObjectIdentifier: Handler] = [:]
+
+    fileprivate mutating func activeHandlers() -> [Handler] {
+        self.handlers = self.handlers.filter {
+            $0.value.observer != nil 
+        }
+        return self.handlers.values.map(\.self)
+    }
+
+    public init() {
+    }
+
+    public mutating func addEventObserver(_ observer: AnyObject, handler: @escaping (_: WindowEvent)->Void) {
+        let key = ObjectIdentifier(observer)
+        if var handlers = self.handlers[key] {
+            handlers.windowEventHandler = handler
+            self.handlers[key] = handlers
+        } else {
+            self.handlers[key] = Handler(observer: observer, windowEventHandler: handler)
+        }
+    }
+
+    public mutating func addEventObserver(_ observer: AnyObject, handler: @escaping (_: MouseEvent)->Void) {
+        let key = ObjectIdentifier(observer)
+        if var handlers = self.handlers[key] {
+            handlers.mouseEventHandler = handler
+            self.handlers[key] = handlers
+        } else {
+            self.handlers[key] = Handler(observer: observer, mouseEventHandler: handler)
+        }
+    }
+
+    public mutating func addEventObserver(_ observer: AnyObject, handler: @escaping (_: KeyboardEvent)->Void) {
+        let key = ObjectIdentifier(observer)
+        if var handlers = self.handlers[key] {
+            handlers.keyboardEventHandler = handler
+            self.handlers[key] = handlers
+        } else {
+            self.handlers[key] = Handler(observer: observer, keyboardEventHandler: handler)
+        }
+    }
+
+    public mutating func removeEventObserver(_ observer: AnyObject) {
+        let key = ObjectIdentifier(observer)
+        self.handlers[key] = nil
+    }
+}
+
+extension Window where Self.EventObserver == WindowEventObserverContainer {
+    func postWindowEvent(type: WindowEventType) {
+        self.postWindowEvent(
+            WindowEvent(type: type,
+                        window: self,
+                        windowFrame: self.windowFrame,
+                        contentBounds: self.contentBounds,
+                        contentScaleFactor: self.contentScaleFactor))
+    }
+    
+    func postWindowEvent(_ event: WindowEvent) {
+        assert(event.window === self)
+        self.eventObservers.activeHandlers().forEach {
+            $0.windowEventHandler?(event)
+        }
+    }
+
+    func postKeyboardEvent(_ event: KeyboardEvent) {
+        assert(event.window === self)
+        self.eventObservers.activeHandlers().forEach {
+            $0.keyboardEventHandler?(event)
+        }
+    }
+
+    func postMouseEvent(_ event: MouseEvent) {
+        assert(event.window === self)
+        self.eventObservers.activeHandlers().forEach {
+            $0.mouseEventHandler?(event)
+        }
+    }
 }

@@ -140,6 +140,8 @@ final class AppKitWindow: Window {
     }
     var isValid: Bool { view != nil }
     
+    var eventObservers = WindowEventObserverContainer()
+    
     required init?(name: String, style: WindowStyle, delegate: WindowDelegate?, data: [String: Any]) {
         var styleMask: NSWindow.StyleMask = []
         let backingStoreType: NSWindow.BackingStoreType = .buffered
@@ -313,94 +315,6 @@ final class AppKitWindow: Window {
             return self.view?.textInput ?? false
         }
         return false
-    }
-
-    func postWindowEvent(type: WindowEventType) {
-        self.postWindowEvent(
-            WindowEvent(type: type,
-                        window: self,
-                        windowFrame: self.windowFrame,
-                        contentBounds: self.contentBounds,
-                        contentScaleFactor: self.contentScaleFactor))
-    }
-
-    func postWindowEvent(_ event: WindowEvent) {
-        assert(event.window === self)
-        var invalidHandlers: [ObjectIdentifier] = []
-        self.eventObservers.forEach { key, handlers in
-            if let _ = handlers.observer {
-                handlers.windowEventHandler?(event)
-            } else {
-                invalidHandlers.append(key)
-            }
-        }
-        for key in invalidHandlers { self.eventObservers[key] = nil }
-    }
-
-    func postKeyboardEvent(_ event: KeyboardEvent) {
-        assert(event.window === self)
-        var invalidHandlers: [ObjectIdentifier] = []
-        self.eventObservers.forEach { key, handlers in
-            if let _ = handlers.observer {
-                handlers.keyboardEventHandler?(event)
-            } else {
-                invalidHandlers.append(key)
-            }
-        }
-        for key in invalidHandlers { self.eventObservers[key] = nil }
-    }
-
-    func postMouseEvent(_ event: MouseEvent) {
-        assert(event.window === self)
-        var invalidHandlers: [ObjectIdentifier] = []
-        self.eventObservers.forEach { key, handlers in
-            if let _ = handlers.observer {
-                handlers.mouseEventHandler?(event)
-            } else {
-                invalidHandlers.append(key)
-            }
-        }
-        for key in invalidHandlers { self.eventObservers[key] = nil }
-    }
-
-    private struct EventHandlers {
-        weak var observer: AnyObject?
-        var windowEventHandler: ((_: WindowEvent)->Void)?
-        var mouseEventHandler: ((_: MouseEvent)->Void)?
-        var keyboardEventHandler: ((_: KeyboardEvent)->Void)?
-    }
-    private var eventObservers: [ObjectIdentifier: EventHandlers] = [:]
-
-    func addEventObserver(_ observer: AnyObject, handler: @escaping (_: WindowEvent)->Void) {
-        let key = ObjectIdentifier(observer)
-        if var handlers = self.eventObservers[key] {
-            handlers.windowEventHandler = handler
-            self.eventObservers[key] = handlers
-        } else {
-            self.eventObservers[key] = EventHandlers(observer: observer, windowEventHandler: handler)
-        }
-    }
-    func addEventObserver(_ observer: AnyObject, handler: @escaping (_: MouseEvent)->Void) {
-        let key = ObjectIdentifier(observer)
-        if var handlers = self.eventObservers[key] {
-            handlers.mouseEventHandler = handler
-            self.eventObservers[key] = handlers
-        } else {
-            self.eventObservers[key] = EventHandlers(observer: observer, mouseEventHandler: handler)
-        }
-    }
-    func addEventObserver(_ observer: AnyObject, handler: @escaping (_: KeyboardEvent)->Void) {
-        let key = ObjectIdentifier(observer)
-        if var handlers = self.eventObservers[key] {
-            handlers.keyboardEventHandler = handler
-            self.eventObservers[key] = handlers
-        } else {
-            self.eventObservers[key] = EventHandlers(observer: observer, keyboardEventHandler: handler)
-        }
-    }
-    func removeEventObserver(_ observer: AnyObject) {
-        let key = ObjectIdentifier(observer)
-        self.eventObservers[key] = nil
     }
     
     func convertPointToScreen(_ point: CGPoint) -> CGPoint {
