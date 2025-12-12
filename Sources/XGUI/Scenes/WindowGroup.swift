@@ -115,9 +115,34 @@ class WindowGroupSceneContext<Content>: TypedSceneContext<WindowGroupScene<Conte
 
 class GroupWindowContext<Content>: GenericWindowContext<Content> where Content: View {
     let dataType: Any.Type?
+    
+    let titleGraph: _GraphValue<Text>
+    var _title: String = ""
+
+    override var title: String { _title }
+    override var style: WindowStyle { .genericWindow }
+
     init(dataType: Any.Type?, content: _GraphValue<Content>, title: _GraphValue<Text>, scene: SceneContext) {
         self.dataType = dataType
+        self.titleGraph = title
         super.init(content: content, scene: scene)
+    }
+
+    override func updateContent() {
+        let oldTitle = _title
+        let title = self.scene.value(atPath: self.titleGraph)
+        self._title = title?._resolveText(in: self.environment) ?? ""
+
+        super.updateContent()
+        
+        if oldTitle != self._title {
+            if let window {
+                let newTitle = self._title
+                runOnMainQueueSync {
+                    window.title = newTitle
+                }
+            }
+        }
     }
 }
 

@@ -86,8 +86,6 @@ class SingleWindowSceneContext<Content>: TypedSceneContext<SingleWindowScene<Con
 
 
 class SceneWindowContext<Content>: GenericWindowContext<Content> where Content: View {
-    weak var sceneContext: SceneContext?
-
     let titleGraph: _GraphValue<Text>
     var _title: String = ""
 
@@ -95,14 +93,13 @@ class SceneWindowContext<Content>: GenericWindowContext<Content> where Content: 
     override var style: WindowStyle { .genericWindow }
 
     init(content: _GraphValue<Content>, title: _GraphValue<Text>, scene: SceneContext) {
-        self.sceneContext = scene
         self.titleGraph = title
         super.init(content: content, scene: scene)
     }
 
     override func updateContent() {
         let oldTitle = _title
-        let title = sceneContext?.value(atPath: self.titleGraph)
+        let title = self.scene.value(atPath: self.titleGraph)
         self._title = title?._resolveText(in: self.environment) ?? ""
 
         super.updateContent()
