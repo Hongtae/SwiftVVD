@@ -117,7 +117,19 @@ public func isMainThreadOrQueue() -> Bool {
     Thread.isMainThread || DispatchQueue.isMain
 }
 
-public func runOnMainQueueSync<T>(_ block: @escaping @MainActor () -> T) -> T where T: Sendable {
+public func runOnMainQueue(_ block: @escaping @MainActor () -> Void) {
+    if DispatchQueue.isMain {
+        MainActor.assumeIsolated {
+            block()
+        }
+    } else {
+        DispatchQueue.main.async {
+            block()
+        }
+    }
+}
+
+public func runOnMainQueueSync<T>(_ block: @MainActor () -> T) -> T where T: Sendable {
     if DispatchQueue.isMain {
         return MainActor.assumeIsolated {
             block()
