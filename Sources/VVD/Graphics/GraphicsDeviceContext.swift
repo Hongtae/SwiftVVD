@@ -2,7 +2,7 @@
 //  File: GraphicsDeviceContext.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -166,12 +166,15 @@ public func makeGraphicsDeviceContext(api: GraphicsAPI = .auto) -> GraphicsDevic
     if api == .vulkan || api == .auto {
 #if ENABLE_VULKAN
         var enableValidation = false
+        let validationFeatures: VulkanValidationFeatures = [.coreValidation,
+                                                            .synchronizationValidation]
 #if DEBUG
         if CommandLine.arguments.contains(where: { $0.lowercased() == "--disable-validation"}) == false {
             enableValidation = true
         }
 #endif
-        if let instance = VulkanInstance(enableValidation: enableValidation) {
+        if let instance = VulkanInstance(enableValidation: enableValidation,
+                                         validationFeatures: validationFeatures) {
             var device: VulkanGraphicsDevice? = nil
             if let deviceNamePrefix {
                 for physicalDevice in instance.physicalDevices {
@@ -183,7 +186,7 @@ public func makeGraphicsDeviceContext(api: GraphicsAPI = .auto) -> GraphicsDevic
             }
             if device == nil {
                 device = instance.makeDevice()
-            }                    
+            }
             if let device {
                 return GraphicsDeviceContext(device: device)
             }
@@ -204,7 +207,7 @@ public func makeGraphicsDeviceContext(api: GraphicsAPI = .auto) -> GraphicsDevic
         if let device {
             return GraphicsDeviceContext(device: device)
         }
-#endif        
+#endif
     }
     return nil
 }

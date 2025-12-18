@@ -33,6 +33,17 @@ struct VulkanLayerProperties {
     let extensions: [String: UInt32]
 }
 
+struct VulkanValidationFeatures: OptionSet {
+    let rawValue: UInt32
+
+    static let coreValidation                   = VulkanValidationFeatures(rawValue: 1)
+    static let synchronizationValidation        = VulkanValidationFeatures(rawValue: 1 << 1)
+    static let bestPractices                    = VulkanValidationFeatures(rawValue: 1 << 2)
+    static let debugPrintf                      = VulkanValidationFeatures(rawValue: 1 << 3)
+    static let gpuAssisted                      = VulkanValidationFeatures(rawValue: 1 << 4)
+    static let gpuAssistedReserveBindingSlot    = VulkanValidationFeatures(rawValue: 1 << 5)
+}
+
 nonisolated(unsafe)
 private weak var vulkanDebugLogger: Logger? = nil
 
@@ -106,7 +117,7 @@ final class VulkanInstance {
 
     private(set) var instance: VkInstance
     private(set) var allocationCallbacks: UnsafePointer<VkAllocationCallbacks>?
-    
+
     private var debugMessenger: VkDebugUtilsMessengerEXT?
     
     var extensionProc = VulkanInstanceExtensions()
@@ -123,6 +134,8 @@ final class VulkanInstance {
           enableLayersForEnabledExtensions: Bool = false,
           enableValidation: Bool = false,
           enableDebugUtils: Bool = false,
+          validationFeatures: VulkanValidationFeatures = [.coreValidation,
+                                                          .synchronizationValidation],
           allocationCallbacks: VkAllocationCallbacks? = nil) {
         var requiredLayers = requiredLayers
         var optionalLayers = optionalLayers
@@ -134,7 +147,7 @@ final class VulkanInstance {
         var appInfo : VkApplicationInfo = VkApplicationInfo()
         appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO
         appInfo.pNext = nil
-        
+
         let tempHolder = TemporaryBufferHolder(label: "VulkanInstance.init")
 
         let applicationName = unsafePointerCopy(string: "VVD.Vulkan", holder: tempHolder)
@@ -224,7 +237,7 @@ final class VulkanInstance {
                     self.extensionSupportLayers[ext]?.append(layer.name)
                 }
             }
-            
+
             self.layers[layer.name] = VulkanLayerProperties(
                 name: layer.name,
                 specVersion: layer.specVersion,
@@ -298,7 +311,7 @@ final class VulkanInstance {
                 Log.warn("Instance extension: \(ext) not supported.")
             }
         }
-        
+
         // setup layer, merge extension list
         var enabledLayers: [String] = []
         for layer in optionalLayers {
@@ -336,20 +349,42 @@ final class VulkanInstance {
         instanceCreateInfo.pApplicationInfo = unsafePointerCopy(from: appInfo, holder: tempHolder)
 
         if enableValidation {
-            let enabledFeatures: [VkValidationFeatureEnableEXT] = [
-                VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_EXT,
-                VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_RESERVE_BINDING_SLOT_EXT,
-                VK_VALIDATION_FEATURE_ENABLE_DEBUG_PRINTF_EXT,
-                VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT,
-            ]
+            var enabledFeatures: [VkValidationFeatureEnableEXT] = []
+            var disabledFeatures: [VkValidationFeatureDisableEXT] = []
+            var validationFeatures = validationFeatures
+            if validationFeatures.contains(.gpuAssistedReserveBindingSlot) {
+                if validationFeatures.intersection([.gpuAssisted, .debugPrintf]).isEmpty {
+                    Log.warn("VulkanValidationFeatures.gpuAssistedReserveBindingSlot requires gpuAssisted or debugPrintf to be enabled. Enabling gpuAssisted.")
+                    validationFeatures.insert(.gpuAssisted)
+                }
+            }
 
-            var validationFeatures = VkValidationFeaturesEXT()
-            validationFeatures.sType = VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT
+            if validationFeatures.contains(.coreValidation) == false {
+                disabledFeatures.append(VK_VALIDATION_FEATURE_DISABLE_CORE_CHECKS_EXT)
+            }
+            if validationFeatures.contains(.synchronizationValidation) {
+                enabledFeatures.append(VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT)
+            }
+            if validationFeatures.contains(.bestPractices) {
+                enabledFeatures.append(VK_VALIDATION_FEATURE_ENABLE_BEST_PRACTICES_EXT)
+            }
+            if validationFeatures.contains(.debugPrintf) {
+                enabledFeatures.append(VK_VALIDATION_FEATURE_ENABLE_DEBUG_PRINTF_EXT)
+            }
+            if validationFeatures.contains(.gpuAssisted) {
+                enabledFeatures.append(VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_EXT)
+            }
+            if validationFeatures.contains(.gpuAssistedReserveBindingSlot) {
+                enabledFeatures.append(VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_RESERVE_BINDING_SLOT_EXT)
+            }
 
-            validationFeatures.enabledValidationFeatureCount = UInt32(enabledFeatures.count)
-            validationFeatures.pEnabledValidationFeatures = unsafePointerCopy(collection: enabledFeatures, holder: tempHolder)
-
-            instanceCreateInfo.pNext = UnsafeRawPointer(unsafePointerCopy(from: validationFeatures, holder: tempHolder))
+            var validationFeaturesExt = VkValidationFeaturesEXT()
+            validationFeaturesExt.sType = VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT
+            validationFeaturesExt.enabledValidationFeatureCount = UInt32(enabledFeatures.count)
+            validationFeaturesExt.pEnabledValidationFeatures = unsafePointerCopy(collection: enabledFeatures, holder: tempHolder)
+            validationFeaturesExt.disabledValidationFeatureCount = UInt32(disabledFeatures.count)
+            validationFeaturesExt.pDisabledValidationFeatures = unsafePointerCopy(collection: disabledFeatures, holder: tempHolder)
+            instanceCreateInfo.pNext = UnsafeRawPointer(unsafePointerCopy(from: validationFeaturesExt, holder: tempHolder))
         }
 
         if enabledLayers.count > 0 {
