@@ -19,10 +19,14 @@ final class VulkanSwapChain: SwapChain, @unchecked Sendable {
     private var frameCount: UInt64  // incremented at each present 
     private var imageIndex: UInt32  // returned from vkAcquireNextImageKHR
 
+    private var acquireFences: [VkFence]
     private var acquireSemaphores: [VkSemaphore]
+    private var numberOfAcquireLocks: Int
+
     private var submitSemaphores: [VkSemaphore]
-    private var numberOfSwapchainImages: Int
     private var imageViews: [VulkanImageView]
+    private var numberOfSwapchainImages: Int
+    private var offscreenImageView: VulkanImageView? = nil
 
     private var swapchain: VkSwapchainKHR?
     private var surface: VkSurfaceKHR?
@@ -31,6 +35,7 @@ final class VulkanSwapChain: SwapChain, @unchecked Sendable {
 
     private let lock = NSLock()
     private var deviceReset = false
+    private var surfaceReady = false
     private var validWindow = false
     private var cachedResolution: CGSize
 
@@ -43,6 +48,8 @@ final class VulkanSwapChain: SwapChain, @unchecked Sendable {
         self.frameCount = 0
         self.imageIndex = 0
         self.acquireSemaphores = []
+        self.acquireFences = []
+        self.numberOfAcquireLocks = 0
         self.submitSemaphores = []
         self.numberOfSwapchainImages = 0
         self.imageViews = []
@@ -53,21 +60,29 @@ final class VulkanSwapChain: SwapChain, @unchecked Sendable {
         self.validWindow = window.isValid
 
         window.addEventObserver(self) { [weak self](event: WindowEvent) in
-            if event.type == .resized {
-                if let self = self {
+            switch event.type {
+                case .resized:
+                if let self {
                     let resolution = self.window.resolution
                     self.lock.withLock {
                         self.cachedResolution = resolution
                         self.deviceReset = true
                     }
                 }
-            }
-            else if event.type == .closed {
-                if let self = self {
+                case .closed:
+                if let self {
+                    self.lock.withLock { self.validWindow = false }
+                }
+                case .shown, .activated:
+                if let self {
                     self.lock.withLock {
-                        self.validWindow = false
+                        if self.surfaceReady == false {
+                            self.deviceReset = true
+                        }
                     }
                 }
+                default:
+                    break
             }
         }
     }
@@ -91,6 +106,9 @@ final class VulkanSwapChain: SwapChain, @unchecked Sendable {
         }
         if let surface = self.surface {
             vkDestroySurfaceKHR(instance.instance, surface, device.allocationCallbacks)          
+        }
+        self.acquireFences.forEach {
+            vkDestroyFence(device.device, $0, device.allocationCallbacks)
         }
         self.acquireSemaphores.forEach {
             vkDestroySemaphore(device.device, $0, device.allocationCallbacks)
@@ -122,8 +140,7 @@ final class VulkanSwapChain: SwapChain, @unchecked Sendable {
         surfaceCreateInfo.hwnd = (self.window as! Win32Window).hWnd
 
         err = instance.extensionProc.vkCreateWin32SurfaceKHR!(instance.instance, &surfaceCreateInfo, device.allocationCallbacks, &self.surface)
-        if (err != VK_SUCCESS)
-        {
+        if err != VK_SUCCESS {
             Log.err("vkCreateWin32SurfaceKHR failed: \(err)")
             return false
         }
@@ -134,8 +151,7 @@ final class VulkanSwapChain: SwapChain, @unchecked Sendable {
         surfaceCreateInfo.window = (self.window as! AndroidWindow).nativeWindow // ANativeWindow *
 
         err = instance.extensionProc.vkCreateAndroidSurfaceKHR!(instance.instance, &surfaceCreateInfo, device.allocationCallbacks, &self.surface)
-        if (err != VK_SUCCESS)
-        {
+        if err != VK_SUCCESS {
             Log.err("vkCreateAndroidSurfaceKHR failed: \(err)")
             return false
         }
@@ -147,8 +163,7 @@ final class VulkanSwapChain: SwapChain, @unchecked Sendable {
         surfaceCreateInfo.surface = (self.window as! WaylandWindow).surface
 
         err = instance.extensionProc.vkCreateWaylandSurfaceKHR!(instance.instance, &surfaceCreateInfo, device.allocationCallbacks, &self.surface)
-        if (err != VK_SUCCESS)
-        {
+        if err != VK_SUCCESS {
             Log.err("vkCreateWaylandSurfaceKHR failed: \(err)")
             return false
         }
@@ -187,7 +202,7 @@ final class VulkanSwapChain: SwapChain, @unchecked Sendable {
         }
 
         // If the surface format list only includes one entry with VK_FORMAT_UNDEFINED,
-        // there is no preferered format, so we assume VK_FORMAT_B8G8R8A8_UNORM
+        // there is no preferred format, so we assume VK_FORMAT_B8G8R8A8_UNORM
         if (surfaceFormatCount == 1) && (availableSurfaceFormats[0].format == VK_FORMAT_UNDEFINED) {
             self.surfaceFormat.format = VK_FORMAT_B8G8R8A8_UNORM
         } else {
@@ -208,9 +223,10 @@ final class VulkanSwapChain: SwapChain, @unchecked Sendable {
         //let instance = device.instance
         let physicalDevice = device.physicalDevice
 
-        let resolution = self.lock.withLock { 
+        let (resolution, surfaceFormat) = self.lock.withLock { 
             self.deviceReset = false
-            return self.cachedResolution 
+            self.surfaceReady = false
+            return (self.cachedResolution, self.surfaceFormat)
         }
         var width = UInt32(resolution.width.rounded())
         var height = UInt32(resolution.height.rounded())
@@ -259,6 +275,24 @@ final class VulkanSwapChain: SwapChain, @unchecked Sendable {
             height = surfaceCaps.currentExtent.height
         }
 
+        if swapchainExtent.width == 0 || swapchainExtent.height == 0 {
+            // surface is not visible, swapchain cannot be created until the size changes.
+            Log.warning("Swapchain cannot be created with zero area (\(swapchainExtent.width) x \(swapchainExtent.height))");
+
+            // create an off-screen render target as a fallback.
+            let pixelFormat = PixelFormat.from(vkFormat: surfaceFormat.format)
+            let imageView = device.makeTransientRenderTarget(type: .type2D,
+                                                             pixelFormat: pixelFormat,
+                                                             width: max(1, Int(width)),
+                                                             height: max(1, Int(height)),
+                                                             depth: 1)
+            if let imageView {
+                assert(imageView is VulkanImageView)
+            }
+            self.offscreenImageView = imageView as? VulkanImageView
+            return false
+        }
+
         // Select a present mode for the swapchain
         // VK_PRESENT_MODE_IMMEDIATE_KHR
         // VK_PRESENT_MODE_MAILBOX_KHR
@@ -300,8 +334,8 @@ final class VulkanSwapChain: SwapChain, @unchecked Sendable {
         swapchainCreateInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR
         swapchainCreateInfo.surface = self.surface
         swapchainCreateInfo.minImageCount = desiredNumberOfSwapchainImages
-        swapchainCreateInfo.imageFormat = self.surfaceFormat.format
-        swapchainCreateInfo.imageColorSpace = self.surfaceFormat.colorSpace
+        swapchainCreateInfo.imageFormat = surfaceFormat.format
+        swapchainCreateInfo.imageColorSpace = surfaceFormat.colorSpace
         swapchainCreateInfo.imageExtent = VkExtent2D(width: swapchainExtent.width, height: swapchainExtent.height)
         swapchainCreateInfo.imageUsage = UInt32(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT.rawValue)
         swapchainCreateInfo.preTransform = preTransform
@@ -317,7 +351,7 @@ final class VulkanSwapChain: SwapChain, @unchecked Sendable {
 
         // Set additional usage flag for blitting from the swapchain images if supported
         var formatProps = VkFormatProperties()
-        vkGetPhysicalDeviceFormatProperties(physicalDevice.device, self.surfaceFormat.format, &formatProps)
+        vkGetPhysicalDeviceFormatProperties(physicalDevice.device, surfaceFormat.format, &formatProps)
         if formatProps.optimalTilingFeatures & UInt32(VK_FORMAT_FEATURE_BLIT_DST_BIT.rawValue) != 0 {
             swapchainCreateInfo.imageUsage |= UInt32(VK_IMAGE_USAGE_TRANSFER_SRC_BIT.rawValue)
         }
@@ -380,7 +414,7 @@ final class VulkanSwapChain: SwapChain, @unchecked Sendable {
         for image in swapchainImages {
             var imageViewCreateInfo = VkImageViewCreateInfo()
             imageViewCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO
-            imageViewCreateInfo.format = self.surfaceFormat.format
+            imageViewCreateInfo.format = surfaceFormat.format
             imageViewCreateInfo.components = VkComponentMapping(
                 r: VK_COMPONENT_SWIZZLE_IDENTITY,
                 g: VK_COMPONENT_SWIZZLE_IDENTITY,
@@ -439,8 +473,34 @@ final class VulkanSwapChain: SwapChain, @unchecked Sendable {
             }
             return semaphores.count == count
         }
+        let resizeFenceArray = { (fences: inout [VkFence], count: Int, signaled: Bool) in
+            while fences.count > count {
+                let last = fences.removeLast()
+                vkDestroyFence(device.device, last, device.allocationCallbacks)
+            }
+            while fences.count < count {
+                // create fence
+                var fenceCreateInfo = VkFenceCreateInfo()
+                fenceCreateInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO
+                fenceCreateInfo.flags = signaled ? VkFenceCreateFlags(VK_FENCE_CREATE_SIGNALED_BIT.rawValue) : 0
+                var fence: VkFence?
+                let err = vkCreateFence(device.device, &fenceCreateInfo, device.allocationCallbacks, &fence)
+                if err != VK_SUCCESS {
+                    Log.err("vkCreateFence failed: \(err)")
+                    assertionFailure("vkCreateFence failed: \(err)")
+                    return false
+                }
+                fences.append(fence!)
+            }
+            return fences.count == count
+        }
 
-        if resizeSemaphoreArray(&self.acquireSemaphores, Int(swapchainImageCount)) == false {
+        let numAcquireLocks = max(swapchainImageCount, 3)
+
+        if resizeFenceArray(&self.acquireFences, Int(numAcquireLocks), true) == false {
+            return false
+        }
+        if resizeSemaphoreArray(&self.acquireSemaphores, Int(numAcquireLocks)) == false {
             return false
         }
         if resizeSemaphoreArray(&self.submitSemaphores, Int(swapchainImageCount)) == false {
@@ -449,13 +509,21 @@ final class VulkanSwapChain: SwapChain, @unchecked Sendable {
 
         self.imageIndex = 0
         self.frameCount = 0
+        self.numberOfAcquireLocks = Int(numAcquireLocks)
         self.numberOfSwapchainImages = Int(swapchainImageCount)
+        self.offscreenImageView = nil
+
+        assert(self.numberOfAcquireLocks > 0)
+        assert(self.acquireSemaphores.count == self.numberOfAcquireLocks)
+        assert(self.acquireFences.count == self.numberOfAcquireLocks)
 
         assert(self.numberOfSwapchainImages > 0)
-        assert(self.imageViews.count == self.numberOfSwapchainImages)
-        assert(self.acquireSemaphores.count == self.numberOfSwapchainImages)
         assert(self.submitSemaphores.count == self.numberOfSwapchainImages)
+        assert(self.imageViews.count == self.numberOfSwapchainImages)
 
+        self.lock.withLock {
+            self.surfaceReady = true
+        }
         return true 
     }
 
@@ -466,7 +534,7 @@ final class VulkanSwapChain: SwapChain, @unchecked Sendable {
             self.queue.waitIdle()
 
             if self.updateDevice() == false {
-                Log.error("VulkanSwapChain.updateDevice() failed.")
+                Log.error("VulkanSwapChain.updateDevice() failed! (surfaceReady: \(self.surfaceReady))")
             }
         }
     }
@@ -476,22 +544,44 @@ final class VulkanSwapChain: SwapChain, @unchecked Sendable {
 
         let device = self.queue.device as! VulkanGraphicsDevice
 
-        let frameIndex = self.frameCount % UInt64(self.numberOfSwapchainImages)
-        let waitSemaphore = self.acquireSemaphores[Int(frameIndex)]
+        let acquireLockIndex = self.frameCount % UInt64(self.numberOfAcquireLocks)
+        let waitSemaphore = self.acquireSemaphores[Int(acquireLockIndex)]
+        let fence = self.acquireFences[Int(acquireLockIndex)]
 
-        let result = self.lock.withLock {
-            vkAcquireNextImageKHR(device.device, self.swapchain, UInt64.max, waitSemaphore, nil, &self.imageIndex)
-        }
-        switch result {
-        case VK_SUCCESS, VK_TIMEOUT, VK_NOT_READY ,VK_SUBOPTIMAL_KHR:
-            break
-        default:
-            Log.err("vkAcquireNextImageKHR failed: \(result)")
+        let frameReady = self.lock.withLock {
+            if self.surfaceReady {
+                let st = vkGetFenceStatus(device.device, fence)
+                if st == VK_NOT_READY {
+                    let start = DispatchTime.now()
+                    vkWaitForFences(device.device, 1, [fence], VK_TRUE, UInt64.max)
+                    let end = DispatchTime.now()
+                    let elapsed = (end.uptimeNanoseconds - start.uptimeNanoseconds) / 1000
+                    if elapsed > 100 {
+                        Log.warning("VulkanSwapChain.setupFrame: vkWaitForFences took \(elapsed) μs.")
+                    }
+                } else if st != VK_SUCCESS {
+                    Log.err("vkGetFenceStatus failed: \(st)")
+                }
+                vkResetFences(device.device, 1, [fence])
+                let err = vkAcquireNextImageKHR(device.device, self.swapchain, UInt64.max, waitSemaphore, nil, &self.imageIndex)
+                switch err {
+                case VK_SUCCESS, VK_TIMEOUT, VK_NOT_READY ,VK_SUBOPTIMAL_KHR:
+                    return true
+                default:
+                    Log.err("vkAcquireNextImageKHR failed: \(err)")
+                }
+            }
+            return false
         }
 
-        let renderTarget = self.imageViews[Int(self.imageIndex)]
-        renderTarget.waitSemaphore = waitSemaphore
-        renderTarget.signalSemaphore = waitSemaphore
+        let renderTarget: VulkanImageView
+        if frameReady {
+            renderTarget = self.imageViews[Int(self.imageIndex)]
+            renderTarget.waitSemaphore = waitSemaphore
+            renderTarget.signalSemaphore = waitSemaphore
+        } else {
+            renderTarget = self.offscreenImageView!
+        }
 
         let colorAttachment = RenderPassColorAttachmentDescriptor(
             renderTarget: renderTarget,
@@ -545,7 +635,10 @@ final class VulkanSwapChain: SwapChain, @unchecked Sendable {
     }
 
     var maximumBufferCount: Int {
-        self.lock.withLock { self.imageViews.count }
+        self.lock.withLock {
+            assert(self.imageViews.count == self.numberOfSwapchainImages)
+            return self.numberOfSwapchainImages
+        }
     }
 
     func currentRenderPassDescriptor() -> RenderPassDescriptor {
@@ -561,16 +654,54 @@ final class VulkanSwapChain: SwapChain, @unchecked Sendable {
 
     @discardableResult
     func present(waitEvents: [GPUEvent]) -> Bool {
-        let validWindow = self.lock.withLock { self.validWindow }
+        let (validWindow, surfaceReady) = self.lock.withLock {
+            (self.validWindow, self.surfaceReady)
+        }
         if validWindow == false {
             Log.err("VulkanSwapChain.present(waitEvents:) failed: invalid window.")
             return false
         }
+        if surfaceReady == false {
+            self.renderPassDescriptor = nil
+            return false
+        }
 
-        let frameIndex = self.frameCount % UInt64(self.numberOfSwapchainImages)
-        let waitSemaphore = self.acquireSemaphores[Int(frameIndex)]
+        let acquireLockIndex = self.frameCount % UInt64(self.numberOfSwapchainImages)
+        let waitSemaphore = self.acquireSemaphores[Int(acquireLockIndex)]
+        let fence = self.acquireFences[Int(acquireLockIndex)]
+
         let submitSemaphore = self.submitSemaphores[Int(self.imageIndex)]
         let presentSrc = self.imageViews[Int(self.imageIndex)]
+
+        do {
+            var waitSemaphoreInfo = VkSemaphoreSubmitInfo()
+            waitSemaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO
+            waitSemaphoreInfo.semaphore = waitSemaphore
+            waitSemaphoreInfo.stageMask = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT
+
+            var signalSemaphoreInfo = VkSemaphoreSubmitInfo()
+            signalSemaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO
+            signalSemaphoreInfo.semaphore = submitSemaphore
+            signalSemaphoreInfo.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT
+
+            withUnsafePointer(to: &waitSemaphoreInfo) { waitSemaphoreInfo in
+                withUnsafePointer(to: &signalSemaphoreInfo) { signalSemaphoreInfo in
+                    var submitInfo = VkSubmitInfo2()
+                    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2
+                    submitInfo.waitSemaphoreInfoCount = 1
+                    submitInfo.pWaitSemaphoreInfos = waitSemaphoreInfo
+                    submitInfo.signalSemaphoreInfoCount = 1
+                    submitInfo.pSignalSemaphoreInfos = signalSemaphoreInfo
+
+                    let err = self.queue.withVkQueue { queue in
+                        vkQueueSubmit2(queue, 1, &submitInfo, fence)
+                    }
+                    if err != VK_SUCCESS {
+                        Log.err("vkQueueSubmit2 failed: \(err)")
+                    }
+                }
+            }
+        }
 
         if let buffer = self.queue.makeCommandBuffer() {
             if let encoder = buffer.makeCopyCommandEncoder() as? VulkanCopyCommandEncoder {
@@ -583,7 +714,7 @@ final class VulkanSwapChain: SwapChain, @unchecked Sendable {
                                       queueFamilyIndex: self.queue.family.familyIndex,
                                       commandBuffer: commandBuffer)
                 }
-                encoder.waitSemaphore(waitSemaphore, value: 0, flags: VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT)
+                encoder.waitSemaphore(submitSemaphore, value: 0, flags: VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT)
                 encoder.signalSemaphore(submitSemaphore, value: 0, flags: VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT)
                 encoder.endEncoding()
                 buffer.commit()
