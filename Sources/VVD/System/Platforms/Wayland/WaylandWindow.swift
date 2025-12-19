@@ -112,11 +112,11 @@ var fractionalScaleListener = wp_fractional_scale_v1_listener(
         let window = unsafeBitCast(data, to: AnyObject.self) as! WaylandWindow
         // The scale is the numerator of a fraction with a denominator of 120
         let scaleFactor = Double(scale) / 120.0
-        Log.debug("wp_fractional_scale_v1_listener.preferred_scale (scale: \(scale)/120 = \(scaleFactor))")
+        let bufferScale = ceil(scaleFactor)
+        Log.debug("wp_fractional_scale_v1_listener.preferred_scale (scale: \(scaleFactor), bufferScale: \(bufferScale))")
         
         MainActor.assumeIsolated {
-            let newScaleFactor = CGFloat(scaleFactor)
-            window.contentScaleFactor = newScaleFactor
+            window.contentScaleFactor = CGFloat(bufferScale)
         }
     }
 )
@@ -146,6 +146,8 @@ final class WaylandWindow: Window {
             if oldValue != contentScaleFactor {
                 assert(contentScaleFactor > 0)
                 let size = self.contentSize
+                let bufferScale = ceil(contentScaleFactor)
+                wl_surface_set_buffer_scale(self.surface, Int32(bufferScale))
                 self.contentSize = size
             }
         }
