@@ -14,7 +14,7 @@ public protocol PlatformFactory {
     @MainActor
     func runApplication(delegate: ApplicationDelegate?) -> Int
     @MainActor
-    func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?, data: [String: Any]) -> Window?
+    func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?, data: [String: Any]) -> (any Window)?
 
     func supportedWindowStyles(_ style: WindowStyle) -> WindowStyle
 }
@@ -73,7 +73,7 @@ public class Platform {
     }
 
     @MainActor
-    public class func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?, data: [String: Any]) -> Window? {
+    public class func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?, data: [String: Any]) -> (any Window)? {
         factory.makeWindow(name: name, style: style, delegate: delegate, data: data)
     }
     @MainActor

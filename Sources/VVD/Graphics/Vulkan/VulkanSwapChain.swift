@@ -11,7 +11,7 @@ import Vulkan
 
 final class VulkanSwapChain: SwapChain, @unchecked Sendable {
 
-    let window: Window
+    let window: any Window
     let queue: VulkanCommandQueue
 
     var enableVSync = false
@@ -39,7 +39,7 @@ final class VulkanSwapChain: SwapChain, @unchecked Sendable {
     var commandQueue: CommandQueue { queue }
 
     @MainActor
-    init?(queue: VulkanCommandQueue, window: Window) {
+    init?(queue: VulkanCommandQueue, window: any Window) {
         self.frameCount = 0
         self.imageIndex = 0
         self.acquireSemaphores = []

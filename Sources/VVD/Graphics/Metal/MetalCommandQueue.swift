@@ -27,7 +27,7 @@ final class MetalCommandQueue: CommandQueue, @unchecked Sendable {
     }
 
     @MainActor
-    func makeSwapChain(target: Window) -> SwapChain? {
+    func makeSwapChain(target: any Window) -> SwapChain? {
         return MetalSwapChain(queue: self, window: target)
     }
 }

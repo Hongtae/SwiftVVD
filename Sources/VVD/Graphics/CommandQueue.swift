@@ -18,7 +18,7 @@ public struct CommandQueueFlags: OptionSet, Sendable {
 public protocol CommandQueue: Sendable {
     func makeCommandBuffer() -> CommandBuffer?
     @MainActor
-    func makeSwapChain(target: Window) -> SwapChain?
+    func makeSwapChain(target: any Window) -> SwapChain?
 
     var flags: CommandQueueFlags { get }
     var device: GraphicsDevice { get }

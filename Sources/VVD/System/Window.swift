@@ -16,10 +16,10 @@ public enum DragOperation {
 }
 
 public protocol DragTargetDelegate {
-    func draggingEntered(target: Window, position: CGPoint, files: [String]) -> DragOperation
-    func draggingUpdated(target: Window, position: CGPoint, files: [String]) -> DragOperation
-    func draggingDropped(target: Window, position: CGPoint, files: [String]) -> DragOperation
-    func draggingExited(target: Window, files: [String])
+    func draggingEntered(target: any Window, position: CGPoint, files: [String]) -> DragOperation
+    func draggingUpdated(target: any Window, position: CGPoint, files: [String]) -> DragOperation
+    func draggingDropped(target: any Window, position: CGPoint, files: [String]) -> DragOperation
+    func draggingExited(target: any Window, files: [String])
 }
 
 public enum MouseEventType {
@@ -39,7 +39,7 @@ public enum MouseEventDevice {
 
 public struct MouseEvent {
     public var type: MouseEventType
-    public weak var window: Window?
+    public weak var window: (any Window)?
     public var device: MouseEventDevice
     public var deviceID: Int
     public var buttonID: Int
@@ -58,7 +58,7 @@ public enum KeyboardEventType {
 
 public struct KeyboardEvent {
     public var type: KeyboardEventType
-    public weak var window: Window?
+    public weak var window: (any Window)?
     public var deviceID: Int
     public var key: VirtualKey
     public var text: String
@@ -79,28 +79,28 @@ public enum WindowEventType {
 
 public struct WindowEvent {
     public var type: WindowEventType
-    public weak var window: Window?
+    public weak var window: (any Window)?
     public var windowFrame: CGRect
     public var contentBounds: CGRect
     public var contentScaleFactor: CGFloat
 }
 
 public protocol WindowDelegate: AnyObject, DragTargetDelegate {
-    func shouldClose(window: Window) -> Bool
-    func minimumContentSize(window: Window) -> CGSize?
-    func maximumContentSize(window: Window) -> CGSize?
+    func shouldClose(window: any Window) -> Bool
+    func minimumContentSize(window: any Window) -> CGSize?
+    func maximumContentSize(window: any Window) -> CGSize?
 }
 
 extension WindowDelegate {
-    public func shouldClose(window: Window) -> Bool { true }
-    public func minimumContentSize(window: Window) -> CGSize? { nil }
-    public func maximumContentSize(window: Window) -> CGSize? { nil }
+    public func shouldClose(window: any Window) -> Bool { true }
+    public func minimumContentSize(window: any Window) -> CGSize? { nil }
+    public func maximumContentSize(window: any Window) -> CGSize? { nil }
 
     // DragTargetDelegate 
-    public func draggingEntered(target: Window, position: CGPoint, files: [String]) -> DragOperation { .reject }
-    public func draggingUpdated(target: Window, position: CGPoint, files: [String]) -> DragOperation { .reject }
-    public func draggingDropped(target: Window, position: CGPoint, files: [String]) -> DragOperation { .reject }
-    public func draggingExited(target: Window, files: [String]) {}
+    public func draggingEntered(target: any Window, position: CGPoint, files: [String]) -> DragOperation { .reject }
+    public func draggingUpdated(target: any Window, position: CGPoint, files: [String]) -> DragOperation { .reject }
+    public func draggingDropped(target: any Window, position: CGPoint, files: [String]) -> DragOperation { .reject }
+    public func draggingExited(target: any Window, files: [String]) {}
 }
 
 public struct WindowStyle: OptionSet, Sendable {
@@ -184,6 +184,6 @@ extension Window {
 }
 
 @MainActor
-public func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?, data: [String: Any]? = nil) -> Window? {
+public func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?, data: [String: Any]? = nil) -> (any Window)? {
     Platform.makeWindow(name: name, style: style, delegate: delegate, data: data ?? [:])
 }

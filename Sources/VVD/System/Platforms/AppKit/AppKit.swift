@@ -19,7 +19,7 @@ public struct PlatformFactoryAppKit: PlatformFactory {
     }
 
     @MainActor
-    public func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?, data: [String: Any]) -> Window? {
+    public func makeWindow(name: String, style: WindowStyle, delegate: WindowDelegate?, data: [String: Any]) -> (any Window)? {
         return AppKitWindow(name: name, style: style, delegate: delegate, data: data)
     }
 

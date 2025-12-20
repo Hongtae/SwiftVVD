@@ -3,7 +3,7 @@ import VVD
 
 @main
 class RenderTestApp: ApplicationDelegate, WindowDelegate, @unchecked Sendable {
-    var window: Window?
+    var window: (any Window)?
     var renderTask: Task<Void, Never>?
     var graphicsContext: GraphicsDeviceContext?
     var appResourcesRoot: String = ""
@@ -49,11 +49,11 @@ class RenderTestApp: ApplicationDelegate, WindowDelegate, @unchecked Sendable {
         graphicsContext = nil
     }
 
-    func minimumContentSize(window: Window) -> CGSize? {
+    func minimumContentSize(window: any Window) -> CGSize? {
         CGSize(width: 100, height: 100)
     }
 
-    func shouldClose(window: Window) -> Bool {
+    func shouldClose(window: any Window) -> Bool {
         // stop render thread
         sharedApplication()?.terminate(exitCode: 1234)
         return true

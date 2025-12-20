@@ -12,7 +12,7 @@ internal import QuartzCore
 
 final class MetalSwapChain: SwapChain, @unchecked Sendable {
 
-    let window: Window
+    let window: any Window
     let queue: MetalCommandQueue
     private var layer: CAMetalLayer
 
@@ -42,7 +42,7 @@ final class MetalSwapChain: SwapChain, @unchecked Sendable {
     var maximumBufferCount: Int { self.layer.maximumDrawableCount }
 
     @MainActor
-    init?(queue: MetalCommandQueue, window: Window) {
+    init?(queue: MetalCommandQueue, window: any Window) {
         self.window = window
         self.queue = queue
 
