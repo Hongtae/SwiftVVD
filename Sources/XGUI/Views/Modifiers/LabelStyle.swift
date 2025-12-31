@@ -154,8 +154,8 @@ struct LabelStyleProxy {
         self.type = S.self
         self.graph = graph.unsafeCast(to: Any.self)
     }
-    func resolve(_ view: ViewContext) -> (any LabelStyle)? {
-        view.value(atPath: graph) as? (any LabelStyle)
+    func resolve(_ resolver: some _GraphValueResolver) -> (any LabelStyle)? {
+        resolver.value(atPath: graph) as? (any LabelStyle)
     }
 }
 

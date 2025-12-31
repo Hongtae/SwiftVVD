@@ -273,8 +273,8 @@ struct PrimitiveButtonStyleProxy {
         self.type = S.self
         self.graph = graph.unsafeCast(to: Any.self)
     }
-    func resolve(_ view: ViewContext) -> (any PrimitiveButtonStyle)? {
-        view.value(atPath: graph) as? (any PrimitiveButtonStyle)
+    func resolve(_ resolver: some _GraphValueResolver) -> (any PrimitiveButtonStyle)? {
+        resolver.value(atPath: graph) as? (any PrimitiveButtonStyle)
     }
 }
 
