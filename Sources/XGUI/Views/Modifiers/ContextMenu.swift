@@ -5,6 +5,8 @@
 //  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
+import VVD
+
 struct ContextMenuModifier<MenuContent>: ViewModifier where MenuContent: View {
     typealias Body = Never
     
@@ -12,6 +14,19 @@ struct ContextMenuModifier<MenuContent>: ViewModifier where MenuContent: View {
 }
 
 protocol StyleContext {
+    static func _isModifierAllowed<T: ViewModifier>(_: T.Type) -> Bool
+}
+
+struct StyleContextProxy {
+    let type: any StyleContext.Type
+    let graph: _GraphValue<Any>
+    init<S: StyleContext>(_ graph: _GraphValue<S>) {
+        self.type = S.self
+        self.graph = graph.unsafeCast(to: Any.self)
+    }
+    func resolve(_ resolver: some _GraphValueResolver) -> (any StyleContext)? {
+        resolver.value(atPath: graph) as? (any StyleContext)
+    }
 }
 
 struct StyleContextWriter<Style>: ViewModifier where Style: StyleContext {
@@ -19,7 +34,25 @@ struct StyleContextWriter<Style>: ViewModifier where Style: StyleContext {
     let style: Style
 }
 
+extension StyleContextWriter: _ViewInputsModifier where Self: ViewModifier {
+    static func _makeViewInputs(modifier: _GraphValue<Self>, inputs: inout _ViewInputs) {
+        inputs.layouts.styleContext = StyleContextProxy(modifier[\.style])
+    }
+}
+
 struct MenuStyleContext: StyleContext {
+    static func _isModifierAllowed<T: ViewModifier>(_: T.Type) -> Bool {
+        if T.self is any _ViewInputsModifier.Type { return true }
+        if T.self is any _GraphInputsModifier.Type { return true }
+        // only buttons are allowed.
+        if let gestureModifier = T.self as? any _GestureGenerator.Type {
+            func isButton<U: _GestureGenerator>(_ type: U.Type) -> Bool {
+                U.T.self is _ButtonGesture.Type
+            }
+            if isButton(gestureModifier) { return true }
+        }
+        return false
+    }
 }
 
 extension View {
@@ -51,12 +84,14 @@ extension ContextMenuModifier: _UnaryViewModifier {
     }
 }
 
-private protocol _ContextMenuGestureProvider {
-    var _gesture: ContextMenuGesture { get }
-}
+extension ContextMenuModifier {
+    fileprivate var _gesture: ContextMenuGesture {
+        .init() 
+    }
 
-extension ContextMenuModifier: _ContextMenuGestureProvider {
-    fileprivate var _gesture: ContextMenuGesture { .init() }
+    fileprivate var _scene: some Scene {
+        AuxiliaryWindowScene(content: content) 
+    }
 }
 
 private struct ContextMenuGesture: Gesture {
@@ -71,56 +106,165 @@ private struct ContextMenuGesture: Gesture {
 private class ContextMenuGestureHandler: _GestureHandler {
     var typeFilter: _PrimitiveGestureTypes = .all
     let gesture: ContextMenuGesture
+    var openMenuOnButtonUp: Bool = false
+    var openMenuCallback: ((CGPoint) -> Void)? = nil
+    var modifierKeys: [VirtualKey] = []
+    var buttonID: Int = 1
+    var location: CGPoint = .zero
 
     override var type: _PrimitiveGestureTypes { .all }
 
     override var isValid: Bool {
         typeFilter.contains(self.type)
     }
-    
+
     override func setTypeFilter(_ f: _PrimitiveGestureTypes) -> _PrimitiveGestureTypes {
         self.typeFilter = f
         return f.subtracting(.tap)
     }
-    
+
     init(graph: _GraphValue<ContextMenuGesture>, target: ViewContext?, gesture: ContextMenuGesture) {
         self.gesture = gesture
         super.init(graph: graph, target: target)
     }
-    
+
+    deinit {
+        //Log.debug("ContextMenuGestureHandler: deinit")
+    }
+
     override func began(deviceID: Int, buttonID: Int, location: CGPoint) {
+        if deviceID == 0 {
+            if buttonID == 0 {
+                // check 'control' key is pressing.
+                let controlKeyPressed = modifierKeys.contains(.leftControl) || modifierKeys.contains(.rightControl)
+                if controlKeyPressed {
+                    self.state = .processing
+                }
+            } else if buttonID == 1 {
+                // right mouse button
+                self.state = .processing
+            }
+        }
+        if self.state == .processing {
+            self.buttonID = buttonID
+            self.location = self.locationInView(location)
+            if self.openMenuOnButtonUp == false {
+                self.openMenuCallback?(location)
+            }
+            return
+        }
+        self.state = .failed
     }
-    
+
     override func moved(deviceID: Int, buttonID: Int, location: CGPoint) {
+        if deviceID == 0 && buttonID == self.buttonID {
+            self.location = self.locationInView(location)
+        }
     }
-    
+
     override func ended(deviceID: Int, buttonID: Int) {
+        if deviceID == 0 && buttonID == self.buttonID {
+            if buttonID == 0 {
+                let controlKeyPressed = modifierKeys.contains(.leftControl) || modifierKeys.contains(.rightControl)
+                if controlKeyPressed == false {
+                    self.state = .failed
+                }
+            }
+            if self.state == .processing {
+                self.state = .done
+                if self.openMenuOnButtonUp {
+                    self.openMenuCallback?(self.location)
+                }
+            }
+        }
     }
-    
+
     override func cancelled(deviceID: Int, buttonID: Int) {
+        if deviceID == 0 && buttonID == self.buttonID {
+            self.state = .cancelled
+        }
     }
-    
+
     override func reset() {
+        self.state = .ready
+        Log.debug("ContextMenuGestureHandler: reset")
     }
 }
 
-private class ContextMenuViewContext<Modifier>: ViewModifierContext<Modifier> where Modifier: ViewModifier, Modifier: _ContextMenuGestureProvider {
+private class ContextMenuViewContext<MenuContent>: ViewModifierContext<ContextMenuModifier<MenuContent>> where MenuContent: View {
+    typealias Modifier = ContextMenuModifier<MenuContent>
     let gesture: _GraphValue<ContextMenuGesture>
+
+    var sceneContext: AuxiliaryWindowSceneContext<MenuContent>!
 
     override init(graph: _GraphValue<Modifier>, body: ViewContext, inputs: _GraphInputs) {
         self.gesture = graph[\._gesture]
         super.init(graph: graph, body: body, inputs: inputs)
+
+        let sceneRoot = _SceneRoot(view: self)
+        let sceneInputs = _SceneInputs(root: sceneRoot, environment: self.environment,
+                                       modifiers: self.inputs.modifiers,
+                                       _modifierTypeGraphs: self.inputs._modifierTypeGraphs)
+
+        func makeScene<T: Scene>(scene: _GraphValue<T>, inputs: _SceneInputs) -> _SceneOutputs {
+            T._makeScene(scene: scene, inputs: inputs)
+        }
+        let sceneOutputs = makeScene(scene: graph[\._scene], inputs: sceneInputs)
+        self.sceneContext = sceneOutputs.scene?.makeScene() as? AuxiliaryWindowSceneContext<MenuContent>
+        assert(self.sceneContext != nil, "Failed to create AuxiliaryWindowSceneContext")
     }
-    
+
+    override func updateContent() {
+        super.updateContent()
+        self.sceneContext.updateContent()
+    }
+
     override func gestureHandlers(at location: CGPoint) -> GestureHandlerOutputs {
         let outputs = super.gestureHandlers(at: location)
-        if let gesture = self.modifier?._gesture {
-            let gestureHandler = ContextMenuGestureHandler(graph: self.gesture, target: self, gesture: gesture)
-            let local = GestureHandlerOutputs(gestures: [gestureHandler],
-                                              simultaneousGestures: [],
-                                              highPriorityGestures: [])
-            return outputs.merge(local)
+        
+        if self.bounds.contains(location) {
+            Log.debug("ContextMenuViewContext.gestureHandlers at \(location), existing handlers: \(outputs.gestures.count)")
+            
+            if let gesture = self.modifier?._gesture {
+                let gestureHandler = ContextMenuGestureHandler(graph: self.gesture, target: self, gesture: gesture)
+                gestureHandler.openMenuOnButtonUp = true
+                gestureHandler.openMenuCallback = { [weak self](location: CGPoint) in
+                    self?.openMenu(at: location)
+                }
+                let local = GestureHandlerOutputs(gestures: [gestureHandler],
+                                                  simultaneousGestures: [],
+                                                  highPriorityGestures: [])
+                return outputs.merge(local)
+            }
         }
         return outputs
+    }
+
+    struct _SceneRoot: SceneRoot {
+        typealias Root = ContextMenuModifier<MenuContent>
+        var root: Root {
+            view.modifier!
+        }
+        var graph: _GraphValue<Root> {
+            view.graph
+        }
+        var app: AppContext {
+            view.sharedContext.app
+        }
+        unowned let view: ContextMenuViewContext<MenuContent>
+    }
+
+    func openMenu(at location: CGPoint) {
+        let windowLocation = location.applying(self.transformToRoot)
+        Log.debug("ContextMenuViewContext: openMenu(at: \(location), windowLocation: \(windowLocation))")
+
+        let sceneContext = self.sceneContext!
+        let mainWindow = self.sharedContext.window
+
+        Task { @MainActor in
+            if sceneContext.activate(at: windowLocation, parent: mainWindow, dismissOnDeactivate: true) == false {
+                Log.error("ContextMenuViewContext: failed to activate menu scene")
+            }
+        }
     }
 }

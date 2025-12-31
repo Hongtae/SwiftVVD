@@ -14,18 +14,16 @@ protocol WindowContext: AnyObject {
     typealias WindowStyle = VVD.WindowStyle
 
     var scene: SceneContext { get }
-    var window: Window? { get }
+    var window: (any Window)? { get }
     var isValid: Bool { get }
 
     func updateContent()
-    
+
     func updateView(tick: UInt64, delta: Double, date: Date)
     func drawFrame(_: GraphicsContext, offset: CGPoint)
-    
-    var view: ViewContext? { get }
 
     @MainActor
-    func makeWindow() -> Window?
+    func makeWindow() -> (any Window)?
 }
 
 protocol WindowInputEventHandler {
@@ -39,7 +37,7 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
     typealias Window = WindowContext.Window
 
     private(set) var swapChain: SwapChain?
-    private(set) var window: Window?
+    private(set) var window: (any Window)?
 
     var view: ViewContext?
     let content: _GraphValue<Content>
@@ -70,14 +68,12 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
     private let stateConfig = Mutex<(state: State, config: Configuration)>((state: State(), config: Configuration()))
     private var task: Task<Void, Never>?
 
-    private struct AuxiliaryWindow {
-        let window: WindowContext
-        let offset: CGPoint
-        let color: Color
-        let filter: GraphicsContext.Filter?
+    private struct AuxiliaryWindow: @unchecked Sendable {
+        weak var client: AuxiliaryWindowClient?
+        var frame: CGRect? = nil // cached frame
     }
-    private var auxiliaryWindows: [AuxiliaryWindow] = []
-    
+    private let auxiliaryWindows = Mutex<[AuxiliaryWindow]>([])
+
     init(content: _GraphValue<Content>, scene: SceneContext) {
         let sceneInputs = scene.inputs
         self.content = content
@@ -133,7 +129,7 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
     }
 
     @MainActor
-    func makeWindow() -> Window? {
+    func makeWindow() -> (any Window)? {
         if self.window == nil {
 
             self.task?.cancel()
@@ -207,7 +203,7 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
             }
         }
     }
-    
+
     func updateView(tick: UInt64, delta: Double, date: Date) {
         if let view, view.isValid {
             var viewsToReload = sharedContext.viewsNeedToReloadResources.compactMap { $0.value }
@@ -273,33 +269,38 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
             }
             view.update(tick: tick, delta: delta, date: date)
         }
-        
-        self.auxiliaryWindows.forEach {
-            let window = $0.window
-            window.updateView(tick: tick, delta: delta, date: date)
+
+        // filter valid clients
+        let clients = self.auxiliaryWindows.withLock {
+            let clients = $0.compactMap(\.client)
+            $0 = $0.filter { $0.client != nil }
+            return clients
+        }
+        // update clients
+        clients.forEach {
+            $0.updateAuxiliaryWindowContent(tick: tick, delta: delta, date: date)
+        }
+        // update frame
+        self.auxiliaryWindows.withLock { windows in
+            windows.indices.forEach { index in
+                windows[index].frame = windows[index].client?.auxiliaryWindowFrame()
+            }
         }
     }
-    
+
     func drawFrame(_ context: GraphicsContext, offset: CGPoint) {
         if let view, view.isValid {
             let frame = view.frame.offsetBy(dx: offset.x, dy: offset.y)
             view.drawView(frame: frame, context: context)
         }
-        
-        self.auxiliaryWindows.forEach {
-            let window = $0.window
-            let offset = $0.offset + offset
-            if let view = window.view, let filter = $0.filter {
-                var context = context
-                let frame = view.frame.offsetBy(dx: offset.x, dy: offset.y)
-                let path = Rectangle().path(in: frame)
-                context.addFilter(filter)
-                context.fill(path, with: .color($0.color))
-            }
-            window.drawFrame(context, offset: offset)
+
+        self.auxClients.forEach {
+            $0.drawAuxiliaryWindowBackground(offset: offset, with: context)
+            $0.drawAuxiliaryWindowContent(offset: offset, with: context)
+            $0.drawAuxiliaryWindowOverlay(offset: offset, with: context)
         }
     }
-    
+
     private var _drawDebugInfo: _DrawDebug.Info = []
 
     private func runUpdateTask() -> Task<Void, Never> {
@@ -323,17 +324,17 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
             var contentBounds: CGRect = .null
             var contentScaleFactor: CGFloat = 1
             var renderTargets: GraphicsContext.RenderTargets? = nil
-            
+
             //let clearColor = VVD.Color(rgba8: (245, 242, 241, 255))
             let clearColor = VVD.Color(rgba8: (255, 255, 241, 255))
-            
+
             var additionalDeltaTimes: Double = 0.0
             let debugDrawEnabled = self?.style.contains(.auxiliaryWindow) == false
-            
+
             mainLoop: while true {
                 guard let self = self else { break }
                 if Task.isCancelled { break }
-                
+
                 let swapChain = self.swapChain
                 let (state, config) = self.stateConfig.withLock {
                     ($0.state, $0.config)
@@ -374,7 +375,7 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
                         view.updateEnvironment(self.environment)
                         self.sharedContext.viewsNeedToReloadResources = [.init(view)]
                     }
-                    
+
                     contentBounds = state.bounds
                     contentScaleFactor = state.contentScaleFactor
 
@@ -383,17 +384,16 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
                     sharedContext.contentScaleFactor = state.contentScaleFactor
                     sharedContext.needsLayout = true
                 }
-                
+
                 self.updateView(tick: tick, delta: delta, date: date)
-                
+
                 if state.visible, let swapChain {
-                    
                     var renderPass = swapChain.currentRenderPassDescriptor()
                     let device = swapChain.commandQueue.device
                     let backBuffer = renderPass.colorAttachments[0].renderTarget!
-                    
+
                     let dim = { (tex: Texture) in (tex.width, tex.height, tex.depth) }
-                    
+
                     if let renderTargets, dim(renderTargets.backdrop) == dim(backBuffer) {
                     } else {
                         renderTargets = GraphicsContext.RenderTargets(
@@ -401,11 +401,11 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
                             width: backBuffer.width,
                             height: backBuffer.height)
                     }
-                    
+
                     renderPass.colorAttachments[0].clearColor = clearColor
                     if let renderTargets,
                        let commandBuffer = swapChain.commandQueue.makeCommandBuffer() {
-                        
+
                         if let context = GraphicsContext(
                             sharedContext: self.sharedContext,
                             environment: self.environment,
@@ -416,10 +416,10 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
                             contentScaleFactor: state.contentScaleFactor,
                             renderTargets: renderTargets,
                             commandBuffer: commandBuffer) {
-                            
+
                             context.clear(with: clearColor)
                             self.drawFrame(context, offset: state.bounds.origin)
-
+                            
                             if debugDrawEnabled {
                                 var offset = CGPoint(x: 5, y: 5)
                                 let drawText = { (text: Text) in
@@ -445,7 +445,7 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
                                     drawText(Text("foreground: \(state.activated)"))
                                 }
                             }
-                            
+
                             if let rp = context.beginRenderPass(descriptor: renderPass,
                                                                 viewport: context.viewport) {
                                 context.encodeDrawTextureCommand(
@@ -464,7 +464,7 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
                                 encoder.endEncoding()
                             }
                         }
-                        
+
                         commandBuffer.commit()
                         _=swapChain.present()
                     }
@@ -477,7 +477,7 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
                     if Task.isCancelled { break mainLoop }
                     await Task.yield()
                 } while elapsed() < frameInterval - timeForBusyWait
-                
+
                 // busy waiting, remaining time is too short to yield.
                 while elapsed() < frameInterval {
                     if Task.isCancelled { break mainLoop }
@@ -521,6 +521,9 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
             DispatchQueue.main.async {
                 appContext?.checkWindowActivities()
             }
+            self.auxClients.forEach {
+                $0.onHostWindowClosed()
+            }
         case .created:
             self.stateConfig.withLock {
                 $0.state.frame = event.windowFrame.standardized
@@ -542,10 +545,16 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
                 $0.state.visible = true
                 $0.state.activated = true
             }
+            self.auxClients.forEach {
+                $0.onHostWindowActivated()
+            }
         case .inactivated:
             releaseEventHandlers()
             self.stateConfig.withLock {
                 $0.state.activated = false
+            }
+            self.auxClients.forEach {
+                $0.onHostWindowInactivated()
             }
         case .minimized:
             releaseEventHandlers()
@@ -559,17 +568,19 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
                 $0.state.bounds = event.contentBounds.standardized
                 $0.state.contentScaleFactor = event.contentScaleFactor
             }
+            self.auxClients.forEach {
+                $0.onHostWindowMoved()
+            }
         case .update:
             break
         }
     }
-    
 
     @MainActor
     func onKeyboardEvent(event: KeyboardEvent) {
         _=self.handleKeyboardEvent(event: event)
     }
-    
+
     @MainActor
     func onMouseEvent(event: MouseEvent) {
         if event.type == .wheel {
@@ -584,13 +595,13 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
             }
         }
     }
-    
+
     private var _lastKeyboardEventHandler: ObjectIdentifier? = nil
     private var _lastMouseEventHandler: ObjectIdentifier? = nil
 
     func handleKeyboardEvent(event: KeyboardEvent) -> Bool {
         let handleEvent = { (event: KeyboardEvent) -> Bool in
-            
+
             if let window = self.window, window !== event.window {
                 return false
             }
@@ -605,15 +616,19 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
             return false
         }
 
-        var handlers = self.auxiliaryWindows.reversed().map {
-            let window = $0.window
-            return (id: ObjectIdentifier(window),
-                    action: { (event: KeyboardEvent) -> Bool in
-                if let handler = window as? WindowInputEventHandler {
-                    return handler.handleKeyboardEvent(event: event)
+        var handlers = self.auxiliaryWindows.withLock{
+            $0.reversed().compactMap {
+                if let client = $0.client {
+                    return (id: ObjectIdentifier(client),
+                            action: { (event: KeyboardEvent) -> Bool in
+                        if let handler = client.auxiliaryWindowInputEventHandler() {
+                            return handler.handleKeyboardEvent(event: event)
+                        }
+                        return false
+                    })
                 }
-                return false
-            })
+                return nil
+            }
         }
         handlers.append( (id: ObjectIdentifier(self), action: handleEvent))
 
@@ -634,10 +649,10 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
         _lastKeyboardEventHandler = nil
         return false
     }
-    
+
     func handleMouseEvent(event: MouseEvent) -> Bool {
         let handleEvent = { (event: MouseEvent) -> Bool in
-            
+
             if let window = self.window, window !== event.window {
                 return false
             }
@@ -706,7 +721,7 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
             default:
                 break
             }
-            
+
             if event.type == .move {
                 gestureHandlers = activeHandlers(.ready, .processing)
             } else {
@@ -715,24 +730,32 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
             return gestureHandlers.isEmpty == false
         }
 
-        var handlers = self.auxiliaryWindows.reversed().map {
-            let window = $0.window
-            let offset = $0.offset
-            return (id: ObjectIdentifier(window),
-                    action: { (event: MouseEvent) -> Bool in
-                if let handler = window as? WindowInputEventHandler {
-                    var event = event
-                    event.location -= offset
-                    return handler.handleMouseEvent(event: event)
+        var handlers = self.auxiliaryWindows.withLock {
+            $0.reversed().compactMap {
+                if let client = $0.client, let frame = $0.frame {
+                    return (target: client as AnyObject,
+                            action: { (event: MouseEvent) -> Bool in
+                        if let handler = client.auxiliaryWindowInputEventHandler() {
+                            var event = event
+                            event.location -= frame.origin
+                            return handler.handleMouseEvent(event: event)
+                        }
+                        return false
+                    })
                 }
-                return false
-            })
+                return nil
+            }
         }
-        handlers.append((id: ObjectIdentifier(self), action: handleEvent))
+        handlers.append((target: self as AnyObject, action: handleEvent))
 
+        var clients: [AuxiliaryWindowClient] = []
+        if event.type == .buttonDown {
+            clients = self.auxClients
+        }
+        
         if let _lastMouseEventHandler {
             if let index = handlers.firstIndex(where: {
-                _lastMouseEventHandler == $0.id
+                _lastMouseEventHandler == ObjectIdentifier($0.target)
             }) {
                 let tmp = handlers.remove(at: index)
                 handlers.insert(tmp, at: 0)
@@ -740,40 +763,48 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
         }
         for handler in handlers {
             if handler.action(event) {
-                _lastMouseEventHandler = handler.id
+                _lastMouseEventHandler = ObjectIdentifier(handler.target)
+                clients.forEach { $0.initiatedGesture(from: handler.target,
+                                                      location: event.location) }
                 return true
             }
         }
         _lastMouseEventHandler = nil
+        clients.forEach { $0.initiatedGesture(from: nil,
+                                              location: event.location) }
         return false
     }
 
     func handleMouseWheel(at location: CGPoint, delta: CGPoint) -> Bool {
-        for aux in self.auxiliaryWindows.reversed() {
-            if let handler = aux.window as? WindowInputEventHandler {
-                let loc = location - aux.offset
-                if handler.handleMouseWheel(at: loc, delta: delta) {
-                    return true
+        for aux in self.auxiliaryWindows.withLock({ $0.reversed() }) {
+            if let offset = aux.frame?.origin {
+                if let handler = aux.client?.auxiliaryWindowInputEventHandler() {
+                    let loc = location - offset
+                    if handler.handleMouseWheel(at: loc, delta: delta) {
+                        return true
+                    }
                 }
             }
         }
-        
+
         if let view {
             let location = location.applying(view.transformToContainer.inverted())
             return view.handleMouseWheel(at: location, delta: delta)
         }
         return false
     }
-    
+
     func handleMouseHover(at location: CGPoint, deviceID: Int, isTopMost: Bool) -> Bool {
         var topMost = isTopMost
-        for aux in self.auxiliaryWindows.reversed() {
-            if let handler = aux.window as? WindowInputEventHandler {
-                let loc = location - aux.offset
-                if handler.handleMouseHover(at: loc,
-                                            deviceID: deviceID,
-                                            isTopMost: topMost) {
-                    topMost = false
+        self.auxiliaryWindows.withLock({ $0.reversed() }).forEach { aux in
+            if let offset = aux.frame?.origin {
+                if let handler = aux.client?.auxiliaryWindowInputEventHandler() {
+                    let loc = location - offset
+                    if handler.handleMouseHover(at: loc,
+                                                deviceID: deviceID,
+                                                isTopMost: topMost) {
+                        topMost = false
+                    }
                 }
             }
         }
@@ -787,26 +818,41 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
         return isTopMost != topMost
     }
 
-    func onWindowCreated(_: Window) {}
-    func onWindowClosing(_: Window) {}
+    func onWindowCreated(_: any Window) {}
+
+    func onWindowClosing(_: any Window) {
+        self.auxClients.forEach {
+            $0.onHostWindowClosed()
+        }
+    }
+
     func onSwapchainCreated(_: SwapChain) {}
     func onViewLoaded() {}
     func onViewLayoutUpdated() {}
 
-    func addAuxiliaryWindow(_ window: some WindowContext, position: CGPoint) -> Bool {
-        if let index = self.auxiliaryWindows.firstIndex(where: { $0.window === window }) {
-            self.auxiliaryWindows.remove(at: index)
+    func addAuxiliaryWindow(_ client: AuxiliaryWindowClient) -> Bool {
+        let aux = AuxiliaryWindow(client: client)
+
+        self.auxiliaryWindows.withLock { auxiliaryWindows in
+            if let index = auxiliaryWindows.firstIndex(where: { $0.client === client }) {
+                auxiliaryWindows.remove(at: index)
+            }
+            auxiliaryWindows = auxiliaryWindows.filter { $0.client != nil }
+            auxiliaryWindows.append(aux)
         }
-        let filter = GraphicsContext.Filter.shadow(radius: 4.0, x: 0, y: 0)
-        let aux = AuxiliaryWindow(window: window, offset: position, color: .white, filter: filter)
-        self.auxiliaryWindows.append(aux)
         return true
     }
-    
-    func removeAuxiliaryWindow(_ window: some WindowContext) {
-        if let index = self.auxiliaryWindows.firstIndex(where: { $0.window === window }) {
-            self.auxiliaryWindows.remove(at: index)
+
+    func removeAuxiliaryWindow(_ client: AuxiliaryWindowClient) {
+        self.auxiliaryWindows.withLock { auxiliaryWindows in
+            if let index = auxiliaryWindows.firstIndex(where: { $0.client === client }) {
+                auxiliaryWindows.remove(at: index)
+            }
         }
+    }
+    
+    var auxClients: [AuxiliaryWindowClient] {
+        self.auxiliaryWindows.withLock { $0.compactMap(\.client) }
     }
 }
 
