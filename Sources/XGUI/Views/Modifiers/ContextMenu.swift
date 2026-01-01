@@ -229,7 +229,7 @@ private class ContextMenuViewContext<MenuContent>: ViewModifierContext<ContextMe
                 let gestureHandler = ContextMenuGestureHandler(graph: self.gesture, target: self, gesture: gesture)
                 gestureHandler.openMenuOnButtonUp = true
                 gestureHandler.openMenuCallback = { [weak self](location: CGPoint) in
-                    self?.openMenu(at: location)
+                    self?.openMenu(at: location, dismissOnDeactivate: true)
                 }
                 let local = GestureHandlerOutputs(gestures: [gestureHandler],
                                                   simultaneousGestures: [],
@@ -254,15 +254,18 @@ private class ContextMenuViewContext<MenuContent>: ViewModifierContext<ContextMe
         unowned let view: ContextMenuViewContext<MenuContent>
     }
 
-    func openMenu(at location: CGPoint) {
+    func openMenu(at location: CGPoint, dismissOnDeactivate: Bool) {
         let windowLocation = location.applying(self.transformToRoot)
         Log.debug("ContextMenuViewContext: openMenu(at: \(location), windowLocation: \(windowLocation))")
 
         let sceneContext = self.sceneContext!
-        let mainWindow = self.sharedContext.window
+        let context = self.sharedContext
 
         Task { @MainActor in
-            if sceneContext.activate(at: windowLocation, parent: mainWindow, dismissOnDeactivate: true) == false {
+            let activated = sceneContext.activate(at: windowLocation,
+                                                  context: context,
+                                                  dismissOnDeactivate: dismissOnDeactivate)
+            if activated == false {
                 Log.error("ContextMenuViewContext: failed to activate menu scene")
             }
         }

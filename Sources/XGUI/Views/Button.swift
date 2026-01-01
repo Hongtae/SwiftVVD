@@ -176,7 +176,10 @@ private class ResolvedButtonStyleViewContext: GenericViewContext<ResolvedButtonS
         let role = view.configuration.role
         let label = PrimitiveButtonStyleConfiguration.Label(label)
         let action = view.configuration.action
-        view.configuration = PrimitiveButtonStyleConfiguration(role: role, label: label, action: action)
+        let buttonAction: ButtonAction = { [weak self] in
+            self?.onDispatchButtonAction(action)
+        }
+        view.configuration = PrimitiveButtonStyleConfiguration(role: role, label: label, action: buttonAction)
         view._isPressing = false
         view._pressingCallback = { [weak self] isPressed in
             self?.onButtonPressing(isPressed)
@@ -191,6 +194,17 @@ private class ResolvedButtonStyleViewContext: GenericViewContext<ResolvedButtonS
     func onButtonPressing(_ isPressed: Bool) {
         self.view?._isPressing = isPressed
         self.body.updateContent()
+    }
+    
+    func onDispatchButtonAction(_ action: @escaping ButtonAction) {
+        self.sharedContext.dismissPopup?()
+        struct _UnsafeBox<T>: Sendable {
+            nonisolated(unsafe) let value: T
+        }
+        let box = _UnsafeBox(value: action)
+        Task { @MainActor in
+            box.value()
+        }
     }
 
     override func drawBackground(frame: CGRect, context: GraphicsContext) {

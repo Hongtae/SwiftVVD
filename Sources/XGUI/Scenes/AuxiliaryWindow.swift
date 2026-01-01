@@ -50,7 +50,7 @@ class AuxiliaryWindowSceneContext<Content>: TypedSceneContext<AuxiliaryWindowSce
 
     private struct _ActivationContext: @unchecked Sendable {
         let window: AuxiliaryWindowContext<Content>
-        weak var parent: WindowContext?
+        weak var parentWindow: WindowContext?
         weak var popupWindow: (any WindowContext.Window)?
         var windowOffset: CGPoint
         var windowSize: CGSize = .zero
@@ -141,14 +141,15 @@ class AuxiliaryWindowSceneContext<Content>: TypedSceneContext<AuxiliaryWindowSce
     }
 
     @MainActor
-    func activate(at location: CGPoint, parent: WindowContext, dismissOnDeactivate: Bool) -> Bool {
+    func activate(at location: CGPoint, context parentContext: SharedContext, dismissOnDeactivate: Bool) -> Bool {
         self.updateContent()
         defer {
             self.window?.updateContent()
         }
 
+        let parentWindow = parentContext.window
         var enablePopup = self.environment.auxiliaryWindowPopupWindow
-        if enablePopup && parent is AuxiliaryWindowHost {
+        if enablePopup && parentWindow is AuxiliaryWindowHost {
             if Platform.factory.supportedWindowStyles([.auxiliaryWindow]).contains(.auxiliaryWindow) == false {
                 Log.error("AuxiliaryWindowContext: Auxiliary windows are not supported on this platform.")
                 enablePopup = false
@@ -163,19 +164,23 @@ class AuxiliaryWindowSceneContext<Content>: TypedSceneContext<AuxiliaryWindowSce
         }
 
         let window = AuxiliaryWindowContext(content: self.graph[\.content], scene: self)
-        var context = _ActivationContext(window: window,
-                                         parent: parent,
-                                         windowOffset: location,
-                                         windowSize: .zero,
-                                         dismissOnDeactivate: dismissOnDeactivate)
+        var activationContext = _ActivationContext(window: window,
+                                                   parentWindow: parentWindow,
+                                                   windowOffset: location,
+                                                   windowSize: .zero,
+                                                   dismissOnDeactivate: dismissOnDeactivate)
+        window.sharedContext.dismissPopup = { [weak self, weak parentContext] in
+            self?.dismissPopup()
+            parentContext?.dismissPopup?()
+        }
 
-        if enablePopup, let window = parent.window {
-            if let popup = context.window.makeWindow() {
+        if enablePopup, let window = parentWindow.window {
+            if let popup = activationContext.window.makeWindow() {
                 let position = window.convertPointToScreen(location)
                 popup.contentSize = CGSize(width: 10, height: 10)
                 popup.origin = position
-                context.popupWindow = popup
-                self.activationContext = context
+                activationContext.popupWindow = popup
+                self.activationContext = activationContext
                 window.addEventObserver(self) { [weak self](event: WindowEvent) in
                     guard let self else { return }
                     switch event.type {
@@ -205,13 +210,13 @@ class AuxiliaryWindowSceneContext<Content>: TypedSceneContext<AuxiliaryWindowSce
                 Log.error("AuxiliaryWindowContext: failed to create popup window")
             }
         } else {
-            if let host = parent as? AuxiliaryWindowHost {
-                let contentScale = parent.window?.contentScaleFactor ?? 1.0
+            if let host = parentWindow as? AuxiliaryWindowHost {
+                let contentScale = parentWindow.window?.contentScaleFactor ?? 1.0
                 window.sharedContext.contentScaleFactor = contentScale
                 if host.addAuxiliaryWindow(self) {
                     let filter = GraphicsContext.Filter.shadow(radius: 4.0, x: 0, y: 0)
-                    context.filter = filter
-                    self.activationContext = context
+                    activationContext.filter = filter
+                    self.activationContext = activationContext
                     return true
                 }
             } else {
@@ -224,7 +229,7 @@ class AuxiliaryWindowSceneContext<Content>: TypedSceneContext<AuxiliaryWindowSce
     func dismiss() {
         if let context = self.activationContext {
             self.activationContext = nil
-            if let host = context.parent as? AuxiliaryWindowHost {
+            if let host = context.parentWindow as? AuxiliaryWindowHost {
                 host.removeAuxiliaryWindow(self)
             }
             if let window = context.popupWindow {
@@ -234,7 +239,7 @@ class AuxiliaryWindowSceneContext<Content>: TypedSceneContext<AuxiliaryWindowSce
             } else {
                 context.window.auxClients.forEach { $0.onHostWindowClosed() }
             }
-            if let window = context.parent?.window {
+            if let window = context.parentWindow?.window {
                 runOnMainQueue { @MainActor [weak window] in
                     window?.removeEventObserver(self)
                 }
