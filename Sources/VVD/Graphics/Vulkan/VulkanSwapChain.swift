@@ -666,7 +666,7 @@ final class VulkanSwapChain: SwapChain, @unchecked Sendable {
             return false
         }
 
-        let acquireLockIndex = self.frameCount % UInt64(self.numberOfSwapchainImages)
+        let acquireLockIndex = self.frameCount % UInt64(self.numberOfAcquireLocks)
         let waitSemaphore = self.acquireSemaphores[Int(acquireLockIndex)]
         let fence = self.acquireFences[Int(acquireLockIndex)]
 
