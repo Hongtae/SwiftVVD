@@ -13,10 +13,6 @@ struct ContextMenuModifier<MenuContent>: ViewModifier where MenuContent: View {
     let content: MenuContent
 }
 
-protocol StyleContext {
-    static func _isModifierAllowed<T: ViewModifier>(_: T.Type) -> Bool
-}
-
 struct StyleContextProxy {
     let type: any StyleContext.Type
     let graph: _GraphValue<Any>
@@ -36,22 +32,7 @@ struct StyleContextWriter<Style>: ViewModifier where Style: StyleContext {
 
 extension StyleContextWriter: _ViewInputsModifier where Self: ViewModifier {
     static func _makeViewInputs(modifier: _GraphValue<Self>, inputs: inout _ViewInputs) {
-        inputs.layouts.styleContext = StyleContextProxy(modifier[\.style])
-    }
-}
-
-struct MenuStyleContext: StyleContext {
-    static func _isModifierAllowed<T: ViewModifier>(_: T.Type) -> Bool {
-        if T.self is any _ViewInputsModifier.Type { return true }
-        if T.self is any _GraphInputsModifier.Type { return true }
-        // only buttons are allowed.
-        if let gestureModifier = T.self as? any _GestureGenerator.Type {
-            func isButton<U: _GestureGenerator>(_ type: U.Type) -> Bool {
-                U.T.self is _ButtonGesture.Type
-            }
-            if isButton(gestureModifier) { return true }
-        }
-        return false
+        inputs.base.styleContext = StyleContextProxy(modifier[\.style])
     }
 }
 

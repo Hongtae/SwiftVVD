@@ -49,6 +49,7 @@ public struct _GraphInputs {
     var mergedInputs: [_GraphInputs] = []
     var modifiers: [any _GraphInputResolve] = []
     var _modifierTypeGraphs: [ObjectIdentifier: _GraphValue<Any>] = [:]
+    var styleContext: StyleContextProxy? = nil
     var viewStyleModifiers: [any ViewStyleModifier] = []
 }
 
@@ -111,8 +112,6 @@ struct LayoutInputs {
 
     var labelStyles: [LabelStyleProxy] = []
     var buttonStyles: [PrimitiveButtonStyleProxy] = []
-    
-    var styleContext: StyleContextProxy? = nil
 }
 
 struct PreferenceInputs {

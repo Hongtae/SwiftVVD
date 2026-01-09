@@ -209,16 +209,21 @@ private class ResolvedButtonStyleViewContext: GenericViewContext<ResolvedButtonS
 
     override func drawBackground(frame: CGRect, context: GraphicsContext) {
         if self.isMouseHovered {
-            let dropShadow = switch self.drawButtonShadowOnHover {
-            case .default: view?._style is DefaultButtonStyle
-            case .any: true
-            case .none: false
-            }
-            if dropShadow {
-                let path = RoundedRectangle(cornerRadius: 4).inset(by: -1).path(in: frame)
-                var context = context
-                context.addFilter(.shadow(color: .blue.opacity(0.6), radius: 2, options: .shadowOnly))
-                context.fill(path, with: .color(.black))
+            if let styleContext {
+                let path = Rectangle().inset(by: -2).path(in: frame)
+                context.fill(path, with: .color(.gray))
+            } else {
+                let dropShadow = switch self.drawButtonShadowOnHover {
+                case .default: view?._style is DefaultButtonStyle
+                case .any: true
+                case .none: false
+                }
+                if dropShadow {
+                    let path = RoundedRectangle(cornerRadius: 4).inset(by: -1).path(in: frame)
+                    var context = context
+                    context.addFilter(.shadow(color: .blue.opacity(0.6), radius: 2, options: .shadowOnly))
+                    context.fill(path, with: .color(.black))
+                }
             }
         }
     }

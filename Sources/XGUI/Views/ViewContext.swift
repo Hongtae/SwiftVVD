@@ -31,6 +31,7 @@ class ViewContext: _GraphValueResolver {
     var traits: [ObjectIdentifier: Any]
     var environment: EnvironmentValues
     var properties: PropertyList
+    var styleContext: (any StyleContext)? = nil
     let sharedContext: SharedContext
     var frame: CGRect
     var transform: AffineTransform = .identity          // local transform
@@ -141,6 +142,7 @@ class ViewContext: _GraphValueResolver {
             }
             self.inputs.viewStyleModifiers = modifiers
         }
+        self.styleContext = self.inputs.styleContext?.resolve(self)
     }
 
     func update(transform t: AffineTransform) {

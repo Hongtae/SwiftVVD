@@ -204,7 +204,7 @@ extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
     }
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        if let styleProxy = inputs.layouts.styleContext, isProhibitedByStyleContext(styleProxy.type) {
+        if let styleProxy = inputs.base.styleContext, isProhibitedByStyleContext(styleProxy.type) {
             return Content._makeView(view: view[\.content], inputs: inputs)
         }
         
@@ -245,7 +245,7 @@ extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
         assert(view.isRoot == false)
         
-        if let styleProxy = inputs.layouts.styleContext, isProhibitedByStyleContext(styleProxy.type) {
+        if let styleProxy = inputs.base.styleContext, isProhibitedByStyleContext(styleProxy.type) {
             return Content._makeViewList(view: view[\.content], inputs: inputs)
         }
 
