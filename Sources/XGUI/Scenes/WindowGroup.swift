@@ -126,6 +126,10 @@ class GroupWindowContext<Content>: GenericWindowContext<Content> where Content: 
         self.dataType = dataType
         self.titleGraph = title
         super.init(content: content, scene: scene)
+
+        //let backgroundColor = VVD.Color(rgba8: (245, 242, 241, 255))
+        let backgroundColor = VVD.Color(rgba8: (255, 255, 241, 255))
+        self.config.backgroundColor = backgroundColor
     }
 
     override func updateContent() {

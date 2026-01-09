@@ -63,6 +63,16 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
     struct Configuration {
         var activeFrameInterval = 1.0 / 60.0
         var inactiveFrameInterval = 1.0 / 30.0
+        var backgroundColor: VVD.Color = .white
+        var drawDebugInfo: _DrawDebug.Info = []
+    }
+
+    var state: State {
+        stateConfig.withLock { $0.state }
+    }
+    var config: Configuration {
+        get { stateConfig.withLock { $0.config } }
+        set { stateConfig.withLock { $0.config = newValue } }
     }
 
     private let stateConfig = Mutex<(state: State, config: Configuration)>((state: State(), config: Configuration()))
@@ -190,16 +200,17 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
             if let frameRate = self.scene.value(atPath: modifier) {
                 let active = 1.0 / max(frameRate.active, 1.0)
                 let inactive = 1.0 / max(frameRate.inactive, 1.0)
-                let config = Configuration(activeFrameInterval: active,
-                                           inactiveFrameInterval: inactive)
                 self.stateConfig.withLock {
-                    $0.config = config
+                    $0.config.activeFrameInterval = active
+                    $0.config.inactiveFrameInterval = inactive
                 }
             }
         }
         if let modifier = self.scene.inputs.modifierTypeGraph(of: _DrawDebug.self) {
             if let drawDebug = self.scene.value(atPath: modifier) {
-                self._drawDebugInfo = drawDebug.selectedValues
+                self.stateConfig.withLock {
+                    $0.config.drawDebugInfo = drawDebug.selectedValues
+                }
             }
         }
     }
@@ -301,8 +312,6 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
         }
     }
 
-    private var _drawDebugInfo: _DrawDebug.Info = []
-
     private func runUpdateTask() -> Task<Void, Never> {
         Task.detached(priority: .userInitiated) { @MainActor @Sendable [weak self] in
             Log.info("WindowContext<\(Content.self)> update task is started.")
@@ -325,9 +334,6 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
             var contentScaleFactor: CGFloat = 1
             var renderTargets: GraphicsContext.RenderTargets? = nil
 
-            //let clearColor = VVD.Color(rgba8: (245, 242, 241, 255))
-            let clearColor = VVD.Color(rgba8: (255, 255, 241, 255))
-
             var additionalDeltaTimes: Double = 0.0
             let debugDrawEnabled = self?.style.contains(.auxiliaryWindow) == false
 
@@ -339,6 +345,8 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
                 let (state, config) = self.stateConfig.withLock {
                     ($0.state, $0.config)
                 }
+
+                let clearColor = config.backgroundColor
 
                 let delta = resetTimestamp() + additionalDeltaTimes
                 let tick = timestamp.uptimeNanoseconds
@@ -428,20 +436,20 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
                                     offset.y += resolvedText.measure().height
                                 }
 
-                                if self._drawDebugInfo.contains(.fps) {
+                                if config.drawDebugInfo.contains(.fps) {
                                     let d = max(delta, 0.001001) // up to 999
                                     drawText(Text(String(format: "%.1f FPS (%f)", 1.0 / d, delta)))
                                 }
-                                if self._drawDebugInfo.contains(.thread) {
+                                if config.drawDebugInfo.contains(.thread) {
                                     drawText(Text("thread: \(Platform.currentThreadID())"))
                                 }
-                                if self._drawDebugInfo.contains(.queue) {
+                                if config.drawDebugInfo.contains(.queue) {
                                     drawText(Text("dispatch-queue: \(isMainQueue() ? "main" : "global")"))
                                 }
-                                if self._drawDebugInfo.contains(.appState) {
+                                if config.drawDebugInfo.contains(.appState) {
                                     drawText(Text("app-active: \(appContext?.isActive ?? false)"))
                                 }
-                                if self._drawDebugInfo.contains(.windowState) {
+                                if config.drawDebugInfo.contains(.windowState) {
                                     drawText(Text("foreground: \(state.activated)"))
                                 }
                             }

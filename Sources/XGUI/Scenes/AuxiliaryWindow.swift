@@ -296,15 +296,19 @@ class AuxiliaryWindowSceneContext<Content>: TypedSceneContext<AuxiliaryWindowSce
 
     func drawAuxiliaryWindowBackground(offset: CGPoint, with context: GraphicsContext) {
         if let activationContext, let frame = self.auxiliaryWindowFrame() {
+
+            let frame = frame.offsetBy(dx: offset.x, dy: offset.y)
+            //let path = Rectangle().path(in: frame)
+            let path = RoundedRectangle(cornerRadius: 5).path(in: frame)
+
             if let filter = activationContext.filter {
-                let frame = frame.offsetBy(dx: offset.x, dy: offset.y)
-                //let path = Rectangle().path(in: frame)
-                let path = RoundedRectangle(cornerRadius: 5).path(in: frame)
                 var context = context
                 context.addFilter(filter)
                 context.fill(path, with: .color(.white))
-                context.stroke(path, with: .color(.gray), style: StrokeStyle(lineWidth: 1))
+            } else {
+                context.fill(path, with: .color(.white))
             }
+            context.stroke(path, with: .color(.black.opacity(0.7)), style: StrokeStyle(lineWidth: 1))
         }
     }
 
