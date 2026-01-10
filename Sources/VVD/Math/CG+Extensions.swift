@@ -2,7 +2,7 @@
 //  File: CG+Extensions.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -157,6 +157,10 @@ public extension CGPoint {
     static func maximum(_ lhs: Self, _ rhs: Self) -> Self {
         return Self(x: max(lhs.x, rhs.x), y: max(lhs.y, rhs.y))
     }
+    
+    static func clamp(_ value: Self, min: Self, max: Self) -> Self {
+        return minimum(maximum(min, value), max)
+    }
 }
 
 public func lerp(_ a: CGPoint, _ b: CGPoint, _ t: CGFloat) -> CGPoint {
@@ -222,6 +226,10 @@ public extension CGSize {
 
     static func maximum(_ lhs: Self, _ rhs: Self) -> Self {
         return Self(width: max(lhs.width, rhs.width), height: max(lhs.height, rhs.height))
+    }
+
+    static func clamp(_ value: Self, min: Self, max: Self) -> Self {
+        return minimum(maximum(min, value), max)
     }
 
     var cgPoint: CGPoint { CGPoint(x: width, y: height) }

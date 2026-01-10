@@ -2,7 +2,7 @@
 //  File: WindowContext.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -107,7 +107,7 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
     }
 
     deinit {
-        Log.debug("WindowContext<\(Content.self)> deinit")
+        //Log.debug("WindowContext<\(Content.self)> deinit")
         self.task?.cancel()
         self.sharedContext.gestureHandlers.removeAll()
         self.sharedContext.resourceData.removeAll()

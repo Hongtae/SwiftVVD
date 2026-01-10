@@ -2,7 +2,7 @@
 //  File: ShapeStyle.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 public protocol ShapeStyle: Sendable {
@@ -45,6 +45,7 @@ public struct _ShapeStyle_Shape {
 }
 
 public struct _ShapeStyle_ShapeType {
+    var type: (any ShapeStyle.Type)?
 }
 
 public struct ForegroundStyle: ShapeStyle {
@@ -56,7 +57,7 @@ public struct ForegroundStyle: ShapeStyle {
         shape.shading = .color(.sRGB, white: 0.145)
     }
     public static func _apply(to type: inout _ShapeStyle_ShapeType) {
-        fatalError()
+        type.type = self
     }
     public typealias Resolved = Never
 }
@@ -70,7 +71,7 @@ public struct BackgroundStyle: ShapeStyle {
         shape.shading = .color(.sRGB, white: 1)
     }
     public static func _apply(to type: inout _ShapeStyle_ShapeType) {
-        fatalError()
+        type.type = self
     }
 
     public typealias Resolved = Never
@@ -86,7 +87,7 @@ public struct SeparatorShapeStyle: ShapeStyle {
         shape.shading = .color(.sRGB, white: 0, opacity: 0.1)
     }
     public static func _apply(to type: inout _ShapeStyle_ShapeType) {
-        fatalError()
+        type.type = self
     }
     public typealias Resolved = Never
 }

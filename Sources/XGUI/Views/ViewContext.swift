@@ -2,7 +2,7 @@
 //  File: ViewContext.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -70,11 +70,11 @@ class ViewContext: _GraphValueResolver {
         self.environment = inputs.environment
         self.properties = inputs.properties
 
-        Log.debug("ViewContext(\(self)) init")
+        //Log.debug("ViewContext(\(self)) init")
     }
 
     deinit {
-        Log.debug("ViewContext(\(self)) deinit")
+        //Log.debug("ViewContext(\(self)) deinit")
         assert(self.superview == nil)
     }
 
@@ -142,7 +142,11 @@ class ViewContext: _GraphValueResolver {
             }
             self.inputs.viewStyleModifiers = modifiers
         }
-        self.styleContext = self.inputs.styleContext?.resolve(self)
+        if let styleContext  = self.environment._overrideStyleContext {
+            self.styleContext = styleContext
+        } else {
+            self.styleContext = self.inputs.styleContext?.resolve(self)
+        }
     }
 
     func update(transform t: AffineTransform) {
@@ -432,7 +436,7 @@ class GenericViewContext<Content>: ViewContext {
             fatalError("Failed to resolve view for \(self.graph)")
         }
     }
-
+    
     override func updateFrame() {
         self.body.updateFrame()
     }
@@ -632,6 +636,15 @@ class DynamicViewContext<Content>: ViewContext {
         }
     }
 
+    override func updateFrame() {
+        body?.updateFrame()
+    }
+
+    override func updateEnvironment(_ environmentValues: EnvironmentValues) {
+        super.updateEnvironment(environmentValues)
+        body?.updateEnvironment(environmentValues)
+    }
+
     override func update(transform t: AffineTransform) {
         self.transformToRoot = self.transformToContainer.concatenating(t)
         body?.update(transform: self.transformToRoot)
@@ -640,10 +653,6 @@ class DynamicViewContext<Content>: ViewContext {
     override func update(tick: UInt64, delta: Double, date: Date) {
         super.update(tick: tick, delta: delta, date: date)
         body?.update(tick: tick, delta: delta, date: date)
-    }
-
-    override func updateFrame() {
-        body?.updateFrame()
     }
 
     override func loadResources(_ context: GraphicsContext) {

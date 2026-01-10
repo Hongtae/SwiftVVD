@@ -2,7 +2,7 @@
 //  File: Text.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -319,20 +319,28 @@ private class TextViewContext: PrimitiveViewContext<Text> {
     }
 
     override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
+        var size = proposal.replacingUnspecifiedDimensions()
         if let resolvedText {
             if proposal == .zero {
-                let lineGlyphs = resolvedText.makeGlyphs(maxWidth: 0, maxHeight: 0)
+                let lineGlyphs = resolvedText.makeGlyphs(maxWidth: 0,
+                                                         maxHeight: 0)
                 if let glyph = lineGlyphs.first?.glyphs.first {
-                    return glyph.advance / resolvedText.scaleFactor
+                    size = glyph.advance / resolvedText.scaleFactor
                 }
             } else if proposal == .infinity {
-                return resolvedText.measure()
+                size = resolvedText.measure()
             } else {
-                return resolvedText.measure(maxWidth: proposal.width,
+                size = resolvedText.measure(maxWidth: proposal.width,
                                             maxHeight: proposal.height)
             }
         }
-        return proposal.replacingUnspecifiedDimensions()
+        
+        if let styleContext = self.styleContext {
+            return .clamp(size,
+                          min: styleContext.minimumViewSize,
+                          max: styleContext.maximumViewSize)
+        }
+        return size
     }
 
     override func draw(frame: CGRect, context: GraphicsContext) {
@@ -347,10 +355,29 @@ private class TextViewContext: PrimitiveViewContext<Text> {
                 }
             }
             if let resolvedText {
-                if let style = self.primaryStyle {
-                    context.draw(resolvedText, in: frame, shading: .style(style))
+                if let styleContext {
+                    let size = resolvedText.measure(maxWidth: frame.width,
+                                                    maxHeight: frame.height)
+                    var frame = frame.standardized
+                    frame.origin.x += CGFloat(styleContext.textOffset)
+                    frame.size.width -= CGFloat(styleContext.textOffset)
+                    if size.height < frame.height {
+                        let offset = frame.height - size.height
+                        frame = frame.offsetBy(dx: 0,
+                                               dy: offset * 0.5)
+                        frame.size.height = size.height
+                    }
+                    if frame.width > 0 && frame.height > 0 {
+                        let style = styleContext.foregroundStyle
+                        context.draw(resolvedText, in: frame,
+                                     shading: .style(style))
+                    }
                 } else {
-                    context.draw(resolvedText, in: frame)
+                    if let style = self.primaryStyle {
+                        context.draw(resolvedText, in: frame, shading: .style(style))
+                    } else {
+                        context.draw(resolvedText, in: frame)
+                    }
                 }
             }
         }
