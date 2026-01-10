@@ -60,7 +60,7 @@ final class SharedContext: @unchecked Sendable {
     var window: WindowContext { _window! }
     weak var _window: WindowContext?
     
-    var dismissPopup: (() -> Void)? = nil
+    var auxiliarySceneContext: AuxiliarySceneContext?
 
     init(scene: SceneContext) {
         self.scene = scene

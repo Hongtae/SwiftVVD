@@ -32,6 +32,29 @@ protocol AuxiliaryWindowHost {
     func removeAuxiliaryWindow(_ client: AuxiliaryWindowClient)
 }
 
+struct AuxiliarySceneContext {
+    weak var hostContext: SharedContext?
+    weak var hostWindow: WindowContext?
+    weak var sceneContext: SceneContext?
+    
+    let dismissOnDeactivate: Bool
+    let dismiss: () -> Void
+    let dismissPopup: () -> Void
+    
+    func dismiss(withParentContext: Bool) {
+        if withParentContext {
+            hostContext?.auxiliarySceneContext?.dismiss(withParentContext: true)
+        }
+        self.dismiss()
+    }
+    
+    func dismissPopup(withParentContext: Bool) {
+        if withParentContext {
+            hostContext?.auxiliarySceneContext?.dismissPopup(withParentContext: true)
+        }
+        self.dismissPopup()
+    }
+}
 
 // utility window (popup-window or layered window) scene
 struct AuxiliaryWindowScene<Content>: _PrimitiveScene where Content: View {
@@ -148,7 +171,7 @@ class AuxiliaryWindowSceneContext<Content>: TypedSceneContext<AuxiliaryWindowSce
         }
 
         let parentWindow = parentContext.window
-        var enablePopup = self.environment.auxiliaryWindowPopupWindow
+        var enablePopup = self.environment.auxiliaryWindowUsingSystemWindow
         if enablePopup && parentWindow is AuxiliaryWindowHost {
             if Platform.factory.supportedWindowStyles([.auxiliaryWindow]).contains(.auxiliaryWindow) == false {
                 Log.error("AuxiliaryWindowContext: Auxiliary windows are not supported on this platform.")
@@ -169,10 +192,15 @@ class AuxiliaryWindowSceneContext<Content>: TypedSceneContext<AuxiliaryWindowSce
                                                    windowOffset: location,
                                                    windowSize: .zero,
                                                    dismissOnDeactivate: dismissOnDeactivate)
-        window.sharedContext.dismissPopup = { [weak self, weak parentContext] in
-            self?.dismissPopup()
-            parentContext?.dismissPopup?()
-        }
+        window.sharedContext.auxiliarySceneContext = AuxiliarySceneContext(
+            hostContext: parentContext,
+            hostWindow: parentWindow,
+            sceneContext: self,
+
+            dismissOnDeactivate: dismissOnDeactivate,
+            dismiss: { [weak self] in self?.dismiss() },
+            dismissPopup: { [weak self] in self?.dismissPopup() }
+        )
 
         if enablePopup, let window = parentWindow.window {
             if let popup = activationContext.window.makeWindow() {
@@ -363,14 +391,13 @@ private class AuxiliaryWindowContext<Content>: GenericWindowContext<Content>, @u
     }
 }
 
-
-private struct AuxiliaryWindowPopupWindow: EnvironmentKey {
+private struct AuxiliaryWindowUsingSystemWindow: EnvironmentKey {
     static let defaultValue: Bool = false
 }
 
 extension EnvironmentValues {
-    public var auxiliaryWindowPopupWindow: Bool {
-        get { self[AuxiliaryWindowPopupWindow.self] }
-        set { self[AuxiliaryWindowPopupWindow.self] = newValue }
+    public var auxiliaryWindowUsingSystemWindow: Bool {
+        get { self[AuxiliaryWindowUsingSystemWindow.self] }
+        set { self[AuxiliaryWindowUsingSystemWindow.self] = newValue }
     }
 }

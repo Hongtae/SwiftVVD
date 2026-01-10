@@ -197,7 +197,7 @@ private class ResolvedButtonStyleViewContext: GenericViewContext<ResolvedButtonS
     }
     
     func onDispatchButtonAction(_ action: @escaping ButtonAction) {
-        self.sharedContext.dismissPopup?()
+        self.sharedContext.auxiliarySceneContext?.dismissPopup(withParentContext: true)
         struct _UnsafeBox<T>: Sendable {
             nonisolated(unsafe) let value: T
         }
