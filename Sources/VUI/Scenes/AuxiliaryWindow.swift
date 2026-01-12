@@ -74,7 +74,7 @@ class AuxiliaryWindowSceneContext<Content>: TypedSceneContext<AuxiliaryWindowSce
     private struct _ActivationContext: @unchecked Sendable {
         let window: AuxiliaryWindowContext<Content>
         weak var parentWindow: WindowContext?
-        weak var popupWindow: (any WindowContext.Window)?
+        weak var popupWindow: (any PlatformWindow)?
         var windowOffset: CGPoint
         var windowSize: CGSize = .zero
         var dismissOnDeactivate: Bool
@@ -136,7 +136,7 @@ class AuxiliaryWindowSceneContext<Content>: TypedSceneContext<AuxiliaryWindowSce
         windowSize.height = max(windowSize.height, 1) + CGFloat(padding * 2)
         self.activationContext?.windowSize = windowSize
 
-        if let nativeWindow = window.window {
+        if let platformWindow = window.window {
             let style = window.style
 
             let activate = self.activationContext?.activateFirstTime ?? false
@@ -146,10 +146,10 @@ class AuxiliaryWindowSceneContext<Content>: TypedSceneContext<AuxiliaryWindowSce
 
             Task { @MainActor in
                 if style.contains(.autoResize) {
-                    nativeWindow.contentSize = windowSize
+                    platformWindow.contentSize = windowSize
                 }
                 if activate {
-                    nativeWindow.activate()
+                    platformWindow.activate()
                 }
             }
         } else {
@@ -171,7 +171,7 @@ class AuxiliaryWindowSceneContext<Content>: TypedSceneContext<AuxiliaryWindowSce
         }
 
         let parentWindow = parentContext.window
-        var enablePopup = self.environment.auxiliaryWindowUsingSystemWindow
+        var enablePopup = self.environment.auxiliaryWindowUsingPlatformWindow
         if enablePopup && parentWindow is AuxiliaryWindowHost {
             if Platform.factory.supportedWindowStyles([.auxiliaryWindow]).contains(.auxiliaryWindow) == false {
                 Log.error("AuxiliaryWindowContext: Auxiliary windows are not supported on this platform.")
@@ -366,7 +366,7 @@ class AuxiliaryWindowSceneContext<Content>: TypedSceneContext<AuxiliaryWindowSce
 
 // popup-window for auxiliary window scene
 private class AuxiliaryWindowContext<Content>: GenericWindowContext<Content>, @unchecked Sendable where Content: View {
-    override var style: WindowStyle { [.auxiliaryWindow, .autoResize] }
+    override var style: PlatformWindowStyle { [.auxiliaryWindow, .autoResize] }
 
     private weak var _scene: AuxiliaryWindowSceneContext<Content>?
 
@@ -390,18 +390,18 @@ private class AuxiliaryWindowContext<Content>: GenericWindowContext<Content>, @u
         }
     }
 
-    override func onWindowClosing(_: any WindowContext.Window) {
+    override func onWindowClosing(_: any PlatformWindow) {
         _scene?.onWindowClosed()
     }
 }
 
-private struct AuxiliaryWindowUsingSystemWindow: EnvironmentKey {
+private struct AuxiliaryWindowUsingPlatformWindow: EnvironmentKey {
     static let defaultValue: Bool = false
 }
 
 extension EnvironmentValues {
-    public var auxiliaryWindowUsingSystemWindow: Bool {
-        get { self[AuxiliaryWindowUsingSystemWindow.self] }
-        set { self[AuxiliaryWindowUsingSystemWindow.self] = newValue }
+    public var auxiliaryWindowUsingPlatformWindow: Bool {
+        get { self[AuxiliaryWindowUsingPlatformWindow.self] }
+        set { self[AuxiliaryWindowUsingPlatformWindow.self] = newValue }
     }
 }

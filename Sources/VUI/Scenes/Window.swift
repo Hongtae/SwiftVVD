@@ -90,7 +90,7 @@ class SceneWindowContext<Content>: GenericWindowContext<Content> where Content: 
     var _title: String = ""
 
     override var title: String { _title }
-    override var style: WindowStyle { .genericWindow }
+    override var style: PlatformWindowStyle { .genericWindow }
 
     init(content: _GraphValue<Content>, title: _GraphValue<Text>, scene: SceneContext) {
         self.titleGraph = title

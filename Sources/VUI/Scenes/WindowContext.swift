@@ -9,12 +9,12 @@ import Foundation
 import Synchronization
 import VVD
 
-protocol WindowContext: AnyObject {
-    typealias Window = VVD.Window
-    typealias WindowStyle = VVD.WindowStyle
+typealias PlatformWindow = VVD.Window
+typealias PlatformWindowStyle = VVD.WindowStyle
 
+protocol WindowContext: AnyObject {
     var scene: SceneContext { get }
-    var window: (any Window)? { get }
+    var window: (any PlatformWindow)? { get }
     var isValid: Bool { get }
 
     func updateContent()
@@ -23,21 +23,30 @@ protocol WindowContext: AnyObject {
     func drawFrame(_: GraphicsContext, offset: CGPoint)
 
     @MainActor
-    func makeWindow() -> (any Window)?
+    func makeWindow() -> (any PlatformWindow)?
 }
 
 protocol WindowInputEventHandler {
+    @discardableResult
     func handleKeyboardEvent(event: KeyboardEvent) -> Bool
+    @discardableResult
     func handleMouseEvent(event: MouseEvent) -> Bool
+    @discardableResult
     func handleMouseWheel(at location: CGPoint, delta: CGPoint) -> Bool
+    @discardableResult
     func handleMouseHover(at location: CGPoint, deviceID: Int, isTopMost: Bool) -> Bool
+
+    func resetGestureHandlers()
 }
 
-class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowInputEventHandler, WindowDelegate, @unchecked Sendable where Content: View {
-    typealias Window = WindowContext.Window
-
+class GenericWindowContext<Content>: WindowContext,
+                                     AuxiliaryWindowHost,
+                                     ModalWindowHost,
+                                     WindowInputEventHandler,
+                                     WindowDelegate,
+                                     @unchecked Sendable where Content: View {
     private(set) var swapChain: SwapChain?
-    private(set) var window: (any Window)?
+    private(set) var window: (any PlatformWindow)?
 
     var view: ViewContext?
     let content: _GraphValue<Content>
@@ -47,7 +56,7 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
         sharedContext.scene
     }
     var title: String { "" }
-    var style: WindowStyle { .genericWindow }
+    var style: PlatformWindowStyle { .genericWindow }
 
     var filterGestureTypes: Bool = true
     var allowedGestureTypes: _PrimitiveGestureTypes = .all
@@ -83,6 +92,13 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
         var frame: CGRect? = nil // cached frame
     }
     private let auxiliaryWindows = Mutex<[AuxiliaryWindow]>([])
+
+    private struct ModalWindow: @unchecked Sendable {
+        weak var client: ModalWindowClient?
+        var frame: CGRect? = nil // cached frame
+        var initiated: Bool = false
+    }
+    private let modalWindows = Mutex<[ModalWindow]>([])
 
     init(content: _GraphValue<Content>, scene: SceneContext) {
         let sceneInputs = scene.inputs
@@ -139,7 +155,7 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
     }
 
     @MainActor
-    func makeWindow() -> (any Window)? {
+    func makeWindow() -> (any PlatformWindow)? {
         if self.window == nil {
 
             self.task?.cancel()
@@ -297,6 +313,30 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
                 window.frame = window.client?.auxiliaryWindowFrame()
             }
         }
+
+        var modalClient: ModalWindowClient? = nil
+        var modalClientInitiated: Bool = false
+        self.modalWindows.withLock { windows in
+            windows = windows.filter { $0.client != nil }
+            if let modalWindow = windows.first {
+                modalClient = modalWindow.client
+                modalClientInitiated = modalWindow.initiated
+            }
+        }
+
+        if let modalClient {
+            if modalClientInitiated == false {
+                modalClient.onModalSessionInitiated()
+                modalClientInitiated = true
+            }
+            modalClient.updateModalWindowContent(tick: tick, delta: delta, date: date)
+            self.modalWindows.withLock {
+                if $0.count > 0 {
+                    $0[0].initiated = modalClientInitiated
+                    $0[0].frame = modalClient.modalWindowFrame()
+                }
+            }
+        }
     }
 
     func drawFrame(_ context: GraphicsContext, offset: CGPoint) {
@@ -309,6 +349,13 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
             $0.drawAuxiliaryWindowBackground(offset: offset, with: context)
             $0.drawAuxiliaryWindowContent(offset: offset, with: context)
             $0.drawAuxiliaryWindowOverlay(offset: offset, with: context)
+        }
+
+        let modalClient = self.modalWindows.withLock { $0.first?.client }
+        if let modalClient {
+            modalClient.drawModalWindowBackground(offset: offset, with: context)
+            modalClient.drawModalWindowContent(offset: offset, with: context)
+            modalClient.drawModalWindowOverlay(offset: offset, with: context)
         }
     }
 
@@ -586,19 +633,56 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
 
     @MainActor
     func onKeyboardEvent(event: KeyboardEvent) {
-        _=self.handleKeyboardEvent(event: event)
+        let modalClient = self.modalWindows.withLock { $0.first?.client }
+        if let modalClient {
+            modalClient.modalWindowInputEventHandler()?
+                .handleKeyboardEvent(event: event)
+        } else {
+            self.handleKeyboardEvent(event: event)
+        }
     }
 
     @MainActor
     func onMouseEvent(event: MouseEvent) {
+        let modalWindow = self.modalWindows.withLock { $0.first }
+        if let modalClient = modalWindow?.client,
+           let modalFrame = modalWindow?.frame {
+
+            var updateHover = false
+            if let handler = modalClient.modalWindowInputEventHandler() {
+                var event = event
+                event.location -= modalFrame.origin
+
+                if event.type == .wheel {
+                    handler.handleMouseWheel(at: event.location,
+                                             delta: event.delta)                
+                } else {
+                    if handler.handleMouseEvent(event: event) == false {
+                        if event.type == .move || event.type == .buttonUp {
+                            handler.handleMouseHover(at: event.location,
+                                                     deviceID: event.deviceID,
+                                                     isTopMost: true)
+                            updateHover = true
+                        }
+                    }
+                }
+            }
+            if updateHover {
+                self.handleMouseHover(at: event.location,
+                                      deviceID: event.deviceID,
+                                      isTopMost: false)
+            }
+            return
+        }
+
         if event.type == .wheel {
-            _=self.handleMouseWheel(at: event.location, delta: event.delta)
+            self.handleMouseWheel(at: event.location, delta: event.delta)
         } else {
             if self.handleMouseEvent(event: event) == false {
                 if event.type == .move || event.type == .buttonUp {
-                    _=self.handleMouseHover(at: event.location,
-                                            deviceID: event.deviceID,
-                                            isTopMost: true)
+                    self.handleMouseHover(at: event.location,
+                                          deviceID: event.deviceID,
+                                          isTopMost: true)
                 }
             }
         }
@@ -607,6 +691,7 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
     private var _lastKeyboardEventHandler: ObjectIdentifier? = nil
     private var _lastMouseEventHandler: ObjectIdentifier? = nil
 
+    @discardableResult
     func handleKeyboardEvent(event: KeyboardEvent) -> Bool {
         let handleEvent = { (event: KeyboardEvent) -> Bool in
 
@@ -658,6 +743,7 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
         return false
     }
 
+    @discardableResult
     func handleMouseEvent(event: MouseEvent) -> Bool {
         let handleEvent = { (event: MouseEvent) -> Bool in
 
@@ -772,17 +858,21 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
         for handler in handlers {
             if handler.action(event) {
                 _lastMouseEventHandler = ObjectIdentifier(handler.target)
-                clients.forEach { $0.initiatedGesture(from: handler.target,
-                                                      location: event.location) }
+                clients.forEach {
+                    $0.initiatedGesture(from: handler.target,
+                                        location: event.location) 
+                }
                 return true
             }
         }
         _lastMouseEventHandler = nil
-        clients.forEach { $0.initiatedGesture(from: nil,
-                                              location: event.location) }
+        clients.forEach {
+            $0.initiatedGesture(from: nil, location: event.location) 
+        }
         return false
     }
 
+    @discardableResult
     func handleMouseWheel(at location: CGPoint, delta: CGPoint) -> Bool {
         for aux in self.auxiliaryWindows.withLock({ $0.reversed() }) {
             if let offset = aux.frame?.origin {
@@ -802,6 +892,7 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
         return false
     }
 
+    @discardableResult
     func handleMouseHover(at location: CGPoint, deviceID: Int, isTopMost: Bool) -> Bool {
         var topMost = isTopMost
         self.auxiliaryWindows.withLock({ $0.reversed() }).forEach { aux in
@@ -826,9 +917,15 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
         return isTopMost != topMost
     }
 
-    func onWindowCreated(_: any Window) {}
+    func resetGestureHandlers() {
+        let handlers = self.sharedContext.gestureHandlers
+        handlers.forEach { $0.reset() }
+        self.sharedContext.gestureHandlers.removeAll()
+    }
 
-    func onWindowClosing(_: any Window) {
+    func onWindowCreated(_: any PlatformWindow) {}
+
+    func onWindowClosing(_: any PlatformWindow) {
         self.auxClients.forEach {
             $0.onHostWindowClosed()
         }
@@ -861,6 +958,54 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
     
     var auxClients: [AuxiliaryWindowClient] {
         self.auxiliaryWindows.withLock { $0.compactMap(\.client) }
+    }
+
+    var modalClients: [ModalWindowClient] {
+        self.modalWindows.withLock { $0.compactMap(\.client) }
+    }
+
+    func addModalWindow(_ client: ModalWindowClient) -> Bool {
+        var prepareForFirstModal = false
+        let modal = ModalWindow(client: client)
+
+        self.modalWindows.withLock { modalWindows in
+            prepareForFirstModal = modalWindows.isEmpty
+
+            if modalWindows.contains(where: { $0.client === client }) {
+                return // already added
+            }
+            modalWindows.append(modal)
+        }
+
+        if prepareForFirstModal {
+            self.resetGestureHandlers()
+            self.handleMouseHover(at: .zero, deviceID: 0, isTopMost: false)
+        }
+        return true
+    }
+
+    func removeModalWindow(_ client: ModalWindowClient) {
+        var initiated: Bool? = nil
+        self.modalWindows.withLock { modalWindows in
+            if let index = modalWindows.firstIndex(where: {
+                $0.client === client }) {
+
+                initiated = modalWindows[index].initiated
+                modalWindows.remove(at: index)
+            }
+        }
+        guard let initiated else {
+            return  // client was not found
+        }
+        if initiated {
+            client.onModalSessionDismissed()
+        } else {
+            client.onModalSessionCancelled()
+        }
+    }
+
+    func shouldClose(window: any PlatformWindow) -> Bool {
+        self.modalClients.isEmpty
     }
 }
 
