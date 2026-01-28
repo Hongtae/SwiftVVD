@@ -58,10 +58,7 @@ extension _GraphInputs {
         if self.mergedInputs.isEmpty {
             return self
         }
-        var mergedInputs = self.mergedInputs
-        mergedInputs.indices.forEach { index in
-            mergedInputs[index] = mergedInputs[index].resolveMergedInputs()
-        }
+        let mergedInputs = self.mergedInputs.map { $0.resolveMergedInputs() }
         var inputs = self
         mergedInputs.forEach {
             inputs.environment.values.merge($0.environment.values) { $1 }
@@ -81,15 +78,9 @@ extension _GraphInputs {
     }
 
     mutating func resetModifiers() {
-        self.viewStyleModifiers.indices.forEach { index in
-            self.viewStyleModifiers[index].reset()
-        }
-        self.modifiers.indices.forEach { index in
-            self.modifiers[index].reset()
-        }
-        self.mergedInputs.indices.forEach { index in
-            self.mergedInputs[index].resetModifiers()
-        }
+        self.viewStyleModifiers.updateEach { $0.reset() }
+        self.modifiers.updateEach { $0.reset() }
+        self.mergedInputs.updateEach { $0.resetModifiers() }
     }
     
     mutating func setModifierTypeGraph<T>(_ graph: _GraphValue<T>) where T: _SceneModifier {

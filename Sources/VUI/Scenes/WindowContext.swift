@@ -292,9 +292,9 @@ class GenericWindowContext<Content>: WindowContext, AuxiliaryWindowHost, WindowI
             $0.updateAuxiliaryWindowContent(tick: tick, delta: delta, date: date)
         }
         // update frame
-        self.auxiliaryWindows.withLock { windows in
-            windows.indices.forEach { index in
-                windows[index].frame = windows[index].client?.auxiliaryWindowFrame()
+        self.auxiliaryWindows.withLock {
+            $0.updateEach { window in
+                window.frame = window.client?.auxiliaryWindowFrame()
             }
         }
     }

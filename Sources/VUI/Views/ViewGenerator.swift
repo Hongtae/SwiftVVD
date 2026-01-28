@@ -66,9 +66,7 @@ struct StaticViewListGenerator: ViewListGenerator, StaticViewList {
     }
 
     mutating func mergeInputs(_ inputs: _GraphInputs) {
-        views.indices.forEach {
-            views[$0].mergeInputs(inputs) 
-        }
+        views.updateEach { $0.mergeInputs(inputs) }
     }
 }
 
@@ -97,9 +95,7 @@ struct DynamicViewListGenerator: ViewListGenerator {
     }
 
     mutating func mergeInputs(_ inputs: _GraphInputs) {
-        views.indices.forEach {
-            views[$0].mergeInputs(inputs)
-        }
+        views.updateEach { $0.mergeInputs(inputs) }
     }
 }
 
@@ -179,9 +175,7 @@ struct StaticMultiViewGenerator<Content>: MultiViewGenerator, StaticViewList {
     }
 
     mutating func mergeInputs(_ inputs: _GraphInputs) {
-        views.indices.forEach {
-            views[$0].mergeInputs(inputs)
-        }
+        views.updateEach { $0.mergeInputs(inputs) }
         baseInputs.mergedInputs.append(inputs)
     }
 }

@@ -58,9 +58,7 @@ public struct _SceneInputs {
 
 extension _SceneInputs {
     mutating func resetModifiers() {
-        self.modifiers.indices.forEach { index in
-            self.modifiers[index].reset()
-        }
+        self.modifiers.updateEach { $0.reset() }
     }
     
     mutating func setModifierTypeGraph<T>(_ graph: _GraphValue<T>) where T: _SceneModifier {

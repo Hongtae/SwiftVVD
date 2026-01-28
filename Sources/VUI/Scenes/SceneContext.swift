@@ -63,23 +63,21 @@ class SceneContext: _GraphValueResolver {
             self.environment = self.inputs.environment
             self.properties = self.inputs.properties
 
-            var modifiers = self.inputs.modifiers
-            modifiers.indices.forEach { index in
-                if modifiers[index].isResolved == false {
-                    modifiers[index].resolve(container: self)
+            self.inputs.modifiers.updateEach { modifier in
+                if modifier.isResolved == false {
+                    modifier.resolve(container: self)
                 }
             }
-            modifiers.forEach { modifier in
+            self.inputs.modifiers.forEach { modifier in
                 if modifier.isResolved {
                     modifier.apply(to: &self.environment)
                 }
             }
-            modifiers.forEach { modifier in
+            self.inputs.modifiers.forEach { modifier in
                 if modifier.isResolved {
                     modifier.apply(to: &self.properties)
                 }
             }
-            self.inputs.modifiers = modifiers
         }
     }
 }

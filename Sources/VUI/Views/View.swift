@@ -283,9 +283,7 @@ private final class DynamicContentStaticMultiViewContext<Content>: StaticMultiVi
         }
 
         mutating func mergeInputs(_ inputs: _GraphInputs) {
-            views.indices.forEach {
-                views[$0].mergeInputs(inputs)
-            }
+            views.updateEach { $0.mergeInputs(inputs) }
             baseInputs.mergedInputs.append(inputs)
         }
     }
