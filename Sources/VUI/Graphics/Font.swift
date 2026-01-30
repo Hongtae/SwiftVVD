@@ -86,23 +86,29 @@ struct SystemFontProvider: TypeFaceProvider {
     let size: CGFloat
     let weight: Font.Weight
     let design: Font.Design
-    let outline: CGFloat
-    let forceBitmap: Bool
+    let outlineThickness: CGFloat
+    let isBitmapPreferred: Bool
+    let isColorEnabled: Bool
 
     init(size: CGFloat, weight: Font.Weight, design: Font.Design,
-         outline: CGFloat = 0.0, forceBitmap: Bool? = nil) {
+         outlineThickness: CGFloat = 0.0, isBitmapPreferred: Bool? = nil,
+         isColorEnabled: Bool = true) {
         self.size = size
         self.weight = weight
         self.design = design
-        self.outline = outline
-        self.forceBitmap = forceBitmap ?? (outline > 0.0)
+        self.outlineThickness = outlineThickness
+        self.isBitmapPreferred = isBitmapPreferred ?? (outlineThickness > 0.0)
+        self.isColorEnabled = isColorEnabled
     }
 
     func isEqual(to: any TypeFaceProvider) -> Bool {
         if let other = to as? Self {
             return self.size == other.size && 
                    self.weight == other.weight &&
-                   self.design == other.design
+                   self.design == other.design &&
+                   self.outlineThickness == other.outlineThickness &&
+                   self.isBitmapPreferred == other.isBitmapPreferred &&
+                   self.isColorEnabled == other.isColorEnabled
         }
         return false
     }
@@ -111,8 +117,9 @@ struct SystemFontProvider: TypeFaceProvider {
         hasher.combine(size)
         hasher.combine(weight)
         hasher.combine(design)
-        hasher.combine(outline)
-        hasher.combine(forceBitmap)
+        hasher.combine(outlineThickness)
+        hasher.combine(isBitmapPreferred)
+        hasher.combine(isColorEnabled)
     }
 
     func makeTypeFace(_ context: AppContext,
@@ -138,9 +145,10 @@ struct SystemFontProvider: TypeFaceProvider {
                 let embolden = { value in
                     ((value - 400.0) / 300.0) * emboldenFactor
                 }
-                font?.embolden = embolden(self.weight.value)
-                font?.outline = outline
-                font?.forceBitmap = forceBitmap
+                font?.boldStrength = embolden(self.weight.value)
+                font?.outlineThickness = outlineThickness
+                font?.isBitmapPreferred = isBitmapPreferred
+                font?.isColorEnabled = isColorEnabled
                 font?.setStyle(pointSize: self.size,
                                dpi: (UInt32(dpi), UInt32(dpi)))
                 return font

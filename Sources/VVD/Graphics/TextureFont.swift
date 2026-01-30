@@ -31,53 +31,12 @@ public class TextureFont: Font {
 
     public let deviceContext: GraphicsDeviceContext
 
-    private var _embolden: CGFloat = .zero
-    private var _outline: CGFloat = .zero
-    private var _kerningEnabled: Bool = true
-    private var _forceBitmap: Bool = false
-
-    public var embolden: CGFloat {
-        get { _embolden }
-        set {
-            self.withFaceLock {
-                _embolden = newValue
-                glyphMap.removeAll()
-                textures.removeAll()
-            }
-        }
+    public var boldStrength: CGFloat = .zero {
+        didSet { if oldValue != boldStrength { self.clearCache() } }
     }
 
-    public var outline: CGFloat {
-        get { _outline }
-        set {
-            self.withFaceLock {
-                _outline = newValue
-                glyphMap.removeAll()
-                textures.removeAll()
-            }
-        }
-    }
-
-    public override var kerningEnabled: Bool {
-        get { _kerningEnabled }
-        set {
-            self.withFaceLock {
-                _kerningEnabled = newValue
-                glyphMap.removeAll()
-                textures.removeAll()
-            }
-        }
-    }
-
-    public override var forceBitmap: Bool {
-        get { _forceBitmap }
-        set {
-            self.withFaceLock {
-                _forceBitmap = newValue
-                glyphMap.removeAll()
-                textures.removeAll()
-            }
-        }
+    public var outlineThickness: CGFloat = .zero {
+        didSet { if oldValue != outlineThickness { self.clearCache() } }
     }
 
     public init?(deviceContext: GraphicsDeviceContext, data: any DataProtocol) {
@@ -90,8 +49,8 @@ public class TextureFont: Font {
         super.init(path: path)
     }
 
-    override func clearCacheInternal() {
-        super.clearCacheInternal()
+    override func clearCacheLocked() {
+        super.clearCacheLocked()
         glyphMap.removeAll()
         textures.removeAll()
         numGlyphsLoaded = 0
@@ -123,7 +82,7 @@ public class TextureFont: Font {
                 }
 
                 offset += glyph.advance.width
-                if self.kerningEnabled {
+                if self.isKerningEnabled {
                     offset += self.kernAdvance(left: c1, right: c2).x
                 }
             }
@@ -144,8 +103,8 @@ public class TextureFont: Font {
         }
 
         let loaded = self.loadBitmap(for: c,
-                                     embolden: self.embolden,
-                                     outline: self.outline) { data, glyph, bmp, metrics in
+                                     embolden: self.boldStrength,
+                                     outline: self.outlineThickness) { data, glyph, bmp, metrics in
             var frame: CGRect = .zero
             let offset = CGPoint(x: bmp.left, y: bmp.top)
             let texture = self.cacheGlyphTexture(width: bmp.width,

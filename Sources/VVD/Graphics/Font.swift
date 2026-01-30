@@ -57,48 +57,64 @@ private func sharedFTLibrary() -> FTLibrary {
     }
 }
 
+@inline(__always)
 private func ft26d6ToFloat(_ value: FT_F26Dot6) -> CGFloat {
     CGFloat(value >> 6) + CGFloat(value & 63) / 64.0
 }
 
+@inline(__always)
 private func ft26d6(_ value: CGFloat) -> FT_F26Dot6 {
     FT_F26Dot6(value * 64.0)
 }
 
+@inline(__always)
 private func ft26d6Floor(_ value: FT_F26Dot6) -> FT_F26Dot6 {
     value & ~63
 }
 
+@inline(__always)
 private func ft26d6Round(_ value: FT_F26Dot6) -> FT_F26Dot6 {
     ft26d6Floor(value + 32)
 }
 
+@inline(__always)
 private func ft26d6Ceil(_ value: FT_F26Dot6) -> FT_F26Dot6 {
     ft26d6Floor(value + 63)
 }
 
+@inline(__always)
 private func ft16d16ToFloat(_ value: FT_Fixed) -> CGFloat {
     CGFloat(value >> 16) + CGFloat(value & 65535) / 65536.0
 }
 
+@inline(__always)
 private func ft16d16(_ value: CGFloat) -> FT_Fixed {
     FT_Fixed(value * 65536.0)
 }
 
+@inline(__always)
 private func FT_HAS_KERNING(_ face: FT_Face) -> Bool {
     return face.pointee.face_flags & FT_FACE_FLAG_KERNING != 0
 }
 
+@inline(__always)
 private func FT_IS_SCALABLE(_ face: FT_Face) -> Bool {
     return face.pointee.face_flags & FT_FACE_FLAG_SCALABLE != 0
 }
 
+@inline(__always)
 private func FT_IS_FIXED_WIDTH(_ face: FT_Face) -> Bool {
     return face.pointee.face_flags & FT_FACE_FLAG_FIXED_WIDTH != 0
 }
 
+@inline(__always)
 private func FT_HAS_FIXED_SIZES(_ face: FT_Face) -> Bool {
     return face.pointee.face_flags & FT_FACE_FLAG_FIXED_SIZES != 0
+}
+
+@inline(__always)
+private func FT_HAS_COLOR(_ face: FT_Face) -> Bool {
+    return face.pointee.face_flags & FT_FACE_FLAG_COLOR != 0
 }
 
 private extension CGPoint {
@@ -142,19 +158,30 @@ public class Font {
         set(v) { self.setStyle(pointSize: self.pointSize, dpi: v) }
     }
 
-    public var forceBitmap: Bool { false }
-    public var kerningEnabled: Bool { true }
+    public var isBitmapPreferred: Bool = false {
+        didSet { if oldValue != isBitmapPreferred { self.clearCache() } }
+    }
+    public var isKerningEnabled: Bool = true {
+        didSet { if oldValue != isKerningEnabled { self.clearCache() } }
+    }
+    public var isColorEnabled: Bool = true {
+        didSet { if oldValue != isColorEnabled { self.clearCache() } }
+    }
+    public var hasColor: Bool {
+        self.face.withLock { FT_HAS_COLOR($0.face) }
+    }
 
     private var _size26d6: FT_F26Dot6
     private var _dpi: DPI
 
     public struct Glyph: Sendable {
+        public let index: UInt32        // glyph index (FT_UInt)
         public let advance: CGSize      // distance to next glyph
+        public let bearing: CGPoint     // offset from baseline (left, top)
+        public let size: CGSize         // glyph size (width, height)
         public let ascender: CGFloat    // upper distance from baseline
         public let descender: CGFloat   // lower distance from baseline (negative direction)
     }
-
-    private var loadedGlyphs: [UnicodeScalar: Glyph] = [:]
 
     public init?(path: String) {
         self._size26d6 = 10 * 64
@@ -223,13 +250,12 @@ public class Font {
         }
     }
 
-    internal func clearCacheInternal() {
-        loadedGlyphs = [:]
+    internal func clearCacheLocked() {
     }
 
     public func clearCache() {
         self.withFaceLock {
-            self.clearCacheInternal()
+            self.clearCacheLocked()
         }
     }
 
@@ -255,7 +281,7 @@ public class Font {
                 self._size26d6 = charSize
                 self._dpi = (resX, resY)
                 assert(self.numGlyphs == Int(face.pointee.num_glyphs))
-                self.clearCacheInternal()
+                self.clearCacheLocked()
             }
         }
     }
@@ -283,7 +309,7 @@ public class Font {
     /// text pixel-width from baseline. not includes outline.
     public func lineWidth(of text: String) -> CGFloat {
         var length: CGFloat = 0.0
-        if self.kerningEnabled {
+        if self.isKerningEnabled {
             var c1 = UnicodeScalar(UInt8(0))
             for c2 in text.unicodeScalars {
                 if let glyph = self.glyph(for: c2) {
@@ -372,33 +398,37 @@ public class Font {
         if c.value == 0 { return nil }
         return self.face.withLock {
             let face = $0.face
-            if let glyph = self.loadedGlyphs[c] {
-                return glyph
-            }
-
             let index = if face.pointee.charmap != nil {
                 FT_Get_Char_Index(face, FT_ULong(c.value))
             } else {
                 FT_UInt(c.value)
             }
             // loading font.
-            let loadFlags = self.forceBitmap ? FT_Int32(FT_LOAD_RENDER) : FT_Int32(FT_LOAD_DEFAULT)
+            var loadFlags = self.isBitmapPreferred ? FT_Int32(FT_LOAD_RENDER) : FT_Int32(FT_LOAD_DEFAULT)
+            if self.isColorEnabled && FT_HAS_COLOR(face) { loadFlags |= FT_Int32(FT_LOAD_COLOR) }
             if FT_Load_Glyph(face, index, loadFlags) != 0 {
                 Log.err("Failed to load glyph for char=\(c)(0x\(String(format: "%x", c.value)))")
                 return nil
             }
 
-            let advance = CGSize(width: ft26d6ToFloat(face.pointee.glyph.pointee.advance.x),
-                                 height: ft26d6ToFloat(face.pointee.glyph.pointee.advance.y))
+            let metrics = face.pointee.glyph.pointee.metrics
+            let advance = CGSize(width: ft26d6ToFloat(metrics.horiAdvance),
+                                 height: ft26d6ToFloat(metrics.vertAdvance))
+            let bearing = CGPoint(x: ft26d6ToFloat(metrics.horiBearingX),
+                                  y: ft26d6ToFloat(metrics.horiBearingY))
+            let size = CGSize(width: ft26d6ToFloat(metrics.width),
+                              height: ft26d6ToFloat(metrics.height))
 
-            let metrics = face.pointee.size.pointee.metrics
-            let ascender = ft26d6ToFloat(metrics.ascender)
-            let descender = ft26d6ToFloat(metrics.descender)
+            let faceMetrics = face.pointee.size.pointee.metrics
+            let ascender = ft26d6ToFloat(faceMetrics.ascender)
+            let descender = ft26d6ToFloat(faceMetrics.descender)
 
-            self.loadedGlyphs[c] = Glyph(advance: advance,
-                                         ascender: ascender,
-                                         descender: descender)
-            return self.loadedGlyphs[c]
+            return Glyph(index: UInt32(index),
+                         advance: advance,
+                         bearing: bearing,
+                         size: size,
+                         ascender: ascender,
+                         descender: descender)
         }
     }
 
@@ -431,7 +461,8 @@ public class Font {
                 FT_UInt(c.value)
             }
             // loading font.
-            let loadFlags = self.forceBitmap ? FT_Int32(FT_LOAD_RENDER) : FT_Int32(FT_LOAD_DEFAULT)
+            var loadFlags = self.isBitmapPreferred ? FT_Int32(FT_LOAD_RENDER) : FT_Int32(FT_LOAD_DEFAULT)
+            if self.isColorEnabled && FT_HAS_COLOR(face) { loadFlags |= FT_Int32(FT_LOAD_COLOR) }
             if FT_Load_Glyph(face, index, loadFlags) != 0 {
                 Log.err("Failed to load glyph for char=\(c)(0x\(String(format: "%x", c.value)))")
                 return false
@@ -590,10 +621,15 @@ public class Font {
             }
 
             let metrics = baseMetrics(for: face)
-            let glyph = Glyph(advance: advance,
+            let glyphMetrics = face.pointee.glyph.pointee.metrics
+            let glyph = Glyph(index: UInt32(index),
+                              advance: advance,
+                              bearing: CGPoint(x: ft26d6ToFloat(glyphMetrics.horiBearingX),
+                                               y: ft26d6ToFloat(glyphMetrics.horiBearingY)),
+                              size: CGSize(width: ft26d6ToFloat(glyphMetrics.width),
+                                           height: ft26d6ToFloat(glyphMetrics.height)),
                               ascender: metrics.ascender,
                               descender: metrics.descender)
-            self.loadedGlyphs[c] = glyph
             callback(bitmapData, glyph, bitmapInfo, metrics)
             return true
         }
