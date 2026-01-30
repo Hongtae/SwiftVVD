@@ -469,7 +469,7 @@ extension GraphicsContext {
     static func cachePipelineContext(_ deviceContext: GraphicsDeviceContext) -> Bool {
         if let queue = deviceContext.renderQueue() {
             if let state = GraphicsPipelineStates.sharedInstance(commandQueue: queue) {
-                deviceContext.cachedDeviceResources["XGUI.GraphicsPipelineStates"] = state
+                deviceContext.cachedDeviceResources["VUI.GraphicsPipelineStates"] = state
                 return true
             }
         }

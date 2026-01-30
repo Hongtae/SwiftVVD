@@ -42,7 +42,7 @@ extension Button where Label == Text {
     }
 }
 
-extension Button where Label == XGUI.Label<Text, Image> {
+extension Button where Label == VUI.Label<Text, Image> {
     public init(_ titleKey: LocalizedStringKey, systemImage: String, action: @escaping () -> Void) {
         self.init(action: action) {
             Label(titleKey, systemImage: systemImage)
@@ -85,7 +85,7 @@ extension Button where Label == Text {
     }
 }
 
-extension Button where Label == XGUI.Label<Text, Image> {
+extension Button where Label == VUI.Label<Text, Image> {
     public init(_ titleKey: LocalizedStringKey, systemImage: String, role: ButtonRole?, action: @escaping () -> Void) {
         self.init(role: role, action: action) {
             Label(titleKey, systemImage: systemImage)

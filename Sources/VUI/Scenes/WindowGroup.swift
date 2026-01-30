@@ -8,7 +8,7 @@
 import Foundation
 import VVD
 
-private var defaultWindowTitle: Text { Text("XGUI.WindowGroup") }
+private var defaultWindowTitle: Text { Text("VUI.WindowGroup") }
 
 public struct WindowGroup<Content>: Scene where Content: View {
 

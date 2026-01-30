@@ -1,4 +1,4 @@
-import XGUI
+import VUI
 
 @main
 struct TestApp1: App {

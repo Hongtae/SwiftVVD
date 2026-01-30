@@ -1,5 +1,5 @@
 import Foundation
-import XGUI
+import VUI
 
 struct ContentView: View {
     init() {

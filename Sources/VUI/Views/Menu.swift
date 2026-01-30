@@ -48,7 +48,7 @@ extension Menu {
     }
 }
 
-extension Menu where Label == XGUI.Label<Text, Image> {
+extension Menu where Label == VUI.Label<Text, Image> {
     public init(_ titleKey: LocalizedStringKey, systemImage: String, @ViewBuilder content: () -> Content) {
         self.init {
             content()

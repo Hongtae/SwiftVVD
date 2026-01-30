@@ -1,5 +1,5 @@
 import Foundation
-import XGUI
+import VUI
 
 struct BlueButton: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
