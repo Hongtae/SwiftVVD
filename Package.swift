@@ -24,8 +24,7 @@ let package = Package(
         // Products define the executables and libraries a package produces, and make them visible to other packages.
         .library(name: "VVD", type: .dynamic, targets: ["VVD"]),
         .library(name: "VUI", type: .dynamic, targets: ["VUI"]),
-        .executable(name: "Editor", targets: ["Editor"]),
-        .executable(name: "TestApp1", targets: ["TestApp1"])
+        .executable(name: "VEditor", targets: ["VEditor"])
     ],
     dependencies: [
         // Dependencies declare other packages that this package depends on.
@@ -122,7 +121,7 @@ let package = Package(
             swiftSettings: [
             ]),
         .executableTarget(
-            name: "Editor",
+            name: "VEditor",
             dependencies: [
                 .target(name: "VVD"),
                 .target(name: "VUI"),
