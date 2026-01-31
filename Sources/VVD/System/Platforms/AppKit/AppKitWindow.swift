@@ -2,7 +2,7 @@
 //  File: AppKitWindow.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_APPKIT
@@ -14,7 +14,7 @@ final class AppKitWindow: Window {
     
     var activated: Bool { self.view?.activated ?? false }
     var visible: Bool { self.view?.visible ?? false }
-    
+
     var resolution: CGSize {
         get {
             if let nsView {
@@ -133,7 +133,13 @@ final class AppKitWindow: Window {
     var isValid: Bool { view != nil }
     
     var eventObservers = WindowEventObserverContainer()
-    
+
+    private struct ModalQueueEntry {
+        weak var window: AppKitWindow?
+        let completionHandler: (()->Void)?
+    }
+    private var modalWindowQueue: [ModalQueueEntry] = []
+
     required init?(name: String, style: WindowStyle, delegate: WindowDelegate?, data: [String: Any]) {
         var styleMask: NSWindow.StyleMask = []
         let backingStoreType: NSWindow.BackingStoreType = .buffered
@@ -240,6 +246,23 @@ final class AppKitWindow: Window {
 
     func close() {
         if let window {
+            // close all modal windows
+            let entries = self.modalWindowQueue
+            self.modalWindowQueue.removeAll()
+            let completionHandlers = entries.compactMap { $0.completionHandler }
+            entries.forEach {
+                if let modalWindow = $0.window {
+                    modalWindow.removeEventObserver(self)
+                    if let nsWindow = modalWindow.window {
+                        window.endSheet(nsWindow)
+                    }
+                    modalWindow.close()
+                }
+            }
+            if !completionHandlers.isEmpty {
+                Task { completionHandlers.forEach { $0() } }
+            }
+
             window.close()
             self.view = nil
             self.window = nil
@@ -330,6 +353,72 @@ final class AppKitWindow: Window {
             return nsView.convert(ptWindow, from: nil)
         }
         return point
+    }
+
+    var canPresentModalWindow: Bool {
+        self.window != nil
+    }
+
+    var modalWindows: [any Window] {
+        self.modalWindowQueue.compactMap { $0.window }
+    }
+
+    func presentModalWindow(_ window: any Window, completionHandler: (()->Void)?) -> Bool {
+        guard let modalWindow = window as? AppKitWindow else {
+            Log.err("Window.presentModalWindow failed: incompatible window type.")
+            return false
+        }
+
+        if let host = self.window, let modal = modalWindow.window {
+            self.modalWindowQueue.append(
+                ModalQueueEntry(window: modalWindow,
+                                completionHandler: completionHandler))
+            host.beginSheet(modal) { [weak self, weak modalWindow] response in
+                Log.debug("Modal window sheet ended with response: \(response.rawValue)")
+                guard let self else { return }
+                if let modalWindow, let index = self.modalWindowQueue
+                    .firstIndex(where: { $0.window === modalWindow }) {
+                    // remove all entries up to and including the matched entry
+                    // (earlier entries may have been orphaned if NSWindow skipped their callbacks)
+                    let handlers = self.modalWindowQueue[...index].compactMap { $0.completionHandler }
+                    self.modalWindowQueue.removeSubrange(...index)
+                    handlers.forEach { $0() }
+                } else {
+                    // modalWindow deallocated, clean up all nil entries
+                    let cancelledHandlers = self.modalWindowQueue
+                        .filter { $0.window == nil }
+                        .compactMap { $0.completionHandler }
+                    self.modalWindowQueue.removeAll { $0.window == nil }
+                    cancelledHandlers.forEach { $0() }
+                }
+            }
+            return true
+        }
+        Log.err("Window.presentModalWindow failed: invalid window.")
+        return false
+    }
+
+    func dismissModalWindow(_ window: any Window) -> Bool {
+        guard let modalWindow = window as? AppKitWindow else {
+            Log.err("Window.dismissModalWindow failed: incompatible window type.")
+            return false
+        }
+
+        // clean up cancelled entries (nil windows) and call their completion handlers
+        let cancelledHandlers = self.modalWindowQueue
+            .filter { $0.window == nil }
+            .compactMap { $0.completionHandler }
+        self.modalWindowQueue.removeAll { $0.window == nil }
+        if !cancelledHandlers.isEmpty {
+            Task { cancelledHandlers.forEach { $0() } }
+        }
+
+        if let host = self.window, let modalWindow = modalWindow.window {
+            host.endSheet(modalWindow)
+            return true
+        }
+        Log.err("Window.dismissModalWindow failed: invalid window.")
+        return false
     }
 }
 

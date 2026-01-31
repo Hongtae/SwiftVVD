@@ -2,7 +2,7 @@
 //  File: Win32Window.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_WIN32
@@ -107,6 +107,12 @@ final class Win32Window: Window {
 
     private var dropTarget: UnsafeMutablePointer<Win32DropTarget>?
 
+    private struct ModalEntry: @unchecked Sendable {
+        weak var window: Win32Window?
+        let completionHandler: (()->Void)?
+    }
+    private var modalEntries: [ModalEntry] = []
+
     private lazy var registeredWindowClass: ATOM? = {
         let atom: ATOM? = windowClass.withCString(encodedAs: UTF16.self) {
             className in
@@ -173,6 +179,11 @@ final class Win32Window: Window {
             dwStyleEx |= DWORD(WS_EX_TOOLWINDOW)
             dwStyleEx |= DWORD(WS_EX_TOPMOST)
 
+            ncRenderingPolicy = .enabled // enable windows theme
+        }
+        let anyTitlebarStyle: WindowStyle = [.title, .closeButton, .minimizeButton, .maximizeButton]
+        if style.intersection(anyTitlebarStyle).isEmpty {
+            dwStyle |= DWORD(WS_POPUP)  // window without titlebar
             ncRenderingPolicy = .enabled // enable windows theme
         }
 
@@ -255,6 +266,12 @@ final class Win32Window: Window {
     }
 
     deinit {
+        let modals = self.modalEntries.compactMap { $0.window }
+        if !modals.isEmpty {
+            Task { @MainActor in
+                modals.forEach { $0.close() }
+            }
+        }
         if let hWnd = self.hWnd {
             KillTimer(hWnd, updateKeyboardMouseTimerId)
             SetWindowLongPtrW(hWnd, GWLP_USERDATA, 0)
@@ -357,6 +374,20 @@ final class Win32Window: Window {
     }
     
     func close() {
+        // close all modal windows
+        let entries = self.modalEntries
+        self.modalEntries.removeAll()
+        let completionHandlers = entries.compactMap { $0.completionHandler }
+        entries.forEach { 
+            if let window = $0.window {
+                window.removeEventObserver(self)
+                window.close()
+            }
+        }
+        if !completionHandlers.isEmpty {
+            Task { completionHandlers.forEach { $0() } }
+        }
+
         if let hWnd = self.hWnd {
             if let dt = self.dropTarget {
                 RevokeDragDrop(hWnd)
@@ -607,6 +638,133 @@ final class Win32Window: Window {
         var pt = POINT(x: LONG(point.x), y: LONG(point.y))
         ScreenToClient(self.hWnd, &pt)
         return CGPoint(x: Int(pt.x), y: Int(pt.y)) * (1.0 / self.contentScaleFactor)
+    }
+
+    var canPresentModalWindow: Bool {
+        hWnd != nil
+    }
+
+    var modalWindows: [any Window] {
+        self.modalEntries.compactMap { $0.window }
+    }
+
+    func presentModalWindow(_ window: any Window, completionHandler: (()->Void)?) -> Bool {
+        guard let modalWindow = window as? Win32Window else {
+            Log.err("Window.presentModalWindow failed: incompatible window type.")
+            return false
+        }
+
+        if modalWindow.isValid {
+            let present = self.modalEntries.isEmpty
+            self.modalEntries.append(
+                ModalEntry(window: modalWindow,
+                           completionHandler: completionHandler))
+            if present {
+                self.presentNextModal()
+            }
+            return true
+        }
+        Log.err("Window.presentModalWindow failed: invalid window.")
+       return false
+    }
+
+    func dismissModalWindow(_ window: any Window) -> Bool {
+        guard let modalWindow = window as? Win32Window else {
+            Log.err("Window.dismissModalWindow failed: incompatible window type.")
+            return false
+        }
+
+        var presentNext = false
+        modalWindow.removeEventObserver(self)
+
+        // check if the window to be dismissed is the current modal-window
+        if let current = self.modalEntries.first {
+            if current.window == nil || current.window === modalWindow {
+                presentNext = true
+            }
+        }
+        // remove modal-entry from the list and collect completion handlers
+        var completionHandlers: [(() -> Void)] = []
+        self.modalEntries = self.modalEntries.filter {
+            if let window = $0.window, window !== modalWindow {
+                return true
+            }
+            if let handler = $0.completionHandler {
+                completionHandlers.append(handler)
+            }
+            return false
+        }
+        // enable host window if no more modal-windows
+        if self.modalEntries.isEmpty {
+            presentNext = true
+        }
+        if presentNext {
+            if let hWnd = modalWindow.hWnd {
+                ShowWindow(hWnd, SW_HIDE)
+            }
+
+            self.presentNextModal()
+        }
+        // call completion handlers after presenting next modal
+        if !completionHandlers.isEmpty {
+            Task { completionHandlers.forEach { $0() } }
+        }
+        return true
+    }
+
+    private func presentNextModal() {
+        // temporary hold strong reference to modal windows
+        let tmp = self.modalEntries.compactMap { $0.window }
+        defer { _=consume tmp }
+        // remove invalid windows from the list
+        var cancelledHandlers: [()->Void] = []
+        self.modalEntries = self.modalEntries.filter {
+            if $0.window?.isValid ?? false { return true }
+            if let handler = $0.completionHandler {
+                cancelledHandlers.append(handler)
+            }
+            return false
+        }
+        if !cancelledHandlers.isEmpty {
+            Task { cancelledHandlers.forEach { $0() } }
+        }
+        if let hWnd = self.hWnd {
+            if let next = self.modalEntries.first?.window {
+                if let modal = next.hWnd {
+                    next.addEventObserver(self) { (event: WindowEvent) in
+                        if event.type == .closed {
+                            next.removeEventObserver(self)
+                            Task {
+                                self.dismissModalWindow(next)
+                            }
+                        }
+                    }
+
+                    SetForegroundWindow(hWnd)
+                    EnableWindow(hWnd, false)
+
+                    var rcHost = RECT()
+                    GetWindowRect(hWnd, &rcHost)
+                    var rcModal = RECT()
+                    GetWindowRect(modal, &rcModal)
+                    
+                    let centerX = (rcHost.left + rcHost.right) / 2
+                    let centerY = (rcHost.top + rcHost.bottom) / 2
+                    let modalWidth = rcModal.right - rcModal.left
+                    let modalHeight = rcModal.bottom - rcModal.top
+                    let left = centerX - (modalWidth / 2)
+                    let top = centerY - (modalHeight / 2)
+                    
+                    Log.debug("Presenting modal window at (\(left), \(top))")
+                    SetWindowPos(modal, hWnd, left, top, 0, 0,  UINT(SWP_NOSIZE | SWP_SHOWWINDOW))
+
+                    SetActiveWindow(modal)
+                }
+            } else {
+                EnableWindow(hWnd, true)
+                SetForegroundWindow(hWnd)
+            }
+        }
     }
 
     private static func windowProc(_ hWnd: HWND?, _ uMsg: UINT, _ wParam: WPARAM, _ lParam: LPARAM) -> LRESULT {
@@ -1103,6 +1261,26 @@ final class Win32Window: Window {
             case UINT(WM_PAINT):
                 if window.resizing == false {
                     window.postWindowEvent(type: .update)
+                }
+                break
+            case UINT(WM_SETCURSOR):
+                if IsWindowEnabled(hWnd) == false &&
+                     (HIWORD(lParam) == WM_LBUTTONDOWN || HIWORD(lParam) == WM_RBUTTONDOWN) &&
+                     (LOWORD(lParam) & WORD(HTCLIENT | HTCAPTION)) != 0 {
+                    if let currentModal = window.modalEntries.first?.window, let modal = currentModal.hWnd {
+                        MessageBeep(UINT(MB_OK))
+                        SetForegroundWindow(hWnd)
+                        SetActiveWindow(modal)
+                        
+                        var fi = FLASHWINFO()
+                        fi.cbSize = UINT(MemoryLayout<FLASHWINFO>.size)
+                        fi.hwnd = modal
+                        fi.dwFlags = DWORD(FLASHW_ALL | FLASHW_TIMERNOFG)
+                        fi.uCount = 3
+                        fi.dwTimeout = 0
+                        FlashWindowEx(&fi)
+                        return 1
+                    }
                 }
                 break
             case UINT(WM_CLOSE):

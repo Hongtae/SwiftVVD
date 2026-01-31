@@ -2,7 +2,7 @@
 //  File: Window.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -168,6 +168,13 @@ public protocol Window: AnyObject {
 
     func convertPointToScreen(_: CGPoint) -> CGPoint
     func convertPointFromScreen(_: CGPoint) -> CGPoint
+
+    var canPresentModalWindow: Bool { get }
+    var modalWindows: [any Window] { get }
+    @discardableResult
+    func presentModalWindow(_: any Window, completionHandler: (()->Void)?) -> Bool
+    @discardableResult
+    func dismissModalWindow(_: any Window) -> Bool
     
     var isValid: Bool { get }
     var platformHandle: OpaquePointer? { get }
@@ -186,6 +193,14 @@ extension Window {
 
     public func enableTextInput(_: Bool, forDeviceID: Int) {}
     public func isTextInputEnabled(forDeviceID: Int) -> Bool { false }
+
+    public var canPresentModalWindow: Bool { false }
+    public var modalWindows: [any Window] { [] }
+    public func presentModalWindow(_: any Window, completionHandler: (()->Void)?) -> Bool { false }
+    public func presentModalWindow(_ window: any Window) -> Bool {
+        self.presentModalWindow(window, completionHandler: nil) 
+    }
+    public func dismissModalWindow(_: any Window) -> Bool { false }
 }
 
 public extension Window {
