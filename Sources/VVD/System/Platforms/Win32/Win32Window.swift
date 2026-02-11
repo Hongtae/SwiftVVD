@@ -422,6 +422,7 @@ final class Win32Window: Window {
     func isMouseVisible(forDeviceID deviceID: Int) -> Bool {
         if deviceID == 0 {
             var info = CURSORINFO()
+            info.cbSize = UINT(MemoryLayout<CURSORINFO>.size)
             if GetCursorInfo(&info) {
                 return info.flags != 0
             }
@@ -430,12 +431,10 @@ final class Win32Window: Window {
     }
 
     func lockMouse(_ lock: Bool, forDeviceID deviceID: Int) {
-        if deviceID == 0 {
+        if deviceID == 0, let pos = self.mousePosition(forDeviceID: 0) {
             self.mouseLocked = lock
-
-            self.mousePosition = self.mousePosition(forDeviceID: 0)!
-            self.lockedMousePosition = mousePosition
-
+            self.mousePosition = pos
+            self.lockedMousePosition = pos
             PostMessageW(hWnd, UINT(WM_VVDWINDOW_UPDATEMOUSECAPTURE), 0, 0)
         }
     }
@@ -459,11 +458,10 @@ final class Win32Window: Window {
 
     func setMousePosition(_ pos: CGPoint, forDeviceID deviceID: Int) {
         if let hWnd = self.hWnd, deviceID == 0 {
-            var pt = POINT(x: LONG(pos.x), y: LONG(pos.y))
+            let pixel = pos * self.contentScaleFactor
+            var pt = POINT(x: LONG(pixel.x.rounded()), y: LONG(pixel.y.rounded()))
             ClientToScreen(hWnd, &pt)
-            let v = CGPoint(x: Int(pt.x), y: Int(pt.y)) * self.contentScaleFactor
-            SetCursorPos(Int32(v.x.rounded()), Int32(v.y.rounded()))
-
+            SetCursorPos(pt.x, pt.y)
             self.mousePosition = pos
         }
     }
@@ -773,8 +771,8 @@ final class Win32Window: Window {
                 return 0
             case UINT(WM_MOVE):
                 if window.resizing == false {
-                    let x = Int(LOWORD(lParam))     // horizontal position 
-                    let y = Int(HIWORD(lParam))     // vertical position 
+                    let x = Int(Int16(bitPattern: LOWORD(lParam)))
+                    let y = Int(Int16(bitPattern: HIWORD(lParam)))
 
                     window.windowFrame.origin = CGPoint(x: x, y: y)
                     window.postWindowEvent(type: .moved)
@@ -852,17 +850,17 @@ final class Win32Window: Window {
                 }
             case UINT(WM_MOUSEMOVE):
                 let pt = MAKEPOINTS(lParam)
-                let oldPtX = LONG((window.mousePosition.x * window.contentScaleFactor).rounded())
-                let oldPtY = LONG((window.mousePosition.y * window.contentScaleFactor).rounded())
+                let oldPtX = Int((window.mousePosition.x * window.contentScaleFactor).rounded())
+                let oldPtY = Int((window.mousePosition.y * window.contentScaleFactor).rounded())
                 if pt.x != oldPtX || pt.y != oldPtY {
-                    let delta = CGPoint(x: CGFloat(pt.x) - window.mousePosition.x,
-                                        y: CGFloat(pt.y) - window.mousePosition.y) * (1.0 / window.contentScaleFactor)
+                    let delta = CGPoint(x: Int(pt.x) - oldPtX,
+                                        y: Int(pt.y) - oldPtY) * (1.0 / window.contentScaleFactor)
 
                     var postEvent = true
                     if window.mouseLocked {
                         if window.activated {
-                            let lockedPtX = LONG((window.lockedMousePosition.x * window.contentScaleFactor).rounded())
-                            let lockedPtY = LONG((window.lockedMousePosition.y * window.contentScaleFactor).rounded())
+                            let lockedPtX = Int((window.lockedMousePosition.x * window.contentScaleFactor).rounded())
+                            let lockedPtY = Int((window.lockedMousePosition.y * window.contentScaleFactor).rounded())
                             if pt.x == lockedPtX && pt.y == lockedPtY {
                                 postEvent = false
                             } else {
@@ -1020,11 +1018,10 @@ final class Win32Window: Window {
                 PostMessageW(hWnd, UINT(WM_VVDWINDOW_UPDATEMOUSECAPTURE), 0, 0)                  
                 return 1 // should return TRUE
             case UINT(WM_MOUSEWHEEL):
-                var origin: POINT = POINT(x:0, y:0)
-                ClientToScreen(hWnd, &origin)
-
                 let pts = MAKEPOINTS(lParam)
-                let pos = CGPoint(x: Int(pts.x), y: Int(pts.y)) * (1.0 / window.contentScaleFactor)
+                var pt = POINT(x: LONG(pts.x), y: LONG(pts.y))
+                ScreenToClient(hWnd, &pt)
+                let pos = CGPoint(x: Int(pt.x), y: Int(pt.y)) * (1.0 / window.contentScaleFactor)
 
                 let deltaY = Int16(bitPattern: UInt16(HIWORD(wParam)))
                 let deltaYScaled = CGFloat(deltaY) / window.contentScaleFactor
