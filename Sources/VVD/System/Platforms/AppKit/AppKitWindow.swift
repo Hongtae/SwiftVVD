@@ -9,8 +9,6 @@
 import Foundation
 @_implementationOnly import AppKit
 
-nonisolated(unsafe) private var hideCursorCount = 0
-
 @MainActor
 final class AppKitWindow: Window {
     
@@ -29,13 +27,9 @@ final class AppKitWindow: Window {
             if nsView?.window?.contentView === self.view {
                 let window = nsView!.window!
                 let origin = self.origin
-                let pixelBounds = window.convertFromBacking(
-                    NSMakeRect(0, 0, value.width, value.height))
-                let rect = CGRect(origin: .zero,
-                                  size: CGSize(width: pixelBounds.width,
-                                               height: pixelBounds.height))
-                let frame = window.frameRect(forContentRect: rect)
-                window.setContentSize(frame.size)
+                let contentSize = window.convertFromBacking(
+                    NSMakeRect(0, 0, value.width, value.height)).size
+                window.setContentSize(contentSize)
                 if origin == self.origin {
                     window.displayIfNeeded()
                 } else {
@@ -115,9 +109,7 @@ final class AppKitWindow: Window {
                 if nsView.window?.contentView === self.view {
                     let origin = self.origin
                     let window = nsView.window!
-                    let rect = CGRect(origin: .zero, size: value)
-                    let frame = window.frameRect(forContentRect: rect)
-                    window.setContentSize(frame.size)
+                    window.setContentSize(value)
                     if origin == self.origin {
                         window.displayIfNeeded()
                     } else {
@@ -182,8 +174,7 @@ final class AppKitWindow: Window {
             (view as! NSView).registerForDraggedTypes([.fileURL])
         }
         if style.contains(.auxiliaryWindow) {
-            let levelKey: CGWindowLevelKey = .utilityWindow
-            window.level = .init(Int(levelKey.rawValue))
+            window.level = .init(rawValue: Int(CGWindowLevelForKey(.utilityWindow)))
         }
         
         self.postWindowEvent(
@@ -252,20 +243,20 @@ final class AppKitWindow: Window {
             window.close()
             self.view = nil
             self.window = nil
-
-            self.postWindowEvent(type: .closed)
         }
     }
     
+    private static var hideCursorCount = 0
+
     func showMouse(_ show: Bool, forDeviceID deviceID: Int) {
         if deviceID == 0 {
             if show {
                 if CGDisplayShowCursor(CGMainDisplayID()) == .success {
-                    hideCursorCount -= 1
+                    Self.hideCursorCount -= 1
                 }
             } else {
                 if CGDisplayHideCursor(CGMainDisplayID()) == .success {
-                    hideCursorCount += 1
+                    Self.hideCursorCount += 1
                 }
             }
         }
@@ -273,7 +264,7 @@ final class AppKitWindow: Window {
 
     func isMouseVisible(forDeviceID deviceID: Int) -> Bool {
         if deviceID == 0 {
-            return hideCursorCount >= 0
+            return Self.hideCursorCount <= 0
         }
         return false
     }

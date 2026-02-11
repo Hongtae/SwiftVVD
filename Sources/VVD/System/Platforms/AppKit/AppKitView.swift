@@ -214,14 +214,14 @@ private final class AppKitViewImpl: NSView, NSTextInputClient, NSWindowDelegate,
     }
 
     func updateModifier(flags: NSEvent.ModifierFlags) {
-        let updateKey = { (modifier: NSEvent.ModifierFlags, virtualKey: VirtualKey) in
+        let updateKey = { (modifier: NSEvent.ModifierFlags, vkey: VirtualKey) in
             if flags.contains(modifier) {
                 if self.modifierKeyFlags.contains(modifier) == false {
-                    self.postKeyboardEvent(type: .keyDown, mappedVKey: .capslock)
+                    self.postKeyboardEvent(type: .keyDown, mappedVKey: vkey)
                 }
             } else {
                 if self.modifierKeyFlags.contains(modifier) {
-                    self.postKeyboardEvent(type: .keyUp, mappedVKey: .capslock)
+                    self.postKeyboardEvent(type: .keyUp, mappedVKey: vkey)
                 }
             }
         }
@@ -274,17 +274,19 @@ private final class AppKitViewImpl: NSView, NSTextInputClient, NSWindowDelegate,
             #selector(insertTab(_:)): "\t",
             #selector(deleteBackward(_:)): "\u{8}", // \b
             #selector(deleteBackwardByDecomposingPreviousCharacter(_:)): "\u{8}",
-            #selector(cancelOperation(_:)): "\u{27}", // \e (esc)
+            #selector(cancelOperation(_:)): "\u{1B}", // \e (esc)
         ]
 
         MainActor.assumeIsolated {
             if let text = textBySelector[selector] {
                 self.insertText(text, replacementRange:NSMakeRange(NSNotFound, 0))
             } else {
-                let event = self.window!.currentEvent!
-                let key = VirtualKey.from(code: event.keyCode)
-
-                Log.err("[NSTextInput] doCommandBySelector:(\(selector)) for key:(\(key)) not processed.")
+                if let event = self.window?.currentEvent {
+                    let key = VirtualKey.from(code: event.keyCode)
+                    Log.err("[NSTextInput] doCommandBySelector:(\(selector)) for key:(\(key)) not processed.")
+                } else {
+                    Log.err("[NSTextInput] doCommandBySelector:(\(selector)) not processed.")
+                }
             }
 
             self.markedText = ""
@@ -411,8 +413,8 @@ private final class AppKitViewImpl: NSView, NSTextInputClient, NSWindowDelegate,
             if sender.draggingDestinationWindow === self.window {
                 let pboard = sender.draggingPasteboard
                 if pboard.availableType(from: [.fileURL]) == .fileURL {
-                    if let fileURLs = pboard.propertyList(forType: .fileURL) as? [URL] {
-                        let files = fileURLs.map{ $0.absoluteString }
+                    if let fileURLs = pboard.readObjects(forClasses: [NSURL.self]) as? [URL] {
+                        let files = fileURLs.map { $0.absoluteString }
                         let location = self.convert(sender.draggingLocation, from: nil)
 
                         var dragOperation = sender.draggingSourceOperationMask
@@ -499,9 +501,10 @@ private final class AppKitViewImpl: NSView, NSTextInputClient, NSWindowDelegate,
         if notification.object as? NSWindow === self.window {
             self.activated = true
             self.visible = true
-            let currentEvent = NSApp.currentEvent!
             self.postWindowEvent(type: .activated)
-            self.updateModifier(flags: currentEvent.modifierFlags)
+            if let currentEvent = NSApp.currentEvent {
+                self.updateModifier(flags: currentEvent.modifierFlags)
+            }
         }
     }
 
@@ -523,9 +526,7 @@ private final class AppKitViewImpl: NSView, NSTextInputClient, NSWindowDelegate,
 
     func windowWillClose(_ notification: Notification) {
         if notification.object as? NSWindow === self.window {
-            DispatchQueue.main.async {
-                self.postWindowEvent(type: .closed)
-            }
+            self.postWindowEvent(type: .closed)
         }
     }
 
@@ -600,7 +601,7 @@ private final class AppKitViewImpl: NSView, NSTextInputClient, NSWindowDelegate,
                 delta.y = event.scrollingDeltaY
             }
 
-            let deviceID = 0;
+            let deviceID = 0
             let buttonID = event.buttonNumber
 
             window.postMouseEvent(MouseEvent(type: eventType,

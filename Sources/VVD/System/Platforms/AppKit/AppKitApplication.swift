@@ -16,11 +16,11 @@ final class AppKitApplication: Application, @unchecked Sendable {
     weak var delegate: ApplicationDelegate?
 
     var activationPolicy: ActivationPolicy = .accessory
-    var running = false
     var exitCode: Int = 0
+    let running = Atomic<Bool>(false)
 
     func terminate(exitCode : Int) {
-        if self.running {
+        if self.running.load(ordering: .relaxed) {
             DispatchQueue.main.async {
                 let app = NSApplication.shared
                 NotificationCenter.default.post(name: NSApplication.willTerminateNotification,
@@ -84,7 +84,7 @@ final class AppKitApplication: Application, @unchecked Sendable {
 
         let app = AppKitApplication()
         app.delegate = delegate
-        app.running = true
+        app.running.store(true, ordering: .relaxed)
 
         self.shared = app
 
@@ -97,7 +97,7 @@ final class AppKitApplication: Application, @unchecked Sendable {
         NSApplication.shared.setActivationPolicy(policy)
 
         NSApplication.shared.run()
-        app.running = false
+        app.running.store(false, ordering: .relaxed)
 
         delegate?.finalize(application: app)
 
