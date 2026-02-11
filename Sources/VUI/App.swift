@@ -9,6 +9,7 @@ import Foundation
 import VVD
 
 typealias Log = VVD.Log
+typealias UnsafeBox<T> = VVD.UnsafeBox<T>
 
 public protocol App {
     associatedtype Body: Scene
