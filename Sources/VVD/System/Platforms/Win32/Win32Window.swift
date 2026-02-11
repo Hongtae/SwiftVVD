@@ -44,8 +44,6 @@ private func dpiScaleForWindow(_ hWnd: HWND) -> CGFloat {
     return 1.0
 }
 
-private let windowClass = "_SwiftVVD_WndClass"
-
 // TIMER ID, Interval
 private let updateKeyboardMouseTimerId: UINT_PTR = 10
 private let updateKeyboardMouseTimeInterval: UINT = 10
@@ -113,9 +111,9 @@ final class Win32Window: Window {
     }
     private var modalEntries: [ModalEntry] = []
 
-    private lazy var registeredWindowClass: ATOM? = {
-        let atom: ATOM? = windowClass.withCString(encodedAs: UTF16.self) {
-            className in
+    private static let windowClassName = "_SwiftVVD_WndClass"
+    private static let registeredClassAtom: ATOM? = {
+        let atom: ATOM? = windowClassName.withCString(encodedAs: UTF16.self) { className in
 
             let IDC_ARROW: UnsafePointer<WCHAR> = UnsafePointer<WCHAR>(bitPattern: 32512)!
             let IDI_APPLICATION: UnsafePointer<WCHAR> = UnsafePointer<WCHAR>(bitPattern: 32512)!
@@ -124,7 +122,10 @@ final class Win32Window: Window {
                 cbSize: UINT(MemoryLayout<WNDCLASSEXW>.size),
                 style: UINT(CS_OWNDC),
                 lpfnWndProc: { (hWnd, uMsg, wParam, lParam) -> LRESULT in
-                    Win32Window.windowProc(hWnd, uMsg, wParam, lParam) 
+                    let box = UnsafeBox(hWnd)
+                    return MainActor.assumeIsolated {
+                        Win32Window.windowProc(box.value, uMsg, wParam, lParam)
+                    }
                 },
                 cbClsExtra: 0,
                 cbWndExtra: 0,
@@ -139,12 +140,17 @@ final class Win32Window: Window {
             return RegisterClassExW(&wc)
         }
         if atom == nil { 
-            Log.err("RegisterClassExW failed.")
+            let lastError = GetLastError()
+            if lastError != DWORD(ERROR_CLASS_ALREADY_EXISTS) {
+                Log.err("RegisterClassExW failed with error: \(win32ErrorString(lastError))")
+            }
         } else {
-            Log.debug("WindowClass: \"\(windowClass)\" registered!")
+            Log.debug("WindowClass: \"\(windowClassName)\" registered successfully.")
         }
         return atom
     }()
+
+    private static var windowMap: [WinSDK.HWND: WeakObject<Win32Window>] = [:]
 
     enum NonClientAreaRenderingPolicy {
         case `default`
@@ -160,7 +166,9 @@ final class Win32Window: Window {
         self.style = style
         self.delegate = delegate    
 
-        _ = self.registeredWindowClass
+        guard Self.registeredClassAtom != nil || GetLastError() == DWORD(ERROR_CLASS_ALREADY_EXISTS) else {
+            return nil
+        }
 
         assert(Thread.isMainThread, "A window must be created on the main thread.")
 
@@ -188,7 +196,7 @@ final class Win32Window: Window {
         }
 
         let hWnd = name.withCString(encodedAs: UTF16.self) { title in
-            windowClass.withCString(encodedAs: UTF16.self) { className in
+            Self.windowClassName.withCString(encodedAs: UTF16.self) { className in
                 CreateWindowExW(dwStyleEx, className, title, dwStyle,
                 CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
                 nil, nil, GetModuleHandleW(nil), nil)
@@ -219,17 +227,8 @@ final class Win32Window: Window {
             DwmExtendFrameIntoClientArea(hWnd, &margins)
         }
 
-        if SetWindowLongPtrW(hWnd, GWLP_USERDATA, unsafeBitCast(self as AnyObject, to: LONG_PTR.self)) == 0 {
-            let err: DWORD = GetLastError()
-            if err != 0 {
-                Log.err("SetWindowLongPtr failed with error: \(win32ErrorString(err))")
-                DestroyWindow(hWnd)
-                SetLastError(err)
-                return nil
-            }
-        }
-
         self.hWnd = hWnd
+        Self.windowMap[hWnd] = WeakObject(self)
 
         if style.contains(.acceptFileDrop) {
             let dropTargetPtr = Win32DropTarget.makeMutablePointer(target: self)
@@ -267,17 +266,18 @@ final class Win32Window: Window {
 
     deinit {
         let modals = self.modalEntries.compactMap { $0.window }
-        if !modals.isEmpty {
-            Task { @MainActor in
-                modals.forEach { $0.close() }
+        let hWnd = self.hWnd
+
+        Task { @MainActor in
+            modals.forEach { $0.close() }
+
+            if let hWnd {
+                KillTimer(hWnd, updateKeyboardMouseTimerId)
+                Self.windowMap.removeValue(forKey: hWnd)
+                PostMessageW(hWnd, UINT(WM_CLOSE), 0, 0)
             }
+            OleUninitialize()
         }
-        if let hWnd = self.hWnd {
-            KillTimer(hWnd, updateKeyboardMouseTimerId)
-            SetWindowLongPtrW(hWnd, GWLP_USERDATA, 0)
-            PostMessageW(hWnd, UINT(WM_CLOSE), 0, 0)
-        }
-        OleUninitialize()
     }
 
     func show() {
@@ -402,9 +402,8 @@ final class Win32Window: Window {
             self.dropTarget = nil
 
             KillTimer(hWnd, updateKeyboardMouseTimerId)
+            Self.windowMap.removeValue(forKey: hWnd)
 
-            // set GWLP_USERDATA to 0, to forwarding messages to DefWindowProc.
-            SetWindowLongPtrW(hWnd, GWLP_USERDATA, 0)
             SetWindowPos(hWnd, HWND_TOP, 0, 0, 0, 0, UINT(SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED))
 
             // Post WM_CLOSE to destroy window from DefWindowProc().
@@ -768,8 +767,11 @@ final class Win32Window: Window {
     }
 
     private static func windowProc(_ hWnd: HWND?, _ uMsg: UINT, _ wParam: WPARAM, _ lParam: LPARAM) -> LRESULT {
-        let userData = GetWindowLongPtrW(hWnd, GWLP_USERDATA)
-        let window: Win32Window? = userData == 0 ? nil : unsafeBitCast(userData, to: AnyObject.self) as? Win32Window
+        let window: Win32Window? = if let hWnd {
+            Self.windowMap[hWnd]?.value
+        } else {
+            nil
+        }
 
         let MAKEPOINTS = { (lParam: LPARAM) -> POINTS in
             var pt: POINTS = POINTS()
