@@ -43,7 +43,7 @@ struct ModalWindowScene<Content>: _PrimitiveScene where Content: View {
 }
 
 
-// scene context for utility window scene
+// scene context for modal window scene
 class ModalWindowSceneContext<Content>: TypedSceneContext<ModalWindowScene<Content>>, ModalWindowClient, @unchecked Sendable where Content: View {
     typealias Scene = ModalWindowScene<Content>
 
@@ -106,10 +106,10 @@ class ModalWindowSceneContext<Content>: TypedSceneContext<ModalWindowScene<Conte
             return
         }
 
-        let padding = 4
+        let padding: CGFloat = 4
         var windowSize = view.sizeThatFits(.unspecified)
-        windowSize.width = max(windowSize.width, 1) + CGFloat(padding * 2)
-        windowSize.height = max(windowSize.height, 1) + CGFloat(padding * 2)
+        windowSize.width = max(windowSize.width, 1) + padding * 2
+        windowSize.height = max(windowSize.height, 1) + padding * 2
         self.modalContext?.windowSize = windowSize
 
         if let platformWindow = window.window {
@@ -190,7 +190,7 @@ class ModalWindowSceneContext<Content>: TypedSceneContext<ModalWindowScene<Conte
                 modal.contentSize = CGSize(width: 10, height: 10)
                 modal.origin = .zero
                 modalContext.modalWindow = modal
-                window.addEventObserver(self) { [weak self](event: WindowEvent) in
+                modal.addEventObserver(self) { [weak self](event: WindowEvent) in
                     guard let self else { return }
                     switch event.type {
                     case .created:
@@ -204,9 +204,9 @@ class ModalWindowSceneContext<Content>: TypedSceneContext<ModalWindowScene<Conte
                 if window.presentModalWindow(modal) {
                     self.modalContext = modalContext
                     return true
-                } else {
-                    Log.error("ModalWindowContext: failed to present modal window")
-                }
+                } 
+                modal.removeEventObserver(self)    
+                Log.error("ModalWindowContext: failed to present modal window")
             } else {
                 Log.error("ModalWindowContext: failed to create modal window")
             }
@@ -228,25 +228,28 @@ class ModalWindowSceneContext<Content>: TypedSceneContext<ModalWindowScene<Conte
         return false
     }
 
-    func dismiss(withAnimation: Bool = false, completion: (@Sendable () -> Void)? = nil) {
+    func dismiss(withAnimation: Bool = false, completion: (() -> Void)? = nil) {
         if let context = self.modalContext {
-            self.modalContext = nil
             if let host = context.parentWindow as? ModalWindowHost {
                 host.removeModalWindow(self)
             }
             let parentWindow = context.parentWindow?.window
             if let window = context.modalWindow {
-                runOnMainQueue { @MainActor [weak window] in
-                    if let window = window {
+                self.onModalSessionDismissed()
+
+                runOnMainQueue { [weak window, weak self] in
+                    if let self {
+                        window?.removeEventObserver(self)
+                    }
+                    if let window {
                         parentWindow?.dismissModalWindow(window)
                         window.close()
                     }
-                    completion?()
                 }
-            } else {            
-                self.onModalSessionDismissed()
-                completion?()
             }
+            completion?()
+
+            self.modalContext = nil
 
             Log.debug("ModalWindowSceneContext: dismissed modal window")
         } else {
@@ -269,12 +272,12 @@ class ModalWindowSceneContext<Content>: TypedSceneContext<ModalWindowScene<Conte
         if let modalContext, let frame = self.modalWindowFrame() {
 
             if let parentContext = modalContext.parentContext {
-                let frame = parentContext.contentBounds
-                context.fill(Path(frame), with: .color(.black.opacity(0.3)))
+                let parentFrame = parentContext.contentBounds
+                context.fill(Path(parentFrame), with: .color(.black.opacity(0.3)))
             }
 
-            let frame = frame.offsetBy(dx: offset.x, dy: offset.y)
-            let path = RoundedRectangle(cornerRadius: 5).path(in: frame)
+            let modal = frame.offsetBy(dx: offset.x, dy: offset.y)
+            let path = RoundedRectangle(cornerRadius: 5).path(in: modal)
 
             if let filter = modalContext.filter {
                 var context = context
@@ -313,25 +316,21 @@ class ModalWindowSceneContext<Content>: TypedSceneContext<ModalWindowScene<Conte
     func onModalSessionDismissed() {
         if let context = self.modalContext {
             self.modalContext = nil
-            var clients = context.window.modalClients
-            if clients.isEmpty == false {
-                clients.removeFirst().onModalSessionDismissed()
-            }
-            clients.forEach { $0.onModalSessionCancelled() }
+            context.window.dismissAllModalWindows()
+            context.window.dismissAllAuxiliaryWindows()
         }
     }
 
     func onModalSessionCancelled() {
         if let context = self.modalContext {
             self.modalContext = nil
-            context.window.modalClients.forEach {
-                $0.onModalSessionCancelled() 
-            }
+            context.window.dismissAllModalWindows()
+            context.window.dismissAllAuxiliaryWindows()
         }
     }
 }
 
-// popup-window for auxiliary window scene
+// popup-window for modal window scene
 private class ModalWindowContext<Content>: GenericWindowContext<Content>, @unchecked Sendable where Content: View {
     override var style: PlatformWindowStyle { [.autoResize] }
 

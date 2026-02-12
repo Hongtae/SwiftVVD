@@ -955,7 +955,15 @@ class GenericWindowContext<Content>: WindowContext,
             }
         }
     }
-    
+
+    func dismissAllAuxiliaryWindows() {
+        let clients = self.auxiliaryWindows.withLock { aux in
+            defer { aux.removeAll() }
+            return aux.compactMap(\.client)
+        }
+        clients.forEach { $0.onHostWindowClosed() }
+    }
+
     var auxClients: [AuxiliaryWindowClient] {
         self.auxiliaryWindows.withLock { $0.compactMap(\.client) }
     }
@@ -1001,6 +1009,24 @@ class GenericWindowContext<Content>: WindowContext,
             client.onModalSessionDismissed()
         } else {
             client.onModalSessionCancelled()
+        }
+    }
+
+    func dismissAllModalWindows() {
+        let clients = self.modalWindows.withLock { modals in
+            defer { modals.removeAll() }
+            return modals.compactMap {
+                modal -> (client: ModalWindowClient, initiated: Bool)? in
+                guard let client = modal.client else { return nil }
+                return (client, modal.initiated)
+            }
+        }
+        for (client, initiated) in clients {
+            if initiated {
+                client.onModalSessionDismissed()
+            } else {
+                client.onModalSessionCancelled()
+            }
         }
     }
 

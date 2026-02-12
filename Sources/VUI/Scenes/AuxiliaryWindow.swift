@@ -130,10 +130,10 @@ class AuxiliaryWindowSceneContext<Content>: TypedSceneContext<AuxiliaryWindowSce
             return
         }
 
-        let padding = 4
+        let padding: CGFloat = 4
         var windowSize = view.sizeThatFits(.unspecified)
-        windowSize.width = max(windowSize.width, 1) + CGFloat(padding * 2)
-        windowSize.height = max(windowSize.height, 1) + CGFloat(padding * 2)
+        windowSize.width = max(windowSize.width, 1) + padding * 2
+        windowSize.height = max(windowSize.height, 1) + padding * 2
         self.activationContext?.windowSize = windowSize
 
         if let platformWindow = window.window {
@@ -260,12 +260,14 @@ class AuxiliaryWindowSceneContext<Content>: TypedSceneContext<AuxiliaryWindowSce
             if let host = context.parentWindow as? AuxiliaryWindowHost {
                 host.removeAuxiliaryWindow(self)
             }
+
+            context.window.dismissAllModalWindows()
+            context.window.dismissAllAuxiliaryWindows()
+
             if let window = context.popupWindow {
                 runOnMainQueue { @MainActor [weak window] in
                     window?.close()
                 }
-            } else {
-                context.window.auxClients.forEach { $0.onHostWindowClosed() }
             }
             if let window = context.parentWindow?.window {
                 runOnMainQueue { @MainActor [weak window] in
@@ -297,9 +299,9 @@ class AuxiliaryWindowSceneContext<Content>: TypedSceneContext<AuxiliaryWindowSce
     func drawAuxiliaryWindowBackground(offset: CGPoint, with context: GraphicsContext) {
         if let activationContext, let frame = self.auxiliaryWindowFrame() {
 
-            let frame = frame.offsetBy(dx: offset.x, dy: offset.y)
-            //let path = Rectangle().path(in: frame)
-            let path = RoundedRectangle(cornerRadius: 5).path(in: frame)
+            let auxFrame = frame.offsetBy(dx: offset.x, dy: offset.y)
+            //let path = Rectangle().path(in: auxFrame)
+            let path = RoundedRectangle(cornerRadius: 5).path(in: auxFrame)
 
             if let filter = activationContext.filter {
                 var context = context
