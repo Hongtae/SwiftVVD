@@ -152,12 +152,405 @@ public struct Path: Equatable {
         self.elements.forEach(body)
     }
 
-    private var _strokeStyle: StrokeStyle? = nil
-
     public func strokedPath(_ style: StrokeStyle) -> Path {
-        var path = self
-        path._strokeStyle = style
-        return path
+        let halfWidth = style.lineWidth * 0.5
+        if halfWidth < .ulpOfOne { return Path() }
+
+        // Internal Types
+        enum Seg {
+            case line(from: CGPoint, to: CGPoint)
+            case cubic(CubicBezier)
+
+            var startPoint: CGPoint {
+                switch self {
+                case .line(let from, _): return from
+                case .cubic(let c):      return c.p0
+                }
+            }
+            var endPoint: CGPoint {
+                switch self {
+                case .line(_, let to): return to
+                case .cubic(let c):    return c.p3
+                }
+            }
+            var startDir: CGPoint {
+                switch self {
+                case .line(let from, let to): return (to - from).normalized()
+                case .cubic(let c):           return c.startDirection
+                }
+            }
+            var endDir: CGPoint {
+                switch self {
+                case .line(let from, let to): return (to - from).normalized()
+                case .cubic(let c):           return c.endDirection
+                }
+            }
+            var length: CGFloat {
+                switch self {
+                case .line(let from, let to): return (to - from).magnitude
+                case .cubic(let c):           return c.approximateLength(subdivide: 2)
+                }
+            }
+
+            func split(_ t: CGFloat) -> (Seg, Seg) {
+                switch self {
+                case .line(let from, let to):
+                    let mid = lerp(from, to, t)
+                    return (.line(from: from, to: mid), .line(from: mid, to: to))
+                case .cubic(let c):
+                    let (a, b) = c.split(t)
+                    return (.cubic(a), .cubic(b))
+                }
+            }
+        }
+
+        struct SubPath {
+            var segments: [Seg]
+            var isClosed: Bool
+        }
+
+        let normalOf = { (dir: CGPoint) -> CGPoint in
+            CGPoint(x: -dir.y, y: dir.x)
+        }
+
+        // Offset Helpers
+        let offsetSegment = { (seg: Seg, distance: CGFloat) -> [(to: CGPoint, c1: CGPoint?, c2: CGPoint?)] in
+            switch seg {
+            case .line(let from, let to):
+                let dir = (to - from).normalized()
+                let n = normalOf(dir)
+                return [(to: to + n * distance, c1: nil, c2: nil)]
+            case .cubic(let c):
+                return c.offsetCurves(by: distance).map {
+                    (to: $0.p3, c1: $0.p1, c2: $0.p2)
+                }
+            }
+        }
+
+        let offsetStartPoint = { (seg: Seg, distance: CGFloat) -> CGPoint in
+            let n = normalOf(seg.startDir)
+            return seg.startPoint + n * distance
+        }
+
+        let addOffsetElements = { (path: inout Path, elements: [(to: CGPoint, c1: CGPoint?, c2: CGPoint?)]) in
+            for e in elements {
+                if let c1 = e.c1, let c2 = e.c2 {
+                    path.addCurve(to: e.to, control1: c1, control2: c2)
+                } else {
+                    path.addLine(to: e.to)
+                }
+            }
+        }
+
+        // Parse path into sub-paths
+        var subPaths: [SubPath] = []
+        do {
+            var spStart: CGPoint? = nil
+            var currentPt: CGPoint? = nil
+            var segs: [Seg] = []
+
+            let flushOpen = {
+                if spStart != nil, !segs.isEmpty {
+                    subPaths.append(SubPath(segments: segs, isClosed: false))
+                }
+                segs = []
+            }
+
+            self.forEach { element in
+                switch element {
+                case .move(let to):
+                    flushOpen()
+                    spStart = to
+                    currentPt = to
+                case .line(let to):
+                    if let cp = currentPt {
+                        if (to - cp).magnitude > .ulpOfOne {
+                            segs.append(.line(from: cp, to: to))
+                        }
+                    }
+                    currentPt = to
+                case .quadCurve(let to, let control):
+                    if let cp = currentPt {
+                        let cubic = QuadraticBezier(p0: cp, p1: control, p2: to).toCubic()
+                        if cubic.approximateLength() > .ulpOfOne {
+                            segs.append(.cubic(cubic))
+                        }
+                    }
+                    currentPt = to
+                case .curve(let to, let c1, let c2):
+                    if let cp = currentPt {
+                        let cubic = CubicBezier(p0: cp, p1: c1, p2: c2, p3: to)
+                        if cubic.approximateLength() > .ulpOfOne {
+                            segs.append(.cubic(cubic))
+                        }
+                    }
+                    currentPt = to
+                case .closeSubpath:
+                    if let start = spStart, let cp = currentPt {
+                        if (cp - start).magnitude > .ulpOfOne {
+                            segs.append(.line(from: cp, to: start))
+                        }
+                    }
+                    if !segs.isEmpty {
+                        subPaths.append(SubPath(segments: segs, isClosed: true))
+                    }
+                    segs = []
+                    currentPt = spStart
+                }
+            }
+            flushOpen()
+        }
+
+        // Dash pattern
+        if !style.dash.isEmpty {
+            let dash = style.dash.map { $0.magnitude }
+            let numDashes = dash.count
+            let patternLen = dash.reduce(0, +)
+            if patternLen > .ulpOfOne && numDashes > 0 {
+                var dashedPaths: [SubPath] = []
+                for sp in subPaths {
+                    // compute total length
+                    var totalLength: CGFloat = 0
+                    for s in sp.segments { totalLength += s.length }
+                    if totalLength < .ulpOfOne { continue }
+
+                    // initialize dash phase
+                    var dashIdx = 0
+                    var dashRemain = dash[0]
+                    if style.dashPhase != 0 {
+                        var phase = style.dashPhase.truncatingRemainder(dividingBy: patternLen)
+                        if phase < 0 { phase += patternLen }
+                        while phase > .ulpOfOne {
+                            let dl = dash[dashIdx % numDashes]
+                            if phase <= dl {
+                                dashRemain = dl - phase
+                                break
+                            }
+                            phase -= dl
+                            dashIdx += 1
+                        }
+                        if dashRemain < .ulpOfOne {
+                            dashIdx += 1
+                            dashRemain = dash[dashIdx % numDashes]
+                        }
+                    }
+
+                    var currentSegs: [Seg] = []
+                    for seg in sp.segments {
+                        var remaining = seg
+                        var segLen = remaining.length
+                        while segLen > .ulpOfOne {
+                            let consume = min(dashRemain, segLen)
+                            let isVisible = dashIdx % 2 == 0
+
+                            if consume >= segLen - .ulpOfOne {
+                                // consume the entire remaining segment
+                                if isVisible { currentSegs.append(remaining) }
+                                dashRemain -= segLen
+                                segLen = 0
+                            } else {
+                                // split the segment
+                                let t = consume / segLen
+                                let (head, tail) = remaining.split(t)
+                                if isVisible { currentSegs.append(head) }
+                                remaining = tail
+                                segLen = remaining.length
+                                dashRemain = 0
+                            }
+
+                            if dashRemain < .ulpOfOne {
+                                // end of current dash/gap
+                                if !currentSegs.isEmpty {
+                                    dashedPaths.append(SubPath(segments: currentSegs, isClosed: false))
+                                    currentSegs = []
+                                }
+                                dashIdx += 1
+                                dashRemain = dash[dashIdx % numDashes]
+                            }
+                        }
+                    }
+                    if !currentSegs.isEmpty {
+                        dashedPaths.append(SubPath(segments: currentSegs, isClosed: false))
+                    }
+                }
+                subPaths = dashedPaths
+            }
+        }
+
+        // Join helper
+        let addJoin = { (path: inout Path, point: CGPoint,
+                         d0: CGPoint, d1: CGPoint, side: CGFloat) in
+            let n0 = normalOf(d0) * side
+            let n1 = normalOf(d1) * side
+            let to = point + n1 * halfWidth
+
+            let cross = CGPoint.cross(d0, d1)
+            let isOuter = (cross * side) < 0
+
+            if !isOuter || (1.0 - CGPoint.dot(d0, d1)) < .ulpOfOne {
+                // inner side or nearly co-linear: just connect
+                path.addLine(to: to)
+                return
+            }
+
+            switch style.lineJoin {
+            case .bevel:
+                path.addLine(to: to)
+            case .round:
+                let startAngle = atan2(n0.y, n0.x)
+                let endAngle   = atan2(n1.y, n1.x)
+                var delta = endAngle - startAngle
+                while delta > .pi  { delta -= .pi * 2 }
+                while delta < -.pi { delta += .pi * 2 }
+                path.addRelativeArc(center: point, radius: halfWidth,
+                                    startAngle: .radians(startAngle),
+                                    delta: .radians(delta))
+            case .miter:
+                let dot = CGPoint.dot(d0, d1)
+                let angle = acos(clamp(dot, min: -1, max: 1))
+                let sinHalf = sin(angle * 0.5)
+                if sinHalf > .ulpOfOne {
+                    let miterLen = halfWidth / sinHalf
+                    if miterLen <= style.miterLimit * style.lineWidth {
+                        let from = point + n0 * halfWidth
+                        let s = CGPoint.cross(d0, d1)
+                        if s.magnitude > .ulpOfOne {
+                            let t = CGPoint.cross(to - from, d1) / s
+                            let miterPt = from + d0 * t
+                            path.addLine(to: miterPt)
+                        }
+                        path.addLine(to: to)
+                    } else {
+                        path.addLine(to: to) // fallback bevel
+                    }
+                } else {
+                    path.addLine(to: to)
+                }
+            @unknown default:
+                path.addLine(to: to)
+            }
+        }
+
+        // Cap helper
+        let addCap = { (path: inout Path, point: CGPoint,
+                        direction: CGPoint, fromLeftToRight: Bool) in
+            let n = normalOf(direction)
+            let leftPt  = point + n * halfWidth
+            let rightPt = point - n * halfWidth
+
+            switch style.lineCap {
+            case .butt:
+                path.addLine(to: fromLeftToRight ? rightPt : leftPt)
+            case .round:
+                let startN = fromLeftToRight ? n : -n
+                let startAngle = atan2(startN.y, startN.x)
+                path.addRelativeArc(center: point, radius: halfWidth,
+                                    startAngle: .radians(startAngle),
+                                    delta: .radians(-.pi))
+            case .square:
+                let ext = direction * halfWidth
+                if fromLeftToRight {
+                    path.addLine(to: leftPt + ext)
+                    path.addLine(to: rightPt + ext)
+                    path.addLine(to: rightPt)
+                } else {
+                    path.addLine(to: rightPt - ext)
+                    path.addLine(to: leftPt - ext)
+                    path.addLine(to: leftPt)
+                }
+            @unknown default:
+                path.addLine(to: fromLeftToRight ? rightPt : leftPt)
+            }
+        }
+
+        // Generate outlines
+        var result = Path()
+
+        for sp in subPaths {
+            if sp.segments.isEmpty { continue }
+
+            let first = sp.segments.first!
+            let last  = sp.segments.last!
+
+            if sp.isClosed {
+                // Closed path: outer (forward) + inner (backward)
+
+                // Outer (offset +halfWidth, forward direction)
+                result.move(to: offsetStartPoint(first, halfWidth))
+                for (i, seg) in sp.segments.enumerated() {
+                    if i > 0 {
+                        let prev = sp.segments[i - 1]
+                        addJoin(&result, seg.startPoint, prev.endDir, seg.startDir, 1)
+                    }
+                    addOffsetElements(&result, offsetSegment(seg, halfWidth))
+                }
+                addJoin(&result, first.startPoint, last.endDir, first.startDir, 1)
+                result.closeSubpath()
+
+                // Inner (reversed direction, offset +halfWidth → opposite winding)
+                let revStartDir = -last.endDir
+                result.move(to: last.endPoint + normalOf(revStartDir) * halfWidth)
+                let n = sp.segments.count
+                for i in stride(from: n - 1, through: 0, by: -1) {
+                    let seg = sp.segments[i]
+                    let revSeg: Seg
+                    switch seg {
+                    case .line(let from, let to):
+                        revSeg = .line(from: to, to: from)
+                    case .cubic(let c):
+                        revSeg = .cubic(c.reversed())
+                    }
+                    if i < n - 1 {
+                        let next = sp.segments[i + 1]
+                        addJoin(&result, seg.endPoint, -next.startDir, -seg.endDir, 1)
+                    }
+                    addOffsetElements(&result, offsetSegment(revSeg, halfWidth))
+                }
+                addJoin(&result, first.startPoint, -first.startDir, -last.endDir, 1)
+                result.closeSubpath()
+
+            } else {
+                // Open path: left → end cap → right (reversed) → start cap
+
+                // Left side forward (+halfWidth)
+                result.move(to: offsetStartPoint(first, halfWidth))
+                for (i, seg) in sp.segments.enumerated() {
+                    if i > 0 {
+                        let prev = sp.segments[i - 1]
+                        addJoin(&result, seg.startPoint, prev.endDir, seg.startDir, 1)
+                    }
+                    addOffsetElements(&result, offsetSegment(seg, halfWidth))
+                }
+
+                // End cap
+                addCap(&result, last.endPoint, last.endDir, true)
+
+                // Right side backward (-halfWidth, reversed)
+                for i in stride(from: sp.segments.count - 1, through: 0, by: -1) {
+                    let seg = sp.segments[i]
+                    let revSeg: Seg
+                    switch seg {
+                    case .line(let from, let to):
+                        revSeg = .line(from: to, to: from)
+                    case .cubic(let c):
+                        revSeg = .cubic(c.reversed())
+                    }
+                    if i < sp.segments.count - 1 {
+                        let next = sp.segments[i + 1]
+                        // reversed directions: prev.endDir becomes -next.startDir
+                        addJoin(&result, seg.endPoint, -next.startDir, -seg.endDir, 1)
+                    }
+                    addOffsetElements(&result, offsetSegment(revSeg, halfWidth))
+                }
+
+                // Start cap
+                addCap(&result, first.startPoint, -first.startDir, true)
+
+                result.closeSubpath()
+            }
+        }
+
+        return result
     }
 
     public func trimmedPath(from: CGFloat, to: CGFloat) -> Path {
@@ -315,7 +708,6 @@ public struct Path: Equatable {
                 }
             }
         }
-        path._strokeStyle = self._strokeStyle
         return path
     }
 }
@@ -339,7 +731,7 @@ extension Path {
     public mutating func addLine(to p1: CGPoint) {
         self.elements.append(.line(to: p1))
 
-        if let p0 = self.initialPoint {
+        if let p0 = self.currentPoint {
             self.currentPoint = p1
             self.boundingBox.expand(by: p0, p1)
             self.boundingBoxOfPath.expand(by: p0, p1)
@@ -349,7 +741,7 @@ extension Path {
     public mutating func addQuadCurve(to p2: CGPoint, control p1: CGPoint) {
         self.elements.append(.quadCurve(to: p2, control: p1))
 
-        if let p0 = self.initialPoint {
+        if let p0 = self.currentPoint {
             self.currentPoint = p2
             self.boundingBox.expand(by: p0, p1, p2)
             self.boundingBoxOfPath.expand(by: QuadraticBezier(p0: p0, p1: p1, p2: p2).boundingBox)
@@ -359,7 +751,7 @@ extension Path {
     public mutating func addCurve(to p3: CGPoint, control1 p1: CGPoint, control2 p2: CGPoint) {
         self.elements.append(.curve(to: p3, control1: p1, control2: p2))
 
-        if let p0 = self.initialPoint {
+        if let p0 = self.currentPoint {
             self.currentPoint = p3
             self.boundingBox.expand(by: p0, p1, p2, p3)
             self.boundingBoxOfPath.expand(by: CubicBezier(p0: p0, p1: p1, p2: p2, p3: p3).boundingBox)
@@ -373,33 +765,6 @@ extension Path {
         self.currentPoint = self.initialPoint
     }
 
-    private mutating func _extendBounds(by pt: CGPoint) {
-        if self.boundingBox.isNull {
-            self.boundingBox = CGRect(x: pt.x, y: pt.y, width: 0, height: 0)
-        } else {
-            let minX = min(self.boundingBox.minX, pt.x)
-            let maxX = max(self.boundingBox.maxX, pt.x)
-            let minY = min(self.boundingBox.minY, pt.y)
-            let maxY = max(self.boundingBox.maxY, pt.y)
-            self.boundingBox = CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
-        }
-    }
-
-    private mutating func _extendPathBounds(by pt: CGPoint) {
-        if self.boundingBox.isNull {
-            self.boundingBox = CGRect(x: pt.x, y: pt.y, width: 0, height: 0)
-        } else {
-            let minX = min(self.boundingBox.minX, pt.x)
-            let maxX = max(self.boundingBox.maxX, pt.x)
-            let minY = min(self.boundingBox.minY, pt.y)
-            let maxY = max(self.boundingBox.maxY, pt.y)
-            self.boundingBox = CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
-        }
-    }
-
-    private mutating func _extendPathBounds(by rect: CGRect) {
-        self.boundingBoxOfPath = self.boundingBoxOfPath.union(rect)
-    }
 }
 
 extension Path {
@@ -510,7 +875,7 @@ extension Path {
                               CGPoint(x: 0.627176, y: 0.83094),
                               CGPoint(x: 0.368506, y: 0.925089),
                               CGPoint(x: lerp(0.18, 0.131593, rx), y: 1),
-                              CGPoint(x: lerp(0.004, -0.08849, rx), y: 1),
+                              CGPoint(x: lerp(0.04, -0.08849, rx), y: 1),
                               CGPoint(x: lerp(0, -0.52866, rx) , y: 1)]
 
                 let c1 = corner.map { $0.applying(t1) }
@@ -619,8 +984,8 @@ extension Path {
         }
 
         let oneQuarter = CubicBezier(p0: CGPoint(x: 1, y: 0),
-                                     p1: CGPoint(x: 1, y: lerp(0, 1, _r)),
-                                     p2: CGPoint(x: lerp(0, 1, _r), y: 1),
+                                     p1: CGPoint(x: 1, y: _r),
+                                     p2: CGPoint(x: _r, y: 1),
                                      p3: CGPoint(x: 0, y: 1))
 
         let halfPi: Double = .pi * 0.5
@@ -651,67 +1016,20 @@ extension Path {
                                 endAngle: Angle,
                                 clockwise: Bool,
                                 transform: CGAffineTransform = .identity) {
-        var angle: Double = 0.0
-
-        let normalizeRadian = { (r: Double) -> Double in
-            let pi2: Double = .pi * 2
-            var r = r
-            while r < 0.0 { r += pi2 }
-            while r > pi2 { r -= pi2 }
-            return r
-        }
-
+        let pi2: Double = .pi * 2
+        var delta = endAngle.radians - startAngle.radians
         if clockwise {
-            let r = startAngle.radians - endAngle.radians
-            angle = normalizeRadian(r)
+            if delta > 0 { delta -= pi2 }
         } else {
-            let r = endAngle.radians - startAngle.radians
-            angle = normalizeRadian(r)
+            if delta < 0 { delta += pi2 }
         }
+        if delta.magnitude < .ulpOfOne { return }
 
-        if angle.magnitude < .ulpOfOne { return }
-
-        var trans = CGAffineTransform(scaleX: radius, y: radius)
-        if clockwise {
-            trans = trans.scaledBy(x: 1, y: -1) // flip
-        }
-        trans = trans.concatenating(CGAffineTransform(rotationAngle: startAngle.radians))
-        trans = trans.concatenating(CGAffineTransform(translationX: center.x, y: center.y))
-        trans = trans.concatenating(transform)
-        
-        let startPoint = CGPoint(x: 1, y: 0).applying(trans)
-
-        if let last = self.elements.last, last != .closeSubpath {
-            self.addLine(to: startPoint)
-        } else {
-            self.move(to: startPoint)
-        }
-
-        let oneQuarter = CubicBezier(p0: CGPoint(x: 1, y: 0),
-                                     p1: CGPoint(x: 1, y: _r),
-                                     p2: CGPoint(x: _r, y: 1),
-                                     p3: CGPoint(x: 0, y: 1))
-
-        let halfPi: Double = .pi * 0.5
-        var rotate = CGAffineTransform.identity
-        while angle > 0 {
-            let t = rotate.concatenating(trans)
-            if angle >= halfPi {
-                let to = oneQuarter.p3.applying(t)
-                let c1 = oneQuarter.p1.applying(t)
-                let c2 = oneQuarter.p2.applying(t)
-                self.addCurve(to: to, control1: c1, control2: c2)
-            } else {
-                let curve = oneQuarter.split(angle / halfPi).0
-                let to = curve.p3.applying(t)
-                let c1 = curve.p1.applying(t)
-                let c2 = curve.p2.applying(t)
-                self.addCurve(to: to, control1: c1, control2: c2)
-                break
-            }
-            angle = angle - halfPi
-            rotate = rotate.concatenating(CGAffineTransform(rotationAngle: halfPi))
-        }
+        addRelativeArc(center: center,
+                       radius: radius,
+                       startAngle: startAngle,
+                       delta: .radians(delta),
+                       transform: transform)
     }
 
     public mutating func addArc(tangent1End p1: CGPoint,
@@ -720,34 +1038,44 @@ extension Path {
                                 transform: CGAffineTransform = .identity) {
         if radius < .ulpOfOne { return }
 
+        // Transform p1, p2 into path space to match currentPoint.
+        // After this, all geometry is computed in path space — no transform passed to addRelativeArc.
+        let p1 = p1.applying(transform)
+        let p2 = p2.applying(transform)
         let current = currentPoint ?? .zero
 
-        // tangent-vector1 = -p1
-        // tangent-vector2 = p2 - (p1 + pivot)
+        // Tangent directions at p1
+        let tan1 = (current - p1).normalized()
+        let tan2 = (p2 - p1).normalized()
+        let d = CGPoint.dot(tan1, tan2)
 
-        let pivot = current + p1
-        let tan1 = (-p1).normalized()
-        let tan2 = (p2 - pivot).normalized()
-        let d = CGPoint.dot(tan1, tan2) // cos of two vectors
+        // Nearly parallel or opposite — no arc to draw
+        if (1.0 - d.magnitude) < .ulpOfOne { return }
 
-        if d == 0.0 { return }
-        if d == .pi * 2 { return }
+        let clockwise = CGPoint.cross(tan1, tan2) < 0
 
-        var clockwise = false
-        if d < 0.0 { clockwise = true }
+        let halfAngle = acos(clamp(d, min: -1, max: 1)) * 0.5
+        let distanceToStart = radius / tan(halfAngle)
 
-        let r = acos(d) * 0.5
-        let distanceToCircleCenter = radius / sin(r)
-        let distanceToStart = radius / tan(r)
+        // Tangent points on each line
+        let arcStart = p1 + tan1 * distanceToStart
+        let arcEnd   = p1 + tan2 * distanceToStart
 
-        let center = (tan1 + tan2).normalized() * distanceToCircleCenter + pivot
-        let startPoint = tan1 * distanceToStart + pivot
-        //let endPoint = tan2 * distanceToStart + pivot
-        var delta = (.pi - r) * 2.0
+        // Arc center along the angle bisector
+        let bisector = (tan1 + tan2).normalized()
+        let distanceToCenter = radius / sin(halfAngle)
+        let center = p1 + bisector * distanceToCenter
+
+        let startVec = arcStart - center
+        let startAngle = atan2(startVec.y, startVec.x)
+
+        let endVec = arcEnd - center
+        var delta = atan2(endVec.y, endVec.x) - startAngle
         if clockwise {
-            delta = -delta
+            if delta < 0 { delta += .pi * 2 }
+        } else {
+            if delta > 0 { delta -= .pi * 2 }
         }
-        let startAngle = acos(CGPoint.dot(CGPoint(x: 1, y: 0), (startPoint - center).normalized()))
 
         self.addRelativeArc(center: center,
                             radius: radius,
@@ -783,7 +1111,6 @@ extension Path {
 
         var path = Path()
         path.addPath(self, transform: transform)
-        path._strokeStyle = self._strokeStyle
         return path
     }
 

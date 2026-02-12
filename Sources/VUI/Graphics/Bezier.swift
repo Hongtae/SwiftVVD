@@ -369,3 +369,66 @@ struct CubicBezier {
         CubicBezier(p0: self.p3, p1: self.p2, p2: self.p1, p3: self.p0)
     }
 }
+
+// MARK: - Extensions for stroke path offset
+
+extension QuadraticBezier {
+    var startDirection: CGPoint {
+        var d = p1 - p0
+        if d.magnitude < .ulpOfOne { d = p2 - p0 }
+        let len = d.magnitude
+        return len > .ulpOfOne ? d / len : .zero
+    }
+
+    var endDirection: CGPoint {
+        var d = p2 - p1
+        if d.magnitude < .ulpOfOne { d = p2 - p0 }
+        let len = d.magnitude
+        return len > .ulpOfOne ? d / len : .zero
+    }
+
+    func toCubic() -> CubicBezier {
+        CubicBezier(p0: p0,
+                     p1: p0 + (p1 - p0) * (2.0 / 3.0),
+                     p2: p2 + (p1 - p2) * (2.0 / 3.0),
+                     p3: p2)
+    }
+}
+
+extension CubicBezier {
+    var startDirection: CGPoint {
+        var d = p1 - p0
+        if d.magnitude < .ulpOfOne { d = p2 - p0 }
+        if d.magnitude < .ulpOfOne { d = p3 - p0 }
+        let len = d.magnitude
+        return len > .ulpOfOne ? d / len : .zero
+    }
+
+    var endDirection: CGPoint {
+        var d = p3 - p2
+        if d.magnitude < .ulpOfOne { d = p3 - p1 }
+        if d.magnitude < .ulpOfOne { d = p3 - p0 }
+        let len = d.magnitude
+        return len > .ulpOfOne ? d / len : .zero
+    }
+
+    /// Tiller-Hanson offset: offset control points along endpoint normals.
+    /// Positive distance offsets to the left (in the direction of the normal).
+    func offset(by distance: CGFloat) -> CubicBezier {
+        let sd = startDirection
+        let ed = endDirection
+        if sd.magnitude < .ulpOfOne || ed.magnitude < .ulpOfOne { return self }
+        let n0 = CGPoint(x: -sd.y, y: sd.x)
+        let n1 = CGPoint(x: -ed.y, y: ed.x)
+        return CubicBezier(
+            p0: p0 + n0 * distance,
+            p1: p1 + n0 * distance,
+            p2: p2 + n1 * distance,
+            p3: p3 + n1 * distance)
+    }
+
+    /// Subdivide then offset each piece for better accuracy.
+    func offsetCurves(by distance: CGFloat, subdivisions: Int = 2) -> [CubicBezier] {
+        subdivide(subdivisions).map { $0.offset(by: distance) }
+    }
+}
