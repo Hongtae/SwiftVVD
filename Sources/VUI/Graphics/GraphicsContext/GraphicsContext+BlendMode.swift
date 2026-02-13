@@ -60,7 +60,7 @@ extension GraphicsContext {
         //let blendResult = self.renderTargets.composited
 
         let opacity = opacity ?? self.opacity
-        let color = VVD.Color(white: 1, opacity: opacity)
+        let color = VVD.Color(white: opacity, opacity: opacity)
 
         if let renderPass = self.beginRenderPassCompositionTarget() {
             if self.encodeBlendTexturesCommand(renderPass: renderPass,
