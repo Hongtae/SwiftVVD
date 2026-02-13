@@ -817,9 +817,8 @@ extension Path {
         let maxX = rect.maxX
         let minY = rect.minY
         let maxY = rect.maxY
-        let cc = min(maxX - midX, maxY - midY)
-        let cx = clamp(cornerSize.width, min: 0, max: cc)
-        let cy = clamp(cornerSize.height, min: 0, max: cc)
+        let cx = clamp(cornerSize.width, min: 0, max: maxX - midX)
+        let cy = clamp(cornerSize.height, min: 0, max: maxY - midY)
 
         if cx > .ulpOfOne && cy > .ulpOfOne {
 
