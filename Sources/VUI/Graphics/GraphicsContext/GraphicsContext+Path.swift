@@ -148,7 +148,7 @@ extension GraphicsContext {
 
         var dashIndex: Int = 0      // even: dash, odd: gap
         var dashRemain: CGFloat = 0 // remaining length of the current dash(gap)
-        if dash.isEmpty == false {
+        if dash.isEmpty == false && dashPatternLength > .ulpOfOne {
             if style.dashPhase > 0 {
                 let phase = style.dashPhase
                 dashRemain = dashLength(dashIndex)
@@ -483,7 +483,7 @@ extension GraphicsContext {
                     let curve = QuadraticBezier(p0: p0, p1: p1, p2: p2)
                     let length = curve.approximateLength()
                     if length > .ulpOfOne {
-                        let step = 1.0 / curve.approximateLength()
+                        let step = 1.0 / length
                         var t = step
                         var pt0 = p0
                         var d0 = currentDir ?? (p1 - p0).normalized()
@@ -507,7 +507,7 @@ extension GraphicsContext {
                     let curve = CubicBezier(p0: p0, p1: p1, p2: p2, p3: p3)
                     let length = curve.approximateLength()
                     if length > .ulpOfOne {
-                        let step = 1.0 / curve.approximateLength()
+                        let step = 1.0 / length
                         var t = step
                         var pt0 = p0
                         var d0 = currentDir ?? (p1 - p0).normalized()
@@ -528,27 +528,36 @@ extension GraphicsContext {
                 currentPoint = p3
             case .closeSubpath:
                 if let p0 = currentPoint, let p1 = initialPoint {
-                    let d = (p1 - p0).normalized()
-                    if let d0 = currentDir, dashIndex % 2 == 0 {
-                        addStrokeJoin(p0, d0, d)
-                    }
-                    addStrokeLine(p0, p1, d, d)
-                    if let d1 = initialDir {
-                        if dashIndex % 2 == 0 {
-                            resetDashPhase()
+                    let diff = p1 - p0
+                    let length = diff.magnitude
+                    if length > .ulpOfOne {
+                        let d = diff / length
+                        if let d0 = currentDir, dashIndex % 2 == 0 {
+                            addStrokeJoin(p0, d0, d)
+                        }
+                        addStrokeLine(p0, p1, d, d)
+                        if let d1 = initialDir {
                             if dashIndex % 2 == 0 {
-                                // join with initial point
-                                addStrokeJoin(p1, d, d1)
+                                resetDashPhase()
+                                if dashIndex % 2 == 0 {
+                                    // join with initial point
+                                    addStrokeJoin(p1, d, d1)
+                                } else {
+                                    // line cap current point
+                                    addStrokeCap(p1, d)
+                                }
                             } else {
-                                // line cap current point
-                                addStrokeCap(p1, d)
+                                resetDashPhase()
+                                if dashIndex % 2 == 0 {
+                                    // line cap initial point
+                                    addStrokeCap(p1, -d1)
+                                }
                             }
-                        } else {
-                            resetDashPhase()
-                            if dashIndex % 2 == 0 {
-                                // line cap initial point
-                                addStrokeCap(p1, -d1)
-                            }
+                        }
+                    } else if let d0 = currentDir, let d1 = initialDir {
+                        resetDashPhase()
+                        if dashIndex % 2 == 0 {
+                            addStrokeJoin(p1, d0, d1)
                         }
                     }
                 }
@@ -576,7 +585,7 @@ extension GraphicsContext {
             return false
         }
 
-        // pipeline states for generate polgon winding numbers
+        // pipeline states for generate polygon winding numbers
         guard let pipelineState = pipeline.renderState(
             shader: .stencil,
             colorFormat: renderPass.colorFormat,
@@ -616,7 +625,7 @@ extension GraphicsContext {
             var vertices: [CGPoint] = []
         }
         var polygons: [PolygonElement] = []
-        if true {
+        do {
             var initialPoint: CGPoint? = nil
             var currentPoint: CGPoint? = nil
             var polygon = PolygonElement()
@@ -641,7 +650,7 @@ extension GraphicsContext {
                         let curve = QuadraticBezier(p0: p0, p1: p1, p2: p2)
                         let length = curve.approximateLength()
                         if length > .ulpOfOne {
-                            let step = 1.0 / curve.approximateLength()
+                            let step = 1.0 / length
                             var t = step
                             while t < 1.0 {
                                 let pt = curve.interpolate(t)
@@ -657,7 +666,7 @@ extension GraphicsContext {
                         let curve = CubicBezier(p0: p0, p1: p1, p2: p2, p3: p3)
                         let length = curve.approximateLength()
                         if length > .ulpOfOne {
-                            let step = 1.0 / curve.approximateLength()
+                            let step = 1.0 / length
                             var t = step
                             while t < 1.0 {
                                 let pt = curve.interpolate(t)
@@ -961,7 +970,7 @@ extension GraphicsContext {
                         x1 = 0
                     }
                     if x2 > scale {
-                        c2 = .lerp(c1, c2, (x2 - scale)/(x2 - x1))
+                        c2 = .lerp(c1, c2, (scale - x1)/(x2 - x1))
                         x2 = scale
                     }
                     if (x2 - x1) < .ulpOfOne { return }
