@@ -42,10 +42,74 @@ struct ModalWindowScene<Content>: _PrimitiveScene where Content: View {
     }
 }
 
+enum TransitionAnimationKey: String, Hashable {
+    case scale
+    case alpha
+}
+
+struct TransitionAnimationConfiguration<Key: Hashable> {
+    struct Track {
+        let curve: UnitCurve
+        let keyframes: [(value: CGFloat, time: Double)]
+    }
+    
+    let tracks: [Key: Track]
+}
 
 // scene context for modal window scene
 class ModalWindowSceneContext<Content>: TypedSceneContext<ModalWindowScene<Content>>, ModalWindowClient, @unchecked Sendable where Content: View {
     typealias Scene = ModalWindowScene<Content>
+    typealias AnimationKey = TransitionAnimationKey
+    typealias AnimationTrack = TransitionAnimationConfiguration<AnimationKey>.Track
+    typealias AnimationConfiguration = TransitionAnimationConfiguration<AnimationKey>
+
+    private struct TransitionAnimation: @unchecked Sendable {
+        let startValue: Double
+        let endValue: Double
+        let duration: Double
+        let configuration: AnimationConfiguration
+        var elapsed: Double = 0
+        var completion: (() -> Void)?
+
+        var progress: Double {
+            min(elapsed / duration, 1.0)
+        }
+        var value: Double {
+            let t = progress
+            return startValue + (endValue - startValue) * t
+        }
+        var isComplete: Bool { elapsed >= duration }
+    }
+
+    var transitionDuration: Double { 4.25 }
+    var transitionPresentAnimation: AnimationConfiguration {
+        AnimationConfiguration(
+            tracks: [
+                .scale: AnimationTrack(
+                    curve: .easeOut,
+                    keyframes: [(0.2, 0.0), (1.2, 0.95), (1.0, 1.0)]
+                ),
+                .alpha: AnimationTrack(
+                    curve: .easeInOut,
+                    keyframes: [(0.0, 0.0), (1.0, 1.0)]
+                )
+            ]
+        )
+    }
+    var transitionDismissAnimation: AnimationConfiguration {
+        AnimationConfiguration(
+            tracks: [
+                .scale: AnimationTrack(
+                    curve: .easeIn,
+                    keyframes: [(1.0, 0.0), (0.2, 1.0)]
+                ),
+                .alpha: AnimationTrack(
+                    curve: .easeOut,
+                    keyframes: [(1.0, 0.0), (0.0, 1.0)]
+                )
+            ]
+        )
+    }
 
     private struct _ModalContext: @unchecked Sendable {
         let window: ModalWindowContext<Content>
@@ -56,11 +120,43 @@ class ModalWindowSceneContext<Content>: TypedSceneContext<ModalWindowScene<Conte
         var windowSize: CGSize = .zero
         var activateFirstTime: Bool = true
         var filter: GraphicsContext.Filter?
+        var transition: TransitionAnimation? = nil
     }
     private var modalContext: _ModalContext? = nil
 
     private var window: ModalWindowContext<Content>? {
         self.modalContext?.window
+    }
+
+    private var animationProgress: Double {
+        self.modalContext?.transition?.progress ?? 1.0
+    }
+
+    private func valueForProgress(_ rawProgress: Double, key: AnimationKey) -> CGFloat {
+        guard let config = self.modalContext?.transition?.configuration else { return 1.0 }
+        guard let track = config.tracks[key] else { return 1.0 }
+        
+        let progress = track.curve.value(at: rawProgress)
+        let keyframes = track.keyframes
+        
+        guard keyframes.count >= 2 else { return 1.0 }
+        if progress <= keyframes.first!.time { return keyframes.first!.value }
+        if progress >= keyframes.last!.time { return keyframes.last!.value }
+        
+        for i in 0..<(keyframes.count - 1) {
+            let k0 = keyframes[i]
+            let k1 = keyframes[i + 1]
+            if progress >= k0.time && progress <= k1.time {
+                let t = (progress - k0.time) / (k1.time - k0.time)
+                let p0 = keyframes[max(i - 1, 0)].value
+                let p1 = k0.value
+                let p2 = k1.value
+                let p3 = keyframes[min(i + 2, keyframes.count - 1)].value
+                let spline = SplineSegment<CGFloat>.catmullRom(p0: p0, p1: p1, p2: p2, p3: p3)
+                return CGFloat(spline.interpolate(Scalar(t)))
+            }
+        }
+        return keyframes.last!.value
     }
     
     override init(graph: _GraphValue<Scene>, inputs: _SceneInputs) {
@@ -152,7 +248,7 @@ class ModalWindowSceneContext<Content>: TypedSceneContext<ModalWindowScene<Conte
     }
 
     fileprivate func onWindowClosed() {
-        self.dismiss()
+        self.dismiss(withAnimation: false)
     }
 
     @MainActor
@@ -217,6 +313,14 @@ class ModalWindowSceneContext<Content>: TypedSceneContext<ModalWindowScene<Conte
                 if host.addModalWindow(self) {
                     let filter = GraphicsContext.Filter.shadow(radius: 8.0, x: 0, y: 0)
                     modalContext.filter = filter
+                    if withAnimation {
+                        modalContext.transition = TransitionAnimation(
+                            startValue: 0, endValue: 1,
+                            duration: self.transitionDuration,
+                            configuration: self.transitionPresentAnimation,
+                            elapsed: 0,
+                            completion: nil)
+                    }
                     self.modalContext = modalContext
                     return true
                 }
@@ -228,33 +332,56 @@ class ModalWindowSceneContext<Content>: TypedSceneContext<ModalWindowScene<Conte
         return false
     }
 
-    func dismiss(withAnimation: Bool = false, completion: (() -> Void)? = nil) {
-        if let context = self.modalContext {
-            if let host = context.parentWindow as? ModalWindowHost {
-                host.removeModalWindow(self)
-            }
-            let parentWindow = context.parentWindow?.window
-            if let window = context.modalWindow {
-                self.onModalSessionDismissed()
+    func dismiss(withAnimation: Bool, completion: (() -> Void)? = nil) {
+        guard let context = self.modalContext else {
+            completion?()
+            return
+        }
 
-                runOnMainQueue { [weak window, weak self] in
-                    if let self {
-                        window?.removeEventObserver(self)
-                    }
-                    if let window {
-                        parentWindow?.dismissModalWindow(window)
-                        window.close()
-                    }
+        let isOverlayMode = context.modalWindow == nil
+        if withAnimation && isOverlayMode {
+            let elapsed = context.transition?.elapsed ?? 0.0
+            self.modalContext?.transition = TransitionAnimation(
+                startValue: 0, endValue: 1,
+                duration: self.transitionDuration,
+                configuration: self.transitionDismissAnimation,
+                elapsed: elapsed,
+                completion: { [weak self] in
+                    self?.performImmediateDismiss(completion: completion)
+                })
+            return
+        }
+
+        performImmediateDismiss(completion: completion)
+    }
+
+    private func performImmediateDismiss(completion: (() -> Void)?) {
+        guard let context = self.modalContext else {
+            completion?()
+            return
+        }
+        if let host = context.parentWindow as? ModalWindowHost {
+            host.removeModalWindow(self)
+        }
+        let parentWindow = context.parentWindow?.window
+        if let window = context.modalWindow {
+            self.onModalSessionDismissed()
+
+            runOnMainQueue { [weak window, weak self] in
+                if let self {
+                    window?.removeEventObserver(self)
+                }
+                if let window {
+                    parentWindow?.dismissModalWindow(window)
+                    window.close()
                 }
             }
-            completion?()
-
-            self.modalContext = nil
-
-            Log.debug("ModalWindowSceneContext: dismissed modal window")
-        } else {
-            completion?()
         }
+        completion?()
+
+        self.modalContext = nil
+
+        Log.debug("ModalWindowSceneContext: dismissed modal window")
     }
 
     func modalWindowFrame() -> CGRect? {
@@ -270,19 +397,31 @@ class ModalWindowSceneContext<Content>: TypedSceneContext<ModalWindowScene<Conte
 
     func drawModalWindowBackground(offset: CGPoint, with context: GraphicsContext) {
         if let modalContext, let frame = self.modalWindowFrame() {
+            let progress = self.animationProgress
+            let alpha = self.valueForProgress(progress, key: .alpha)
 
             if let parentContext = modalContext.parentContext {
                 let parentFrame = parentContext.contentBounds
-                context.fill(Path(parentFrame), with: .color(.black.opacity(0.3)))
+                let backgroundOpacity = 0.3 * alpha
+                context.fill(Path(parentFrame), with: .color(.black.opacity(backgroundOpacity)))
             }
 
             let modal = frame.offsetBy(dx: offset.x, dy: offset.y)
+            let scale = self.valueForProgress(progress, key: .scale)
+            let center = CGPoint(x: modal.midX, y: modal.midY)
+
+            var context = context
+            context.opacity = alpha
+            context.translateBy(x: center.x, y: center.y)
+            context.scaleBy(x: scale, y: scale)
+            context.translateBy(x: -center.x, y: -center.y)
+
             let path = RoundedRectangle(cornerRadius: 5).path(in: modal)
 
             if let filter = modalContext.filter {
-                var context = context
-                context.addFilter(filter)
-                context.fill(path, with: .color(.white))
+                var filteredContext = context
+                filteredContext.addFilter(filter)
+                filteredContext.fill(path, with: .color(.white))
             } else {
                 context.fill(path, with: .color(.white))
             }
@@ -294,18 +433,49 @@ class ModalWindowSceneContext<Content>: TypedSceneContext<ModalWindowScene<Conte
     }
 
     func drawModalWindowContent(offset: CGPoint, with context: GraphicsContext) {
-        if let modalContext {
+        if let modalContext, let frame = self.modalWindowFrame() {
+            let progress = self.animationProgress
+
+            let alpha = self.valueForProgress(progress, key: .alpha)
+            let modal = frame.offsetBy(dx: offset.x, dy: offset.y)
+            let scale = self.valueForProgress(progress, key: .scale)
+            let center = CGPoint(x: modal.midX, y: modal.midY)
+
+            var context = context
+            context.opacity = alpha
+            context.translateBy(x: center.x, y: center.y)
+            context.scaleBy(x: scale, y: scale)
+            context.translateBy(x: -center.x, y: -center.y)
+
+            if alpha < 1.0 {                
+                context.drawLayer { context in
+                    modalContext.window
+                        .drawFrame(context,
+                                offset: modalContext.windowOffset + offset)
+                }
+            } else {
             modalContext.window
                 .drawFrame(context,
-                           offset: modalContext.windowOffset + offset)
+                            offset: modalContext.windowOffset + offset)
+            }
         }
     }
 
     func updateModalWindowContent(tick: UInt64, delta: Double, date: Date) {
+        if var transition = self.modalContext?.transition {
+            transition.elapsed += delta
+            if transition.isComplete {
+                self.modalContext!.transition = nil
+                transition.completion?()                
+            } else {
+                self.modalContext!.transition = transition
+            }
+        }
         self.window?.updateView(tick: tick, delta: delta, date: date)
     }
 
     func modalWindowInputEventHandler() -> WindowInputEventHandler? {
+        if self.modalContext?.transition != nil { return nil }
         return self.window
     }
 
