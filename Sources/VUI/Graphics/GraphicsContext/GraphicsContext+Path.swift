@@ -149,23 +149,18 @@ extension GraphicsContext {
         var dashIndex: Int = 0      // even: dash, odd: gap
         var dashRemain: CGFloat = 0 // remaining length of the current dash(gap)
         if dash.isEmpty == false && dashPatternLength > .ulpOfOne {
-            if style.dashPhase > 0 {
-                let phase = style.dashPhase
-                dashRemain = dashLength(dashIndex)
+            let fullCycleLength = dash.count.isMultiple(of: 2)
+                ? dashPatternLength
+                : dashPatternLength * 2
+            var phase = style.dashPhase.truncatingRemainder(dividingBy: fullCycleLength)
+            if phase < 0 { phase += fullCycleLength }
+            dashRemain = dashLength(dashIndex)
+            if phase > .ulpOfOne {
                 while phase > dashRemain {
                     dashIndex += 1
                     dashRemain += dashLength(dashIndex)
                 }
                 dashRemain -= phase
-            } else {
-                var phase = style.dashPhase
-                while phase < 0 {
-                    if dashIndex == 0 { dashIndex += dash.count * 2 }
-                    dashIndex -= 1
-                    let f = dashLength(dashIndex)
-                    phase += f
-                }
-                dashRemain = dashLength(dashIndex) - phase
             }
             while dashRemain < .ulpOfOne {
                 dashIndex += 1
@@ -650,6 +645,9 @@ extension GraphicsContext {
                         let curve = QuadraticBezier(p0: p0, p1: p1, p2: p2)
                         let length = curve.approximateLength()
                         if length > .ulpOfOne {
+                            if polygon.vertices.isEmpty {
+                                polygon.vertices.append(p0)
+                            }
                             let step = 1.0 / length
                             var t = step
                             while t < 1.0 {
@@ -666,6 +664,9 @@ extension GraphicsContext {
                         let curve = CubicBezier(p0: p0, p1: p1, p2: p2, p3: p3)
                         let length = curve.approximateLength()
                         if length > .ulpOfOne {
+                            if polygon.vertices.isEmpty {
+                                polygon.vertices.append(p0)
+                            }
                             let step = 1.0 / length
                             var t = step
                             while t < 1.0 {
