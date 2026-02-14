@@ -992,6 +992,12 @@ class GenericWindowContext<Content>: WindowContext,
         return true
     }
 
+    func detachModalWindow(_ client: ModalWindowClient) {
+        self.modalWindows.withLock { modalWindows in
+            modalWindows.removeAll { $0.client === client }
+        }
+    }
+
     func removeModalWindow(_ client: ModalWindowClient) {
         var initiated: Bool? = nil
         self.modalWindows.withLock { modalWindows in
@@ -1006,7 +1012,7 @@ class GenericWindowContext<Content>: WindowContext,
             return  // client was not found
         }
         if initiated {
-            client.onModalSessionDismissed()
+            client.onModalSessionDismissedByParent()
         } else {
             client.onModalSessionCancelled()
         }
@@ -1023,7 +1029,7 @@ class GenericWindowContext<Content>: WindowContext,
         }
         for (client, initiated) in clients {
             if initiated {
-                client.onModalSessionDismissed()
+                client.onModalSessionDismissedByParent()
             } else {
                 client.onModalSessionCancelled()
             }
