@@ -75,7 +75,9 @@ extension GraphicsContext {
                                   textureTransform: CGAffineTransform = .identity,
                                   blendState: BlendState,
                                   color: VVD.Color) {
-        let trans = transform.concatenating(self.viewTransform)
+        let trans = transform
+            .concatenating(self.transform)
+            .concatenating(self.viewTransform)
         let makeVertex = { (x: Scalar, y: Scalar, u: Scalar, v: Scalar) in
             _Vertex(position: Vector2(x, y).applying(trans).float2,
                     texcoord: Vector2(u, v).applying(textureTransform).float2,
