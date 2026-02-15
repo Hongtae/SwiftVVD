@@ -2,7 +2,7 @@
 //  File: SharedContext.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -61,6 +61,7 @@ final class SharedContext: @unchecked Sendable {
     weak var _window: WindowContext?
     
     var auxiliarySceneContext: AuxiliarySceneContext?
+    var alertDismissAction: (() -> Void)?
 
     init(scene: SceneContext) {
         self.scene = scene

@@ -2,7 +2,7 @@
 //  File: ModalWindow.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -248,8 +248,9 @@ class ModalWindowSceneContext<Content>: TypedSceneContext<ModalWindowScene<Conte
             // set modal window offset to center of parent
             if let parentContext = self.modalContext?.parentContext {
                 let parentSize = parentContext.contentBounds.size
-                let centerPosition = CGPoint(x: parentSize.width * 0.5, y: parentSize.height * 0.5)
-                self.modalContext?.windowOffset = centerPosition
+                self.modalContext?.windowOffset = CGPoint(
+                    x: (parentSize.width - windowSize.width) * 0.5,
+                    y: (parentSize.height - windowSize.height) * 0.5)
             }
         }
     }
@@ -265,6 +266,11 @@ class ModalWindowSceneContext<Content>: TypedSceneContext<ModalWindowScene<Conte
 
     @MainActor
     func present(context parentContext: SharedContext, withAnimation: Bool, onDismiss: ((ModalResponse) -> Void)? = nil) -> Bool {
+        present(context: parentContext, withAnimation: withAnimation, alertDismissAction: nil, onDismiss: onDismiss)
+    }
+
+    @MainActor
+    func present(context parentContext: SharedContext, withAnimation: Bool, alertDismissAction: (() -> Void)?, onDismiss: ((ModalResponse) -> Void)? = nil) -> Bool {
         self.updateContent()
         defer {
             self.window?.updateContent()
@@ -312,8 +318,9 @@ class ModalWindowSceneContext<Content>: TypedSceneContext<ModalWindowScene<Conte
                 }
                 if window.presentModalWindow(modal) {
                     self.modalContext = modalContext
+                    modalContext.window.sharedContext.alertDismissAction = alertDismissAction
                     return true
-                } 
+                }
                 modal.removeEventObserver(self)    
                 Log.error("ModalWindowContext: failed to present modal window")
             } else {
@@ -334,6 +341,7 @@ class ModalWindowSceneContext<Content>: TypedSceneContext<ModalWindowScene<Conte
                             completion: nil)
                     }
                     self.modalContext = modalContext
+                    window.sharedContext.alertDismissAction = alertDismissAction
                     return true
                 }
             } else {
@@ -391,6 +399,7 @@ class ModalWindowSceneContext<Content>: TypedSceneContext<ModalWindowScene<Conte
         }
 
         self.modalContext = nil
+        context.window.sharedContext.alertDismissAction = nil
         // clean up any child modals and auxiliary windows
         context.window.dismissAllModalWindows()
         context.window.dismissAllAuxiliaryWindows()
