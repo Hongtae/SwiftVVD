@@ -42,6 +42,9 @@ extension ShapeStyle {
 
 public struct _ShapeStyle_Shape {
     var shading: GraphicsContext.Shading?
+    // Resolved foreground style context for hierarchical style resolution.
+    // Set by view contexts before calling _apply when available.
+    var foregroundStyle: (primary: AnyShapeStyle?, secondary: AnyShapeStyle?, tertiary: AnyShapeStyle?)? = nil
 }
 
 public struct _ShapeStyle_ShapeType {
@@ -98,6 +101,59 @@ public struct _ImplicitShapeStyle: ShapeStyle {
         fatalError()
     }
     public typealias Resolved = Never
+}
+
+// MARK: - HierarchicalShapeStyle
+
+public struct HierarchicalShapeStyle: ShapeStyle {
+    public enum Level: Sendable {
+        case primary
+        case secondary
+        case tertiary
+        case quaternary
+    }
+
+    let level: Level
+
+    public func _apply(to shape: inout _ShapeStyle_Shape) {
+        // Resolve against explicit foreground style context when available.
+        if let styles = shape.foregroundStyle {
+            switch level {
+            case .primary:
+                if let s = styles.primary { s._apply(to: &shape); return }
+            case .secondary:
+                if let s = styles.secondary { s._apply(to: &shape); return }
+            case .tertiary:
+                if let s = styles.tertiary { s._apply(to: &shape); return }
+            case .quaternary:
+                break
+            }
+        }
+        // Default fallback: same opacity scale as SwiftUI's standard hierarchy.
+        switch level {
+        case .primary:
+            shape.shading = .color(.sRGB, white: 0.145)
+        case .secondary:
+            shape.shading = .color(.sRGB, white: 0, opacity: 0.498)
+        case .tertiary:
+            shape.shading = .color(.sRGB, white: 0, opacity: 0.3)
+        case .quaternary:
+            shape.shading = .color(.sRGB, white: 0, opacity: 0.18)
+        }
+    }
+
+    public static func _makeView<S>(view: _GraphValue<_ShapeView<S, HierarchicalShapeStyle>>, inputs: _ViewInputs) -> _ViewOutputs where S: Shape {
+        _ShapeView<S, HierarchicalShapeStyle>._makeView(view: view, inputs: inputs)
+    }
+
+    public typealias Resolved = Never
+}
+
+extension ShapeStyle where Self == HierarchicalShapeStyle {
+    public static var primary: HierarchicalShapeStyle { .init(level: .primary) }
+    public static var secondary: HierarchicalShapeStyle { .init(level: .secondary) }
+    public static var tertiary: HierarchicalShapeStyle { .init(level: .tertiary) }
+    public static var quaternary: HierarchicalShapeStyle { .init(level: .quaternary) }
 }
 
 extension ShapeStyle where Self == ForegroundStyle {
