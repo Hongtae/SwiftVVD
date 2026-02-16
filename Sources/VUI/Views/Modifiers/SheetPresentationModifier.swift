@@ -121,7 +121,8 @@ private class SheetModifierViewContext<SheetModifier>: ViewModifierContext<Sheet
         super.init(graph: graph, body: body, inputs: inputs)
 
         let sceneRoot = _SceneRoot<SheetModifier>(view: self)
-        let sceneInputs = _SceneInputs(root: sceneRoot, environment: self.environment,
+        let sceneInputs = _SceneInputs(root: sceneRoot,
+                                       environment: self.environment,
                                        modifiers: self.inputs.modifiers,
                                        _modifierTypeGraphs: self.inputs._modifierTypeGraphs)
 

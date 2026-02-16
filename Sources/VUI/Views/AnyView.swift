@@ -85,7 +85,7 @@ private class TypeErasedViewContext: DynamicViewContext<AnyView> {
                 let viewType = type(of: view)
                 let graph = self.graph.unsafeCast(to: AnyView.self)[\._view]
                 let outputs = _makeView(viewType, view: graph, inputs: _ViewInputs(base: self.inputs))
-                self.body = outputs.view?.makeView(sharedContext: self.sharedContext)
+                self.body = outputs.view?.makeView()
             }
             self.body?.updateContent()
         } else {

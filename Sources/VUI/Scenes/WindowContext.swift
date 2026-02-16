@@ -116,15 +116,14 @@ class GenericWindowContext<Content>: WindowContext,
         properties.setValue(VStackLayout(), forKey: DefaultLayoutProperty.self)
         properties.setValue(EdgeInsets(_all: 16), forKey: DefaultPaddingEdgeInsetsProperty.self)
 
-        self.view = SharedContext.$taskLocalContext.withValue(sharedContext) {
-            let baseInputs = _GraphInputs(properties: properties,
-                                          environment: sceneInputs.environment,
-                                          modifiers: sceneInputs.modifiers,
-                                          _modifierTypeGraphs: sceneInputs._modifierTypeGraphs)
-            let inputs = _ViewInputs.inputs(with: baseInputs)
-            let outputs = Content._makeView(view: content, inputs: inputs)
-            return outputs.view?.makeView()
-        }
+        let baseInputs = _GraphInputs(sharedContext: self.sharedContext,
+                                      properties: properties,
+                                      environment: sceneInputs.environment,
+                                      modifiers: sceneInputs.modifiers,
+                                      _modifierTypeGraphs: sceneInputs._modifierTypeGraphs)
+        let inputs = _ViewInputs.inputs(with: baseInputs)
+        let outputs = Content._makeView(view: content, inputs: inputs)
+        self.view = outputs.view?.makeView()
     }
 
     deinit {

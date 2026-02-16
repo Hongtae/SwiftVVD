@@ -101,9 +101,6 @@ final class SharedContext: @unchecked Sendable {
         Log.error("cannot load resource.")
         return nil
     }
-
-    @TaskLocal
-    static var taskLocalContext: SharedContext? = nil
 }
 
 private struct ResourceBundleKey: EnvironmentKey {

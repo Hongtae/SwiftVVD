@@ -10,6 +10,8 @@ import VVD
 
 typealias Log = VVD.Log
 typealias UnsafeBox<T> = VVD.UnsafeBox<T>
+typealias WeakObject<T: AnyObject> = VVD.WeakObject<T>
+typealias AnyWeakObject = VVD.AnyWeakObject
 
 public protocol App {
     associatedtype Body: Scene

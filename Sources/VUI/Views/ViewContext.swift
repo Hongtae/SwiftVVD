@@ -59,16 +59,17 @@ class ViewContext: _GraphValueResolver {
     }
 
     init(inputs: _GraphInputs) {
-        guard let sharedContext = SharedContext.taskLocalContext else {
+        guard let sharedContext = inputs.sharedContext else {
             fatalError("SharedContext must be present to create a new ViewContext.")
         }
         self.sharedContext = sharedContext
         self.traits = [:]
         self.frame = .zero
         self.spacing = .zero
-        self.inputs = inputs.resolveMergedInputs()
-        self.environment = inputs.environment
-        self.properties = inputs.properties
+        let resolvedInputs = inputs.resolveMergedInputs()
+        self.inputs = resolvedInputs
+        self.environment = resolvedInputs.environment
+        self.properties = resolvedInputs.properties
 
         //Log.debug("ViewContext(\(self)) init")
     }

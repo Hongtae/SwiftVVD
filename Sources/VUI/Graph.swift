@@ -42,6 +42,7 @@ public struct _GraphInputs {
         static var none: Options { Options(rawValue: 0) }
     }
 
+    weak let sharedContext: SharedContext?
     var customInputs: [CustomInput] = []
     var properties: PropertyList = .init()
     var environment: EnvironmentValues

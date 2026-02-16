@@ -34,12 +34,6 @@ protocol ViewGenerator<Content>: Equatable {
 }
 
 extension ViewGenerator {
-    func makeView(sharedContext: SharedContext) -> ViewContext {
-        SharedContext.$taskLocalContext.withValue(sharedContext) {
-            self.makeView()
-        }
-    }
-
     static func == (lhs: Self, rhs: some ViewGenerator) -> Bool {
         if lhs.graph == rhs.graph {
             assert(type(of: lhs) == type(of: rhs))

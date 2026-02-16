@@ -129,7 +129,7 @@ class DynamicMultiViewContext<Content>: MultiViewContext {
             self.root = root
             // generate subviews
             self.subviews = self.body.makeViewList(containerView: self).map {
-                $0.makeView(sharedContext: self.sharedContext)
+                $0.makeView()
             }
             self.subviews.forEach {
                 $0.superview = self

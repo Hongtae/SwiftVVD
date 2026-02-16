@@ -347,7 +347,7 @@ private class PrimitiveButtonStyleConfigurationLabelViewContext: DynamicViewCont
         if let proxy = self.view?.view {
             if self.body == nil || proxy != oldProxy {
                 let outputs = proxy.makeView(_Graph(), inputs: _ViewInputs(base: self.inputs))
-                self.body = outputs.view?.makeView(sharedContext: self.sharedContext)
+                self.body = outputs.view?.makeView()
             }
             self.body?.updateContent()
         } else {

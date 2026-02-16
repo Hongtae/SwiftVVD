@@ -18,9 +18,12 @@ public protocol View {
 
 extension View {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        guard let sharedContext = inputs.base.sharedContext else {
+            fatalError("SharedContext must be present to makeView.")
+        }
         if let prim = self as? any _PrimitiveView.Type {
             func makeView<T: _PrimitiveView, U>(_: T.Type, view: _GraphValue<U>) -> _ViewOutputs {
-                T._makeView(view: view.unsafeCast(to: T.self))
+                T._makeView(view: view.unsafeCast(to: T.self), sharedContext: sharedContext)
             }
             return makeView(prim, view: view)
         }
@@ -70,14 +73,14 @@ extension View {
 
 // _PrimitiveView is a View type that does not have a body. (body = Never)
 protocol _PrimitiveView {
-    static func _makeView(view: _GraphValue<Self>) -> _ViewOutputs
+    static func _makeView(view: _GraphValue<Self>, sharedContext: SharedContext) -> _ViewOutputs
 }
 
 extension _PrimitiveView {
     public var body: Never {
         fatalError("\(Self.self) may not have Body == Never")
     }
-    static func _makeView(view: _GraphValue<Self>) -> _ViewOutputs {
+    static func _makeView(view: _GraphValue<Self>, sharedContext: SharedContext) -> _ViewOutputs {
         fatalError("PrimitiveView must provide view")
     }
 }

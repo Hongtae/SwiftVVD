@@ -351,7 +351,7 @@ private class ChildrenElementViewContext: DynamicViewContext<_VariadicView_Child
                 return false
             }
             if self.body == nil || isEqual(view, oldView) == false {
-                self.body = view.makeView(sharedContext: self.sharedContext)
+                self.body = view.makeView()
             }
             self.body?.updateContent()
         } else {
