@@ -100,6 +100,11 @@ class GenericWindowContext<Content>: WindowContext,
     }
     private let modalWindows = Mutex<[ModalWindow]>([])
 
+    // key-based slot registry for modal dedup — covers both platform and overlay modals.
+    // ModalWindowSceneContext is @unchecked Sendable; claimModalSlot/releaseModalSlot are
+    // always called on the main thread (same pattern as modalContext in ModalWindowSceneContext).
+    private let modalSlots = Mutex<[AnyHashable: AnyWeakObject]>([:])
+
     init(content: _GraphValue<Content>, scene: SceneContext) {
         let sceneInputs = scene.inputs
         self.content = content
@@ -970,6 +975,29 @@ class GenericWindowContext<Content>: WindowContext,
 
     var modalClients: [ModalWindowClient] {
         self.modalWindows.withLock { $0.compactMap(\.client) }
+    }
+
+    func claimModalSlot(key: AnyHashable, client: ModalWindowClient) -> Bool {
+        let key = UnsafeBox(key)
+        let slot = UnsafeBox(client)
+        return modalSlots.withLock { slots in
+            // stale cleanup
+            slots = slots.filter { _, value in value.value != nil }
+            let key = key.value
+            if slots[key]?.value != nil {
+                return false  // already occupied
+            }
+            slots[key] = AnyWeakObject(slot.value as AnyObject)
+            return true
+        }
+    }
+
+    func releaseModalSlot(key: AnyHashable) {
+        let key = UnsafeBox(key)
+        modalSlots.withLock { slots in
+            let key = key.value
+            slots.removeValue(forKey: key)
+        }
     }
 
     func addModalWindow(_ client: ModalWindowClient) -> Bool {

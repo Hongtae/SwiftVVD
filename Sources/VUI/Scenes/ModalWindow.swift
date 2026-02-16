@@ -9,6 +9,12 @@ import Foundation
 import VVD
 
 protocol ModalWindowClient: AnyObject {
+    // Stable key identifying the view-tree slot of this modal.
+    // Used by ModalWindowHost to detect duplicate presentation when multiple
+    // client instances are created for the same logical slot — e.g. when a
+    // _UnaryViewModifier generates contexts for multiple subviews.
+    var windowContextKey: AnyHashable { get }
+
     func modalWindowFrame() -> CGRect?
     func drawModalWindowBackground(offset: CGPoint, with context: GraphicsContext)
     func drawModalWindowOverlay(offset: CGPoint, with context: GraphicsContext)
@@ -32,6 +38,11 @@ protocol ModalWindowHost {
     func removeModalWindow(_ client: ModalWindowClient)
     // removes the client from the host without triggering any session callbacks
     func detachModalWindow(_ client: ModalWindowClient)
+
+    // key-based slot claim for dedup — platform/overlay agnostic
+    // returns false if a live modal already occupies the slot
+    func claimModalSlot(key: AnyHashable, client: ModalWindowClient) -> Bool
+    func releaseModalSlot(key: AnyHashable)
 }
 
 enum ModalResponse {
@@ -166,6 +177,12 @@ class ModalWindowSceneContext<Content>: TypedSceneContext<ModalWindowScene<Conte
         return track.value(at: rawProgress)
     }
     
+    var windowContextKey: AnyHashable {
+        // _GraphValue hash is stable across rebuilds (ObjectIdentifier(root) + index),
+        // so different instances created for the same view-tree position share the same key.
+        AnyHashable(self.graph.unsafeCast(to: Any.self))
+    }
+
     override init(graph: _GraphValue<Scene>, inputs: _SceneInputs) {
         super.init(graph: graph, inputs: inputs)
         self.modalContext = nil
@@ -291,8 +308,19 @@ class ModalWindowSceneContext<Content>: TypedSceneContext<ModalWindowScene<Conte
             return true
         }
 
+        // Claim the slot before platform/overlay split — prevents duplicate presentation
+        // when a new ModalWindowSceneContext is created for the same view tree position.
+        let key = self.windowContextKey
+        let host = parentWindow as? ModalWindowHost
+        if let host {
+            guard host.claimModalSlot(key: key, client: self) else {
+                Log.debug("ModalWindowContext: duplicate modal slot — presentation skipped")
+                return false
+            }
+        }
+
         let window = ModalWindowContext(content: self.graph[\._content], scene: self)
-        
+
         var modalContext = _ModalContext(window: window,
                                         parentWindow: parentWindow,
                                         parentContext: parentContext,
@@ -321,13 +349,13 @@ class ModalWindowSceneContext<Content>: TypedSceneContext<ModalWindowScene<Conte
                     modalContext.window.sharedContext.alertDismissAction = alertDismissAction
                     return true
                 }
-                modal.removeEventObserver(self)    
+                modal.removeEventObserver(self)
                 Log.error("ModalWindowContext: failed to present modal window")
             } else {
                 Log.error("ModalWindowContext: failed to create modal window")
             }
         } else {
-            if let host = parentWindow as? ModalWindowHost {
+            if let host {
                 let contentScale = parentWindow.window?.contentScaleFactor ?? 1.0
                 window.sharedContext.contentScaleFactor = contentScale
                 if host.addModalWindow(self) {
@@ -348,6 +376,7 @@ class ModalWindowSceneContext<Content>: TypedSceneContext<ModalWindowScene<Conte
                 Log.error("ModalWindowContext: parent window is not ModalWindowHost")
             }
         }
+        host?.releaseModalSlot(key: key)
         self.modalContext = nil
         return false
     }
@@ -384,6 +413,7 @@ class ModalWindowSceneContext<Content>: TypedSceneContext<ModalWindowScene<Conte
         if let host = context.parentWindow as? ModalWindowHost {
             // detach without triggering session callbacks — caller handles response
             host.detachModalWindow(self)
+            host.releaseModalSlot(key: self.windowContextKey)
         }
         let parentWindow = context.parentWindow?.window
         if let window = context.modalWindow {
@@ -509,6 +539,9 @@ class ModalWindowSceneContext<Content>: TypedSceneContext<ModalWindowScene<Conte
     private func endModalSession(response: ModalResponse?) {
         if let context = self.modalContext {
             let onDismiss = context.onDismiss
+            if let host = context.parentWindow as? ModalWindowHost {
+                host.releaseModalSlot(key: self.windowContextKey)
+            }
             self.modalContext = nil
             context.window.dismissAllModalWindows()
             context.window.dismissAllAuxiliaryWindows()
