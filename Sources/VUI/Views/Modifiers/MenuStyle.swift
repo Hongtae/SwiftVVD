@@ -2,7 +2,7 @@
 //  File: MenuStyle.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 public protocol MenuStyle {
@@ -70,14 +70,63 @@ extension MenuStyleConfiguration.Content {
 
 public struct DefaultMenuStyle: MenuStyle {
     public init() {}
+
+    private struct TriangleDown: Shape {
+        func path(in rect: CGRect) -> Path {
+            var path = Path()
+            path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+            path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+            path.addLine(to: CGPoint(x: rect.midX, y: rect.maxY))
+            path.closeSubpath()
+            return path
+        }
+    }
+
     public func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .modifier(MenuDropdownModifier(content: configuration.content))
+        HStack(spacing: 4) {
+            configuration.label
+            TriangleDown()
+                .fill(Color(white: 0.2))
+                .frame(width: 8, height: 5)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(Color(white: 0.97), in: RoundedRectangle(cornerRadius: 7))
+        .overlay(alignment: .center) {
+            RoundedRectangle(cornerRadius: 7)
+                .stroke(Color(white: 0.7), lineWidth: 1)
+        }
+        .modifier(MenuDropdownModifier(content: configuration.content))
     }
 }
 
 extension MenuStyle where Self == DefaultMenuStyle {
     public static var automatic: DefaultMenuStyle { .init() }
+}
+
+struct _SubmenuStyle: MenuStyle {
+    private struct TriangleRight: Shape {
+        func path(in rect: CGRect) -> Path {
+            var path = Path()
+            path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+            path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+            path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
+            path.closeSubpath()
+            return path
+        }
+    }
+
+    func makeBody(configuration: Configuration) -> some View {
+        //HStack(spacing: 4) {
+        HStack {
+            configuration.label
+            Spacer()
+            TriangleRight()
+                .fill(Color(white: 0.2))
+                .frame(width: 5, height: 8)
+        }
+        .modifier(MenuDropdownModifier(content: configuration.content))
+    }
 }
 
 struct MenuStyleProxy {
@@ -117,7 +166,6 @@ extension View {
     }
 }
 
-// MARK: - DynamicViewContext for Label/Content
 
 private class MenuStyleConfigurationLabelViewContext: DynamicViewContext<MenuStyleConfiguration.Label> {
     override func updateContent() {
@@ -144,11 +192,6 @@ private class MenuStyleConfigurationLabelViewContext: DynamicViewContext<MenuSty
 }
 
 private class MenuStyleConfigurationContentViewContext: DynamicViewContext<MenuStyleConfiguration.Content> {
-    override func value<T>(atPath graph: _GraphValue<T>) -> T? {
-        if let result = super.value(atPath: graph) { return result }
-        return self.sharedContext.auxiliarySceneContext?.hostContext?.root?.value(atPath: graph)
-    }
-
     override func updateContent() {
         let oldProxy = self.view?.view
         self.view = nil
@@ -169,5 +212,13 @@ private class MenuStyleConfigurationContentViewContext: DynamicViewContext<MenuS
             fatalError("Unable to recover view for \(graph)")
         }
         self.sharedContext.needsLayout = true
+    }
+    
+    override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
+        let size = super.sizeThatFits(proposal)
+        let styleContext = MenuStyleContext()
+        return .clamp(size,
+                      min: styleContext.minimumViewSize,
+                      max: styleContext.maximumViewSize)
     }
 }
