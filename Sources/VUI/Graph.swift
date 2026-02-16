@@ -104,6 +104,7 @@ struct LayoutInputs {
 
     var labelStyles: [LabelStyleProxy] = []
     var buttonStyles: [PrimitiveButtonStyleProxy] = []
+    var menuStyles: [MenuStyleProxy] = []
 }
 
 struct PreferenceInputs {
