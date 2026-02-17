@@ -96,6 +96,9 @@ public struct DefaultButtonStyle: PrimitiveButtonStyle, PrimitiveButtonStyleWith
             }, perform: {
                 configuration.trigger()
             })
+            .hoverBackground {
+                RoundedRectangle(cornerRadius: 4).inset(by: -2).fill(.blue.opacity(0.7))
+            }
     }
 }
 

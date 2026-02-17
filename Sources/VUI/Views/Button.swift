@@ -184,17 +184,6 @@ private class ResolvedButtonStyleViewContext: GenericViewContext<ResolvedButtonS
         view._pressingCallback = { [weak self] isPressed in
             self?.onButtonPressing(isPressed)
         }
-
-        // override style context if needed
-        if let overrideStyle = self.overrideStyleContext(highlight: self.isMouseHovered) {
-            self.environment._overrideStyleContext = overrideStyle
-            self.updateEnvironment(self.environment)
-        }
-    }
-
-    override func updateContent() {
-        super.updateContent()
-        self.drawButtonShadowOnHover = self.environment.drawButtonShadowOnHover
     }
 
     func onButtonPressing(_ isPressed: Bool) {
@@ -211,74 +200,4 @@ private class ResolvedButtonStyleViewContext: GenericViewContext<ResolvedButtonS
         }
     }
 
-    override func drawBackground(frame: CGRect, context: GraphicsContext) {
-        if self.isMouseHovered {
-            if let styleContext {
-                let path = RoundedRectangle(cornerRadius: 4).inset(by: -2).path(in: frame)
-                context.fill(path, with: .color(.blue))
-            } else {
-                let dropShadow = switch self.drawButtonShadowOnHover {
-                case .default: view?._style is DefaultButtonStyle
-                case .any: true
-                case .none: false
-                }
-                if dropShadow {
-                    let path = RoundedRectangle(cornerRadius: 4).inset(by: -1).path(in: frame)
-                    var context = context
-                    context.addFilter(.shadow(color: .blue.opacity(0.6), radius: 2, options: .shadowOnly))
-                    context.fill(path, with: .color(.black))
-                }
-            }
-        }
-    }
-
-    var isMouseHovered = false
-    var drawButtonShadowOnHover: DrawButtonShadowOnHoverForButtonStyle = .none
-    override func handleMouseHover(at location: CGPoint, deviceID: Int, isTopMost: Bool) -> Bool {
-        if deviceID == 0 {
-            let hovered = self.isMouseHovered
-            if isTopMost {
-                self.isMouseHovered = self.hitTest(location) != nil
-            } else {
-                self.isMouseHovered = false
-            }
-            if hovered != self.isMouseHovered {
-                if let overrideStyle = self.overrideStyleContext(highlight: self.isMouseHovered) {
-                    self.environment._overrideStyleContext = overrideStyle
-                    self.updateEnvironment(self.environment)
-                }
-                self.body.updateContent()
-            }
-        }
-        return isMouseHovered
-    }
-    
-    private func overrideStyleContext(highlight: Bool) -> (any StyleContext)? {
-        if let styleContext {
-            if highlight {
-                if let style = styleContext.buttonHighlightStyle {
-                    return style
-                }
-            }
-            return styleContext.buttonStyle
-        }
-        return nil
-    }
-}
-
-public enum DrawButtonShadowOnHoverForButtonStyle: Sendable{
-    case none
-    case any
-    case `default`
-}
-
-private struct DrawButtonShadowOnHover: EnvironmentKey {
-    static let defaultValue: DrawButtonShadowOnHoverForButtonStyle = .default
-}
-
-extension EnvironmentValues {
-    public var drawButtonShadowOnHover: DrawButtonShadowOnHoverForButtonStyle {
-        get { self[DrawButtonShadowOnHover.self] }
-        set { self[DrawButtonShadowOnHover.self] = newValue }
-    }
 }
