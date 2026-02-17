@@ -16,6 +16,7 @@ protocol AuxiliaryWindowClient: AnyObject {
     func updateAuxiliaryWindowContent(tick: UInt64, delta: Double, date: Date)
 
     func auxiliaryWindowInputEventHandler() -> WindowInputEventHandler?
+    func auxiliaryWindowHitTest(_ point: CGPoint) -> Bool
 
     func activateAuxiliaryWindow()
     func inactivateAuxiliaryWindow()
@@ -295,13 +296,17 @@ class AuxiliaryWindowSceneContext<Content>: TypedSceneContext<AuxiliaryWindowSce
         }
         return nil
     }
+    
+    var auxiliaryWindowShape: some Shape {
+        RoundedRectangle(cornerRadius: 5)
+    }
 
     func drawAuxiliaryWindowBackground(offset: CGPoint, with context: GraphicsContext) {
         if let activationContext, let frame = self.auxiliaryWindowFrame() {
 
             let auxFrame = frame.offsetBy(dx: offset.x, dy: offset.y)
             //let path = Rectangle().path(in: auxFrame)
-            let path = RoundedRectangle(cornerRadius: 5).path(in: auxFrame)
+            let path = auxiliaryWindowShape.path(in: auxFrame)
 
             if let filter = activationContext.filter {
                 var context = context
@@ -331,6 +336,14 @@ class AuxiliaryWindowSceneContext<Content>: TypedSceneContext<AuxiliaryWindowSce
 
     func auxiliaryWindowInputEventHandler() -> WindowInputEventHandler? {
         return self.window
+    }
+    
+    func auxiliaryWindowHitTest(_ point: CGPoint) -> Bool {
+        if let frame = self.auxiliaryWindowFrame() {
+            let path = auxiliaryWindowShape.path(in: frame)
+            return path.contains(point)
+        }
+        return false
     }
 
     // AuxiliaryWindowDelegate

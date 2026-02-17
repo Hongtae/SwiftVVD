@@ -682,12 +682,12 @@ class GenericWindowContext<Content>: WindowContext,
         if event.type == .wheel {
             self.handleMouseWheel(at: event.location, delta: event.delta)
         } else {
-            if self.handleMouseEvent(event: event) == false {
-                if event.type == .move || event.type == .buttonUp {
-                    self.handleMouseHover(at: event.location,
-                                          deviceID: event.deviceID,
-                                          isTopMost: true)
-                }
+            self.handleMouseEvent(event: event)
+            
+            if event.type == .move || event.type == .buttonUp {
+                self.handleMouseHover(at: event.location,
+                                      deviceID: event.deviceID,
+                                      isTopMost: true)
             }
         }
     }
@@ -833,10 +833,13 @@ class GenericWindowContext<Content>: WindowContext,
                 if let client = $0.client, let frame = $0.frame {
                     return (target: client as AnyObject,
                             action: { (event: MouseEvent) -> Bool in
-                        if let handler = client.auxiliaryWindowInputEventHandler() {
-                            var event = event
-                            event.location -= frame.origin
-                            return handler.handleMouseEvent(event: event)
+                        if client.auxiliaryWindowHitTest(event.location) {
+                            if let handler = client.auxiliaryWindowInputEventHandler() {
+                                var event = event
+                                event.location -= frame.origin
+                                handler.handleMouseEvent(event: event)
+                            }
+                            return true // don't pass event to other aux windows
                         }
                         return false
                     })
@@ -908,6 +911,11 @@ class GenericWindowContext<Content>: WindowContext,
                                                 isTopMost: topMost) {
                         topMost = false
                     }
+                }
+            }
+            if topMost {
+                if let hitTest = aux.client?.auxiliaryWindowHitTest(location) {
+                    topMost = !hitTest
                 }
             }
         }
