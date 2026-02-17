@@ -65,6 +65,30 @@ public struct _HoverOverlayModifier<Overlay>: ViewModifier where Overlay: View {
 extension _HoverOverlayModifier: _UnaryViewModifier {
 }
 
+public struct _HoverRegionModifier: ViewModifier {
+    public var action: (Bool) -> Void
+
+    @inlinable public init(_ action: @escaping (Bool) -> Void) {
+        self.action = action
+    }
+
+    public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
+        let outputs = body(_Graph(), inputs)
+        if let body = outputs.view {
+            let view = UnaryViewGenerator(graph: modifier, baseInputs: inputs.base) { graph, inputs in
+                HoverRegionViewContext(graph: graph, body: body.makeView(), inputs: inputs)
+            }
+            return _ViewOutputs(view: view)
+        }
+        return outputs
+    }
+
+    public typealias Body = Never
+}
+
+extension _HoverRegionModifier: _UnaryViewModifier {
+}
+
 extension View {
     @inlinable
     public func hoverBackground<V>(@ViewBuilder content: () -> V) -> some View where V: View {
@@ -74,6 +98,11 @@ extension View {
     @inlinable
     public func hoverOverlay<V>(@ViewBuilder content: () -> V) -> some View where V: View {
         modifier(_HoverOverlayModifier(overlay: content()))
+    }
+
+    @inlinable
+    public func onHover(perform action: @escaping (Bool) -> Void) -> some View {
+        modifier(_HoverRegionModifier(action))
     }
 }
 
@@ -153,5 +182,24 @@ private class HoverOverlayViewContext<Overlay: View>: HoverViewContextBase<_Hove
             }
         }
         return super.hitTest(location)
+    }
+}
+
+private class HoverRegionViewContext: ViewModifierContext<_HoverRegionModifier> {
+    var isMouseHovered = false
+
+    override func handleMouseHover(at location: CGPoint, deviceID: Int, isTopMost: Bool) -> Bool {
+        if deviceID == 0 {
+            let hovered = self.isMouseHovered
+            if isTopMost {
+                self.isMouseHovered = self.hitTest(location) != nil
+            } else {
+                self.isMouseHovered = false
+            }
+            if hovered != self.isMouseHovered {
+                self.view?.action(self.isMouseHovered)
+            }
+        }
+        return super.handleMouseHover(at: location, deviceID: deviceID, isTopMost: isTopMost)
     }
 }
