@@ -71,6 +71,8 @@ struct AuxiliaryWindowScene<Content>: _PrimitiveScene where Content: View {
 // scene context for utility window scene
 class AuxiliaryWindowSceneContext<Content>: TypedSceneContext<AuxiliaryWindowScene<Content>>, AuxiliaryWindowClient, @unchecked Sendable where Content: View {
     typealias Scene = AuxiliaryWindowScene<Content>
+    
+    let layoutPadding = 4
 
     private struct _ActivationContext: @unchecked Sendable {
         let window: AuxiliaryWindowContext<Content>
@@ -118,6 +120,22 @@ class AuxiliaryWindowSceneContext<Content>: TypedSceneContext<AuxiliaryWindowSce
         return false
     }
 
+    fileprivate func layoutBounds(_ bounds: CGRect) -> CGRect {
+        let padding = CGFloat(self.layoutPadding)
+        let center = CGPoint(x: bounds.midX, y: bounds.midY)
+        var rect = bounds.insetBy(dx: padding, dy: padding)
+        if rect.width < 1 || rect.height < 1 {
+            let width = max(rect.width, 1)
+            let height = max(rect.height, 1)
+            rect = CGRect(
+                x: center.x - width / 2,
+                y: center.y - height / 2,
+                width: width,
+                height: height)
+        }
+        return rect
+    }
+    
     fileprivate func onViewLoaded() {
     }
 
@@ -131,7 +149,7 @@ class AuxiliaryWindowSceneContext<Content>: TypedSceneContext<AuxiliaryWindowSce
             return
         }
 
-        let padding: CGFloat = 4
+        let padding = CGFloat(self.layoutPadding)
         let contentSize = view.sizeThatFits(.unspecified)
         var windowSize = contentSize
         windowSize.width = max(windowSize.width, 1) + padding * 2
@@ -400,6 +418,10 @@ private class AuxiliaryWindowContext<Content>: GenericWindowContext<Content>, @u
         }
     }
 
+    override func layoutBounds(_ bounds: CGRect) -> CGRect {
+        _scene?.layoutBounds(bounds) ?? bounds
+    }
+    
     override func onViewLayoutUpdated() {
         if view != nil {
             _scene?.onViewLayoutChanged()
@@ -421,3 +443,4 @@ extension EnvironmentValues {
         set { self[AuxiliaryWindowUsingPlatformWindow.self] = newValue }
     }
 }
+

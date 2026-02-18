@@ -234,6 +234,8 @@ class GenericWindowContext<Content>: WindowContext,
             }
         }
     }
+    
+    func layoutBounds(_ bounds: CGRect) -> CGRect { bounds }
 
     func updateView(tick: UInt64, delta: Double, date: Date) {
         if let view, view.isValid {
@@ -288,7 +290,8 @@ class GenericWindowContext<Content>: WindowContext,
             }
 
             if sharedContext.needsLayout {
-                let bounds = sharedContext.contentBounds
+                let bounds = self.layoutBounds(sharedContext.contentBounds)
+                assert(bounds.width > 0 && bounds.height > 0)
                 sharedContext.needsLayout = false
                 view.place(at: CGPoint(x: bounds.midX, y: bounds.midY),
                            anchor: .center,

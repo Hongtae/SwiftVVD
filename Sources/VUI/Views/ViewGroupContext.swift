@@ -85,6 +85,7 @@ class ViewGroupContext: ViewContext {
     }
 
     override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
+        var size: CGSize = .zero
         let viewList = self.activeSubviews.flatMap {
             $0.multiViewForLayout()
         }
@@ -102,14 +103,22 @@ class ViewGroupContext: ViewContext {
                 self.layoutCache = self.layout.makeCache(subviews: layoutSubviews)
             }
             if var cache = self.layoutCache {
-                let ret = self.layout.sizeThatFits(proposal: proposal,
+                size = self.layout.sizeThatFits(proposal: proposal,
                                                    subviews: layoutSubviews,
                                                    cache: &cache)
                 self.layoutCache = cache
-                return ret
             }
         }
-        return proposal.replacingUnspecifiedDimensions()
+        if self.superview == nil {
+            if let menuStyle = self.activeSubviews.first(where: {
+                $0.styleContext is MenuStyleContext
+            })?.styleContext as? MenuStyleContext {
+                size.width = max(size.width, menuStyle.minimumViewSize.width)
+                size.width = min(size.width, menuStyle.maximumViewSize.width)
+                size.height = max(size.height, menuStyle.minimumViewSize.height)
+            }
+        }
+        return size
     }
 
     override func layoutSubviews() {
