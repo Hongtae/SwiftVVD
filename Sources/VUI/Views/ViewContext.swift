@@ -88,7 +88,15 @@ class ViewContext: _GraphValueResolver {
             return superview.value(atPath: graph)
         }
         if let root = self.sharedContext.root {
-            return root.value(atPath: graph)
+            if let value = root.value(atPath: graph) {
+                return value
+            }
+        }
+        if let value = self.sharedContext.scene.root.value(atPath: graph) {
+            return value
+        }
+        if let host = self.sharedContext.auxiliarySceneContext?.hostContext {
+            return host.root?.value(atPath: graph)
         }
         return nil
     }
