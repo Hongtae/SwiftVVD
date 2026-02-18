@@ -5,6 +5,8 @@
 //  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
+import VVD
+
 public protocol MenuStyle {
     associatedtype Body: View
     @ViewBuilder func makeBody(configuration: Self.Configuration) -> Self.Body

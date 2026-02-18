@@ -65,3 +65,23 @@ extension EnvironmentValues {
         set { self[_OverrideStyleContextKey.self] = newValue }
     }
 }
+
+struct _SubmenuRegistration: @unchecked Sendable {
+    var close: () -> Void
+    var isHovered: () -> Bool
+}
+
+class MenuContext: @unchecked Sendable {
+    var activeSubmenuRegistration: _SubmenuRegistration? = nil
+}
+
+private struct _MenuContextKey: EnvironmentKey {
+    static let defaultValue: MenuContext? = nil
+}
+
+extension EnvironmentValues {
+    var _menuContext: MenuContext? {
+        get { self[_MenuContextKey.self] }
+        set { self[_MenuContextKey.self] = newValue }
+    }
+}

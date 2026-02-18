@@ -107,6 +107,7 @@ struct ResolvedButtonStyle: View {
 
     var _isPressing = false
     var _style: any PrimitiveButtonStyle = DefaultButtonStyle.automatic
+    var _menuItemStyle = _MenuItemButtonStyle()
     var _pressingCallback: ((Bool) -> Void)? = nil
     var _body: any View {
         if let styleWithPressingBody = _style as? (any PrimitiveButtonStyleWithPressingBody) {
@@ -127,16 +128,18 @@ struct ResolvedButtonStyle: View {
         let label2 = inputs.layouts.sourceWrites.removeValue(forKey: buttonStyleLabelKey)
         let label = label1 ?? label2
         let style = inputs.layouts.buttonStyles.popLast()
-        let styleType = style?.type ?? DefaultButtonStyle.self
+        let isInMenu = inputs.base.styleContext != nil
+        let effectiveStyle = isInMenu ? PrimitiveButtonStyleProxy(view[\._menuItemStyle]) : style
+        let styleType = effectiveStyle?.type ?? DefaultButtonStyle.self
 
         func makeStyleBody<S: PrimitiveButtonStyle, T>(_: S.Type, graph: _GraphValue<T>, inputs: _ViewInputs) -> _ViewOutputs {
             S.Body._makeView(view: graph.unsafeCast(to: S.Body.self), inputs: inputs)
         }
         let outputs = makeStyleBody(styleType, graph: view[\._body], inputs: inputs)
-        
+
         if let body = outputs.view {
             let view = UnaryViewGenerator(graph: view, baseInputs: inputs.base) { graph, inputs in
-                ResolvedButtonStyleViewContext(buttonStyle: style,
+                ResolvedButtonStyleViewContext(buttonStyle: effectiveStyle,
                                                label: label,
                                                graph: graph,
                                                body: body.makeView(),
@@ -184,6 +187,21 @@ private class ResolvedButtonStyleViewContext: GenericViewContext<ResolvedButtonS
         view._pressingCallback = { [weak self] isPressed in
             self?.onButtonPressing(isPressed)
         }
+    }
+    
+    override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
+        let size = super.sizeThatFits(proposal)
+        if let styleContext {
+            var result = CGSize.clamp(size,
+                                      min: styleContext.minimumViewSize,
+                                      max: styleContext.maximumViewSize)
+            if let proposedWidth = proposal.width,
+               proposedWidth.isFinite, proposedWidth > 0 {
+                result.width = proposedWidth
+            }
+            return result
+        }
+        return size
     }
 
     func onButtonPressing(_ isPressed: Bool) {

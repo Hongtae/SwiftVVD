@@ -5,7 +5,6 @@
 //  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-
 public struct Menu<Label, Content>: View where Label: View, Content: View {
     let label: Label
     let content: Content
@@ -88,6 +87,7 @@ extension Menu where Label == MenuStyleConfiguration.Label, Content == MenuStyle
 
 
 struct ResolvedMenuStyle: View {
+    var _menuItemStyle = _MenuItemMenuStyle()
     var _style: any MenuStyle = DefaultMenuStyle.automatic
     var _configuration = MenuStyleConfiguration(nil, nil)
     var _body: any View {
@@ -103,8 +103,10 @@ struct ResolvedMenuStyle: View {
         let content = inputs.layouts.sourceWrites.removeValue(forKey: contentKey)
         let configuration = MenuStyleConfiguration(label, content)
 
-        let style = inputs.layouts.menuStyles.popLast()
-        let styleType = style?.type ?? DefaultMenuStyle.self
+        let explicitStyle = inputs.layouts.menuStyles.popLast()
+        let isSubmenu = inputs.base.styleContext != nil
+        let menuStyle: MenuStyleProxy? = isSubmenu ? MenuStyleProxy(view[\._menuItemStyle]) : explicitStyle
+        let styleType = menuStyle?.type ?? DefaultMenuStyle.self
 
         func makeStyleBody<S: MenuStyle, T>(_: S.Type, graph: _GraphValue<T>, inputs: _ViewInputs) -> _ViewOutputs {
             S.Body._makeView(view: graph.unsafeCast(to: S.Body.self), inputs: inputs)
@@ -112,7 +114,7 @@ struct ResolvedMenuStyle: View {
         let outputs = makeStyleBody(styleType, graph: view[\._body], inputs: inputs)
         if let body = outputs.view {
             let view = UnaryViewGenerator(graph: view, baseInputs: inputs.base) { graph, inputs in
-                ResolvedMenuStyleViewContext(menuStyle: style,
+                ResolvedMenuStyleViewContext(menuStyle: menuStyle,
                                              configuration: configuration,
                                              graph: graph,
                                              body: body.makeView(),
@@ -131,11 +133,11 @@ struct ResolvedMenuStyle: View {
 
 extension ResolvedMenuStyle: _PrimitiveView {}
 
-// MARK: - MenuDropdownModifier
-
 struct MenuDropdownModifier<MenuContent>: ViewModifier where MenuContent: View {
     typealias Body = Never
     let content: MenuContent
+    var onHoverChanged: ((Bool) -> Void)? = nil
+    var onMenuOpenChanged: ((Bool) -> Void)? = nil
 }
 
 extension MenuDropdownModifier {
@@ -222,16 +224,20 @@ private class MenuDropdownGestureHandler: _GestureHandler {
 private class MenuDropdownViewContext<MenuContent>: ViewModifierContext<MenuDropdownModifier<MenuContent>> where MenuContent: View {
     typealias Modifier = MenuDropdownModifier<MenuContent>
     let gesture: _GraphValue<MenuDropdownGesture>
+    let popupMenuContext = MenuContext()     // shared context for the popup level opened by this view
     var sceneContext: AuxiliaryWindowSceneContext<MenuContent>!
     var isMenuOpen = false
     var isMouseHovered = false
+    var isPopupActivated = false
 
     override init(graph: _GraphValue<Modifier>, body: ViewContext, inputs: _GraphInputs) {
         self.gesture = graph[\._gesture]
         super.init(graph: graph, body: body, inputs: inputs)
 
         let sceneRoot = _SceneRoot(view: self)
-        let sceneInputs = _SceneInputs(root: sceneRoot, environment: self.environment,
+        var popupEnvironment = self.environment
+        popupEnvironment._menuContext = popupMenuContext
+        let sceneInputs = _SceneInputs(root: sceneRoot, environment: popupEnvironment,
                                        modifiers: self.inputs.modifiers,
                                        _modifierTypeGraphs: self.inputs._modifierTypeGraphs)
 
@@ -247,8 +253,6 @@ private class MenuDropdownViewContext<MenuContent>: ViewModifierContext<MenuDrop
         super.updateContent()
         self.sceneContext.updateContent()
     }
-
-    // MARK: Standalone menu — click to open popup below label
 
     override func gestureHandlers(at location: CGPoint) -> GestureHandlerOutputs {
         let outputs = super.gestureHandlers(at: location)
@@ -269,44 +273,58 @@ private class MenuDropdownViewContext<MenuContent>: ViewModifierContext<MenuDrop
         return outputs
     }
 
-    // MARK: Submenu — hover to open popup to the right
-
     override func handleMouseHover(at location: CGPoint, deviceID: Int, isTopMost: Bool) -> Bool {
         guard styleContext != nil else {
             return super.handleMouseHover(at: location, deviceID: deviceID, isTopMost: isTopMost)
         }
 
+        _ = super.handleMouseHover(at: location, deviceID: deviceID, isTopMost: isTopMost)
+
         if deviceID == 0 {
             let wasHovered = self.isMouseHovered
+
             if isTopMost {
                 self.isMouseHovered = self.hitTest(location) != nil
             } else {
+                if isMenuOpen {
+                    let wp = location.applying(self.transformToRoot)
+                    if let frame = self.sceneContext?.auxiliaryWindowFrame(), frame.contains(wp) {
+                        self.isPopupActivated = true
+                    }
+                }
                 self.isMouseHovered = false
             }
+
             if wasHovered != self.isMouseHovered {
                 if self.isMouseHovered {
-                    if let highlightStyle = styleContext?.buttonHighlightStyle {
-                        self.environment._overrideStyleContext = highlightStyle
-                        self.updateEnvironment(self.environment)
+                    self.isPopupActivated = false
+                    if !self.isMenuOpen {
+                        let origin = CGPoint(x: self.bounds.maxX, y: self.bounds.minY)
+                        self.openMenu(at: origin)
                     }
-                    let origin = CGPoint(x: self.bounds.maxX, y: self.bounds.minY)
-                    self.openMenu(at: origin)
                 } else {
-                    if let normalStyle = styleContext?.buttonStyle {
-                        self.environment._overrideStyleContext = normalStyle
-                        self.updateEnvironment(self.environment)
+                    if !self.isPopupActivated {
+                        self.closeMenu()
                     }
-                    self.closeMenu()
                 }
+                self.modifier?.onHoverChanged?(self.isMouseHovered)
                 self.body.updateContent()
             }
         }
         return isMouseHovered
     }
 
-    // MARK: Common open/close
-
     func openMenu(at localOrigin: CGPoint) {
+        self.isPopupActivated = false
+
+        if let ctx = self.environment._menuContext {
+            ctx.activeSubmenuRegistration?.close()
+            ctx.activeSubmenuRegistration = _SubmenuRegistration(
+                close: { [weak self] in self?.closeMenu() },
+                isHovered: { [weak self] in self?.isMouseHovered ?? false }
+            )
+        }
+
         let windowLocation = localOrigin.applying(self.transformToRoot)
         let sceneContext = self.sceneContext!
         let context = self.sharedContext
@@ -319,14 +337,17 @@ private class MenuDropdownViewContext<MenuContent>: ViewModifierContext<MenuDrop
             }
         }
         self.isMenuOpen = true
+        self.modifier?.onMenuOpenChanged?(true)
     }
 
     func closeMenu() {
+        guard isMenuOpen else { return }
         self.sceneContext?.dismiss()
         self.isMenuOpen = false
+        self.isPopupActivated = false
+        self.environment._menuContext?.activeSubmenuRegistration = nil
+        self.modifier?.onMenuOpenChanged?(false)
     }
-
-    // MARK: SceneRoot
 
     struct _SceneRoot: SceneRoot {
         typealias Root = MenuDropdownModifier<MenuContent>
@@ -334,6 +355,13 @@ private class MenuDropdownViewContext<MenuContent>: ViewModifierContext<MenuDrop
         var graph: _GraphValue<Root> { view.graph }
         var app: AppContext { view.sharedContext.app }
         unowned let view: MenuDropdownViewContext<MenuContent>
+        
+        func value<T>(atPath path: _GraphValue<T>) -> T? {
+            if let v = graph.value(atPath: path, from: root) {
+                return v
+            }
+            return view.value(atPath: path)
+        }
     }
 }
 
@@ -356,5 +384,30 @@ private class ResolvedMenuStyleViewContext: GenericViewContext<ResolvedMenuStyle
             view._style = style
         }
         view._configuration = configuration
+    }
+
+    override func handleMouseHover(at location: CGPoint, deviceID: Int, isTopMost: Bool) -> Bool {
+        let result = super.handleMouseHover(at: location, deviceID: deviceID, isTopMost: isTopMost)
+        if isTopMost, let ctx = self.environment._menuContext,
+           let reg = ctx.activeSubmenuRegistration, !reg.isHovered() {
+            reg.close()
+            ctx.activeSubmenuRegistration = nil
+        }
+        return result
+    }
+
+    override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
+        let size = super.sizeThatFits(proposal)
+        if let styleContext {
+            var result = CGSize.clamp(size,
+                                      min: styleContext.minimumViewSize,
+                                      max: styleContext.maximumViewSize)
+            if let proposedWidth = proposal.width,
+               proposedWidth.isFinite, proposedWidth > 0 {
+                result.width = proposedWidth
+            }
+            return result
+        }
+        return size
     }
 }

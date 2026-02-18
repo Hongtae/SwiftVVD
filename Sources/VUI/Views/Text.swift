@@ -334,11 +334,13 @@ private class TextViewContext: PrimitiveViewContext<Text> {
                                             maxHeight: proposal.height)
             }
         }
-        
-        if let styleContext = self.styleContext {
-            return .clamp(size,
-                          min: styleContext.minimumViewSize,
-                          max: styleContext.maximumViewSize)
+        if let styleContext, let proposedWidth = proposal.width,
+           proposedWidth.isFinite, proposedWidth > 0 {
+            var result = CGSize.clamp(size,
+                                      min: styleContext.minimumViewSize,
+                                      max: styleContext.maximumViewSize)
+            result.width = proposedWidth
+            return result
         }
         return size
     }
@@ -355,25 +357,19 @@ private class TextViewContext: PrimitiveViewContext<Text> {
                 }
             }
             if let resolvedText {
-                if let styleContext {
-                    let size = resolvedText.measure(maxWidth: frame.width,
-                                                    maxHeight: frame.height)
-                    var frame = frame.standardized
-                    frame.origin.x += CGFloat(styleContext.textOffset)
-                    frame.size.width -= CGFloat(styleContext.textOffset)
-                    if size.height < frame.height {
-                        let offset = frame.height - size.height
-                        frame = frame.offsetBy(dx: 0,
-                                               dy: offset * 0.5)
-                        frame.size.height = size.height
-                    }
-                    if frame.width > 0 && frame.height > 0 {
-                        let style = styleContext.foregroundStyle
-                        context.draw(resolvedText, in: frame,
-                                     shading: .style(style))
-                    }
-                } else {
+                let size = resolvedText.measure(maxWidth: frame.width,
+                                                maxHeight: frame.height)
+                var frame = frame.standardized
+                if size.height < frame.height {
+                    let offset = frame.height - size.height
+                    frame = frame.offsetBy(dx: 0, dy: offset * 0.5)
+                    frame.size.height = size.height
+                }
+                if frame.width > 0 && frame.height > 0 {
                     if let style = self.primaryStyle {
+                        context.draw(resolvedText, in: frame, shading: .style(style))
+                    } else if let styleContext {
+                        let style = styleContext.foregroundStyle
                         context.draw(resolvedText, in: frame, shading: .style(style))
                     } else {
                         context.draw(resolvedText, in: frame)

@@ -48,6 +48,7 @@ extension Label where Title == LabelStyleConfiguration.Title, Icon == LabelStyle
 
 struct ResolvedLabelStyle: View {
     var _style: any LabelStyle = DefaultLabelStyle.automatic
+    var _menuItemStyle = _MenuItemLabelStyle()
     var _configuration = LabelStyleConfiguration(nil, nil)
     var _body: any View {
         _style.makeBody(configuration: self._configuration)
@@ -63,7 +64,9 @@ struct ResolvedLabelStyle: View {
         let configuration = LabelStyleConfiguration(title, icon)
 
         let style = inputs.layouts.labelStyles.popLast()
-        let styleType = style?.type ?? DefaultLabelStyle.self
+        let isInMenu = inputs.base.styleContext != nil
+        let effectiveStyle = isInMenu ? LabelStyleProxy(view[\._menuItemStyle]) : style
+        let styleType = effectiveStyle?.type ?? DefaultLabelStyle.self
 
         func makeStyleBody<S: LabelStyle, T>(_: S.Type, graph: _GraphValue<T>, inputs: _ViewInputs) -> _ViewOutputs {
             S.Body._makeView(view: graph.unsafeCast(to: S.Body.self), inputs: inputs)
@@ -71,7 +74,7 @@ struct ResolvedLabelStyle: View {
         let outputs = makeStyleBody(styleType, graph: view[\._body], inputs: inputs)
         if let body = outputs.view {
             let view = UnaryViewGenerator(graph: view, baseInputs: inputs.base) { graph, inputs in
-                ResolvedLabelStyleViewContext(labelStyle: style,
+                ResolvedLabelStyleViewContext(labelStyle: effectiveStyle,
                                               configuration: configuration,
                                               graph: graph,
                                               body: body.makeView(),
@@ -109,5 +112,21 @@ private class ResolvedLabelStyleViewContext: GenericViewContext<ResolvedLabelSty
             view._style = style
         }
         view._configuration = configuration
+    }
+    
+    override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
+        let size = super.sizeThatFits(proposal)
+        if let styleContext {
+            if let proposedWidth = proposal.width,
+               proposedWidth.isFinite, proposedWidth > 0 {
+                var result = CGSize.clamp(size,
+                                          min: styleContext.minimumViewSize,
+                                          max: styleContext.maximumViewSize)
+                result.width = proposedWidth
+                return result
+            }
+            return size
+        }
+        return size
     }
 }
