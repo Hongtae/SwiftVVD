@@ -8,9 +8,10 @@
 public struct Menu<Label, Content>: View where Label: View, Content: View {
     let label: Label
     let content: Content
+    let primaryAction: (() -> Void)?
 
     public var body: some View {
-        ResolvedMenuStyle()
+        ResolvedMenuStyle(primaryAction: primaryAction)
             .modifier(StaticSourceWriter<MenuStyleConfiguration.Label, Label>(source: self.label))
             .modifier(
                 StaticSourceWriter<MenuStyleConfiguration.Content, ModifiedContent<Content, StyleContextWriter<MenuStyleContext>>>(
@@ -23,30 +24,39 @@ extension Menu {
     public init(@ViewBuilder content: () -> Content, @ViewBuilder label: () -> Label) {
         self.label = label()
         self.content = content()
+        self.primaryAction = nil
     }
 
     public init(_ titleKey: LocalizedStringKey, @ViewBuilder content: () -> Content) where Label == Text {
         self.label = Text(titleKey)
         self.content = content()
+        self.primaryAction = nil
     }
 
     public init<S>(_ title: S, @ViewBuilder content: () -> Content) where Label == Text, S: StringProtocol {
         self.label = Text(title)
         self.content = content()
+        self.primaryAction = nil
     }
 }
 
 extension Menu {
     public init(@ViewBuilder content: () -> Content, @ViewBuilder label: () -> Label, primaryAction: @escaping () -> Void) {
-        fatalError()
+        self.label = label()
+        self.content = content()
+        self.primaryAction = primaryAction
     }
 
     public init(_ titleKey: LocalizedStringKey, @ViewBuilder content: () -> Content, primaryAction: @escaping () -> Void) where Label == Text {
-        fatalError()
+        self.label = Text(titleKey)
+        self.content = content()
+        self.primaryAction = primaryAction
     }
 
     public init<S>(_ title: S, @ViewBuilder content: () -> Content, primaryAction: @escaping () -> Void) where Label == Text, S: StringProtocol {
-        fatalError()
+        self.label = Text(title)
+        self.content = content()
+        self.primaryAction = primaryAction
     }
 }
 
@@ -82,6 +92,7 @@ extension Menu where Label == MenuStyleConfiguration.Label, Content == MenuStyle
     public init(_ configuration: MenuStyleConfiguration) {
         self.label = configuration.label
         self.content = configuration.content
+        self.primaryAction = configuration.primaryAction
     }
 }
 
@@ -90,6 +101,12 @@ struct ResolvedMenuStyle: View {
     var _menuItemStyle = _MenuItemMenuStyle()
     var _style: any MenuStyle = DefaultMenuStyle.automatic
     var _configuration = MenuStyleConfiguration(nil, nil)
+    var _primaryAction: (() -> Void)? = nil
+
+    init(primaryAction: (() -> Void)? = nil) {
+        self._primaryAction = primaryAction
+    }
+
     var _body: any View {
         _style.makeBody(configuration: _configuration)
     }
@@ -383,7 +400,11 @@ private class ResolvedMenuStyleViewContext: GenericViewContext<ResolvedMenuStyle
             }
             view._style = style
         }
-        view._configuration = configuration
+        view._configuration = MenuStyleConfiguration(
+            configuration._label,
+            configuration._content,
+            primaryAction: view._primaryAction
+        )
     }
 
     override func handleMouseHover(at location: CGPoint, deviceID: Int, isTopMost: Bool) -> Bool {

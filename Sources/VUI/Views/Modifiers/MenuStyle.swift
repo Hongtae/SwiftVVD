@@ -26,12 +26,16 @@ public struct MenuStyleConfiguration {
 
     public var label: MenuStyleConfiguration.Label { .init(view: _label) }
     public var content: MenuStyleConfiguration.Content { .init(view: _content) }
+    public var primaryAction: (() -> Void)? { _primaryAction }
 
     let _label: ViewProxy?
     let _content: ViewProxy?
-    init(_ label: ViewProxy?, _ content: ViewProxy?) {
+    var _primaryAction: (() -> Void)?
+
+    init(_ label: ViewProxy?, _ content: ViewProxy?, primaryAction: (() -> Void)? = nil) {
         self._label = label
         self._content = content
+        self._primaryAction = primaryAction
     }
 }
 
@@ -73,6 +77,15 @@ extension MenuStyleConfiguration.Content {
 public struct DefaultMenuStyle: MenuStyle {
     public init() {}
 
+    public func makeBody(configuration: Configuration) -> some View {
+        _DefaultMenuStyleBody(configuration: configuration)
+    }
+}
+
+private struct _DefaultMenuStyleBody: View {
+    let configuration: MenuStyleConfiguration
+    @State private var isPressing = false
+
     private struct TriangleDown: Shape {
         func path(in rect: CGRect) -> Path {
             var path = Path()
@@ -84,21 +97,45 @@ public struct DefaultMenuStyle: MenuStyle {
         }
     }
 
-    public func makeBody(configuration: Configuration) -> some View {
-        HStack(spacing: 4) {
-            configuration.label
-            TriangleDown()
-                .fill(Color(white: 0.2))
-                .frame(width: 8, height: 5)
+    var body: some View {
+        if let primaryAction = configuration.primaryAction {
+            HStack(spacing: 0) {
+                configuration.label
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(isPressing ? Color(white: 0.88) : Color.clear,
+                                in: RoundedRectangle(cornerRadius: 7))
+                    ._onButtonGesture(pressing: { isPressing = $0 }, perform: { primaryAction() })
+                Divider()
+                    .frame(height: 20)
+                TriangleDown()
+                    .fill(Color(white: 0.2))
+                    .frame(width: 8, height: 5)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .modifier(MenuDropdownModifier(content: configuration.content))
+            }
+            .background(Color(white: 0.97), in: RoundedRectangle(cornerRadius: 7))
+            .overlay(alignment: .center) {
+                RoundedRectangle(cornerRadius: 7)
+                    .stroke(Color(white: 0.7), lineWidth: 1)
+            }
+        } else {
+            HStack(spacing: 4) {
+                configuration.label
+                TriangleDown()
+                    .fill(Color(white: 0.2))
+                    .frame(width: 8, height: 5)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(Color(white: 0.97), in: RoundedRectangle(cornerRadius: 7))
+            .overlay(alignment: .center) {
+                RoundedRectangle(cornerRadius: 7)
+                    .stroke(Color(white: 0.7), lineWidth: 1)
+            }
+            .modifier(MenuDropdownModifier(content: configuration.content))
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .background(Color(white: 0.97), in: RoundedRectangle(cornerRadius: 7))
-        .overlay(alignment: .center) {
-            RoundedRectangle(cornerRadius: 7)
-                .stroke(Color(white: 0.7), lineWidth: 1)
-        }
-        .modifier(MenuDropdownModifier(content: configuration.content))
     }
 }
 
@@ -129,29 +166,52 @@ private struct _MenuItemMenuBody: View {
     }
 
     var body: some View {
-        let bgColor: Color = isHovered ? .blue : isMenuOpen ? Color.blue.opacity(0.8) : .clear
-        let fgColor: Color = (isHovered || isMenuOpen) ? .white : .black
-        let arrowColor: Color = (isHovered || isMenuOpen) ? .white : Color(white: 0.4)
-        ZStack(alignment: .leading) {
-            RoundedRectangle(cornerRadius: 4)
-                .fill(bgColor)
-            HStack {
-                configuration.label
-                    .padding(.vertical, 4)
-                    .padding(.leading, 8)
-                Spacer()
-                TriangleRight()
-                    .fill(arrowColor)
-                    .frame(width: 4, height: 7)
-                    .padding(.trailing, 8)
+        if let primaryAction = configuration.primaryAction {
+            // Split: label Button (primary action + menu dismiss) | arrow (submenu)
+            let arrowColor: Color = isMenuOpen ? .white : Color(white: 0.4)
+            HStack(spacing: 0) {
+                Button(action: primaryAction) {
+                    configuration.label
+                }
+                ZStack {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(isMenuOpen ? Color.blue.opacity(0.8) : Color.clear)
+                    TriangleRight()
+                        .fill(arrowColor)
+                        .frame(width: 4, height: 7)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                }
+                .modifier(MenuDropdownModifier(
+                    content: configuration.content,
+                    onMenuOpenChanged: { isMenuOpen = $0 }
+                ))
             }
+        } else {
+            let bgColor: Color = isHovered ? .blue : isMenuOpen ? Color.blue.opacity(0.8) : .clear
+            let fgColor: Color = (isHovered || isMenuOpen) ? .white : .black
+            let arrowColor: Color = (isHovered || isMenuOpen) ? .white : Color(white: 0.4)
+            ZStack(alignment: .leading) {
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(bgColor)
+                HStack {
+                    configuration.label
+                        .padding(.vertical, 4)
+                        .padding(.leading, 8)
+                    Spacer()
+                    TriangleRight()
+                        .fill(arrowColor)
+                        .frame(width: 4, height: 7)
+                        .padding(.trailing, 8)
+                }
+            }
+            .foregroundStyle(fgColor)
+            .modifier(MenuDropdownModifier(
+                content: configuration.content,
+                onHoverChanged: { isHovered = $0 },
+                onMenuOpenChanged: { isMenuOpen = $0 }
+            ))
         }
-        .foregroundStyle(fgColor)
-        .modifier(MenuDropdownModifier(
-            content: configuration.content,
-            onHoverChanged: { isHovered = $0 },
-            onMenuOpenChanged: { isMenuOpen = $0 }
-        ))
     }
 }
 
