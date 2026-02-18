@@ -174,4 +174,27 @@ extension Color: View {
 }
 
 extension Color: _PrimitiveView {
+    public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        let view = UnaryViewGenerator(graph: view, baseInputs: inputs.base) { graph, inputs in
+            ColorViewContext(graph: graph, inputs: inputs)
+        }
+        return _ViewOutputs(view: view)
+    }
+}
+
+private class ColorViewContext: PrimitiveViewContext<Color> {
+    override func draw(frame: CGRect, context: GraphicsContext) {
+        super.draw(frame: frame, context: context)
+        if let color = self.view {
+            context.fill(Path(frame), with: .color(color))
+        }
+    }
+
+    override func hitTest(_ location: CGPoint) -> ViewContext? {
+        guard let color = self.view, color.provider.alpha > 0 else {
+            return super.hitTest(location)
+        }
+        if bounds.contains(location) { return self }
+        return super.hitTest(location)
+    }
 }
