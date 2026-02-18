@@ -224,6 +224,7 @@ private struct _MenuItemButtonBody: View {
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
         }
+        .border(.red, width: 1)
         .foregroundStyle(isHovered ? Color.white : Color.black)
         ._onButtonGesture(pressing: { isPressed in
             callback?(isPressed)

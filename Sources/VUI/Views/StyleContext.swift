@@ -42,7 +42,7 @@ extension _MenuItemStyleContext {
     var buttonHighlightStyle: (any StyleContext)? { MenuButtonHighlightStyleContext() }
 }
 
-struct MenuStyleContext: _MenuItemStyleContext {
+struct MenuStyleContext: StyleContext, _MenuItemStyleContext {
 }
 
 struct MenuButtonStyleContext: _MenuItemStyleContext {

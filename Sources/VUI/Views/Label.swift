@@ -113,19 +113,14 @@ private class ResolvedLabelStyleViewContext: GenericViewContext<ResolvedLabelSty
         }
         view._configuration = configuration
     }
-    
+
     override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
-        let size = super.sizeThatFits(proposal)
-        if let styleContext {
+        var size = super.sizeThatFits(proposal)
+        if styleContext is MenuStyleContext {
             if let proposedWidth = proposal.width,
                proposedWidth.isFinite, proposedWidth > 0 {
-                var result = CGSize.clamp(size,
-                                          min: styleContext.minimumViewSize,
-                                          max: styleContext.maximumViewSize)
-                result.width = proposedWidth
-                return result
+                size.width = proposedWidth
             }
-            return size
         }
         return size
     }

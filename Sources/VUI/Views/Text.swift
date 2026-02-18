@@ -334,13 +334,11 @@ private class TextViewContext: PrimitiveViewContext<Text> {
                                             maxHeight: proposal.height)
             }
         }
-        if let styleContext, let proposedWidth = proposal.width,
-           proposedWidth.isFinite, proposedWidth > 0 {
-            var result = CGSize.clamp(size,
-                                      min: styleContext.minimumViewSize,
-                                      max: styleContext.maximumViewSize)
-            result.width = proposedWidth
-            return result
+        if styleContext is MenuStyleContext {
+            if let proposedWidth = proposal.width,
+               proposedWidth.isFinite, proposedWidth > 0 {
+                size.width = proposedWidth
+            }
         }
         return size
     }

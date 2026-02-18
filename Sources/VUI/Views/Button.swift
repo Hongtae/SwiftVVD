@@ -190,16 +190,12 @@ private class ResolvedButtonStyleViewContext: GenericViewContext<ResolvedButtonS
     }
     
     override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
-        let size = super.sizeThatFits(proposal)
-        if let styleContext {
-            var result = CGSize.clamp(size,
-                                      min: styleContext.minimumViewSize,
-                                      max: styleContext.maximumViewSize)
+        var size = super.sizeThatFits(proposal)
+        if styleContext is MenuStyleContext {
             if let proposedWidth = proposal.width,
                proposedWidth.isFinite, proposedWidth > 0 {
-                result.width = proposedWidth
+                size.width = proposedWidth
             }
-            return result
         }
         return size
     }

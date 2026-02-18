@@ -132,7 +132,8 @@ class AuxiliaryWindowSceneContext<Content>: TypedSceneContext<AuxiliaryWindowSce
         }
 
         let padding: CGFloat = 4
-        var windowSize = view.sizeThatFits(.unspecified)
+        let contentSize = view.sizeThatFits(.unspecified)
+        var windowSize = contentSize
         windowSize.width = max(windowSize.width, 1) + padding * 2
         windowSize.height = max(windowSize.height, 1) + padding * 2
         self.activationContext?.windowSize = windowSize
@@ -156,7 +157,7 @@ class AuxiliaryWindowSceneContext<Content>: TypedSceneContext<AuxiliaryWindowSce
         } else {
             window.sharedContext.contentBounds.size = windowSize
             let center = CGPoint(x: windowSize.width * 0.5, y: windowSize.height * 0.5)
-            view.place(at: center, anchor: .center, proposal: ProposedViewSize(windowSize))
+            view.place(at: center, anchor: .center, proposal: ProposedViewSize(contentSize))
         }
     }
 

@@ -71,11 +71,13 @@ extension _PaddingLayout: _ViewLayoutModifier {
             }
 
             var proposal = proposal
-            if let w = proposal.width {
-                proposal.width = max(w - paddingH, 0)
-            }
-            if let h = proposal.height {
-                proposal.height = max(h - paddingV, 0)
+            if proposal != .zero && proposal != .infinity && proposal != .unspecified {
+                if let w = proposal.width {
+                    proposal.width = max(w - paddingH, 0)
+                }
+                if let h = proposal.height {
+                    proposal.height = max(h - paddingV, 0)
+                }
             }
             let size = self.body.sizeThatFits(proposal)
             return CGSize(width: max(size.width + paddingH, 0),
