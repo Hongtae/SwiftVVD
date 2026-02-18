@@ -74,7 +74,7 @@ class ViewGroupContext: ViewContext {
     override func updateEnvironment(_ environment: EnvironmentValues) {
         super.updateEnvironment(environment)
         self.subviews.forEach {
-            $0.updateEnvironment(self.environment)
+            $0.updateEnvironment(environment)
         }
     }
 

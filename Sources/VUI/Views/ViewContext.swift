@@ -161,8 +161,10 @@ class ViewContext: _GraphValueResolver {
 
     func updateEnvironment(_ environmentValues: EnvironmentValues) {
         inputs.environment.values.merge(environmentValues.values) { $1 }
-        inputs.modifiers.forEach {
-            $0.apply(to: &inputs.environment)
+        self.inputs.modifiers.forEach { modifier in
+            if modifier.isResolved {
+                modifier.apply(to: &self.environment)
+            }
         }
     }
 
