@@ -104,7 +104,17 @@ extension MenuStyle where Self == DefaultMenuStyle {
     public static var automatic: DefaultMenuStyle { .init() }
 }
 
-struct _SubmenuStyle: MenuStyle {
+struct _MenuItemMenuStyle: MenuStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        _MenuItemMenuBody(configuration: configuration)
+    }
+}
+
+private struct _MenuItemMenuBody: View {
+    let configuration: MenuStyleConfiguration
+    @State private var isHovered = false
+    @State private var isMenuOpen = false
+
     private struct TriangleRight: Shape {
         func path(in rect: CGRect) -> Path {
             var path = Path()
@@ -116,16 +126,30 @@ struct _SubmenuStyle: MenuStyle {
         }
     }
 
-    func makeBody(configuration: Configuration) -> some View {
-        //HStack(spacing: 4) {
-        HStack {
-            configuration.label
-            Spacer()
-            TriangleRight()
-                .fill(Color(white: 0.2))
-                .frame(width: 5, height: 8)
+    var body: some View {
+        let bgColor: Color = isHovered ? .blue : isMenuOpen ? Color.blue.opacity(0.8) : .clear
+        let fgColor: Color = (isHovered || isMenuOpen) ? .white : .black
+        let arrowColor: Color = (isHovered || isMenuOpen) ? .white : Color(white: 0.4)
+        ZStack(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 4)
+                .fill(bgColor)
+            HStack {
+                configuration.label
+                    .padding(.vertical, 4)
+                    .padding(.leading, 8)
+                Spacer()
+                TriangleRight()
+                    .fill(arrowColor)
+                    .frame(width: 4, height: 7)
+                    .padding(.trailing, 8)
+            }
         }
-        .modifier(MenuDropdownModifier(content: configuration.content))
+        .foregroundStyle(fgColor)
+        .modifier(MenuDropdownModifier(
+            content: configuration.content,
+            onHoverChanged: { isHovered = $0 },
+            onMenuOpenChanged: { isMenuOpen = $0 }
+        ))
     }
 }
 

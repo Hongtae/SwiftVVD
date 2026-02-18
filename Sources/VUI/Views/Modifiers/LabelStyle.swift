@@ -106,6 +106,20 @@ public struct TitleOnlyLabelStyle: LabelStyle {
     }
 }
 
+struct _MenuItemLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        ZStack(alignment: .leading) {
+            Rectangle().fill(Color.clear)
+            HStack(spacing: 6) {
+                configuration.icon
+                configuration.title
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+        }
+    }
+}
+
 extension LabelStyle where Self == DefaultLabelStyle {
     public static var automatic: DefaultLabelStyle { .init() }
 }

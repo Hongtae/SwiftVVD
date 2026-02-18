@@ -199,6 +199,41 @@ public struct BorderedButtonStyle: PrimitiveButtonStyle, PrimitiveButtonStyleWit
     }
 }
 
+struct _MenuItemButtonStyle: PrimitiveButtonStyle, PrimitiveButtonStyleWithPressingBody {
+    func makeBody(configuration: Configuration) -> some View {
+        makeBody(configuration: configuration, isPressing: false, callback: nil)
+    }
+
+    func makeBody(configuration: Configuration, isPressing: Bool, callback: ((Bool)->Void)? = nil) -> some View {
+        _MenuItemButtonBody(configuration: configuration, isPressing: isPressing, callback: callback)
+    }
+}
+
+private struct _MenuItemButtonBody: View {
+    let configuration: PrimitiveButtonStyleConfiguration
+    let isPressing: Bool
+    let callback: ((Bool)->Void)?
+
+    @State private var isHovered = false
+
+    var body: some View {
+        ZStack(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 4)
+                .fill(isHovered ? Color.blue : Color.clear)
+            configuration.label
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+        }
+        .foregroundStyle(isHovered ? Color.white : Color.black)
+        ._onButtonGesture(pressing: { isPressed in
+            callback?(isPressed)
+        }, perform: {
+            configuration.trigger()
+        })
+        .onHover { isHovered = $0 }
+    }
+}
+
 extension PrimitiveButtonStyle where Self == DefaultButtonStyle {
     public static var automatic: DefaultButtonStyle { .init() }
 }
