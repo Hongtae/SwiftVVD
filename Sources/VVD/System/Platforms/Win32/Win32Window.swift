@@ -318,7 +318,11 @@ final class Win32Window: Window {
             if let hWnd = self.hWnd {
                 let x = Int32(value.x)
                 let y = Int32(value.y)
-                SetWindowPos(hWnd, HWND_TOP, x, y, 0, 0, UINT(SWP_NOSIZE | SWP_NOOWNERZORDER | SWP_NOACTIVATE))
+                var flags = UINT(SWP_NOSIZE | SWP_NOOWNERZORDER | SWP_NOACTIVATE)
+                if style.contains(.auxiliaryWindow) {
+                    flags |= UINT(SWP_NOZORDER)
+                }
+                SetWindowPos(hWnd, HWND_TOP, x, y, 0, 0, flags)
             }
         }
     }
@@ -350,7 +354,11 @@ final class Win32Window: Window {
 
                     w = rc.right - rc.left
                     h = rc.bottom - rc.top
-                    SetWindowPos(hWnd, HWND_TOP, 0, 0, w, h, UINT(SWP_NOMOVE | SWP_NOOWNERZORDER | SWP_NOACTIVATE))
+                    var flags = UINT(SWP_NOMOVE | SWP_NOOWNERZORDER | SWP_NOACTIVATE)
+                    if self.style.contains(.auxiliaryWindow) {
+                        flags |= UINT(SWP_NOZORDER)
+                    }
+                    SetWindowPos(hWnd, HWND_TOP, 0, 0, w, h, flags)
                 }
             }
         }
@@ -403,8 +411,6 @@ final class Win32Window: Window {
 
             KillTimer(hWnd, updateKeyboardMouseTimerId)
             Self.windowMap.removeValue(forKey: hWnd)
-
-            SetWindowPos(hWnd, HWND_TOP, 0, 0, 0, 0, UINT(SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED))
 
             // Post WM_CLOSE to destroy window from DefWindowProc().
             PostMessageW(hWnd, UINT(WM_CLOSE), 0, 0)
