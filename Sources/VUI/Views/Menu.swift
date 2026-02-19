@@ -92,7 +92,7 @@ extension Menu where Label == MenuStyleConfiguration.Label, Content == MenuStyle
     public init(_ configuration: MenuStyleConfiguration) {
         self.label = configuration.label
         self.content = configuration.content
-        self.primaryAction = configuration.primaryAction
+        self.primaryAction = configuration._primaryAction
     }
 }
 
@@ -155,6 +155,7 @@ struct MenuDropdownModifier<MenuContent>: ViewModifier where MenuContent: View {
     let content: MenuContent
     var onHoverChanged: ((Bool) -> Void)? = nil
     var onMenuOpenChanged: ((Bool) -> Void)? = nil
+    var onPressingChanged: ((Bool) -> Void)? = nil
 }
 
 extension MenuDropdownModifier {
@@ -187,6 +188,7 @@ private class MenuDropdownGestureHandler: _GestureHandler {
     var typeFilter: _PrimitiveGestureTypes = .all
     let gesture: MenuDropdownGesture
     var openMenuCallback: ((CGPoint) -> Void)? = nil
+    var pressingCallback: ((Bool) -> Void)? = nil
     var location: CGPoint = .zero
 
     override var type: _PrimitiveGestureTypes { .button }
@@ -209,6 +211,7 @@ private class MenuDropdownGestureHandler: _GestureHandler {
         if deviceID == 0, buttonID == 0 {
             self.location = self.locationInView(location)
             self.state = .processing
+            self.pressingCallback?(true)
         } else {
             self.state = .failed
         }
@@ -222,6 +225,7 @@ private class MenuDropdownGestureHandler: _GestureHandler {
 
     override func ended(deviceID: Int, buttonID: Int) {
         if deviceID == 0, buttonID == 0, self.state == .processing {
+            self.pressingCallback?(false)
             self.state = .done
             self.openMenuCallback?(self.location)
         }
@@ -229,6 +233,7 @@ private class MenuDropdownGestureHandler: _GestureHandler {
 
     override func cancelled(deviceID: Int, buttonID: Int) {
         if deviceID == 0, buttonID == 0 {
+            self.pressingCallback?(false)
             self.state = .cancelled
         }
     }
@@ -282,6 +287,10 @@ private class MenuDropdownViewContext<MenuContent>: ViewModifierContext<MenuDrop
                 let origin = CGPoint(x: self.bounds.minX, y: self.bounds.maxY)
                 self.openMenu(at: origin)
             }
+            handler.pressingCallback = { [weak self] isPressing in
+                self?.modifier?.onPressingChanged?(isPressing)
+                self?.body.updateContent()
+            }
             let local = GestureHandlerOutputs(gestures: [handler],
                                               simultaneousGestures: [],
                                               highPriorityGestures: [])
@@ -291,10 +300,6 @@ private class MenuDropdownViewContext<MenuContent>: ViewModifierContext<MenuDrop
     }
 
     override func handleMouseHover(at location: CGPoint, deviceID: Int, isTopMost: Bool) -> Bool {
-        guard styleContext != nil else {
-            return super.handleMouseHover(at: location, deviceID: deviceID, isTopMost: isTopMost)
-        }
-
         _ = super.handleMouseHover(at: location, deviceID: deviceID, isTopMost: isTopMost)
 
         if deviceID == 0 {
@@ -313,15 +318,17 @@ private class MenuDropdownViewContext<MenuContent>: ViewModifierContext<MenuDrop
             }
 
             if wasHovered != self.isMouseHovered {
-                if self.isMouseHovered {
-                    self.isPopupActivated = false
-                    if !self.isMenuOpen {
-                        let origin = CGPoint(x: self.bounds.maxX, y: self.bounds.minY)
-                        self.openMenu(at: origin)
-                    }
-                } else {
-                    if !self.isPopupActivated {
-                        self.closeMenu()
+                if styleContext != nil {
+                    if self.isMouseHovered {
+                        self.isPopupActivated = false
+                        if !self.isMenuOpen {
+                            let origin = CGPoint(x: self.bounds.maxX, y: self.bounds.minY)
+                            self.openMenu(at: origin)
+                        }
+                    } else {
+                        if !self.isPopupActivated {
+                            self.closeMenu()
+                        }
                     }
                 }
                 self.modifier?.onHoverChanged?(self.isMouseHovered)
@@ -393,6 +400,14 @@ private class ResolvedMenuStyleViewContext: GenericViewContext<ResolvedMenuStyle
         super.init(graph: graph, body: body, inputs: inputs)
     }
 
+    func onDispatchPrimaryAction(_ action: @escaping () -> Void) {
+        self.sharedContext.auxiliarySceneContext?.dismissPopup(withParentContext: true)
+        let box = UnsafeBox(action)
+        Task { @MainActor in
+            box.value()
+        }
+    }
+
     override func updateView(_ view: inout ResolvedMenuStyle) {
         if let menuStyle {
             guard let style = menuStyle.resolve(self) else {
@@ -403,7 +418,11 @@ private class ResolvedMenuStyleViewContext: GenericViewContext<ResolvedMenuStyle
         view._configuration = MenuStyleConfiguration(
             configuration._label,
             configuration._content,
-            primaryAction: view._primaryAction
+            primaryAction: view._primaryAction.map { action in
+                { [weak self] in
+                    self?.onDispatchPrimaryAction(action) 
+                }
+            }
         )
     }
 

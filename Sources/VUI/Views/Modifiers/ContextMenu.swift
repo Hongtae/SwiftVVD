@@ -160,8 +160,10 @@ private class ContextMenuViewContext<MenuContent>: ViewModifierContext<ContextMe
         super.init(graph: graph, body: body, inputs: inputs)
 
         let sceneRoot = _SceneRoot(view: self)
+        var popupEnvironment = self.environment
+        popupEnvironment._menuContext = MenuContext()
         let sceneInputs = _SceneInputs(root: sceneRoot,
-                                       environment: self.environment,
+                                       environment: popupEnvironment,
                                        modifiers: self.inputs.modifiers,
                                        _modifierTypeGraphs: self.inputs._modifierTypeGraphs)
 
@@ -211,6 +213,13 @@ private class ContextMenuViewContext<MenuContent>: ViewModifierContext<ContextMe
             view.sharedContext.app
         }
         unowned let view: ContextMenuViewContext<MenuContent>
+
+        func value<T>(atPath path: _GraphValue<T>) -> T? {
+            if let v = graph.value(atPath: path, from: root) {
+                return v
+            }
+            return view.value(atPath: path)
+        }
     }
 
     func openMenu(at location: CGPoint, dismissOnDeactivate: Bool) {
