@@ -45,7 +45,7 @@ extension Layout {
                                   proposal: ProposedViewSize,
                                   subviews: Self.Subviews,
                                   cache: inout Self.Cache) -> CGFloat? {
-        nil
+        return nil
     }
 
     public func explicitAlignment(of guide: VerticalAlignment,
@@ -53,7 +53,7 @@ extension Layout {
                                   proposal: ProposedViewSize,
                                   subviews: Self.Subviews,
                                   cache: inout Self.Cache) -> CGFloat? {
-        nil
+        return nil
     }
 
     public func spacing(subviews: Self.Subviews,
@@ -88,9 +88,7 @@ public struct LayoutProperties {
     }
 }
 
-extension Layout {
-    static var _defaultLayoutSpacing: CGFloat { 0 }
-}
+
 
 private extension Layout {
     @inline(__always)

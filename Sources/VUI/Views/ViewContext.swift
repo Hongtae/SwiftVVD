@@ -36,7 +36,7 @@ class ViewContext: _GraphValueResolver {
     var frame: CGRect
     var transform: AffineTransform = .identity          // local transform
     var transformToRoot: AffineTransform = .identity    // local to root
-    var spacing: ViewSpacing
+    var spacing: ViewSpacing { styleContext?.viewSpacing ?? ViewSpacing() }
     var requiresContentUpdates: Bool = false
 
     var bounds: CGRect {
@@ -65,7 +65,6 @@ class ViewContext: _GraphValueResolver {
         self.sharedContext = sharedContext
         self.traits = [:]
         self.frame = .zero
-        self.spacing = .zero
         let resolvedInputs = inputs.resolveMergedInputs()
         self.inputs = resolvedInputs
         self.environment = resolvedInputs.environment

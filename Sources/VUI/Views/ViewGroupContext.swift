@@ -121,6 +121,56 @@ class ViewGroupContext: ViewContext {
         return size
     }
 
+    override func dimensions(in proposal: ProposedViewSize) -> ViewDimensions {
+        let size = sizeThatFits(proposal)
+        var dimensions = ViewDimensions(width: size.width, height: size.height)
+        
+        let viewList = self.activeSubviews.flatMap {
+            $0.multiViewForLayout()
+        }
+        let subviews: [LayoutSubview] = viewList.map {
+            LayoutSubview(view: $0)
+        }
+        
+        if subviews.isEmpty == false {
+            let layoutSubviews = AnyLayout.Subviews(subviews: subviews,
+                                                    layoutDirection: .leftToRight)
+            
+            if var cache = self.layoutCache {
+                self.layout.updateCache(&cache, subviews: layoutSubviews)
+                self.layoutCache = cache
+            } else {
+                self.layoutCache = self.layout.makeCache(subviews: layoutSubviews)
+            }
+            
+            if var cache = self.layoutCache {
+                let bounds = CGRect(origin: .zero, size: size)
+                
+                // Query layout for explicit alignment guides
+                // This allows stacks to export their alignment (e.g., baseline) to parent layouts
+                if let value = self.layout.explicitAlignment(of: .firstTextBaseline,
+                                                             in: bounds,
+                                                             proposal: ProposedViewSize(size),
+                                                             subviews: layoutSubviews,
+                                                             cache: &cache) {
+                    dimensions.explicitAlignments[VerticalAlignment.firstTextBaseline.key] = value
+                }
+                
+                if let value = self.layout.explicitAlignment(of: .lastTextBaseline,
+                                                             in: bounds,
+                                                             proposal: ProposedViewSize(size),
+                                                             subviews: layoutSubviews,
+                                                             cache: &cache) {
+                    dimensions.explicitAlignments[VerticalAlignment.lastTextBaseline.key] = value
+                }
+                
+                self.layoutCache = cache
+            }
+        }
+        
+        return dimensions
+    }
+
     override func layoutSubviews() {
         let frame = self.bounds
         guard frame.width > 0 && frame.height > 0 else { return }
@@ -144,20 +194,10 @@ class ViewGroupContext: ViewContext {
             if var cache = self.layoutCache {
                 let proposal = ProposedViewSize(frame.size)
                 _/*let size*/ = self.layout.sizeThatFits(proposal: proposal,
-                                                    subviews: layoutSubviews,
-                                                    cache: &cache)
-                _/*let halign*/ = self.layout.explicitAlignment(of: HorizontalAlignment.center,
-                                                           in: frame,
-                                                           proposal: proposal,
-                                                           subviews: layoutSubviews,
-                                                           cache: &cache)
-                _/*let valign*/ = self.layout.explicitAlignment(of: VerticalAlignment.center,
-                                                           in: frame,
-                                                           proposal: proposal,
-                                                           subviews: layoutSubviews,
-                                                           cache: &cache)
-
+                                                         subviews: layoutSubviews,
+                                                         cache: &cache)
                 // TODO: calcuate alignment guide.
+
                 self.layout.placeSubviews(in: frame,
                                           proposal: proposal,
                                           subviews: layoutSubviews,

@@ -11,9 +11,9 @@ public struct _AlignmentWritingModifier: ViewModifier {
     @usableFromInline
     let key: AlignmentKey
     @usableFromInline
-    let computeValue: (ViewDimensions) -> CGFloat
+    let computeValue: @Sendable (ViewDimensions) -> CGFloat
 
-    @inlinable init(key: AlignmentKey, computeValue: @escaping (ViewDimensions) -> CGFloat) {
+    @inlinable init(key: AlignmentKey, computeValue: @escaping @Sendable (ViewDimensions) -> CGFloat) {
         self.key = key
         self.computeValue = computeValue
     }
@@ -28,12 +28,12 @@ extension _AlignmentWritingModifier: _UnaryViewModifier {
 }
 
 extension View {
-    @inlinable public func alignmentGuide(_ g: HorizontalAlignment, computeValue: @escaping (ViewDimensions) -> CGFloat) -> some View {
+    @inlinable public func alignmentGuide(_ g: HorizontalAlignment, computeValue: @escaping @Sendable (ViewDimensions) -> CGFloat) -> some View {
         return modifier(
             _AlignmentWritingModifier(key: g.key, computeValue: computeValue))
     }
 
-    @inlinable public func alignmentGuide(_ g: VerticalAlignment, computeValue: @escaping (ViewDimensions) -> CGFloat) -> some View {
+    @inlinable public func alignmentGuide(_ g: VerticalAlignment, computeValue: @escaping @Sendable (ViewDimensions) -> CGFloat) -> some View {
         return modifier(
             _AlignmentWritingModifier(key: g.key, computeValue: computeValue))
     }

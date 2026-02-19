@@ -2,23 +2,19 @@
 //  File: ZStackLayout.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
 
 public struct ZStackLayout: Layout {
-    public typealias Cache = Void
     public var alignment: Alignment
 
-    public var animatableData: EmptyAnimatableData {
-        get { EmptyAnimatableData() }
-        set { }
-    }
+    public typealias AnimatableData = EmptyAnimatableData
+    public typealias Cache = Void
 
     public init(alignment: Alignment = .center) {
         self.alignment = alignment
-        self.animatableData = EmptyAnimatableData()
     }
 
     public func spacing(subviews: Self.Subviews,
@@ -65,15 +61,12 @@ public struct ZStackLayout: Layout {
         let offset = CGPoint(x: minX + width * anchor.x,
                              y: minY + height * anchor.y)
 
+        // ZStack passes the bounds-constrained proposal to each child
+        // Children decide their own size within those constraints
+        let boundsProposal = ProposedViewSize(width: width, height: height)
+        
         subviews.forEach { view in
-            let maxSize = view.sizeThatFits(proposal)
-            let minSize = view.sizeThatFits(.unspecified)
-
-            let fitWidth = min(width, max(maxSize.width, minSize.width))
-            let fitHeight = min(height, max(maxSize.height, minSize.height))
-
-            let proposal = ProposedViewSize(width: fitWidth, height: fitHeight)
-            view.place(at: offset, anchor: anchor, proposal: proposal)
+            view.place(at: offset, anchor: anchor, proposal: boundsProposal)
         }
     }
 }
@@ -82,6 +75,4 @@ public typealias _ZStackLayout = ZStackLayout
 extension _ZStackLayout: _VariadicView_UnaryViewRoot {}
 extension _ZStackLayout: Sendable {}
 
-extension _ZStackLayout {
-    static var _defaultLayoutSpacing: CGFloat { 0 }
-}
+

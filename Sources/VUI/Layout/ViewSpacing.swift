@@ -8,18 +8,23 @@
 import Foundation
 
 public struct ViewSpacing: Sendable {
-    public static let zero = ViewSpacing()
+    public static let zero = ViewSpacing(top: 0, leading: 0, bottom: 0, trailing: 0)
 
-    let top: CGFloat
-    let leading: CGFloat
-    let bottom: CGFloat
-    let trailing: CGFloat
+    static let defaultSpacing: CGFloat = 8
+
+    var top: CGFloat?
+    var leading: CGFloat?
+    var bottom: CGFloat?
+    var trailing: CGFloat?
 
     public init() {
-        self.init(top: 0, leading: 0, bottom: 0, trailing: 0)
+        self.top = nil
+        self.leading = nil
+        self.bottom = nil
+        self.trailing = nil
     }
 
-    init(top: CGFloat, leading: CGFloat, bottom: CGFloat, trailing: CGFloat) {
+    init(top: CGFloat?, leading: CGFloat?, bottom: CGFloat?, trailing: CGFloat?) {
         self.top = top
         self.leading = leading
         self.bottom = bottom
@@ -31,25 +36,40 @@ public struct ViewSpacing: Sendable {
     }
 
     public func union(_ other: ViewSpacing, edges: Edge.Set = .all) -> ViewSpacing {
-        var top = self.top
-        var leading = self.leading
-        var bottom = self.bottom
-        var trailing = self.trailing
-
-        if edges.contains(.top) { top = max(top, other.top) }
-        if edges.contains(.leading) { leading = max(leading, other.leading) }
-        if edges.contains(.bottom) { bottom = max(bottom, other.bottom) }
-        if edges.contains(.trailing) { trailing = max(trailing, other.trailing) }
-
-        return ViewSpacing(top: top, leading: leading, bottom: bottom, trailing: trailing)
+        var result = self
+        if edges.contains(.top) {
+            let s = self.top ?? Self.defaultSpacing
+            let o = other.top ?? Self.defaultSpacing
+            result.top = max(s, o)
+        }
+        if edges.contains(.leading) {
+            let s = self.leading ?? Self.defaultSpacing
+            let o = other.leading ?? Self.defaultSpacing
+            result.leading = max(s, o)
+        }
+        if edges.contains(.bottom) {
+            let s = self.bottom ?? Self.defaultSpacing
+            let o = other.bottom ?? Self.defaultSpacing
+            result.bottom = max(s, o)
+        }
+        if edges.contains(.trailing) {
+            let s = self.trailing ?? Self.defaultSpacing
+            let o = other.trailing ?? Self.defaultSpacing
+            result.trailing = max(s, o)
+        }
+        return result
     }
 
     public func distance(to next: ViewSpacing, along axis: Axis) -> CGFloat {
         switch axis {
         case .horizontal:
-            return max(self.trailing, next.leading)
+            let trailing = self.trailing ?? Self.defaultSpacing
+            let leading = next.leading ?? Self.defaultSpacing
+            return max(trailing, leading)
         case .vertical:
-            return max(self.bottom, next.top)
+            let bottom = self.bottom ?? Self.defaultSpacing
+            let top = next.top ?? Self.defaultSpacing
+            return max(bottom, top)
         }
     }
 }

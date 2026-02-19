@@ -2,7 +2,7 @@
 //  File: Alignment.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -12,8 +12,11 @@ public protocol AlignmentID {
 }
 
 @usableFromInline
-struct AlignmentKey: Equatable {
+struct AlignmentKey: Hashable, Comparable {
     let bits: UInt
+    public static func < (lhs: AlignmentKey, rhs: AlignmentKey) -> Bool {
+        lhs.bits < rhs.bits
+    }
 }
 
 public struct HorizontalAlignment: Equatable {

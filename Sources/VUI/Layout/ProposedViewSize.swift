@@ -11,8 +11,11 @@ public struct ProposedViewSize: Equatable, Sendable {
     public var width: CGFloat?
     public var height: CGFloat?
 
+    // The zero proposal - the view responds with its minimum size.
     public static let zero = ProposedViewSize(width: 0, height: 0)
+    // The unspecified proposal - the view responds with its ideal size.
     public static let unspecified = ProposedViewSize(width: nil, height: nil)
+    // The infinity proposal - the view responds with its maximum size.
     public static let infinity = ProposedViewSize(width: .infinity, height: .infinity)
 
     @inlinable public init(width: CGFloat? = nil, height: CGFloat? = nil) {

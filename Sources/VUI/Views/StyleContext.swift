@@ -15,6 +15,8 @@ protocol StyleContext: Sendable {
     var textOffset: Int { get }
     var buttonStyle: (any StyleContext)? { get }
     var buttonHighlightStyle: (any StyleContext)? { get }
+
+    var viewSpacing: ViewSpacing { get }
 }
 
 extension StyleContext {
@@ -26,6 +28,8 @@ extension StyleContext {
     var textOffset: Int { 0 }
     var buttonStyle: (any StyleContext)? { nil }
     var buttonHighlightStyle: (any StyleContext)? { nil }
+
+    var viewSpacing: ViewSpacing { ViewSpacing() }
 }
 
 private protocol _MenuItemStyleContext: StyleContext {
@@ -40,6 +44,8 @@ extension _MenuItemStyleContext {
     var textOffset: Int { 4 }
     var buttonStyle: (any StyleContext)? { MenuButtonStyleContext() }
     var buttonHighlightStyle: (any StyleContext)? { MenuButtonHighlightStyleContext() }
+
+    var viewSpacing: ViewSpacing { .zero }
 }
 
 struct MenuStyleContext: StyleContext, _MenuItemStyleContext {

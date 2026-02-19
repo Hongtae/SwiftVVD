@@ -289,14 +289,16 @@ class GenericWindowContext<Content>: WindowContext,
                 self.onViewLoaded()
             }
 
-            if sharedContext.needsLayout {
+            while sharedContext.needsLayout {
                 let bounds = self.layoutBounds(sharedContext.contentBounds)
                 assert(bounds.width > 0 && bounds.height > 0)
-                sharedContext.needsLayout = false
+                let isInitialLayout = view.frame == .zero
+                sharedContext.needsLayout = isInitialLayout
                 view.place(at: CGPoint(x: bounds.midX, y: bounds.midY),
                            anchor: .center,
                            proposal: ProposedViewSize(bounds.size))
                 view.update(transform: .identity)
+                assert(view.frame != .zero)
                 if sharedContext.needsLayout == false {
                     self.onViewLayoutUpdated()
                 }

@@ -343,6 +343,22 @@ private class TextViewContext: PrimitiveViewContext<Text> {
         return size
     }
 
+    override func dimensions(in proposal: ProposedViewSize) -> ViewDimensions {
+        let size = sizeThatFits(proposal)
+        var d = ViewDimensions(width: size.width, height: size.height)
+        
+        // Only set baseline if text is resolved
+        // If not set, ViewDimensions will fallback to .bottom (height)
+        if let resolvedText {
+            let firstBaseline = resolvedText.firstBaseline(in: size)
+            let lastBaseline = resolvedText.lastBaseline(in: size)
+            d.explicitAlignments[VerticalAlignment.firstTextBaseline.key] = firstBaseline
+            d.explicitAlignments[VerticalAlignment.lastTextBaseline.key] = lastBaseline
+        }
+        
+        return d
+    }
+
     override func draw(frame: CGRect, context: GraphicsContext) {
         super.draw(frame: frame, context: context)
 

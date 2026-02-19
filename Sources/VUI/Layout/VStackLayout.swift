@@ -2,7 +2,7 @@
 //  File: VStackLayout.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -11,15 +11,13 @@ public struct VStackLayout: Layout {
     public var alignment: HorizontalAlignment
     public var spacing: CGFloat?
 
+    public typealias Body = Never
     public typealias AnimatableData = EmptyAnimatableData
     public typealias Cache = _StackLayoutCache
-
-    public var animatableData: EmptyAnimatableData
 
     public init(alignment: HorizontalAlignment = .center, spacing: CGFloat? = nil) {
         self.alignment = alignment
         self.spacing = spacing
-        self.animatableData = EmptyAnimatableData()
     }
 
     public func makeCache(subviews: Subviews) -> Self.Cache {
@@ -31,58 +29,116 @@ public struct VStackLayout: Layout {
     public func updateCache(_ cache: inout Self.Cache, subviews: Subviews) {
         cache.priorities = subviews.map { $0.priority }
         cache.spacings = subviews.map { $0.spacing }
-        cache.minSizes = subviews.map { $0.sizeThatFits(.zero) }
-        cache.maxSizes = subviews.map { $0.sizeThatFits(.infinity) }
-
-        let layoutSpacing: CGFloat = self.spacing ?? Self._defaultLayoutSpacing
+        cache.horizontalAlignment = self.alignment
 
         cache.subviewSpacings = cache.spacings.indices.map { index in
             if index > 0 {
+                if let layoutSpacing = self.spacing {
+                    return layoutSpacing
+                }
                 let spacing1 = cache.spacings[index-1]
                 let spacing2 = cache.spacings[index]
-                let space = spacing2.distance(to: spacing1, along: .vertical)
-                return max(space, layoutSpacing)
+                return spacing1.distance(to: spacing2, along: .vertical)
             }
             return 0
         }
     }
 
+    private func layoutHeights(proposal: ProposedViewSize,
+                               subviews: Subviews,
+                               cache: inout Self.Cache) -> [CGFloat] {
+        let fitWidthProposal = ProposedViewSize(width: proposal.width)
+        
+        let minHeights = subviews.map { $0.sizeThatFits(ProposedViewSize(width: fitWidthProposal.width, height: 0)).height }
+        let idealHeights = subviews.map { $0.sizeThatFits(fitWidthProposal).height }
+        let maxHeights = subviews.map { $0.sizeThatFits(ProposedViewSize(width: fitWidthProposal.width, height: .infinity)).height }
+        
+        if proposal.height == nil {
+            return idealHeights
+        }
+        
+        let totalSpacing = cache.subviewSpacings.reduce(0, +)
+        let totalMinHeight = minHeights.reduce(0, +) + totalSpacing
+        let availableHeight = proposal.height!
+        
+        var currentHeights = minHeights
+        var remainingSpace = availableHeight - totalMinHeight
+        
+        if remainingSpace <= 0 {
+            // Insufficient space: all views get minimum height (may clip)
+            return minHeights
+        }
+        
+        let priorities = cache.priorities
+        let uniquePriorities = Set(priorities).sorted(by: >)
+        
+        // Phase 1: Grow from min to ideal (high priority first)
+        for priority in uniquePriorities {
+            var flexibleIndices = subviews.indices.filter {
+                priorities[$0] == priority && currentHeights[$0] < idealHeights[$0]
+            }
+            
+            while remainingSpace > 1e-5 && !flexibleIndices.isEmpty {
+                let count = CGFloat(flexibleIndices.count)
+                let share = remainingSpace / count
+                var distributed: CGFloat = 0
+                
+                for index in flexibleIndices {
+                    let limit = idealHeights[index] - currentHeights[index]
+                    let give = min(share, limit)
+                    currentHeights[index] += give
+                    distributed += give
+                }
+                
+                remainingSpace -= distributed
+                if distributed < 1e-5 { break }
+                
+                flexibleIndices = flexibleIndices.filter { currentHeights[$0] < idealHeights[$0] }
+            }
+        }
+        
+        // Phase 2: Grow from ideal to max (high priority first)
+        for priority in uniquePriorities {
+            var flexibleIndices = subviews.indices.filter {
+                priorities[$0] == priority && currentHeights[$0] < maxHeights[$0]
+            }
+            
+            while remainingSpace > 1e-5 && !flexibleIndices.isEmpty {
+                let count = CGFloat(flexibleIndices.count)
+                let share = remainingSpace / count
+                var distributed: CGFloat = 0
+                
+                for index in flexibleIndices {
+                    let limit = maxHeights[index] - currentHeights[index]
+                    let give = min(share, limit)
+                    currentHeights[index] += give
+                    distributed += give
+                }
+                
+                remainingSpace -= distributed
+                if distributed < 1e-5 { break }
+                
+                flexibleIndices = flexibleIndices.filter { currentHeights[$0] < maxHeights[$0] }
+            }
+        }
+        
+        return currentHeights
+    }
+
     public func sizeThatFits(proposal: ProposedViewSize,
                              subviews: Subviews,
                              cache: inout Self.Cache) -> CGSize {
-        let size = proposal.replacingUnspecifiedDimensions()
-        let spacing = cache.subviewSpacings.reduce(.zero, +)
-
-        let minHeight = cache.minSizes.reduce(CGFloat.zero) { result, size in
-            result + size.height
+        let heights = layoutHeights(proposal: proposal, subviews: subviews, cache: &cache)
+        let totalSpacing = cache.subviewSpacings.reduce(0, +)
+        let totalHeight = heights.reduce(0, +) + totalSpacing
+        
+        let fitWidthProposal = ProposedViewSize(width: proposal.width)
+        let widths = subviews.indices.map { index in
+            subviews[index].sizeThatFits(ProposedViewSize(width: fitWidthProposal.width, height: heights[index])).width
         }
-
-        if proposal == .zero {
-            return CGSize(width: size.width, height: minHeight + spacing)
-        }
-
-        let proposalFitSize = ProposedViewSize(width: proposal.width)
-        let fitSizes = subviews.map {
-            $0.sizeThatFits(proposalFitSize)
-        }
-
-        let fitHeight = fitSizes.reduce(CGFloat.zero) { result, size in
-            result + size.height
-        }
-        let fitWidth = fitSizes.reduce(CGFloat.zero) { result, size in
-            max(result, size.width)
-        }
-
-        if proposal.height == nil {
-            return CGSize(width: fitWidth, height: fitHeight + spacing)
-        }
-
-        let maxHeight = cache.maxSizes.reduce(CGFloat.zero) { result, size in
-            result + size.height
-        }
-
-        let height = min(max(size.height - spacing, fitHeight), maxHeight)
-        return CGSize(width: fitWidth, height: height + spacing)
+        let maxWidth = widths.reduce(0, max)
+        
+        return CGSize(width: maxWidth, height: totalHeight)
     }
 
     public func spacing(subviews: Self.Subviews,
@@ -101,67 +157,53 @@ public struct VStackLayout: Layout {
                               proposal: ProposedViewSize,
                               subviews: Subviews,
                               cache: inout Self.Cache) {
-        var offset = bounds.origin
-        let width = bounds.width
-        let height = bounds.height
-        var anchor: UnitPoint
-        switch self.alignment {
-        case .leading:
-            offset.x = bounds.minX
-            anchor = .topLeading
-        case .trailing:
-            offset.x = bounds.maxX
-            anchor = .topTrailing
-        default:
-            offset.x = bounds.midX
-            anchor = .top
+        let start = bounds.origin
+        
+        // Use bounds height for layout calculation
+        let actualProposal = ProposedViewSize(width: bounds.width, height: bounds.height)
+        let heights = layoutHeights(proposal: actualProposal, subviews: subviews, cache: &cache)
+        
+        // Pre-calculate max leading and trailing for alignment
+        var maxLeading: CGFloat = 0
+        var maxTrailing: CGFloat = 0
+        var leadings: [CGFloat] = []
+        leadings.reserveCapacity(subviews.count)
+        
+        for index in subviews.indices {
+            let childHeight = heights[index]
+            let childProposal = ProposedViewSize(width: actualProposal.width, height: childHeight)
+            let dimensions = subviews[index].dimensions(in: childProposal)
+            
+            let leading = dimensions[self.alignment]
+            let trailing = dimensions.width - leading
+            
+            maxLeading = max(maxLeading, leading)
+            maxTrailing = max(maxTrailing, trailing)
+            
+            leadings.append(leading)
         }
-
-        let proposalSize = proposal.replacingUnspecifiedDimensions()
-        let fitSizes = subviews.map {
-            $0.sizeThatFits(ProposedViewSize(width: proposalSize.width))
-        }
-
-        let fitHeight = fitSizes.reduce(CGFloat.zero) { result, size in
-            result + size.height
-        }
-        let maxHeight = cache.maxSizes.reduce(CGFloat.zero) { result, size in
-            result + size.height
-        }
-        let totalSpacing = cache.subviewSpacings.reduce(.zero, +)
-
-        let layoutHeight = min(maxHeight + totalSpacing, height)
-        offset.y += (height - layoutHeight) * 0.5    // center layout
-
-        var restOfFlexibleViews = zip(cache.maxSizes, fitSizes).reduce(Int.zero) {
-            count, sizes in
-            count + (sizes.0.height > sizes.1.height ? 1 : 0)
-        }
-        var flexibleSpaces = max(layoutHeight - fitHeight - totalSpacing, 0)
-
-        subviews.indices.forEach { index in
-            var fitHeight = fitSizes[index].height
-            let maxHeight = cache.maxSizes[index].height
-
-            let flexible = maxHeight > fitHeight
-            if flexible && restOfFlexibleViews > 0 {
-                let s = max(flexibleSpaces, 0) / CGFloat(restOfFlexibleViews)
-                fitHeight += s
-                flexibleSpaces -= s
-                restOfFlexibleViews -= 1
-            }
+        
+        let contentWidth = maxLeading + maxTrailing
+        // Center the content horizontally within bounds
+        let contentLeading = bounds.minX + (bounds.width - contentWidth) * 0.5
+        let guideX = contentLeading + maxLeading
+        
+        var offset = start
+        
+        for index in subviews.indices {
             offset.y += cache.subviewSpacings[index]
-
-            let proposal = ProposedViewSize(width: width, height: fitHeight)
-            subviews[index].place(at: offset,
-                                  anchor: anchor,
-                                  proposal: proposal)
-            let placed = subviews[index].dimensions(in: proposal)
-
-            if flexible {
-                flexibleSpaces = flexibleSpaces - (placed.height - fitHeight)
-            }
-            offset.y += placed.height
+            
+            let childHeight = heights[index]
+            let childProposal = ProposedViewSize(width: actualProposal.width, height: childHeight)
+            
+            let leading = leadings[index]
+            let x = guideX - leading
+            
+            subviews[index].place(at: CGPoint(x: x, y: offset.y),
+                                  anchor: .topLeading,
+                                  proposal: childProposal)
+            
+            offset.y += childHeight
         }
     }
 
@@ -176,6 +218,4 @@ extension _VStackLayout: _VariadicView_UnaryViewRoot {}
 extension _VStackLayout: _VariadicView_ViewRoot {}
 extension _VStackLayout: Sendable {}
 
-extension _VStackLayout {
-    static var _defaultLayoutSpacing: CGFloat { 8 }
-}
+
