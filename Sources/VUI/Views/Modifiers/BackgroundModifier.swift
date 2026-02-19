@@ -2,7 +2,7 @@
 //  File: BackgroundModifier.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -232,6 +232,11 @@ private class BackgroundViewContext<Modifier>: ViewModifierContext<Modifier> whe
         return false
     }
 
+    override func update(transform t: AffineTransform) {
+        super.update(transform: t)
+        background.update(transform: self.transformToRoot)
+    }
+
     override func layoutSubviews() {
         super.layoutSubviews()
 
@@ -302,5 +307,28 @@ private class BackgroundViewContext<Modifier>: ViewModifierContext<Modifier> whe
         }
         let local = location.applying(background.transformToContainer.inverted())
         return background.hitTest(local)
+    }
+
+    override func gestureHandlers(at location: CGPoint) -> GestureHandlerOutputs {
+        var outputs = super.gestureHandlers(at: location)
+        let local = location.applying(background.transformToContainer.inverted())
+        outputs = outputs.merge(background.gestureHandlers(at: local))
+        return outputs
+    }
+
+    override func handleMouseWheel(at location: CGPoint, delta: CGPoint) -> Bool {
+        if super.handleMouseWheel(at: location, delta: delta) {
+            return true
+        }
+        let local = location.applying(background.transformToContainer.inverted())
+        return background.handleMouseWheel(at: local, delta: delta)
+    }
+
+    override func handleMouseHover(at location: CGPoint, deviceID: Int, isTopMost: Bool) -> Bool {
+        if super.handleMouseHover(at: location, deviceID: deviceID, isTopMost: isTopMost) {
+            return true
+        }
+        let local = location.applying(background.transformToContainer.inverted())
+        return background.handleMouseHover(at: local, deviceID: deviceID, isTopMost: isTopMost)
     }
 }

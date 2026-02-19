@@ -2,7 +2,7 @@
 //  File: GestureModifier.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -255,7 +255,7 @@ private class GestureViewContext<Modifier>: ViewModifierContext<Modifier> where 
             } else if case let .gesture(handler) = gesture {
                 gestures.append(handler)
             }
-            // prioritize inner view higher.
+            // prioritize modifier's gesture higher.
             return GestureHandlerOutputs(gestures: gestures,
                                          simultaneousGestures: simGestures,
                                          highPriorityGestures: hpGestures)

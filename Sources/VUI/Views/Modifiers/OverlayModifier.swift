@@ -2,7 +2,7 @@
 //  File: OverlayModifier.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -184,6 +184,11 @@ private class OverlayViewContext<Modifier>: ViewModifierContext<Modifier> where 
         super.validate() && overlay.validate()
     }
 
+    override func update(transform t: AffineTransform) {
+        super.update(transform: t)
+        overlay.update(transform: self.transformToRoot)
+    }
+
     override func layoutSubviews() {
         super.layoutSubviews()
 
@@ -254,5 +259,28 @@ private class OverlayViewContext<Modifier>: ViewModifierContext<Modifier> where 
             return result
         }
         return super.hitTest(location)
+    }
+
+    override func gestureHandlers(at location: CGPoint) -> GestureHandlerOutputs {
+        let local = location.applying(overlay.transformToContainer.inverted())
+        var outputs = overlay.gestureHandlers(at: local)
+        outputs = outputs.merge(super.gestureHandlers(at: location))
+        return outputs
+    }
+
+    override func handleMouseWheel(at location: CGPoint, delta: CGPoint) -> Bool {
+        let local = location.applying(overlay.transformToContainer.inverted())
+        if overlay.handleMouseWheel(at: local, delta: delta) {
+            return true
+        }
+        return super.handleMouseWheel(at: location, delta: delta)
+    }
+
+    override func handleMouseHover(at location: CGPoint, deviceID: Int, isTopMost: Bool) -> Bool {
+        let local = location.applying(overlay.transformToContainer.inverted())
+        if overlay.handleMouseHover(at: local, deviceID: deviceID, isTopMost: isTopMost) {
+            return true
+        }
+        return super.handleMouseHover(at: location, deviceID: deviceID, isTopMost: isTopMost)
     }
 }
