@@ -213,5 +213,4 @@ private class ResolvedButtonStyleViewContext: GenericViewContext<ResolvedButtonS
             box.value()
         }
     }
-
 }

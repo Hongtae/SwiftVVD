@@ -223,8 +223,7 @@ private struct _MenuItemButtonBody: View {
             configuration.label
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
-        }
-        .border(.red, width: 1)
+        }        
         .foregroundStyle(isHovered ? Color.white : Color.black)
         ._onButtonGesture(pressing: { isPressed in
             callback?(isPressed)
@@ -232,6 +231,7 @@ private struct _MenuItemButtonBody: View {
             configuration.trigger()
         })
         .onHover { isHovered = $0 }
+        //.border(.red, width: 1)
     }
 }
 
