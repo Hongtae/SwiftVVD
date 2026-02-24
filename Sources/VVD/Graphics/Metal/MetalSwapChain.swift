@@ -16,6 +16,11 @@ final class MetalSwapChain: SwapChain, @unchecked Sendable {
     let queue: MetalCommandQueue
     private var layer: CAMetalLayer
 
+    var displaySyncEnabled: Bool {
+        get { self.layer.displaySyncEnabled }
+        set { self.layer.displaySyncEnabled = newValue }
+    }
+
     private var _pixelFormat: PixelFormat
     var pixelFormat: PixelFormat {
         get { _pixelFormat }

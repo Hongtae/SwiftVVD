@@ -14,7 +14,13 @@ final class VulkanSwapChain: SwapChain, @unchecked Sendable {
     let window: any Window
     let queue: VulkanCommandQueue
 
-    var enableVSync = false
+    var displaySyncEnabled: Bool = false {
+        didSet {
+            if oldValue != displaySyncEnabled {
+                self.lock.withLock { self.deviceReset = true }
+            }
+        }
+    }
 
     private var frameCount: UInt64  // incremented at each present 
     private var imageIndex: UInt32  // returned from vkAcquireNextImageKHR
@@ -305,7 +311,7 @@ final class VulkanSwapChain: SwapChain, @unchecked Sendable {
 
         // If v-sync is not requested, try to find a mailbox mode
         // It's the lowest latency non-tearing present mode available
-        if self.enableVSync == false {
+        if self.displaySyncEnabled == false {
             for i in 0 ..< Int(presentModeCount) {
                 if presentModes[i] == VK_PRESENT_MODE_MAILBOX_KHR {
                     swapchainPresentMode = VK_PRESENT_MODE_MAILBOX_KHR
@@ -376,7 +382,7 @@ final class VulkanSwapChain: SwapChain, @unchecked Sendable {
                 "## UNKNOWN ##"
             }
         }
-        Log.info("VkSwapchainKHR created. (\(swapchainExtent.width) x \(swapchainExtent.height), V-sync:\(self.enableVSync), \(presentModeString(swapchainPresentMode)))")
+        Log.info("VkSwapchainKHR created. (\(swapchainExtent.width) x \(swapchainExtent.height), V-sync:\(self.displaySyncEnabled), \(presentModeString(swapchainPresentMode)))")
 
         // If an existing swap chain is re-created, destroy the old swap chain
         // This also cleans up all the presentable images

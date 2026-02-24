@@ -8,6 +8,7 @@
 public protocol SwapChain: Sendable {
     var pixelFormat: PixelFormat { get set }
     var maximumBufferCount: Int { get }
+    var displaySyncEnabled: Bool { get set }
 
     func currentRenderPassDescriptor() -> RenderPassDescriptor
     func present(waitEvents: [GPUEvent]) -> Bool
