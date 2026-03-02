@@ -68,6 +68,37 @@ struct Attribute<Value> {
     }
 }
 
+/// A group of AG nodes that are created and destroyed together.
+///
+/// Wrap node-creation code in `Subgraph.$current.withValue(subgraph) { ... }` to
+/// automatically register every node created in that scope to this subgraph.
+/// Call `invalidate(graph:)` to batch-remove all registered nodes at once.
+///
+/// Typical use — ForEach item lifecycle:
+/// ```swift
+/// let subgraph = Subgraph()
+/// Subgraph.$current.withValue(subgraph) {
+///     Content._makeView(view: itemGraph, inputs: inputs)
+/// }
+/// itemSubgraphs[id] = subgraph
+///
+/// // item removed:
+/// itemSubgraphs[id]?.invalidate(graph: graph)
+/// ```
+final class Subgraph: @unchecked Sendable {
+    private(set) var nodes: [AGAttribute] = []
+
+    @TaskLocal static var current: Subgraph? = nil
+
+    func register(_ id: AGAttribute) {
+        nodes.append(id)
+    }
+
+    func invalidate(graph: AttributeGraph) {
+        nodes.forEach { graph.removeNode($0) }
+    }
+}
+
 class AttributeGraph: @unchecked Sendable {
 
     private struct Node {
@@ -148,14 +179,18 @@ class AttributeGraph: @unchecked Sendable {
     func makeInput<Value>(value: Value) -> Attribute<Value> {
         let index = allocateSlot()
         slots[Int(index)].node = Node(value: value, rule: nil, needsEvaluation: false)
-        return Attribute(AGAttribute(rawValue: index))
+        let attr = Attribute<Value>(AGAttribute(rawValue: index))
+        Subgraph.current?.register(attr.identifier)
+        return attr
     }
 
     /// Creates a computed node with a rule (e.g., a View's body or a derived property)
     func makeRule<Value>(rule: @escaping () -> Value) -> Attribute<Value> {
         let index = allocateSlot()
         slots[Int(index)].node = Node(value: nil, rule: rule, needsEvaluation: true)
-        return Attribute(AGAttribute(rawValue: index))
+        let attr = Attribute<Value>(AGAttribute(rawValue: index))
+        Subgraph.current?.register(attr.identifier)
+        return attr
     }
 
     /// Completely removes a node and cleans up its dependencies.
@@ -339,7 +374,9 @@ class AttributeGraph: @unchecked Sendable {
         slots[Int(index)].node = node
         pathIDs[rp] = index
         addDependency(from: AGAttribute(rawValue: index), dependsOn: parent.identifier)
-        return Attribute(AGAttribute(rawValue: index))
+        let attr = Attribute<U>(AGAttribute(rawValue: index))
+        Subgraph.current?.register(attr.identifier)
+        return attr
     }
 
     func parent(of id: AGAttribute) -> AGAttribute? {
