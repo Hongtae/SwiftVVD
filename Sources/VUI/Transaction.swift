@@ -2,7 +2,7 @@
 //  File: Transaction.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -91,4 +91,62 @@ extension Transaction {
     }
     @TaskLocal
     static var _current: _Local?
+}
+
+// Gesture / physics animation keys
+private struct IsContinuousKey: TransactionKey {
+    static let defaultValue: Bool = false
+}
+private struct TracksVelocityKey: TransactionKey {
+    static let defaultValue: Bool = false
+}
+
+// Frame interval key
+private struct AnimationFrameIntervalKey: TransactionKey {
+    static let defaultValue: Double? = nil
+}
+
+// Content transition key
+private struct DisablesContentTransitionsKey: TransactionKey {
+    static let defaultValue: Bool = false
+}
+
+extension Transaction {
+    /// Whether this transaction arose from a continuous (gesture-driven) interaction.
+    /// When `true`, the animation system uses velocity data for physics-based animations.
+    public var isContinuous: Bool {
+        get { self[IsContinuousKey.self] }
+        set { self[IsContinuousKey.self] = newValue }
+    }
+
+    /// Whether the animation system should track and apply gesture velocity.
+    /// Used by spring animations to match the in-progress gesture velocity.
+    public var tracksVelocity: Bool {
+        get { self[TracksVelocityKey.self] }
+        set { self[TracksVelocityKey.self] = newValue }
+    }
+
+    /// Override the default display-link frame interval for this transaction's animations.
+    /// `nil` means use the default frame rate.
+    public var animationFrameInterval: Double? {
+        get { self[AnimationFrameIntervalKey.self] }
+        set { self[AnimationFrameIntervalKey.self] = newValue }
+    }
+
+    /// When `true`, content transitions (e.g. `.contentTransition(.numericText())`)
+    /// are suppressed and views update without their transition animation.
+    public var disablesContentTransitions: Bool {
+        get { self[DisablesContentTransitionsKey.self] }
+        set { self[DisablesContentTransitionsKey.self] = newValue }
+    }
+
+    /// `true` when an animation is attached to this transaction and animations are not disabled.
+    public var isAnimated: Bool { animation != nil && !disablesAnimations }
+
+    /// The animation to use, taking `disablesAnimations` into account.
+    /// Returns `nil` when animations are disabled even if `animation` is set.
+    public var effectiveAnimation: Animation? { disablesAnimations ? nil : animation }
+
+    /// Disables all animations for this transaction.
+    public mutating func disableAnimations() { disablesAnimations = true }
 }

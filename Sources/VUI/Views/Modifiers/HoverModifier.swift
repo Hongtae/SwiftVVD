@@ -19,8 +19,12 @@ public struct _HoverBackgroundModifier<Background>: ViewModifier where Backgroun
     }
 }
 
-extension _HoverBackgroundModifier: _UnaryViewModifier {
+extension _HoverBackgroundModifier {
     public typealias Body = Never
+
+    public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
+        body(_Graph(), inputs)
+    }
 }
 
 public struct _HoverOverlayModifier<Overlay>: ViewModifier where Overlay: View {
@@ -35,8 +39,12 @@ public struct _HoverOverlayModifier<Overlay>: ViewModifier where Overlay: View {
     }
 }
 
-extension _HoverOverlayModifier: _UnaryViewModifier {
+extension _HoverOverlayModifier {
     public typealias Body = Never
+
+    public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
+        body(_Graph(), inputs)
+    }
 }
 
 public struct _HoverRegionModifier: ViewModifier {
@@ -51,8 +59,12 @@ public struct _HoverRegionModifier: ViewModifier {
     }
 }
 
-extension _HoverRegionModifier: _UnaryViewModifier {
+extension _HoverRegionModifier {
     public typealias Body = Never
+
+    public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
+        body(_Graph(), inputs)
+    }
 }
 
 extension View {

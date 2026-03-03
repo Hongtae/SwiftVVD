@@ -23,6 +23,45 @@ public struct _FrameLayout: ViewModifier, Animatable, Sendable {
     public typealias Body = Never
 }
 
+extension _FrameLayout: _ViewLayoutModifier {
+    func modifyLayoutComputer(_ lc: LayoutComputer) -> LayoutComputer {
+        let w = self.width
+        let h = self.height
+        return LayoutComputer(
+            sizeThatFits: { proposal in
+                let childProposal = ProposedViewSize(
+                    width:  w != nil ? w : proposal.width,
+                    height: h != nil ? h : proposal.height
+                )
+                let childSize = lc.sizeThatFits(childProposal)
+                return CGSize(
+                    width:  w ?? childSize.width,
+                    height: h ?? childSize.height
+                )
+            },
+            spacing: lc.spacing,
+            dimensions: { proposal in
+                let childProposal = ProposedViewSize(
+                    width:  w != nil ? w : proposal.width,
+                    height: h != nil ? h : proposal.height
+                )
+                let childSize = lc.sizeThatFits(childProposal)
+                return ViewDimensions(
+                    width:  w ?? childSize.width,
+                    height: h ?? childSize.height
+                )
+            },
+            place: { position, anchor, proposal in
+                let childProposal = ProposedViewSize(
+                    width:  w != nil ? w : proposal.width,
+                    height: h != nil ? h : proposal.height
+                )
+                lc.place(at: position, anchor: anchor, proposal: childProposal)
+            }
+        )
+    }
+}
+
 extension View {
     @inlinable nonisolated
     public func frame(width: CGFloat? = nil,
@@ -58,6 +97,62 @@ public struct _FlexFrameLayout: ViewModifier, Animatable, Sendable {
   
     public typealias AnimatableData = EmptyAnimatableData
     public typealias Body = Never
+}
+
+extension _FlexFrameLayout: _ViewLayoutModifier {
+    func modifyLayoutComputer(_ lc: LayoutComputer) -> LayoutComputer {
+        let minW = minWidth,  idealW = idealWidth,  maxW = maxWidth
+        let minH = minHeight, idealH = idealHeight, maxH = maxHeight
+
+        func computeSize(proposal: ProposedViewSize) -> CGSize {
+            // Propose to child: use ideal if provided, else expand to fill when max==∞
+            let childW: CGFloat?
+            if let ideal = idealW {
+                childW = ideal
+            } else if maxW == .infinity, let available = proposal.width {
+                childW = available
+            } else {
+                childW = proposal.width
+            }
+            let childH: CGFloat?
+            if let ideal = idealH {
+                childH = ideal
+            } else if maxH == .infinity, let available = proposal.height {
+                childH = available
+            } else {
+                childH = proposal.height
+            }
+
+            let childSize = lc.sizeThatFits(ProposedViewSize(width: childW, height: childH))
+
+            // Clamp result to [min, max]; fill when max==∞
+            var w = childSize.width
+            if maxW == .infinity, let available = proposal.width { w = available }
+            else if let max = maxW { w = min(w, max) }
+            if let min = minW { w = Swift.max(w, min) }
+
+            var h = childSize.height
+            if maxH == .infinity, let available = proposal.height { h = available }
+            else if let max = maxH { h = min(h, max) }
+            if let min = minH { h = Swift.max(h, min) }
+
+            return CGSize(width: w, height: h)
+        }
+
+        return LayoutComputer(
+            sizeThatFits: { proposal in
+                computeSize(proposal: proposal)
+            },
+            spacing: lc.spacing,
+            dimensions: { proposal in
+                let size = computeSize(proposal: proposal)
+                return ViewDimensions(width: size.width, height: size.height)
+            },
+            place: { position, anchor, proposal in
+                lc.place(at: position, anchor: anchor, proposal: proposal)
+            }
+        )
+    }
 }
 
 @usableFromInline

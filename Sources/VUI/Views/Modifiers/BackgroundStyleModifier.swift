@@ -2,7 +2,7 @@
 //  File: BackgroundStyleModifier.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -18,8 +18,22 @@ public struct _EnvironmentBackgroundStyleModifier<S>: ViewModifier where S: Shap
 }
 
 extension _EnvironmentBackgroundStyleModifier: _ViewInputsModifier {
-    public static func _makeViewInputs(modifier: _GraphValue<_EnvironmentBackgroundStyleModifier>, inputs: inout _ViewInputs) {
-        fatalError("Implement with AG")
+    public static func _makeViewInputs(modifier: _GraphValue<Self>, inputs: inout _ViewInputs) {
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(self)._makeViewInputs called outside an active AttributeGraph context.")
+        }
+        let parentEnvAttr = inputs.base.cachedEnvironment.value.environment
+        let newEnvAttr: Attribute<EnvironmentValues> = graph.makeRule {
+            let m = modifier._attribute.value
+            var env = parentEnvAttr.value
+            env.backgroundStyle = AnyShapeStyle(m.style)
+            return env
+        }
+        inputs.base.cachedEnvironment = MutableBox(CachedEnvironment(environment: newEnvAttr))
+    }
+
+    public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
+        fatalError()
     }
 }
 

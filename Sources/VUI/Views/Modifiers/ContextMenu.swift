@@ -29,9 +29,13 @@ extension View {
     }
 }
 
-extension ContextMenuModifier: _UnaryViewModifier {
+extension ContextMenuModifier {
     static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
         fatalError("Implement with AG")
+    }
+
+    public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
+        body(_Graph(), inputs)
     }
 }
 

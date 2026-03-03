@@ -2,7 +2,7 @@
 //  File: AnimationModifier.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -17,11 +17,39 @@ public struct _AnimationModifier<Value>: ViewModifier where Value: Equatable {
     }
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        fatalError()
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        }
+        let parentTransAttr = inputs.base.transaction
+        let newTransAttr: Attribute<Transaction> = graph.makeRule {
+            let m = modifier._attribute.value
+            var t = parentTransAttr.value
+            if let anim = m.animation {
+                t.animation = anim
+            }
+            return t
+        }
+        var modifiedInputs = inputs
+        modifiedInputs.base.transaction = newTransAttr
+        return body(_Graph(), modifiedInputs)
     }
 
     public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        fatalError()
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(self)._makeViewList called outside an active AttributeGraph context.")
+        }
+        let parentTransAttr = inputs.base.transaction
+        let newTransAttr: Attribute<Transaction> = graph.makeRule {
+            let m = modifier._attribute.value
+            var t = parentTransAttr.value
+            if let anim = m.animation {
+                t.animation = anim
+            }
+            return t
+        }
+        var modifiedInputs = inputs
+        modifiedInputs.base.transaction = newTransAttr
+        return body(_Graph(), modifiedInputs)
     }
 
     public typealias Body = Never

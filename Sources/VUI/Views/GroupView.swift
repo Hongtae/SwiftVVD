@@ -2,7 +2,7 @@
 //  File: GroupView.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 extension Group: View where Content: View {
@@ -11,7 +11,7 @@ extension Group: View where Content: View {
     }
     
     public static func _makeViewList(view: _GraphValue<Group<Content>>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        fatalError()
+        Content._makeViewList(view: view[\.content], inputs: inputs)
     }
 }
 

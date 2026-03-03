@@ -2,7 +2,7 @@
 //  File: Label.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 public struct Label<Title, Icon>: View where Title: View, Icon: View {
@@ -55,11 +55,33 @@ struct ResolvedLabelStyle: View {
     }
 
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        fatalError("Implement with AG")
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        }
+        let style: any LabelStyle =
+            inputs.base.customInputs.value(forKey: _LabelStyleKey.self)
+            ?? DefaultLabelStyle.automatic
+        let configuration = LabelStyleConfiguration(
+            inputs.base.customInputs.value(forKey: _StaticSourceInputKey<LabelStyleConfiguration.Title>.self),
+            inputs.base.customInputs.value(forKey: _StaticSourceInputKey<LabelStyleConfiguration.Icon>.self)
+        )
+
+        func wireBody(_ style: some LabelStyle) -> _ViewOutputs {
+            let bodyAttr = graph.makeRule {
+                _ = view._attribute.value
+                return style.makeBody(configuration: configuration)
+            }
+            return makeView(view: _GraphValue(_attribute: bodyAttr), inputs: inputs)
+        }
+        return wireBody(style)
     }
 
     static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        fatalError("Implement with AG")
+        _ViewListOutputs(
+            views: .staticList(.unary(TypedUnaryViewGenerator(view, inputs: inputs))),
+            nextImplicitID: 1,
+            staticCount: 1
+        )
     }
 }
 

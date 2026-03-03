@@ -21,7 +21,26 @@ extension Spacer: Sendable {
 
 extension Spacer: _PrimitiveView {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        fatalError("Implement with AG")
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        }
+        let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
+            let minLen = view._attribute.value.minLength ?? 0
+            return LayoutComputer(
+                sizeThatFits: { proposal in
+                    CGSize(
+                        width:  proposal.width.map  { max($0, minLen) } ?? minLen,
+                        height: proposal.height.map { max($0, minLen) } ?? minLen
+                    )
+                },
+                dimensions: { proposal in
+                    let w = proposal.width.map  { max($0, minLen) } ?? minLen
+                    let h = proposal.height.map { max($0, minLen) } ?? minLen
+                    return ViewDimensions(width: w, height: h)
+                }
+            )
+        }
+        return _ViewOutputs(layoutComputer: OptionalAttribute(lcAttr))
     }
 }
 
@@ -29,12 +48,24 @@ public struct Divider: View {
     public init() {
     }
 
-    public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        fatalError("Implement with AG")
-    }
-
     public typealias Body = Never
 }
 
 extension Divider: _PrimitiveView {
+    public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        }
+        let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
+            LayoutComputer(
+                sizeThatFits: { proposal in
+                    CGSize(width: proposal.width ?? 0, height: 1)
+                },
+                dimensions: { proposal in
+                    ViewDimensions(width: proposal.width ?? 0, height: 1)
+                }
+            )
+        }
+        return _ViewOutputs(layoutComputer: OptionalAttribute(lcAttr))
+    }
 }

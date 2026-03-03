@@ -2,10 +2,39 @@
 //  File: Layout.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
+
+private final class _DynamicLayoutState {
+    var items: [UInt32: (lc: Attribute<LayoutComputer>, prefs: PreferencesOutputs, traitsList: OptionalAttribute<ViewList>)] = [:]
+    var subgraphs: [UInt32: Subgraph] = [:]
+    init() {}
+}
+
+/// Creates a single AG reduce rule whose input list is resolved dynamically
+/// from `nodeListAttr` at evaluation time.
+///
+/// SE-0352 allows this to be called with `any PreferenceKey.Type`; the
+/// compiler opens the existential and binds `K` to the concrete key type,
+/// so `Attribute<K.Value>` is correctly typed at call time.
+private func _makeDynReduceAttr<K: PreferenceKey>(
+    _ keyType: K.Type,
+    nodeListAttr: Attribute<[AGAttribute]>,
+    in graph: AttributeGraph
+) -> AGAttribute {
+    let attr: Attribute<K.Value> = graph.makeRule {
+        let nodes = nodeListAttr.value          // registers dep on the ID list
+        var combined = K.defaultValue
+        for nodeID in nodes {
+            let val = Attribute<K.Value>(nodeID).value  // registers dep on each child
+            K.reduce(value: &combined) { val }
+        }
+        return combined
+    }
+    return attr.identifier
+}
 
 public protocol Layout: Animatable {
     static var layoutProperties: LayoutProperties { get }
@@ -26,8 +55,328 @@ public protocol Layout: Animatable {
 }
 
 extension Layout {
+    /// Generic implementation of `_makeLayoutView` that works for any `Layout` type.
+    ///
+    /// Algorithm:
+    /// 1. Calls `body(_Graph(), inputs)` to wire the content's AG nodes and obtain
+    ///    `_ViewListOutputs` containing per-child `ViewProxy` values.
+    /// 2. For each child proxy, creates a per-child position `Attribute<CGPoint>` and
+    ///    calls `proxy.makeView` with child-specific inputs to get `_ViewOutputs`.
+    /// 3. Creates an `Attribute<LayoutComputer>` rule that:
+    ///    - reads the layout configuration from `root._attribute` (registers dependency),
+    ///    - reads each child's LayoutComputer attribute (registers re-layout dependency),
+    ///    - builds `LayoutSubviews` and returns a `LayoutComputer` with sizing and
+    ///      placement closures that delegate to the concrete `Layout` protocol methods.
     public static func _makeLayoutView(root: _GraphValue<Self>, inputs: _ViewInputs, body: (_Graph, _ViewInputs) -> _ViewListOutputs) -> _ViewOutputs {
-        fatalError()
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(self)._makeLayoutView called outside an active AttributeGraph context.")
+        }
+
+        let childListOutputs = body(_Graph(), inputs)
+
+        // AG input nodes that track this container's placed origin and size.
+        // Written by the _place closure below; read by the debug overlay rule.
+        let layoutPosAttr  = graph.makeInput(value: CGPoint.zero)
+        let layoutSizeAttr = graph.makeInput(value: CGSize.zero)
+
+        let cachedEnvironmentAttr = inputs.base.cachedEnvironment
+        let debugLayoutAttr: Attribute<Bool> = graph.makeRule {
+            cachedEnvironmentAttr.value.environment.value._debugLayout
+        }
+        let debugDLAttr: Attribute<DisplayList> = graph.makeRule {
+            let debugLayout = debugLayoutAttr.value
+            var dl = DisplayList()
+            if debugLayout {
+                let frame = CGRect(origin: layoutPosAttr.value, size: layoutSizeAttr.value)
+                appendDebugOverlay(to: &dl, frame: frame, category: .layoutContainer)
+            }
+            return dl
+        }
+
+        // Local helper: wire one generator → wrapper Attribute<LayoutComputer> + child preferences + ViewList for _traitsList.
+        // Creates a per-child Attribute<ViewList> wrapping the single generator so that
+        // LayoutSubview._traitsList is always non-null.
+        func wireGenerator(_ gen: TypedUnaryViewGenerator) -> (lc: Attribute<LayoutComputer>, prefs: PreferencesOutputs, traitsList: OptionalAttribute<ViewList>)? {
+            let posAttr = graph.makeInput(value: CGPoint.zero)
+            let sizeAttr = graph.makeInput(value: ViewSize(.zero))
+            let childInputs = _ViewInputs(
+                base: gen.baseInputs,
+                preferences: inputs.preferences,
+                transform: inputs.transform,
+                position: posAttr,
+                containerPosition: inputs.position,
+                size: sizeAttr,
+                safeAreaInsets: inputs.safeAreaInsets,
+                containerSize: OptionalAttribute(inputs.size)
+            )
+            guard let childOutputs = gen.makeView(inputs: childInputs) else { return nil }
+            guard let lcAttr = childOutputs._layoutComputer.attribute else { return nil }
+
+            // Wrap the child's LayoutComputer so that calls to `place` update its AG nodes.
+            let wrapperLC: Attribute<LayoutComputer> = graph.makeRule {
+                let innerLC = lcAttr.value
+                return LayoutComputer(
+                    sizeThatFits: innerLC._sizeThatFits,
+                    spacing: innerLC._spacing,
+                    dimensions: innerLC._dimensions,
+                    place: { position, anchor, proposal in
+                        posAttr.setValue(position)
+                        let resolvedSize = innerLC.sizeThatFits(proposal)
+                        sizeAttr.setValue(ViewSize(resolvedSize))
+                        innerLC.place(at: position, anchor: anchor, proposal: proposal)
+                    }
+                )
+            }
+
+            // Per-child ViewList AG node: wraps this single generator so the Layout
+            // always has a non-null _traitsList to read traits from.
+            let genCopy = gen
+            let viewListAttr: Attribute<ViewList> = graph.makeRule {
+                ViewList(generators: [genCopy])
+            }
+            return (wrapperLC, childOutputs.preferences, OptionalAttribute(viewListAttr))
+        }
+
+        // Recursive helper: traverse ViewListElements and produce flat LCs + merged preferences + traitsLists.
+        // Also handles dynamicList children (produced by _TraitWritingModifier) inside a .merged context.
+        func wireElements(_ elements: ViewListElements) -> (lcs: [Attribute<LayoutComputer>], prefs: [PreferencesOutputs], traitsLists: [OptionalAttribute<ViewList>]) {
+            switch elements {
+            case .unary(let gen):
+                guard let (lc, prefs, traitsList) = wireGenerator(gen) else { return ([], [], []) }
+                return ([lc], [prefs], [traitsList])
+
+            case .merged(let childOutputsList):
+                var allLCs: [Attribute<LayoutComputer>] = []
+                var allPrefs: [PreferencesOutputs] = []
+                var allTraitsLists: [OptionalAttribute<ViewList>] = []
+                for childOutput in childOutputsList {
+                    switch childOutput.views {
+                    case .staticList(let innerElements):
+                        let (lcs, prefs, traitsLists) = wireElements(innerElements)
+                        allLCs.append(contentsOf: lcs)
+                        allPrefs.append(contentsOf: prefs)
+                        allTraitsLists.append(contentsOf: traitsLists)
+                    case .dynamicList(let childViewListAttr, _):
+                        // _TraitWritingModifier returns a dynamicList whose ViewList
+                        // contains the child generators with trait-aware traitListAttr.
+                        // Read generators at build time (they are static for _TraitWritingModifier).
+                        let gens = childViewListAttr.value.generators
+                        for gen in gens {
+                            if let (lc, prefs, _) = wireGenerator(gen) {
+                                allLCs.append(lc)
+                                allPrefs.append(prefs)
+                                // Use the viewListAttr from _TraitWritingModifier directly
+                                // so the Layout's _traitsList points to the reactive AG node.
+                                allTraitsLists.append(OptionalAttribute(childViewListAttr))
+                            }
+                        }
+                    }
+                }
+                return (allLCs, allPrefs, allTraitsLists)
+
+            case .modified(let base, let layoutMod):
+                let (innerLCs, innerPrefs, innerTraitsLists) = wireElements(base)
+                guard layoutMod.modifier.isValid(in: graph) else { return (innerLCs, innerPrefs, innerTraitsLists) }
+                let modAttrID = layoutMod.modifier.toStrong()
+                func applyMod<M: _ViewLayoutModifier>(_ type: M.Type) -> ([Attribute<LayoutComputer>], [PreferencesOutputs], [OptionalAttribute<ViewList>]) {
+                    let modAttr = Attribute<M>(modAttrID)
+                    var outLCs: [Attribute<LayoutComputer>] = []
+                    var outPrefs = innerPrefs
+                    for (idx, innerLcAttr) in innerLCs.enumerated() {
+                        let wrappedLcAttr: Attribute<LayoutComputer> = graph.makeRule {
+                            modAttr.value.modifyLayoutComputer(innerLcAttr.value)
+                        }
+                        let outerPosAttr  = graph.makeInput(value: CGPoint.zero)
+                        let outerSizeAttr = graph.makeInput(value: CGSize.zero)
+                        let cachedEnvAttr = layoutMod.baseInputs.cachedEnvironment
+                        let debugDLAttr: Attribute<DisplayList> = graph.makeRule {
+                            let debugLayout = cachedEnvAttr.value.environment.value._debugLayout
+                            var dl = DisplayList()
+                            if debugLayout {
+                                appendDebugOverlay(
+                                    to: &dl,
+                                    frame: CGRect(origin: outerPosAttr.value, size: outerSizeAttr.value),
+                                    category: .layoutModifier
+                                )
+                            }
+                            return dl
+                        }
+                        if idx < outPrefs.count {
+                            outPrefs[idx].append(DisplayList.Key.self, node: debugDLAttr.identifier)
+                        }
+                        let trackedLcAttr: Attribute<LayoutComputer> = graph.makeRule {
+                            var lc = wrappedLcAttr.value
+                            let origPlace = lc._place
+                            let origSTF   = lc._sizeThatFits
+                            lc._place = { position, anchor, proposal in
+                                let size   = origSTF(proposal)
+                                let origin = CGPoint(x: position.x - size.width  * anchor.x,
+                                                     y: position.y - size.height * anchor.y)
+                                outerPosAttr.setValue(origin)
+                                outerSizeAttr.setValue(size)
+                                origPlace(position, anchor, proposal)
+                            }
+                            return lc
+                        }
+                        outLCs.append(trackedLcAttr)
+                    }
+                    return (outLCs, outPrefs, innerTraitsLists)
+                }
+                return applyMod(layoutMod.modifierType)
+            }
+        }
+
+        // Local helper: build a LayoutComputer from a snapshot of [Attribute<LayoutComputer>] + traitsLists.
+        func buildLayoutComputer(layout: Self,
+                                 childLCs: [Attribute<LayoutComputer>],
+                                 childTraitsLists: [OptionalAttribute<ViewList>] = []) -> LayoutComputer {
+            let subviewProxies = childLCs.enumerated().map { idx, lc in
+                LayoutSubviewProxy(layoutComputerAttr: lc,
+                                   traitsList: idx < childTraitsLists.count ? childTraitsLists[idx] : OptionalAttribute())
+            }
+            let subviews = LayoutSubviews(
+                subviews: subviewProxies.map { LayoutSubview(proxy: $0) },
+                layoutDirection: .leftToRight
+            )
+            var initCache = layout.makeCache(subviews: subviews)
+            let spacingValue = layout.spacing(subviews: subviews, cache: &initCache)
+            return LayoutComputer(
+                sizeThatFits: { [layout, subviews] proposal in
+                    var c = layout.makeCache(subviews: subviews)
+                    return layout.sizeThatFits(proposal: proposal, subviews: subviews, cache: &c)
+                },
+                spacing: spacingValue,
+                dimensions: { [layout, subviews] proposal in
+                    var c = layout.makeCache(subviews: subviews)
+                    let size = layout.sizeThatFits(proposal: proposal, subviews: subviews, cache: &c)
+                    return ViewDimensions(width: size.width, height: size.height)
+                },
+                place: { [layout, subviews] position, anchor, proposal in
+                    var sizeCache = layout.makeCache(subviews: subviews)
+                    let size = layout.sizeThatFits(proposal: proposal, subviews: subviews,
+                                                   cache: &sizeCache)
+                    let origin = CGPoint(
+                        x: position.x - size.width * anchor.x,
+                        y: position.y - size.height * anchor.y
+                    )
+                    let bounds = CGRect(origin: origin, size: size)
+                    layoutPosAttr.setValue(origin)
+                    layoutSizeAttr.setValue(size)
+                    var placeCache = layout.makeCache(subviews: subviews)
+                    layout.placeSubviews(in: bounds, proposal: proposal, subviews: subviews,
+                                         cache: &placeCache)
+                }
+            )
+        }
+
+        let layoutComputerAttr: Attribute<LayoutComputer>
+        var mergedPreferences: PreferencesOutputs
+
+        switch childListOutputs.views {
+        case .staticList(let elements):
+            // Wire all generators once at graph-construction time.
+            let (layoutPairs, childPrefsList, childTraitsLists) = wireElements(elements)
+
+            layoutComputerAttr = graph.makeRule {
+                let layout = root._attribute.value
+                let _ = layoutPairs.map { $0.value }
+                return buildLayoutComputer(layout: layout, childLCs: layoutPairs, childTraitsLists: childTraitsLists)
+            }
+
+            mergedPreferences = PreferencesOutputs.merge(childPrefsList, in: graph)
+
+        case .dynamicList(let viewListAttr, _):
+            // Per-generator wiring state: keyed by AGAttribute rawValue.
+            // New generators are wired on first appearance; stale ones are dropped.
+            let dynState = _DynamicLayoutState()
+
+            // Eagerly wire the initial generators so that dynState is populated
+            // before any AG rules fire. Each generator's nodes are owned by a
+            // dedicated Subgraph so they can be removed cleanly when the item leaves.
+            for gen in viewListAttr.value.generators {
+                let subgraph = Subgraph()
+                let wired = Subgraph.$current.withValue(subgraph) { wireGenerator(gen) }
+                if let wired {
+                    dynState.items[gen.view.identifier] = wired
+                    dynState.subgraphs[gen.view.identifier] = subgraph
+                } else {
+                    subgraph.invalidate()
+                    subgraph.removeFromParent()
+                }
+            }
+
+            layoutComputerAttr = graph.makeRule {
+                let layout = root._attribute.value
+                let currentGens = viewListAttr.value.generators  // registers AG dependency
+
+                // Drop entries for generators no longer in the list.
+                // Invalidate each item's Subgraph to batch-remove its AG nodes.
+                let currentIDs = Set(currentGens.map { $0.view.identifier })
+                for id in dynState.items.keys where !currentIDs.contains(id) {
+                    dynState.subgraphs[id]?.invalidate()
+                    dynState.subgraphs[id]?.removeFromParent()
+                    dynState.subgraphs.removeValue(forKey: id)
+                }
+                dynState.items = dynState.items.filter { currentIDs.contains($0.key) }
+
+                // Wire newly appeared generators, each into its own Subgraph.
+                for gen in currentGens where dynState.items[gen.view.identifier] == nil {
+                    let subgraph = Subgraph()
+                    let wired = Subgraph.$current.withValue(subgraph) { wireGenerator(gen) }
+                    if let wired {
+                        dynState.items[gen.view.identifier] = wired
+                        dynState.subgraphs[gen.view.identifier] = subgraph
+                    } else {
+                        subgraph.invalidate()
+                        subgraph.removeFromParent()
+                    }
+                }
+
+                // Build LayoutComputer from current generators in order.
+                let ordered = currentGens.compactMap { dynState.items[$0.view.identifier] }
+                let childLCs = ordered.map { $0.lc }
+                let childTraitsLists = ordered.map { $0.traitsList }
+                let _ = childLCs.map { $0.value }
+                return buildLayoutComputer(layout: layout, childLCs: childLCs, childTraitsLists: childTraitsLists)
+            }
+
+            // For each preference key registered by the host, create a two-level
+            // dynamic reduce:
+            //
+            //   nodeListAttr: Attribute<[AGAttribute]>
+            //     — reads layoutComputerAttr (ensures dynState is current)
+            //       and viewListAttr (registers dep on list changes);
+            //       returns the ordered list of child preference node IDs for this key.
+            //
+            //   reduceAttr: Attribute<K.Value>  (via _makeDynReduceAttr, SE-0352)
+            //     — reads nodeListAttr (dep on ID list changes) and each child node
+            //       (dep on individual value changes); reduces with K.reduce.
+            //
+            // Iterate registered preference keys and create one AG reduce node
+            // per key.
+            var dynMergedPreferences = PreferencesOutputs()
+            for keyType in inputs.preferences.keys.keys {
+                let nodeListAttr: Attribute<[AGAttribute]> = graph.makeRule {
+                    _ = layoutComputerAttr.value        // ensure dynState is current
+                    let currentGens = viewListAttr.value.generators  // register dep
+                    return currentGens.compactMap { gen in
+                        dynState.items[gen.view.identifier]?.prefs.values(for: keyType).first
+                    }
+                }
+                // SE-0352 opens `keyType: any PreferenceKey.Type` → concrete K,
+                // allowing _makeDynReduceAttr to create a typed Attribute<K.Value>.
+                let reducedID = _makeDynReduceAttr(keyType, nodeListAttr: nodeListAttr, in: graph)
+                dynMergedPreferences.append(keyType, node: reducedID)
+            }
+            mergedPreferences = dynMergedPreferences
+        }
+
+        mergedPreferences.append(DisplayList.Key.self, node: debugDLAttr.identifier)
+
+        return _ViewOutputs(
+            preferences: mergedPreferences,
+            layoutComputer: OptionalAttribute(layoutComputerAttr)
+        )
     }
 }
 
@@ -239,7 +588,7 @@ public struct AnyLayout: Layout {
     }
 }
 
-//MARK: - LayoutRoot, VariadicView Root for Layout
+// VariadicView Root for Layout
 public struct _LayoutRoot<L>: _VariadicView.UnaryViewRoot where L: Layout {
     @usableFromInline
     var layout: L
@@ -247,8 +596,11 @@ public struct _LayoutRoot<L>: _VariadicView.UnaryViewRoot where L: Layout {
         self.layout = layout
     }
 
+    /// Delegates to `L._makeLayoutView` by navigating the root KeyPath to the
+    /// embedded `layout: L` AG node.  The generic `Layout._makeLayoutView`
+    /// implementation handles the rest.
     public static func _makeView(root: _GraphValue<Self>, inputs: _ViewInputs, body: (_Graph, _ViewInputs) -> _ViewListOutputs) -> _ViewOutputs {
-        fatalError("Implement with AG")
+        L._makeLayoutView(root: root[\.layout], inputs: inputs, body: body)
     }
 
     public typealias Body = Never

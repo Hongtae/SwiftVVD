@@ -2,7 +2,7 @@
 //  File: Font.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -78,7 +78,6 @@ protocol TypeFaceProvider {
 }
 
 extension TypeFaceProvider {
-    func makeTypeFace(_: SharedContext) -> TypeFace? { nil }
     var isShareable: Bool { true }
 }
 
@@ -255,20 +254,18 @@ public struct Font: Hashable, Sendable {
         hasher.combine(displayScale)
     }
 
-    func typeFace(forContext context: SharedContext) -> TypeFace? {
+    func typeFace(forContext context: SceneResources) -> TypeFace? {
+        guard let app = appContext else { return nil }
         if provider.isShareable {
             if let typeFace = context.cachedTypeFaces[self] {
                 return typeFace
             }
-            if let typeFace = provider.makeTypeFace(
-                context.app,
-                displayScale: self.displayScale) {
+            if let typeFace = provider.makeTypeFace(app, displayScale: self.displayScale) {
                 context.cachedTypeFaces[self] = typeFace
                 return typeFace
             }
         } else {
-            return provider.makeTypeFace(context.app,
-                                         displayScale: self.displayScale)
+            return provider.makeTypeFace(app, displayScale: self.displayScale)
         }
         return nil
     }

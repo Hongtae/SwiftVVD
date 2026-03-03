@@ -148,21 +148,36 @@ protocol _GestureGenerator {
     var gestureMask: GestureMask { get }
 }
 
-extension AddGestureModifier: _UnaryViewModifier {
+extension AddGestureModifier {
     static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        fatalError("Implement with AG")
+        // TODO: Implement gesture routing with AG
+        body(_Graph(), inputs)
+    }
+
+    public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
+        body(_Graph(), inputs)
     }
 }
 
-extension SimultaneousGestureModifier: _UnaryViewModifier {
+extension SimultaneousGestureModifier {
     static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        fatalError("Implement with AG")
+        // TODO: Implement gesture routing with AG
+        body(_Graph(), inputs)
+    }
+
+    public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
+        body(_Graph(), inputs)
     }
 }
 
-extension HighPriorityGestureModifier: _UnaryViewModifier {
+extension HighPriorityGestureModifier {
     static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        fatalError("Implement with AG")
+        // TODO: Implement gesture routing with AG
+        body(_Graph(), inputs)
+    }
+
+    public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
+        body(_Graph(), inputs)
     }
 }
 

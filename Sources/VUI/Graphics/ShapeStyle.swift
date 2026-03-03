@@ -103,8 +103,6 @@ public struct _ImplicitShapeStyle: ShapeStyle {
     public typealias Resolved = Never
 }
 
-// MARK: - HierarchicalShapeStyle
-
 public struct HierarchicalShapeStyle: ShapeStyle {
     public enum Level: Sendable {
         case primary
@@ -129,7 +127,6 @@ public struct HierarchicalShapeStyle: ShapeStyle {
                 break
             }
         }
-        // Default fallback: same opacity scale as SwiftUI's standard hierarchy.
         switch level {
         case .primary:
             shape.shading = .color(.sRGB, white: 0.145)

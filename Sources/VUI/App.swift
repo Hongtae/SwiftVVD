@@ -2,7 +2,7 @@
 //  File: App.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -54,14 +54,13 @@ class AppMain<A>: ApplicationDelegate, AppContext where A: App {
     }
 
     let app: A
-    var scene: Any? // implement with AG
+    var appGraph: AppGraph<A>?
+    var windowsController: AppWindowsController?
     var terminateAfterLastWindowClosed = true
 
-    var activeWindows: [WindowContext] {
-        var windows: [WindowContext] = []
-        fatalError("Implement with AG")
-
-        return windows.filter {
+    var activeWindows: [WindowController] {
+        guard let windowsController else { return [] }
+        return windowsController.allWindowControllers.filter {
             $0.isValid && $0.window != nil
         }
     }
@@ -80,11 +79,30 @@ class AppMain<A>: ApplicationDelegate, AppContext where A: App {
         self.graphicsDeviceContext = makeGraphicsDeviceContext()
         self.audioDeviceContext = makeAudioDeviceContext()
 
-        fatalError("Implement with AG")
+        let graph = AppGraph(app: app)
+        let wc = AppWindowsController()
+        wc.syncWindowControllers(sceneListAttr: graph.sceneListAttr,
+                                 runtimeConfigAttr: graph.runtimeWindowConfigAttr,
+                                 in: graph.graph)
+        self.appGraph = graph
+        self.windowsController = wc
+        
+        let primaryWindows = wc.allWindowControllers
+        if primaryWindows.isEmpty == false {
+            application.activationPolicy = .regular
+        }
+        Task { @MainActor in
+            for window in primaryWindows {
+                if let win = window.makeWindow() {
+                    win.activate()
+                }
+            }
+        }
     }
 
     func finalize(application: Application) {
-        self.scene = nil
+        self.appGraph = nil
+        self.windowsController = nil
         self.graphicsDeviceContext = nil
         self.audioDeviceContext = nil
         self.resources = [:]

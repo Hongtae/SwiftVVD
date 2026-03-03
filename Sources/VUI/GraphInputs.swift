@@ -1,0 +1,170 @@
+//
+//  File: GraphInputs.swift
+//  Author: Hongtae Kim (tiff2766@gmail.com)
+//
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
+//
+
+import Foundation
+
+/// A generic single-owner reference box.
+/// Used in `_GraphInputs.cachedEnvironment` so that copying `_GraphInputs`
+/// (a struct) still shares the same `CachedEnvironment` instance across
+/// all descendants of the same view subtree.
+final class MutableBox<Value>: @unchecked Sendable {
+    var value: Value
+    init(_ value: Value) { self.value = value }
+}
+
+/// Animation time value passed through the AG graph.
+/// Only stored property: `seconds: Double` (8 bytes).
+struct Time {
+    var seconds: Double
+
+    static var zero: Time { Time(seconds: 0) }
+    static var infinity: Time { Time(seconds: Double.infinity) }
+    static var systemUptime: Time { Time(seconds: ProcessInfo.processInfo.systemUptime) }
+
+    init(seconds: Double = 0) { self.seconds = seconds }
+
+    static func + (lhs: Time, rhs: Double) -> Time { Time(seconds: lhs.seconds + rhs) }
+    static func - (lhs: Time, rhs: Double) -> Double { lhs.seconds - rhs }
+    static func < (lhs: Time, rhs: Time) -> Bool { lhs.seconds < rhs.seconds }
+    static func == (lhs: Time, rhs: Time) -> Bool { lhs.seconds == rhs.seconds }
+}
+
+/// Render phase passed through the AG graph.
+/// Stored: isBeingRemoved: Bool, resetSeed: UInt32.
+/// Computed: isInserted (derived from stored fields).
+/// Total size: 8 bytes (Bool + 3-byte pad + UInt32).
+struct Phase {
+    var isBeingRemoved: Bool = false
+    var resetSeed: UInt32 = 0
+
+    var isInserted: Bool { !isBeingRemoved && resetSeed != 0 }
+
+    static var invalid: Phase { Phase() }
+
+    init() {}
+    init(value: UInt32) {
+        self.resetSeed = value
+    }
+
+    mutating func merge(_ other: Phase) {
+        if other.isBeingRemoved { isBeingRemoved = true }
+        if other.resetSeed != 0 { resetSeed = other.resetSeed }
+    }
+}
+
+/// Animated view frame snapshot passed through the animation system.
+/// { origin: CGPoint (16 bytes), size: ViewSize (32 bytes) }
+/// Total size: 48 bytes.
+struct ViewFrame: Equatable {
+    var origin: CGPoint
+    var size: ViewSize
+
+    init(size: ViewSize) {
+        self.origin = .zero
+        self.size = size
+    }
+    init(origin: CGPoint, size: ViewSize) {
+        self.origin = origin
+        self.size = size
+    }
+
+    mutating func round(toMultipleOf value: CGFloat) {
+        origin.x = (origin.x / value).rounded() * value
+        origin.y = (origin.y / value).rounded() * value
+        size.value.width  = (size.value.width  / value).rounded() * value
+        size.value.height = (size.value.height / value).rounded() * value
+    }
+}
+
+/// Shared environment cache passed down the view tree via `_GraphInputs`.
+/// Copying `_GraphInputs` preserves the same `CachedEnvironment` reference
+/// (via `MutableBox`) so all descendants share a single environment Attribute.
+struct CachedEnvironment {
+
+    struct UniqueID {
+        var value: Int
+    }
+
+    struct ID {
+        var base: UniqueID
+    }
+
+    struct MapItem {
+        var key: ID
+        var value: AGAttribute
+    }
+
+    struct AnimatedFrame {
+        var position:          Attribute<CGPoint>
+        var size:              Attribute<ViewSize>
+        var pixelLength:       Attribute<CGFloat>
+        var time:              Attribute<Time>
+        var transaction:       Attribute<Transaction>
+        var viewPhase:         Attribute<Phase>
+        var animatedFrame:     Attribute<ViewFrame>
+        var _animatedPosition: Attribute<CGPoint>?
+        var _animatedSize:     Attribute<ViewSize>?
+        var _animatedCGSize:   Attribute<CGSize>?
+    }
+
+    /// The live `EnvironmentValues` AG node.
+    /// Reading `.value` inside a rule registers a dependency so the rule
+    /// re-evaluates automatically when the environment changes.
+    var environment: Attribute<EnvironmentValues>
+
+    /// Style-map items threaded through the environment cache.
+    var mapItems: [MapItem]
+
+    /// Per-frame animation layout snapshot.
+    /// Nil until layout AG nodes are wired; animation modifiers read from here.
+    var animatedFrame: AnimatedFrame?
+
+    /// Cache of resolved shape styles keyed by ResolvedShapeStyles.
+    /// Placeholder — ResolvedShapeStyles / _ShapeStyle_Pack types TBD.
+    var resolvedShapeStyles: Any?
+
+    /// Platform-specific renderer cache (e.g. Metal layer reference).
+    var platformCache: Any?
+
+    init(environment: Attribute<EnvironmentValues>) {
+        self.environment = environment
+        self.mapItems = []
+        self.animatedFrame = nil
+        self.resolvedShapeStyles = nil
+        self.platformCache = nil
+    }
+}
+
+/// The bundle of AG context Attributes passed from parent to child during
+/// `_makeView` traversal.  All fields are Attribute references (IDs), so
+/// copying this struct is cheap.
+public struct _GraphInputs {
+    /// Arbitrary typed values threaded through the view tree (styles, options, …).
+    var customInputs: PropertyList
+
+    /// Current animation time.
+    var time: Attribute<Time>
+
+    /// Shared environment cache.  `MutableBox` ensures all copies of
+    /// `_GraphInputs` in the same subtree point at the same `CachedEnvironment`.
+    var cachedEnvironment: MutableBox<CachedEnvironment>
+
+    /// Current render phase (referenced as `viewPhase` inside AnimatedFrame).
+    var phase: Attribute<Phase>
+
+    /// Current transaction (animation parameters, etc.).
+    var transaction: Attribute<Transaction>
+
+    /// Bitmask tracking which debug properties have changed since the last evaluation.
+    var changedDebugProperties: UInt32
+
+    /// Bitmask of options controlling view list traversal behavior.
+    var options: UInt32
+
+    /// Set of AG node IDs whose inputs have been merged into this context.
+    var mergedInputs: Set<AGAttribute>
+}

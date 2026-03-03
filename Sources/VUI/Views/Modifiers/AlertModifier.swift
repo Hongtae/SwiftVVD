@@ -148,14 +148,22 @@ private struct AlertContentView<Actions: View, Message: View>: View {
     }
 }
 
-extension ActionsModifier: _UnaryViewModifier {
+extension ActionsModifier {
     static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
+        body(_Graph(), inputs)
+    }
+
+    public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
         body(_Graph(), inputs)
     }
 }
 
-extension AlertModifier: _UnaryViewModifier {
+extension AlertModifier {
     static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
         fatalError("Implement with AG")
+    }
+
+    public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
+        body(_Graph(), inputs)
     }
 }

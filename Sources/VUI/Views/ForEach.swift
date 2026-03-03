@@ -2,7 +2,7 @@
 //  File: ForEach.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 
@@ -16,11 +16,103 @@ extension ForEach: View where Content: View {
     public typealias Body = Never
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        fatalError("Implement with AG")
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        }
+        let rootAttr: Attribute<VStackLayout> = graph.makeRule { VStackLayout() }
+        return VStackLayout._makeLayoutView(
+            root: _GraphValue(_attribute: rootAttr),
+            inputs: inputs
+        ) { _, _ in
+            Self._makeViewList(view: view, inputs: _ViewListInputs(from: inputs))
+        }
+    }
+
+    // ForEach always returns .dynamicList(Attribute<ViewList>, nil).
+    // Per-element state class — holds content-Attribute generator and Subgraph for each ID.
+    // Each item's AG nodes are owned by its Subgraph; invalidating it on removal
+    // batch-removes all nodes so the graph doesn't accumulate zombie entries.
+    private final class _ItemState {
+        var generators: [AnyHashable: TypedUnaryViewGenerator] = [:]
+        var subgraphs:  [AnyHashable: Subgraph] = [:]
+        var order: [AnyHashable] = []
     }
 
     public static func _makeViewList(view: _GraphValue<ForEach<Data, ID, Content>>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        fatalError("Implement with AG")
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(self)._makeViewList called outside an active AttributeGraph context.")
+        }
+
+        let state = _ItemState()
+
+        let viewListAttr: Attribute<ViewList> = graph.makeRule {
+            guard let graph = AttributeGraph.current else {
+                fatalError("ForEach viewList rule evaluated outside an active AttributeGraph context.")
+            }
+            let forEach = view._attribute.value   // dep: data / content changes
+
+            // Collect current IDs in data order.
+            var newOrder: [AnyHashable] = []
+            var newIDs: Set<AnyHashable> = []
+            var dataIdx = forEach.data.startIndex
+            while dataIdx != forEach.data.endIndex {
+                let element = forEach.data[dataIdx]
+                let id = AnyHashable(element[keyPath: forEach.id])
+                newOrder.append(id)
+                newIDs.insert(id)
+                dataIdx = forEach.data.index(after: dataIdx)
+            }
+
+            // Drop entries that are no longer present.
+            // Invalidating the item's Subgraph removes all its AG nodes at once.
+            for id in state.order where !newIDs.contains(id) {
+                state.subgraphs[id]?.invalidate()
+                state.subgraphs[id]?.removeFromParent()
+                state.subgraphs.removeValue(forKey: id)
+                state.generators.removeValue(forKey: id)
+            }
+
+            // Create content Attributes for newly seen IDs.
+            // Each item's nodes are registered to a dedicated Subgraph so they can
+            // be cleanly removed when the item disappears from the data source.
+            dataIdx = forEach.data.startIndex
+            for id in newOrder {
+                let element = forEach.data[dataIdx]
+                dataIdx = forEach.data.index(after: dataIdx)
+
+                if state.generators[id] == nil {
+                    let subgraph = Subgraph()
+                    let contentAttr: Attribute<Content> = Subgraph.$current.withValue(subgraph) {
+                        graph.makeRule {
+                            let fe = view._attribute.value
+                            var si = fe.data.startIndex
+                            while si != fe.data.endIndex {
+                                let e = fe.data[si]
+                                if AnyHashable(e[keyPath: fe.id]) == id {
+                                    return fe.content(e)
+                                }
+                                si = fe.data.index(after: si)
+                            }
+                            return forEach.content(element)  // stale fallback if ID removed
+                        }
+                    }
+                    state.subgraphs[id] = subgraph
+                    state.generators[id] = TypedUnaryViewGenerator(
+                        _GraphValue(_attribute: contentAttr),
+                        inputs: inputs
+                    )
+                }
+            }
+
+            state.order = newOrder
+            return ViewList(generators: newOrder.compactMap { state.generators[$0] })
+        }
+
+        return _ViewListOutputs(
+            views: .dynamicList(viewListAttr, nil),
+            nextImplicitID: 0,
+            staticCount: nil
+        )
     }
 }
 

@@ -40,14 +40,14 @@ public struct GraphicsContext {
     let renderTargets: RenderTargets
     let viewport: CGRect
 
-    let sharedContext: SharedContext
+    let sceneResources: SceneResources
     let commandBuffer: CommandBuffer
     let pipeline: GraphicsPipelineStates
 
     let bindingSet1: ShaderBindingSet // for 1-texture
     let bindingSet2: ShaderBindingSet // for 2-textures
 
-    init?(sharedContext: SharedContext,
+    init?(sceneResources: SceneResources,
           environment: EnvironmentValues,
           viewport: CGRect,
           contentOffset: CGPoint,
@@ -65,7 +65,7 @@ public struct GraphicsContext {
             return nil
         }
         self.viewport = viewport
-        self.sharedContext = sharedContext
+        self.sceneResources = sceneResources
         self.opacity = 1
         self.blendMode = .normal
         self.transform = .identity
@@ -241,7 +241,7 @@ extension GraphicsContext {
         }
     }
 
-    init?(sharedContext: SharedContext,
+    init?(sceneResources: SceneResources,
           environment: EnvironmentValues,
           viewport: CGRect,
           contentOffset: CGPoint,
@@ -264,7 +264,7 @@ extension GraphicsContext {
             return nil
         }
 
-        self.init(sharedContext: sharedContext,
+        self.init(sceneResources: sceneResources,
                   environment: environment,
                   viewport: viewport,
                   contentOffset: contentOffset,

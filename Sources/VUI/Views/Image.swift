@@ -2,7 +2,7 @@
 //  File: Image.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -18,6 +18,9 @@ class AnyImageProviderBox: @unchecked Sendable {
     func isEqual(to other: AnyImageProviderBox) -> Bool {
         return self === other
     }
+    
+    @TaskLocal
+    fileprivate static var _preferredBundle: Bundle?
 }
 
 final class NamedImageProvider: AnyImageProviderBox, @unchecked Sendable {
@@ -39,32 +42,46 @@ final class NamedImageProvider: AnyImageProviderBox, @unchecked Sendable {
     }
 
     override func makeTexture(_ context: GraphicsContext) -> Texture? {
-        let bundle = self.location ?? .main
-        if let url = bundle.url(forResource: self.name,
-                                withExtension: nil,
-                                subdirectory: nil) {
-
-            let sharedContext = context.sharedContext
-            if let texture = sharedContext.resourceObjects[url.absoluteString] as? Texture {
-                self.scale = sharedContext.contentScaleFactor
-                return texture
-            }
-
-            var image: VVD.Image?
-            do {
-                Log.debug("url: \(url)")
-                let data = try Data(contentsOf: url, options: [])
-                image = data.withUnsafeBytes { ptr in
-                    VVD.Image(data: ptr)
+        let bundles: [Bundle]
+        if let location = self.location {
+            bundles = [location]
+        } else {
+            bundles = [
+                Self._preferredBundle,
+                Image._mainNamedBundle,
+                .main
+            ].compactMap(\.self)
+        }
+        
+        for bundle in bundles {
+            if let url = bundle.url(forResource: self.name,
+                                    withExtension: nil,
+                                    subdirectory: nil) {
+                
+                let sceneResources = context.sceneResources
+                if let texture = sceneResources.cachedTextures[url.absoluteString] as? Texture {
+                    self.scale = sceneResources.contentScaleFactor
+                    return texture
                 }
-            } catch {
-                Log.error("Error on loading data: \(error)")
-            }
-            if let texture = image?.makeTexture(commandQueue: context.commandQueue) {
-                // cache
-                sharedContext.resourceObjects[url.absoluteString] = texture
-                self.scale = sharedContext.contentScaleFactor
-                return texture
+
+                var image: VVD.Image?
+                do {
+                    Log.debug("url: \(url)")
+                    let data = try Data(contentsOf: url, options: [])
+                    image = data.withUnsafeBytes { ptr in
+                        VVD.Image(data: ptr)
+                    }
+                } catch {
+                    Log.error("Error on loading data: \(error)")
+                }
+                if let texture = image?.makeTexture(commandQueue: context.commandQueue) {
+                    // cache
+                    sceneResources.cachedTextures[url.absoluteString] = texture
+                    self.scale = sceneResources.contentScaleFactor
+                    return texture
+                }
+                Log.error("Failed to create texture from image at url: \(url)")
+                return nil
             }
         }
         return nil
@@ -166,12 +183,10 @@ public struct Image: Equatable, Sendable {
     }
     
     public init(_ name: String, bundle: Bundle? = nil) {
-        let bundle = bundle ?? Image._mainNamedBundle ?? .main
         self.provider = NamedImageProvider(name: name, value: nil, location: bundle, label: nil)
     }
 
     public init(_ name: String, bundle: Bundle? = nil, label: Text) {
-        let bundle = bundle ?? Image._mainNamedBundle ?? .main
         self.provider = NamedImageProvider(name: name, value: nil, location: bundle, label: label)
     }
 
@@ -222,17 +237,104 @@ extension Image {
 
 extension Image: View {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        fatalError()
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        }
+
+        // 1. Internal state nodes for communication between the resource and layout passes.
+        // Caches the fully resolved image object (including GPU texture).
+        let resolvedImageAttr = graph.makeInput(value: GraphicsContext.ResolvedImage?.none)
+        
+        let inbox = graph.inbox
+        let sizeAttr = inputs.size
+        let positionAttr = inputs.position
+        let envAttr = inputs.base.cachedEnvironment.value.environment
+
+        // 2. Resource pass (Resource Rule)
+        // Evaluated before drawing (in updateView) to upload the image texture to the GPU.
+        let resourceAttr: Attribute<ResourceList> = graph.makeRule {
+            let image = view._attribute.value // Dependency: image provider changes
+
+            // Optimization (Cache Hit): Return an empty list if the image is already cached.
+            // Note: For a robust implementation, you might want to compare an image "version"
+            // or use a caching mechanism within the ImageProvider.
+            if resolvedImageAttr.value != nil {
+                return ResourceList() 
+            }
+
+            // If loading is required, create a new ResourceList(Task) to propagate upwards.
+            let bundle = envAttr.value.resourceBundle  // Register AG dependency and capture for closure.
+            var list = ResourceList()
+            
+            list.items.append { context in
+                AnyImageProviderBox.$_preferredBundle.withValue(bundle) {
+                    // 1. [Synchronous Loading] Resolve the image (loads data and creates texture).
+                    let resolved = context.resolve(image)
+                    let boxedResolved = UnsafeBox(resolved)
+                    
+                    // 2. [State Invalidation] Notify completion and trigger a layout recomputation.
+                    inbox.enqueue {
+                        resolvedImageAttr.setValue(boxedResolved.value)
+                    }
+                } // withValue
+            }
+
+            return list
+        }
+
+        // 3. Layout pass (Layout Rule)
+        let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
+            // Dependency: Re-evaluates when `inbox` updates these values from the Resource Rule.
+            let resolved = resolvedImageAttr.value
+
+            return LayoutComputer(
+                sizeThatFits: { _ in resolved?.size ?? .zero },
+                dimensions: { _ in
+                    let size = resolved?.size ?? .zero
+                    return ViewDimensions(width: size.width, height: size.height)
+                }
+            )
+        }
+
+        // 4. Drawing pass (DisplayList Rule)
+        let dlAttr: Attribute<DisplayList> = graph.makeRule {
+            let _ = view._attribute.value // Dependency: image changes
+            let viewSize = sizeAttr.value.value
+            let position = positionAttr.value
+            let resolved = resolvedImageAttr.value
+
+            var list = DisplayList()
+
+            if let resolved = resolved {
+                list.items.append { context in
+                    // 1. Local rendering frame (origin is the position assigned by the parent)
+                    let frame = CGRect(origin: position, size: viewSize)
+                    
+                    // 2. Draw to the screen
+                    if frame.width > 0 && frame.height > 0 {
+                        context.draw(resolved, in: frame)
+                    }
+                }
+            }
+            return list
+        }
+
+        var outputs = _ViewOutputs()
+        outputs._layoutComputer = OptionalAttribute(lcAttr)
+
+        // 5. Propagate ResourceList and DisplayList upwards via the Preference channel!
+        outputs.preferences.append(ResourceList.Key.self, node: resourceAttr.identifier)
+        outputs.preferences.append(DisplayList.Key.self, node: dlAttr.identifier)
+
+        return outputs
     }
 
     public typealias Body = Never
 }
 
 extension Image {
-    @TaskLocal
-    static var _mainNamedBundle: Bundle? = nil
+    static let _mainNamedBundle: Bundle? = .main
 }
 
 extension Image: _PrimitiveView {
 }
-

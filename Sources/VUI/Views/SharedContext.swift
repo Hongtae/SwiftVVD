@@ -8,22 +8,10 @@
 import Foundation
 import VVD
 
-enum DisplayScaleEnvironmentKey: EnvironmentKey {
-    static var defaultValue: CGFloat { return 1 }
-}
-
-extension EnvironmentValues {
-    public var displayScale: CGFloat {
-        set { self[DisplayScaleEnvironmentKey.self] = newValue }
-        get { self[DisplayScaleEnvironmentKey.self] }
-    }
-}
 
 final class SharedContext: @unchecked Sendable {
 
-    var scene: Any { fatalError("Implement with AG") }
-    var app: AppContext { fatalError("Implement with AG") }
-    var root: Any?
+    var app: AppContext { appContext! }
 
     var contentBounds: CGRect
     var contentScaleFactor: CGFloat
@@ -32,17 +20,19 @@ final class SharedContext: @unchecked Sendable {
     var resourceData: [String: Data] = [:]
     var resourceObjects: [String: AnyObject] = [:]
     var cachedTypeFaces: [Font: TypeFace] = [:]
+
+    // TODO: Use AppWindowsController
     var focusedViews: [Int: WeakObject<AnyObject>] = [:]
 
+    // TODO: Implement with AG
+    var gestureHandlers: [_GestureHandler] = [] 
 
-    var gestureHandlers: [_GestureHandler] = []
-
-    var window: WindowContext { fatalError("Implement with AG") }
+    var window: WindowController { fatalError("Implement with AG") }
     
     var auxiliarySceneContext: AuxiliarySceneContext?
     var alertDismissAction: (() -> Void)?
 
-    init(scene: Any) {
+    init() {
         self.contentBounds = .zero
         self.contentScaleFactor = 1
         self.needsLayout = true
@@ -81,13 +71,3 @@ final class SharedContext: @unchecked Sendable {
     }
 }
 
-private struct ResourceBundleKey: EnvironmentKey {
-    static let defaultValue: Bundle? = nil
-}
-
-extension EnvironmentValues {
-    public var resourceBundle: Bundle? {
-        get { self[ResourceBundleKey.self] }
-        set { self[ResourceBundleKey.self] = newValue }
-    }
-}

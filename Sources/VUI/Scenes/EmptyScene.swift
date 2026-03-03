@@ -11,7 +11,10 @@ public struct _EmptyScene: Scene {
     }
 
     public static func _makeScene(scene: _GraphValue<Self>, inputs: _SceneInputs) -> _SceneOutputs {
-        fatalError()
+        guard AttributeGraph.current != nil else {
+            fatalError("\(self)._makeScene called outside an active AttributeGraph context.")
+        }
+        return _SceneOutputs(preferences: PreferencesOutputs())
     }
 
     public typealias Body = Never

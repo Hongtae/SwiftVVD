@@ -2,7 +2,7 @@
 //  File: TransactionModifier.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -15,7 +15,17 @@ public struct _TransactionModifier: ViewModifier, _GraphInputsModifier {
     }
 
     public static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GraphInputs) {
-        fatalError()
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(self)._makeInputs called outside an active AttributeGraph context.")
+        }
+        let parentTransAttr = inputs.transaction
+        let newTransAttr: Attribute<Transaction> = graph.makeRule {
+            let m = modifier._attribute.value
+            var t = parentTransAttr.value
+            m.transform(&t)
+            return t
+        }
+        inputs.transaction = newTransAttr
     }
 
     public typealias Body = Never
@@ -31,7 +41,19 @@ public struct _PushPopTransactionModifier<Content>: ViewModifier where Content: 
     }
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        fatalError()
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        }
+        let parentTransAttr = inputs.base.transaction
+        let newTransAttr: Attribute<Transaction> = graph.makeRule {
+            let m = modifier._attribute.value
+            var t = parentTransAttr.value
+            m.base.transform(&t)
+            return t
+        }
+        var modifiedInputs = inputs
+        modifiedInputs.base.transaction = newTransAttr
+        return Content._makeView(modifier: modifier[\.content], inputs: modifiedInputs, body: body)
     }
 
     public typealias Body = Never

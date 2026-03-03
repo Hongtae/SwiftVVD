@@ -2,7 +2,7 @@
 //  File: Scene.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 public protocol Scene {
@@ -29,11 +29,24 @@ extension _PrimitiveScene {
     }
 }
 
+/// The bundle of AG context Attributes passed into a Scene's `_makeScene` call.
 public struct _SceneInputs {
-    var environment: EnvironmentValues
-    var properties: PropertyList = .init()
+    /// Shared graph-level inputs (time, environment, transaction, …).
+    var base: _GraphInputs
+
+    /// Preference inputs for aggregating preference values up the scene tree.
+    var preferences: PreferencesInputs
 }
 
+/// The AG nodes produced by a scene's `_makeScene` call.
 public struct _SceneOutputs {
-    let scene: Any?
+    /// Preference outputs accumulated from the scene subtree.
+    var preferences: PreferencesOutputs
+}
+
+/// Activation state of a scene window.
+public enum SceneActivationState {
+    case foregroundActive
+    case foregroundInactive
+    case background
 }

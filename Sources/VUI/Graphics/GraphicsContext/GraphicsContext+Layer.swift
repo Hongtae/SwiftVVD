@@ -11,7 +11,7 @@ import VVD
 extension GraphicsContext {
     func makeLayerContext() -> Self? {
         let context = GraphicsContext(
-            sharedContext: self.sharedContext,
+            sceneResources: self.sceneResources,
             environment: self.environment,
             viewport: self.viewport,
             contentOffset: self.contentOffset,
@@ -29,7 +29,7 @@ extension GraphicsContext {
         guard width > 0 && height > 0 else { return nil }
 
         let context = GraphicsContext(
-            sharedContext: self.sharedContext,
+            sceneResources: self.sceneResources,
             environment: self.environment,
             viewport: CGRect(x: 0, y: 0, width: width, height: height),
             contentOffset: .zero,

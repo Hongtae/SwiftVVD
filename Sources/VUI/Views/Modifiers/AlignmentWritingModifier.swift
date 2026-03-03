@@ -2,7 +2,7 @@
 //  File: AlignmentWritingModifier.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -19,12 +19,41 @@ public struct _AlignmentWritingModifier: ViewModifier {
     }
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        fatalError()
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        }
+        let childOutputs = body(_Graph(), inputs)
+        guard let childLCAttr = childOutputs._layoutComputer.attribute else {
+            return childOutputs
+        }
+        let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
+            let m = modifier._attribute.value   // dep: key/computeValue changes
+            let childLC = childLCAttr.value     // dep: child layout changes
+            return LayoutComputer(
+                sizeThatFits: { proposal in childLC.sizeThatFits(proposal) },
+                spacing: childLC.spacing,
+                dimensions: { proposal in
+                    var d = childLC.dimensions(in: proposal)
+                    d.explicitAlignments[m.key] = m.computeValue(d)
+                    return d
+                },
+                place: { position, anchor, proposal in
+                    childLC.place(at: position, anchor: anchor, proposal: proposal)
+                }
+            )
+        }
+        return _ViewOutputs(
+            preferences: childOutputs.preferences,
+            layoutComputer: OptionalAttribute(lcAttr)
+        )
     }
     public typealias Body = Never
 }
 
-extension _AlignmentWritingModifier: _UnaryViewModifier {
+extension _AlignmentWritingModifier {
+    public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
+        body(_Graph(), inputs)
+    }
 }
 
 extension View {

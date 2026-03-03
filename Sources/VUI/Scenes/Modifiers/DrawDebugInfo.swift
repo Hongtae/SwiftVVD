@@ -2,7 +2,7 @@
 //  File: DrawDebugInfo.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -28,7 +28,17 @@ public struct _DrawDebug: _SceneModifier {
     let selectedValues: Info
     
     public static func _makeScene(modifier: _GraphValue<Self>, inputs: _SceneInputs, body: @escaping (_Graph, _SceneInputs) -> _SceneOutputs) -> _SceneOutputs {
-        fatalError("Implement with AG")
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(Self.self)._makeScene called outside an active AttributeGraph context.")
+        }
+        var outputs = body(_Graph(), inputs)
+        let configAttr: Attribute<_RuntimeWindowConfig> = graph.makeRule {
+            var c = _RuntimeWindowConfig()
+            c.drawDebugInfo = modifier._attribute.value.selectedValues
+            return c
+        }
+        outputs.preferences.append(_RuntimeWindowConfig.Key.self, node: configAttr.identifier)
+        return outputs
     }
 }
 

@@ -12,14 +12,15 @@ protocol ModalWindowClient: AnyObject {
     // Stable key identifying the view-tree slot of this modal.
     // Used by ModalWindowHost to detect duplicate presentation when multiple
     // client instances are created for the same logical slot — e.g. when a
-    // _UnaryViewModifier generates contexts for multiple subviews.
+    // A modifier may be applied to multiple subviews, generating duplicate modal slots.
     var windowContextKey: AnyHashable { get }
 
     func modalWindowFrame() -> CGRect?
     func drawModalWindowBackground(offset: CGPoint, with context: GraphicsContext)
     func drawModalWindowOverlay(offset: CGPoint, with context: GraphicsContext)
     func drawModalWindowContent(offset: CGPoint, with context: GraphicsContext)
-    func updateModalWindowContent(tick: UInt64, delta: Double, date: Date)
+    func updateModalWindowContent(tick: UInt64, delta: Double, date: Date,
+                                  redraw: inout Bool, _: WindowContext.WithGraphicsContext)
 
     func modalWindowInputEventHandler() -> WindowInputEventHandler?
 
@@ -148,8 +149,8 @@ class ModalWindowSceneContext<Content>: ModalWindowClient, @unchecked Sendable w
     }
 
     private struct _ModalContext: @unchecked Sendable {
-        let window: ModalWindowContext<Content>
-        weak var parentWindow: WindowContext?
+        let window: ModalWindowController<Content>
+        weak var parentController: WindowController?
         weak var parentContext: SharedContext?
         weak var modalWindow: (any PlatformWindow)?
         var windowOffset: CGPoint
@@ -161,7 +162,7 @@ class ModalWindowSceneContext<Content>: ModalWindowClient, @unchecked Sendable w
     }
     private var modalContext: _ModalContext? = nil
 
-    private var window: ModalWindowContext<Content>? {
+    private var window: ModalWindowController<Content>? {
         self.modalContext?.window
     }
 
@@ -191,18 +192,14 @@ class ModalWindowSceneContext<Content>: ModalWindowClient, @unchecked Sendable w
 
     fileprivate func onViewLayoutChanged() {
         guard let window = self.window else {
-            Log.error("ModalWindowContext: Invalid window!")
-            return
+            fatalError("ModalWindowContext: Invalid window!")
         }
-        guard let view = window.view else {
-            Log.error("ModalWindowContext: Invalid view!")
-            return
+        guard let layoutComputer = window.rootLayoutComputer else {
+            fatalError("ModalWindowContext: rootLayoutComputer not set — AG wiring incomplete!")
         }
 
         let padding: CGFloat = 4
-        fatalError("Implement with AG")
-        //var windowSize = view.sizeThatFits(.unspecified)
-        var windowSize: CGSize = .zero 
+        var windowSize = layoutComputer.value.sizeThatFits(.unspecified)
         windowSize.width = max(windowSize.width, 1) + padding * 2
         windowSize.height = max(windowSize.height, 1) + padding * 2
         self.modalContext?.windowSize = windowSize
@@ -221,7 +218,7 @@ class ModalWindowSceneContext<Content>: ModalWindowClient, @unchecked Sendable w
                 }
                 if activate {
                     // set modal window position to center of parent window
-                    if let parentWindow = self.modalContext?.parentWindow?.window {
+                    if let parentWindow = self.modalContext?.parentController?.window {
                         let parentFrame = parentWindow.windowFrame
                         let centerPosition = CGPoint(x: parentFrame.midX, y: parentFrame.midY)
                         let windowSize = platformWindow.windowFrame.size
@@ -234,10 +231,12 @@ class ModalWindowSceneContext<Content>: ModalWindowClient, @unchecked Sendable w
             }
         } else {
             window.sharedContext.contentBounds.size = windowSize
-            let center = CGPoint(x: windowSize.width * 0.5, y: windowSize.height * 0.5)
-            fatalError("Implement with AG")
-            //view.place(at: center, anchor: .center, proposal: ProposedViewSize(windowSize))
             
+            let center = CGPoint(x: windowSize.width * 0.5, y: windowSize.height * 0.5)
+            layoutComputer.value.place(at: center,
+                                       anchor: .center,
+                                       proposal: ProposedViewSize(windowSize))
+
             // set modal window offset to center of parent
             if let parentContext = self.modalContext?.parentContext {
                 let parentSize = parentContext.contentBounds.size
@@ -296,12 +295,12 @@ class ModalWindowSceneContext<Content>: ModalWindowClient, @unchecked Sendable w
 
     private func tearDownModal() {
         guard let context = self.modalContext else { return }
-        if let host = context.parentWindow as? ModalWindowHost {
+        if let host = context.parentController {
             // detach without triggering session callbacks — caller handles response
             host.detachModalWindow(self)
             host.releaseModalSlot(key: self.windowContextKey)
         }
-        let parentWindow = context.parentWindow?.window
+        let parentWindow = context.parentController?.window
         if let window = context.modalWindow {
             runOnMainQueue { [weak window, weak self] in
                 if let self {
@@ -389,18 +388,18 @@ class ModalWindowSceneContext<Content>: ModalWindowClient, @unchecked Sendable w
             if alpha < 1.0 {                
                 context.drawLayer { context in
                     modalContext.window
-                        .drawFrame(context,
-                                offset: modalContext.windowOffset + offset)
+                        .drawFrame(offset: modalContext.windowOffset + offset, context)
                 }
             } else {
                 modalContext.window
-                    .drawFrame(context,
-                               offset: modalContext.windowOffset + offset)
+                    .drawFrame(offset: modalContext.windowOffset + offset, context)
             }
         }
     }
 
-    func updateModalWindowContent(tick: UInt64, delta: Double, date: Date) {
+    func updateModalWindowContent(tick: UInt64, delta: Double, date: Date,
+                                  redraw: inout Bool,
+                                  _ withGC: WindowContext.WithGraphicsContext) {
         if var transition = self.modalContext?.transition {
             transition.elapsed += delta
             if transition.isComplete {
@@ -410,7 +409,11 @@ class ModalWindowSceneContext<Content>: ModalWindowClient, @unchecked Sendable w
                 self.modalContext?.transition = transition
             }
         }
-        self.window?.updateView(tick: tick, delta: delta, date: date)
+        if let frame = self.modalWindowFrame() {
+            self.window?.updateView(tick: tick, delta: delta, date: date,
+                                    contentSize: frame.size, redraw: &redraw,
+                                    withGC)
+        }
     }
 
     func modalWindowInputEventHandler() -> WindowInputEventHandler? {
@@ -425,7 +428,7 @@ class ModalWindowSceneContext<Content>: ModalWindowClient, @unchecked Sendable w
     private func endModalSession(response: ModalResponse?) {
         if let context = self.modalContext {
             let onDismiss = context.onDismiss
-            if let host = context.parentWindow as? ModalWindowHost {
+            if let host = context.parentController {
                 host.releaseModalSlot(key: self.windowContextKey)
             }
             self.modalContext = nil
@@ -451,15 +454,15 @@ class ModalWindowSceneContext<Content>: ModalWindowClient, @unchecked Sendable w
 }
 
 // popup-window for modal window scene
-private class ModalWindowContext<Content>: GenericWindowContext<Content>, @unchecked Sendable where Content: View {
+private class ModalWindowController<Content: View>: WindowController, @unchecked Sendable {
     override var style: PlatformWindowStyle { [.autoResize] }
 
     private weak var _scene: ModalWindowSceneContext<Content>?
 
-    override init(content: _GraphValue<Content>, scene: Any) {
+    init(content: _GraphValue<Content>, scene: WindowKey) {
         super.init(content: content, scene: scene)
         guard let scene = scene as? ModalWindowSceneContext<Content> else {
-            fatalError("ModalWindowContext: invalid scene context")
+            fatalError("ModalWindowController: invalid scene context")
         }
         self._scene = scene
     }

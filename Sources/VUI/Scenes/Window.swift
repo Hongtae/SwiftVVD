@@ -2,7 +2,7 @@
 //  File: Window.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -42,38 +42,20 @@ struct SingleWindowScene<Content>: _PrimitiveScene where Content: View {
     var title: Text
 
     static func _makeScene(scene: _GraphValue<Self>, inputs: _SceneInputs) -> _SceneOutputs {
-        fatalError("Implement with AG")
-    }
-}
-
-class SingleWindowSceneContext<Content> where Content: View {
-    typealias Scene = SingleWindowScene<Content>
-    var window: WindowContext?
-
-    init(graph: _GraphValue<Scene>, inputs: _SceneInputs) {
-        defer {
-            self.window = SceneWindowContext(content: graph[\.content], title: graph[\.title], scene: self)
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(self)._makeScene called outside an active AttributeGraph context.")
         }
+        let windowKey = WindowKey(namespace: .app, sceneID: SceneID(Content.self, index: 0))
+        let contentGraph = scene[\.content]
+        let titleGraph = scene[\.title]
+        let item = SceneList.Item(windowKey: windowKey, kind: .single) {
+            WindowController(content: contentGraph, title: titleGraph, scene: windowKey)
+        }
+        let itemsAttr: Attribute<[SceneList.Item]> = graph.makeRule { [item] in [item] }
+
+        var outputs = PreferencesOutputs()
+        outputs.append(SceneList.Key.self, node: itemsAttr.identifier)
+        return _SceneOutputs(preferences: outputs)
     }
 }
 
-
-class SceneWindowContext<Content>: GenericWindowContext<Content> where Content: View {
-    let titleGraph: _GraphValue<Text>
-    var _title: String = ""
-
-    override var title: String { _title }
-    override var style: PlatformWindowStyle { .genericWindow }
-
-    init(content: _GraphValue<Content>, title: _GraphValue<Text>, scene: Any) {
-        self.titleGraph = title
-        super.init(content: content, scene: scene)
-    }
-
-    override func updateContent() {
-        fatalError("Implement with AG")
-    }
-}
-
-extension SceneWindowContext: @unchecked Sendable {
-}

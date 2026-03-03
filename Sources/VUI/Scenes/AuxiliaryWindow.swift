@@ -2,7 +2,7 @@
 //  File: AuxiliaryWindow.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -13,7 +13,8 @@ protocol AuxiliaryWindowClient: AnyObject {
     func drawAuxiliaryWindowBackground(offset: CGPoint, with context: GraphicsContext)
     func drawAuxiliaryWindowOverlay(offset: CGPoint, with context: GraphicsContext)
     func drawAuxiliaryWindowContent(offset: CGPoint, with context: GraphicsContext)
-    func updateAuxiliaryWindowContent(tick: UInt64, delta: Double, date: Date)
+    func updateAuxiliaryWindowContent(tick: UInt64, delta: Double, date: Date,
+                                      redraw: inout Bool, _: WindowContext.WithGraphicsContext)
 
     func auxiliaryWindowInputEventHandler() -> WindowInputEventHandler?
     func auxiliaryWindowHitTest(_ point: CGPoint) -> Bool
@@ -35,7 +36,7 @@ protocol AuxiliaryWindowHost {
 
 struct AuxiliarySceneContext {
     weak var hostContext: SharedContext?
-    weak var hostWindow: WindowContext?
+    weak var hostController: WindowController?
     var sceneContext: Any?
     
     let dismissOnDeactivate: Bool
@@ -73,8 +74,8 @@ class AuxiliaryWindowSceneContext<Content>: AuxiliaryWindowClient, @unchecked Se
     let layoutPadding = 4
 
     private struct _ActivationContext: @unchecked Sendable {
-        let window: AuxiliaryWindowContext<Content>
-        weak var parentWindow: WindowContext?
+        let window: AuxiliaryWindowController<Content>
+        weak var parentController: WindowController?
         weak var popupWindow: (any PlatformWindow)?
         var windowOffset: CGPoint
         var windowSize: CGSize = .zero
@@ -84,7 +85,7 @@ class AuxiliaryWindowSceneContext<Content>: AuxiliaryWindowClient, @unchecked Se
     }
     private var activationContext: _ActivationContext? = nil
 
-    private var window: AuxiliaryWindowContext<Content>? {
+    private var window: AuxiliaryWindowController<Content>? {
         self.activationContext?.window
     }
     
@@ -113,19 +114,14 @@ class AuxiliaryWindowSceneContext<Content>: AuxiliaryWindowClient, @unchecked Se
 
     fileprivate func onViewLayoutChanged() {
         guard let window = self.window else {
-            Log.error("AuxiliaryWindowContext: Invalid window!")
-            return
+            fatalError("AuxiliaryWindowContext: Invalid window!")
+        }
+        guard let layoutComputer = window.rootLayoutComputer else {
+            fatalError("AuxiliaryWindowContext: rootLayoutComputer not set — AG wiring incomplete!")
         }
 
-        // guard let view = window.view else {
-        //     Log.error("AuxiliaryWindowContext: Invalid view!")
-        //     return
-        // }
-
         let padding = CGFloat(self.layoutPadding)
-         fatalError("Implement with AG")
-        //let contentSize = view.sizeThatFits(.unspecified)
-        let contentSize: CGSize = .zero
+        let contentSize = layoutComputer.value.sizeThatFits(.unspecified)
         var windowSize = contentSize
         windowSize.width = max(windowSize.width, 1) + padding * 2
         windowSize.height = max(windowSize.height, 1) + padding * 2
@@ -149,9 +145,11 @@ class AuxiliaryWindowSceneContext<Content>: AuxiliaryWindowClient, @unchecked Se
             }
         } else {
             window.sharedContext.contentBounds.size = windowSize
+            
             let center = CGPoint(x: windowSize.width * 0.5, y: windowSize.height * 0.5)
-            fatalError("Implement with AG")
-            //view.place(at: center, anchor: .center, proposal: ProposedViewSize(contentSize))
+            layoutComputer.value.place(at: center,
+                                       anchor: .center,
+                                       proposal: ProposedViewSize(contentSize))
         }
     }
 
@@ -168,9 +166,7 @@ class AuxiliaryWindowSceneContext<Content>: AuxiliaryWindowClient, @unchecked Se
     func dismiss() {
         if let context = self.activationContext {
             self.activationContext = nil
-            if let host = context.parentWindow as? AuxiliaryWindowHost {
-                host.removeAuxiliaryWindow(self)
-            }
+            context.parentController?.removeAuxiliaryWindow(self)
 
             context.window.dismissAllModalWindows()
             context.window.dismissAllAuxiliaryWindows()
@@ -180,7 +176,7 @@ class AuxiliaryWindowSceneContext<Content>: AuxiliaryWindowClient, @unchecked Se
                     window?.close()
                 }
             }
-            if let window = context.parentWindow?.window {
+            if let window = context.parentController?.window {
                 runOnMainQueue { @MainActor [weak window] in
                     window?.removeEventObserver(self)
                 }
@@ -235,13 +231,18 @@ class AuxiliaryWindowSceneContext<Content>: AuxiliaryWindowClient, @unchecked Se
     func drawAuxiliaryWindowContent(offset: CGPoint, with context: GraphicsContext) {
         if let activationContext {
             activationContext.window
-                .drawFrame(context,
-                           offset: activationContext.windowOffset + offset)
+                .drawFrame(offset: activationContext.windowOffset + offset, context)
         }
     }
 
-    func updateAuxiliaryWindowContent(tick: UInt64, delta: Double, date: Date) {
-        self.window?.updateView(tick: tick, delta: delta, date: date)
+    func updateAuxiliaryWindowContent(tick: UInt64, delta: Double, date: Date,
+                                      redraw: inout Bool,
+                                      _ withGC: WindowContext.WithGraphicsContext) {
+        if let frame = self.auxiliaryWindowFrame() {
+            self.window?.updateView(tick: tick, delta: delta, date: date,
+                                    contentSize: frame.size, redraw: &redraw,
+                                    withGC)
+        }
     }
 
     func auxiliaryWindowInputEventHandler() -> WindowInputEventHandler? {
@@ -290,15 +291,15 @@ class AuxiliaryWindowSceneContext<Content>: AuxiliaryWindowClient, @unchecked Se
 }
 
 // popup-window for auxiliary window scene
-private class AuxiliaryWindowContext<Content>: GenericWindowContext<Content>, @unchecked Sendable where Content: View {
+private class AuxiliaryWindowController<Content: View>: WindowController, @unchecked Sendable {
     override var style: PlatformWindowStyle { [.auxiliaryWindow, .autoResize] }
 
     private weak var _scene: AuxiliaryWindowSceneContext<Content>?
 
-    override init(content: _GraphValue<Content>, scene: Any) {
+    init(content: _GraphValue<Content>, scene: WindowKey) {
         super.init(content: content, scene: scene)
         guard let scene = scene as? AuxiliaryWindowSceneContext<Content> else {
-            fatalError("AuxiliaryWindowContext: invalid scene context")
+            fatalError("AuxiliaryWindowController: invalid scene context")
         }
         self._scene = scene
     }

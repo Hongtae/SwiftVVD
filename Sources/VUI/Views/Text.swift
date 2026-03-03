@@ -205,13 +205,13 @@ public struct Text: Equatable {
     }
 
     func _resolve(context: GraphicsContext) -> GraphicsContext.ResolvedText {
-        let displayScale = context.sharedContext.contentScaleFactor
+        let displayScale = context.sceneResources.contentScaleFactor
         var font = self.font ?? context.environment.font
         if font == nil {
             font = .system(.body)
         }
         font = font?.displayScale(displayScale)
-        let defaultFace = font?.typeFace(forContext: context.sharedContext)
+        let defaultFace = font?.typeFace(forContext: context.sceneResources)
         let fallbackFaces = font?.fallbackTypeFaces ?? []
         let faces = ([defaultFace] + fallbackFaces).compactMap {$0 }
 
@@ -281,7 +281,144 @@ extension Text {
 
 extension Text: View {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        fatalError("Implement with AG")
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        }
+
+        // 1. Internal state nodes for communication between the resource and layout passes.
+        // Caches the fully resolved text object (including glyphs/metrics).
+        let resolvedTextAttr = graph.makeInput(value: GraphicsContext.ResolvedText?.none)
+        // Tracks the hash of the text content and environment to detect changes.
+        let resolvedEnvVersionAttr = graph.makeInput(value: 0)
+
+        // Extract inputs to avoid capturing the entire `inputs` struct
+        let cachedEnvironmentAttr = inputs.base.cachedEnvironment
+        let inbox = graph.inbox
+        let sizeAttr = inputs.size
+        let positionAttr = inputs.position
+
+        let debugLayoutAttr: Attribute<Bool> = graph.makeRule {
+            cachedEnvironmentAttr.value.environment.value._debugLayout
+        }
+
+        // 2. Resource pass (Resource Rule)
+        // Evaluated before drawing (in updateView) to upload resources to the GPU.
+        let resourceAttr: Attribute<ResourceList> = graph.makeRule {
+            let text = view._attribute.value // Dependency 1: Text content and modifiers
+            let environment = cachedEnvironmentAttr.value.environment.value // Dependency 2: Environment (scale, theme, font)
+
+            // Generate a unique hash (version) combining text content and environment factors.
+            var hasher = Hasher()
+            hasher.combine(text._resolveText(in: environment))
+            hasher.combine(environment.font?.hashValue ?? 0)
+            hasher.combine(environment.displayScale)
+            let currentVersion = hasher.finalize()
+
+            // Optimization (Cache Hit): Return an empty list if the resolved version matches and the text is already cached.
+            if resolvedEnvVersionAttr.value == currentVersion, resolvedTextAttr.value != nil {
+                return ResourceList() 
+            }
+
+            // If loading is required, create a new ResourceList(Task) to propagate upwards.
+            var list = ResourceList()
+
+            list.items.append { context in
+                // 1. [Synchronous Loading] Parse the text and generate glyphs using the provided context.
+                let resolved = text._resolve(context: context)
+                let boxedResolved = UnsafeBox(resolved)
+
+                // 2. [State Invalidation] Notify completion and trigger a layout recomputation.
+                inbox.enqueue {
+                    resolvedTextAttr.setValue(boxedResolved.value)
+                    resolvedEnvVersionAttr.setValue(currentVersion) // Update cached version
+                }
+            }
+
+            return list
+        }
+
+        // 3. Layout pass (Layout Rule)
+        let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
+            // Dependency: Re-evaluates when `inbox` updates these values from the Resource Rule.
+            let resolved = resolvedTextAttr.value
+
+            func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
+                guard let r = resolved else { return .zero } // Return zero size before loading completes
+                if proposal == .zero {
+                    let lineGlyphs = r.makeGlyphs(maxWidth: 0, maxHeight: 0)
+                    if let glyph = lineGlyphs.first?.glyphs.first {
+                        return glyph.advance / r.scaleFactor
+                    }
+                    return .zero
+                } else if proposal == .infinity {
+                    return r.measure()
+                } else {
+                    return r.measure(maxWidth: proposal.width, maxHeight: proposal.height)
+                }
+            }
+
+            return LayoutComputer(
+                sizeThatFits: { proposal in
+                    sizeThatFits(proposal)
+                },
+                dimensions: { proposal in
+                    let size = sizeThatFits(proposal)
+                    var d = ViewDimensions(width: size.width, height: size.height)
+                    if let r = resolved {
+                        d.explicitAlignments[VerticalAlignment.firstTextBaseline.key] = r.firstBaseline(in: size)
+                        d.explicitAlignments[VerticalAlignment.lastTextBaseline.key] = r.lastBaseline(in: size)
+                    }
+                    return d
+                }
+            )
+        }
+
+        let dlAttr: Attribute<DisplayList> = graph.makeRule {
+            let _ = view._attribute.value // Dependency: text modifiers/colors
+            let viewSize = sizeAttr.value.value
+            let position = positionAttr.value
+            let resolved = resolvedTextAttr.value
+            let debugLayout = debugLayoutAttr.value
+
+            var list = DisplayList()
+
+            if let resolved = resolved {
+                list.items.append { context in
+                    // 1. Local rendering frame (origin is the position assigned by the parent)
+                    var frame = CGRect(origin: position, size: viewSize)
+
+                    // 2. Measure actual text size for vertical centering
+                    let measuredSize = resolved.measure(maxWidth: frame.width, maxHeight: frame.height)
+
+                    if measuredSize.height < frame.height {
+                        let offset = frame.height - measuredSize.height
+                        frame = frame.offsetBy(dx: 0, dy: offset * 0.5)
+                        frame.size.height = measuredSize.height
+                    }
+
+                    // 3. Draw to the screen
+                    if frame.width > 0 && frame.height > 0 {
+                        // TODO: Extract foregroundColor from text.modifiers or environment
+                        // and pass it to context.draw(..., shading:)
+                        context.draw(resolved, in: frame)
+                    }
+                }
+            }
+            if debugLayout {
+                appendDebugOverlay(to: &list, frame: CGRect(origin: position, size: viewSize),
+                                   category: .primitiveView)
+            }
+            return list
+        }
+
+        var outputs = _ViewOutputs()
+        outputs._layoutComputer = OptionalAttribute(lcAttr)
+
+        // 5. Propagate ResourceList and DisplayList upwards via the Preference channel!
+        outputs.preferences.append(ResourceList.Key.self, node: resourceAttr.identifier)
+        outputs.preferences.append(DisplayList.Key.self, node: dlAttr.identifier)
+
+        return outputs
     }
 }
 

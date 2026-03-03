@@ -2,7 +2,7 @@
 //  File: ButtonStyle.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -45,11 +45,21 @@ extension PrimitiveButtonStyleConfiguration.Label {
     }
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        fatalError("Implement with AG")
+        if let proxy = view._attribute.value.view {
+            return proxy.makeView(_Graph(), inputs: inputs)
+        }
+        if let proxy = inputs.base.customInputs.value(forKey: _StaticSourceInputKey<Self>.self) {
+            return proxy.makeView(_Graph(), inputs: inputs)
+        }
+        return _ViewOutputs()
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        fatalError("Implement with AG")
+        _ViewListOutputs(
+            views: .staticList(.unary(TypedUnaryViewGenerator(view, inputs: inputs))),
+            nextImplicitID: 1,
+            staticCount: 1
+        )
     }
 }
 
@@ -273,7 +283,11 @@ extension ButtonStyleConfiguration.Label {
         PrimitiveButtonStyleConfiguration.Label._makeView(view: view[\.view], inputs: inputs)
     }
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        PrimitiveButtonStyleConfiguration.Label._makeViewList(view: view[\.view], inputs: inputs)
+        _ViewListOutputs(
+            views: .staticList(.unary(TypedUnaryViewGenerator(view, inputs: inputs))),
+            nextImplicitID: 1,
+            staticCount: 1
+        )
     }
 }
 
@@ -299,6 +313,11 @@ struct _DefaultButtonWithButtonStyle<Style>: PrimitiveButtonStyle, PrimitiveButt
     }
 }
 
+struct _PrimitiveButtonStyleKey: PropertyItem {
+    static var defaultValue: (any PrimitiveButtonStyle)? { nil }
+    var description: String { "_PrimitiveButtonStyleKey" }
+}
+
 struct PrimitiveButtonStyleContainerModifier<Style>: ViewModifier where Style: PrimitiveButtonStyle {
     let style: Style
     typealias Body = Never
@@ -306,11 +325,17 @@ struct PrimitiveButtonStyleContainerModifier<Style>: ViewModifier where Style: P
 
 extension PrimitiveButtonStyleContainerModifier {
     static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        fatalError()
+        var inputs = inputs
+        let styleExistential: (any PrimitiveButtonStyle)? = modifier._attribute.value.style
+        inputs.base.customInputs.setValue(styleExistential, forKey: _PrimitiveButtonStyleKey.self)
+        return body(_Graph(), inputs)
     }
 
     static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        fatalError()
+        var inputs = inputs
+        let styleExistential: (any PrimitiveButtonStyle)? = modifier._attribute.value.style
+        inputs.base.customInputs.setValue(styleExistential, forKey: _PrimitiveButtonStyleKey.self)
+        return body(_Graph(), inputs)
     }
 }
 

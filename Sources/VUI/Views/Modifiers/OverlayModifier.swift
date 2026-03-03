@@ -17,15 +17,68 @@ public struct _OverlayModifier<Overlay>: ViewModifier where Overlay: View {
     }
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        fatalError("Implement with AG")
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        }
+        let mainOutputs = body(_Graph(), inputs)
+        guard let mainLCAttr = mainOutputs._layoutComputer.attribute else {
+            return mainOutputs
+        }
+        let ovPosAttr = graph.makeInput(value: CGPoint.zero)
+        let ovInputs = _ViewInputs(
+            base: inputs.base,
+            preferences: inputs.preferences,
+            transform: inputs.transform,
+            position: ovPosAttr,
+            containerPosition: inputs.position,
+            size: inputs.size,
+            safeAreaInsets: inputs.safeAreaInsets,
+            containerSize: inputs.containerSize
+        )
+        let ovOutputs = Overlay._makeView(view: modifier[\.overlay], inputs: ovInputs)
+        guard let ovLCAttr = ovOutputs._layoutComputer.attribute else {
+            return mainOutputs
+        }
+        let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
+            let m = modifier._attribute.value   // dep: alignment changes
+            let mainLC = mainLCAttr.value       // dep: main content changes
+            let ovLC = ovLCAttr.value           // dep: overlay changes
+            return LayoutComputer(
+                sizeThatFits: { proposal in mainLC.sizeThatFits(proposal) },
+                spacing: mainLC.spacing,
+                dimensions: { proposal in mainLC.dimensions(in: proposal) },
+                place: { position, anchor, proposal in
+                    mainLC.place(at: position, anchor: anchor, proposal: proposal)
+                    let mainSize = mainLC.sizeThatFits(proposal)
+                    let ox = position.x - mainSize.width * anchor.x
+                    let oy = position.y - mainSize.height * anchor.y
+                    let mainDims = mainLC.dimensions(in: proposal)
+                    let ovProposal = ProposedViewSize(width: mainSize.width, height: mainSize.height)
+                    let ovDims = ovLC.dimensions(in: ovProposal)
+                    let ovX = ox + mainDims[m.alignment.horizontal] - ovDims[m.alignment.horizontal]
+                    let ovY = oy + mainDims[m.alignment.vertical] - ovDims[m.alignment.vertical]
+                    let ovOrigin = CGPoint(x: ovX, y: ovY)
+                    ovPosAttr.setValue(ovOrigin)
+                    ovLC.place(at: ovOrigin, anchor: .topLeading, proposal: ovProposal)
+                }
+            )
+        }
+        return _ViewOutputs(
+            preferences: mainOutputs.preferences,
+            layoutComputer: OptionalAttribute(lcAttr)
+        )
     }
 }
 
 extension _OverlayModifier: Equatable where Overlay: Equatable {
 }
 
-extension _OverlayModifier: _UnaryViewModifier {
+extension _OverlayModifier {
     public typealias Body = Never
+
+    public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
+        body(_Graph(), inputs)
+    }
 }
 
 public struct _OverlayStyleModifier<Style>: ViewModifier where Style: ShapeStyle {
@@ -37,13 +90,18 @@ public struct _OverlayStyleModifier<Style>: ViewModifier where Style: ShapeStyle
         self.ignoresSafeAreaEdges = ignoresSafeAreaEdges
     }
 
+    // TODO: Wire style fill as an overlay layer once rendering context is available.
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        fatalError("Implement with AG")
+        body(_Graph(), inputs)
     }
 }
 
-extension _OverlayStyleModifier: _UnaryViewModifier {
+extension _OverlayStyleModifier {
     public typealias Body = Never
+
+    public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
+        body(_Graph(), inputs)
+    }
 }
 
 public struct _OverlayShapeModifier<Style, Bounds>: ViewModifier where Style: ShapeStyle, Bounds: Shape {
@@ -57,13 +115,18 @@ public struct _OverlayShapeModifier<Style, Bounds>: ViewModifier where Style: Sh
         self.fillStyle = fillStyle
     }
 
+    // TODO: Wire shape fill as an overlay layer once rendering context is available.
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        fatalError("Implement with AG")
+        body(_Graph(), inputs)
     }
 }
 
-extension _OverlayShapeModifier: _UnaryViewModifier {
+extension _OverlayShapeModifier {
     public typealias Body = Never
+
+    public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
+        body(_Graph(), inputs)
+    }
 }
 
 extension View {

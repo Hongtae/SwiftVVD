@@ -8,6 +8,10 @@
 //  Single-threaded design — no internal synchronization.
 //  The caller is responsible for ensuring that all operations on a given
 //  AttributeGraph instance occur on a single thread (or equivalent serial context).
+//
+//  All methods on AttributeGraph require that AttributeGraph.current is already bound
+//  to this instance (via AttributeGraph.$current.withValue(self) { ... }) before
+//  they are called. Violating this precondition causes a runtime assertion failure.
 
 /// The raw identifier for an AG node — an index into the graph's slot array.
 struct AGAttribute: Hashable, CustomDebugStringConvertible, Sendable {
@@ -38,7 +42,9 @@ struct AGWeakAttribute: Hashable, Sendable {
 }
 
 /// A typed wrapper around an AGAttribute.
-struct Attribute<Value> {
+/// Marked @unchecked Sendable: stores only AGAttribute (a Sendable raw index).
+/// Value type parameter is used only in method signatures; no Value is retained here.
+struct Attribute<Value>: @unchecked Sendable {
     var identifier: AGAttribute
 
     init(_ id: AGAttribute) {
@@ -54,7 +60,9 @@ struct Attribute<Value> {
         return graph.value(for: identifier) as! Value
     }
 
-    // Only used for State/Input nodes to push new values.
+    // Primarily used for State/Input nodes to push new values.
+    // Can also be used to inject an initial fallback value into a rule node
+    // to resolve potential dependency cycles before it is first evaluated.
     func setValue(_ newValue: Value, transaction: Transaction = Transaction()) {
         guard let graph = AttributeGraph.current else {
             fatalError("Attempted to write to an Attribute outside of an active AttributeGraph context.")
@@ -63,19 +71,59 @@ struct Attribute<Value> {
     }
 
     /// Creates a weak reference to this attribute, capturing the current generation seed.
-    func asWeak(in graph: AttributeGraph) -> AGWeakAttribute {
-        AGWeakAttribute(identifier: identifier.rawValue, seed: graph._seed(at: identifier.rawValue))
+    func asWeak() -> AGWeakAttribute {
+        guard let graph = AttributeGraph.current else {
+            fatalError("Attempted to read an Attribute outside of an active AttributeGraph context.")
+        }
+        return AGWeakAttribute(identifier: identifier.rawValue, seed: graph._seed(at: identifier.rawValue))
+    }
+}
+
+extension Attribute where Value: Equatable {
+    func setValue(_ newValue: Value, transaction: Transaction = Transaction()) {
+        guard let graph = AttributeGraph.current else {
+            fatalError("Attempted to write to an Attribute outside of an active AttributeGraph context.")
+        }
+        graph.setValue(for: self, to: newValue, transaction: transaction)
+    }
+}
+
+/// Type-erased optional wrapper around an AG node identifier.
+/// Used as the backing storage for `OptionalAttribute<T>` so that
+/// `OptionalAttribute` can be stored in non-generic contexts.
+struct AnyOptionalAttribute {
+    var identifier: AGAttribute?
+
+    init() { identifier = nil }
+    init(_ id: AGAttribute) { identifier = id }
+}
+
+/// An optional typed reference to an AG node.
+/// Used for fields that may or may not have an associated AG node
+/// (e.g., `_layoutComputer`, `safeAreaInsets`, `containerSize`).
+struct OptionalAttribute<Value> {
+    var base: AnyOptionalAttribute
+
+    init() { base = AnyOptionalAttribute() }
+    init(_ attribute: Attribute<Value>) { base = AnyOptionalAttribute(attribute.identifier) }
+
+    var attribute: Attribute<Value>? {
+        guard let id = base.identifier else { return nil }
+        return Attribute(id)
     }
 }
 
 /// A group of AG nodes that are created and destroyed together.
 ///
+/// Must be created while an AttributeGraph context is active (`AttributeGraph.current != nil`).
+/// The owning AttributeGraph is captured at creation time and validated on `invalidate()`.
+///
 /// Wrap node-creation code in `Subgraph.$current.withValue(subgraph) { ... }` to
 /// automatically register every node created in that scope to this subgraph.
-/// Call `invalidate(graph:)` to batch-remove all registered nodes at once.
+/// Call `invalidate()` to batch-remove all registered nodes at once.
 ///
 /// Subgraphs form a parent/child tree: a Subgraph created while another is active
-/// automatically becomes its child. `invalidate(graph:)` cascades depth-first,
+/// automatically becomes its child. `invalidate()` cascades depth-first,
 /// so invalidating a parent also destroys all descendant Subgraphs.
 ///
 /// Typical use — ForEach item lifecycle:
@@ -87,17 +135,23 @@ struct Attribute<Value> {
 /// itemSubgraphs[id] = subgraph
 ///
 /// // item removed:
-/// itemSubgraphs[id]?.invalidate(graph: graph)
+/// itemSubgraphs[id]?.invalidate()
+/// itemSubgraphs[id]?.removeFromParent()
 /// itemSubgraphs[id] = nil
 /// ```
 final class Subgraph: @unchecked Sendable {
     private(set) var nodes: [AGAttribute] = []
     private(set) var children: [Subgraph] = []
     private(set) weak var parent: Subgraph? = nil
+    weak let graph: AttributeGraph?
 
     @TaskLocal static var current: Subgraph? = nil
 
     init() {
+        guard let graph = AttributeGraph.current else {
+            fatalError("Subgraph must be created within an active AttributeGraph context.")
+        }
+        self.graph = graph
         if let parent = Subgraph.current {
             parent.children.append(self)
             self.parent = parent
@@ -108,11 +162,22 @@ final class Subgraph: @unchecked Sendable {
         nodes.append(id)
     }
 
-    func invalidate(graph: AttributeGraph) {
-        children.forEach { $0.invalidate(graph: graph) }
+    func invalidate() {
+        guard let graph = AttributeGraph.current else {
+            fatalError("Subgraph.invalidate() called outside an active AttributeGraph context.")
+        }
+        guard graph === self.graph else {
+            fatalError("Subgraph.invalidate() called from a different AttributeGraph than the one that owns this subgraph.")
+        }
+        children.forEach { $0.invalidate() }
         children.removeAll()
         nodes.forEach { graph.removeNode($0) }
         nodes.removeAll()
+    }
+
+    func removeFromParent() {
+        parent?.children.removeAll { $0 === self }
+        parent = nil
     }
 }
 
@@ -158,6 +223,9 @@ class AttributeGraph: @unchecked Sendable {
     // Cache for KeyPath-derived child nodes
     private var pathIDs: [RelativePath: UInt32] = [:]
 
+    // Thread-safe bridge for scheduling AG invalidations from arbitrary threads.
+    let inbox: AGInbox = AGInbox()
+
     final class ChangeSet: @unchecked Sendable {
         private var _ids: Set<AGAttribute> = []
         var ids: Set<AGAttribute> { _ids }
@@ -165,18 +233,18 @@ class AttributeGraph: @unchecked Sendable {
     }
 
     @TaskLocal static var current: AttributeGraph?
-    @TaskLocal static var _changeSet: ChangeSet?
+    @TaskLocal static var changeSet: ChangeSet?
     @TaskLocal private static var currentlyEvaluatingNode: AGAttribute?
 
     init() {}
 
-    var _slotCount: Int { slots.count }
+    //var _slotCount: Int { slots.count }
 
-    func _seed(at index: UInt32) -> UInt32 {
+    fileprivate func _seed(at index: UInt32) -> UInt32 {
         slots[Int(index)].seed
     }
 
-    func _isValid(index: UInt32, seed: UInt32) -> Bool {
+    fileprivate func _isValid(index: UInt32, seed: UInt32) -> Bool {
         let i = Int(index)
         guard i < slots.count else { return false }
         return slots[i].seed == seed && slots[i].node != nil
@@ -194,6 +262,7 @@ class AttributeGraph: @unchecked Sendable {
 
     /// Creates a source-of-truth input node (e.g., @State)
     func makeInput<Value>(value: Value) -> Attribute<Value> {
+        assert(AttributeGraph.current === self)
         let index = allocateSlot()
         slots[Int(index)].node = Node(value: value, rule: nil, needsEvaluation: false)
         let attr = Attribute<Value>(AGAttribute(rawValue: index))
@@ -203,6 +272,7 @@ class AttributeGraph: @unchecked Sendable {
 
     /// Creates a computed node with a rule (e.g., a View's body or a derived property)
     func makeRule<Value>(rule: @escaping () -> Value) -> Attribute<Value> {
+        assert(AttributeGraph.current === self)
         let index = allocateSlot()
         slots[Int(index)].node = Node(value: nil, rule: rule, needsEvaluation: true)
         let attr = Attribute<Value>(AGAttribute(rawValue: index))
@@ -212,6 +282,7 @@ class AttributeGraph: @unchecked Sendable {
 
     /// Completely removes a node and cleans up its dependencies.
     func removeNode(_ id: AGAttribute) {
+        assert(AttributeGraph.current === self)
         let index = Int(id.rawValue)
         guard slots[index].node != nil else {
             fatalError("removeNode called on @\(id.rawValue) which does not exist — double-remove is a usage error.")
@@ -245,6 +316,7 @@ class AttributeGraph: @unchecked Sendable {
     }
 
     func value(for id: AGAttribute) -> Any? {
+        assert(AttributeGraph.current === self)
         let index = Int(id.rawValue)
         guard slots[index].node != nil else {
             fatalError("Invalid AGAttribute @\(id.rawValue): node does not exist.")
@@ -277,6 +349,7 @@ class AttributeGraph: @unchecked Sendable {
     }
 
     func setValue<Value: Equatable>(for attribute: Attribute<Value>, to newValue: Value, transaction: Transaction = Transaction()) {
+        assert(AttributeGraph.current === self)
         let index = Int(attribute.identifier.rawValue)
         guard slots[index].node != nil else {
             fatalError("setValue called on AGAttribute @\(attribute.identifier.rawValue) that does not exist.")
@@ -285,10 +358,11 @@ class AttributeGraph: @unchecked Sendable {
         slots[index].node!.value = newValue
         let outputs = slots[index].node!.outputs
         for outputIndex in outputs { markNeedsEvaluation(AGAttribute(rawValue: outputIndex)) }
-        AttributeGraph._changeSet?.record(attribute.identifier)
+        AttributeGraph.changeSet?.record(attribute.identifier)
     }
 
     func setValue<Value>(for attribute: Attribute<Value>, to newValue: Value, transaction: Transaction = Transaction()) {
+        assert(AttributeGraph.current === self)
         let index = Int(attribute.identifier.rawValue)
         guard slots[index].node != nil else {
             fatalError("setValue called on AGAttribute @\(attribute.identifier.rawValue) that does not exist.")
@@ -296,7 +370,7 @@ class AttributeGraph: @unchecked Sendable {
         slots[index].node!.value = newValue
         let outputs = slots[index].node!.outputs
         for outputIndex in outputs { markNeedsEvaluation(AGAttribute(rawValue: outputIndex)) }
-        AttributeGraph._changeSet?.record(attribute.identifier)
+        AttributeGraph.changeSet?.record(attribute.identifier)
     }
 
     private func evaluateNode(_ id: AGAttribute) {
@@ -305,9 +379,14 @@ class AttributeGraph: @unchecked Sendable {
             fatalError("evaluateNode called on AGAttribute @\(id.rawValue) that does not exist.")
         }
 
-        // KeyPath node: no rule, compute from parent via KeyPath
-        // clearInputs is intentionally omitted — the dependency on the parent is fixed at
-        // creation time in subscriptNode() and never changes.
+        // KeyPath node: no rule, derive value from parent via KeyPath.
+        // clearInputs is intentionally omitted — the dependency on parent is established
+        // once at creation time in subscriptNode() and never changes.
+        // Note: value(for: parent) is called while currentlyEvaluatingNode is still set to
+        // the outer caller, so the caller also acquires a direct dependency on parent (in
+        // addition to its dependency on this KeyPath node). This is redundant but harmless —
+        // markNeedsEvaluation's BFS stops at already-dirty nodes, and the extra edge is
+        // cleaned up by clearInputs on the caller's next re-evaluation.
         if slots[index].node!.rule == nil,
            let parent = slots[index].node!.parent,
            let kp = slots[index].node!.keyPath {
@@ -319,16 +398,14 @@ class AttributeGraph: @unchecked Sendable {
         }
 
         guard let rule = slots[index].node?.rule else {
-            fatalError("evaluateNode called on a node with no rule — setValue must not mark input nodes dirty.")
+            fatalError("evaluateNode called on a node with no rule — input nodes must never be marked needsEvaluation.")
         }
 
         // Clear previous dynamic inputs before re-running the rule
         clearInputs(for: id)
 
-        let newValue = AttributeGraph.$current.withValue(self) {
-            AttributeGraph.$currentlyEvaluatingNode.withValue(id) {
-                rule()
-            }
+        let newValue = AttributeGraph.$currentlyEvaluatingNode.withValue(id) {
+            rule()
         }
 
         slots[index].node!.value = newValue
@@ -336,7 +413,8 @@ class AttributeGraph: @unchecked Sendable {
         slots[index].node!.isEvaluating = false
     }
 
-    private func markNeedsEvaluation(_ startID: AGAttribute) {
+    func markNeedsEvaluation(_ startID: AGAttribute) {
+        assert(AttributeGraph.current === self)
         // Iterative BFS to avoid stack overflow on deep dependency graphs.
         var queue: [UInt32] = [startID.rawValue]
         var i = 0
@@ -378,6 +456,7 @@ class AttributeGraph: @unchecked Sendable {
 
     /// Dynamically creates or retrieves a child node representing a property accessed via KeyPath.
     func subscriptNode<T, U>(parent: Attribute<T>, keyPath: KeyPath<T, U>) -> Attribute<U> {
+        assert(AttributeGraph.current === self)
         let rp = RelativePath(parentID: parent.identifier.rawValue, keyPath: keyPath)
 
         if let existingIndex = pathIDs[rp] {
@@ -410,19 +489,25 @@ class AttributeGraph: @unchecked Sendable {
     private var pendingActions: [() -> Void] = []
 
     func enqueue(_ action: @escaping () -> Void) {
+        assert(AttributeGraph.current === self)
         pendingActions.append(action)
     }
 
-    // Executes and removes all pending actions that were queued at the time of the call.
-    // Actions enqueued during execution are deferred to the next drainActions() call.
+    // Executes only the actions that are queued at the moment of the call, then returns.
+    // Any actions enqueued during execution are deferred to the next drainActions() call.
+    // Use this variant for a single, bounded flush — e.g., at the start of a frame update.
     func drainActions() {
+        assert(AttributeGraph.current === self)
         let actions = pendingActions
         pendingActions.removeAll()
         actions.forEach { $0() }
     }
 
-    // Executes pending actions up to the given time limit, then stops.
+    // Keeps executing actions (including ones enqueued during execution) until the time
+    // limit is reached, then stops. Remaining unexecuted actions stay in the queue.
+    // Use this variant for a background drain loop that must yield within a deadline.
     func drainActions(timeLimit: Duration) {
+        assert(AttributeGraph.current === self)
         let deadline = ContinuousClock.now + timeLimit
         var index = 0
         while index < pendingActions.count {

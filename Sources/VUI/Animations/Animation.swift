@@ -2,7 +2,7 @@
 //  File: Animation.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -70,18 +70,29 @@ extension Animation {
     }
 }
 
+private struct AnimationTransactionKey: TransactionKey {
+    typealias Value = Animation?
+    static var defaultValue: Animation? { nil }
+}
+
+private struct DisablesAnimationsTransactionKey: TransactionKey {
+    typealias Value = Bool
+    static var defaultValue: Bool { false }
+}
+
 extension Transaction {
     public init(animation: Animation?) {
-        fatalError()
+        plist = PropertyList()
+        self.animation = animation
     }
 
     public var animation: Animation? {
-        get { fatalError() }
-        set { fatalError() }
+        get { self[AnimationTransactionKey.self] }
+        set { self[AnimationTransactionKey.self] = newValue }
     }
     public var disablesAnimations: Bool {
-        get { fatalError() }
-        set { fatalError() }
+        get { self[DisablesAnimationsTransactionKey.self] }
+        set { self[DisablesAnimationsTransactionKey.self] = newValue }
     }
 }
 

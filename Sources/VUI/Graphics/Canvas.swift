@@ -50,7 +50,20 @@ extension Canvas where Symbols == EmptyView {
 
 extension Canvas {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        fatalError("Implement with AG")
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        }
+        let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
+            LayoutComputer(
+                sizeThatFits: { proposal in
+                    CGSize(width: proposal.width ?? 0, height: proposal.height ?? 0)
+                },
+                dimensions: { proposal in
+                    ViewDimensions(width: proposal.width ?? 0, height: proposal.height ?? 0)
+                }
+            )
+        }
+        return _ViewOutputs(layoutComputer: OptionalAttribute(lcAttr))
     }
 }
 

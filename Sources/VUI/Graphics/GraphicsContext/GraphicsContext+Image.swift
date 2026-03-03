@@ -29,7 +29,7 @@ extension GraphicsContext {
 
     public func resolve(_ image: Image) -> ResolvedImage {
         let texture = image.provider.makeTexture(self)
-        let displayScale = self.sharedContext.contentScaleFactor
+        let displayScale = self.sceneResources.contentScaleFactor
         let scaleFactor = image.provider.scaleFactor / displayScale
         let baseline = CGFloat(texture?.height ?? 0) * scaleFactor
         return ResolvedImage(baseline: baseline, shading: nil, texture: texture, textureTransform: .identity, scaleFactor: scaleFactor)

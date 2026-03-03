@@ -2,7 +2,7 @@
 //  File: WindowGroup.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -71,44 +71,26 @@ struct WindowGroupScene<Content>: _PrimitiveScene where Content: View {
     var title: Text
 
     static func _makeScene(scene: _GraphValue<Self>, inputs: _SceneInputs) -> _SceneOutputs {
-        fatalError("Implement with AG")
-    }
-}
-
-class WindowGroupSceneContext<Content> where Content: View {
-    typealias Scene = WindowGroupScene<Content>
-    var window: WindowContext?
-
-    init(graph: _GraphValue<Scene>, inputs: _SceneInputs) {
-        defer {
-            self.window = GroupWindowContext(dataType: nil, content: graph[\.content], title: graph[\.title], scene: self)
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(self)._makeScene called outside an active AttributeGraph context.")
         }
+        // One window slot per Content type. AppGraph subscribes to this preference
+        // and creates/destroys a WindowController when the value changes.
+        let windowKey = WindowKey(namespace: .app, sceneID: SceneID(Content.self, index: 0))
+        let contentGraph = scene[\.content]
+        let titleGraph = scene[\.title]
+        let item = SceneList.Item(windowKey: windowKey, kind: .main) {
+            let wc = WindowController(content: contentGraph, title: titleGraph, scene: windowKey)
+            var cfg = wc.config
+            cfg.backgroundColor = VVD.Color(rgba8: (255, 255, 241, 255))
+            wc.config = cfg
+            return wc
+        }
+        let itemsAttr: Attribute<[SceneList.Item]> = graph.makeRule { [item] in [item] }
+
+        var outputs = PreferencesOutputs()
+        outputs.append(SceneList.Key.self, node: itemsAttr.identifier)
+        return _SceneOutputs(preferences: outputs)
     }
 }
 
-class GroupWindowContext<Content>: GenericWindowContext<Content> where Content: View {
-    let dataType: Any.Type?
-    
-    let titleGraph: _GraphValue<Text>
-    var _title: String = ""
-
-    override var title: String { _title }
-    override var style: PlatformWindowStyle { .genericWindow }
-
-    init(dataType: Any.Type?, content: _GraphValue<Content>, title: _GraphValue<Text>, scene: Any) {
-        self.dataType = dataType
-        self.titleGraph = title
-        super.init(content: content, scene: scene)
-
-        //let backgroundColor = VVD.Color(rgba8: (245, 242, 241, 255))
-        let backgroundColor = VVD.Color(rgba8: (255, 255, 241, 255))
-        self.config.backgroundColor = backgroundColor
-    }
-
-    override func updateContent() {
-        fatalError("Implement with AG")
-    }
-}
-
-extension GroupWindowContext: @unchecked Sendable {
-}

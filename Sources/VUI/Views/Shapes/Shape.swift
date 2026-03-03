@@ -2,7 +2,7 @@
 //  File: Shape.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -60,6 +60,10 @@ extension Shape {
         Body._makeView(view: view[\.body], inputs: inputs)
     }
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        fatalError()
+        _ViewListOutputs(
+            views: .staticList(.unary(TypedUnaryViewGenerator(view, inputs: inputs))),
+            nextImplicitID: 1,
+            staticCount: 1
+        )
     }
 }

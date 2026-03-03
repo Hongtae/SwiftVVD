@@ -2,7 +2,7 @@
 //  File: TupleView.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -78,11 +78,59 @@ private extension TupleView {
 
 extension TupleView {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        fatalError("Implement with AG")
+        // Delegates to VStackLayout as the default layout for a bare TupleView.
+        // This mirrors the behaviour when a view's body returns a TupleView directly,
+        // which the framework wraps in a VStack-equivalent root.
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        }
+        let body: (_Graph, _ViewInputs) -> _ViewListOutputs = { _, viewInputs in
+            Self._makeViewList(view: view, inputs: _ViewListInputs(from: viewInputs))
+        }
+        let rootAttr: Attribute<VStackLayout> = graph.makeInput(value: VStackLayout())
+        let rootGraph = _GraphValue<VStackLayout>(_attribute: rootAttr)
+        return VStackLayout._makeLayoutView(root: rootGraph, inputs: inputs, body: body)
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        fatalError("Implement with AG")
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(self)._makeViewList called outside an active AttributeGraph context.")
+        }
+
+        var children: [_ViewListOutputs] = []
+
+        // For each View-typed field in T, create an AG rule node that extracts that field
+        // from the TupleView attribute.  Reading `view._attribute.value` inside the rule
+        // registers a dependency on the TupleView node, so any update to the TupleView
+        // propagates automatically.
+        func makeChild<V: View>(_: V.Type, offset: Int) {
+            let childAttr: Attribute<V> = graph.makeRule {
+                let t = view._attribute.value.value   // TupleView<T>.value is T
+                return withUnsafeBytes(of: t) { buf in
+                    buf.baseAddress!
+                        .advanced(by: offset)
+                        .assumingMemoryBound(to: V.self)
+                        .pointee
+                }
+            }
+            let childGraph = _GraphValue<V>(_attribute: childAttr)
+            children.append(V._makeViewList(view: childGraph, inputs: inputs))
+        }
+
+        _forEachField(of: T.self) { _, offset, fieldType in
+            if let viewType = fieldType as? any View.Type {
+                func open<V: View>(_: V.Type) { makeChild(V.self, offset: offset) }
+                open(viewType)
+            }
+            return true
+        }
+
+        let count = children.count
+        return _ViewListOutputs(
+            views: .staticList(.merged(children)),
+            nextImplicitID: count,
+            staticCount: count
+        )
     }
 }
 

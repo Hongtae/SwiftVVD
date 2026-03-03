@@ -2,7 +2,7 @@
 //  File: SceneModifier.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 
@@ -61,7 +61,9 @@ extension _SceneModifier {
 
 extension _SceneModifier where Self: _GraphInputsModifier, Self.Body == Never {
     public static func _makeScene(modifier: _GraphValue<Self>, inputs: _SceneInputs, body: @escaping (_Graph, _SceneInputs) -> _SceneOutputs) -> _SceneOutputs {
-        fatalError("Implement with AG")
+        var inputs = inputs
+        Self._makeInputs(modifier: modifier, inputs: &inputs.base)
+        return body(_Graph(), inputs)
     }
 }
 

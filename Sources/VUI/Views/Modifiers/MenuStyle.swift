@@ -41,23 +41,48 @@ public struct MenuStyleConfiguration {
 extension MenuStyleConfiguration.Label: _PrimitiveView {}
 extension MenuStyleConfiguration.Content: _PrimitiveView {}
 
+struct _MenuStyleKey: PropertyItem {
+    static var defaultValue: (any MenuStyle)? { nil }
+    var description: String { "_MenuStyleKey" }
+}
+
 extension MenuStyleConfiguration.Label {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        fatalError("Implement with AG")
+        if let proxy = view._attribute.value.view {
+            return proxy.makeView(_Graph(), inputs: inputs)
+        }
+        if let proxy = inputs.base.customInputs.value(forKey: _StaticSourceInputKey<Self>.self) {
+            return proxy.makeView(_Graph(), inputs: inputs)
+        }
+        return _ViewOutputs()
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        fatalError("Implement with AG")
+        _ViewListOutputs(
+            views: .staticList(.unary(TypedUnaryViewGenerator(view, inputs: inputs))),
+            nextImplicitID: 1,
+            staticCount: 1
+        )
     }
 }
 
 extension MenuStyleConfiguration.Content {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        fatalError("Implement with AG")
+        if let proxy = view._attribute.value.view {
+            return proxy.makeView(_Graph(), inputs: inputs)
+        }
+        if let proxy = inputs.base.customInputs.value(forKey: _StaticSourceInputKey<Self>.self) {
+            return proxy.makeView(_Graph(), inputs: inputs)
+        }
+        return _ViewOutputs()
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        fatalError("Implement with AG")
+        _ViewListOutputs(
+            views: .staticList(.unary(TypedUnaryViewGenerator(view, inputs: inputs))),
+            nextImplicitID: 1,
+            staticCount: 1
+        )
     }
 }
 
@@ -241,11 +266,17 @@ struct MenuStyleModifier<Style>: ViewModifier where Style: MenuStyle {
 
 extension MenuStyleModifier {
     static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        fatalError("Implement with AG")
+        var inputs = inputs
+        let styleExistential: (any MenuStyle)? = modifier._attribute.value.style
+        inputs.base.customInputs.setValue(styleExistential, forKey: _MenuStyleKey.self)
+        return body(_Graph(), inputs)
     }
 
     static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        fatalError("Implement with AG")
+        var inputs = inputs
+        let styleExistential: (any MenuStyle)? = modifier._attribute.value.style
+        inputs.base.customInputs.setValue(styleExistential, forKey: _MenuStyleKey.self)
+        return body(_Graph(), inputs)
     }
 }
 

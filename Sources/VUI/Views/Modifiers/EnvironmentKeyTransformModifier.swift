@@ -2,7 +2,7 @@
 //  File: EnvironmentKeyTransformModifier.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 public struct _EnvironmentKeyTransformModifier<Value>: ViewModifier, _GraphInputsModifier {
@@ -17,7 +17,17 @@ public struct _EnvironmentKeyTransformModifier<Value>: ViewModifier, _GraphInput
     }
 
     public static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GraphInputs) {
-        fatalError("Implement with AG")
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(self)._makeInputs called outside an active AttributeGraph context.")
+        }
+        let parentEnvAttr = inputs.cachedEnvironment.value.environment
+        let newEnvAttr: Attribute<EnvironmentValues> = graph.makeRule {
+            let m = modifier._attribute.value   // dep: transform closure changes
+            var env = parentEnvAttr.value       // dep: parent environment changes
+            m.transform(&env[keyPath: m.keyPath])
+            return env
+        }
+        inputs.cachedEnvironment = MutableBox(CachedEnvironment(environment: newEnvAttr))
     }
 }
 

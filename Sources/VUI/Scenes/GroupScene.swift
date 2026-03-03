@@ -12,7 +12,10 @@ extension Group: Scene where Content: Scene {
     }
     
     public static func _makeScene(scene: _GraphValue<Group<Content>>, inputs: _SceneInputs) -> _SceneOutputs {
-        fatalError()
+        guard AttributeGraph.current != nil else {
+            fatalError("\(self)._makeScene called outside an active AttributeGraph context.")
+        }
+        return Content._makeScene(scene: scene[\.content], inputs: inputs)
     }
 }
 

@@ -112,11 +112,32 @@ struct ResolvedMenuStyle: View {
     }
 
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        fatalError("Implement with AG")
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        }
+        let style: any MenuStyle =
+            inputs.base.customInputs.value(forKey: _MenuStyleKey.self)
+            ?? DefaultMenuStyle.automatic
+
+        func wireBody(_ style: some MenuStyle) -> _ViewOutputs {
+            let labelProxy = inputs.base.customInputs.value(forKey: _StaticSourceInputKey<MenuStyleConfiguration.Label>.self)
+            let contentProxy = inputs.base.customInputs.value(forKey: _StaticSourceInputKey<MenuStyleConfiguration.Content>.self)
+            let bodyAttr = graph.makeRule {
+                let rs = view._attribute.value
+                let config = MenuStyleConfiguration(labelProxy, contentProxy, primaryAction: rs._primaryAction)
+                return style.makeBody(configuration: config)
+            }
+            return makeView(view: _GraphValue(_attribute: bodyAttr), inputs: inputs)
+        }
+        return wireBody(style)
     }
 
     static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        fatalError("Implement with AG")
+        _ViewListOutputs(
+            views: .staticList(.unary(TypedUnaryViewGenerator(view, inputs: inputs))),
+            nextImplicitID: 1,
+            staticCount: 1
+        )
     }
 }
 
@@ -135,9 +156,17 @@ extension MenuDropdownModifier {
     fileprivate var _scene: some Scene { AuxiliaryWindowScene(content: content) }
 }
 
-extension MenuDropdownModifier: _UnaryViewModifier {
+extension MenuDropdownModifier {
     static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        fatalError("Implement with AG")
+        // TODO: Requires Gesture system + AuxiliaryWindow after WindowContext is implemented.
+        // MenuDropdownModifier wraps the label view and, on press, opens an
+        // AuxiliaryWindowScene containing the menu content.
+        // For now, pass content through unchanged so the label is still rendered.
+        body(_Graph(), inputs)
+    }
+
+    public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
+        body(_Graph(), inputs)
     }
 }
 

@@ -120,11 +120,33 @@ struct ResolvedButtonStyle: View {
     }
 
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        fatalError("Implement with AG")
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        }
+        let style: any PrimitiveButtonStyle =
+            inputs.base.customInputs.value(forKey: _PrimitiveButtonStyleKey.self)
+            ?? DefaultButtonStyle.automatic
+
+        func wireBody(_ style: some PrimitiveButtonStyle) -> _ViewOutputs {
+            let bodyAttr = graph.makeRule {
+                let rs = view._attribute.value
+                let config = PrimitiveButtonStyleConfiguration(
+                    role: rs.configuration.role,
+                    label: rs.configuration.label,
+                    action: rs.configuration.action)
+                return style.makeBody(configuration: config)
+            }
+            return makeView(view: _GraphValue(_attribute: bodyAttr), inputs: inputs)
+        }
+        return wireBody(style)
     }
 
     static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        fatalError("Implement with AG")
+        _ViewListOutputs(
+            views: .staticList(.unary(TypedUnaryViewGenerator(view, inputs: inputs))),
+            nextImplicitID: 1,
+            staticCount: 1
+        )
     }
 }
 
