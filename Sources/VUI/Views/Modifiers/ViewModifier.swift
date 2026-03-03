@@ -11,21 +11,11 @@ public struct _ViewModifier_Content<Modifier> where Modifier: ViewModifier {
     public typealias Body = Never
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        if let body = _ViewModifierBodyContext.body[ObjectIdentifier(self)]?.makeView {
-            return body(_Graph(), inputs)
-        }
-        fatalError("Unable to get view body of \(Modifier.self)")
+        fatalError("Implement with AG")
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        if let body = _ViewModifierBodyContext.body[ObjectIdentifier(self)]?.makeViewList {
-            return body(_Graph(), inputs)
-        }
-        if let body = _ViewModifierBodyContext.body[ObjectIdentifier(self)]?.makeView {
-            let outputs = body(_Graph(), inputs.inputs)
-            return _ViewListOutputs(views: .staticList(outputs.view))
-        }
-        fatalError("Unable to get view body of \(Modifier.self)")
+        fatalError("Implement with AG")
     }
 }
 
@@ -118,18 +108,12 @@ extension _ViewInputsModifier {
         fatalError()
     }
     static func _makeViewListInputs(modifier: _GraphValue<Self>, inputs: inout _ViewListInputs) {
-        var _inputs = inputs.inputs
-        Self._makeViewInputs(modifier: modifier, inputs: &_inputs)
-        inputs = _inputs.listInputs
+        fatalError("Implement with AG")
     }
 }
 
 // _UnaryViewModifier is for View-Modifiers with Body = Never without _makeViewList.
 protocol _UnaryViewModifier {
-}
-
-protocol _ViewLayoutModifier {
-    static func _makeLayoutView(modifier: _GraphValue<Self>, inputs: _ViewInputs, content: any ViewGenerator) -> any ViewGenerator
 }
 
 extension ViewModifier where Self: _GraphInputsModifier, Self.Body == Never {
@@ -148,43 +132,11 @@ extension ViewModifier where Self: _GraphInputsModifier, Self.Body == Never {
 
 extension ViewModifier where Self: Animatable {
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        var modifier = modifier
-        Self._makeAnimatable(value: &modifier, inputs: inputs.base)
-
-        let outputs = body(_Graph(), inputs)
-        if let view = outputs.view, let layoutModifier = self as? any _ViewLayoutModifier.Type {
-            func _makeView<T: _ViewLayoutModifier, U>(_: T.Type, modifier: _GraphValue<U>, view: any ViewGenerator) -> any ViewGenerator {
-                T._makeLayoutView(modifier: modifier.unsafeCast(to: T.self), inputs: inputs, content: view)
-            }
-            return _ViewOutputs(view: _makeView(layoutModifier, modifier: modifier, view: view))
-        }
-        return outputs
+        fatalError("Implement with AG")
     }
 
     public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        var modifier = modifier
-        Self._makeAnimatable(value: &modifier, inputs: inputs.base)
-
-        let outputs = body(_Graph(), inputs)
-        if let layoutModifier = self as? any _ViewLayoutModifier.Type {
-            let inputs = inputs.inputs
-            func _makeView<T: _ViewLayoutModifier, U>(_: T.Type, modifier: _GraphValue<U>, view: any ViewGenerator) -> any ViewGenerator {
-                T._makeLayoutView(modifier: modifier.unsafeCast(to: T.self), inputs: inputs, content: view)
-            }
-            if var staticList = outputs.views as? StaticViewList & ViewListGenerator {
-                let views = staticList.views.map { wrapped in
-                    _makeView(layoutModifier, modifier: modifier, view: wrapped)
-                }
-                staticList.views = views
-                return _ViewListOutputs(views: staticList)
-            } else {
-                let views = outputs.views.wrapper(inputs: inputs.base) { _, baseInputs, view in
-                    _makeView(layoutModifier, modifier: modifier, view: view)
-                }
-                return _ViewListOutputs(views: views)
-            }
-        }
-        return outputs
+        fatalError("Implement with AG")
     }
 }
 
@@ -198,75 +150,13 @@ extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
     public var body: Never {
         fatalError("body() should not be called on \(Self.self).")
     }
-    
-    public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
 
-        if Modifier.self is _UnaryViewModifier.Type {
-            let outputs = Content._makeView(view: view[\.content], inputs: inputs)
-            if let multiView = outputs.view as? any MultiViewGenerator {
-                if var staticMultiView = multiView as? any StaticViewList & ViewGenerator {
-                    let views = staticMultiView.views.map { wrapped in
-                        let outputs = Modifier._makeView(modifier: view[\.modifier],
-                                                         inputs: inputs) { _, inputs in
-                            var view = wrapped
-                            view.mergeInputs(inputs.base)
-                            return _ViewOutputs(view: view)
-                        }
-                        return outputs.view ?? wrapped
-                    }
-                    staticMultiView.views = views
-                    return _ViewOutputs(view: staticMultiView)
-                } else {
-                    let view = DynamicMultiViewGenerator(graph: view,
-                                                         baseInputs: inputs.base,
-                                                         body: multiView)
-                    return _ViewOutputs(view: view)
-                }
-            }
-            return Modifier._makeView(modifier: view[\.modifier], inputs: inputs) { _, inputs in
-                var view = outputs.view
-                view?.mergeInputs(inputs.base)
-                return _ViewOutputs(view: view)
-            }
-        }
-        return Modifier._makeView(modifier: view[\.modifier], inputs: inputs) { _, inputs in
-            let outputs = Content._makeView(view: view[\.content], inputs: inputs)
-            return outputs
-        }
+    public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        fatalError("Implement with AG")
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        assert(view.isRoot == false)
-        
-        let modifier = view[\.modifier]
-        if Modifier.self is _UnaryViewModifier.Type {
-            let outputs = Content._makeViewList(view: view[\.content], inputs: inputs)
-            let inputs = inputs.inputs
-            if let staticList = outputs.views as? StaticViewList & ViewListGenerator {
-                let views = staticList.views.map { content in
-                    Modifier._makeView(modifier: modifier, inputs: inputs) { _, inputs in
-                        var content = content
-                        content.mergeInputs(inputs.base)
-                        return _ViewOutputs(view: content)
-                    }
-                }
-                return _ViewListOutputs(views: .staticList(views.compactMap { $0.view }))
-            } else {
-                let views = outputs.views.wrapper(inputs: inputs.base) { _, _, view in
-                    let outputs = Modifier._makeView(modifier: modifier,
-                                                     inputs: inputs) { _, inputs in
-                        var view = view
-                        view.mergeInputs(inputs.base)
-                        return _ViewOutputs(view: view)
-                    }
-                    return outputs.view ?? view
-                }
-                return _ViewListOutputs(views: views)
-            }
-        }
-        return Modifier._makeViewList(modifier: modifier, inputs: inputs) { _, inputs in
-            Content._makeViewList(view: view[\.content], inputs: inputs)
-        }
+        fatalError("Implement with AG")
     }
 }
 
@@ -290,6 +180,3 @@ extension View {
     }
 }
 
-class ViewModifierContext<Modifier>: GenericViewContext<Modifier> where Modifier: ViewModifier {
-    var modifier: Modifier? { self.view }
-}

@@ -51,21 +51,7 @@ public struct DragGesture: Gesture {
     }
 
     public static func _makeGesture(gesture: _GraphValue<DragGesture>, inputs: _GestureInputs) -> _GestureOutputs<DragGesture.Value> {
-        struct _Generator: _GestureRecognizerGenerator {
-            let graph: _GraphValue<DragGesture>
-            let inputs: _GestureInputs
-            func makeGesture(containerView: ViewContext) -> _GestureRecognizer<Value>? {
-                if let gesture = containerView.value(atPath: self.graph) {
-                    let callbacks = inputs.makeCallbacks(of: Value.self, containerView: containerView)
-                    return DragGestureRecognizer(graph: graph,
-                                                 target: inputs.view,
-                                                 callbacks: callbacks,
-                                                 gesture: gesture)
-                }
-                fatalError("Unable to recover gesture: \(self.graph.valueType)")
-            }
-        }
-        return _GestureOutputs(generator: _Generator(graph: gesture, inputs: inputs))
+        fatalError("Implement with AG")
     }
 
     public typealias Body = Never
@@ -79,7 +65,7 @@ class DragGestureRecognizer: _GestureRecognizer<DragGesture.Value> {
     var value: DragGesture.Value
     var dragging = false
 
-    init(graph: _GraphValue<DragGesture>, target: ViewContext?, callbacks: Callbacks, gesture: DragGesture) {
+    init(graph: _GraphValue<DragGesture>, target: Any?, callbacks: Callbacks, gesture: DragGesture) {
         self.gesture = gesture
         self.buttonID = 0
         self.value = .init(time: .now,

@@ -54,23 +54,13 @@ class AppMain<A>: ApplicationDelegate, AppContext where A: App {
     }
 
     let app: A
-    var scene: SceneContext?
+    var scene: Any? // implement with AG
     var terminateAfterLastWindowClosed = true
 
     var activeWindows: [WindowContext] {
         var windows: [WindowContext] = []
-        if let scene {
-            scene.primaryWindows.forEach { window in
-                if !windows.contains(where: { $0 === window }) {
-                    windows.append(window)
-                }
-            }
-            scene.windows.forEach { window in
-                if !windows.contains(where: { $0 === window }) {
-                    windows.append(window)
-                }
-            }
-        }
+        fatalError("Implement with AG")
+
         return windows.filter {
             $0.isValid && $0.window != nil
         }
@@ -90,27 +80,7 @@ class AppMain<A>: ApplicationDelegate, AppContext where A: App {
         self.graphicsDeviceContext = makeGraphicsDeviceContext()
         self.audioDeviceContext = makeAudioDeviceContext()
 
-        let root = TypedSceneRoot(root: app.body, graph: _GraphValue<A.Body>.root(), app: self)
-        let inputs = _SceneInputs(root: root, environment: EnvironmentValues())
-        let outputs = A.Body._makeScene(scene: root.graph, inputs: inputs)
-        self.scene = outputs.scene?.makeScene()
-
-        if let scene {
-            let primaryWindows = scene.primaryWindows
-
-            Task { @MainActor in
-                scene.updateContent()
-                for window in primaryWindows {
-                    if let win = window.makeWindow() {
-                        win.activate()
-                    }
-                }
-            }
-            
-            if primaryWindows.isEmpty == false {
-                application.activationPolicy = .regular
-            }
-        }
+        fatalError("Implement with AG")
     }
 
     func finalize(application: Application) {

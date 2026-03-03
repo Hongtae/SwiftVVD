@@ -71,45 +71,18 @@ struct WindowGroupScene<Content>: _PrimitiveScene where Content: View {
     var title: Text
 
     static func _makeScene(scene: _GraphValue<Self>, inputs: _SceneInputs) -> _SceneOutputs {
-        _SceneOutputs(scene: UnarySceneGenerator(graph: scene, inputs: inputs) { graph, inputs in
-            WindowGroupSceneContext<Content>(graph: graph, inputs: inputs)
-        })
+        fatalError("Implement with AG")
     }
 }
 
-class WindowGroupSceneContext<Content>: TypedSceneContext<WindowGroupScene<Content>> where Content: View {
+class WindowGroupSceneContext<Content> where Content: View {
     typealias Scene = WindowGroupScene<Content>
     var window: WindowContext?
 
-    override init(graph: _GraphValue<Scene>, inputs: _SceneInputs) {
+    init(graph: _GraphValue<Scene>, inputs: _SceneInputs) {
         defer {
             self.window = GroupWindowContext(dataType: nil, content: graph[\.content], title: graph[\.title], scene: self)
         }
-        super.init(graph: graph, inputs: inputs)
-    }
-
-    override func updateContent() {
-        super.updateContent()
-        if self.content != nil {
-            self.window?.updateContent()
-        }
-    }
-
-    override var windows: [WindowContext] {
-        [window].compactMap(\.self)
-    }
-
-    override var primaryWindows: [WindowContext] {
-        [window].compactMap(\.self)
-    }
-
-    override var isValid: Bool {
-        if super.isValid {
-            if let window {
-                return window.isValid
-            }
-        }
-        return false
     }
 }
 
@@ -122,7 +95,7 @@ class GroupWindowContext<Content>: GenericWindowContext<Content> where Content: 
     override var title: String { _title }
     override var style: PlatformWindowStyle { .genericWindow }
 
-    init(dataType: Any.Type?, content: _GraphValue<Content>, title: _GraphValue<Text>, scene: SceneContext) {
+    init(dataType: Any.Type?, content: _GraphValue<Content>, title: _GraphValue<Text>, scene: Any) {
         self.dataType = dataType
         self.titleGraph = title
         super.init(content: content, scene: scene)
@@ -133,20 +106,7 @@ class GroupWindowContext<Content>: GenericWindowContext<Content> where Content: 
     }
 
     override func updateContent() {
-        let oldTitle = _title
-        let title = self.scene.value(atPath: self.titleGraph)
-        self._title = title?._resolveText(in: self.environment) ?? ""
-
-        super.updateContent()
-        
-        if oldTitle != self._title {
-            if let window {
-                let newTitle = self._title
-                runOnMainQueueSync {
-                    window.title = newTitle
-                }
-            }
-        }
+        fatalError("Implement with AG")
     }
 }
 

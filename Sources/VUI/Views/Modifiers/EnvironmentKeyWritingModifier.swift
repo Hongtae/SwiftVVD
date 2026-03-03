@@ -5,7 +5,7 @@
 //  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
 //
 
-public struct _EnvironmentKeyWritingModifier<Value>: ViewModifier, _GraphInputsModifier, _EnvironmentValuesResolve {
+public struct _EnvironmentKeyWritingModifier<Value>: ViewModifier, _GraphInputsModifier {
     public typealias Body = Never
 
     public var keyPath: WritableKeyPath<EnvironmentValues, Value>
@@ -17,42 +17,10 @@ public struct _EnvironmentKeyWritingModifier<Value>: ViewModifier, _GraphInputsM
     }
 
     public static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GraphInputs) {
-        inputs.modifiers.append(_InputModifier(graph: modifier))
+        fatalError("Implement with AG")
     }
 
-    func _resolve(_ values: inout EnvironmentValues) {
-        values[keyPath: self.keyPath] = value
-    }
 
-    class _InputModifier: _GraphInputResolve {
-        typealias Modifier = _EnvironmentKeyWritingModifier<Value>
-        var isResolved: Bool {  modifier != nil }
-        var modifier: Modifier?
-        let graph: _GraphValue<Modifier>
-        init(graph: _GraphValue<Modifier>) {
-            self.graph = graph
-        }
-
-        func apply(to environment: inout EnvironmentValues) {
-            if let modifier {
-                modifier._resolve(&environment)
-            }
-        }
-
-        func reset() {
-            modifier = nil
-        }
-        
-        func resolve(container: some _GraphValueResolver) {
-            if let modifier = container.value(atPath: self.graph) {
-                self.modifier = modifier
-            }
-        }
-
-        static func == (lhs: _InputModifier, rhs: _InputModifier) -> Bool {
-            lhs === rhs
-        }
-    }
 }
 
 extension View {

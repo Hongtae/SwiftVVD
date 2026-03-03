@@ -61,13 +61,7 @@ extension _SceneModifier {
 
 extension _SceneModifier where Self: _GraphInputsModifier, Self.Body == Never {
     public static func _makeScene(modifier: _GraphValue<Self>, inputs: _SceneInputs, body: @escaping (_Graph, _SceneInputs) -> _SceneOutputs) -> _SceneOutputs {
-        var graphInputs = _GraphInputs(sharedContext: nil,
-                                       environment: inputs.environment)
-        Self._makeInputs(modifier: modifier, inputs: &graphInputs)
-
-        var inputs = inputs
-        inputs.modifiers.append(contentsOf: graphInputs.modifiers)
-        return body(_Graph(), inputs)
+        fatalError("Implement with AG")
     }
 }
 

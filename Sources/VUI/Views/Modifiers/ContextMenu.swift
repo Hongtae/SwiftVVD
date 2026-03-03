@@ -31,14 +31,7 @@ extension View {
 
 extension ContextMenuModifier: _UnaryViewModifier {
     static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        let outputs = body(_Graph(), inputs)
-        if let body = outputs.view?.makeView() {
-            let view = UnaryViewGenerator(graph: modifier, baseInputs: inputs.base) { graph, inputs in
-                ContextMenuViewContext(graph: graph, body: body, inputs: inputs)
-            }
-            return _ViewOutputs(view: view)
-        }
-        return outputs
+        fatalError("Implement with AG")
     }
 }
 
@@ -81,7 +74,7 @@ private class ContextMenuGestureHandler: _GestureHandler {
         return f.subtracting(.tap)
     }
 
-    init(graph: _GraphValue<ContextMenuGesture>, target: ViewContext?, gesture: ContextMenuGesture) {
+    init(graph: _GraphValue<ContextMenuGesture>, target: Any?, gesture: ContextMenuGesture) {
         self.gesture = gesture
         super.init(graph: graph, target: target)
     }
@@ -149,93 +142,3 @@ private class ContextMenuGestureHandler: _GestureHandler {
     }
 }
 
-private class ContextMenuViewContext<MenuContent>: ViewModifierContext<ContextMenuModifier<MenuContent>> where MenuContent: View {
-    typealias Modifier = ContextMenuModifier<MenuContent>
-    let gesture: _GraphValue<ContextMenuGesture>
-
-    var sceneContext: AuxiliaryWindowSceneContext<MenuContent>!
-
-    override init(graph: _GraphValue<Modifier>, body: ViewContext, inputs: _GraphInputs) {
-        self.gesture = graph[\._gesture]
-        super.init(graph: graph, body: body, inputs: inputs)
-
-        let sceneRoot = _SceneRoot(view: self)
-        var popupEnvironment = self.environment
-        popupEnvironment._menuContext = MenuContext()
-        let sceneInputs = _SceneInputs(root: sceneRoot,
-                                       environment: popupEnvironment,
-                                       modifiers: self.inputs.modifiers,
-                                       _modifierTypeGraphs: self.inputs._modifierTypeGraphs)
-
-        func makeScene<T: Scene>(scene: _GraphValue<T>, inputs: _SceneInputs) -> _SceneOutputs {
-            T._makeScene(scene: scene, inputs: inputs)
-        }
-        let sceneOutputs = makeScene(scene: graph[\._scene], inputs: sceneInputs)
-        self.sceneContext = sceneOutputs.scene?.makeScene() as? AuxiliaryWindowSceneContext<MenuContent>
-        assert(self.sceneContext != nil, "Failed to create AuxiliaryWindowSceneContext")
-    }
-
-    override func updateContent() {
-        super.updateContent()
-        self.sceneContext.updateContent()
-    }
-
-    override func gestureHandlers(at location: CGPoint) -> GestureHandlerOutputs {
-        let outputs = super.gestureHandlers(at: location)
-        
-        if self.bounds.contains(location) {
-            Log.debug("ContextMenuViewContext.gestureHandlers at \(location), existing handlers: \(outputs.gestures.count)")
-            
-            if let gesture = self.modifier?._gesture {
-                let gestureHandler = ContextMenuGestureHandler(graph: self.gesture, target: self, gesture: gesture)
-                gestureHandler.openMenuOnButtonUp = true
-                gestureHandler.openMenuCallback = { [weak self](location: CGPoint) in
-                    self?.openMenu(at: location, dismissOnDeactivate: true)
-                }
-                let local = GestureHandlerOutputs(gestures: [gestureHandler],
-                                                  simultaneousGestures: [],
-                                                  highPriorityGestures: [])
-                return outputs.merge(local)
-            }
-        }
-        return outputs
-    }
-
-    struct _SceneRoot: SceneRoot {
-        typealias Root = ContextMenuModifier<MenuContent>
-        var root: Root {
-            view.modifier!
-        }
-        var graph: _GraphValue<Root> {
-            view.graph
-        }
-        var app: AppContext {
-            view.sharedContext.app
-        }
-        unowned let view: ContextMenuViewContext<MenuContent>
-
-        func value<T>(atPath path: _GraphValue<T>) -> T? {
-            if let v = graph.value(atPath: path, from: root) {
-                return v
-            }
-            return view.value(atPath: path)
-        }
-    }
-
-    func openMenu(at location: CGPoint, dismissOnDeactivate: Bool) {
-        let windowLocation = location.applying(self.transformToRoot)
-        Log.debug("ContextMenuViewContext: openMenu(at: \(location), windowLocation: \(windowLocation))")
-
-        let sceneContext = self.sceneContext!
-        let context = self.sharedContext
-
-        Task { @MainActor in
-            let activated = sceneContext.activate(at: windowLocation,
-                                                  context: context,
-                                                  dismissOnDeactivate: dismissOnDeactivate)
-            if activated == false {
-                Log.error("ContextMenuViewContext: failed to activate menu scene")
-            }
-        }
-    }
-}

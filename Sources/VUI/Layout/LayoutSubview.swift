@@ -10,7 +10,7 @@ import Foundation
 public struct LayoutSubview: Equatable {
 
     public func _trait<K>(key: K.Type) -> K.Value where K: _ViewTraitKey {
-        view.trait(key: key)
+        fatalError("Implement with AG")
     }
 
     public subscript<K>(key: K.Type) -> K.Value where K: LayoutValueKey {
@@ -22,28 +22,23 @@ public struct LayoutSubview: Equatable {
     }
 
     public func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
-        view.sizeThatFits(proposal)
+        fatalError("Implement with AG")
     }
 
     public func dimensions(in proposal: ProposedViewSize) -> ViewDimensions {
-        view.dimensions(in: proposal)
+        fatalError("Implement with AG")
     }
 
     public var spacing: ViewSpacing {
-        view.spacing
+        fatalError("Implement with AG")
     }
 
     public func place(at position: CGPoint, anchor: UnitPoint = .topLeading, proposal: ProposedViewSize) {
-        view.place(at: position, anchor: anchor, proposal: proposal)
+        fatalError("Implement with AG")
     }
 
     public static func == (a: LayoutSubview, b: LayoutSubview) -> Bool {
-        a.view === b.view
-    }
-
-    let view: ViewContext
-    init(view: ViewContext) {
-        self.view = view
+        fatalError("Implement with AG")
     }
 }
 

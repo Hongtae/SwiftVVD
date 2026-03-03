@@ -19,52 +19,30 @@ extension EnvironmentValues {
     }
 }
 
-protocol ViewRoot: _GraphValueResolver {
-    associatedtype Root
-    var root: Root { get }
-    var graph: _GraphValue<Root> { get }
-    var scene: SceneContext { get }
-}
-
-extension ViewRoot {
-    func value<T>(atPath path: _GraphValue<T>) -> T? {
-        graph.value(atPath: path, from: root)
-    }
-}
-
-struct TypedViewRoot<Root>: ViewRoot where Root: View {
-    let root: Root
-    let graph: _GraphValue<Root>
-    unowned let scene: SceneContext
-}
-
 final class SharedContext: @unchecked Sendable {
-    unowned let scene: SceneContext
 
-    var app: AppContext { scene.app }
-    var root: (any ViewRoot)?
+    var scene: Any { fatalError("Implement with AG") }
+    var app: AppContext { fatalError("Implement with AG") }
+    var root: Any?
 
     var contentBounds: CGRect
     var contentScaleFactor: CGFloat
     var needsLayout: Bool
-    var viewsNeedToReloadResources: [WeakObject<ViewContext>] = []
 
     var resourceData: [String: Data] = [:]
     var resourceObjects: [String: AnyObject] = [:]
     var cachedTypeFaces: [Font: TypeFace] = [:]
+    var focusedViews: [Int: WeakObject<AnyObject>] = [:]
 
-    var focusedViews: [Int: WeakObject<ViewContext>] = [:]
 
     var gestureHandlers: [_GestureHandler] = []
 
-    var window: WindowContext { _window! }
-    weak var _window: WindowContext?
+    var window: WindowContext { fatalError("Implement with AG") }
     
     var auxiliarySceneContext: AuxiliarySceneContext?
     var alertDismissAction: (() -> Void)?
 
-    init(scene: SceneContext) {
-        self.scene = scene
+    init(scene: Any) {
         self.contentBounds = .zero
         self.contentScaleFactor = 1
         self.needsLayout = true

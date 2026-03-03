@@ -41,17 +41,11 @@ public struct AnyView: View {
     }
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let view = UnaryViewGenerator(graph: view, baseInputs: inputs.base) { graph, inputs in
-            TypeErasedViewContext(graph: graph, inputs: inputs)
-        }
-        return _ViewOutputs(view: view)
+        fatalError("Implement with AG")
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        let view = UnaryViewGenerator(graph: view, baseInputs: inputs.base) { graph, inputs in
-            TypeErasedViewContext(graph: graph, inputs: inputs)
-        }
-        return _ViewListOutputs(views: .staticList(view))
+        fatalError("Implement with AG")
     }
 
     public typealias Body = Never
@@ -64,33 +58,3 @@ extension AnyView {
 extension AnyView: _PrimitiveView {
 }
 
-private class TypeErasedViewContext: DynamicViewContext<AnyView> {
-    override func updateContent() {
-        var oldViewType: (any View.Type)?
-        if let oldView = self.view?._view {
-            oldViewType = type(of: oldView)
-        }
-        self.view = nil
-        if var view = value(atPath: self.graph) {
-            self.resolveGraphInputs()
-            self.updateView(&view)
-            self.requiresContentUpdates = false
-            self.view = view
-        }
-        if let view = self.view?._view {
-            if self.body == nil || type(of: view) != oldViewType {
-                func _makeView<V: View, U>(_: V.Type, view: _GraphValue<U>, inputs: _ViewInputs) -> _ViewOutputs {
-                    V._makeView(view: view.unsafeCast(to: V.self), inputs: inputs)
-                }
-                let viewType = type(of: view)
-                let graph = self.graph.unsafeCast(to: AnyView.self)[\._view]
-                let outputs = _makeView(viewType, view: graph, inputs: _ViewInputs(base: self.inputs))
-                self.body = outputs.view?.makeView()
-            }
-            self.body?.updateContent()
-        } else {
-            self.invalidate()
-        }
-        self.sharedContext.needsLayout = true
-    }
-}

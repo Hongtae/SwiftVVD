@@ -28,9 +28,7 @@ public struct _DrawDebug: _SceneModifier {
     let selectedValues: Info
     
     public static func _makeScene(modifier: _GraphValue<Self>, inputs: _SceneInputs, body: @escaping (_Graph, _SceneInputs) -> _SceneOutputs) -> _SceneOutputs {
-        var inputs = inputs
-        inputs.setModifierTypeGraph(modifier)
-        return body(_Graph(), inputs)
+        fatalError("Implement with AG")
     }
 }
 

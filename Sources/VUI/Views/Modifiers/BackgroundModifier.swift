@@ -17,30 +17,15 @@ public struct _BackgroundModifier<Background>: ViewModifier where Background: Vi
     }
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        let outputs = body(_Graph(), inputs)
-        if let body = outputs.view {
-            var backgroundInputs = inputs
-            backgroundInputs.base.properties.setValue(ZStackLayout(), forKey: DefaultLayoutProperty.self)
-            if let background = makeView(view: modifier[\.background], inputs: backgroundInputs).view {
-                let view = UnaryViewGenerator(graph: modifier, baseInputs: inputs.base) { graph, inputs in
-                    BackgroundViewContext(background: background.makeView(),
-                                          graph: graph,
-                                          body: body.makeView(),
-                                          inputs: inputs)
-                }
-                return _ViewOutputs(view: view)
-            }
-        }
-        return outputs
+        fatalError("Implement with AG")
     }
-
-    public typealias Body = Never
 }
 
 extension _BackgroundModifier: Equatable where Background: Equatable {
 }
 
 extension _BackgroundModifier: _UnaryViewModifier {
+    public typealias Body = Never
 }
 
 public struct _BackgroundStyleModifier<Style>: ViewModifier where Style: ShapeStyle {
@@ -53,29 +38,12 @@ public struct _BackgroundStyleModifier<Style>: ViewModifier where Style: ShapeSt
     }
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        let outputs = body(_Graph(), inputs)
-        if let body = outputs.view {
-            if let background = makeView(view: modifier[\._shapeView], inputs: inputs).view {
-                let view = UnaryViewGenerator(graph: modifier, baseInputs: inputs.base) { graph, inputs in
-                    BackgroundViewContext(background: background.makeView(),
-                                          graph: graph,
-                                          body: body.makeView(),
-                                          inputs: inputs)
-                }
-                return _ViewOutputs(view: view)
-            }
-        }
-        return outputs
-    }
-
-    public typealias Body = Never
-
-    var _shapeView: some View {
-        _ShapeView(shape: Rectangle(), style: self.style)
+        fatalError("Implement with AG")
     }
 }
 
 extension _BackgroundStyleModifier: _UnaryViewModifier {
+    public typealias Body = Never
 }
 
 public struct _BackgroundShapeModifier<Style, Bounds>: ViewModifier where Style: ShapeStyle, Bounds: Shape {
@@ -90,29 +58,12 @@ public struct _BackgroundShapeModifier<Style, Bounds>: ViewModifier where Style:
     }
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        let outputs = body(_Graph(), inputs)
-        if let body = outputs.view {
-            if let background = makeView(view: modifier[\._shapeView], inputs: inputs).view {
-                let view = UnaryViewGenerator(graph: modifier, baseInputs: inputs.base) { graph, inputs in
-                    BackgroundViewContext(background: background.makeView(),
-                                          graph: graph,
-                                          body: body.makeView(),
-                                          inputs: inputs)
-                }
-                return _ViewOutputs(view: view)
-            }
-        }
-        return outputs
-    }
-
-    public typealias Body = Never
-
-    var _shapeView: some View {
-        _ShapeView(shape: self.shape, style: self.style, fillStyle: self.fillStyle)
+        fatalError("Implement with AG")
     }
 }
 
 extension _BackgroundShapeModifier: _UnaryViewModifier {
+    public typealias Body = Never
 }
 
 public struct _InsettableBackgroundShapeModifier<Style, Bounds>: ViewModifier where Style: ShapeStyle, Bounds: InsettableShape {
@@ -127,29 +78,12 @@ public struct _InsettableBackgroundShapeModifier<Style, Bounds>: ViewModifier wh
     }
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        let outputs = body(_Graph(), inputs)
-        if let body = outputs.view {
-            if let background = makeView(view: modifier[\._shapeView], inputs: inputs).view {
-                let view = UnaryViewGenerator(graph: modifier, baseInputs: inputs.base) { graph, inputs in
-                    BackgroundViewContext(background: background.makeView(),
-                                          graph: graph,
-                                          body: body.makeView(),
-                                          inputs: inputs)
-                }
-                return _ViewOutputs(view: view)
-            }
-        }
-        return outputs
-    }
-
-    public typealias Body = Never
-
-    var _shapeView: some View {
-        _ShapeView(shape: self.shape, style: self.style, fillStyle: self.fillStyle)
+        fatalError("Implement with AG")
     }
 }
 
 extension _InsettableBackgroundShapeModifier: _UnaryViewModifier {
+    public typealias Body = Never
 }
 
 extension View {
@@ -203,132 +137,3 @@ extension _BackgroundModifier: _BackgroundModifierWithAlignment {
 extension _BackgroundStyleModifier: _BackgroundModifierWithIgnoresSafeAreaEdges {
 }
 
-private class BackgroundViewContext<Modifier>: ViewModifierContext<Modifier> where Modifier: ViewModifier {
-    let background: ViewContext
-
-    init(background: ViewContext, graph: _GraphValue<Modifier>, body: ViewContext, inputs: _GraphInputs) {
-        self.background = background
-        defer { self.background.superview = self }
-
-        super.init(graph: graph, body: body, inputs: inputs)
-    }
-
-    deinit {
-        self.background.superview = nil
-    }
-
-    override func updateContent() {
-        super.updateContent()
-        if self.view != nil {
-            background.updateContent()
-        }
-    }
-
-    override func validate() -> Bool {
-        if super.validate() {
-            background.validate()
-            return true
-        }
-        return false
-    }
-
-    override func update(transform t: AffineTransform) {
-        super.update(transform: t)
-        background.update(transform: self.transformToRoot)
-    }
-
-    override func layoutSubviews() {
-        super.layoutSubviews()
-
-        guard let modifier else { fatalError("Invalid view modifier") }
-
-        let alignment: Alignment
-        if let alignmentModifier = modifier as? _BackgroundModifierWithAlignment {
-            alignment = alignmentModifier.alignment
-        } else {
-            alignment = .center
-        }
-
-        let frame = self.bounds
-        var position = frame.origin
-        var anchor = UnitPoint()
-        switch alignment.horizontal {
-        case .leading:
-            position.x = frame.minX
-            anchor.x = 0
-        case .center:
-            position.x = frame.midX
-            anchor.x = 0.5
-        case .trailing:
-            position.x = frame.maxX
-            anchor.x = 1
-        default:
-            position.x = frame.midX
-            anchor.x = 0.5
-        }
-        switch alignment.vertical {
-        case .top:
-            position.y = frame.minY
-            anchor.y = 0
-        case .center:
-            position.y = frame.midY
-            anchor.y = 0.5
-        case .bottom:
-            position.y = frame.maxY
-            anchor.y = 1
-        default:
-            position.y = frame.midY
-            anchor.y = 0.5
-        }
-        let proposal = ProposedViewSize(width: frame.width, height: frame.height)
-        background.place(at: position,
-                         anchor: anchor,
-                         proposal: proposal)
-    }
-
-    override func drawBackground(frame: CGRect, context: GraphicsContext) {
-        let width = background.frame.width
-        let height = background.frame.height
-        guard width > .ulpOfOne && height > .ulpOfOne else {
-            return
-        }
-
-        let drawingFrame = background.frame.offsetBy(dx: frame.minX,
-                                                     dy: frame.minY)
-        if frame.intersection(drawingFrame).isNull {
-            return
-        }
-        background.drawView(frame: drawingFrame, context: context)
-    }
-    
-    override func hitTest(_ location: CGPoint) -> ViewContext? {
-        if let result = super.hitTest(location) {
-            return result
-        }
-        let local = location.applying(background.transformToContainer.inverted())
-        return background.hitTest(local)
-    }
-
-    override func gestureHandlers(at location: CGPoint) -> GestureHandlerOutputs {
-        var outputs = super.gestureHandlers(at: location)
-        let local = location.applying(background.transformToContainer.inverted())
-        outputs = outputs.merge(background.gestureHandlers(at: local))
-        return outputs
-    }
-
-    override func handleMouseWheel(at location: CGPoint, delta: CGPoint) -> Bool {
-        if super.handleMouseWheel(at: location, delta: delta) {
-            return true
-        }
-        let local = location.applying(background.transformToContainer.inverted())
-        return background.handleMouseWheel(at: local, delta: delta)
-    }
-
-    override func handleMouseHover(at location: CGPoint, deviceID: Int, isTopMost: Bool) -> Bool {
-        if super.handleMouseHover(at: location, deviceID: deviceID, isTopMost: isTopMost) {
-            return true
-        }
-        let local = location.applying(background.transformToContainer.inverted())
-        return background.handleMouseHover(at: local, deviceID: deviceID, isTopMost: isTopMost)
-    }
-}

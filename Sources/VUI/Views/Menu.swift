@@ -112,39 +112,11 @@ struct ResolvedMenuStyle: View {
     }
 
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let labelKey = ObjectIdentifier(MenuStyleConfiguration.Label.self)
-        let contentKey = ObjectIdentifier(MenuStyleConfiguration.Content.self)
-
-        var inputs = inputs
-        let label = inputs.layouts.sourceWrites.removeValue(forKey: labelKey)
-        let content = inputs.layouts.sourceWrites.removeValue(forKey: contentKey)
-        let configuration = MenuStyleConfiguration(label, content)
-
-        let explicitStyle = inputs.layouts.menuStyles.popLast()
-        let isSubmenu = inputs.base.styleContext != nil
-        let menuStyle: MenuStyleProxy? = isSubmenu ? MenuStyleProxy(view[\._menuItemStyle]) : explicitStyle
-        let styleType = menuStyle?.type ?? DefaultMenuStyle.self
-
-        func makeStyleBody<S: MenuStyle, T>(_: S.Type, graph: _GraphValue<T>, inputs: _ViewInputs) -> _ViewOutputs {
-            S.Body._makeView(view: graph.unsafeCast(to: S.Body.self), inputs: inputs)
-        }
-        let outputs = makeStyleBody(styleType, graph: view[\._body], inputs: inputs)
-        if let body = outputs.view {
-            let view = UnaryViewGenerator(graph: view, baseInputs: inputs.base) { graph, inputs in
-                ResolvedMenuStyleViewContext(menuStyle: menuStyle,
-                                             configuration: configuration,
-                                             graph: graph,
-                                             body: body.makeView(),
-                                             inputs: inputs)
-            }
-            return _ViewOutputs(view: view)
-        }
-        return outputs
+        fatalError("Implement with AG")
     }
 
     static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        let outputs = Self._makeView(view: view, inputs: inputs.inputs)
-        return _ViewListOutputs(views: .staticList(outputs.view))
+        fatalError("Implement with AG")
     }
 }
 
@@ -165,14 +137,7 @@ extension MenuDropdownModifier {
 
 extension MenuDropdownModifier: _UnaryViewModifier {
     static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        let outputs = body(_Graph(), inputs)
-        if let body = outputs.view?.makeView() {
-            let view = UnaryViewGenerator(graph: modifier, baseInputs: inputs.base) { graph, inputs in
-                MenuDropdownViewContext(graph: graph, body: body, inputs: inputs)
-            }
-            return _ViewOutputs(view: view)
-        }
-        return outputs
+        fatalError("Implement with AG")
     }
 }
 
@@ -202,7 +167,7 @@ private class MenuDropdownGestureHandler: _GestureHandler {
         return f.subtracting([.button, .tap, .longPress])
     }
 
-    init(graph: _GraphValue<MenuDropdownGesture>, target: ViewContext?, gesture: MenuDropdownGesture) {
+    init(graph: _GraphValue<MenuDropdownGesture>, target: Any?, gesture: MenuDropdownGesture) {
         self.gesture = gesture
         super.init(graph: graph, target: target)
     }
@@ -243,207 +208,3 @@ private class MenuDropdownGestureHandler: _GestureHandler {
     }
 }
 
-private class MenuDropdownViewContext<MenuContent>: ViewModifierContext<MenuDropdownModifier<MenuContent>> where MenuContent: View {
-    typealias Modifier = MenuDropdownModifier<MenuContent>
-    let gesture: _GraphValue<MenuDropdownGesture>
-    let popupMenuContext = MenuContext()     // shared context for the popup level opened by this view
-    var sceneContext: AuxiliaryWindowSceneContext<MenuContent>!
-    var isMenuOpen = false
-    var isMouseHovered = false
-    var isPopupActivated = false
-
-    override init(graph: _GraphValue<Modifier>, body: ViewContext, inputs: _GraphInputs) {
-        self.gesture = graph[\._gesture]
-        super.init(graph: graph, body: body, inputs: inputs)
-
-        let sceneRoot = _SceneRoot(view: self)
-        var popupEnvironment = self.environment
-        popupEnvironment._menuContext = popupMenuContext
-        let sceneInputs = _SceneInputs(root: sceneRoot, environment: popupEnvironment,
-                                       modifiers: self.inputs.modifiers,
-                                       _modifierTypeGraphs: self.inputs._modifierTypeGraphs)
-
-        func makeScene<T: Scene>(scene: _GraphValue<T>, inputs: _SceneInputs) -> _SceneOutputs {
-            T._makeScene(scene: scene, inputs: inputs)
-        }
-        let sceneOutputs = makeScene(scene: graph[\._scene], inputs: sceneInputs)
-        self.sceneContext = sceneOutputs.scene?.makeScene() as? AuxiliaryWindowSceneContext<MenuContent>
-        assert(self.sceneContext != nil, "Failed to create AuxiliaryWindowSceneContext for Menu")
-    }
-
-    override func updateContent() {
-        super.updateContent()
-        self.sceneContext.updateContent()
-    }
-
-    override func gestureHandlers(at location: CGPoint) -> GestureHandlerOutputs {
-        let outputs = super.gestureHandlers(at: location)
-        guard styleContext == nil else { return outputs }
-
-        if self.bounds.contains(location), let gesture = self.modifier?._gesture {
-            let handler = MenuDropdownGestureHandler(graph: self.gesture, target: self, gesture: gesture)
-            handler.openMenuCallback = { [weak self] _ in
-                guard let self else { return }
-                let origin = CGPoint(x: self.bounds.minX, y: self.bounds.maxY)
-                self.openMenu(at: origin)
-            }
-            handler.pressingCallback = { [weak self] isPressing in
-                self?.modifier?.onPressingChanged?(isPressing)
-                self?.body.updateContent()
-            }
-            let local = GestureHandlerOutputs(gestures: [handler],
-                                              simultaneousGestures: [],
-                                              highPriorityGestures: [])
-            return outputs.merge(local)
-        }
-        return outputs
-    }
-
-    override func handleMouseHover(at location: CGPoint, deviceID: Int, isTopMost: Bool) -> Bool {
-        _ = super.handleMouseHover(at: location, deviceID: deviceID, isTopMost: isTopMost)
-
-        if deviceID == 0 {
-            let wasHovered = self.isMouseHovered
-
-            if isTopMost {
-                self.isMouseHovered = self.hitTest(location) != nil
-            } else {
-                if isMenuOpen {
-                    let wp = location.applying(self.transformToRoot)
-                    if let frame = self.sceneContext?.auxiliaryWindowFrame(), frame.contains(wp) {
-                        self.isPopupActivated = true
-                    }
-                }
-                self.isMouseHovered = false
-            }
-
-            if wasHovered != self.isMouseHovered {
-                if styleContext != nil {
-                    if self.isMouseHovered {
-                        self.isPopupActivated = false
-                        if !self.isMenuOpen {
-                            let origin = CGPoint(x: self.bounds.maxX, y: self.bounds.minY)
-                            self.openMenu(at: origin)
-                        }
-                    } else {
-                        if !self.isPopupActivated {
-                            self.closeMenu()
-                        }
-                    }
-                }
-                self.modifier?.onHoverChanged?(self.isMouseHovered)
-                self.body.updateContent()
-            }
-        }
-        return isMouseHovered
-    }
-
-    func openMenu(at localOrigin: CGPoint) {
-        self.isPopupActivated = false
-
-        if let ctx = self.environment._menuContext {
-            ctx.activeSubmenuRegistration?.close()
-            ctx.activeSubmenuRegistration = _SubmenuRegistration(
-                close: { [weak self] in self?.closeMenu() },
-                isHovered: { [weak self] in self?.isMouseHovered ?? false }
-            )
-        }
-
-        let windowLocation = localOrigin.applying(self.transformToRoot)
-        let sceneContext = self.sceneContext!
-        let context = self.sharedContext
-        Task { @MainActor in
-            let activated = sceneContext.activate(at: windowLocation,
-                                                  context: context,
-                                                  dismissOnDeactivate: true)
-            if activated == false {
-                Log.error("MenuDropdownViewContext: failed to activate menu scene")
-            }
-        }
-        self.isMenuOpen = true
-        self.modifier?.onMenuOpenChanged?(true)
-    }
-
-    func closeMenu() {
-        guard isMenuOpen else { return }
-        self.sceneContext?.dismiss()
-        self.isMenuOpen = false
-        self.isPopupActivated = false
-        self.environment._menuContext?.activeSubmenuRegistration = nil
-        self.modifier?.onMenuOpenChanged?(false)
-    }
-
-    struct _SceneRoot: SceneRoot {
-        typealias Root = MenuDropdownModifier<MenuContent>
-        var root: Root { view.modifier! }
-        var graph: _GraphValue<Root> { view.graph }
-        var app: AppContext { view.sharedContext.app }
-        unowned let view: MenuDropdownViewContext<MenuContent>
-        
-        func value<T>(atPath path: _GraphValue<T>) -> T? {
-            if let v = graph.value(atPath: path, from: root) {
-                return v
-            }
-            return view.value(atPath: path)
-        }
-    }
-}
-
-private class ResolvedMenuStyleViewContext: GenericViewContext<ResolvedMenuStyle> {
-    let menuStyle: MenuStyleProxy?
-    let configuration: MenuStyleConfiguration
-
-    init(menuStyle: MenuStyleProxy?, configuration: MenuStyleConfiguration,
-         graph: _GraphValue<ResolvedMenuStyle>, body: ViewContext, inputs: _GraphInputs) {
-        self.menuStyle = menuStyle
-        self.configuration = configuration
-        super.init(graph: graph, body: body, inputs: inputs)
-    }
-
-    func onDispatchPrimaryAction(_ action: @escaping () -> Void) {
-        self.sharedContext.auxiliarySceneContext?.dismissPopup(withParentContext: true)
-        let box = UnsafeBox(action)
-        Task { @MainActor in
-            box.value()
-        }
-    }
-
-    override func updateView(_ view: inout ResolvedMenuStyle) {
-        if let menuStyle {
-            guard let style = menuStyle.resolve(self) else {
-                fatalError("Unable to resolve menu style")
-            }
-            view._style = style
-        }
-        view._configuration = MenuStyleConfiguration(
-            configuration._label,
-            configuration._content,
-            primaryAction: view._primaryAction.map { action in
-                { [weak self] in
-                    self?.onDispatchPrimaryAction(action) 
-                }
-            }
-        )
-    }
-
-    override func handleMouseHover(at location: CGPoint, deviceID: Int, isTopMost: Bool) -> Bool {
-        let result = super.handleMouseHover(at: location, deviceID: deviceID, isTopMost: isTopMost)
-        if isTopMost, let ctx = self.environment._menuContext,
-           let reg = ctx.activeSubmenuRegistration, !reg.isHovered() {
-            reg.close()
-            ctx.activeSubmenuRegistration = nil
-        }
-        return result
-    }
-
-    override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
-        var size = super.sizeThatFits(proposal)
-        if styleContext is MenuStyleContext {
-            if let proposedWidth = proposal.width,
-               proposedWidth.isFinite, proposedWidth > 0 {
-                size.width = proposedWidth
-            }
-        }
-        return size
-    }
-}

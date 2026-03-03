@@ -78,46 +78,11 @@ private extension TupleView {
 
 extension TupleView {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let outputs = Self._makeViewList(view: view, inputs: inputs.listInputs)
-
-        if let staticList = outputs.views as? StaticViewList {
-            let views = staticList.views.map { $0.makeView() }
-            let view = UnaryViewGenerator(graph: view, baseInputs: inputs.base) { graph, inputs in
-                StaticViewGroupContext(graph: graph, subviews: views, inputs: inputs)
-            }
-            return _ViewOutputs(view: view)
-        }
-        else {
-            let view = UnaryViewGenerator(graph: view, baseInputs: inputs.base) { graph, inputs in
-                DynamicViewGroupContext(graph: graph, body: outputs.views, inputs: inputs)
-            }
-            return _ViewOutputs(view: view)
-        }
+        fatalError("Implement with AG")
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        func _makeViewList<V: View, U>(_ type: V.Type, view: _GraphValue<U>, inputs: _ViewListInputs) -> _ViewListOutputs {
-            return type._makeViewList(view: view.unsafeCast(to: V.self), inputs: inputs)
-        }
-        var subviews: [any ViewListGenerator] = []
-        if let viewType = T.self as? any View.Type {
-            let outputs = _makeViewList(viewType, view: view[\.value], inputs: inputs)
-            subviews.append(outputs.views)
-        } else {
-            let subviewTypes = self._subviewTypes
-            for (index, v) in subviewTypes.enumerated() {
-                let outputs = _makeViewList(v.type, view: view[\._subviews[index]], inputs: inputs)
-                subviews.append(outputs.views)
-            }
-        }
-
-        let staticList = subviews.compactMap { $0 as? StaticViewList }
-        if staticList.count == subviews.count { // all static
-            let views = staticList.flatMap(\.views)
-            return _ViewListOutputs(views: StaticViewListGenerator(views: views))
-        } else {
-            return _ViewListOutputs(views: .dynamicList(subviews))
-        }
+        fatalError("Implement with AG")
     }
 }
 

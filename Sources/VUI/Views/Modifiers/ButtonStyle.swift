@@ -45,17 +45,11 @@ extension PrimitiveButtonStyleConfiguration.Label {
     }
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let view = UnaryViewGenerator(graph: view, baseInputs: inputs.base) { graph, inputs in
-            PrimitiveButtonStyleConfigurationLabelViewContext(graph: graph, inputs: inputs)
-        }
-        return _ViewOutputs(view: view)
+        fatalError("Implement with AG")
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        let view = UnaryViewGenerator(graph: view, baseInputs: inputs.base) { graph, inputs in
-            PrimitiveButtonStyleConfigurationLabelViewContext(graph: graph, inputs: inputs)
-        }
-        return _ViewListOutputs(views: .staticList(view))
+        fatalError("Implement with AG")
     }
 }
 
@@ -305,18 +299,6 @@ struct _DefaultButtonWithButtonStyle<Style>: PrimitiveButtonStyle, PrimitiveButt
     }
 }
 
-struct PrimitiveButtonStyleProxy {
-    let type: any PrimitiveButtonStyle.Type
-    let graph: _GraphValue<Any>
-    init<S: PrimitiveButtonStyle>(_ graph: _GraphValue<S>) {
-        self.type = S.self
-        self.graph = graph.unsafeCast(to: Any.self)
-    }
-    func resolve(_ resolver: some _GraphValueResolver) -> (any PrimitiveButtonStyle)? {
-        resolver.value(atPath: graph) as? (any PrimitiveButtonStyle)
-    }
-}
-
 struct PrimitiveButtonStyleContainerModifier<Style>: ViewModifier where Style: PrimitiveButtonStyle {
     let style: Style
     typealias Body = Never
@@ -324,15 +306,11 @@ struct PrimitiveButtonStyleContainerModifier<Style>: ViewModifier where Style: P
 
 extension PrimitiveButtonStyleContainerModifier {
     static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        var inputs = inputs
-        inputs.layouts.buttonStyles.append(PrimitiveButtonStyleProxy(modifier[\.style]))
-        return body(_Graph(), inputs)
+        fatalError()
     }
 
     static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        var inputs = inputs
-        inputs.layouts.buttonStyles.append(PrimitiveButtonStyleProxy(modifier[\.style]))
-        return body(_Graph(), inputs)
+        fatalError()
     }
 }
 
@@ -370,29 +348,5 @@ extension View {
 
     public func buttonStyle<S>(_ style: S) -> some View where S: ButtonStyle {
         modifier(ButtonStyleContainerModifier(style: style))
-    }
-}
-
-private class PrimitiveButtonStyleConfigurationLabelViewContext: DynamicViewContext<PrimitiveButtonStyleConfiguration.Label> {
-    override func updateContent() {
-        let oldProxy = self.view?.view
-        self.view = nil
-        if var view = value(atPath: self.graph) {
-            self.resolveGraphInputs()
-            self.updateView(&view)
-            self.requiresContentUpdates = false
-            self.view = view
-        }
-        if let proxy = self.view?.view {
-            if self.body == nil || proxy != oldProxy {
-                let outputs = proxy.makeView(_Graph(), inputs: _ViewInputs(base: self.inputs))
-                self.body = outputs.view?.makeView()
-            }
-            self.body?.updateContent()
-        } else {
-            self.invalidate()
-            fatalError("Unable to recover view for \(graph)")
-        }
-        self.sharedContext.needsLayout = true
     }
 }

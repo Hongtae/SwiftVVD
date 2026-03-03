@@ -22,37 +22,11 @@ public struct SequenceGesture<First, Second>: Gesture where First: Gesture, Seco
     public static func _makeGesture(gesture: _GraphValue<Self>, inputs: _GestureInputs) -> _GestureOutputs<Self.Value> {
         let first = First._makeGesture(gesture: gesture[\.first], inputs: inputs)
         let second = Second._makeGesture(gesture: gesture[\.second], inputs: inputs)
-        return _GestureOutputs(generator: _Generator(graph: gesture,
-                                                     first: first,
-                                                     second: second,
-                                                     inputs: inputs))
+
+        fatalError("Implement with AG")
     }
 
     public typealias Body = Never
-
-    private struct _Generator: _GestureRecognizerGenerator {
-        let graph: _GraphValue<SequenceGesture>
-        let first: _GestureOutputs<First.Value>
-        let second: _GestureOutputs<Second.Value>
-        let inputs: _GestureInputs
-        func makeGesture(containerView: ViewContext) -> _GestureRecognizer<Value>? {
-            if let gesture = containerView.value(atPath: self.graph) {
-                let first = self.first.generator.makeGesture(containerView: containerView)
-                let second = self.second.generator.makeGesture(containerView: containerView)
-                if let first, let second {
-                    let callbacks = inputs.makeCallbacks(of: Value.self, containerView: containerView)
-                    return SequenceGestureRecognizer(graph: graph,
-                                                     target: inputs.view,
-                                                     callbacks: callbacks,
-                                                     gesture: gesture,
-                                                     first: first,
-                                                     second: second)
-                }
-                return nil
-            }
-            fatalError("Unable to recover gesture: \(self.graph.valueType)")
-        }
-    }
 }
 
 extension SequenceGesture.Value: Equatable where First.Value: Equatable, Second.Value: Equatable {
@@ -73,7 +47,7 @@ class SequenceGestureRecognizer<First: Gesture, Second: Gesture>: _GestureRecogn
     typealias Value = SequenceGesture<First, Second>.Value
 
     init(graph: _GraphValue<SequenceGesture<First, Second>>,
-         target: ViewContext?,
+         target: Any?,
          callbacks: Callbacks,
          gesture: SequenceGesture<First, Second>,
          first: _GestureRecognizer<First.Value>,

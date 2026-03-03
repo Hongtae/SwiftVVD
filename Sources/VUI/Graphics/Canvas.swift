@@ -50,36 +50,9 @@ extension Canvas where Symbols == EmptyView {
 
 extension Canvas {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let view = UnaryViewGenerator(graph: view, baseInputs: inputs.base) { graph, inputs in
-            CanvasViewContext(graph: graph, inputs: inputs)
-        }
-        return _ViewOutputs(view: view)
+        fatalError("Implement with AG")
     }
 }
 
 extension Canvas: _PrimitiveView {
-}
-
-private class CanvasViewContext<Symbols>: PrimitiveViewContext<Canvas<Symbols>> where Symbols: View {
-    typealias Content = Canvas<Symbols>
-
-    override func draw(frame: CGRect, context: GraphicsContext) {
-        super.draw(frame: frame, context: context)
-
-        if let renderer = self.view?.renderer {
-            let bounds = self.bounds
-            if bounds.width > 0 && bounds.height > 0 {
-                context.drawLayer(in: frame) { context, size in
-                    renderer(&context, size)
-                }
-            }
-        }
-    }
-
-    override func hitTest(_ location: CGPoint) -> ViewContext? {
-        if self.bounds.contains(location) {
-            return self
-        }
-        return super.hitTest(location)
-    }
 }

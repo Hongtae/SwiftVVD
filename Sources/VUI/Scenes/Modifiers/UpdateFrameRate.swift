@@ -14,9 +14,7 @@ public struct _UpdateFrameRate: _SceneModifier {
     var inactive: CGFloat = 30.0
     
     public static func _makeScene(modifier: _GraphValue<Self>, inputs: _SceneInputs, body: @escaping (_Graph, _SceneInputs) -> _SceneOutputs) -> _SceneOutputs {
-        var inputs = inputs
-        inputs.setModifierTypeGraph(modifier)
-        return body(_Graph(), inputs)
+        fatalError("Implement with AG")
     }
 }
 

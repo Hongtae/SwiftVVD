@@ -120,97 +120,14 @@ struct ResolvedButtonStyle: View {
     }
 
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let primitiveButtonStyleLabelKey = ObjectIdentifier(PrimitiveButtonStyleConfiguration.Label.self)
-        let buttonStyleLabelKey = ObjectIdentifier(ButtonStyleConfiguration.Label.self)
-
-        var inputs = inputs
-        let label1 = inputs.layouts.sourceWrites.removeValue(forKey: primitiveButtonStyleLabelKey)
-        let label2 = inputs.layouts.sourceWrites.removeValue(forKey: buttonStyleLabelKey)
-        let label = label1 ?? label2
-        let style = inputs.layouts.buttonStyles.popLast()
-        let isInMenu = inputs.base.styleContext != nil
-        let effectiveStyle = isInMenu ? PrimitiveButtonStyleProxy(view[\._menuItemStyle]) : style
-        let styleType = effectiveStyle?.type ?? DefaultButtonStyle.self
-
-        func makeStyleBody<S: PrimitiveButtonStyle, T>(_: S.Type, graph: _GraphValue<T>, inputs: _ViewInputs) -> _ViewOutputs {
-            S.Body._makeView(view: graph.unsafeCast(to: S.Body.self), inputs: inputs)
-        }
-        let outputs = makeStyleBody(styleType, graph: view[\._body], inputs: inputs)
-
-        if let body = outputs.view {
-            let view = UnaryViewGenerator(graph: view, baseInputs: inputs.base) { graph, inputs in
-                ResolvedButtonStyleViewContext(buttonStyle: effectiveStyle,
-                                               label: label,
-                                               graph: graph,
-                                               body: body.makeView(),
-                                               inputs: inputs)
-            }
-            return _ViewOutputs(view: view)
-        }
-        return outputs
+        fatalError("Implement with AG")
     }
 
     static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        let outputs = Self._makeView(view: view, inputs: inputs.inputs)
-        return _ViewListOutputs(views: .staticList(outputs.view))
+        fatalError("Implement with AG")
     }
 }
 
 extension ResolvedButtonStyle: _PrimitiveView {
 }
 
-private class ResolvedButtonStyleViewContext: GenericViewContext<ResolvedButtonStyle> {
-    let buttonStyle: PrimitiveButtonStyleProxy?
-    let label: ViewProxy?
-
-    init(buttonStyle: PrimitiveButtonStyleProxy?, label: ViewProxy?, graph: _GraphValue<ResolvedButtonStyle>, body: ViewContext, inputs: _GraphInputs) {
-        self.buttonStyle = buttonStyle
-        self.label = label
-        super.init(graph: graph, body: body, inputs: inputs)
-    }
-
-    override func updateView(_ view: inout ResolvedButtonStyle) {
-        if let buttonStyle {
-            guard let style = buttonStyle.resolve(self) else {
-                fatalError("Unable to resolve button style")
-            }
-            view._style = style
-        }
-        let role = view.configuration.role
-        let label = PrimitiveButtonStyleConfiguration.Label(label)
-        let action = view.configuration.action
-        let buttonAction: ButtonAction = { [weak self] in
-            self?.onDispatchButtonAction(action)
-        }
-        view.configuration = PrimitiveButtonStyleConfiguration(role: role, label: label, action: buttonAction)
-        view._isPressing = false
-        view._pressingCallback = { [weak self] isPressed in
-            self?.onButtonPressing(isPressed)
-        }
-    }
-    
-    override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
-        var size = super.sizeThatFits(proposal)
-        if styleContext is MenuStyleContext {
-            if let proposedWidth = proposal.width,
-               proposedWidth.isFinite, proposedWidth > 0 {
-                size.width = proposedWidth
-            }
-        }
-        return size
-    }
-
-    func onButtonPressing(_ isPressed: Bool) {
-        self.view?._isPressing = isPressed
-        self.body.updateContent()
-    }
-
-    func onDispatchButtonAction(_ action: @escaping ButtonAction) {
-        self.sharedContext.auxiliarySceneContext?.dismissPopup(withParentContext: true)
-        self.sharedContext.alertDismissAction?()
-        let box = UnsafeBox(action)
-        Task { @MainActor in
-            box.value()
-        }
-    }
-}

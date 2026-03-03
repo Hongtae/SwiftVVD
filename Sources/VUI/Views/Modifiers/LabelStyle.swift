@@ -42,33 +42,20 @@ extension LabelStyleConfiguration.Icon: _PrimitiveView {}
 
 extension LabelStyleConfiguration.Title {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let view = UnaryViewGenerator(graph: view, baseInputs: inputs.base) { graph, inputs in
-            LabelStyleConfigurationTitleViewContext(graph: graph, inputs: inputs)
-        }
-        return _ViewOutputs(view: view)
+        fatalError("Implement with AG")
     }
-
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        let view = UnaryViewGenerator(graph: view, baseInputs: inputs.base) { graph, inputs in
-            LabelStyleConfigurationTitleViewContext(graph: graph, inputs: inputs)
-        }
-        return _ViewListOutputs(views: .staticList(view))
+        fatalError("Implement with AG")
     }
 }
 
 extension LabelStyleConfiguration.Icon {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let view = UnaryViewGenerator(graph: view, baseInputs: inputs.base) { graph, inputs in
-            LabelStyleConfigurationIconViewContext(graph: graph, inputs: inputs)
-        }
-        return _ViewOutputs(view: view)
+        fatalError("Implement with AG")
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        let view = UnaryViewGenerator(graph: view, baseInputs: inputs.base) { graph, inputs in
-            LabelStyleConfigurationIconViewContext(graph: graph, inputs: inputs)
-        }
-        return _ViewListOutputs(views: .staticList(view))
+        fatalError("Implement with AG")
     }
 }
 
@@ -143,80 +130,16 @@ struct LabelStyleWritingModifier<Style>: ViewModifier where Style: LabelStyle {
 
 extension LabelStyleWritingModifier {
     static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        var inputs = inputs
-        inputs.layouts.labelStyles.append(LabelStyleProxy(modifier[\.style]))
-        return body(_Graph(), inputs)
+        fatalError("Implement with AG")
     }
 
     static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        var inputs = inputs
-        inputs.layouts.labelStyles.append(LabelStyleProxy(modifier[\.style]))
-        return body(_Graph(), inputs)
+        fatalError("Implement with AG")
     }
 }
 
 extension View {
     public func labelStyle<S>(_ style: S) -> some View where S: LabelStyle {
         modifier(LabelStyleWritingModifier(style: style))
-    }
-}
-
-struct LabelStyleProxy {
-    let type: any LabelStyle.Type
-    let graph: _GraphValue<Any>
-    init<S: LabelStyle>(_ graph: _GraphValue<S>) {
-        self.type = S.self
-        self.graph = graph.unsafeCast(to: Any.self)
-    }
-    func resolve(_ resolver: some _GraphValueResolver) -> (any LabelStyle)? {
-        resolver.value(atPath: graph) as? (any LabelStyle)
-    }
-}
-
-private class LabelStyleConfigurationTitleViewContext: DynamicViewContext<LabelStyleConfiguration.Title> {
-    override func updateContent() {
-        let oldProxy = self.view?.view
-        self.view = nil
-        if var view = value(atPath: self.graph) {
-            self.resolveGraphInputs()
-            self.updateView(&view)
-            self.requiresContentUpdates = false
-            self.view = view
-        }
-        if let view, let proxy = view.view {
-            if self.body == nil || proxy != oldProxy {
-                let outputs = proxy.makeView(_Graph(), inputs: _ViewInputs(base: self.inputs))
-                self.body = outputs.view?.makeView()
-            }
-            self.body?.updateContent()
-        } else {
-            self.invalidate()
-            fatalError("Unable to recover view for \(graph)")
-        }
-        self.sharedContext.needsLayout = true
-    }
-}
-
-private class LabelStyleConfigurationIconViewContext: DynamicViewContext<LabelStyleConfiguration.Icon> {
-    override func updateContent() {
-        let oldProxy = self.view?.view
-        self.view = nil
-        if var view = value(atPath: self.graph) {
-            self.resolveGraphInputs()
-            self.updateView(&view)
-            self.requiresContentUpdates = false
-            self.view = view
-        }
-        if let view, let proxy = view.view {
-            if self.body == nil || proxy != oldProxy {
-                let outputs = proxy.makeView(_Graph(), inputs: _ViewInputs(base: self.inputs))
-                self.body = outputs.view?.makeView()
-            }
-            self.body?.updateContent()
-        } else {
-            self.invalidate()
-            fatalError("Unable to recover view for \(graph)")
-        }
-        self.sharedContext.needsLayout = true
     }
 }

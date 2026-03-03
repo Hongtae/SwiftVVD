@@ -13,7 +13,7 @@ typealias PlatformWindow = VVD.Window
 typealias PlatformWindowStyle = VVD.WindowStyle
 
 protocol WindowContext: AnyObject {
-    var scene: SceneContext { get }
+    var scene: Any { get }
     var window: (any PlatformWindow)? { get }
     var isValid: Bool { get }
 
@@ -48,11 +48,11 @@ class GenericWindowContext<Content>: WindowContext,
     private(set) var swapChain: SwapChain?
     private(set) var window: (any PlatformWindow)?
 
-    var view: ViewContext?
+    var view: Any?
     let content: _GraphValue<Content>
     var environment: EnvironmentValues
     var sharedContext: SharedContext
-    var scene: SceneContext {
+    var scene: Any {
         sharedContext.scene
     }
     var title: String { "" }
@@ -105,25 +105,8 @@ class GenericWindowContext<Content>: WindowContext,
     // always called on the main thread (same pattern as modalContext in ModalWindowSceneContext).
     private let modalSlots = Mutex<[AnyHashable: AnyWeakObject]>([:])
 
-    init(content: _GraphValue<Content>, scene: SceneContext) {
-        let sceneInputs = scene.inputs
-        self.content = content
-        self.environment = sceneInputs.environment
-        self.sharedContext = SharedContext(scene: scene)
-        self.sharedContext._window = self
-
-        var properties = PropertyList()
-        properties.setValue(VStackLayout(), forKey: DefaultLayoutProperty.self)
-        properties.setValue(EdgeInsets(_all: 16), forKey: DefaultPaddingEdgeInsetsProperty.self)
-
-        let baseInputs = _GraphInputs(sharedContext: self.sharedContext,
-                                      properties: properties,
-                                      environment: sceneInputs.environment,
-                                      modifiers: sceneInputs.modifiers,
-                                      _modifierTypeGraphs: sceneInputs._modifierTypeGraphs)
-        let inputs = _ViewInputs.inputs(with: baseInputs)
-        let outputs = Content._makeView(view: content, inputs: inputs)
-        self.view = outputs.view?.makeView()
+    init(content: _GraphValue<Content>, scene: Any) {
+        fatalError("Implement with AG")
     }
 
     deinit {
@@ -138,24 +121,11 @@ class GenericWindowContext<Content>: WindowContext,
     }
 
     func updateContent() {
-        if let content = scene.value(atPath: self.content) {
-            self.sharedContext.root = TypedViewRoot(root: content, graph: self.content, scene: self.scene)
-            if let view {
-                view.updateContent()
-                if view.validate() == false {
-                    Log.err("View(type:\(Content.self) validation failed.")
-                }
-            }
-        } else {
-            fatalError("Unable to recover view for \(content)")
-        }
+        fatalError("Implement with AG")
     }
 
     var isValid: Bool {
-        if let view {
-            return view.isValid
-        }
-        return false
+        fatalError("Implement with AG")
     }
 
     @MainActor
@@ -211,100 +181,14 @@ class GenericWindowContext<Content>: WindowContext,
                 }
             }
         }
-        self.applyModifiers()
         return self.window
-    }
-
-    func applyModifiers() {
-        if let modifier = self.scene.inputs.modifierTypeGraph(of: _UpdateFrameRate.self) {
-            if let frameRate = self.scene.value(atPath: modifier) {
-                let active = 1.0 / max(frameRate.active, 1.0)
-                let inactive = 1.0 / max(frameRate.inactive, 1.0)
-                self.stateConfig.withLock {
-                    $0.config.activeFrameInterval = active
-                    $0.config.inactiveFrameInterval = inactive
-                }
-            }
-        }
-        if let modifier = self.scene.inputs.modifierTypeGraph(of: _DrawDebug.self) {
-            if let drawDebug = self.scene.value(atPath: modifier) {
-                self.stateConfig.withLock {
-                    $0.config.drawDebugInfo = drawDebug.selectedValues
-                }
-            }
-        }
     }
     
     func layoutBounds(_ bounds: CGRect) -> CGRect { bounds }
 
     func updateView(tick: UInt64, delta: Double, date: Date) {
-        if let view, view.isValid {
-            var viewsToReload = sharedContext.viewsNeedToReloadResources.compactMap { $0.value }
-            sharedContext.viewsNeedToReloadResources.removeAll()
-
-            if viewsToReload.contains(where: {
-                $0 === view
-            }) {
-                viewsToReload = [view]
-            } else if viewsToReload.isEmpty == false {
-                let copiedList = viewsToReload
-                let rootView = view
-                let isValidToReload = { (_ view: ViewContext) -> Bool in
-                    var view = Optional(view)
-                    while let superview = view?.superview {
-                        // when the view is reloaded, its subviews are also reloaded.
-                        if copiedList.contains(where: { $0 === superview }) {
-                            return false
-                        }
-                        view = superview
-                    }
-                    // the root view must be the same.
-                    return view === rootView
-                }
-                viewsToReload = viewsToReload.filter { isValidToReload($0) }
-            }
-
-            if viewsToReload.isEmpty == false {
-                if let commandBuffer = appContext?.graphicsDeviceContext?.renderQueue()?.makeCommandBuffer() {
-                    let width = 4, height = 4
-                    let scaleFactor = sharedContext.contentScaleFactor
-                    if var context = GraphicsContext(sharedContext: sharedContext,
-                                                     environment: environment,
-                                                     viewport: CGRect(x: 0, y: 0, width: width, height: height),
-                                                     contentOffset: .zero,
-                                                     contentScaleFactor: scaleFactor,
-                                                     resolution: CGSize(width: width, height: height),
-                                                     commandBuffer: commandBuffer) {
-                        context.environment = view.environment
-                        viewsToReload.forEach { view in
-                            view.loadResources(context)
-                        }
-                        commandBuffer.commit()
-                    } else {
-                        Log.error("GraphicsContext failed.")
-                    }
-                } else {
-                    Log.error("GraphicsDeviceContext.makeCommandBuffer failed.")
-                }
-                self.onViewLoaded()
-            }
-
-            while sharedContext.needsLayout {
-                let bounds = self.layoutBounds(sharedContext.contentBounds)
-                assert(bounds.width > 0 && bounds.height > 0)
-                let isInitialLayout = view.frame == .zero
-                sharedContext.needsLayout = isInitialLayout
-                view.place(at: CGPoint(x: bounds.midX, y: bounds.midY),
-                           anchor: .center,
-                           proposal: ProposedViewSize(bounds.size))
-                view.update(transform: .identity)
-                assert(view.frame != .zero)
-                if sharedContext.needsLayout == false {
-                    self.onViewLayoutUpdated()
-                }
-            }
-            view.update(tick: tick, delta: delta, date: date)
-        }
+        // update view
+        fatalError("Implement with AG")
 
         // filter valid clients
         let clients = self.auxiliaryWindows.withLock {
@@ -349,10 +233,9 @@ class GenericWindowContext<Content>: WindowContext,
     }
 
     func drawFrame(_ context: GraphicsContext, offset: CGPoint) {
-        if let view, view.isValid {
-            let frame = view.frame.offsetBy(dx: offset.x, dy: offset.y)
-            view.drawView(frame: frame, context: context)
-        }
+        // draw view
+        fatalError("Implement with AG")
+
 
         self.auxClients.forEach {
             $0.drawAuxiliaryWindowBackground(offset: offset, with: context)
@@ -409,130 +292,8 @@ class GenericWindowContext<Content>: WindowContext,
                 let date = Date(timeIntervalSinceNow: 0)
                 additionalDeltaTimes = 0.0
 
-                guard let view = self.view, view.isValid
-                else {
-                    if state.visible, let swapChain {
-                        var renderPass = swapChain.currentRenderPassDescriptor()
-                        if let commandBuffer = swapChain.commandQueue.makeCommandBuffer() {
-                            renderPass.colorAttachments[0].clearColor = clearColor
-                            renderPass.colorAttachments[0].loadAction = .clear
-                            if let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPass) {
-                                encoder.endEncoding()
-                            }
-                            commandBuffer.commit()
-                            _=swapChain.present()
-                        }
-                    }
-                    additionalDeltaTimes = delta
-                    let frameInterval = config.inactiveFrameInterval
-                    repeat {
-                        if Task.isCancelled { break mainLoop }
-                        await Task.yield()
-                    } while elapsed() < frameInterval
-                    continue
-                }
-
-                if state.bounds != contentBounds || state.contentScaleFactor != contentScaleFactor {
-                    if state.contentScaleFactor != contentScaleFactor {
-                        sharedContext.contentScaleFactor = state.contentScaleFactor
-                        self.environment.displayScale = state.contentScaleFactor
-                        view.updateEnvironment(self.environment)
-                        self.sharedContext.viewsNeedToReloadResources = [.init(view)]
-                    }
-
-                    contentBounds = state.bounds
-                    contentScaleFactor = state.contentScaleFactor
-
-                    let bounds = state.bounds.standardized
-                    sharedContext.contentBounds = bounds
-                    sharedContext.contentScaleFactor = state.contentScaleFactor
-                    sharedContext.needsLayout = true
-                }
-
-                self.updateView(tick: tick, delta: delta, date: date)
-
-                if state.visible, let swapChain {
-                    var renderPass = swapChain.currentRenderPassDescriptor()
-                    let device = swapChain.commandQueue.device
-                    let backBuffer = renderPass.colorAttachments[0].renderTarget!
-
-                    let dim = { (tex: Texture) in (tex.width, tex.height, tex.depth) }
-
-                    if let renderTargets, dim(renderTargets.backdrop) == dim(backBuffer) {
-                    } else {
-                        renderTargets = GraphicsContext.RenderTargets(
-                            device: device,
-                            width: backBuffer.width,
-                            height: backBuffer.height)
-                    }
-
-                    renderPass.colorAttachments[0].clearColor = clearColor
-                    if let renderTargets,
-                       let commandBuffer = swapChain.commandQueue.makeCommandBuffer() {
-
-                        if let context = GraphicsContext(
-                            sharedContext: self.sharedContext,
-                            environment: self.environment,
-                            viewport: CGRect(x: 0, y: 0,
-                                             width: backBuffer.width,
-                                             height: backBuffer.height),
-                            contentOffset: .zero,
-                            contentScaleFactor: state.contentScaleFactor,
-                            renderTargets: renderTargets,
-                            commandBuffer: commandBuffer) {
-
-                            context.clear(with: clearColor)
-                            self.drawFrame(context, offset: state.bounds.origin)
-                            
-                            if debugDrawEnabled {
-                                var offset = CGPoint(x: 5, y: 5)
-                                let drawText = { (text: Text) in
-                                    let resolvedText = context.resolve(text)
-                                    context.draw(resolvedText, at: offset, anchor: .topLeading)
-                                    offset.y += resolvedText.measure().height
-                                }
-
-                                if config.drawDebugInfo.contains(.fps) {
-                                    let d = max(delta, 0.001001) // up to 999
-                                    drawText(Text(String(format: "%.1f FPS (%f)", 1.0 / d, delta)))
-                                }
-                                if config.drawDebugInfo.contains(.thread) {
-                                    drawText(Text("thread: \(Platform.currentThreadID())"))
-                                }
-                                if config.drawDebugInfo.contains(.queue) {
-                                    drawText(Text("dispatch-queue: \(isMainQueue() ? "main" : "global")"))
-                                }
-                                if config.drawDebugInfo.contains(.appState) {
-                                    drawText(Text("app-active: \(appContext?.isActive ?? false)"))
-                                }
-                                if config.drawDebugInfo.contains(.windowState) {
-                                    drawText(Text("foreground: \(state.activated)"))
-                                }
-                            }
-
-                            if let rp = context.beginRenderPass(descriptor: renderPass,
-                                                                viewport: context.viewport) {
-                                context.encodeDrawTextureCommand(
-                                    renderPass: rp,
-                                    texture: context.backdrop,
-                                    frame: state.bounds,
-                                    textureFrame: context.viewport,
-                                    blendState: .opaque,
-                                    color: .white)
-                                rp.end()
-                            } else {
-                                Log.error("beginRenderPass failed.")
-                            }
-                        } else {
-                            if let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPass) {
-                                encoder.endEncoding()
-                            }
-                        }
-
-                        commandBuffer.commit()
-                        _=swapChain.present()
-                    }
-                }
+                // update view
+                // draw view
 
                 let frameInterval = state.activated ? config.activeFrameInterval : config.inactiveFrameInterval
                 let timeForBusyWait = state.activated ? 0.001 : 0.0
@@ -558,10 +319,11 @@ class GenericWindowContext<Content>: WindowContext,
         Log.debug("WindowContext.onWindowEvent: \(event)")
 
         let releaseEventHandlers = {
-            self.sharedContext.focusedViews.forEach {
-                (deviceID, weakViewProxy) in
-                weakViewProxy.value?.onLostFocus(for: deviceID)
-            }
+            fatalError("Implement with AG")
+            // self.sharedContext.focusedViews.forEach {
+            //     (deviceID, weakViewProxy) in
+            //     weakViewProxy.value?.onLostFocus(for: deviceID)
+            // }
             self.sharedContext.focusedViews.removeAll()
             self.sharedContext.gestureHandlers.forEach {
                 $0.reset()
@@ -710,10 +472,11 @@ class GenericWindowContext<Content>: WindowContext,
 
             Log.debug("WindowContext.onKeyboardEvent: \(event)")
             if let focusedView = self.sharedContext.focusedViews[event.deviceID]?.value {
-                return focusedView.processKeyboardEvent(type: event.type,
-                                                        deviceID: event.deviceID,
-                                                        key: event.key,
-                                                        text: event.text)
+                fatalError("Implement with AG")
+                // return focusedView.processKeyboardEvent(type: event.type,
+                //                                         deviceID: event.deviceID,
+                //                                         key: event.key,
+                //                                         text: event.text)
             }
             return false
         }
@@ -766,7 +529,8 @@ class GenericWindowContext<Content>: WindowContext,
                 return false
             }
 
-            guard let view = self.view else { return false }
+            return false
+            //guard let view = self.view else { return false }
 
             var gestureHandlers = self.sharedContext.gestureHandlers
             defer {
@@ -775,18 +539,20 @@ class GenericWindowContext<Content>: WindowContext,
 
             if gestureHandlers.isEmpty {
                 if event.type == .buttonDown {
-                    let location = event.location.applying(view.transformToContainer.inverted())
-                    let outputs = view.gestureHandlers(at: location)
-                    gestureHandlers = outputs.highPriorityGestures + outputs.gestures + outputs.simultaneousGestures
+                    fatalError("Implement with AG")
 
-                    if self.filterGestureTypes {
-                        var typeFilter = self.allowedGestureTypes
-                        gestureHandlers = gestureHandlers.filter {
-                            let include = typeFilter.contains($0.type)
-                            typeFilter = $0.setTypeFilter(typeFilter)
-                            return include
-                        }
-                    }
+                    // let location = event.location.applying(view.transformToContainer.inverted())
+                    // let outputs = view.gestureHandlers(at: location)
+                    // gestureHandlers = outputs.highPriorityGestures + outputs.gestures + outputs.simultaneousGestures
+
+                    // if self.filterGestureTypes {
+                    //     var typeFilter = self.allowedGestureTypes
+                    //     gestureHandlers = gestureHandlers.filter {
+                    //         let include = typeFilter.contains($0.type)
+                    //         typeFilter = $0.setTypeFilter(typeFilter)
+                    //         return include
+                    //     }
+                    // }
                 }
             }
 
@@ -897,10 +663,11 @@ class GenericWindowContext<Content>: WindowContext,
             }
         }
 
-        if let view {
-            let location = location.applying(view.transformToContainer.inverted())
-            return view.handleMouseWheel(at: location, delta: delta)
-        }
+        fatalError("Implement with AG")
+        // if let view {
+        //     let location = location.applying(view.transformToContainer.inverted())
+        //     return view.handleMouseWheel(at: location, delta: delta)
+        // }
         return false
     }
 
@@ -925,12 +692,13 @@ class GenericWindowContext<Content>: WindowContext,
             }
         }
 
-        if let view {
-            let location = location.applying(view.transformToContainer.inverted())
-            if view.handleMouseHover(at: location, deviceID: deviceID, isTopMost: topMost) {
-                topMost = false
-            }
-        }
+        fatalError("Implement with AG")
+        // if let view {
+        //     let location = location.applying(view.transformToContainer.inverted())
+        //     if view.handleMouseHover(at: location, deviceID: deviceID, isTopMost: topMost) {
+        //         topMost = false
+        //     }
+        // }
         return isTopMost != topMost
     }
 

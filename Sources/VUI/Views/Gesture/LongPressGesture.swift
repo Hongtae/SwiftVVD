@@ -22,22 +22,7 @@ public struct LongPressGesture: Gesture {
     }
 
     public static func _makeGesture(gesture: _GraphValue<Self>, inputs: _GestureInputs) -> _GestureOutputs<Value> {
-        struct _Generator: _GestureRecognizerGenerator {
-            let graph: _GraphValue<LongPressGesture>
-            let inputs: _GestureInputs
-            func makeGesture(containerView: ViewContext) -> _GestureRecognizer<Value>? {
-                if let gesture = containerView.value(atPath: self.graph) {
-                    let callbacks = inputs.makeCallbacks(of: Value.self,
-                                                         containerView: containerView)
-                    return LongPressGestureRecognizer(graph: graph,
-                                                      target: inputs.view,
-                                                      callbacks: callbacks,
-                                                      gesture: gesture)
-                }
-                fatalError("Unable to recover gesture: \(self.graph.valueType)")
-            }
-        }
-        return _GestureOutputs(generator: _Generator(graph: gesture, inputs: inputs))
+        fatalError("Implement with AG")
     }
 
     public typealias Value = Bool
@@ -72,7 +57,7 @@ final class LongPressGestureRecognizer: _GestureRecognizer<LongPressGesture.Valu
     var timestamp: ContinuousClock.Instant
     var task: Task<Void, Never>?
 
-    init(graph: _GraphValue<LongPressGesture>, target: ViewContext?, callbacks: Callbacks, gesture: LongPressGesture) {
+    init(graph: _GraphValue<LongPressGesture>, target: Any?, callbacks: Callbacks, gesture: LongPressGesture) {
         self.gesture = gesture
         self.buttonID = 0
         self.location = .zero

@@ -36,7 +36,7 @@ protocol AuxiliaryWindowHost {
 struct AuxiliarySceneContext {
     weak var hostContext: SharedContext?
     weak var hostWindow: WindowContext?
-    weak var sceneContext: SceneContext?
+    var sceneContext: Any?
     
     let dismissOnDeactivate: Bool
     let dismiss: () -> Void
@@ -62,14 +62,12 @@ struct AuxiliaryWindowScene<Content>: _PrimitiveScene where Content: View {
     var content: Content
 
     static func _makeScene(scene: _GraphValue<Self>, inputs: _SceneInputs) -> _SceneOutputs {
-        _SceneOutputs(scene: UnarySceneGenerator(graph: scene, inputs: inputs) { graph, inputs in
-            AuxiliaryWindowSceneContext(graph: graph, inputs: inputs)
-        })
+        fatalError("Implement with AG")
     }
 }
 
 // scene context for utility window scene
-class AuxiliaryWindowSceneContext<Content>: TypedSceneContext<AuxiliaryWindowScene<Content>>, AuxiliaryWindowClient, @unchecked Sendable where Content: View {
+class AuxiliaryWindowSceneContext<Content>: AuxiliaryWindowClient, @unchecked Sendable where Content: View {
     typealias Scene = AuxiliaryWindowScene<Content>
     
     let layoutPadding = 4
@@ -90,34 +88,8 @@ class AuxiliaryWindowSceneContext<Content>: TypedSceneContext<AuxiliaryWindowSce
         self.activationContext?.window
     }
     
-    override init(graph: _GraphValue<Scene>, inputs: _SceneInputs) {
-        super.init(graph: graph, inputs: inputs)
+    init(graph: _GraphValue<Scene>, inputs: _SceneInputs) {
         self.activationContext = nil
-    }
-
-    override func updateContent() {
-        super.updateContent()
-        if self.content != nil {
-            self.window?.updateContent()
-        }
-    }
-
-    override var windows: [WindowContext] {
-        [self.window].compactMap(\.self)
-    }
-
-    override var primaryWindows: [WindowContext] {
-        [self.window].compactMap(\.self)
-    }
-
-    override var isValid: Bool {
-        if super.isValid {
-            if let window {
-                return window.isValid
-            }
-            return true
-        }
-        return false
     }
 
     fileprivate func layoutBounds(_ bounds: CGRect) -> CGRect {
@@ -144,13 +116,16 @@ class AuxiliaryWindowSceneContext<Content>: TypedSceneContext<AuxiliaryWindowSce
             Log.error("AuxiliaryWindowContext: Invalid window!")
             return
         }
-        guard let view = window.view else {
-            Log.error("AuxiliaryWindowContext: Invalid view!")
-            return
-        }
+
+        // guard let view = window.view else {
+        //     Log.error("AuxiliaryWindowContext: Invalid view!")
+        //     return
+        // }
 
         let padding = CGFloat(self.layoutPadding)
-        let contentSize = view.sizeThatFits(.unspecified)
+         fatalError("Implement with AG")
+        //let contentSize = view.sizeThatFits(.unspecified)
+        let contentSize: CGSize = .zero
         var windowSize = contentSize
         windowSize.width = max(windowSize.width, 1) + padding * 2
         windowSize.height = max(windowSize.height, 1) + padding * 2
@@ -175,7 +150,8 @@ class AuxiliaryWindowSceneContext<Content>: TypedSceneContext<AuxiliaryWindowSce
         } else {
             window.sharedContext.contentBounds.size = windowSize
             let center = CGPoint(x: windowSize.width * 0.5, y: windowSize.height * 0.5)
-            view.place(at: center, anchor: .center, proposal: ProposedViewSize(contentSize))
+            fatalError("Implement with AG")
+            //view.place(at: center, anchor: .center, proposal: ProposedViewSize(contentSize))
         }
     }
 
@@ -185,92 +161,7 @@ class AuxiliaryWindowSceneContext<Content>: TypedSceneContext<AuxiliaryWindowSce
 
     @MainActor
     func activate(at location: CGPoint, context parentContext: SharedContext, dismissOnDeactivate: Bool) -> Bool {
-        self.updateContent()
-        defer {
-            self.window?.updateContent()
-        }
-
-        let parentWindow = parentContext.window
-        var enablePopup = self.environment.auxiliaryWindowUsingPlatformWindow
-        if enablePopup && parentWindow is AuxiliaryWindowHost {
-            if Platform.factory.supportedWindowStyles([.auxiliaryWindow]).contains(.auxiliaryWindow) == false {
-                Log.error("AuxiliaryWindowContext: Auxiliary windows are not supported on this platform.")
-                enablePopup = false
-            }
-        }
-
-        if activationContext != nil {
-            Log.debug("AuxiliaryWindowContext: already activated")
-            self.activationContext?.windowOffset = location
-            self.activationContext?.activateFirstTime = true
-            return true
-        }
-
-        let window = AuxiliaryWindowContext(content: self.graph[\.content], scene: self)
-        var activationContext = _ActivationContext(window: window,
-                                                   parentWindow: parentWindow,
-                                                   windowOffset: location,
-                                                   windowSize: .zero,
-                                                   dismissOnDeactivate: dismissOnDeactivate)
-        window.sharedContext.auxiliarySceneContext = AuxiliarySceneContext(
-            hostContext: parentContext,
-            hostWindow: parentWindow,
-            sceneContext: self,
-
-            dismissOnDeactivate: dismissOnDeactivate,
-            dismiss: { [weak self] in self?.dismiss() },
-            dismissPopup: { [weak self] in self?.dismissPopup() }
-        )
-
-        if enablePopup, let window = parentWindow.window {
-            if let popup = activationContext.window.makeWindow() {
-                let position = window.convertPointToScreen(location)
-                popup.contentSize = CGSize(width: 10, height: 10)
-                popup.origin = position
-                activationContext.popupWindow = popup
-                self.activationContext = activationContext
-                window.addEventObserver(self) { [weak self](event: WindowEvent) in
-                    guard let self else { return }
-                    switch event.type {
-                    case .activated:
-                        self.onHostWindowActivated()
-                    case .inactivated:
-                        self.onHostWindowInactivated()
-                    case .closed:
-                        self.onHostWindowClosed()
-                    case .moved, .resized:
-                        self.onHostWindowMoved()
-                    default:
-                        break
-                    }
-                }
-                window.addEventObserver(self) { [weak self](event: MouseEvent) in
-                    guard let self else { return }
-                    switch event.type {
-                    case .buttonDown:
-                        self.onHostWindowInactivated()
-                    default:
-                        break
-                    }
-                }
-                return true
-            } else {
-                Log.error("AuxiliaryWindowContext: failed to create popup window")
-            }
-        } else {
-            if let host = parentWindow as? AuxiliaryWindowHost {
-                let contentScale = parentWindow.window?.contentScaleFactor ?? 1.0
-                window.sharedContext.contentScaleFactor = contentScale
-                if host.addAuxiliaryWindow(self) {
-                    let filter = GraphicsContext.Filter.shadow(radius: 4.0, x: 0, y: 0)
-                    activationContext.filter = filter
-                    self.activationContext = activationContext
-                    return true
-                }
-            } else {
-                Log.error("AuxiliaryWindowContext: parent window is not AuxiliaryWindowHost")
-            }
-        }
+         fatalError("Implement with AG")
         return false
     }
 
@@ -404,7 +295,7 @@ private class AuxiliaryWindowContext<Content>: GenericWindowContext<Content>, @u
 
     private weak var _scene: AuxiliaryWindowSceneContext<Content>?
 
-    override init(content: _GraphValue<Content>, scene: SceneContext) {
+    override init(content: _GraphValue<Content>, scene: Any) {
         super.init(content: content, scene: scene)
         guard let scene = scene as? AuxiliaryWindowSceneContext<Content> else {
             fatalError("AuxiliaryWindowContext: invalid scene context")
@@ -413,9 +304,9 @@ private class AuxiliaryWindowContext<Content>: GenericWindowContext<Content>, @u
     }
 
     override func onViewLoaded() {
-        if view != nil {
+        //if view != nil {
             _scene?.onViewLoaded()
-        }
+        //}
     }
 
     override func layoutBounds(_ bounds: CGRect) -> CGRect {
@@ -423,9 +314,9 @@ private class AuxiliaryWindowContext<Content>: GenericWindowContext<Content>, @u
     }
     
     override func onViewLayoutUpdated() {
-        if view != nil {
+        //if view != nil {
             _scene?.onViewLayoutChanged()
-        }
+        //}
     }
 
     override func onWindowClosing(_: any PlatformWindow) {

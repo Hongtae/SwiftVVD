@@ -248,23 +248,7 @@ public struct _LayoutRoot<L>: _VariadicView.UnaryViewRoot where L: Layout {
     }
 
     public static func _makeView(root: _GraphValue<Self>, inputs: _ViewInputs, body: (_Graph, _ViewInputs) -> _ViewListOutputs) -> _ViewOutputs {
-        let body = body(_Graph(), inputs)
-        if let staticList = body.views as? StaticViewList {
-            let views = staticList.views.map { $0.makeView() }
-            let view = UnaryViewGenerator(graph: root, baseInputs: inputs.base) { graph, inputs in
-                return StaticLayoutRootContext(graph: graph,
-                                               subviews: views,
-                                               inputs: inputs)
-            }
-            return _ViewOutputs(view: view)
-        } else {
-            let view = UnaryViewGenerator(graph: root, baseInputs: inputs.base) { graph, inputs in
-                return DynamicLayoutRootContext(graph: graph,
-                                                body: body.views,
-                                                inputs: inputs)
-            }
-            return _ViewOutputs(view: view)
-        }
+        fatalError("Implement with AG")
     }
 
     public typealias Body = Never
@@ -275,33 +259,5 @@ struct DefaultLayoutProperty: PropertyItem {
 
     var description: String {
         "DefaultLayoutProperty"
-    }
-}
-
-class StaticLayoutRootContext<L>: StaticViewGroupContext<_LayoutRoot<L>> where L: Layout {
-    init(graph: _GraphValue<_LayoutRoot<L>>, subviews: [ViewContext], inputs: _GraphInputs) {
-        let layout = DefaultLayoutProperty.defaultValue
-        super.init(graph: graph, subviews: subviews, layout: layout, inputs: inputs)
-
-        self.layoutProperties = L.layoutProperties
-        self.setLayoutProperties(self.layoutProperties)
-    }
-
-    override func updateRoot(_ root: inout _LayoutRoot<L>) {
-        self.layout = AnyLayout(root.layout)
-    }
-}
-
-class DynamicLayoutRootContext<L>: DynamicViewGroupContext<_LayoutRoot<L>> where L: Layout {
-    init(graph: _GraphValue<_LayoutRoot<L>>, body: any ViewListGenerator, inputs: _GraphInputs) {
-        let layout = DefaultLayoutProperty.defaultValue
-        super.init(graph: graph, body: body, layout: layout, inputs: inputs)
-
-        self.layoutProperties = L.layoutProperties
-        self.setLayoutProperties(self.layoutProperties)
-    }
-
-    override func updateRoot(_ root: inout _LayoutRoot<L>) {
-        self.layout = AnyLayout(root.layout)
     }
 }

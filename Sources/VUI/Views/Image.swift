@@ -222,10 +222,7 @@ extension Image {
 
 extension Image: View {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let view = UnaryViewGenerator(graph: view, baseInputs: inputs.base) { graph, inputs in
-            ImageViewContext(graph: graph, inputs: inputs)
-        }
-        return _ViewOutputs(view: view)
+        fatalError()
     }
 
     public typealias Body = Never
@@ -239,61 +236,3 @@ extension Image {
 extension Image: _PrimitiveView {
 }
 
-private class ImageViewContext: PrimitiveViewContext<Image> {
-    var resolvedImage: GraphicsContext.ResolvedImage?
-
-    override func updateContent() {
-        let oldImage = self.view
-        self.resolveGraphInputs()
-        let defaultBundle = self.environment.resourceBundle
-        Image.$_mainNamedBundle.withValue(defaultBundle) {
-            super.updateContent()
-        }
-        if self.view != oldImage || self.resolvedImage == nil {
-            // reload image!
-            self.sharedContext.viewsNeedToReloadResources.append(.init(self))
-        }
-    }
-
-    override func loadResources(_ context: GraphicsContext) {
-        super.loadResources(context)
-        if let image = self.view {
-            self.resolvedImage = context.resolve(image)
-            self.sharedContext.needsLayout = true
-        }
-    }
-
-    override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
-        if let resolvedImage {
-            return resolvedImage.size
-        }
-        if self.view != nil {
-            return proposal.replacingUnspecifiedDimensions()
-        }
-        return .zero
-    }
-
-    override func draw(frame: CGRect, context: GraphicsContext) {
-        super.draw(frame: frame, context: context)
-
-        let bounds = self.bounds
-        if bounds.width > 0 && bounds.height > 0 {
-            if self.resolvedImage == nil {
-                if let image = self.view {
-                    self.resolvedImage = context.resolve(image)
-                    self.sharedContext.needsLayout = true
-                }
-            }
-            if let resolvedImage {
-                context.draw(resolvedImage, in: frame)
-            }
-        }
-    }
-
-    override func hitTest(_ location: CGPoint) -> ViewContext? {
-        if self.bounds.contains(location) {
-            return self
-        }
-        return super.hitTest(location)
-    }
-}

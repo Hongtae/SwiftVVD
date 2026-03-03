@@ -43,33 +43,21 @@ extension MenuStyleConfiguration.Content: _PrimitiveView {}
 
 extension MenuStyleConfiguration.Label {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let view = UnaryViewGenerator(graph: view, baseInputs: inputs.base) { graph, inputs in
-            MenuStyleConfigurationLabelViewContext(graph: graph, inputs: inputs)
-        }
-        return _ViewOutputs(view: view)
+        fatalError("Implement with AG")
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        let view = UnaryViewGenerator(graph: view, baseInputs: inputs.base) { graph, inputs in
-            MenuStyleConfigurationLabelViewContext(graph: graph, inputs: inputs)
-        }
-        return _ViewListOutputs(views: .staticList(view))
+        fatalError("Implement with AG")
     }
 }
 
 extension MenuStyleConfiguration.Content {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let view = UnaryViewGenerator(graph: view, baseInputs: inputs.base) { graph, inputs in
-            MenuStyleConfigurationContentViewContext(graph: graph, inputs: inputs)
-        }
-        return _ViewOutputs(view: view)
+        fatalError("Implement with AG")
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        let view = UnaryViewGenerator(graph: view, baseInputs: inputs.base) { graph, inputs in
-            MenuStyleConfigurationContentViewContext(graph: graph, inputs: inputs)
-        }
-        return _ViewListOutputs(views: .staticList(view))
+        fatalError("Implement with AG")
     }
 }
 
@@ -246,18 +234,6 @@ private struct _MenuItemMenuBody: View {
     }
 }
 
-struct MenuStyleProxy {
-    let type: any MenuStyle.Type
-    let graph: _GraphValue<Any>
-    init<S: MenuStyle>(_ graph: _GraphValue<S>) {
-        self.type = S.self
-        self.graph = graph.unsafeCast(to: Any.self)
-    }
-    func resolve(_ resolver: some _GraphValueResolver) -> (any MenuStyle)? {
-        resolver.value(atPath: graph) as? (any MenuStyle)
-    }
-}
-
 struct MenuStyleModifier<Style>: ViewModifier where Style: MenuStyle {
     let style: Style
     typealias Body = Never
@@ -265,15 +241,11 @@ struct MenuStyleModifier<Style>: ViewModifier where Style: MenuStyle {
 
 extension MenuStyleModifier {
     static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        var inputs = inputs
-        inputs.layouts.menuStyles.append(MenuStyleProxy(modifier[\.style]))
-        return body(_Graph(), inputs)
+        fatalError("Implement with AG")
     }
 
     static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        var inputs = inputs
-        inputs.layouts.menuStyles.append(MenuStyleProxy(modifier[\.style]))
-        return body(_Graph(), inputs)
+        fatalError("Implement with AG")
     }
 }
 
@@ -285,49 +257,3 @@ extension View {
 
 
 /// Protocol for MenuStyleConfiguration components that contain a ViewProxy
-private protocol MenuStyleConfigurationComponent: View {
-    var view: ViewProxy? { get }
-}
-
-extension MenuStyleConfiguration.Label: MenuStyleConfigurationComponent {}
-extension MenuStyleConfiguration.Content: MenuStyleConfigurationComponent {}
-
-/// Base class for MenuStyleConfiguration component view contexts that manage ViewProxy resolution
-private class MenuStyleConfigurationProxyViewContext<T>: DynamicViewContext<T> where T: MenuStyleConfigurationComponent {
-    override func updateContent() {
-        let oldProxy = self.view?.view
-        self.view = nil
-        if var view = value(atPath: self.graph) {
-            self.resolveGraphInputs()
-            self.updateView(&view)
-            self.requiresContentUpdates = false
-            self.view = view
-        }
-        if let view, let proxy = view.view {
-            if self.body == nil || proxy != oldProxy {
-                let outputs = proxy.makeView(_Graph(), inputs: _ViewInputs(base: self.inputs))
-                self.body = outputs.view?.makeView()
-            }
-            self.body?.updateContent()
-        } else {
-            self.invalidate()
-            fatalError("Unable to recover view for \(graph)")
-        }
-        self.sharedContext.needsLayout = true
-    }
-}
-
-private class MenuStyleConfigurationLabelViewContext: MenuStyleConfigurationProxyViewContext<MenuStyleConfiguration.Label> {
-}
-
-private class MenuStyleConfigurationContentViewContext: MenuStyleConfigurationProxyViewContext<MenuStyleConfiguration.Content> {
-    override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
-        var size = super.sizeThatFits(proposal)
-        let menuStyle = MenuStyleContext()
-        size.width = clamp(size.width,
-                           min: menuStyle.minimumViewSize.width,
-                           max: menuStyle.maximumViewSize.width)
-        size.height = max(size.height, menuStyle.minimumViewSize.height)        
-        return size
-    }
-}

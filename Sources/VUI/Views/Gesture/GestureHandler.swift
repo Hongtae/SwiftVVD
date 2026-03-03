@@ -32,7 +32,7 @@ class _GestureHandler {
     var state: State = .ready
 
     let graph: _GraphValue<Any>
-    weak var view: ViewContext?
+    var view: Any? //ViewContext?
 
     func setTypeFilter(_ f: _PrimitiveGestureTypes) -> _PrimitiveGestureTypes {
         f.subtracting(self.type)
@@ -44,17 +44,15 @@ class _GestureHandler {
         self.isValid && (self.state == .ready || self.state == .processing)
     }
 
-    init<T: Gesture>(graph: _GraphValue<T>, target: ViewContext?) {
+    init<T: Gesture>(graph: _GraphValue<T>, target: Any?) {
         self.graph = graph.unsafeCast(to: Any.self)
         self.view = target
+
+        fatalError("Implement with AG")
     }
 
     func locationInView(_ location: CGPoint) -> CGPoint {
-        if let view {
-            let transform = view.transformToRoot.inverted()
-            return location.applying(transform)
-        }
-        return location
+        fatalError("Implement with AG")
     }
 
     func began(deviceID: Int, buttonID: Int, location: CGPoint) {
@@ -83,7 +81,7 @@ class _GestureRecognizer<Value>: _GestureHandler {
     var changedCallbacks: [ChangedCallbacks<Value>] = []
     var pressableGestureCallbacks: [PressableGestureCallbacks<Value>] = []
 
-    init<T: Gesture>(graph: _GraphValue<T>, target: ViewContext?, callbacks: Callbacks) {
+    init<T: Gesture>(graph: _GraphValue<T>, target: Any?, callbacks: Callbacks) {
         self.endedCallbacks = callbacks.endedCallbacks
         self.changedCallbacks = callbacks.changedCallbacks
         self.pressableGestureCallbacks = callbacks.pressableGestureCallbacks

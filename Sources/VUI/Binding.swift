@@ -150,19 +150,3 @@ extension Binding: DynamicProperty {
     }
 }
 
-extension Binding: _DynamicPropertyStorageBinding {
-    mutating func bind(in buffer: inout _DynamicPropertyBuffer, fieldOffset: Int, view: ViewContext, tracker: @escaping Tracker) {
-        let key = AnyLocation<Value>.TrackerKey(id: ObjectIdentifier(view), offset: fieldOffset)
-        self.location.addTracker(key: key, tracker: tracker)
-        buffer.contexts[fieldOffset] = key
-    }
-    
-    func unbind(in buffer: inout _DynamicPropertyBuffer, fieldOffset: Int) {
-        if let context = buffer.contexts[fieldOffset] {
-            guard let key = context as? AnyLocation<Value>.TrackerKey else {
-                fatalError("Invalid context type")
-            }
-            self.location.removeTracker(key: key)
-        }
-    }
-}

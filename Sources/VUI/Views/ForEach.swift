@@ -16,13 +16,11 @@ extension ForEach: View where Content: View {
     public typealias Body = Never
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let body = ForEachViewListGenerator(graph: view, baseInputs: inputs.base)
-        let view = DynamicMultiViewGenerator(graph: view, baseInputs: inputs.base, body: body)
-        return _ViewOutputs(view: view)
+        fatalError("Implement with AG")
     }
 
     public static func _makeViewList(view: _GraphValue<ForEach<Data, ID, Content>>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        _ViewListOutputs(views: ForEachViewListGenerator(graph: view, baseInputs: inputs.base))
+        fatalError("Implement with AG")
     }
 }
 
@@ -97,22 +95,3 @@ private extension ForEach where Content: View {
     var _accessor: _Accessor { .init(forEach: self) }
 }
 
-private struct ForEachViewListGenerator<Data, ID, Content>: ViewListGenerator where Data: RandomAccessCollection, ID: Hashable, Content: View {
-    let graph: _GraphValue<ForEach<Data, ID, Content>>
-    var baseInputs: _GraphInputs
-    
-    func makeViewList(containerView: ViewContext) -> [any ViewGenerator] {
-        if let value = containerView.value(atPath: graph) {
-            let inputs = _ViewInputs.inputs(with: baseInputs)
-            let outputs = (0..<value.data.count).map { index in
-                Content._makeView(view: self.graph[\._accessor[index]], inputs: inputs)
-            }
-            return outputs.compactMap { $0.view }
-        }
-        fatalError("Unable to recover \(graph)")
-    }
-    
-    mutating func mergeInputs(_ inputs: _GraphInputs) {
-        baseInputs.mergedInputs.append(inputs)
-    }
-}

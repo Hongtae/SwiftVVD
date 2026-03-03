@@ -37,16 +37,16 @@ extension Optional: Gesture where Wrapped: Gesture {
 }
 
 protocol GestureCallbackGenerator {
-    func _makeCallback(containerView: ViewContext) -> Any
+    func _makeCallback(containerView: Any) -> Any
 }
 
 public struct _GestureInputs {
-    let view: ViewContext
+    let view: Any
     var endedCallbacks: [GestureCallbackGenerator] = []
     var changedCallbacks: [GestureCallbackGenerator] = []
     var pressableGestureCallbacks: [GestureCallbackGenerator] = []
 
-    func makeCallbacks<Value>(of: Value.Type, containerView: ViewContext) -> _GestureRecognizer<Value>.Callbacks {
+    func makeCallbacks<Value>(of: Value.Type, containerView: Any) -> _GestureRecognizer<Value>.Callbacks {
         var callbacks = _GestureRecognizer<Value>.Callbacks()
         callbacks.endedCallbacks = self.endedCallbacks.compactMap {
             $0._makeCallback(containerView: containerView) as? EndedCallbacks<Value>
@@ -63,7 +63,7 @@ public struct _GestureInputs {
 
 protocol _GestureRecognizerGenerator<Value> {
     associatedtype Value
-    func makeGesture(containerView: ViewContext) -> _GestureRecognizer<Value>?
+    func makeGesture() -> _GestureRecognizer<Value>?
 }
 
 public struct _GestureOutputs<Value> {

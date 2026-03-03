@@ -17,21 +17,7 @@ public struct _ButtonGesture: Gesture {
     }
 
     public static func _makeGesture(gesture: _GraphValue<Self>, inputs: _GestureInputs) -> _GestureOutputs<Value> {
-        struct _Generator: _GestureRecognizerGenerator {
-            let graph: _GraphValue<_ButtonGesture>
-            let inputs: _GestureInputs
-            func makeGesture(containerView: ViewContext) -> _GestureRecognizer<Value>? {
-                if let gesture = containerView.value(atPath: self.graph) {
-                    let callbacks = inputs.makeCallbacks(of: Value.self, containerView: containerView)
-                    return _ButtonGestureRecognizer(graph: graph,
-                                                    target: inputs.view,
-                                                    callbacks: callbacks,
-                                                    gesture: gesture)
-                }
-                fatalError("Unable to recover gesture: \(self.graph.valueType)")
-            }
-        }
-        return _GestureOutputs(generator: _Generator(graph: gesture, inputs: inputs))
+        fatalError("Implement with AG")
     }
 
     public typealias Body = Never
@@ -52,7 +38,7 @@ class _ButtonGestureRecognizer: _GestureRecognizer<_ButtonGesture.Value> {
     var location: CGPoint
     var hover: Bool
 
-    init(graph: _GraphValue<_ButtonGesture>, target: ViewContext?, callbacks: Callbacks, gesture: _ButtonGesture) {
+    init(graph: _GraphValue<_ButtonGesture>, target: Any?, callbacks: Callbacks, gesture: _ButtonGesture) {
         self.gesture = gesture
         self.location = .zero
         self.hover = false
@@ -75,7 +61,10 @@ class _ButtonGestureRecognizer: _GestureRecognizer<_ButtonGesture.Value> {
             let location = self.locationInView(location)
             self.deviceID = deviceID
             self.location = location
-            self.hover = view.bounds.contains(location)
+
+            fatalError("Implement with AG")
+
+            // self.hover = view.bounds.contains(location)
             self.state = .processing
             self.gesture.pressingAction?(self.hover)
         }
@@ -87,7 +76,7 @@ class _ButtonGestureRecognizer: _GestureRecognizer<_ButtonGesture.Value> {
             let location = self.locationInView(location)
             self.location = location
             self.state = .processing
-            self.hover = view.bounds.contains(location)
+            //self.hover = view.bounds.contains(location)
         }
         if h != self.hover {
             self.gesture.pressingAction?(self.hover)

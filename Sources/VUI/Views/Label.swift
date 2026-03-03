@@ -55,73 +55,14 @@ struct ResolvedLabelStyle: View {
     }
 
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let titleKey = ObjectIdentifier(LabelStyleConfiguration.Title.self)
-        let iconKey = ObjectIdentifier(LabelStyleConfiguration.Icon.self)
-
-        var inputs = inputs
-        let title = inputs.layouts.sourceWrites.removeValue(forKey: titleKey)
-        let icon = inputs.layouts.sourceWrites.removeValue(forKey: iconKey)
-        let configuration = LabelStyleConfiguration(title, icon)
-
-        let style = inputs.layouts.labelStyles.popLast()
-        let isInMenu = inputs.base.styleContext != nil
-        let effectiveStyle = isInMenu ? LabelStyleProxy(view[\._menuItemStyle]) : style
-        let styleType = effectiveStyle?.type ?? DefaultLabelStyle.self
-
-        func makeStyleBody<S: LabelStyle, T>(_: S.Type, graph: _GraphValue<T>, inputs: _ViewInputs) -> _ViewOutputs {
-            S.Body._makeView(view: graph.unsafeCast(to: S.Body.self), inputs: inputs)
-        }
-        let outputs = makeStyleBody(styleType, graph: view[\._body], inputs: inputs)
-        if let body = outputs.view {
-            let view = UnaryViewGenerator(graph: view, baseInputs: inputs.base) { graph, inputs in
-                ResolvedLabelStyleViewContext(labelStyle: effectiveStyle,
-                                              configuration: configuration,
-                                              graph: graph,
-                                              body: body.makeView(),
-                                              inputs: inputs)
-            }
-            return _ViewOutputs(view: view)
-        }
-        return outputs
+        fatalError("Implement with AG")
     }
 
     static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        let outputs = Self._makeView(view: view, inputs: inputs.inputs)
-        return _ViewListOutputs(views: .staticList(outputs.view))
+        fatalError("Implement with AG")
     }
 }
 
 extension ResolvedLabelStyle: _PrimitiveView {
 }
 
-private class ResolvedLabelStyleViewContext: GenericViewContext<ResolvedLabelStyle> {
-    let labelStyle: LabelStyleProxy?
-    let configuration: LabelStyleConfiguration
-
-    init(labelStyle: LabelStyleProxy?, configuration: LabelStyleConfiguration, graph: _GraphValue<ResolvedLabelStyle>, body: ViewContext, inputs: _GraphInputs) {
-        self.labelStyle = labelStyle
-        self.configuration = configuration
-        super.init(graph: graph, body: body, inputs: inputs)
-    }
-
-    override func updateView(_ view: inout ResolvedLabelStyle) {
-        if let labelStyle {
-            guard let style = labelStyle.resolve(self) else {
-                fatalError("Unable to resolve label style")
-            }
-            view._style = style
-        }
-        view._configuration = configuration
-    }
-
-    override func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
-        var size = super.sizeThatFits(proposal)
-        if styleContext is MenuStyleContext {
-            if let proposedWidth = proposal.width,
-               proposedWidth.isFinite, proposedWidth > 0 {
-                size.width = proposedWidth
-            }
-        }
-        return size
-    }
-}

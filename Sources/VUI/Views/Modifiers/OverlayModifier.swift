@@ -17,30 +17,15 @@ public struct _OverlayModifier<Overlay>: ViewModifier where Overlay: View {
     }
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        let outputs = body(_Graph(), inputs)
-        if let body = outputs.view {
-            var overlayInputs = inputs
-            overlayInputs.base.properties.setValue(ZStackLayout(), forKey: DefaultLayoutProperty.self)
-            if let overlay = makeView(view: modifier[\.overlay], inputs: overlayInputs).view {
-                let view = UnaryViewGenerator(graph: modifier, baseInputs: inputs.base) { graph, inputs in
-                    OverlayViewContext(overlay: overlay.makeView(),
-                                       graph: graph,
-                                       body: body.makeView(),
-                                       inputs: inputs)
-                }
-                return _ViewOutputs(view: view)
-            }
-        }
-        return outputs
+        fatalError("Implement with AG")
     }
-
-    public typealias Body = Never
 }
 
 extension _OverlayModifier: Equatable where Overlay: Equatable {
 }
 
 extension _OverlayModifier: _UnaryViewModifier {
+    public typealias Body = Never
 }
 
 public struct _OverlayStyleModifier<Style>: ViewModifier where Style: ShapeStyle {
@@ -53,29 +38,12 @@ public struct _OverlayStyleModifier<Style>: ViewModifier where Style: ShapeStyle
     }
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        let outputs = body(_Graph(), inputs)
-        if let body = outputs.view {
-            if let overlay = makeView(view: modifier[\._shapeView], inputs: inputs).view {
-                let view = UnaryViewGenerator(graph: modifier, baseInputs: inputs.base) { graph, inputs in
-                    OverlayViewContext(overlay: overlay.makeView(),
-                                       graph: graph,
-                                       body: body.makeView(),
-                                       inputs: inputs)
-                }
-                return _ViewOutputs(view: view)
-            }
-        }
-        return outputs
-    }
-
-    public typealias Body = Never
-
-    var _shapeView: some View {
-        _ShapeView(shape: Rectangle(), style: self.style)
+        fatalError("Implement with AG")
     }
 }
 
 extension _OverlayStyleModifier: _UnaryViewModifier {
+    public typealias Body = Never
 }
 
 public struct _OverlayShapeModifier<Style, Bounds>: ViewModifier where Style: ShapeStyle, Bounds: Shape {
@@ -90,29 +58,12 @@ public struct _OverlayShapeModifier<Style, Bounds>: ViewModifier where Style: Sh
     }
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        let outputs = body(_Graph(), inputs)
-        if let body = outputs.view {
-            if let overlay = makeView(view: modifier[\._shapeView], inputs: inputs).view {
-                let view = UnaryViewGenerator(graph: modifier, baseInputs: inputs.base) { graph, inputs in
-                    OverlayViewContext(overlay: overlay.makeView(),
-                                       graph: graph,
-                                       body: body.makeView(),
-                                       inputs: inputs)
-                }
-                return _ViewOutputs(view: view)
-            }
-        }
-        return outputs
-    }
-
-    public typealias Body = Never
-
-    var _shapeView: some View {
-        _ShapeView(shape: self.shape, style: self.style, fillStyle: self.fillStyle)
+        fatalError("Implement with AG")
     }
 }
 
 extension _OverlayShapeModifier: _UnaryViewModifier {
+    public typealias Body = Never
 }
 
 extension View {
@@ -152,135 +103,3 @@ extension _OverlayModifier: _OverlayModifierWithAlignment {
 extension _OverlayStyleModifier: _OverlayModifierWithIgnoresSafeAreaEdges {
 }
 
-private class OverlayViewContext<Modifier>: ViewModifierContext<Modifier> where Modifier: ViewModifier {
-    let overlay: ViewContext
-
-    init(overlay: ViewContext, graph: _GraphValue<Modifier>, body: ViewContext, inputs: _GraphInputs) {
-        self.overlay = overlay
-        defer { self.overlay.superview = self }
-
-        super.init(graph: graph, body: body, inputs: inputs)
-    }
-
-    deinit {
-        self.overlay.superview = nil
-    }
-
-    override func updateContent() {
-        super.updateContent()
-        if self.view != nil {
-            overlay.updateContent()
-        }
-    }
-
-    override var isValid: Bool {
-        if super.isValid {
-            return overlay.isValid
-        }
-        return false
-    }
-
-    override func validate() -> Bool {
-        super.validate() && overlay.validate()
-    }
-
-    override func update(transform t: AffineTransform) {
-        super.update(transform: t)
-        overlay.update(transform: self.transformToRoot)
-    }
-
-    override func layoutSubviews() {
-        super.layoutSubviews()
-
-        guard let modifier else { fatalError("Invalid view modifier") }
-
-        let alignment: Alignment
-        if let alignmentModifier = modifier as? _OverlayModifierWithAlignment {
-            alignment = alignmentModifier.alignment
-        } else {
-            alignment = .center
-        }
-
-        let frame = self.bounds
-        var position = frame.origin
-        var anchor = UnitPoint()
-        switch alignment.horizontal {
-        case .leading:
-            position.x = frame.minX
-            anchor.x = 0
-        case .center:
-            position.x = frame.midX
-            anchor.x = 0.5
-        case .trailing:
-            position.x = frame.maxX
-            anchor.x = 1
-        default:
-            position.x = frame.midX
-            anchor.x = 0.5
-        }
-        switch alignment.vertical {
-        case .top:
-            position.y = frame.minY
-            anchor.y = 0
-        case .center:
-            position.y = frame.midY
-            anchor.y = 0.5
-        case .bottom:
-            position.y = frame.maxY
-            anchor.y = 1
-        default:
-            position.y = frame.midY
-            anchor.y = 0.5
-        }
-        let proposal = ProposedViewSize(width: frame.width, height: frame.height)
-        overlay.place(at: position,
-                      anchor: anchor,
-                      proposal: proposal)
-    }
-
-    override func drawOverlay(frame: CGRect, context: GraphicsContext) {
-        let width = overlay.frame.width
-        let height = overlay.frame.height
-        guard width > .ulpOfOne && height > .ulpOfOne else {
-            return
-        }
-
-        let drawingFrame = overlay.frame.offsetBy(dx: frame.minX,
-                                                  dy: frame.minY)
-        if frame.intersection(drawingFrame).isNull {
-            return
-        }
-        overlay.drawView(frame: drawingFrame, context: context)
-    }
-    
-    override func hitTest(_ location: CGPoint) -> ViewContext? {
-        let local = location.applying(overlay.transformToContainer.inverted())
-        if let result = overlay.hitTest(local) {
-            return result
-        }
-        return super.hitTest(location)
-    }
-
-    override func gestureHandlers(at location: CGPoint) -> GestureHandlerOutputs {
-        let local = location.applying(overlay.transformToContainer.inverted())
-        var outputs = overlay.gestureHandlers(at: local)
-        outputs = outputs.merge(super.gestureHandlers(at: location))
-        return outputs
-    }
-
-    override func handleMouseWheel(at location: CGPoint, delta: CGPoint) -> Bool {
-        let local = location.applying(overlay.transformToContainer.inverted())
-        if overlay.handleMouseWheel(at: local, delta: delta) {
-            return true
-        }
-        return super.handleMouseWheel(at: location, delta: delta)
-    }
-
-    override func handleMouseHover(at location: CGPoint, deviceID: Int, isTopMost: Bool) -> Bool {
-        let local = location.applying(overlay.transformToContainer.inverted())
-        if overlay.handleMouseHover(at: local, deviceID: deviceID, isTopMost: isTopMost) {
-            return true
-        }
-        return super.handleMouseHover(at: location, deviceID: deviceID, isTopMost: isTopMost)
-    }
-}

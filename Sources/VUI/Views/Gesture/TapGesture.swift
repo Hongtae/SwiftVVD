@@ -14,21 +14,7 @@ public struct TapGesture: Gesture {
     }
 
     public static func _makeGesture(gesture: _GraphValue<TapGesture>, inputs: _GestureInputs) -> _GestureOutputs<Value> {
-        struct _Generator: _GestureRecognizerGenerator {
-            let graph: _GraphValue<TapGesture>
-            let inputs: _GestureInputs
-            func makeGesture(containerView: ViewContext) -> _GestureRecognizer<Value>? {
-                if let gesture = containerView.value(atPath: self.graph) {
-                    let callbacks = inputs.makeCallbacks(of: Value.self, containerView: containerView)
-                    return TapGestureRecognizer(graph: graph,
-                                                target: inputs.view,
-                                                callbacks: callbacks,
-                                                gesture: gesture)
-                }
-                fatalError("Unable to recover gesture: \(self.graph.valueType)")
-            }
-        }
-        return _GestureOutputs(generator: _Generator(graph: gesture, inputs: inputs))
+        fatalError("Implement with AG")
     }
 
     public typealias Body = Never
@@ -52,7 +38,7 @@ class TapGestureRecognizer: _GestureRecognizer<TapGesture.Value> {
     let clock: ContinuousClock
     var timestamp: ContinuousClock.Instant
 
-    init(graph: _GraphValue<TapGesture>, target: ViewContext?, callbacks: Callbacks, gesture: TapGesture) {
+    init(graph: _GraphValue<TapGesture>, target: Any?, callbacks: Callbacks, gesture: TapGesture) {
         self.gesture = gesture
         self.buttonID = 0
         self.count = 0
@@ -162,7 +148,7 @@ class MultiTouchTapGestureRecognizer: _GestureRecognizer<TapGesture.Value> {
     }
     private var phase: _Phase = .touchDown
 
-    init(graph: _GraphValue<TapGesture>, target: ViewContext?, callbacks: Callbacks, gesture: TapGesture) {
+    init(graph: _GraphValue<TapGesture>, target: Any?, callbacks: Callbacks, gesture: TapGesture) {
         self.gesture = gesture
         self.buttonID = 0
         self.count = 0

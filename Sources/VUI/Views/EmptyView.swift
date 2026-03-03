@@ -9,11 +9,11 @@ public struct EmptyView: View {
     public init() {}
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        _ViewOutputs(view: nil)
+        fatalError("Implement with AG")
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        _ViewListOutputs(views: .empty)
+        fatalError("Implement with AG")
     }
 
     public typealias Body = Never

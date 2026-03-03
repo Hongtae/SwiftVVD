@@ -58,9 +58,7 @@ struct ModalWindowScene<Content>: _PrimitiveScene where Content: View {
     fileprivate var _content: Content { content() }
 
     static func _makeScene(scene: _GraphValue<Self>, inputs: _SceneInputs) -> _SceneOutputs {
-        _SceneOutputs(scene: UnarySceneGenerator(graph: scene, inputs: inputs) { graph, inputs in
-            ModalWindowSceneContext(graph: graph, inputs: inputs)
-        })
+        fatalError("Implement with AG")
     }
 }
 
@@ -101,7 +99,7 @@ struct TransitionAnimationConfiguration<Key: Hashable> {
 }
 
 // scene context for modal window scene
-class ModalWindowSceneContext<Content>: TypedSceneContext<ModalWindowScene<Content>>, ModalWindowClient, @unchecked Sendable where Content: View {
+class ModalWindowSceneContext<Content>: ModalWindowClient, @unchecked Sendable where Content: View {
     typealias Scene = ModalWindowScene<Content>
     typealias AnimationKey = TransitionAnimationKey
     typealias AnimationTrack = TransitionAnimationConfiguration<AnimationKey>.Track
@@ -180,37 +178,12 @@ class ModalWindowSceneContext<Content>: TypedSceneContext<ModalWindowScene<Conte
     var windowContextKey: AnyHashable {
         // _GraphValue hash is stable across rebuilds (ObjectIdentifier(root) + index),
         // so different instances created for the same view-tree position share the same key.
-        AnyHashable(self.graph.unsafeCast(to: Any.self))
+
+        fatalError("Implement with AG")
     }
 
-    override init(graph: _GraphValue<Scene>, inputs: _SceneInputs) {
-        super.init(graph: graph, inputs: inputs)
+    init(graph: _GraphValue<Scene>, inputs: _SceneInputs) {
         self.modalContext = nil
-    }
-
-    override func updateContent() {
-        super.updateContent()
-        if self.content != nil {
-            self.window?.updateContent()
-        }
-    }
-
-    override var windows: [WindowContext] {
-        [self.window].compactMap(\.self)
-    }
-
-    override var primaryWindows: [WindowContext] {
-        [self.window].compactMap(\.self)
-    }
-
-    override var isValid: Bool {
-        if super.isValid {
-            if let window {
-                return window.isValid
-            }
-            return true
-        }
-        return false
     }
 
     fileprivate func onViewLoaded() {
@@ -227,7 +200,9 @@ class ModalWindowSceneContext<Content>: TypedSceneContext<ModalWindowScene<Conte
         }
 
         let padding: CGFloat = 4
-        var windowSize = view.sizeThatFits(.unspecified)
+        fatalError("Implement with AG")
+        //var windowSize = view.sizeThatFits(.unspecified)
+        var windowSize: CGSize = .zero 
         windowSize.width = max(windowSize.width, 1) + padding * 2
         windowSize.height = max(windowSize.height, 1) + padding * 2
         self.modalContext?.windowSize = windowSize
@@ -260,7 +235,8 @@ class ModalWindowSceneContext<Content>: TypedSceneContext<ModalWindowScene<Conte
         } else {
             window.sharedContext.contentBounds.size = windowSize
             let center = CGPoint(x: windowSize.width * 0.5, y: windowSize.height * 0.5)
-            view.place(at: center, anchor: .center, proposal: ProposedViewSize(windowSize))
+            fatalError("Implement with AG")
+            //view.place(at: center, anchor: .center, proposal: ProposedViewSize(windowSize))
             
             // set modal window offset to center of parent
             if let parentContext = self.modalContext?.parentContext {
@@ -288,97 +264,7 @@ class ModalWindowSceneContext<Content>: TypedSceneContext<ModalWindowScene<Conte
 
     @MainActor
     func present(context parentContext: SharedContext, withAnimation: Bool, alertDismissAction: (() -> Void)?, onDismiss: ((ModalResponse) -> Void)? = nil) -> Bool {
-        self.updateContent()
-        defer {
-            self.window?.updateContent()
-        }
-
-        let parentWindow = parentContext.window
-        var usePlatformModal = self.environment.modalSessionUsingPlatformWindow
-        if usePlatformModal && parentWindow is ModalWindowHost {
-            if let window = parentWindow.window, window.canPresentModalWindow == false {
-                Log.error("ModalWindowContext: Modal windows are not supported on this window.")
-                usePlatformModal = false
-            }
-        }
-
-        if modalContext != nil {
-            Log.debug("ModalWindowContext: already presented")
-            self.modalContext?.activateFirstTime = true
-            return true
-        }
-
-        // Claim the slot before platform/overlay split — prevents duplicate presentation
-        // when a new ModalWindowSceneContext is created for the same view tree position.
-        let key = self.windowContextKey
-        let host = parentWindow as? ModalWindowHost
-        if let host {
-            guard host.claimModalSlot(key: key, client: self) else {
-                Log.debug("ModalWindowContext: duplicate modal slot — presentation skipped")
-                return false
-            }
-        }
-
-        let window = ModalWindowContext(content: self.graph[\._content], scene: self)
-
-        var modalContext = _ModalContext(window: window,
-                                        parentWindow: parentWindow,
-                                        parentContext: parentContext,
-                                        windowOffset: .zero,
-                                        windowSize: .zero)
-        modalContext.onDismiss = onDismiss
-
-        if usePlatformModal, let window = parentWindow.window {
-            if let modal = modalContext.window.makeWindow() {
-                modal.contentSize = CGSize(width: 10, height: 10)
-                modal.origin = .zero
-                modalContext.modalWindow = modal
-                modal.addEventObserver(self) { [weak self](event: WindowEvent) in
-                    guard let self else { return }
-                    switch event.type {
-                    case .created:
-                        self.onModalSessionInitiated()
-                    case .closed:
-                        self.onWindowClosed()
-                    default:
-                        break
-                    }
-                }
-                if window.presentModalWindow(modal) {
-                    self.modalContext = modalContext
-                    modalContext.window.sharedContext.alertDismissAction = alertDismissAction
-                    return true
-                }
-                modal.removeEventObserver(self)
-                Log.error("ModalWindowContext: failed to present modal window")
-            } else {
-                Log.error("ModalWindowContext: failed to create modal window")
-            }
-        } else {
-            if let host {
-                let contentScale = parentWindow.window?.contentScaleFactor ?? 1.0
-                window.sharedContext.contentScaleFactor = contentScale
-                if host.addModalWindow(self) {
-                    let filter = GraphicsContext.Filter.shadow(radius: 8.0, x: 0, y: 0)
-                    modalContext.filter = filter
-                    if withAnimation {
-                        modalContext.transition = TransitionAnimation(
-                            duration: self.transitionDuration,
-                            configuration: self.transitionPresentAnimation,
-                            elapsed: 0,
-                            completion: nil)
-                    }
-                    self.modalContext = modalContext
-                    window.sharedContext.alertDismissAction = alertDismissAction
-                    return true
-                }
-            } else {
-                Log.error("ModalWindowContext: parent window is not ModalWindowHost")
-            }
-        }
-        host?.releaseModalSlot(key: key)
-        self.modalContext = nil
-        return false
+        fatalError("Implement with AG")
     }
 
     func dismiss(withAnimation: Bool) {
@@ -570,7 +456,7 @@ private class ModalWindowContext<Content>: GenericWindowContext<Content>, @unche
 
     private weak var _scene: ModalWindowSceneContext<Content>?
 
-    override init(content: _GraphValue<Content>, scene: SceneContext) {
+    override init(content: _GraphValue<Content>, scene: Any) {
         super.init(content: content, scene: scene)
         guard let scene = scene as? ModalWindowSceneContext<Content> else {
             fatalError("ModalWindowContext: invalid scene context")
@@ -579,15 +465,15 @@ private class ModalWindowContext<Content>: GenericWindowContext<Content>, @unche
     }
 
     override func onViewLoaded() {
-        if view != nil {
+        //if view != nil {
             _scene?.onViewLoaded()
-        }
+        //}
     }
 
     override func onViewLayoutUpdated() {
-        if view != nil {
+        //if view != nil {
             _scene?.onViewLayoutChanged()
-        }
+        //}
     }
 
     override func onWindowClosing(_: any PlatformWindow) {
