@@ -74,6 +74,10 @@ struct Attribute<Value> {
 /// automatically register every node created in that scope to this subgraph.
 /// Call `invalidate(graph:)` to batch-remove all registered nodes at once.
 ///
+/// Subgraphs form a parent/child tree: a Subgraph created while another is active
+/// automatically becomes its child. `invalidate(graph:)` cascades depth-first,
+/// so invalidating a parent also destroys all descendant Subgraphs.
+///
 /// Typical use — ForEach item lifecycle:
 /// ```swift
 /// let subgraph = Subgraph()
@@ -84,18 +88,31 @@ struct Attribute<Value> {
 ///
 /// // item removed:
 /// itemSubgraphs[id]?.invalidate(graph: graph)
+/// itemSubgraphs[id] = nil
 /// ```
 final class Subgraph: @unchecked Sendable {
     private(set) var nodes: [AGAttribute] = []
+    private(set) var children: [Subgraph] = []
+    private(set) weak var parent: Subgraph? = nil
 
     @TaskLocal static var current: Subgraph? = nil
+
+    init() {
+        if let parent = Subgraph.current {
+            parent.children.append(self)
+            self.parent = parent
+        }
+    }
 
     func register(_ id: AGAttribute) {
         nodes.append(id)
     }
 
     func invalidate(graph: AttributeGraph) {
+        children.forEach { $0.invalidate(graph: graph) }
+        children.removeAll()
         nodes.forEach { graph.removeNode($0) }
+        nodes.removeAll()
     }
 }
 
