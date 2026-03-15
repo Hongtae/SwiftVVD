@@ -2,89 +2,68 @@
 //  File: GestureHandler.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
 
-struct _PrimitiveGestureTypes: OptionSet {
-    let rawValue: UInt
-    static let tap              = Self(rawValue: 1 << 0)
-    static let longPress        = Self(rawValue: 1 << 1)
-    static let drag             = Self(rawValue: 1 << 2)
-    static let magnification    = Self(rawValue: 1 << 3)
-    static let rotation         = Self(rawValue: 1 << 4)
-    static let rotation3D       = Self(rawValue: 1 << 5)
-    static let button           = Self(rawValue: 1 << 6)
+// GestureRecognizerState
 
-    static let all = Self(rawValue: .max)
-    static let none: Self = []
+/// State machine for gesture recognizers.
+enum GestureRecognizerState {
+    case ready        // waiting for first event
+    case processing   // event(s) received, recognition in progress
+    case cancelled    // interaction was cancelled
+    case failed       // recognition failed (wrong gesture type, timeout, etc.)
+    case done         // recognition succeeded, callbacks fired
 }
 
+// _GestureHandler (Phase 3 replacement target)
+
+/// Legacy base class kept for Menu/ContextMenu gesture handlers.
+/// Will be replaced when MenuDropdownModifier and ContextMenu are rewritten for AG.
 class _GestureHandler {
-    enum State: Int {
-        case ready
-        case processing
-        case cancelled
-        case failed
-        case done
-    }
+    enum State { case ready, processing, done, failed, cancelled }
+
     var state: State = .ready
+    var type: _PrimitiveGestureTypes { [] }
+    var isValid: Bool { true }
 
-    let graph: _GraphValue<Any>
-    var view: Any? //ViewContext?
+    init<G: Gesture>(graph: _GraphValue<G>, target: Any?) {}
 
-    func setTypeFilter(_ f: _PrimitiveGestureTypes) -> _PrimitiveGestureTypes {
-        f.subtracting(self.type)
-    }
-
-    var type: _PrimitiveGestureTypes { .none }
-    var isValid: Bool { false }
-    var isPossible: Bool {
-        self.isValid && (self.state == .ready || self.state == .processing)
-    }
-
-    init<T: Gesture>(graph: _GraphValue<T>, target: Any?) {
-        self.graph = graph.unsafeCast(to: Any.self)
-        self.view = target
-
-        fatalError("Implement with AG")
-    }
-
-    func locationInView(_ location: CGPoint) -> CGPoint {
-        fatalError("Implement with AG")
-    }
-
-    func began(deviceID: Int, buttonID: Int, location: CGPoint) {
-    }
-
-    func moved(deviceID: Int, buttonID: Int, location: CGPoint) {
-    }
-
-    func ended(deviceID: Int, buttonID: Int) {
-    }
-
-    func cancelled(deviceID: Int, buttonID: Int) {
-    }
-
-    func reset() {
-    }
+    func setTypeFilter(_ f: _PrimitiveGestureTypes) -> _PrimitiveGestureTypes { f }
+    func locationInView(_ location: CGPoint) -> CGPoint { location }
+    func began(deviceID: Int, buttonID: Int, location: CGPoint) {}
+    func moved(deviceID: Int, buttonID: Int, location: CGPoint) {}
+    func ended(deviceID: Int, buttonID: Int) {}
+    func cancelled(deviceID: Int, buttonID: Int) {}
+    func reset() { state = .ready }
 }
 
-class _GestureRecognizer<Value>: _GestureHandler {
-    struct Callbacks {
-        var endedCallbacks: [EndedCallbacks<Value>] = []
-        var changedCallbacks: [ChangedCallbacks<Value>] = []
-        var pressableGestureCallbacks: [PressableGestureCallbacks<Value>] = []
-    }
-    var endedCallbacks: [EndedCallbacks<Value>] = []
-    var changedCallbacks: [ChangedCallbacks<Value>] = []
-    var pressableGestureCallbacks: [PressableGestureCallbacks<Value>] = []
+// _GestureRecognizer
 
-    init<T: Gesture>(graph: _GraphValue<T>, target: Any?, callbacks: Callbacks) {
-        self.endedCallbacks = callbacks.endedCallbacks
-        self.changedCallbacks = callbacks.changedCallbacks
-        self.pressableGestureCallbacks = callbacks.pressableGestureCallbacks
-        super.init(graph: graph, target: target)
+/// Base class for all concrete gesture recognizers.
+/// Subclasses process raw events from `_GestureInputs.events` and update
+/// the `phaseAttribute` source-of-truth node in the AG graph.
+class _GestureRecognizer<Value> {
+    var state: GestureRecognizerState = .ready
+
+    /// The AG attribute that holds the current gesture phase.
+    /// Set by the concrete `_makeGesture` implementation; updated here as state changes.
+    var phaseAttribute: Attribute<GesturePhase<Value>>?
+
+    var isPossible: Bool { state == .ready || state == .processing }
+
+    /// Override to handle new events. Called from the AG rule that reads `inputs.events`.
+    func processEvents(_ events: [EventID: any EventType]) {
+    }
+
+    /// Signals that the recognizer should reset to `.ready`.
+    func reset() {
+        state = .ready
+    }
+
+    func updatePhase(_ phase: GesturePhase<Value>) {
+        phaseAttribute?.setValue(phase)
     }
 }

@@ -189,6 +189,24 @@ class AttributeGraph: @unchecked Sendable {
         var needsEvaluation: Bool = true
         var isEvaluating: Bool = false  // for cycle detection
 
+        // When true, this node is evaluated eagerly inside markNeedsEvaluation rather than
+        // waiting for a consumer to pull its value. Use for rules that produce side effects
+        // (callbacks, external state writes) whose return value no other node reads.
+        //
+        // Normal (pull-based) rules fire only when someone calls .value on them.
+        // Side-effect rules fire as soon as any of their inputs change via setValue(_:).
+        //
+        // Cascade example (gesture callbacks):
+        //   eventsAttr.setValue(events)
+        //     → markNeedsEvaluation(eventRule)   [isSideEffect]
+        //       → evaluateNode(eventRule)          immediately
+        //         → recognizer.processEvents()
+        //         → phaseAttr.setValue(.ended)
+        //           → markNeedsEvaluation(callbackRule) [isSideEffect]
+        //             → evaluateNode(callbackRule)       immediately
+        //               → endedCallback()                ← fires here, inside setValue call stack
+        var isSideEffect: Bool = false
+
         // KeyPath node info
         var parent: AGAttribute?
         var keyPath: AnyKeyPath?
@@ -277,6 +295,36 @@ class AttributeGraph: @unchecked Sendable {
         slots[Int(index)].node = Node(value: nil, rule: rule, needsEvaluation: true)
         let attr = Attribute<Value>(AGAttribute(rawValue: index))
         Subgraph.current?.register(attr.identifier)
+        return attr
+    }
+
+    /// Creates a side-effect rule that is evaluated eagerly whenever any of its inputs change.
+    ///
+    /// Use this instead of `makeRule` when:
+    ///   - The rule's return value is never read by another node (`let _ = makeRule { ... }`)
+    ///   - The rule exists purely for its side effects: firing callbacks, updating external
+    ///     objects, writing to non-AG state (e.g. gesture recognizers, @State mutations)
+    ///
+    /// The rule is evaluated once immediately upon creation to register its AG dependencies.
+    /// After that it is re-evaluated synchronously inside `markNeedsEvaluation` whenever an
+    /// input changes — i.e. within the same `setValue` call stack, not deferred to the next
+    /// layout pass.
+    ///
+    /// The node is registered in the current Subgraph and removed when the Subgraph is
+    /// invalidated (e.g. when the owning view is removed from the tree).
+    @discardableResult
+    func makeSideEffectRule<Value>(rule: @escaping () -> Value) -> Attribute<Value> {
+        assert(AttributeGraph.current === self)
+        let index = allocateSlot()
+        var node = Node(value: nil, rule: rule, needsEvaluation: true)
+        node.isSideEffect = true
+        slots[Int(index)].node = node
+        let attr = Attribute<Value>(AGAttribute(rawValue: index))
+        Subgraph.current?.register(attr.identifier)
+        // Evaluate immediately so the rule body runs once and AG records which input
+        // attributes it reads — establishing the dependency edges that will trigger
+        // future eager re-evaluations.
+        evaluateNode(AGAttribute(rawValue: index))
         return attr
     }
 
@@ -416,7 +464,11 @@ class AttributeGraph: @unchecked Sendable {
     func markNeedsEvaluation(_ startID: AGAttribute) {
         assert(AttributeGraph.current === self)
         // Iterative BFS to avoid stack overflow on deep dependency graphs.
+        // Side-effect nodes are collected separately and evaluated after the BFS completes,
+        // so that cascading setValue calls (from inside the side-effect rule) create their
+        // own BFS + evaluation chain without interfering with the current traversal.
         var queue: [UInt32] = [startID.rawValue]
+        var sideEffects: [UInt32] = []
         var i = 0
         while i < queue.count {
             let index = Int(queue[i]); i += 1
@@ -424,8 +476,26 @@ class AttributeGraph: @unchecked Sendable {
             guard !node.needsEvaluation else { continue }          // already marked — stop propagation
             node.needsEvaluation = true
             slots[index].node = node
+            if node.isSideEffect {
+                sideEffects.append(UInt32(index))
+            }
             queue.append(contentsOf: node.outputs)
         }
+        // Eagerly evaluate side-effect nodes in dependency order (parents before children).
+        for id in sideEffects {
+            let index = Int(id)
+            guard slots[index].node != nil else { continue }  // may have been freed
+            guard slots[index].node!.needsEvaluation else { continue }  // already evaluated by cascade
+            evaluateNode(AGAttribute(rawValue: id))
+        }
+    }
+
+    /// Executes `action` without recording any AG dependencies.
+    /// Use when calling user-provided callbacks from inside a rule body to prevent
+    /// the callback's side-reads (e.g. `@State` getter, `@Observable` access) from
+    /// accidentally becoming inputs of the enclosing rule.
+    static func withoutTracking<R>(_ action: () throws -> R) rethrows -> R {
+        try Self.$currentlyEvaluatingNode.withValue(nil) { try action() }
     }
 
     private func addDependency(from parent: AGAttribute, dependsOn child: AGAttribute) {

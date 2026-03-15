@@ -43,6 +43,7 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
     // AG context — owns the view-tree AttributeGraph (GraphHost).
     // Created unconditionally in init; valid for the lifetime of this controller.
     let graph: AttributeGraph
+    let gestureGraph: GestureGraph
     var date: Date // date of initialization, for animation timing reference
 
     // AG input nodes for the root of the view tree — updated on resize, environment change, etc.
@@ -118,6 +119,7 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
         // Create this window's own AttributeGraph (GraphHost).
         // All view-tree nodes belong to ownGraph; AppGraph is only used for scene-level wiring.
         let ownGraph = AttributeGraph()
+        let gestureGraph = GestureGraph()
         let time = Time(seconds: 0)
 
         var sizeAttrResult:  Attribute<ViewSize>?          = nil
@@ -129,6 +131,8 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
         var phaseAttrResult: Attribute<Phase>?             = nil
 
         AttributeGraph.$current.withValue(ownGraph) {
+            gestureGraph.setupAttributes(in: ownGraph)
+
             // Bridge: lift the extracted content value into ownGraph as an input node.
             let contentAttr = ownGraph.makeInput(value: contentValue)
             let contentGV   = _GraphValue<Content>(_attribute: contentAttr)
@@ -150,6 +154,7 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
             var prefKeys     = PreferenceKeys()
             prefKeys.insert(DisplayList.Key.self)
             prefKeys.insert(ResourceList.Key.self)
+            prefKeys.insert(ViewRespondersKey.self)
             
             let hostKeysAttr = ownGraph.makeInput(value: prefKeys)
             let prefsInputs  = PreferencesInputs(keys: prefKeys, hostKeys: hostKeysAttr)
@@ -169,7 +174,9 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
                 containerSize: OptionalAttribute()
             )
 
-            let outputs = Content._makeView(view: contentGV, inputs: viewInputs)
+            let outputs: _ViewOutputs = GestureGraph.$_current.withValue(gestureGraph) {
+                Content._makeView(view: contentGV, inputs: viewInputs)
+            }
 
             // 1. collect DisplayList and ResourceList nodes from preferences
             let resourceNodes = outputs.preferences.values(for: ResourceList.Key.self)
@@ -197,6 +204,23 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
                 }
             }
 
+            // 4. collect ViewRespondersKey and wire to gestureGraph
+            let responderNodes = outputs.preferences.values(for: ViewRespondersKey.self)
+            if !responderNodes.isEmpty {
+                let rootRespondersAttr: Attribute<[any ViewResponder]> = ownGraph.makeRule {
+                    var combined: [any ViewResponder] = ViewRespondersKey.defaultValue
+                    for nodeID in responderNodes {
+                        let list = Attribute<[any ViewResponder]>(nodeID).value
+                        ViewRespondersKey.reduce(value: &combined) { list }
+                    }
+                    return combined
+                }
+                let gg = gestureGraph
+                ownGraph.makeSideEffectRule {
+                    gg.updateResponders(rootRespondersAttr.value)
+                }
+            }
+
             sizeAttrResult  = sizeAttr
             envAttrResult   = envAttr
             timeAttrResult  = timeAttr
@@ -205,6 +229,7 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
         }
 
         self.graph              = ownGraph
+        self.gestureGraph       = gestureGraph
         self.viewSizeAttr       = sizeAttrResult
         self.viewEnvAttr        = envAttrResult
         self.timeAttr           = timeAttrResult
@@ -217,7 +242,6 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
     }
 
     deinit {
-        sharedContext.gestureHandlers.removeAll()
         sharedContext.resourceData.removeAll()
     }
 
@@ -409,9 +433,9 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
         case .hidden:
             // TODO: release focused views (Implement with AG)
             self.sharedContext.focusedViews.removeAll()
-            self.sharedContext.gestureHandlers.forEach { $0.reset() }
-            self.sharedContext.gestureHandlers.removeAll()
-
+            self.graph.inbox.enqueue {
+                self.gestureGraph.resetEvents()
+            }
         case .activated:
             // TODO: aux clients (refactor target)
             self.auxClients.forEach { $0.onHostWindowActivated() }
@@ -419,17 +443,18 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
         case .inactivated:
             // TODO: release focused views (Implement with AG)
             self.sharedContext.focusedViews.removeAll()
-            self.sharedContext.gestureHandlers.forEach { $0.reset() }
-            self.sharedContext.gestureHandlers.removeAll()
+            self.graph.inbox.enqueue {
+                self.gestureGraph.resetEvents()
+            }
             // TODO: aux clients (refactor target)
             self.auxClients.forEach { $0.onHostWindowInactivated() }
 
         case .minimized:
             // TODO: release focused views (Implement with AG)
             self.sharedContext.focusedViews.removeAll()
-            self.sharedContext.gestureHandlers.forEach { $0.reset() }
-            self.sharedContext.gestureHandlers.removeAll()
-
+            self.graph.inbox.enqueue {
+                self.gestureGraph.resetEvents()
+            }
         case .moved, .resized:
             // TODO: aux clients (refactor target)
             self.auxClients.forEach { $0.onHostWindowMoved() }
@@ -560,58 +585,13 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
                 return false
             }
 
-            return false
-            //guard let view = self.view else { return false }
-
-            var gestureHandlers = self.sharedContext.gestureHandlers
-            defer {
-                self.sharedContext.gestureHandlers = gestureHandlers
-            }
-
-            if gestureHandlers.isEmpty {
-                if event.type == .buttonDown {
-                    fatalError("Implement with AG")
-                    // let location = event.location.applying(view.transformToContainer.inverted())
-                    // let outputs = view.gestureHandlers(at: location)
-                    // gestureHandlers = ...
-                }
-            }
-
-            let activeHandlers = { (states: _GestureHandler.State...) -> [_GestureHandler] in
-                gestureHandlers.compactMap {
-                    if states.contains($0.state) { return $0 }
-                    return nil
-                }
-            }
-
-            gestureHandlers = activeHandlers(.ready, .processing)
-            if gestureHandlers.isEmpty { return false }
-
-            self.sharedContext.gestureHandlers = gestureHandlers
-
-            switch event.type {
-            case .buttonDown:
-                gestureHandlers.forEach {
-                    $0.began(deviceID: event.deviceID, buttonID: event.buttonID, location: event.location)
-                }
-            case .buttonUp:
-                gestureHandlers.forEach {
-                    $0.ended(deviceID: event.deviceID, buttonID: event.buttonID)
-                }
-            case .move:
-                gestureHandlers.forEach {
-                    $0.moved(deviceID: event.deviceID, buttonID: event.buttonID, location: event.location)
-                }
+            let phase = self.gestureGraph.sendMouseEvent(event, in: self.graph)
+            switch phase {
+            case .active, .ended:
+                return true
             default:
-                break
+                return false
             }
-
-            if event.type == .move {
-                gestureHandlers = activeHandlers(.ready, .processing)
-            } else {
-                gestureHandlers = activeHandlers(.processing)
-            }
-            return gestureHandlers.isEmpty == false
         }
 
         // TODO: aux window mouse routing (refactor target)
@@ -707,9 +687,7 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
     }
 
     func resetGestureHandlers() {
-        let handlers = self.sharedContext.gestureHandlers
-        handlers.forEach { $0.reset() }
-        self.sharedContext.gestureHandlers.removeAll()
+        gestureGraph.resetEvents()
     }
 
     // Aux/Modal management  TODO: refactor for new scene architecture

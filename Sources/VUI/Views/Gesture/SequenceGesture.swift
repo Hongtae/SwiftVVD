@@ -2,7 +2,7 @@
 //  File: SequenceGesture.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -12,6 +12,7 @@ public struct SequenceGesture<First, Second>: Gesture where First: Gesture, Seco
         case first(First.Value)
         case second(First.Value, Second.Value?)
     }
+
     public var first: First
     public var second: Second
 
@@ -20,218 +21,77 @@ public struct SequenceGesture<First, Second>: Gesture where First: Gesture, Seco
     }
 
     public static func _makeGesture(gesture: _GraphValue<Self>, inputs: _GestureInputs) -> _GestureOutputs<Self.Value> {
-        let first = First._makeGesture(gesture: gesture[\.first], inputs: inputs)
-        let second = Second._makeGesture(gesture: gesture[\.second], inputs: inputs)
+        guard let graph = AttributeGraph.current else {
+            fatalError("SequenceGesture._makeGesture requires AG context")
+        }
 
-        fatalError("Implement with AG")
+        // First gesture must complete before second starts.
+        // Both recognizers receive the same event stream; the combined phase rule
+        // gates second's output on whether first has already ended.
+        let firstOutputs = First._makeGesture(gesture: gesture[\.first], inputs: inputs)
+        let secondOutputs = Second._makeGesture(gesture: gesture[\.second], inputs: inputs)
+
+        let fp = firstOutputs.phase
+        let sp = secondOutputs.phase
+
+        // AG-safe storage for the first gesture's ended value.
+        // Using an Attribute (not a MutableBox) so that:
+        //  • the value survives first's recognizer resetting to .possible
+        //  • dependency tracking correctly re-drives combinedPhase when this is written
+        let firstEndedAttr: Attribute<First.Value?> = graph.makeInput(value: nil)
+
+        let resetSeedAttr = inputs.resetSeed
+        var lastResetSeed: UInt32 = 0
+
+        // Side-effect rule: record first's ended value the moment it lands.
+        // Fires synchronously inside the same setValue call stack as the event dispatch.
+        graph.makeSideEffectRule { () -> Void in
+            let currentSeed = resetSeedAttr.value
+            if currentSeed != lastResetSeed {
+                lastResetSeed = currentSeed
+                firstEndedAttr.setValue(nil)
+                return
+            }
+            // Write once: don't overwrite a valid firstEnded with a later re-evaluation.
+            if case .ended(let v) = fp.value, firstEndedAttr.value == nil {
+                firstEndedAttr.setValue(v)
+            }
+        }
+
+        let combinedPhase: Attribute<GesturePhase<Value>> = graph.makeRule {
+            // Read the persistent first-ended value first to establish the AG dependency.
+            if let fv = firstEndedAttr.value {
+                // First has completed; now follow second gesture's phase.
+                switch sp.value {
+                case .active(let sv): return .active(.second(fv, sv))
+                case .ended(let sv):  return .ended(.second(fv, sv))
+                case .failed:         return .ended(.second(fv, nil))
+                case .possible:       return .active(.second(fv, nil))
+                }
+            }
+
+            // First hasn't ended yet; follow first gesture's phase.
+            switch fp.value {
+            case .active(let v): return .active(.first(v))
+            case .ended(let v):  return .active(.second(v, nil)) // transitioning frames
+            case .failed:        return .failed
+            case .possible:      return .possible(nil)
+            }
+        }
+
+        var out = _GestureOutputs(phase: combinedPhase)
+        for kv in firstOutputs.preferences.preferences { out.preferences.preferences.append(kv) }
+        for kv in secondOutputs.preferences.preferences { out.preferences.preferences.append(kv) }
+        return out
     }
 
     public typealias Body = Never
 }
 
-extension SequenceGesture.Value: Equatable where First.Value: Equatable, Second.Value: Equatable {
-}
+extension SequenceGesture.Value: Equatable where First.Value: Equatable, Second.Value: Equatable {}
 
 extension Gesture {
     @inlinable public func sequenced<Other>(before other: Other) -> SequenceGesture<Self, Other> where Other: Gesture {
-        return SequenceGesture(self, other)
-    }
-}
-
-class SequenceGestureRecognizer<First: Gesture, Second: Gesture>: _GestureRecognizer<SequenceGesture<First, Second>.Value> {
-    let first: _GestureRecognizer<First.Value>
-    let second: _GestureRecognizer<Second.Value>
-    var firstValue: First.Value?
-    var secondValue: Second.Value?
-    var firstGestureRecognized = false
-    typealias Value = SequenceGesture<First, Second>.Value
-
-    init(graph: _GraphValue<SequenceGesture<First, Second>>,
-         target: Any?,
-         callbacks: Callbacks,
-         gesture: SequenceGesture<First, Second>,
-         first: _GestureRecognizer<First.Value>,
-         second: _GestureRecognizer<Second.Value>) {
-        self.first = first
-        self.second = second
-        super.init(graph: graph, target: target, callbacks: callbacks)
-
-        self.first.endedCallbacks.append(EndedCallbacks<First.Value> {
-            [weak self] in
-            if let self, self.firstGestureRecognized == false {
-                self.firstValue = $0
-                self.firstGestureRecognized = true
-
-                if let secondValue {
-                    let value: Value = .second($0, secondValue)
-                    self.changedCallbacks.forEach { $0.changed(value) }
-                } else {
-                    let value: Value = .first($0)
-                    self.changedCallbacks.forEach { $0.changed(value) }
-                }
-            }
-        })
-        self.first.changedCallbacks.append(ChangedCallbacks<First.Value> {
-            [weak self] in
-            if let self, self.firstGestureRecognized == false {
-                self.firstValue = $0
-
-                let value: Value = .first($0)
-                self.changedCallbacks.forEach { $0.changed(value) }
-            }
-        })
-        self.first.pressableGestureCallbacks.append(PressableGestureCallbacks<First.Value>(
-            pressing: { [weak self] in
-                if let self, self.firstGestureRecognized == false {
-                    self.firstValue = $0
-
-                    let value: Value = .first($0)
-                    self.pressableGestureCallbacks.forEach { $0.pressing?(value) }
-                }
-            }, 
-            pressed: { [weak self] in
-                if let self, self.firstGestureRecognized == false {
-                    self.pressableGestureCallbacks.forEach { $0.pressed?() }
-                }
-            })
-        )
-
-        self.second.endedCallbacks.append(EndedCallbacks<Second.Value> {
-            [weak self] in
-            if let self {
-                self.secondValue = $0
-                if self.firstGestureRecognized {
-                    if let firstValue {
-                        let value: Value = .second(firstValue, $0)
-                        self.endedCallbacks.forEach { $0.ended(value) }
-                        self.state = .done
-                    } else {
-                        self.reset()
-                        self.state = .failed
-                    }
-                } else {
-                    self.reset()
-                    self.state = .failed
-                }
-            }
-        })
-        self.second.changedCallbacks.append(ChangedCallbacks<Second.Value> {
-            [weak self] in
-            if let self {
-                self.secondValue = $0
-                if self.firstGestureRecognized {
-                    if let firstValue {
-                        let value: Value = .second(firstValue, $0)
-                        self.changedCallbacks.forEach { $0.changed(value) }
-                        self.state = .processing
-                    } else {
-                        self.reset()
-                        self.state = .failed
-                    }
-                }
-            }
-        })
-        self.second.pressableGestureCallbacks.append(PressableGestureCallbacks<Second.Value>(
-            pressing: { [weak self] in
-                if let self {
-                    self.secondValue = $0
-                    if self.firstGestureRecognized {
-                        if let firstValue {
-                            let value: Value = .second(firstValue, $0)
-                            self.pressableGestureCallbacks.forEach { $0.pressing?(value) }
-                            self.state = .processing
-                        } else {
-                            self.reset()
-                            self.state = .failed
-                        }
-                    }
-                }
-            },
-            pressed: { [weak self] in
-                if let self {
-                    self.pressableGestureCallbacks.forEach { $0.pressed?() }
-                }
-            })
-        )
-    }
-
-    override var type: _PrimitiveGestureTypes { .drag }
-    override var isValid: Bool {
-        self.first.isValid && self.second.isValid
-    }
-
-    override func setTypeFilter(_ f: _PrimitiveGestureTypes) -> _PrimitiveGestureTypes {
-        let f1 = self.first.setTypeFilter(f)
-        let f2 = self.second.setTypeFilter(f)
-        return f1.intersection(f2)
-    }
-
-    func updateState() {
-        if self.first.state == .ready && self.second.state == .ready {
-            self.state = .ready
-            return
-        }
-        if self.first.state == .done && self.second.state == .done {
-            self.state = .done
-            return
-        }
-        if self.first.state == .cancelled || self.second.state == .cancelled {
-            self.state = .cancelled
-            return
-        }
-        if self.first.state == .failed || self.second.state == .failed {
-            self.state = .failed
-            return
-        }
-        self.state = .processing
-    }
-
-    override func began(deviceID: Int, buttonID: Int, location: CGPoint) {
-        if self.first.isPossible {
-            self.first.began(deviceID: deviceID, buttonID: buttonID, location: location)
-        }
-        if self.second.isPossible {
-            self.second.began(deviceID: deviceID, buttonID: buttonID, location: location)
-        }
-        self.updateState()
-    }
-
-    override func moved(deviceID: Int, buttonID: Int, location: CGPoint) {
-        if self.first.isPossible {
-            self.first.moved(deviceID: deviceID, buttonID: buttonID, location: location)
-        }
-        if self.second.isPossible {
-            self.second.moved(deviceID: deviceID, buttonID: buttonID, location: location)
-        }
-        self.updateState()
-    }
-
-    override func ended(deviceID: Int, buttonID: Int) {
-        if self.first.isPossible {
-            self.first.ended(deviceID: deviceID, buttonID: buttonID)
-        }
-        if self.second.isPossible {
-            self.second.ended(deviceID: deviceID, buttonID: buttonID)
-        }
-        self.updateState()
-    }
-
-    override func cancelled(deviceID: Int, buttonID: Int) {
-        if self.first.isPossible {
-            self.first.cancelled(deviceID: deviceID, buttonID: buttonID)
-        }
-        if self.second.isPossible {
-            self.second.cancelled(deviceID: deviceID, buttonID: buttonID)
-        }
-        self.reset()
-        self.state = .cancelled
-    }
-
-    override func reset() {
-        self.first.reset()
-        self.second.reset()
-        self.firstValue = nil
-        self.secondValue = nil
-        self.firstGestureRecognized = false
+        SequenceGesture(self, other)
     }
 }

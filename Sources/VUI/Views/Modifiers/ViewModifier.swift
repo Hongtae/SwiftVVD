@@ -208,7 +208,24 @@ extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        Modifier._makeViewList(modifier: view[\.modifier], inputs: inputs) { _, inputs in
+        // GestureViewModifier requires a TypedUnaryViewGenerator for the full
+        // ModifiedContent type so that wireGenerator → gen.makeView calls
+        // ModifiedContent._makeView (which runs the gesture modifier's makeView
+        // and registers the GestureViewResponder), not just Content._makeView.
+        //
+        // The separate `extension ModifiedContent where Modifier: GestureViewModifier`
+        // approach does NOT work here because TupleView._makeViewList dispatches via
+        // the protocol witness table (generic <V: View> context), which resolves to
+        // the conformance-site implementation — ignoring more-specific extensions.
+        // A runtime `is` check is the correct solution.
+        if Modifier.self is any GestureViewModifier.Type {
+            return _ViewListOutputs(
+                views: .staticList(.unary(TypedUnaryViewGenerator(view, inputs: inputs))),
+                nextImplicitID: 1,
+                staticCount: 1
+            )
+        }
+        return Modifier._makeViewList(modifier: view[\.modifier], inputs: inputs) { _, inputs in
             Content._makeViewList(view: view[\.content], inputs: inputs)
         }
     }

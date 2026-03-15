@@ -2,10 +2,12 @@
 //  File: TapGesture.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
+
+// TapGesture
 
 public struct TapGesture: Gesture {
     public var count: Int
@@ -14,7 +16,39 @@ public struct TapGesture: Gesture {
     }
 
     public static func _makeGesture(gesture: _GraphValue<TapGesture>, inputs: _GestureInputs) -> _GestureOutputs<Value> {
-        fatalError("Implement with AG")
+        guard let graph = AttributeGraph.current else {
+            fatalError("TapGesture._makeGesture requires AG context")
+        }
+
+        let tapCount = gesture._attribute.value.count
+        let recognizer = TapGestureRecognizer(
+            requiredCount: tapCount,
+            position: inputs.position,
+            size: inputs.size)
+
+        // Create the phase source-of-truth attribute
+        let phase: Attribute<GesturePhase<Void>> = graph.makeInput(value: .possible(nil))
+        recognizer.phaseAttribute = phase
+
+        // Create an AG rule that reads the events attribute and feeds them to the recognizer.
+        // Whenever the events attribute changes, AG re-evaluates this rule automatically.
+        let eventsAttr = inputs.events
+        let resetSeedAttr = inputs.resetSeed
+        var lastResetSeed: UInt32 = 0
+
+        graph.makeSideEffectRule { () -> Void in
+            let events = eventsAttr.value          // establishes AG dependency on events
+            let currentSeed = resetSeedAttr.value  // establishes dependency on reset seed
+
+            if currentSeed != lastResetSeed {
+                lastResetSeed = currentSeed
+                recognizer.reset()
+            }
+
+            recognizer.processEvents(events)
+        }
+
+        return _GestureOutputs(phase: phase)
     }
 
     public typealias Body = Never
@@ -27,272 +61,127 @@ extension View {
     }
 }
 
-class TapGestureRecognizer: _GestureRecognizer<TapGesture.Value> {
-    var typeFilter: _PrimitiveGestureTypes = .all
-    let gesture: TapGesture
-    var buttonID: Int
-    var deviceID: Int?
-    var count: Int
-    let maximumInterval: ContinuousClock.Duration
-    let maximumDuration: ContinuousClock.Duration
-    let clock: ContinuousClock
-    var timestamp: ContinuousClock.Instant
+// TapGestureRecognizer
 
-    init(graph: _GraphValue<TapGesture>, target: Any?, callbacks: Callbacks, gesture: TapGesture) {
-        self.gesture = gesture
-        self.buttonID = 0
-        self.count = 0
-        self.maximumInterval = .seconds(0.5)
-        self.maximumDuration = .seconds(1.0)
-        self.clock = .continuous
-        self.timestamp = .now
-        super.init(graph: graph, target: target, callbacks: callbacks)
+final class TapGestureRecognizer: _GestureRecognizer<Void> {
+    let requiredCount: Int
+
+    // Per-interaction tracking
+    private var activeDeviceID: Int? = nil
+    private var completedTaps: Int = 0
+    private var lastTapTime: ContinuousClock.Instant = .now
+    private let clock = ContinuousClock()
+
+    private let maximumInterval: ContinuousClock.Duration = .seconds(0.5)
+    private let maximumPressDuration: ContinuousClock.Duration = .seconds(1.0)
+    private var pressStart: ContinuousClock.Instant = .now
+
+    // Track which event IDs we have already processed to avoid re-processing
+    private var processedBeganIDs: Set<Int> = []
+    private var processedEndedIDs: Set<Int> = []
+
+    // View frame for hit testing (eventsAttr is broadcast to all recognizers)
+    let position: Attribute<CGPoint>
+    let size: Attribute<ViewSize>
+
+    init(requiredCount: Int = 1, position: Attribute<CGPoint>, size: Attribute<ViewSize>) {
+        self.requiredCount = requiredCount
+        self.position = position
+        self.size = size
     }
 
-    override var type: _PrimitiveGestureTypes { .tap }
-    override var isValid: Bool {
-        typeFilter.contains(self.type) && self.endedCallbacks.isEmpty == false
+    private func viewFrame() -> CGRect {
+        CGRect(origin: position.value, size: size.value.value)
     }
 
-    override func setTypeFilter(_ f: _PrimitiveGestureTypes) -> _PrimitiveGestureTypes {
-        self.typeFilter = f
-        return f.subtracting(.tap)
-    }
+    override func processEvents(_ events: [EventID: any EventType]) {
+        for (id, event) in events {
+            guard let tap = event as? TappableEvent else { continue }
 
-    override func began(deviceID: Int, buttonID: Int, location: CGPoint) {
-        if self.buttonID == buttonID {
-            if self.deviceID == nil {
-                self.deviceID = deviceID
-                self.timestamp = self.clock.now
-                self.count = 0
-                self.state = .processing
-            } else if self.deviceID == deviceID {
-                let t = self.clock.now
-                let d = self.timestamp.duration(to: t)
-                self.timestamp = t
-                if d > self.maximumInterval {
-                    self.deviceID = nil
-                    self.state = .failed
-                } else {
-                    self.deviceID = deviceID
-                    self.state = .processing
+            switch tap.phase {
+            case .began:
+                guard !processedBeganIDs.contains(id.serial) else { continue }
+                processedBeganIDs.insert(id.serial)
+
+                if state == .ready {
+                    // Only start if tap is within this view's frame.
+                    // eventsAttr is shared among all gesture recognizers so each
+                    // recognizer must do its own hit test to avoid firing globally.
+                    guard viewFrame().contains(tap.location) else { continue }
+
+                    // Check tap interval
+                    let now = clock.now
+                    let interval = lastTapTime.duration(to: now)
+                    if completedTaps > 0 && interval > maximumInterval {
+                        completedTaps = 0
+                    }
+                    activeDeviceID = id.serial
+                    pressStart = now
+                    state = .processing
+                    updatePhase(.active(()))
                 }
-            }
-        }
-    }
 
-    override func moved(deviceID: Int, buttonID: Int, location: CGPoint) {
-        if self.deviceID == deviceID, self.buttonID == buttonID {
-            let d = self.timestamp.duration(to: self.clock.now)
-            if d > self.maximumDuration {
-                self.deviceID = nil
-                self.state = .failed
-            }
-        }
-    }
-
-    override func ended(deviceID: Int, buttonID: Int) {
-        if self.deviceID == deviceID, self.buttonID == buttonID {
-            let t = self.clock.now
-            let d = self.timestamp.duration(to: t)
-            self.timestamp = t
-            if d > self.maximumDuration {
-                self.deviceID = nil
-                self.state = .failed
-            } else {
-                count = count + 1
-
-                if count == self.gesture.count {
-                    self.deviceID = nil
-                    self.state = .done
-                    self.endedCallbacks.forEach {
-                        $0.ended(())
+            case .moved:
+                if state == .processing, activeDeviceID == id.serial {
+                    let pressDuration = pressStart.duration(to: clock.now)
+                    if pressDuration > maximumPressDuration {
+                        state = .failed
+                        processedBeganIDs.remove(id.serial)
+                        processedEndedIDs.remove(id.serial)
+                        activeDeviceID = nil
+                        updatePhase(.failed)
                     }
                 }
-            }
-        }
-    }
 
-    override func cancelled(deviceID: Int, buttonID: Int) {
-        if self.deviceID == deviceID, self.buttonID == buttonID {
-            self.deviceID = nil
-            self.state = .cancelled
-        }
-    }
+            case .ended:
+                guard !processedEndedIDs.contains(id.serial) else { continue }
+                processedEndedIDs.insert(id.serial)
 
-    override func reset() {
-        self.deviceID = nil
-        self.state = .ready
-    }
-}
-
-class MultiTouchTapGestureRecognizer: _GestureRecognizer<TapGesture.Value> {
-    var typeFilter: _PrimitiveGestureTypes = .all
-    let gesture: TapGesture
-    var buttonID: Int
-    var numberOfTouchesRequired: Int = 1
-
-    private var activeTouches: [Int] = []
-    private var count: Int
-
-    let maximumEventInterval: ContinuousClock.Duration
-    let maximumTapInterval: ContinuousClock.Duration
-    let maximumTapDuration: ContinuousClock.Duration
-    
-    private let clock: ContinuousClock
-    private var timestamp: ContinuousClock.Instant
-    
-    private enum _Phase {
-        case touchDown
-        case touchUp
-    }
-    private var phase: _Phase = .touchDown
-
-    init(graph: _GraphValue<TapGesture>, target: Any?, callbacks: Callbacks, gesture: TapGesture) {
-        self.gesture = gesture
-        self.buttonID = 0
-        self.count = 0
-        self.maximumEventInterval = .seconds(0.2)
-        self.maximumTapInterval = .seconds(0.5)
-        self.maximumTapDuration = .seconds(1.0)
-        self.clock = .continuous
-        self.timestamp = .now
-        super.init(graph: graph, target: target, callbacks: callbacks)
-    }
-
-    override var type: _PrimitiveGestureTypes { .tap }
-    override var isValid: Bool {
-        typeFilter.contains(self.type) && self.endedCallbacks.isEmpty == false
-    }
-
-    override func setTypeFilter(_ f: _PrimitiveGestureTypes) -> _PrimitiveGestureTypes {
-        self.typeFilter = f
-        return f.subtracting(.tap)
-    }
-
-    override func began(deviceID: Int, buttonID: Int, location: CGPoint) {
-        if (self.state == .ready || self.state == .processing) &&
-            self.buttonID == buttonID {
-
-            if self.state == .ready {
-                self.activeTouches = []
-                self.phase = .touchDown
-                self.count = 0
-                self.state = .processing
-                self.timestamp = .now
-                assert(self.activeTouches.isEmpty)
-            }
-            assert(self.state == .processing)
-            
-            if self.activeTouches.contains(deviceID) {
-                Log.error("Duplicated touch ID encountered: \(deviceID)")
-                self.state = .failed
-                return
-            }
-            if self.activeTouches.count >= self.numberOfTouchesRequired {
-                // No more touch events can be accepted.
-                self.state = .failed
-                return
-            }
-            if self.phase != .touchDown {
-                self.state = .failed
-                return
-            }
-
-            let ts = self.clock.now
-            let duration = self.timestamp.duration(to: ts)
-            if self.activeTouches.isEmpty {
-                if duration > self.maximumTapInterval {
-                    // The tab interval was too long.
-                    self.state = .failed
-                    return
-                }
-                // Retain the timestamp of first touch event only.
-                self.timestamp = ts
-            } else {
-                if duration > self.maximumEventInterval {
-                    // The multi-touch event was too late.
-                    self.state = .failed
-                    return
-                }
-            }
-            self.activeTouches.append(deviceID)
-            if self.activeTouches.count == self.numberOfTouchesRequired {
-                // All touch-down events received.
-                // Save timestamp for processing the next touch-up events.
-                self.phase = .touchUp
-                self.timestamp = ts
-            }
-        }
-    }
-
-    override func moved(deviceID: Int, buttonID: Int, location: CGPoint) {
-        if self.state == .processing && self.buttonID == buttonID {
-            if self.activeTouches.contains(deviceID) {
-                let d = self.timestamp.duration(to: self.clock.now)
-                if d > self.maximumTapDuration {
-                    self.state = .failed
-                }
-            }
-        }
-    }
-
-    override func ended(deviceID: Int, buttonID: Int) {
-        if self.state == .processing && self.buttonID == buttonID {
-            if let index = self.activeTouches.firstIndex(of: deviceID) {
-                if self.phase != .touchUp {
-                    self.state = .failed
-                    return
-                }
-
-                let ts = self.clock.now
-                let d = self.timestamp.duration(to: ts)
-
-                if self.activeTouches.count == self.numberOfTouchesRequired {
-                    if d > self.maximumTapDuration {
-                        self.state = .failed
-                        return
-                    }
-                    self.timestamp = ts
-                } else {
-                    if d > self.maximumEventInterval {
-                        self.state = .failed
-                        return
-                    }
-                }
-                self.activeTouches.remove(at: index)
-
-                if self.activeTouches.isEmpty {
-                    // All touch-up events received.
-                    count = count + 1
-
-                    if count == self.gesture.count {
-                        self.state = .done
-                        self.endedCallbacks.forEach {
-                            $0.ended(())
-                        }
+                if state == .processing, activeDeviceID == id.serial {
+                    let now = clock.now
+                    let pressDuration = pressStart.duration(to: now)
+                    if pressDuration > maximumPressDuration {
+                        state = .failed
+                        activeDeviceID = nil
+                        updatePhase(.failed)
                     } else {
-                        // Save timestamp for processing the next touch-down events.
-                        self.phase = .touchDown
-                        self.timestamp = ts
+                        completedTaps += 1
+                        lastTapTime = now
+                        activeDeviceID = nil
+
+                        if completedTaps >= requiredCount {
+                            state = .done
+                            completedTaps = 0
+                            updatePhase(.ended(()))
+                            // _EndedGesture callback has already fired synchronously above.
+                            // Reset now so the recognizer accepts the next tap sequence.
+                            reset()
+                        } else {
+                            state = .ready
+                            updatePhase(.possible(nil))
+                        }
                     }
+                }
+
+            case .cancelled:
+                if activeDeviceID == id.serial {
+                    activeDeviceID = nil
+                    state = .failed
+                    processedBeganIDs.remove(id.serial)
+                    processedEndedIDs.remove(id.serial)
+                    updatePhase(.failed)
+                    reset()
                 }
             }
         }
     }
 
-    override func cancelled(deviceID: Int, buttonID: Int) {
-        if self.buttonID == buttonID {
-            if self.activeTouches.contains(deviceID) {
-                self.state = .cancelled
-            }
-        }
-    }
-
     override func reset() {
-        self.activeTouches = []
-        self.phase = .touchDown
-        self.count = 0
-        self.state = .ready
+        super.reset()
+        activeDeviceID = nil
+        completedTaps = 0
+        processedBeganIDs.removeAll()
+        processedEndedIDs.removeAll()
+        updatePhase(.possible(nil))
     }
 }

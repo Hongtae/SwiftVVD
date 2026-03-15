@@ -2,7 +2,7 @@
 //  File: ButtonGesture.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -17,7 +17,34 @@ public struct _ButtonGesture: Gesture {
     }
 
     public static func _makeGesture(gesture: _GraphValue<Self>, inputs: _GestureInputs) -> _GestureOutputs<Value> {
-        fatalError("Implement with AG")
+        guard let graph = AttributeGraph.current else {
+            fatalError("_ButtonGesture._makeGesture requires AG context")
+        }
+
+        let action = gesture._attribute.value.action
+        let pressingAction = gesture._attribute.value.pressingAction
+        let recognizer = ButtonGestureRecognizer(
+            action: action, pressingAction: pressingAction,
+            position: inputs.position, size: inputs.size)
+
+        let phase: Attribute<GesturePhase<Void>> = graph.makeInput(value: .possible(nil))
+        recognizer.phaseAttribute = phase
+
+        let eventsAttr = inputs.events
+        let resetSeedAttr = inputs.resetSeed
+        var lastResetSeed: UInt32 = 0
+
+        graph.makeSideEffectRule { () -> Void in
+            let events = eventsAttr.value
+            let currentSeed = resetSeedAttr.value
+            if currentSeed != lastResetSeed {
+                lastResetSeed = currentSeed
+                recognizer.reset()
+            }
+            recognizer.processEvents(events)
+        }
+
+        return _GestureOutputs(phase: phase)
     }
 
     public typealias Body = Never
@@ -30,84 +57,96 @@ extension View {
     }
 }
 
-class _ButtonGestureRecognizer: _GestureRecognizer<_ButtonGesture.Value> {
-    let gesture: _ButtonGesture
-    var typeFilter: _PrimitiveGestureTypes = .all
-    let buttonID: Int
-    var deviceID: Int?
-    var location: CGPoint
-    var hover: Bool
+// ButtonGestureRecognizer
 
-    init(graph: _GraphValue<_ButtonGesture>, target: Any?, callbacks: Callbacks, gesture: _ButtonGesture) {
-        self.gesture = gesture
-        self.location = .zero
-        self.hover = false
-        self.buttonID = 0
-        super.init(graph: graph, target: target, callbacks: callbacks)
+final class ButtonGestureRecognizer: _GestureRecognizer<Void> {
+    let action: () -> Void
+    let pressingAction: ((Bool) -> Void)?
+    let position: Attribute<CGPoint>
+    let size: Attribute<ViewSize>
+
+    private var activeSerial: Int? = nil
+    private var isHovering: Bool = false
+    private var processedBeganSerials: Set<Int> = []
+
+    init(action: @escaping () -> Void, pressingAction: ((Bool) -> Void)?,
+         position: Attribute<CGPoint>, size: Attribute<ViewSize>) {
+        self.action = action
+        self.pressingAction = pressingAction
+        self.position = position
+        self.size = size
     }
 
-    override var type: _PrimitiveGestureTypes { .button }
-    override var isValid: Bool {
-        typeFilter.contains(self.type) && view != nil
+    private func viewFrame() -> CGRect {
+        let pos = position.value
+        let sz = size.value.value
+        return CGRect(origin: pos, size: sz)
     }
 
-    override func setTypeFilter(_ f: _PrimitiveGestureTypes) -> _PrimitiveGestureTypes {
-        self.typeFilter = f
-        return f.subtracting([.button, .tap, .longPress])
-    }
+    override func processEvents(_ events: [EventID: any EventType]) {
+        for (id, event) in events {
+            guard let tap = event as? TappableEvent else { continue }
 
-    override func began(deviceID: Int, buttonID: Int, location: CGPoint) {
-        if self.deviceID == nil, self.buttonID == buttonID, let view {
-            let location = self.locationInView(location)
-            self.deviceID = deviceID
-            self.location = location
+            switch tap.phase {
+            case .began:
+                guard !processedBeganSerials.contains(id.serial) else { continue }
+                processedBeganSerials.insert(id.serial)
+                if activeSerial == nil {
+                    // Only accept the event if the initial tap is within this view's frame.
+                    guard viewFrame().contains(tap.location) else { continue }
+                    activeSerial = id.serial
+                    isHovering = true
+                    state = .processing
+                    AttributeGraph.withoutTracking { pressingAction?(true) }
+                    updatePhase(.active(()))
+                }
 
-            fatalError("Implement with AG")
+            case .moved:
+                if activeSerial == id.serial {
+                    let newHover = viewFrame().contains(tap.location)
+                    if newHover != isHovering {
+                        isHovering = newHover
+                        AttributeGraph.withoutTracking { pressingAction?(isHovering) }
+                    }
+                }
 
-            // self.hover = view.bounds.contains(location)
-            self.state = .processing
-            self.gesture.pressingAction?(self.hover)
-        }
-    }
+            case .ended:
+                if activeSerial == id.serial {
+                    let wasHovering = isHovering
+                    activeSerial = nil
+                    isHovering = false
+                    state = .done
+                    AttributeGraph.withoutTracking { pressingAction?(false) }
+                    if wasHovering {
+                        AttributeGraph.withoutTracking { action() }
+                        updatePhase(.ended(()))
+                    } else {
+                        updatePhase(.possible(nil))
+                    }
+                    reset()
+                }
 
-    override func moved(deviceID: Int, buttonID: Int, location: CGPoint) {
-        let h = self.hover
-        if self.deviceID == deviceID, self.buttonID == buttonID, let view {
-            let location = self.locationInView(location)
-            self.location = location
-            self.state = .processing
-            //self.hover = view.bounds.contains(location)
-        }
-        if h != self.hover {
-            self.gesture.pressingAction?(self.hover)
-        }
-    }
-
-    override func ended(deviceID: Int, buttonID: Int) {
-        var invokeAction = false
-        if self.deviceID == deviceID, self.buttonID == buttonID, view != nil {
-            invokeAction = self.hover
-            self.deviceID = nil
-            self.hover = false
-            self.state = .done
-        }
-        if invokeAction {
-            self.gesture.pressingAction?(false)
-            self.gesture.action()
-        }
-    }
-
-    override func cancelled(deviceID: Int, buttonID: Int) {
-        if self.deviceID == deviceID, self.buttonID == buttonID {
-            self.deviceID = nil
-            self.hover = false
-            self.state = .cancelled
+            case .cancelled:
+                if activeSerial == id.serial {
+                    activeSerial = nil
+                    if isHovering {
+                        isHovering = false
+                        AttributeGraph.withoutTracking { pressingAction?(false) }
+                    }
+                    state = .failed
+                    updatePhase(.failed)
+                    reset()
+                }
+            }
         }
     }
 
     override func reset() {
-        self.deviceID = nil
-        self.hover = false
-        self.state = .ready
+        if isHovering { pressingAction?(false) }
+        activeSerial = nil
+        isHovering = false
+        processedBeganSerials.removeAll()
+        super.reset()
+        updatePhase(.possible(nil))
     }
 }
