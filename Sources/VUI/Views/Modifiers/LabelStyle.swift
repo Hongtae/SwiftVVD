@@ -14,25 +14,12 @@ public protocol LabelStyle {
 public struct LabelStyleConfiguration {
     public struct Title {
         public typealias Body = Never
-        let view: ViewProxy?
     }
     public struct Icon {
         public typealias Body = Never
-        let view: ViewProxy?
     }
-    public var title: LabelStyleConfiguration.Title {
-        .init(view: _title)
-    }
-    public var icon: LabelStyleConfiguration.Icon {
-        .init(view: _icon)
-    }
-
-    let _title: ViewProxy?
-    let _icon: ViewProxy?
-    init(_ title: ViewProxy?, _ icon: ViewProxy?) {
-        self._title = title
-        self._icon = icon
-    }
+    public var title: LabelStyleConfiguration.Title { .init() }
+    public var icon: LabelStyleConfiguration.Icon { .init() }
 }
 
 extension LabelStyleConfiguration.Title: View {}
@@ -40,16 +27,9 @@ extension LabelStyleConfiguration.Icon: View {}
 extension LabelStyleConfiguration.Title: _PrimitiveView {}
 extension LabelStyleConfiguration.Icon: _PrimitiveView {}
 
-struct _LabelStyleKey: PropertyItem {
-    static var defaultValue: (any LabelStyle)? { nil }
-    var description: String { "_LabelStyleKey" }
-}
 
 extension LabelStyleConfiguration.Title {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        if let proxy = view._attribute.value.view {
-            return proxy.makeView(_Graph(), inputs: inputs)
-        }
         if let proxy = inputs.base.customInputs.value(forKey: _StaticSourceInputKey<Self>.self) {
             return proxy.makeView(_Graph(), inputs: inputs)
         }
@@ -66,9 +46,6 @@ extension LabelStyleConfiguration.Title {
 
 extension LabelStyleConfiguration.Icon {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        if let proxy = view._attribute.value.view {
-            return proxy.makeView(_Graph(), inputs: inputs)
-        }
         if let proxy = inputs.base.customInputs.value(forKey: _StaticSourceInputKey<Self>.self) {
             return proxy.makeView(_Graph(), inputs: inputs)
         }
@@ -155,16 +132,32 @@ struct LabelStyleWritingModifier<Style>: ViewModifier where Style: LabelStyle {
 
 extension LabelStyleWritingModifier {
     static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        }
+        let styleAttr: Attribute<LabelStyleModifier<Style>> = graph.makeInput(
+            value: LabelStyleModifier(style: modifier._attribute.value.style))
+        let anyMod = AnyStyleModifier(
+            value: styleAttr.identifier,
+            _type: StyleModifierType<LabelStyleModifier<Style>>.self)
         var inputs = inputs
-        let styleExistential: (any LabelStyle)? = modifier._attribute.value.style
-        inputs.base.customInputs.setValue(styleExistential, forKey: _LabelStyleKey.self)
+        let stack = inputs.base.customInputs.value(forKey: StyleInput<LabelStyleConfiguration>.self)
+        inputs.base.customInputs.setValue(stack.pushing(anyMod), forKey: StyleInput<LabelStyleConfiguration>.self)
         return body(_Graph(), inputs)
     }
 
     static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(self)._makeViewList called outside an active AttributeGraph context.")
+        }
+        let styleAttr: Attribute<LabelStyleModifier<Style>> = graph.makeInput(
+            value: LabelStyleModifier(style: modifier._attribute.value.style))
+        let anyMod = AnyStyleModifier(
+            value: styleAttr.identifier,
+            _type: StyleModifierType<LabelStyleModifier<Style>>.self)
         var inputs = inputs
-        let styleExistential: (any LabelStyle)? = modifier._attribute.value.style
-        inputs.base.customInputs.setValue(styleExistential, forKey: _LabelStyleKey.self)
+        let stack = inputs.base.customInputs.value(forKey: StyleInput<LabelStyleConfiguration>.self)
+        inputs.base.customInputs.setValue(stack.pushing(anyMod), forKey: StyleInput<LabelStyleConfiguration>.self)
         return body(_Graph(), inputs)
     }
 }

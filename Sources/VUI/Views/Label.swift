@@ -47,33 +47,28 @@ extension Label where Title == LabelStyleConfiguration.Title, Icon == LabelStyle
 }
 
 struct ResolvedLabelStyle: View {
-    var _style: any LabelStyle = DefaultLabelStyle.automatic
-    var _menuItemStyle = _MenuItemLabelStyle()
-    var _configuration = LabelStyleConfiguration(nil, nil)
-    var _body: any View {
-        _style.makeBody(configuration: self._configuration)
-    }
-
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         guard let graph = AttributeGraph.current else {
             fatalError("\(self)._makeView called outside an active AttributeGraph context.")
         }
-        let style: any LabelStyle =
-            inputs.base.customInputs.value(forKey: _LabelStyleKey.self)
-            ?? DefaultLabelStyle.automatic
-        let configuration = LabelStyleConfiguration(
-            inputs.base.customInputs.value(forKey: _StaticSourceInputKey<LabelStyleConfiguration.Title>.self),
-            inputs.base.customInputs.value(forKey: _StaticSourceInputKey<LabelStyleConfiguration.Icon>.self)
-        )
+        let stack = inputs.base.customInputs.value(forKey: StyleInput<LabelStyleConfiguration>.self)
+        let configuration = LabelStyleConfiguration()
 
-        func wireBody(_ style: some LabelStyle) -> _ViewOutputs {
+        func wireBody(_ style: some LabelStyle, inputs: _ViewInputs) -> _ViewOutputs {
             let bodyAttr = graph.makeRule {
                 _ = view._attribute.value
                 return style.makeBody(configuration: configuration)
             }
             return makeView(view: _GraphValue(_attribute: bodyAttr), inputs: inputs)
         }
-        return wireBody(style)
+
+        if let (head, tail) = stack.popping() {
+            var poppedInputs = inputs
+            poppedInputs.base.customInputs.setValue(tail, forKey: StyleInput<LabelStyleConfiguration>.self)
+            let style = head.labelStyle ?? DefaultLabelStyle.automatic
+            return wireBody(style, inputs: poppedInputs)
+        }
+        return wireBody(DefaultLabelStyle.automatic, inputs: inputs)
     }
 
     static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {

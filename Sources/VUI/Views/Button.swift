@@ -21,11 +21,10 @@ public struct Button<Label>: View where Label: View {
     public var body: some View {
         ResolvedButtonStyle(
             configuration: PrimitiveButtonStyleConfiguration(
-                role: nil,
+                role: role,
                 label: PrimitiveButtonStyleConfiguration.Label(),
                 action: action))
         .modifier(StaticSourceWriter<PrimitiveButtonStyleConfiguration.Label, Label>(source: label))
-        .modifier(StaticSourceWriter<ButtonStyleConfiguration.Label, Label>(source: label))
     }
 }
 
@@ -105,29 +104,32 @@ struct ResolvedButtonStyle: View {
         self.configuration = configuration
     }
 
-    var _isPressing = false
-    var _style: any PrimitiveButtonStyle = DefaultButtonStyle.automatic
-    var _menuItemStyle = _MenuItemButtonStyle()
-    var _pressingCallback: ((Bool) -> Void)? = nil
-    var _body: any View {
-        if let styleWithPressingBody = _style as? (any PrimitiveButtonStyleWithPressingBody) {
-            return styleWithPressingBody.makeBody(configuration: self.configuration,
-                                                  isPressing: self._isPressing,
-                                                  callback: self._pressingCallback)
-        } else {
-            return _style.makeBody(configuration: self.configuration)
-        }
-    }
-
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         guard let graph = AttributeGraph.current else {
             fatalError("\(self)._makeView called outside an active AttributeGraph context.")
         }
-        let style: any PrimitiveButtonStyle =
-            inputs.base.customInputs.value(forKey: _PrimitiveButtonStyleKey.self)
-            ?? DefaultButtonStyle.automatic
+        let isPressingAttr: Attribute<Bool> = graph.makeInput(value: false)
+        let stack = inputs.base.customInputs.value(forKey: StyleInput<PrimitiveButtonStyleConfiguration>.self)
 
-        func wireBody(_ style: some PrimitiveButtonStyle) -> _ViewOutputs {
+        func wirePressingBody<S: PrimitiveButtonStyleWithPressingBody>(_ style: S, inputs: _ViewInputs) -> _ViewOutputs {
+            let bodyAttr = graph.makeRule {
+                let rs = view._attribute.value
+                let config = PrimitiveButtonStyleConfiguration(
+                    role: rs.configuration.role,
+                    label: rs.configuration.label,
+                    action: rs.configuration.action)
+                let isPressing = isPressingAttr.value
+                return style.makeBody(configuration: config, isPressing: isPressing, callback: { v in
+                    isPressingAttr.setValue(v)
+                })
+            }
+            return makeView(view: _GraphValue(_attribute: bodyAttr), inputs: inputs)
+        }
+
+        func wireBody(_ style: some PrimitiveButtonStyle, inputs: _ViewInputs) -> _ViewOutputs {
+            if let sp = style as? any PrimitiveButtonStyleWithPressingBody {
+                return wirePressingBody(sp, inputs: inputs)
+            }
             let bodyAttr = graph.makeRule {
                 let rs = view._attribute.value
                 let config = PrimitiveButtonStyleConfiguration(
@@ -138,7 +140,14 @@ struct ResolvedButtonStyle: View {
             }
             return makeView(view: _GraphValue(_attribute: bodyAttr), inputs: inputs)
         }
-        return wireBody(style)
+
+        if let (head, tail) = stack.popping() {
+            var poppedInputs = inputs
+            poppedInputs.base.customInputs.setValue(tail, forKey: StyleInput<PrimitiveButtonStyleConfiguration>.self)
+            let style = head.primStyle ?? DefaultButtonStyle.automatic
+            return wireBody(style, inputs: poppedInputs)
+        }
+        return wireBody(DefaultButtonStyle.automatic, inputs: inputs)
     }
 
     static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {

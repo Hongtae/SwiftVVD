@@ -7,36 +7,38 @@
 
 import Foundation
 
+struct _ViewModifierBodyInput<Content>: PropertyItem {
+    struct Element: @unchecked Sendable {
+        let makeView: (_Graph, _ViewInputs) -> _ViewOutputs
+        let makeViewList: (_Graph, _ViewListInputs) -> _ViewListOutputs
+    }
+    typealias Item = Element?
+    static var defaultValue: Element? { nil }
+    var description: String { "_ViewModifierBodyInput<\(Content.self)>" }
+}
+
 public struct _ViewModifier_Content<Modifier> where Modifier: ViewModifier {
     public typealias Body = Never
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        if let makeView = _ViewModifierBodyContext.body[ObjectIdentifier(Self.self)]?.makeView {
-            return makeView(_Graph(), inputs)
+        guard let item = inputs.base.customInputs.nonDefaultValue(forKey: _ViewModifierBodyInput<Self>.self),
+              let elem = item else {
+            fatalError("_ViewModifier_Content<\(Modifier.self)>._makeView called without a modifier body context.")
         }
-        fatalError("_ViewModifier_Content<\(Modifier.self)>._makeView called without a modifier body context.")
+        return elem.makeView(_Graph(), inputs)
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        if let makeViewList = _ViewModifierBodyContext.body[ObjectIdentifier(Self.self)]?.makeViewList {
-            return makeViewList(_Graph(), inputs)
+        guard let item = inputs.base.customInputs.nonDefaultValue(forKey: _ViewModifierBodyInput<Self>.self),
+              let elem = item else {
+            fatalError("_ViewModifier_Content<\(Modifier.self)>._makeViewList called without a modifier body context.")
         }
-        fatalError("_ViewModifier_Content<\(Modifier.self)>._makeViewList called without a modifier body context.")
+        return elem.makeViewList(_Graph(), inputs)
     }
 }
 
 extension _ViewModifier_Content: View {
     public var body: Never { neverBody() }
-}
-
-private struct _ViewModifierBodyContext {
-    struct _Body: @unchecked Sendable {
-        let makeView: ((_Graph, _ViewInputs) -> _ViewOutputs)?
-        let makeViewList: ((_Graph, _ViewListInputs) -> _ViewListOutputs)?
-    }
-
-    @TaskLocal
-    static var body: [ObjectIdentifier: _Body] = [:]
 }
 
 public protocol ViewModifier {
@@ -71,11 +73,15 @@ extension ViewModifier {
         if Body.self is Never.Type {
             fatalError("\(Self.self) may not have Body == Never")
         }
-        var value = _ViewModifierBodyContext.body
-        value[ObjectIdentifier(Content.self)] = _ViewModifierBodyContext._Body(makeView: body, makeViewList: nil)
-        return _ViewModifierBodyContext.$body.withValue(value) {
-            Body._makeView(view: modifier[\._content], inputs: inputs)
-        }
+        var inputs = inputs
+        inputs.base.customInputs.setValue(
+            _ViewModifierBodyInput<Content>.Element(
+                makeView: body,
+                makeViewList: { _, _ in fatalError("makeViewList called via makeView path") }
+            ),
+            forKey: _ViewModifierBodyInput<Content>.self
+        )
+        return Body._makeView(view: modifier[\._content], inputs: inputs)
     }
 
     public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
@@ -92,11 +98,15 @@ extension ViewModifier {
         if Body.self is Never.Type {
             fatalError("\(Self.self) may not have Body == Never")
         }
-        var value = _ViewModifierBodyContext.body
-        value[ObjectIdentifier(Content.self)] = _ViewModifierBodyContext._Body(makeView: nil, makeViewList: body)
-        return _ViewModifierBodyContext.$body.withValue(value) {
-            Body._makeViewList(view: modifier[\._content], inputs: inputs)
-        }
+        var inputs = inputs
+        inputs.base.customInputs.setValue(
+            _ViewModifierBodyInput<Content>.Element(
+                makeView: { _, _ in fatalError("makeView called via makeViewList path") },
+                makeViewList: body
+            ),
+            forKey: _ViewModifierBodyInput<Content>.self
+        )
+        return Body._makeViewList(view: modifier[\._content], inputs: inputs)
     }
 }
 
@@ -171,22 +181,30 @@ extension ViewModifier where Self: Animatable {
             // LayoutComputer-wrapping case; this fallback handles everything else.
             return body(_Graph(), inputs)
         }
-        var value = _ViewModifierBodyContext.body
-        value[ObjectIdentifier(Content.self)] = _ViewModifierBodyContext._Body(makeView: body, makeViewList: nil)
-        return _ViewModifierBodyContext.$body.withValue(value) {
-            Body._makeView(view: modifier[\._content], inputs: inputs)
-        }
+        var inputs = inputs
+        inputs.base.customInputs.setValue(
+            _ViewModifierBodyInput<Content>.Element(
+                makeView: body,
+                makeViewList: { _, _ in fatalError("makeViewList called via makeView path") }
+            ),
+            forKey: _ViewModifierBodyInput<Content>.self
+        )
+        return Body._makeView(view: modifier[\._content], inputs: inputs)
     }
 
     public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
         if Body.self is Never.Type {
             return body(_Graph(), inputs)
         }
-        var value = _ViewModifierBodyContext.body
-        value[ObjectIdentifier(Content.self)] = _ViewModifierBodyContext._Body(makeView: nil, makeViewList: body)
-        return _ViewModifierBodyContext.$body.withValue(value) {
-            Body._makeViewList(view: modifier[\._content], inputs: inputs)
-        }
+        var inputs = inputs
+        inputs.base.customInputs.setValue(
+            _ViewModifierBodyInput<Content>.Element(
+                makeView: { _, _ in fatalError("makeView called via makeViewList path") },
+                makeViewList: body
+            ),
+            forKey: _ViewModifierBodyInput<Content>.self
+        )
+        return Body._makeViewList(view: modifier[\._content], inputs: inputs)
     }
 }
 

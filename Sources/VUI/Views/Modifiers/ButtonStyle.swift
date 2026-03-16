@@ -29,7 +29,6 @@ typealias ButtonAction = ()->Void
 public struct PrimitiveButtonStyleConfiguration {
     public struct Label: View {
         public typealias Body = Never
-        let view: ViewProxy?
     }
     public let role: ButtonRole?
     public let label: Label
@@ -40,14 +39,7 @@ public struct PrimitiveButtonStyleConfiguration {
 }
 
 extension PrimitiveButtonStyleConfiguration.Label {
-    init(_ view: ViewProxy? = nil) {
-        self.view = view
-    }
-
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        if let proxy = view._attribute.value.view {
-            return proxy.makeView(_Graph(), inputs: inputs)
-        }
         if let proxy = inputs.base.customInputs.value(forKey: _StaticSourceInputKey<Self>.self) {
             return proxy.makeView(_Graph(), inputs: inputs)
         }
@@ -268,7 +260,6 @@ public protocol ButtonStyle {
 public struct ButtonStyleConfiguration {
     public struct Label: View {
         public typealias Body = Never
-        let view: PrimitiveButtonStyleConfiguration.Label
     }
     public let role: ButtonRole?
     public let label: ButtonStyleConfiguration.Label
@@ -276,11 +267,11 @@ public struct ButtonStyleConfiguration {
 }
 
 extension ButtonStyleConfiguration.Label {
-    init(_ view: PrimitiveButtonStyleConfiguration.Label) {
-        self.view = view
-    }
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        PrimitiveButtonStyleConfiguration.Label._makeView(view: view[\.view], inputs: inputs)
+        if let proxy = inputs.base.customInputs.value(forKey: _StaticSourceInputKey<PrimitiveButtonStyleConfiguration.Label>.self) {
+            return proxy.makeView(_Graph(), inputs: inputs)
+        }
+        return _ViewOutputs()
     }
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
         _ViewListOutputs(
@@ -302,7 +293,7 @@ struct _DefaultButtonWithButtonStyle<Style>: PrimitiveButtonStyle, PrimitiveButt
 
     func makeBody(configuration: PrimitiveButtonStyleConfiguration, isPressing: Bool, callback: ((Bool) -> Void)?) -> some View {
         let config = ButtonStyleConfiguration(role: configuration.role,
-                                              label: .init(configuration.label),
+                                              label: .init(),
                                               isPressed: isPressing)
         return self.style.makeBody(configuration: config)
             ._onButtonGesture(pressing: { isPressed in
@@ -313,11 +304,6 @@ struct _DefaultButtonWithButtonStyle<Style>: PrimitiveButtonStyle, PrimitiveButt
     }
 }
 
-struct _PrimitiveButtonStyleKey: PropertyItem {
-    static var defaultValue: (any PrimitiveButtonStyle)? { nil }
-    var description: String { "_PrimitiveButtonStyleKey" }
-}
-
 struct PrimitiveButtonStyleContainerModifier<Style>: ViewModifier where Style: PrimitiveButtonStyle {
     let style: Style
     typealias Body = Never
@@ -325,16 +311,32 @@ struct PrimitiveButtonStyleContainerModifier<Style>: ViewModifier where Style: P
 
 extension PrimitiveButtonStyleContainerModifier {
     static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        }
+        let styleAttr: Attribute<ButtonStyleModifier<Style>> = graph.makeInput(
+            value: ButtonStyleModifier(style: modifier._attribute.value.style))
+        let anyMod = AnyStyleModifier(
+            value: styleAttr.identifier,
+            _type: StyleModifierType<ButtonStyleModifier<Style>>.self)
         var inputs = inputs
-        let styleExistential: (any PrimitiveButtonStyle)? = modifier._attribute.value.style
-        inputs.base.customInputs.setValue(styleExistential, forKey: _PrimitiveButtonStyleKey.self)
+        let stack = inputs.base.customInputs.value(forKey: StyleInput<PrimitiveButtonStyleConfiguration>.self)
+        inputs.base.customInputs.setValue(stack.pushing(anyMod), forKey: StyleInput<PrimitiveButtonStyleConfiguration>.self)
         return body(_Graph(), inputs)
     }
 
     static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(self)._makeViewList called outside an active AttributeGraph context.")
+        }
+        let styleAttr: Attribute<ButtonStyleModifier<Style>> = graph.makeInput(
+            value: ButtonStyleModifier(style: modifier._attribute.value.style))
+        let anyMod = AnyStyleModifier(
+            value: styleAttr.identifier,
+            _type: StyleModifierType<ButtonStyleModifier<Style>>.self)
         var inputs = inputs
-        let styleExistential: (any PrimitiveButtonStyle)? = modifier._attribute.value.style
-        inputs.base.customInputs.setValue(styleExistential, forKey: _PrimitiveButtonStyleKey.self)
+        let stack = inputs.base.customInputs.value(forKey: StyleInput<PrimitiveButtonStyleConfiguration>.self)
+        inputs.base.customInputs.setValue(stack.pushing(anyMod), forKey: StyleInput<PrimitiveButtonStyleConfiguration>.self)
         return body(_Graph(), inputs)
     }
 }
