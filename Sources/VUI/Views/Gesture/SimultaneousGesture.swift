@@ -65,6 +65,7 @@ public struct SimultaneousGesture<First, Second>: Gesture where First: Gesture, 
 
 extension SimultaneousGesture.Value: Equatable where First.Value: Equatable, Second.Value: Equatable {}
 extension SimultaneousGesture.Value: Hashable where First.Value: Hashable, Second.Value: Hashable {}
+extension SimultaneousGesture.Value: Sendable where First.Value: Sendable, Second.Value: Sendable {}
 
 extension Gesture {
     @inlinable public func simultaneously<Other>(with other: Other) -> SimultaneousGesture<Self, Other> where Other: Gesture {

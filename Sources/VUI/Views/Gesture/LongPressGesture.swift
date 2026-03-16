@@ -93,6 +93,10 @@ final class LongPressGestureRecognizer: _GestureRecognizer<Bool>, @unchecked Sen
     }
 
     override func processEvents(_ events: [EventID: any EventType]) {
+        guard let graph = AttributeGraph.current else {
+            fatalError("LongPressGestureRecognizer.processEvents requires AG context")
+        }
+        let inbox = graph.inbox
         for (id, event) in events {
             guard let tap = event as? TappableEvent else { continue }
 
@@ -109,10 +113,14 @@ final class LongPressGestureRecognizer: _GestureRecognizer<Bool>, @unchecked Sen
                     let duration = minimumDuration
                     pressTask = Task { @MainActor [weak self] in
                         try? await Task.sleep(nanoseconds: UInt64(duration * 1_000_000_000))
-                        guard let self, !Task.isCancelled else { return }
-                        self.activeSerial = nil
-                        self.state = .done
-                        self.updatePhase(.ended(true))
+                        guard !Task.isCancelled else { return }
+
+                        inbox.enqueue { [weak self] in
+                            guard let self else { return }
+                            self.state = .done
+                            self.activeSerial = nil
+                            self.updatePhase(.ended(true))
+                        }
                     }
                 }
 

@@ -114,21 +114,11 @@ class GestureGraph: @unchecked Sendable {
     /// The root multi-view responder that aggregates all ViewResponders from the view tree.
     let rootResponder: MultiViewResponder
 
-    // AG Attributes (owned by this GestureGraph)
-
-    /// Source-of-truth attribute for the current event dictionary.
-    /// Updated by the WindowController each time platform events are converted.
-    private(set) var eventsAttribute: Attribute<[EventID: any EventType]>!
-
-    /// Source-of-truth for the gesture reset seed. Incrementing forces all
-    /// gesture recognizers in the tree to reset their state.
-    private(set) var resetSeedAttribute: Attribute<UInt32>!
-
-    /// Source-of-truth for inherited phase (initial value = .active).
-    private(set) var inheritedPhaseAttribute: Attribute<_GestureInputs.InheritedPhase>!
+    // Active gesture sessions
+    // Each EventID maps to a list of sessions (one per hit responder).
+    var activeSessions: [EventID: [ActiveGestureSession]] = [:]
 
     // Serial counter for EventID assignment
-
     private let _nextSerial: Mutex<Int> = Mutex(1)
 
     func nextSerial() -> Int {
@@ -146,76 +136,189 @@ class GestureGraph: @unchecked Sendable {
         self.eventBindingManager.rootResponder = rootResponder
     }
 
-    /// Called once by `WindowController.init` inside the AG graph context to create
-    /// the input attributes that drive the gesture system.
-    func setupAttributes(in graph: AttributeGraph) {
-        assert(eventsAttribute == nil, "GestureGraph.setupAttributes called twice")
-        eventsAttribute = graph.makeInput(value: [:] as [EventID: any EventType])
-        resetSeedAttribute = graph.makeInput(value: UInt32(0))
-        inheritedPhaseAttribute = graph.makeInput(value: _GestureInputs.InheritedPhase.active)
+    // Session Management
+
+    /// Creates an `ActiveGestureSession` for a hit responder.
+    ///
+    /// Must be called inside an active `AttributeGraph.$current` context.
+    /// All AG nodes created by `_makeGesture` are registered to the session's subgraph.
+    private func createSession(
+        for responder: GestureResponder,
+        in graph: AttributeGraph
+    ) -> ActiveGestureSession {
+        // Create a standalone subgraph (no parent — managed by GestureGraph directly)
+        let subgraph = Subgraph()
+
+        let (eventsAttr, isTerminalAttr) = Subgraph.$current.withValue(subgraph) {
+            let eventsAttr: Attribute<[EventID: any EventType]> = graph.makeInput(value: [:])
+            let resetSeedAttr: Attribute<UInt32> = graph.makeInput(value: UInt32(0))
+            let inheritedPhaseAttr: Attribute<_GestureInputs.InheritedPhase> =
+                graph.makeInput(value: [])
+
+            let gestureInputs = _GestureInputs(
+                responder.viewInputs,
+                viewSubgraph: nil,
+                events: eventsAttr,
+                time: responder.viewInputs.base.time,
+                resetSeed: resetSeedAttr,
+                inheritedPhase: inheritedPhaseAttr,
+                gesturePreferenceKeys: responder.viewInputs.preferences.hostKeys
+            )
+            // Signal that this _makeGesture call is running inside the GestureGraph dispatch pipeline.
+            var gestureInputsWithFlags = gestureInputs
+            gestureInputsWithFlags.options = .gestureGraph
+
+            let isTerminalAttr: Attribute<Bool> = responder.factory(gestureInputsWithFlags)
+
+            return (eventsAttr, isTerminalAttr)
+        }
+
+        return ActiveGestureSession(
+            subgraph: subgraph,
+            eventsAttr: eventsAttr,
+            isTerminalAttr: isTerminalAttr,
+            responder: responder
+        )
+    }
+
+    /// Tears down all sessions bound to `eventID` and removes their bindings.
+    private func teardownSessions(for eventID: EventID) {
+        guard let sessions = activeSessions.removeValue(forKey: eventID) else { return }
+        for session in sessions { session.teardown() }
+        eventBindingManager.bindings.removeValue(forKey: eventID)
     }
 
     // Event Dispatch
 
-    /// Converts a platform mouse event to the event dictionary format and dispatches.
+    /// Processes a platform mouse event using the session model:
     ///
-    /// - Returns: the combined gesture phase after processing (`.failed` if nothing was hit).
+    ///   .buttonDown  → hit test → create one ActiveGestureSession per hit responder →
+    ///                  feed initial event → check terminal
+    ///   .move        → feed event to all bound sessions → check terminal
+    ///   .buttonUp    → feed ended event → check terminal → tear down
+    ///
+    /// All gesture AG rules fire synchronously inside `eventsAttr.setValue`, so
+    /// session terminal state is accurate immediately after each setValue call.
     @discardableResult
     func sendMouseEvent(
         _ event: MouseEvent,
         in graph: AttributeGraph
     ) -> GesturePhase<Void> {
-        guard let eventsAttr = eventsAttribute else { return .failed }
-
-        var events: [EventID: any EventType] = [:]
+        assert(AttributeGraph.current != nil, "GestureGraph.sendMouseEvent requires AG context")
 
         switch event.type {
         case .buttonDown:
-            let serial = nextSerial()
-            let eventID = EventID(type: TappableEvent.self, serial: serial)
-            let tappable = TappableEvent(location: event.location, phase: .began, buttonID: event.buttonID)
-            events[eventID] = tappable
+            // Hit test: find all GestureResponders that contain the touch point.
+            // Results are in child-first order (ViewRespondersKey.reduce appends leaves before root).
+            let hitResponders = rootResponder.respondersContaining(point: event.location)
+                .compactMap { $0 as? GestureResponder }
+                .filter { $0.gestureMask.contains(.gesture) }
+            guard !hitResponders.isEmpty else { return .failed }
 
-            // Hit test to find which responders to bind this event to
-            let hit = rootResponder.respondersContaining(point: event.location)
-            if hit.isEmpty { return .failed }
-            // Bind all hit responders to this event
-            for responder in hit {
-                if let node = responder.nextResponder {
-                    eventBindingManager.rebindEvent(eventID, to: node)
+            // --- GestureResponderExclusionPolicy filtering ---
+            //
+            //  .highPriority    — always creates a session; suppresses all .default sessions
+            //  .default         — only the first (child-most) gets a session,
+            //                     cancelled entirely when a .highPriority responder is hit
+            //  .simultaneous(*) — always creates a session, coexists with all others
+            let hasHighPriority = hitResponders.contains { $0.exclusionPolicy == .highPriority }
+            var activeResponders: [GestureResponder] = []
+            var sawDefault = false
+            for responder in hitResponders {
+                switch responder.exclusionPolicy {
+                case .highPriority:
+                    activeResponders.append(responder)
+                case .default:
+                    if !hasHighPriority && !sawDefault {
+                        activeResponders.append(responder)
+                        sawDefault = true
+                    }
+                case .simultaneous:
+                    activeResponders.append(responder)
                 }
             }
+            guard !activeResponders.isEmpty else { return .failed }
 
-        case .buttonUp:
-            // End all active bindings with a tap-ended event
-            for (id, binding) in eventBindingManager.bindings {
-                let tappable = TappableEvent(location: event.location, phase: .ended, buttonID: event.buttonID)
-                events[id] = tappable
-                _ = binding
+            let serial = nextSerial()
+            let eventID = EventID(type: TappableEvent.self, serial: serial)
+            let initialEvent = TappableEvent(location: event.location, phase: .began, buttonID: event.buttonID)
+
+            // Create one session per active responder.
+            var sessions: [ActiveGestureSession] = []
+            for responder in activeResponders {
+                let session = createSession(for: responder, in: graph)
+                sessions.append(session)
             }
-            eventBindingManager.bindings.removeAll()
+            activeSessions[eventID] = sessions
+
+            // Bind the event for future move/up routing.
+            eventBindingManager.rebindEvent(eventID, to: rootResponder)
+
+            // Feed the initial began event to all sessions.
+            let events: [EventID: any EventType] = [eventID: initialEvent]
+            for session in sessions {
+                session.eventsAttr.setValue(events)
+            }
+
+            // Tear down sessions that already terminated (e.g., instant failure).
+            cleanupTerminatedSessions(for: eventID)
+
+            return activeSessions[eventID] != nil ? .active(()) : .failed
 
         case .move:
-            // Forward move to all active bindings
-            for (id, _) in eventBindingManager.bindings {
-                let tappable = TappableEvent(location: event.location, phase: .moved, buttonID: event.buttonID)
-                events[id] = tappable
+            if activeSessions.isEmpty { return .possible(nil) }
+            let movedEvent = TappableEvent(location: event.location, phase: .moved, buttonID: event.buttonID)
+            for (eventID, sessions) in activeSessions {
+                let events: [EventID: any EventType] = [eventID: movedEvent]
+                for session in sessions { session.eventsAttr.setValue(events) }
+                cleanupTerminatedSessions(for: eventID)
             }
+            return activeSessions.isEmpty ? .possible(nil) : .active(())
+
+        case .buttonUp:
+            if activeSessions.isEmpty { return .possible(nil) }
+            var anyEnded = false
+            for eventID in Array(activeSessions.keys) {
+                let endedEvent = TappableEvent(location: event.location, phase: .ended, buttonID: event.buttonID)
+                let events: [EventID: any EventType] = [eventID: endedEvent]
+                if let sessions = activeSessions[eventID] {
+                    for session in sessions { session.eventsAttr.setValue(events) }
+                    anyEnded = true
+                }
+                teardownSessions(for: eventID)
+            }
+            return anyEnded ? .ended(()) : .failed
 
         default:
             return .failed
         }
+    }
 
-        if events.isEmpty { return .possible(nil) }
-
-        // Update the events attribute — AG will propagate to all dependent gesture rules
-        eventsAttr.setValue(events)
-
-        return .active(())
+    /// Removes sessions whose gesture phase has become terminal and tears them down.
+    private func cleanupTerminatedSessions(for eventID: EventID) {
+        guard var sessions = activeSessions[eventID] else { return }
+        let before = sessions.count
+        sessions = sessions.filter { session in
+            if session.isTerminal {
+                session.teardown()
+                return false
+            }
+            return true
+        }
+        if sessions.isEmpty {
+            activeSessions.removeValue(forKey: eventID)
+            eventBindingManager.bindings.removeValue(forKey: eventID)
+        } else if sessions.count != before {
+            activeSessions[eventID] = sessions
+        }
     }
 
     func resetEvents() {
-        eventsAttribute?.setValue([:])
+        // Tear down all active sessions and clear bindings.
+        for sessions in activeSessions.values {
+            for session in sessions { session.teardown() }
+        }
+        activeSessions.removeAll()
         eventBindingManager.bindings.removeAll()
     }
 

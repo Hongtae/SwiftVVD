@@ -63,7 +63,7 @@ extension View {
 
 // TapGestureRecognizer
 
-final class TapGestureRecognizer: _GestureRecognizer<Void> {
+final class TapGestureRecognizer: _GestureRecognizer<Void>, @unchecked Sendable {
     let requiredCount: Int
 
     // Per-interaction tracking
@@ -75,6 +75,7 @@ final class TapGestureRecognizer: _GestureRecognizer<Void> {
     private let maximumInterval: ContinuousClock.Duration = .seconds(0.5)
     private let maximumPressDuration: ContinuousClock.Duration = .seconds(1.0)
     private var pressStart: ContinuousClock.Instant = .now
+    private var timeoutTask: Task<Void, Never>? = nil
 
     // Track which event IDs we have already processed to avoid re-processing
     private var processedBeganIDs: Set<Int> = []
@@ -95,6 +96,11 @@ final class TapGestureRecognizer: _GestureRecognizer<Void> {
     }
 
     override func processEvents(_ events: [EventID: any EventType]) {
+        guard let graph = AttributeGraph.current else {
+            fatalError("TapGestureRecognizer.processEvents requires AG context")
+        }
+        let inbox = graph.inbox
+
         for (id, event) in events {
             guard let tap = event as? TappableEvent else { continue }
 
@@ -119,6 +125,21 @@ final class TapGestureRecognizer: _GestureRecognizer<Void> {
                     pressStart = now
                     state = .processing
                     updatePhase(.active(()))
+
+                    let duration = maximumPressDuration
+                    timeoutTask = Task { @MainActor [weak self] in
+                        try? await Task.sleep(for: duration)
+                        guard !Task.isCancelled else { return }
+
+                        inbox.enqueue { [weak self] in
+                            guard let self, self.state == .processing else { return }
+                            self.state = .failed
+                            self.activeDeviceID = nil
+                            self.processedBeganIDs.remove(id.serial)
+                            self.processedEndedIDs.remove(id.serial)
+                            self.updatePhase(.failed)
+                        }
+                    }
                 }
 
             case .moved:
@@ -134,6 +155,8 @@ final class TapGestureRecognizer: _GestureRecognizer<Void> {
                 }
 
             case .ended:
+                timeoutTask?.cancel()
+                timeoutTask = nil
                 guard !processedEndedIDs.contains(id.serial) else { continue }
                 processedEndedIDs.insert(id.serial)
 
@@ -153,9 +176,6 @@ final class TapGestureRecognizer: _GestureRecognizer<Void> {
                             state = .done
                             completedTaps = 0
                             updatePhase(.ended(()))
-                            // _EndedGesture callback has already fired synchronously above.
-                            // Reset now so the recognizer accepts the next tap sequence.
-                            reset()
                         } else {
                             state = .ready
                             updatePhase(.possible(nil))
@@ -164,19 +184,22 @@ final class TapGestureRecognizer: _GestureRecognizer<Void> {
                 }
 
             case .cancelled:
+                timeoutTask?.cancel()
+                timeoutTask = nil
                 if activeDeviceID == id.serial {
                     activeDeviceID = nil
                     state = .failed
                     processedBeganIDs.remove(id.serial)
                     processedEndedIDs.remove(id.serial)
                     updatePhase(.failed)
-                    reset()
                 }
             }
         }
     }
 
     override func reset() {
+        timeoutTask?.cancel()
+        timeoutTask = nil
         super.reset()
         activeDeviceID = nil
         completedTaps = 0

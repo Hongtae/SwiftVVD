@@ -357,9 +357,12 @@ class AttributeGraph: @unchecked Sendable {
         slots[index].node = nil
         freeList.append(id.rawValue)
 
-        // 5. Mark former dependents as needing re-evaluation
+        // 5. Mark former dependents as needing re-evaluation.
+        // evaluateSideEffects:false — the node is gone; side-effect rules that depended
+        // on it must NOT fire now (they would crash reading a freed attribute).
+        // They are simply marked dirty and will be removed or re-evaluated later.
         for outputIndex in outputs {
-            markNeedsEvaluation(AGAttribute(rawValue: outputIndex))
+            markNeedsEvaluation(AGAttribute(rawValue: outputIndex), evaluateSideEffects: false)
         }
     }
 
@@ -461,7 +464,14 @@ class AttributeGraph: @unchecked Sendable {
         slots[index].node!.isEvaluating = false
     }
 
-    func markNeedsEvaluation(_ startID: AGAttribute) {
+    /// Marks `startID` and all its transitive dependents as needing re-evaluation.
+    ///
+    /// - Parameter evaluateSideEffects: When `true` (default, used by `setValue`),
+    ///   side-effect nodes are evaluated eagerly within this call so that callbacks
+    ///   fire synchronously. When `false` (used by `removeNode`), side-effect nodes
+    ///   are only marked dirty — they must NOT be evaluated because an input node
+    ///   they depend on may have already been freed.
+    func markNeedsEvaluation(_ startID: AGAttribute, evaluateSideEffects: Bool = true) {
         assert(AttributeGraph.current === self)
         // Iterative BFS to avoid stack overflow on deep dependency graphs.
         // Side-effect nodes are collected separately and evaluated after the BFS completes,
@@ -482,6 +492,8 @@ class AttributeGraph: @unchecked Sendable {
             queue.append(contentsOf: node.outputs)
         }
         // Eagerly evaluate side-effect nodes in dependency order (parents before children).
+        // Skipped when called from removeNode — inputs may already be freed.
+        guard evaluateSideEffects else { return }
         for id in sideEffects {
             let index = Int(id)
             guard slots[index].node != nil else { continue }  // may have been freed

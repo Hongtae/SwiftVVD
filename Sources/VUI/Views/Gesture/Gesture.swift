@@ -111,6 +111,30 @@ extension GesturePhase: Equatable where V: Equatable {
     }
 }
 
+extension GesturePhase {
+    /// The default phase: waiting for input, no pre-computed value.
+    public static var defaultValue: GesturePhase<V> { .possible(nil) }
+
+    /// Combines two phases into a single phase carrying a tuple value.
+    /// Both must be active/ended for the result to be active/ended;
+    /// either failing causes combined failure.
+    public func and<A>(_ other: GesturePhase<A>) -> GesturePhase<(V, A)> {
+        and(other) { ($0, $1) }
+    }
+
+    /// Combines two phases into a single phase with a custom value transform.
+    public func and<A, B>(_ other: GesturePhase<A>, value: (V, A) -> B) -> GesturePhase<B> {
+        switch (self, other) {
+        case (.ended(let v),  .ended(let a)):  return .ended(value(v, a))
+        case (.ended(let v),  .active(let a)): return .ended(value(v, a))
+        case (.active(let v), .ended(let a)):  return .ended(value(v, a))
+        case (.active(let v), .active(let a)): return .active(value(v, a))
+        case (.failed, _), (_, .failed):        return .failed
+        default:                                return .possible(nil)
+        }
+    }
+}
+
 // Event Types
 
 /// Identifies a unique event stream. A single interaction (e.g., finger 1) has
@@ -198,7 +222,8 @@ public struct _GestureInputs {
         init(rawValue: Int) { self.rawValue = rawValue }
         static let active = InheritedPhase(rawValue: 1 << 0)
         static let failed = InheritedPhase(rawValue: 1 << 1)
-        static var defaultValue: InheritedPhase { .active }
+        /// Default: no constraints from parent (top-level gesture context).
+        static var defaultValue: InheritedPhase { [] }
         var description: String {
             var parts: [String] = []
             if contains(.active) { parts.append("active") }

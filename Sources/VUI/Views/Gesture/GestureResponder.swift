@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import Synchronization
 
 // ViewRespondersKey
 
@@ -138,45 +139,115 @@ class MultiViewResponder: ResponderNode {
     }
 }
 
-// GestureViewResponder
+// ActiveGestureSession
+
+/// Represents one active gesture interaction for a single touch/click EventID.
+///
+/// Created when a touch hits a `GestureResponder` (touch began).
+/// Torn down when the gesture phase becomes terminal (.ended or .failed).
+///
+/// All AG nodes produced by `_makeGesture` live inside `subgraph`.
+/// Invalidating the subgraph releases the recognizer and all AG rules atomically.
+final class ActiveGestureSession {
+    /// AG subgraph holding all nodes created by `_makeGesture` for this interaction.
+    let subgraph: Subgraph
+
+    /// Session-local events attribute — only events for this EventID are written here.
+    let eventsAttr: Attribute<[EventID: any EventType]>
+
+    /// Derived attribute: true when the gesture phase is .ended or .failed.
+    let isTerminalAttr: Attribute<Bool>
+
+    /// Weak reference to the responder that owns this session.
+    weak var responder: GestureResponder?
+
+    init(
+        subgraph: Subgraph,
+        eventsAttr: Attribute<[EventID: any EventType]>,
+        isTerminalAttr: Attribute<Bool>,
+        responder: GestureResponder
+    ) {
+        self.subgraph = subgraph
+        self.eventsAttr = eventsAttr
+        self.isTerminalAttr = isTerminalAttr
+        self.responder = responder
+    }
+
+    var isTerminal: Bool { isTerminalAttr.value }
+
+    /// Tears down this session: invalidates the AG subgraph, releasing all gesture nodes
+    /// and recognizers that were created for this interaction.
+    func teardown() {
+#if DEBUG
+        assert(!_tornDown, "ActiveGestureSession.teardown() called more than once")
+        _tornDown = true
+#endif
+        subgraph.invalidate()
+        subgraph.removeFromParent()
+    }
+
+#if DEBUG
+    private var _tornDown = false
+#endif
+}
+
+// GestureResponder
 
 /// Concrete ViewResponder created by AddGestureModifier._makeView.
-/// Carries the view frame (for hit testing) and the gesture phase output.
-final class GestureViewResponder: ViewResponder {
-    nonisolated(unsafe) private static var _nextKey: UInt32 = 1
-    nonisolated(unsafe) private static var _lock = NSLock()
+///
+/// Stores view geometry for hit testing and a factory closure that calls
+/// `Gesture._makeGesture` on demand when a touch begins.
+/// This deferred approach means dynamic views get fresh gesture sessions
+/// each time they are touched.
+final class GestureResponder: ViewResponder {
+    private static let _nextKey = Mutex<UInt32>(1)
 
     let hitTestKey: UInt32
     weak var nextResponder: ResponderNode?
     var gestureContainer: AnyObject? { nil }
 
-    /// AG attribute for the view's position (parent-local).
+    /// AG attribute for the view's position (window-global coords, for hit testing).
     let position: Attribute<CGPoint>
 
-    /// AG attribute for the view's proposed size.
+    /// AG attribute for the view's proposed size (for hit testing).
     let size: Attribute<ViewSize>
 
-    /// AG attribute for the gesture's current phase (type-erased storage).
-    let phaseAttr: AGAttribute
+    /// How this responder interacts with other simultaneously-hit responders.
+    /// Derived from `Combiner.exclusionPolicy` at _makeView time.
+    let exclusionPolicy: GestureResponderExclusionPolicy
 
     /// The gesture mask controlling which gesture types are active.
     let gestureMask: GestureMask
 
+    /// The _ViewInputs captured at _makeView time.
+    /// Provides position, size, time, and preference key context to sessions.
+    let viewInputs: _ViewInputs
+
+    /// Factory closure: called inside a session subgraph to instantiate the gesture graph.
+    /// Takes the session-local _GestureInputs and returns an Attribute<Bool> that is
+    /// true when the gesture phase is terminal (.ended or .failed).
+    typealias Factory = (_GestureInputs) -> Attribute<Bool>
+    let factory: Factory
+
     init(
         position: Attribute<CGPoint>,
         size: Attribute<ViewSize>,
-        phaseAttr: AGAttribute,
-        gestureMask: GestureMask
+        exclusionPolicy: GestureResponderExclusionPolicy,
+        gestureMask: GestureMask,
+        viewInputs: _ViewInputs,
+        factory: @escaping Factory
     ) {
-        GestureViewResponder._lock.lock()
-        self.hitTestKey = GestureViewResponder._nextKey
-        GestureViewResponder._nextKey &+= 1
-        GestureViewResponder._lock.unlock()
+        self.hitTestKey = GestureResponder._nextKey.withLock { key in
+            defer { key &+= 1 }
+            return key
+        }
 
         self.position = position
         self.size = size
-        self.phaseAttr = phaseAttr
+        self.exclusionPolicy = exclusionPolicy
         self.gestureMask = gestureMask
+        self.viewInputs = viewInputs
+        self.factory = factory
     }
 
     func hitTestPolicy(options: ContainsPointsOptions) -> HitTestPolicy {
@@ -190,20 +261,20 @@ final class GestureViewResponder: ViewResponder {
     ) -> ContainsPointsResult {
         let pos = position.value
         let sz = size.value.value
-        let frame = CGRect(origin: pos, size: sz)
+        let globalToLocal = viewInputs.transform.value.matrix.inverted()
+        
+        // Use pos as the origin if transform does not include the view's position translation,
+        // or .zero if transform is the fully accumulated local transform. 
+        // Assuming VUI's transform does not automatically include the parent-assigned position:
+        let localBounds = CGRect(origin: pos, size: sz)
 
         var mask: UInt64 = 0
-        for (i, pt) in points.prefix(64).enumerated() {
-            if frame.contains(pt) { mask |= (1 << i) }
+        for (i, globalPt) in points.prefix(64).enumerated() {
+            let localPt = globalPt.applying(globalToLocal)
+            if localBounds.contains(localPt) { 
+                mask |= (1 << i) 
+            }
         }
         return ContainsPointsResult(mask: mask, priority: 0, children: [])
-    }
-
-    /// Reads the current gesture phase as GesturePhase<Void> (type-erased for dispatch).
-    func currentPhaseAsVoid(in graph: AttributeGraph) -> GesturePhase<Void> {
-        // We store the phase as a type-erased AGAttribute; at dispatch time
-        // we retrieve the raw node and interpret it via a rule that maps → Void.
-        // For now, return via opaque access (VUI-internal only).
-        return .possible(nil)
     }
 }

@@ -12,25 +12,25 @@ import Foundation
 /// `width`/`height` are computed accessors into `value`.
 /// `proposal` stores the proposal that was used to compute this size, which is needed by the
 /// animation system to interpolate between layout frames.
-public struct ViewSize: Equatable, Sendable {
-    public var value: CGSize
-    public var proposal: ProposedViewSize
+struct ViewSize: Equatable, Sendable {
+    var value: CGSize
+    var proposal: ProposedViewSize
 
-    public var width:  CGFloat { get { value.width  } set { value.width  = newValue } }
-    public var height: CGFloat { get { value.height } set { value.height = newValue } }
+    var width:  CGFloat { get { value.width  } set { value.width  = newValue } }
+    var height: CGFloat { get { value.height } set { value.height = newValue } }
 
-    public init(_ value: CGSize, proposal: ProposedViewSize = .unspecified) {
+    init(_ value: CGSize, proposal: ProposedViewSize = .unspecified) {
         self.value = value
         self.proposal = proposal
     }
-    public init(width: CGFloat, height: CGFloat, proposal: ProposedViewSize = .unspecified) {
+    init(width: CGFloat, height: CGFloat, proposal: ProposedViewSize = .unspecified) {
         self.value = CGSize(width: width, height: height)
         self.proposal = proposal
     }
 
-    public static let zero = ViewSize(.zero)
+    static let zero = ViewSize(.zero)
 
-    public static func fixed(_ cgSize: CGSize) -> ViewSize {
+    static func fixed(_ cgSize: CGSize) -> ViewSize {
         ViewSize(cgSize, proposal: ProposedViewSize(cgSize))
     }
 }
@@ -38,23 +38,23 @@ public struct ViewSize: Equatable, Sendable {
 /// The cumulative coordinate-space transform applied to a view.
 /// Backed by `ProjectionTransform` to support both 2D affine and 3D projective
 /// transforms (e.g., `.rotation3DEffect`).
-public struct ViewTransform: Equatable, Sendable {
-    public var matrix: ProjectionTransform
+struct ViewTransform: Equatable, Sendable {
+    var matrix: ProjectionTransform
 
-    public init() { matrix = ProjectionTransform() }
-    public init(_ transform: ProjectionTransform) { matrix = transform }
+    init() { matrix = ProjectionTransform() }
+    init(_ transform: ProjectionTransform) { matrix = transform }
 
-    public static let identity = ViewTransform()
+    static let identity = ViewTransform()
 }
 
 /// The safe-area insets provided to a view by its nearest ancestor container.
 /// Conceptually equivalent to `EdgeInsets` but kept as a distinct type so
 /// the AG graph can distinguish safe-area changes from general padding changes.
-public struct SafeAreaInsets: Equatable, @unchecked Sendable {
-    public var value: EdgeInsets
+struct SafeAreaInsets: Equatable, Sendable {
+    var value: EdgeInsets
 
-    public init() { value = EdgeInsets() }
-    public init(_ insets: EdgeInsets) { value = insets }
+    init() { value = EdgeInsets() }
+    init(_ insets: EdgeInsets) { value = insets }
 
-    public static let zero = SafeAreaInsets()
+    static let zero = SafeAreaInsets()
 }

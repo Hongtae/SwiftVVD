@@ -213,8 +213,9 @@ struct HighPriorityGestureCombiner: GestureCombiner {
     typealias Result = _MapGesture<ExclusiveGesture<AnyGesture<()>, AnyGesture<()>>, ()>
     static var exclusionPolicy: GestureResponderExclusionPolicy { .highPriority }
     static func combine(_ first: AnyGesture<()>, _ second: AnyGesture<()>) -> Result {
-        // Same exclusive structure as Default; priority enforcement is via exclusionPolicy.
-        _MapGesture(content: ExclusiveGesture(first, second), transform: { _ in () })
+        // HighPriority swaps first/second so the added gesture becomes
+        // ExclusiveGesture's first child, giving it recognition priority.
+        _MapGesture(content: ExclusiveGesture(second, first), transform: { _ in () })
     }
 }
 
@@ -318,40 +319,37 @@ extension AddGestureModifier {
 
         var outputs = body(_Graph(), inputs)
 
-        guard let gestureGraph = GestureGraph._current,
-              let eventsAttr = gestureGraph.eventsAttribute,
-              let resetSeedAttr = gestureGraph.resetSeedAttribute,
-              let inheritedPhaseAttr = gestureGraph.inheritedPhaseAttribute else {
-            return outputs
+        // Only register a gesture responder inside a gesture-enabled layout pass.
+        guard GestureGraph._current != nil else { return outputs }
+
+        // Capture context needed to instantiate the gesture at touch time.
+        // These are all value-type AG attribute references (alive as long as the view exists).
+        let capturedViewInputs = inputs
+        let capturedGestureValue = modifier[\.gesture]  // _GraphValue<T> in view subgraph
+
+        // Factory: called inside a session subgraph when a touch hits this view.
+        // All AG nodes created here (phase, recognizer rules, callback rules) are
+        // registered to the session subgraph and released when the session ends.
+        let factory: GestureResponder.Factory = { gestureInputs in
+            guard let graph = AttributeGraph.current else {
+                fatalError("GestureResponder.factory requires AG context")
+            }
+            let outputs = T._makeGesture(gesture: capturedGestureValue, inputs: gestureInputs)
+            // Wrap the typed phase into an Attribute<Bool> so the session can check
+            // termination without knowing the concrete Value type.
+            return graph.makeRule { outputs.phase.value.isTerminal }
         }
 
-        let gestureResetSeed = graph.makeRule { resetSeedAttr.value }
-        let gestureInheritedPhase = graph.makeRule { inheritedPhaseAttr.value }
-
-        let gestureInputs = _GestureInputs(
-            inputs,
-            viewSubgraph: Subgraph.current,
-            events: eventsAttr,
-            time: inputs.base.time,
-            resetSeed: gestureResetSeed,
-            inheritedPhase: gestureInheritedPhase,
-            gesturePreferenceKeys: inputs.preferences.hostKeys
-        )
-
-        let gestureOutputs = T._makeGesture(gesture: modifier[\.gesture], inputs: gestureInputs)
-
-        let responder = GestureViewResponder(
+        let responder = GestureResponder(
             position: inputs.position,
             size: inputs.size,
-            phaseAttr: gestureOutputs.phase.identifier,
-            gestureMask: modifier._attribute.value.gestureMask
+            exclusionPolicy: Combiner.exclusionPolicy,
+            gestureMask: modifier._attribute.value.gestureMask,
+            viewInputs: capturedViewInputs,
+            factory: factory
         )
         let respondersAttr: Attribute<[any ViewResponder]> = graph.makeInput(value: [responder])
         outputs.preferences.append(ViewRespondersKey.self, node: respondersAttr.identifier)
-
-        for kv in gestureOutputs.preferences.preferences {
-            outputs.preferences.preferences.append(kv)
-        }
 
         return outputs
     }

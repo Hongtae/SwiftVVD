@@ -123,7 +123,6 @@ final class ButtonGestureRecognizer: _GestureRecognizer<Void> {
                     } else {
                         updatePhase(.possible(nil))
                     }
-                    reset()
                 }
 
             case .cancelled:
@@ -135,7 +134,6 @@ final class ButtonGestureRecognizer: _GestureRecognizer<Void> {
                     }
                     state = .failed
                     updatePhase(.failed)
-                    reset()
                 }
             }
         }

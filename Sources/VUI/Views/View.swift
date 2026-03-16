@@ -388,10 +388,10 @@ public struct _ViewInputs {
     /// The cumulative coordinate-space transform for this child.
     var transform: Attribute<ViewTransform>
 
-    /// The position assigned to this child by its parent (in parent-local coords).
+    /// The position assigned to this child by its parent (in window-global coords).
     var position: Attribute<CGPoint>
 
-    /// The position of the parent container (used for coordinate conversion).
+    /// The position of the parent container (in window-global coords, used for coordinate conversion).
     var containerPosition: Attribute<CGPoint>
 
     /// The proposed size this parent is offering to the child.

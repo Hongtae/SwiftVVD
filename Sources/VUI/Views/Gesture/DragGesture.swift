@@ -82,7 +82,7 @@ public struct DragGesture: Gesture {
     public typealias Body = Never
 }
 
-// DragGestureRecognizer
+extension DragGesture.Value: Sendable {}
 
 final class DragGestureRecognizer: _GestureRecognizer<DragGesture.Value> {
     let minimumDistance: CGFloat

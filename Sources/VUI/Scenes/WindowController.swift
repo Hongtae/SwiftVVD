@@ -131,7 +131,8 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
         var phaseAttrResult: Attribute<Phase>?             = nil
 
         AttributeGraph.$current.withValue(ownGraph) {
-            gestureGraph.setupAttributes(in: ownGraph)
+            // GestureGraph no longer requires global input attributes;
+            // sessions are created on-demand per touch event.
 
             // Bridge: lift the extracted content value into ownGraph as an input node.
             let contentAttr = ownGraph.makeInput(value: contentValue)

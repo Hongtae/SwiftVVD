@@ -89,6 +89,7 @@ public struct SequenceGesture<First, Second>: Gesture where First: Gesture, Seco
 }
 
 extension SequenceGesture.Value: Equatable where First.Value: Equatable, Second.Value: Equatable {}
+extension SequenceGesture.Value: Sendable where First.Value: Sendable, Second.Value: Sendable {}
 
 extension Gesture {
     @inlinable public func sequenced<Other>(before other: Other) -> SequenceGesture<Self, Other> where Other: Gesture {

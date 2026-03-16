@@ -7,8 +7,7 @@
 
 // _MapGesture
 
-/// A gesture that transforms another gesture's value.
-/// Maps gesture phases directly via a phase-mapping AG rule.
+/// A gesture that transforms another gesture's value via a phase-mapping AG rule.
 struct _MapGesture<Content: Gesture, Value>: Gesture {
     var content: Content
     var transform: (Content.Value) -> Value

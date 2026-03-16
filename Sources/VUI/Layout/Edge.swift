@@ -81,3 +81,9 @@ public struct EdgeInsets: Equatable, Animatable, _VectorMath {
         }
     }
 }
+
+extension Edge: Sendable {    
+}
+
+extension EdgeInsets: Sendable {
+}
