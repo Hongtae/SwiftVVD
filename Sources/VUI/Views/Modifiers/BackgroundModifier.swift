@@ -25,17 +25,24 @@ public struct _BackgroundModifier<Background>: ViewModifier where Background: Vi
             return mainOutputs
         }
         let bgPosAttr = graph.makeInput(value: CGPoint.zero)
+        let bgSizeAttr = graph.makeInput(value: ViewSize(.zero))
         let bgInputs = _ViewInputs(
             base: inputs.base,
             preferences: inputs.preferences,
             transform: inputs.transform,
             position: bgPosAttr,
             containerPosition: inputs.position,
-            size: inputs.size,
+            size: bgSizeAttr,
             safeAreaInsets: inputs.safeAreaInsets,
             containerSize: inputs.containerSize
         )
-        let bgOutputs = Background._makeView(view: modifier[\.background], inputs: bgInputs)
+        let zStackAttr: Attribute<ZStackLayout> = graph.makeRule {
+            ZStackLayout(alignment: modifier._attribute.value.alignment)
+        }
+        let zStackGraph = _GraphValue<ZStackLayout>(_attribute: zStackAttr)
+        let bgOutputs = ZStackLayout._makeLayoutView(root: zStackGraph, inputs: bgInputs) { _, childInputs in
+            Background._makeViewList(view: modifier[\.background], inputs: _ViewListInputs(from: childInputs))
+        }
         guard let bgLCAttr = bgOutputs._layoutComputer.attribute else {
             return mainOutputs
         }
@@ -52,19 +59,56 @@ public struct _BackgroundModifier<Background>: ViewModifier where Background: Vi
                     let mainSize = mainLC.sizeThatFits(proposal)
                     let ox = position.x - mainSize.width * anchor.x
                     let oy = position.y - mainSize.height * anchor.y
-                    let mainDims = mainLC.dimensions(in: proposal)
-                    let bgProposal = ProposedViewSize(width: mainSize.width, height: mainSize.height)
-                    let bgDims = bgLC.dimensions(in: bgProposal)
-                    let bgX = ox + mainDims[m.alignment.horizontal] - bgDims[m.alignment.horizontal]
-                    let bgY = oy + mainDims[m.alignment.vertical] - bgDims[m.alignment.vertical]
-                    let bgOrigin = CGPoint(x: bgX, y: bgY)
-                    bgPosAttr.setValue(bgOrigin)
-                    bgLC.place(at: bgOrigin, anchor: .topLeading, proposal: bgProposal)
+                    let frame = CGRect(x: ox, y: oy, width: mainSize.width, height: mainSize.height)
+
+                    var bgPosition = frame.origin
+                    var bgAnchor = UnitPoint()
+                    
+                    switch m.alignment.horizontal {
+                    case .leading:
+                        bgPosition.x = frame.minX
+                        bgAnchor.x = 0
+                    case .center:
+                        bgPosition.x = frame.midX
+                        bgAnchor.x = 0.5
+                    case .trailing:
+                        bgPosition.x = frame.maxX
+                        bgAnchor.x = 1
+                    default:
+                        bgPosition.x = frame.midX
+                        bgAnchor.x = 0.5
+                    }
+                    
+                    switch m.alignment.vertical {
+                    case .top:
+                        bgPosition.y = frame.minY
+                        bgAnchor.y = 0
+                    case .center:
+                        bgPosition.y = frame.midY
+                        bgAnchor.y = 0.5
+                    case .bottom:
+                        bgPosition.y = frame.maxY
+                        bgAnchor.y = 1
+                    default:
+                        bgPosition.y = frame.midY
+                        bgAnchor.y = 0.5
+                    }
+
+                    let bgProposal = ProposedViewSize(width: frame.width, height: frame.height)
+                    let bgSize = bgLC.sizeThatFits(bgProposal)
+                    
+                    let bgOriginX = bgPosition.x - bgSize.width * bgAnchor.x
+                    let bgOriginY = bgPosition.y - bgSize.height * bgAnchor.y
+                    
+                    bgPosAttr.setValue(CGPoint(x: bgOriginX, y: bgOriginY))
+                    bgSizeAttr.setValue(ViewSize(bgSize))
+                    bgLC.place(at: bgPosition, anchor: bgAnchor, proposal: bgProposal)
                 }
             )
         }
+        let mergedPreferences = PreferencesOutputs.merge([bgOutputs.preferences, mainOutputs.preferences], in: graph)
         return _ViewOutputs(
-            preferences: mainOutputs.preferences,
+            preferences: mergedPreferences,
             layoutComputer: OptionalAttribute(lcAttr)
         )
     }
@@ -90,9 +134,34 @@ public struct _BackgroundStyleModifier<Style>: ViewModifier where Style: ShapeSt
         self.ignoresSafeAreaEdges = ignoresSafeAreaEdges
     }
 
-    // TODO: Wire style fill as a background layer once rendering context is available.
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        body(_Graph(), inputs)
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        }
+        let mainOutputs = body(_Graph(), inputs)
+        let sizeAttr = inputs.size
+        let positionAttr = inputs.position
+        let dlAttr: Attribute<DisplayList> = graph.makeRule {
+            let m = modifier._attribute.value
+            let viewSize = sizeAttr.value.value
+            let position = positionAttr.value
+            var list = DisplayList()
+            if viewSize.width > 0 && viewSize.height > 0 {
+                let frame = CGRect(origin: position, size: viewSize)
+                let path = Rectangle().path(in: frame)
+                list.items.append { context in
+                    context.fill(path, with: .style(m.style))
+                }
+            }
+            return list
+        }
+        var bgPreferences = PreferencesOutputs()
+        bgPreferences.append(DisplayList.Key.self, node: dlAttr.identifier)
+        let mergedPreferences = PreferencesOutputs.merge([bgPreferences, mainOutputs.preferences], in: graph)
+        return _ViewOutputs(
+            preferences: mergedPreferences,
+            layoutComputer: mainOutputs._layoutComputer
+        )
     }
 }
 
@@ -115,9 +184,34 @@ public struct _BackgroundShapeModifier<Style, Bounds>: ViewModifier where Style:
         self.fillStyle = fillStyle
     }
 
-    // TODO: Wire shape fill as a background layer once rendering context is available.
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        body(_Graph(), inputs)
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        }
+        let mainOutputs = body(_Graph(), inputs)
+        let sizeAttr = inputs.size
+        let positionAttr = inputs.position
+        let dlAttr: Attribute<DisplayList> = graph.makeRule {
+            let m = modifier._attribute.value
+            let viewSize = sizeAttr.value.value
+            let position = positionAttr.value
+            var list = DisplayList()
+            if viewSize.width > 0 && viewSize.height > 0 {
+                let frame = CGRect(origin: position, size: viewSize)
+                let path = m.shape.path(in: frame)
+                list.items.append { context in
+                    context.fill(path, with: .style(m.style), style: m.fillStyle)
+                }
+            }
+            return list
+        }
+        var bgPreferences = PreferencesOutputs()
+        bgPreferences.append(DisplayList.Key.self, node: dlAttr.identifier)
+        let mergedPreferences = PreferencesOutputs.merge([bgPreferences, mainOutputs.preferences], in: graph)
+        return _ViewOutputs(
+            preferences: mergedPreferences,
+            layoutComputer: mainOutputs._layoutComputer
+        )
     }
 }
 
@@ -140,9 +234,34 @@ public struct _InsettableBackgroundShapeModifier<Style, Bounds>: ViewModifier wh
         self.fillStyle = fillStyle
     }
 
-    // TODO: Wire insettable shape fill as a background layer once rendering context is available.
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        body(_Graph(), inputs)
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        }
+        let mainOutputs = body(_Graph(), inputs)
+        let sizeAttr = inputs.size
+        let positionAttr = inputs.position
+        let dlAttr: Attribute<DisplayList> = graph.makeRule {
+            let m = modifier._attribute.value
+            let viewSize = sizeAttr.value.value
+            let position = positionAttr.value
+            var list = DisplayList()
+            if viewSize.width > 0 && viewSize.height > 0 {
+                let frame = CGRect(origin: position, size: viewSize)
+                let path = m.shape.path(in: frame)
+                list.items.append { context in
+                    context.fill(path, with: .style(m.style), style: m.fillStyle)
+                }
+            }
+            return list
+        }
+        var bgPreferences = PreferencesOutputs()
+        bgPreferences.append(DisplayList.Key.self, node: dlAttr.identifier)
+        let mergedPreferences = PreferencesOutputs.merge([bgPreferences, mainOutputs.preferences], in: graph)
+        return _ViewOutputs(
+            preferences: mergedPreferences,
+            layoutComputer: mainOutputs._layoutComputer
+        )
     }
 }
 

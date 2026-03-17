@@ -25,17 +25,24 @@ public struct _OverlayModifier<Overlay>: ViewModifier where Overlay: View {
             return mainOutputs
         }
         let ovPosAttr = graph.makeInput(value: CGPoint.zero)
+        let ovSizeAttr = graph.makeInput(value: ViewSize(.zero))
         let ovInputs = _ViewInputs(
             base: inputs.base,
             preferences: inputs.preferences,
             transform: inputs.transform,
             position: ovPosAttr,
             containerPosition: inputs.position,
-            size: inputs.size,
+            size: ovSizeAttr,
             safeAreaInsets: inputs.safeAreaInsets,
             containerSize: inputs.containerSize
         )
-        let ovOutputs = Overlay._makeView(view: modifier[\.overlay], inputs: ovInputs)
+        let zStackAttr: Attribute<ZStackLayout> = graph.makeRule {
+            ZStackLayout(alignment: modifier._attribute.value.alignment)
+        }
+        let zStackGraph = _GraphValue<ZStackLayout>(_attribute: zStackAttr)
+        let ovOutputs = ZStackLayout._makeLayoutView(root: zStackGraph, inputs: ovInputs) { _, childInputs in
+            Overlay._makeViewList(view: modifier[\.overlay], inputs: _ViewListInputs(from: childInputs))
+        }
         guard let ovLCAttr = ovOutputs._layoutComputer.attribute else {
             return mainOutputs
         }
@@ -52,14 +59,50 @@ public struct _OverlayModifier<Overlay>: ViewModifier where Overlay: View {
                     let mainSize = mainLC.sizeThatFits(proposal)
                     let ox = position.x - mainSize.width * anchor.x
                     let oy = position.y - mainSize.height * anchor.y
-                    let mainDims = mainLC.dimensions(in: proposal)
-                    let ovProposal = ProposedViewSize(width: mainSize.width, height: mainSize.height)
-                    let ovDims = ovLC.dimensions(in: ovProposal)
-                    let ovX = ox + mainDims[m.alignment.horizontal] - ovDims[m.alignment.horizontal]
-                    let ovY = oy + mainDims[m.alignment.vertical] - ovDims[m.alignment.vertical]
-                    let ovOrigin = CGPoint(x: ovX, y: ovY)
-                    ovPosAttr.setValue(ovOrigin)
-                    ovLC.place(at: ovOrigin, anchor: .topLeading, proposal: ovProposal)
+                    let frame = CGRect(x: ox, y: oy, width: mainSize.width, height: mainSize.height)
+
+                    var ovPosition = frame.origin
+                    var ovAnchor = UnitPoint()
+                    
+                    switch m.alignment.horizontal {
+                    case .leading:
+                        ovPosition.x = frame.minX
+                        ovAnchor.x = 0
+                    case .center:
+                        ovPosition.x = frame.midX
+                        ovAnchor.x = 0.5
+                    case .trailing:
+                        ovPosition.x = frame.maxX
+                        ovAnchor.x = 1
+                    default:
+                        ovPosition.x = frame.midX
+                        ovAnchor.x = 0.5
+                    }
+                    
+                    switch m.alignment.vertical {
+                    case .top:
+                        ovPosition.y = frame.minY
+                        ovAnchor.y = 0
+                    case .center:
+                        ovPosition.y = frame.midY
+                        ovAnchor.y = 0.5
+                    case .bottom:
+                        ovPosition.y = frame.maxY
+                        ovAnchor.y = 1
+                    default:
+                        ovPosition.y = frame.midY
+                        ovAnchor.y = 0.5
+                    }
+
+                    let ovProposal = ProposedViewSize(width: frame.width, height: frame.height)
+                    let ovSize = ovLC.sizeThatFits(ovProposal)
+                    
+                    let ovOriginX = ovPosition.x - ovSize.width * ovAnchor.x
+                    let ovOriginY = ovPosition.y - ovSize.height * ovAnchor.y
+                    
+                    ovPosAttr.setValue(CGPoint(x: ovOriginX, y: ovOriginY))
+                    ovSizeAttr.setValue(ViewSize(ovSize))
+                    ovLC.place(at: ovPosition, anchor: ovAnchor, proposal: ovProposal)
                 }
             )
         }
@@ -90,9 +133,34 @@ public struct _OverlayStyleModifier<Style>: ViewModifier where Style: ShapeStyle
         self.ignoresSafeAreaEdges = ignoresSafeAreaEdges
     }
 
-    // TODO: Wire style fill as an overlay layer once rendering context is available.
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        body(_Graph(), inputs)
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        }
+        let mainOutputs = body(_Graph(), inputs)
+        let sizeAttr = inputs.size
+        let positionAttr = inputs.position
+        let dlAttr: Attribute<DisplayList> = graph.makeRule {
+            let m = modifier._attribute.value
+            let viewSize = sizeAttr.value.value
+            let position = positionAttr.value
+            var list = DisplayList()
+            if viewSize.width > 0 && viewSize.height > 0 {
+                let frame = CGRect(origin: position, size: viewSize)
+                let path = Rectangle().path(in: frame)
+                list.items.append { context in
+                    context.fill(path, with: .style(m.style))
+                }
+            }
+            return list
+        }
+        var ovPreferences = PreferencesOutputs()
+        ovPreferences.append(DisplayList.Key.self, node: dlAttr.identifier)
+        let mergedPreferences = PreferencesOutputs.merge([mainOutputs.preferences, ovPreferences], in: graph)
+        return _ViewOutputs(
+            preferences: mergedPreferences,
+            layoutComputer: mainOutputs._layoutComputer
+        )
     }
 }
 
@@ -115,9 +183,34 @@ public struct _OverlayShapeModifier<Style, Bounds>: ViewModifier where Style: Sh
         self.fillStyle = fillStyle
     }
 
-    // TODO: Wire shape fill as an overlay layer once rendering context is available.
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        body(_Graph(), inputs)
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+        }
+        let mainOutputs = body(_Graph(), inputs)
+        let sizeAttr = inputs.size
+        let positionAttr = inputs.position
+        let dlAttr: Attribute<DisplayList> = graph.makeRule {
+            let m = modifier._attribute.value
+            let viewSize = sizeAttr.value.value
+            let position = positionAttr.value
+            var list = DisplayList()
+            if viewSize.width > 0 && viewSize.height > 0 {
+                let frame = CGRect(origin: position, size: viewSize)
+                let path = m.shape.path(in: frame)
+                list.items.append { context in
+                    context.fill(path, with: .style(m.style), style: m.fillStyle)
+                }
+            }
+            return list
+        }
+        var ovPreferences = PreferencesOutputs()
+        ovPreferences.append(DisplayList.Key.self, node: dlAttr.identifier)
+        let mergedPreferences = PreferencesOutputs.merge([mainOutputs.preferences, ovPreferences], in: graph)
+        return _ViewOutputs(
+            preferences: mergedPreferences,
+            layoutComputer: mainOutputs._layoutComputer
+        )
     }
 }
 

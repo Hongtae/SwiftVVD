@@ -52,7 +52,7 @@ public struct VStackLayout: Layout {
         let minHeights = subviews.map { $0.sizeThatFits(ProposedViewSize(width: fitWidthProposal.width, height: 0)).height }
         let idealHeights = subviews.map { $0.sizeThatFits(fitWidthProposal).height }
         let maxHeights = subviews.map { $0.sizeThatFits(ProposedViewSize(width: fitWidthProposal.width, height: .infinity)).height }
-        
+
         if proposal.height == nil {
             return idealHeights
         }

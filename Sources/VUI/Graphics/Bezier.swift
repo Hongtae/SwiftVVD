@@ -80,19 +80,32 @@ struct QuadraticBezier {
     }
 
     var boundingBox: CGRect {
-        var bbMin = CGPoint.minimum(p0, p2)
-        var bbMax = CGPoint.minimum(p0, p2)
+        var minX = min(p0.x, p2.x)
+        var minY = min(p0.y, p2.y)
+        var maxX = max(p0.x, p2.x)
+        var maxY = max(p0.y, p2.y)
 
-        if p1.x < bbMin.x || p1.x > bbMax.x || p1.y < bbMin.y || p1.y > bbMax.y {
-            let p = (p0 - p1) / (p0 - p1 * 2 + p2)
-            let t = CGPoint.minimum(.maximum(p, .zero), CGPoint(x: 1, y: 1))
-
-            let q = interpolate(t)
-
-            bbMin = .minimum(bbMin, q)
-            bbMax = .maximum(bbMax, q)
+        let dX = p0.x - 2 * p1.x + p2.x
+        if dX.magnitude > .ulpOfOne {
+            let tx = (p0.x - p1.x) / dX
+            if tx > 0 && tx < 1 {
+                let x = interpolate(tx).x
+                minX = min(minX, x)
+                maxX = max(maxX, x)
+            }
         }
-        return .boundingRect(bbMin, bbMax)
+
+        let dY = p0.y - 2 * p1.y + p2.y
+        if dY.magnitude > .ulpOfOne {
+            let ty = (p0.y - p1.y) / dY
+            if ty > 0 && ty < 1 {
+                let y = interpolate(ty).y
+                minY = min(minY, y)
+                maxY = max(maxY, y)
+            }
+        }
+
+        return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
     }
 
     func intersectLineSegment(_ begin: CGPoint, _ end: CGPoint) -> [CGFloat] {
@@ -232,17 +245,26 @@ struct CubicBezier {
         let a = p3 - p2 * 3 + p1 * 3 - p0
         let b = p2 * 3 - p1 * 6 + p0 * 3
         let c = p1 * 3 - p0 * 3
-        let determinant = b * b - a * c * 4
+        
+        // Derivative coefficients: X'(t) = 3at^2 + 2bt + c = 0
+        let a_der = a * 3
+        let b_der = b * 2
+        let c_der = c
+        
+        let determinant = b_der * b_der - a_der * c_der * 4
 
         let extremes = {
             (a: CGFloat, b: CGFloat, c: CGFloat, d: CGFloat) -> [CGFloat] in
             if d < 0 { return [] }
-            if a == 0 { return [ -c / b ] }
-            if d == 0 { return [ -b / ( a * 2) ] }
+            if a.magnitude < .ulpOfOne {
+                if b.magnitude < .ulpOfOne { return [] }
+                return [ -c / b ]
+            }
+            if d.magnitude < .ulpOfOne { return [ -b / ( a * 2) ] }
             let s = sqrt(d)
             return [
-                (s - b) / ( a * 2),
-                -(s + b) / ( a * 2)
+                (-b + s) / ( a * 2),
+                (-b - s) / ( a * 2)
             ]
         }
 
@@ -256,19 +278,19 @@ struct CubicBezier {
             + (p0)
         }
 
-        var minX = min(p0.x, p2.x)
-        var minY = min(p0.y, p2.y)
-        var maxX = max(p0.x, p2.x)
-        var maxY = max(p0.y, p2.y)
+        var minX = min(p0.x, p3.x)
+        var minY = min(p0.y, p3.y)
+        var maxX = max(p0.x, p3.x)
+        var maxY = max(p0.y, p3.y)
 
-        extremes(a.x, b.x, c.x, determinant.x).forEach { t in
+        extremes(a_der.x, b_der.x, c_der.x, determinant.x).forEach { t in
             if t > 0 && t < 1 {
                 let x = curve(p0.x, p1.x, p2.x, p3.x, t)
                 minX = min(x, minX)
                 maxX = max(x, maxX)
             }
         }
-        extremes(a.y, b.y, c.y, determinant.y).forEach { t in
+        extremes(a_der.y, b_der.y, c_der.y, determinant.y).forEach { t in
             if t > 0 && t < 1 {
                 let y = curve(p0.y, p1.y, p2.y, p3.y, t)
                 minY = min(y, minY)

@@ -22,6 +22,8 @@ public struct _ShapeView<Content, Style>: View where Content: Shape, Style: Shap
         guard let graph = AttributeGraph.current else {
             fatalError("\(self)._makeView called outside an active AttributeGraph context.")
         }
+        let sizeAttr = inputs.size
+        let positionAttr = inputs.position
         let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
             let v = view._attribute.value   // dep: shape/style changes
             return LayoutComputer(
@@ -32,7 +34,28 @@ public struct _ShapeView<Content, Style>: View where Content: Shape, Style: Shap
                 }
             )
         }
-        return _ViewOutputs(layoutComputer: OptionalAttribute(lcAttr))
+        let dlAttr: Attribute<DisplayList> = graph.makeRule {
+            let v = view._attribute.value   // dep: shape/style/fillStyle changes
+            let viewSize = sizeAttr.value.value
+            let position = positionAttr.value
+            var list = DisplayList()
+            //Log.debug("ShapeView: size=\(viewSize), position=\(position)")
+            if viewSize.width > 0 && viewSize.height > 0 {
+                let frame = CGRect(origin: position, size: viewSize)
+                list.items.append { context in
+                    if let drawer = v.shape as? ShapeDrawer {
+                        drawer._draw(in: frame, style: v.style, fillStyle: v.fillStyle, context: context)
+                    } else {
+                        let path = v.shape.path(in: frame)
+                        context.fill(path, with: .style(v.style), style: v.fillStyle)
+                    }
+                }
+            }
+            return list
+        }
+        var outputs = _ViewOutputs(layoutComputer: OptionalAttribute(lcAttr))
+        outputs.preferences.append(DisplayList.Key.self, node: dlAttr.identifier)
+        return outputs
     }
 
     public typealias Body = Never

@@ -22,8 +22,11 @@ public protocol Shape: Animatable, View {
 extension Shape {
     public static var role: ShapeRole { .fill }
     public func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
-        let size = proposal.replacingUnspecifiedDimensions()
-        if size.width == .infinity || size.height == .infinity {
+        var size = proposal.replacingUnspecifiedDimensions()
+        size.width = max(size.width, 0)
+        size.height = max(size.height, 0)
+
+        if size.width == .infinity || size.height == .infinity || size.width <= .ulpOfOne || size.height <= .ulpOfOne {
             return size
         }
         let path = self.path(in: CGRect(origin: .zero, size: size))

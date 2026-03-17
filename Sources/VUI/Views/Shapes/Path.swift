@@ -794,6 +794,7 @@ extension Path {
 
     public mutating func addRect(_ rect: CGRect,
                                  transform: CGAffineTransform = .identity) {
+        if rect.isNull { return }
         let pt = [
             CGPoint(x: rect.minX, y: rect.minY).applying(transform),
             CGPoint(x: rect.maxX, y: rect.minY).applying(transform),
@@ -811,6 +812,7 @@ extension Path {
                                         cornerSize: CGSize,
                                         style: RoundedCornerStyle = .circular,
                                         transform: CGAffineTransform = .identity) {
+        if rect.isNull { return }
         let midX = rect.midX
         let midY = rect.midY
         let minX = rect.minX
@@ -913,6 +915,7 @@ extension Path {
 
     public mutating func addEllipse(in rect: CGRect,
                                     transform: CGAffineTransform = .identity) {
+        if rect.isNull { return }
         let midX = rect.midX
         let midY = rect.midY
         let minX = rect.minX
