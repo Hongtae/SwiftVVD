@@ -30,10 +30,38 @@ extension LabelStyleConfiguration.Icon: _PrimitiveView {}
 
 extension LabelStyleConfiguration.Title {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        if let proxy = inputs.base.customInputs.value(forKey: _StaticSourceInputKey<Self>.self) {
-            return proxy.makeView(_Graph(), inputs: inputs)
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
         }
-        return _ViewOutputs()
+        guard let proxy = inputs.base.customInputs.value(forKey: _StaticSourceInputKey<Self>.self) else {
+            return _ViewOutputs()
+        }
+        let innerPosAttr = graph.makeInput(value: CGPoint.zero)
+        let innerSizeAttr = graph.makeInput(value: ViewSize(.zero))
+        var innerInputs = inputs
+        innerInputs.position = innerPosAttr
+        innerInputs.size = innerSizeAttr
+        let innerOutputs = proxy.makeView(_Graph(), inputs: innerInputs)
+        guard let innerLCAttr = innerOutputs._layoutComputer.attribute else {
+            return innerOutputs
+        }
+        let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
+            let innerLC = innerLCAttr.value
+            return LayoutComputer(
+                sizeThatFits: innerLC._sizeThatFits,
+                spacing: innerLC._spacing,
+                dimensions: innerLC._dimensions,
+                place: { position, anchor, proposal in
+                    let size = innerLC.sizeThatFits(proposal)
+                    let origin = CGPoint(x: position.x - size.width * anchor.x,
+                                         y: position.y - size.height * anchor.y)
+                    innerPosAttr.setValue(origin)
+                    innerSizeAttr.setValue(ViewSize(size))
+                    innerLC.place(at: position, anchor: anchor, proposal: proposal)
+                }
+            )
+        }
+        return _ViewOutputs(preferences: innerOutputs.preferences, layoutComputer: OptionalAttribute(lcAttr))
     }
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
         _ViewListOutputs(
@@ -46,10 +74,38 @@ extension LabelStyleConfiguration.Title {
 
 extension LabelStyleConfiguration.Icon {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        if let proxy = inputs.base.customInputs.value(forKey: _StaticSourceInputKey<Self>.self) {
-            return proxy.makeView(_Graph(), inputs: inputs)
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
         }
-        return _ViewOutputs()
+        guard let proxy = inputs.base.customInputs.value(forKey: _StaticSourceInputKey<Self>.self) else {
+            return _ViewOutputs()
+        }
+        let innerPosAttr = graph.makeInput(value: CGPoint.zero)
+        let innerSizeAttr = graph.makeInput(value: ViewSize(.zero))
+        var innerInputs = inputs
+        innerInputs.position = innerPosAttr
+        innerInputs.size = innerSizeAttr
+        let innerOutputs = proxy.makeView(_Graph(), inputs: innerInputs)
+        guard let innerLCAttr = innerOutputs._layoutComputer.attribute else {
+            return innerOutputs
+        }
+        let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
+            let innerLC = innerLCAttr.value
+            return LayoutComputer(
+                sizeThatFits: innerLC._sizeThatFits,
+                spacing: innerLC._spacing,
+                dimensions: innerLC._dimensions,
+                place: { position, anchor, proposal in
+                    let size = innerLC.sizeThatFits(proposal)
+                    let origin = CGPoint(x: position.x - size.width * anchor.x,
+                                         y: position.y - size.height * anchor.y)
+                    innerPosAttr.setValue(origin)
+                    innerSizeAttr.setValue(ViewSize(size))
+                    innerLC.place(at: position, anchor: anchor, proposal: proposal)
+                }
+            )
+        }
+        return _ViewOutputs(preferences: innerOutputs.preferences, layoutComputer: OptionalAttribute(lcAttr))
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
