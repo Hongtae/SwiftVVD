@@ -43,7 +43,7 @@ extension PrimitiveButtonStyleConfiguration.Label {
         guard let graph = AttributeGraph.current else {
             fatalError("\(self)._makeView called outside an active AttributeGraph context.")
         }
-        guard let proxy = inputs.base.customInputs.value(forKey: _StaticSourceInputKey<Self>.self) else {
+        guard case .node(let source, _) = inputs.base.customInputs.value(forKey: SourceInput<Self>.self) else {
             return _ViewOutputs()
         }
         let innerPosAttr = graph.makeInput(value: CGPoint.zero)
@@ -51,7 +51,7 @@ extension PrimitiveButtonStyleConfiguration.Label {
         var innerInputs = inputs
         innerInputs.position = innerPosAttr
         innerInputs.size = innerSizeAttr
-        let innerOutputs = proxy.makeView(_Graph(), inputs: innerInputs)
+        let innerOutputs = source.makeView(inputs: innerInputs)
         guard let innerLCAttr = innerOutputs._layoutComputer.attribute else {
             return innerOutputs
         }
@@ -299,7 +299,7 @@ extension ButtonStyleConfiguration.Label {
         guard let graph = AttributeGraph.current else {
             fatalError("\(self)._makeView called outside an active AttributeGraph context.")
         }
-        guard let proxy = inputs.base.customInputs.value(forKey: _StaticSourceInputKey<PrimitiveButtonStyleConfiguration.Label>.self) else {
+        guard case .node(let source, _) = inputs.base.customInputs.value(forKey: SourceInput<PrimitiveButtonStyleConfiguration.Label>.self) else {
             return _ViewOutputs()
         }
         let innerPosAttr = graph.makeInput(value: CGPoint.zero)
@@ -307,7 +307,7 @@ extension ButtonStyleConfiguration.Label {
         var innerInputs = inputs
         innerInputs.position = innerPosAttr
         innerInputs.size = innerSizeAttr
-        let innerOutputs = proxy.makeView(_Graph(), inputs: innerInputs)
+        let innerOutputs = source.makeView(inputs: innerInputs)
         guard let innerLCAttr = innerOutputs._layoutComputer.attribute else {
             return innerOutputs
         }

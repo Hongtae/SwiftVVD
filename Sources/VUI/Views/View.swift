@@ -273,38 +273,6 @@ func makeView<V: View>(view: _GraphValue<V>, inputs: _ViewInputs) -> _ViewOutput
     V._makeView(view: view, inputs: inputs)
 }
 
-struct ViewProxy: Hashable {
-    let type: any View.Type
-    let graph: _GraphValue<Any>
-
-    init<V: View>(_ graph: _GraphValue<V>) {
-        self.type = V.self
-        self.graph = graph.unsafeCast(to: Any.self)
-    }
-
-    func makeView(_: _Graph, inputs: _ViewInputs) -> _ViewOutputs {
-        func make<T: View>(_ type: T.Type) -> _ViewOutputs {
-            T._makeView(view: self.graph.unsafeCast(to: T.self), inputs: inputs)
-        }
-        return make(self.type)
-    }
-
-    func makeViewList(_: _Graph, inputs: _ViewListInputs) -> _ViewListOutputs {
-        func make<T: View>(_ type: T.Type) -> _ViewListOutputs {
-            T._makeViewList(view: self.graph.unsafeCast(to: T.self), inputs: inputs)
-        }
-        return make(self.type)
-    }
-
-    static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.graph == rhs.graph
-    }
-
-    func hash(into hasher: inout Hasher) {
-        hasher.combine(graph._attribute.identifier)
-    }
-}
-
 struct TypedUnaryViewGenerator {
     var view: AGWeakAttribute
     var viewType: any View.Type

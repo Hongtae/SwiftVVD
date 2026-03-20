@@ -100,7 +100,7 @@ extension Menu where Label == MenuStyleConfiguration.Label, Content == MenuStyle
 struct ResolvedMenuStyle: View {
     var _menuItemStyle = _MenuItemMenuStyle()
     var _style: any MenuStyle = DefaultMenuStyle.automatic
-    var _configuration = MenuStyleConfiguration(nil, nil)
+    var _configuration = MenuStyleConfiguration()
     var _primaryAction: (() -> Void)? = nil
 
     init(primaryAction: (() -> Void)? = nil) {
@@ -120,11 +120,9 @@ struct ResolvedMenuStyle: View {
             ?? DefaultMenuStyle.automatic
 
         func wireBody(_ style: some MenuStyle) -> _ViewOutputs {
-            let labelProxy = inputs.base.customInputs.value(forKey: _StaticSourceInputKey<MenuStyleConfiguration.Label>.self)
-            let contentProxy = inputs.base.customInputs.value(forKey: _StaticSourceInputKey<MenuStyleConfiguration.Content>.self)
             let bodyAttr = graph.makeRule {
                 let rs = view._attribute.value
-                let config = MenuStyleConfiguration(labelProxy, contentProxy, primaryAction: rs._primaryAction)
+                let config = MenuStyleConfiguration(primaryAction: rs._primaryAction)
                 return style.makeBody(configuration: config)
             }
             return makeView(view: _GraphValue(_attribute: bodyAttr), inputs: inputs)

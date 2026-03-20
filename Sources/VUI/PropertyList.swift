@@ -2,10 +2,42 @@
 //  File: PropertyList.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
+
+// Bloom filter for fast negative lookup in PropertyList chains.
+// 64-bit bit-array: if a key's bits are not set, it is definitely not in the chain.
+// False positives are possible (full scan still needed on hit).
+struct BloomFilter: CustomStringConvertible {
+    var value: UInt64 = 0
+
+    mutating func insert(_ key: any PropertyItem.Type) {
+        let h = UInt64(UInt(bitPattern: ObjectIdentifier(key)))
+        value |= (UInt64(1) << (h & 63)) | (UInt64(1) << ((h >> 6) & 63))
+    }
+
+    func mightContain(_ key: any PropertyItem.Type) -> Bool {
+        let h = UInt64(UInt(bitPattern: ObjectIdentifier(key)))
+        let bit1 = UInt64(1) << (h & 63)
+        let bit2 = UInt64(1) << ((h >> 6) & 63)
+        return (value & bit1 == bit1) && (value & bit2 == bit2)
+    }
+
+    var description: String { "BloomFilter(value: \(value))" }
+}
+
+// Monotonic counter for PropertyList element IDs.
+private nonisolated(unsafe) var _uniqueIDCounter: UInt32 = 0
+struct UniqueID: Equatable, CustomStringConvertible {
+    let value: UInt32
+    init() {
+        _uniqueIDCounter &+= 1
+        value = _uniqueIDCounter
+    }
+    var description: String { "UniqueID(value: \(value))" }
+}
 
 @usableFromInline
 struct PropertyList: CustomStringConvertible {
@@ -39,47 +71,41 @@ struct PropertyList: CustomStringConvertible {
 }
 
 extension PropertyList {
-    mutating func setValue<T: PropertyItem>(_ value: T.Item, forKey  key: T.Type) {
+    mutating func setValue<T: PropertyItem>(_ value: T.Item, forKey key: T.Type) {
         self.makeUnique()
+        // Update in-place if key already exists.
         var element = self.elements
-        if var last = element {
-            while let current = element {
-                if current.item == key {
-                    current.value = value
-                    return
-                }
-                last = current
-                element = current.next
+        while let current = element {
+            if current.keyType == key {
+                (current as! TypedElement<T>).value = value
+                return
             }
-            last.next = Element(item: key, value: value)
-        } else {
-            self.elements = Element(item: key, value: value)
+            element = current.after
         }
+        // Not found — prepend new element at head.
+        self.prepend(TypedElement(key: key, value: value))
     }
 
     mutating func setValue<T: PropertyItem>(_ value: T.Item, forKey key: T.Type) where T.Item: Equatable {
-        if let item = self.nonDefaultValue(forKey: key), item == value {
-            return
-        }
-        if value == T.defaultValue {
-            self.removeValue(forKey: key)
-            return
-        }
-
-        self.makeUnique()
-        var element = self.elements
-        if var last = element {
+        if let existing = self.nonDefaultValue(forKey: key) {
+            if existing == value { return }
+            if value == T.defaultValue {
+                self.removeValue(forKey: key)
+                return
+            }
+            self.makeUnique()
+            var element = self.elements
             while let current = element {
-                if current.item == key {
-                    current.value = value
+                if current.keyType == key {
+                    (current as! TypedElement<T>).value = value
                     return
                 }
-                last = current
-                element = current.next
+                element = current.after
             }
-            last.next = Element(item: key, value: value)
         } else {
-            self.elements = Element(item: key, value: value)
+            if value == T.defaultValue { return }
+            self.makeUnique()
+            self.prepend(TypedElement(key: key, value: value))
         }
     }
 
@@ -87,39 +113,58 @@ extension PropertyList {
         if self.nonDefaultValue(forKey: key) != nil {
             self.makeUnique()
 
-            if let elements, elements.item is T {
-                self.elements = elements.next
+            if let head = self.elements, head.keyType == key {
+                self.elements = head.after
                 return
             }
-            var next = elements?.next
+            var next = elements?.after
             var prev = elements
-            while next != nil {
-                if next!.item == key {
-                    prev!.next = next!.next
+            while let current = next {
+                if current.keyType == key {
+                    prev!.after = current.after
                     break
                 }
-                prev = next
-                next = next!.next
+                prev = current
+                next = current.after
             }
+            // BloomFilter false positives for the removed key are acceptable because
+            // they cause at most one extra scan step, not incorrect results.
         }
     }
 
     func nonDefaultValue<T: PropertyItem>(forKey key: T.Type) -> T.Item? {
         var element = self.elements
         while let current = element {
-            if current.item == key {
-                return (current.value as! T.Item)
+            if current.keyType == key {
+                return (current as! TypedElement<T>).value
             }
-            element = current.next
+            // skipFilter covers all elements after current.
+            // If key is definitely absent in the remaining chain, stop early.
+            if !current.skipFilter.mightContain(key) {
+                return nil
+            }
+            element = current.after
         }
         return nil
     }
 
     func value<T: PropertyItem>(forKey key: T.Type) -> T.Item {
-        if let value = self.nonDefaultValue(forKey: key) {
-            return value
+        nonDefaultValue(forKey: key) ?? T.defaultValue
+    }
+
+    // Insert newElem at the head of the chain, updating length and skipFilter.
+    // skipFilter on each node covers all elements AFTER that node.
+    // Invariant: node.skipFilter = bloom(node.after.key) | node.after.skipFilter
+    private mutating func prepend(_ newElem: Element) {
+        let oldHead = self.elements
+        newElem.after = oldHead
+        newElem.length = 1 + (oldHead?.length ?? 0)
+        if let oldHead {
+            var filter = oldHead.skipFilter
+            filter.insert(oldHead.keyType)
+            newElem.skipFilter = filter
         }
-        return T.defaultValue
+        self.elements = newElem
     }
 
     private mutating func makeUnique() {
@@ -137,32 +182,63 @@ protocol PropertyItem: TransactionKey, CustomStringConvertible {
 extension PropertyList {
     @usableFromInline
     class Element: CustomStringConvertible {
-        let item: any PropertyItem.Type
-        var value: Any
-        var next: Element?
-        init<T: PropertyItem>(item: T.Type, value: T.Item, next: Element? = nil) {
-            self.item = item
-            self.value = value
-            self.next = next
+        let keyType: any PropertyItem.Type
+        var before: Element?               // doubly-linked (currently unused)
+        var after: Element?                // next element in chain
+        var skip: Unmanaged<Element>?      // skip-list pointer (nil = not used)
+        var length: UInt32                 // chain length from this node to end
+        var skipCount: UInt32              // number of elements the skip pointer jumps
+        var skipFilter: BloomFilter        // bloom filter covering elements after this node
+        let id: UniqueID
+
+        init(keyType: any PropertyItem.Type, after: Element? = nil) {
+            self.keyType = keyType
+            self.before = nil
+            self.after = after
+            self.skip = nil
+            self.length = 1 + (after?.length ?? 0)
+            self.skipCount = 0
+            self.skipFilter = BloomFilter()
+            self.id = UniqueID()
         }
+
         @usableFromInline
         var description: String {
-            let desc = "\(item):\(value)"
-            if let next {
-                return "\(desc), \(next.description)"
+            let desc = "\(keyType) = \(valueDescription)"
+            if let after {
+                return "\(desc), \(after.description)"
             }
             return desc
         }
 
-        func clone() -> Element {
-            func _dup<T: PropertyItem>(_ item: T.Type, value: Any, next: Element?) -> Element {
-                Element(item: item, value: value as! T.Item, next: next)
-            }
-            return _dup(item, value: value, next: next?.clone())
+        var valueDescription: String { fatalError("TypedElement must override valueDescription") }
+
+        func clone() -> Element { fatalError("TypedElement must override clone()") }
+    }
+
+    // Typed subclass — value is stored with the concrete Item type rather than Any.
+    final class TypedElement<T: PropertyItem>: Element {
+        var value: T.Item
+
+        init(key: T.Type, value: T.Item, after: Element? = nil) {
+            self.value = value
+            super.init(keyType: key, after: after)
+        }
+
+        override var valueDescription: String { "\(value)" }
+
+        override func clone() -> Element {
+            let copy = TypedElement(key: T.self, value: value, after: after?.clone())
+            // skipFilter covers the same keys after cloning (structure is identical).
+            copy.skipFilter = skipFilter
+            copy.length = length
+            copy.skipCount = skipCount
+            // skip pointers reference old elements, so do not copy.
+            return copy
         }
     }
 
     init<Item: PropertyItem>(_ item: Item.Type, value: Item.Item) {
-        self.elements = Element(item: item, value: value)
+        self.elements = TypedElement(key: item, value: value)
     }
 }

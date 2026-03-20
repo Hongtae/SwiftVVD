@@ -16,24 +16,18 @@ public protocol MenuStyle {
 public struct MenuStyleConfiguration {
     public struct Label: View {
         public typealias Body = Never
-        let view: ViewProxy?
     }
 
     public struct Content: View {
         public typealias Body = Never
-        let view: ViewProxy?
     }
 
-    public var label: MenuStyleConfiguration.Label { .init(view: _label) }
-    public var content: MenuStyleConfiguration.Content { .init(view: _content) }
+    public var label: MenuStyleConfiguration.Label { .init() }
+    public var content: MenuStyleConfiguration.Content { .init() }
 
-    let _label: ViewProxy?
-    let _content: ViewProxy?
     let _primaryAction: (() -> Void)?
 
-    init(_ label: ViewProxy?, _ content: ViewProxy?, primaryAction: (() -> Void)? = nil) {
-        self._label = label
-        self._content = content
+    init(primaryAction: (() -> Void)? = nil) {
         self._primaryAction = primaryAction
     }
 }
@@ -48,13 +42,38 @@ struct _MenuStyleKey: PropertyItem {
 
 extension MenuStyleConfiguration.Label {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        if let proxy = view._attribute.value.view {
-            return proxy.makeView(_Graph(), inputs: inputs)
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
         }
-        if let proxy = inputs.base.customInputs.value(forKey: _StaticSourceInputKey<Self>.self) {
-            return proxy.makeView(_Graph(), inputs: inputs)
+        guard case .node(let source, _) = inputs.base.customInputs.value(forKey: SourceInput<Self>.self) else {
+            return _ViewOutputs()
         }
-        return _ViewOutputs()
+        let innerPosAttr = graph.makeInput(value: CGPoint.zero)
+        let innerSizeAttr = graph.makeInput(value: ViewSize(.zero))
+        var innerInputs = inputs
+        innerInputs.position = innerPosAttr
+        innerInputs.size = innerSizeAttr
+        let innerOutputs = source.makeView(inputs: innerInputs)
+        guard let innerLCAttr = innerOutputs._layoutComputer.attribute else {
+            return innerOutputs
+        }
+        let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
+            let innerLC = innerLCAttr.value
+            return LayoutComputer(
+                sizeThatFits: innerLC._sizeThatFits,
+                spacing: innerLC._spacing,
+                dimensions: innerLC._dimensions,
+                place: { position, anchor, proposal in
+                    let size = innerLC.sizeThatFits(proposal)
+                    let origin = CGPoint(x: position.x - size.width * anchor.x,
+                                         y: position.y - size.height * anchor.y)
+                    innerPosAttr.setValue(origin)
+                    innerSizeAttr.setValue(ViewSize(size))
+                    innerLC.place(at: position, anchor: anchor, proposal: proposal)
+                }
+            )
+        }
+        return _ViewOutputs(preferences: innerOutputs.preferences, layoutComputer: OptionalAttribute(lcAttr))
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
@@ -68,13 +87,38 @@ extension MenuStyleConfiguration.Label {
 
 extension MenuStyleConfiguration.Content {
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        if let proxy = view._attribute.value.view {
-            return proxy.makeView(_Graph(), inputs: inputs)
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
         }
-        if let proxy = inputs.base.customInputs.value(forKey: _StaticSourceInputKey<Self>.self) {
-            return proxy.makeView(_Graph(), inputs: inputs)
+        guard case .node(let source, _) = inputs.base.customInputs.value(forKey: SourceInput<Self>.self) else {
+            return _ViewOutputs()
         }
-        return _ViewOutputs()
+        let innerPosAttr = graph.makeInput(value: CGPoint.zero)
+        let innerSizeAttr = graph.makeInput(value: ViewSize(.zero))
+        var innerInputs = inputs
+        innerInputs.position = innerPosAttr
+        innerInputs.size = innerSizeAttr
+        let innerOutputs = source.makeView(inputs: innerInputs)
+        guard let innerLCAttr = innerOutputs._layoutComputer.attribute else {
+            return innerOutputs
+        }
+        let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
+            let innerLC = innerLCAttr.value
+            return LayoutComputer(
+                sizeThatFits: innerLC._sizeThatFits,
+                spacing: innerLC._spacing,
+                dimensions: innerLC._dimensions,
+                place: { position, anchor, proposal in
+                    let size = innerLC.sizeThatFits(proposal)
+                    let origin = CGPoint(x: position.x - size.width * anchor.x,
+                                         y: position.y - size.height * anchor.y)
+                    innerPosAttr.setValue(origin)
+                    innerSizeAttr.setValue(ViewSize(size))
+                    innerLC.place(at: position, anchor: anchor, proposal: proposal)
+                }
+            )
+        }
+        return _ViewOutputs(preferences: innerOutputs.preferences, layoutComputer: OptionalAttribute(lcAttr))
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
