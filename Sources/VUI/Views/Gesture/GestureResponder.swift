@@ -21,7 +21,11 @@ struct ViewRespondersKey: PreferenceKey {
     static var defaultValue: [any ViewResponder] { [] }
     static var _includesRemovedValues: Bool { true }
     static func reduce(value: inout [any ViewResponder], nextValue: () -> [any ViewResponder]) {
-        value.append(contentsOf: nextValue())
+        // Prepend so that views merged LATER (= higher z-order) appear first in the
+        // hitResponders array and therefore win `.default` gesture priority.
+        // e.g. merge([bg, main]) → [main, bg]: content gets events before background ✓
+        //      merge([main, ov]) → [ov, main]: overlay gets events before content ✓
+        value = nextValue() + value
     }
 }
 

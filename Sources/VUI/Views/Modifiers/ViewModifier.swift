@@ -271,7 +271,8 @@ extension View {
 /// elements, which `wireElements` later dispatches on.
 ///
 /// Conformers: layout modifiers (`UnaryLayout`) and rendering modifiers (background, overlay, …).
-protocol PrimitiveViewModifier: ViewModifier where Self.Body == Never {}
+protocol PrimitiveViewModifier: ViewModifier where Self.Body == Never {
+}
 
 extension PrimitiveViewModifier {
     public static func _makeViewList(

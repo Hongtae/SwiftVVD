@@ -106,8 +106,9 @@ public struct _OverlayModifier<Overlay>: ViewModifier where Overlay: View {
                 }
             )
         }
+        let mergedPreferences = PreferencesOutputs.merge([mainOutputs.preferences, ovOutputs.preferences], in: graph)
         return _ViewOutputs(
-            preferences: mainOutputs.preferences,
+            preferences: mergedPreferences,
             layoutComputer: OptionalAttribute(lcAttr)
         )
     }

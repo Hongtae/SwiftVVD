@@ -27,6 +27,7 @@ extension _FrameLayout: UnaryLayout {
     func modifyLayoutComputer(_ lc: LayoutComputer) -> LayoutComputer {
         let w = self.width
         let h = self.height
+        let alignment = self.alignment
         return LayoutComputer(
             sizeThatFits: { proposal in
                 let childProposal = ProposedViewSize(
@@ -56,7 +57,32 @@ extension _FrameLayout: UnaryLayout {
                     width:  w != nil ? w : proposal.width,
                     height: h != nil ? h : proposal.height
                 )
-                lc.place(at: position, anchor: anchor, proposal: childProposal)
+                let childSize = lc.sizeThatFits(childProposal)
+                let frameWidth  = w ?? childSize.width
+                let frameHeight = h ?? childSize.height
+                // top-left origin of the frame
+                let ox = position.x - frameWidth  * anchor.x
+                let oy = position.y - frameHeight * anchor.y
+                // determine child position based on alignment
+                let cx: CGFloat
+                let ax: CGFloat
+                switch alignment.horizontal {
+                case .leading:   cx = ox;                    ax = 0
+                case .center:    cx = ox + frameWidth * 0.5; ax = 0.5
+                case .trailing:  cx = ox + frameWidth;       ax = 1
+                default:         cx = ox + frameWidth * 0.5; ax = 0.5
+                }
+                let cy: CGFloat
+                let ay: CGFloat
+                switch alignment.vertical {
+                case .top:       cy = oy;                     ay = 0
+                case .center:    cy = oy + frameHeight * 0.5; ay = 0.5
+                case .bottom:    cy = oy + frameHeight;       ay = 1
+                default:         cy = oy + frameHeight * 0.5; ay = 0.5
+                }
+                lc.place(at: CGPoint(x: cx, y: cy),
+                         anchor: UnitPoint(x: ax, y: ay),
+                         proposal: childProposal)
             }
         )
     }

@@ -128,8 +128,10 @@ extension Layout {
                     spacing: innerLC._spacing,
                     dimensions: innerLC._dimensions,
                     place: { position, anchor, proposal in
-                        posAttr.setValue(position)
                         let resolvedSize = innerLC.sizeThatFits(proposal)
+                        let origin = CGPoint(x: position.x - resolvedSize.width  * anchor.x,
+                                             y: position.y - resolvedSize.height * anchor.y)
+                        posAttr.setValue(origin)
                         sizeAttr.setValue(ViewSize(resolvedSize))
                         innerLC.place(at: position, anchor: anchor, proposal: proposal)
                     }
@@ -272,6 +274,7 @@ extension Layout {
                             let posAttr  = innerPosAttrs[i]
                             let sizeAttr = innerSizeAttrs[i]
                             let innerLC  = innerLCs[i]
+                            let innerPref = i < innerPrefs.count ? innerPrefs[i] : PreferencesOutputs()
                             // Reconstruct _ViewInputs for this child using its position/size attrs.
                             let childInputs = _ViewInputs(
                                 base: layoutMod.baseInputs,
@@ -283,13 +286,15 @@ extension Layout {
                                 safeAreaInsets: inputs.safeAreaInsets,
                                 containerSize: OptionalAttribute(inputs.size)
                             )
-                            // body closure: return the child's already-wired _ViewOutputs.
+                            // body closure: pass through inner preferences.
+                            // _BackgroundModifier._makeView: merge([bgPrefs, mainOutputs.prefs]) places bg first.
+                            // _OverlayModifier._makeView:    merge([mainOutputs.prefs, ovPrefs]) places overlay later.
                             let modOutputs = M._makeView(
                                 modifier: _GraphValue(_attribute: modAttr),
                                 inputs: childInputs
                             ) { _, _ in
                                 _ViewOutputs(
-                                    preferences: PreferencesOutputs(),
+                                    preferences: innerPref,
                                     layoutComputer: OptionalAttribute(innerLC)
                                 )
                             }
@@ -297,10 +302,7 @@ extension Layout {
                             // background/overlay modifiers that create their own combined LC).
                             let resultLC = modOutputs._layoutComputer.attribute ?? innerLC
                             outLCs.append(resultLC)
-                            let merged = i < innerPrefs.count
-                                ? PreferencesOutputs.merge([innerPrefs[i], modOutputs.preferences], in: graph)
-                                : modOutputs.preferences
-                            outPrefs.append(merged)
+                            outPrefs.append(modOutputs.preferences)
                         }
                         // posAttrs/sizeAttrs: the inner attrs are still updated via the place chain
                         // (resultLC.place → innerLC.place → wrapperLC.place → posAttr.setValue).
