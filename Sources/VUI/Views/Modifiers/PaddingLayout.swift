@@ -18,7 +18,7 @@ public struct _PaddingLayout: ViewModifier, Animatable {
     public typealias Body = Never
 }
 
-extension _PaddingLayout: _ViewLayoutModifier {
+extension _PaddingLayout: UnaryLayout {
     func modifyLayoutComputer(_ lc: LayoutComputer) -> LayoutComputer {
         let resolvedInsets = insets ?? EdgeInsets(_all: 16)
         let top      = edges.contains(.top)      ? resolvedInsets.top      : 0

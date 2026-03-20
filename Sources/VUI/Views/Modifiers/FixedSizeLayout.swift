@@ -20,7 +20,7 @@ public struct _FixedSizeLayout: ViewModifier, Animatable, Sendable {
     public typealias Body = Never
 }
 
-extension _FixedSizeLayout: _ViewLayoutModifier {
+extension _FixedSizeLayout: UnaryLayout {
     func modifyLayoutComputer(_ lc: LayoutComputer) -> LayoutComputer {
         let h = self.horizontal
         let v = self.vertical

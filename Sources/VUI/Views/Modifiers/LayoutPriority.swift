@@ -11,9 +11,9 @@ public struct LayoutPriorityTraitKey: _ViewTraitKey {
     public static var defaultValue: Double { 0 }
 }
 
-/// `_ViewLayoutModifier` that sets the layout priority on the child's `LayoutComputer`.
+/// `UnaryLayout` that sets the layout priority on the child's `LayoutComputer`.
 /// Wraps the child LC and overrides its `priority` field.
-struct LayoutPriorityLayout: _ViewLayoutModifier {
+struct LayoutPriorityLayout: UnaryLayout {
     var value: Double
 
     var animatableData: Double {

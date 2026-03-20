@@ -117,12 +117,8 @@ public struct _BackgroundModifier<Background>: ViewModifier where Background: Vi
 extension _BackgroundModifier: Equatable where Background: Equatable {
 }
 
-extension _BackgroundModifier {
+extension _BackgroundModifier: PrimitiveViewModifier, MultiViewModifier {
     public typealias Body = Never
-
-    public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        body(_Graph(), inputs)
-    }
 }
 
 public struct _BackgroundStyleModifier<Style>: ViewModifier where Style: ShapeStyle {
@@ -165,12 +161,8 @@ public struct _BackgroundStyleModifier<Style>: ViewModifier where Style: ShapeSt
     }
 }
 
-extension _BackgroundStyleModifier {
+extension _BackgroundStyleModifier: PrimitiveViewModifier, MultiViewModifier {
     public typealias Body = Never
-
-    public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        body(_Graph(), inputs)
-    }
 }
 
 public struct _BackgroundShapeModifier<Style, Bounds>: ViewModifier where Style: ShapeStyle, Bounds: Shape {
@@ -215,12 +207,8 @@ public struct _BackgroundShapeModifier<Style, Bounds>: ViewModifier where Style:
     }
 }
 
-extension _BackgroundShapeModifier {
+extension _BackgroundShapeModifier: PrimitiveViewModifier, MultiViewModifier {
     public typealias Body = Never
-
-    public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        body(_Graph(), inputs)
-    }
 }
 
 public struct _InsettableBackgroundShapeModifier<Style, Bounds>: ViewModifier where Style: ShapeStyle, Bounds: InsettableShape {
@@ -265,12 +253,8 @@ public struct _InsettableBackgroundShapeModifier<Style, Bounds>: ViewModifier wh
     }
 }
 
-extension _InsettableBackgroundShapeModifier {
+extension _InsettableBackgroundShapeModifier: PrimitiveViewModifier, MultiViewModifier {
     public typealias Body = Never
-
-    public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        body(_Graph(), inputs)
-    }
 }
 
 extension View {

@@ -116,12 +116,8 @@ public struct _OverlayModifier<Overlay>: ViewModifier where Overlay: View {
 extension _OverlayModifier: Equatable where Overlay: Equatable {
 }
 
-extension _OverlayModifier {
+extension _OverlayModifier: PrimitiveViewModifier, MultiViewModifier {
     public typealias Body = Never
-
-    public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        body(_Graph(), inputs)
-    }
 }
 
 public struct _OverlayStyleModifier<Style>: ViewModifier where Style: ShapeStyle {
@@ -164,12 +160,8 @@ public struct _OverlayStyleModifier<Style>: ViewModifier where Style: ShapeStyle
     }
 }
 
-extension _OverlayStyleModifier {
+extension _OverlayStyleModifier: PrimitiveViewModifier, MultiViewModifier {
     public typealias Body = Never
-
-    public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        body(_Graph(), inputs)
-    }
 }
 
 public struct _OverlayShapeModifier<Style, Bounds>: ViewModifier where Style: ShapeStyle, Bounds: Shape {
@@ -214,12 +206,8 @@ public struct _OverlayShapeModifier<Style, Bounds>: ViewModifier where Style: Sh
     }
 }
 
-extension _OverlayShapeModifier {
+extension _OverlayShapeModifier: PrimitiveViewModifier, MultiViewModifier {
     public typealias Body = Never
-
-    public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        body(_Graph(), inputs)
-    }
 }
 
 extension View {

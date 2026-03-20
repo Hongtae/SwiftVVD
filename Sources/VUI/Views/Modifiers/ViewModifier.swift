@@ -176,10 +176,7 @@ extension ViewModifier where Self: _GraphInputsModifier, Self.Body == Never {
 extension ViewModifier where Self: Animatable {
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
         if Body.self is Never.Type {
-            // Body == Never: pass child outputs through unchanged.
-            // _ViewLayoutModifier conformance (more specific extension) handles the
-            // LayoutComputer-wrapping case; this fallback handles everything else.
-            return body(_Graph(), inputs)
+            fatalError("\(Self.self) may not have Body == Never")
         }
         var inputs = inputs
         inputs.base.customInputs.setValue(
@@ -194,7 +191,7 @@ extension ViewModifier where Self: Animatable {
 
     public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
         if Body.self is Never.Type {
-            return body(_Graph(), inputs)
+            fatalError("\(Self.self) may not have Body == Never")
         }
         var inputs = inputs
         inputs.base.customInputs.setValue(
@@ -269,20 +266,55 @@ extension View {
     }
 }
 
-/// A `ViewModifier` that transforms the child view's `LayoutComputer` without
-/// introducing a new body view tree.  Geometry-only modifiers (frame, padding,
-/// fixedSize …) conform to this protocol.
+/// Internal protocol that all `Body == Never` modifiers needing `_makeViewList` → `ModifiedElements`
+/// must conform to. The default extension creates a `_ViewListLayoutModifier` wrapping the inner
+/// elements, which `wireElements` later dispatches on.
 ///
-/// Conforming types implement `modifyLayoutComputer(_:)` and receive a correct
-/// `_makeView` / `_makeViewList` implementation for free.
-/// Because `_ViewLayoutModifier` requires both `ViewModifier` and `Animatable`,
-/// this extension is more specific than `extension ViewModifier where Self: Animatable`
-/// and Swift correctly selects it for conforming types.
-protocol _ViewLayoutModifier: ViewModifier, Animatable where Self.Body == Never {
+/// Conformers: layout modifiers (`UnaryLayout`) and rendering modifiers (background, overlay, …).
+protocol PrimitiveViewModifier: ViewModifier where Self.Body == Never {}
+
+extension PrimitiveViewModifier {
+    public static func _makeViewList(
+        modifier: _GraphValue<Self>,
+        inputs: _ViewListInputs,
+        body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs
+    ) -> _ViewListOutputs {
+        guard AttributeGraph.current != nil else {
+            fatalError("\(self)._makeViewList called outside an active AttributeGraph context.")
+        }
+        let innerOutputs = body(_Graph(), inputs)
+        guard case .staticList(let innerElements) = innerOutputs.views else {
+            return innerOutputs
+        }
+        let weakMod = modifier._attribute.asWeak()
+        let layoutMod = _ViewListLayoutModifier(
+            modifier: weakMod,
+            modifierType: Self.self,
+            baseInputs: inputs.base
+        )
+        return _ViewListOutputs(
+            views: .staticList(.modified(innerElements, layoutMod)),
+            nextImplicitID: innerOutputs.nextImplicitID,
+            staticCount: innerOutputs.staticCount
+        )
+    }
+}
+
+/// Marker sub-protocol of `PrimitiveViewModifier`. Nearly all `PrimitiveViewModifier` conformers
+/// also conform to this, signalling that they support multi-child lists (MergedElements).
+protocol MultiViewModifier: PrimitiveViewModifier {}
+
+/// Layout-specific `PrimitiveViewModifier`. Geometry-only modifiers (frame, padding, fixedSize …)
+/// conform to this protocol. Conforming types implement `modifyLayoutComputer(_:)` and receive a
+/// correct `_makeView` implementation for free. `_makeViewList` is inherited from `PrimitiveViewModifier`.
+///
+/// Because `UnaryLayout` is more specific than `extension ViewModifier where Self: Animatable`,
+/// Swift correctly selects the `UnaryLayout` extensions for conforming types.
+protocol UnaryLayout: PrimitiveViewModifier, Animatable {
     func modifyLayoutComputer(_ layoutComputer: LayoutComputer) -> LayoutComputer
 }
 
-extension _ViewLayoutModifier {
+extension UnaryLayout {
     public static func _makeView(
         modifier: _GraphValue<Self>,
         inputs: _ViewInputs,
@@ -301,16 +333,14 @@ extension _ViewLayoutModifier {
             return modifierValue.modifyLayoutComputer(childLC)
         }
 
-        // inputs.position / inputs.size are nodes created by the parent wireGenerator.
-        // wrapperLC.place writes the actual placed origin and size into them — same pattern as Text._makeView.
         let cachedEnvAttr = inputs.base.cachedEnvironment
         let positionAttr  = inputs.position
         let sizeAttr      = inputs.size
         let debugDLAttr: Attribute<DisplayList> = graph.makeRule {
-            let debugLayout = cachedEnvAttr.value.environment.value._debugLayout  // dep: env changes
+            let debugLayout = cachedEnvAttr.value.environment.value._debugLayout
             var dl = DisplayList()
             if debugLayout {
-                let pos  = positionAttr.value   // dep: only registered when debugLayout = true
+                let pos  = positionAttr.value
                 let size = sizeAttr.value.value
                 appendDebugOverlay(to: &dl,
                                    frame: CGRect(origin: pos, size: size),
@@ -321,31 +351,6 @@ extension _ViewLayoutModifier {
         var prefs = childOutputs.preferences
         prefs.append(DisplayList.Key.self, node: debugDLAttr.identifier)
         return _ViewOutputs(preferences: prefs, layoutComputer: OptionalAttribute(lcAttr))
-    }
-
-    public static func _makeViewList(
-        modifier: _GraphValue<Self>,
-        inputs: _ViewListInputs,
-        body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs
-    ) -> _ViewListOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeViewList called outside an active AttributeGraph context.")
-        }
-        let innerOutputs = body(_Graph(), inputs)
-        guard case .staticList(let innerElements) = innerOutputs.views else {
-            return innerOutputs
-        }
-        let weakMod = modifier._attribute.asWeak()
-        let layoutMod = _ViewListLayoutModifier(
-            modifier: weakMod,
-            modifierType: Self.self,
-            baseInputs: inputs.base
-        )
-        return _ViewListOutputs(
-            views: .staticList(.modified(innerElements, layoutMod)),
-            nextImplicitID: innerOutputs.nextImplicitID,
-            staticCount: innerOutputs.staticCount
-        )
     }
 }
 

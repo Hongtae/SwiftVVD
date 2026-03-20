@@ -23,7 +23,7 @@ public struct _FrameLayout: ViewModifier, Animatable, Sendable {
     public typealias Body = Never
 }
 
-extension _FrameLayout: _ViewLayoutModifier {
+extension _FrameLayout: UnaryLayout {
     func modifyLayoutComputer(_ lc: LayoutComputer) -> LayoutComputer {
         let w = self.width
         let h = self.height
@@ -99,7 +99,7 @@ public struct _FlexFrameLayout: ViewModifier, Animatable, Sendable {
     public typealias Body = Never
 }
 
-extension _FlexFrameLayout: _ViewLayoutModifier {
+extension _FlexFrameLayout: UnaryLayout {
     func modifyLayoutComputer(_ lc: LayoutComputer) -> LayoutComputer {
         let minW = minWidth,  idealW = idealWidth,  maxW = maxWidth
         let minH = minHeight, idealH = idealHeight, maxH = maxHeight

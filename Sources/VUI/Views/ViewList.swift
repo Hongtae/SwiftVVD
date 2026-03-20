@@ -23,12 +23,12 @@ struct ViewList {
     }
 }
 
-/// Data carried alongside a `_ViewLayoutModifier` entry in the `modified` case of
+/// Data carried alongside a `PrimitiveViewModifier` entry in the `modified` case of
 /// `ViewListElements`.
-/// `{ base: ViewListElements, modifier: AGWeakAttribute, modifierType: any _ViewLayoutModifier.Type, baseInputs: _GraphInputs }`.
+/// `{ base: ViewListElements, modifier: AGWeakAttribute, modifierType: any PrimitiveViewModifier.Type, baseInputs: _GraphInputs }`.
 struct _ViewListLayoutModifier {
     var modifier: AGWeakAttribute
-    var modifierType: any _ViewLayoutModifier.Type
+    var modifierType: any PrimitiveViewModifier.Type
     var baseInputs: _GraphInputs
 }
 
@@ -36,8 +36,9 @@ struct _ViewListLayoutModifier {
 ///
 /// - `unary(TypedUnaryViewGenerator)`: a single leaf primitive view.
 /// - `merged([_ViewListOutputs])`: multiple children merged together (e.g. TupleView children).
-/// - `modified(ViewListElements, _ViewListLayoutModifier)`: a `_ViewLayoutModifier`
-///   wrapping another element group.
+/// - `modified(ViewListElements, _ViewListLayoutModifier)`: a `PrimitiveViewModifier`
+///   wrapping another element group. Dispatched by `wireElements` as layout (UnaryLayout)
+///   or rendering (other PrimitiveViewModifier) path.
 indirect enum ViewListElements {
     case unary(TypedUnaryViewGenerator)
     case merged([_ViewListOutputs])
