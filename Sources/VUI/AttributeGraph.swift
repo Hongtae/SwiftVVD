@@ -13,6 +13,34 @@
 //  to this instance (via AttributeGraph.$current.withValue(self) { ... }) before
 //  they are called. Violating this precondition causes a runtime assertion failure.
 
+// StatefulRule
+
+/// An AG computed node that maintains mutable state between re-evaluations.
+///
+/// Unlike a plain `makeRule` closure, the conforming struct is stored inside the AG node
+/// and reused on each evaluation — enabling lazy initialization and conditional output updates.
+///
+/// Implement `updateValue()` to recompute the output. Call `AttributeGraph.setStatefulOutput(_:)`
+/// inside `updateValue()` to publish a new value. If `setStatefulOutput` is not called, the
+/// previously cached output is retained unchanged.
+///
+/// Used by view-system filters (e.g. GestureFilter, ContentShapeResponderFilter) that own
+/// a lazily-initialized responder object and update only its properties on re-evaluation.
+protocol StatefulRule {
+    associatedtype Value
+    mutating func updateValue()
+}
+
+private protocol _AnyStatefulBox: AnyObject {
+    func callUpdate()
+}
+
+private class _StatefulBox<R: StatefulRule>: _AnyStatefulBox {
+    var rule: R
+    init(_ rule: R) { self.rule = rule }
+    func callUpdate() { rule.updateValue() }
+}
+
 /// The raw identifier for an AG node — an index into the graph's slot array.
 struct AGAttribute: Hashable, CustomDebugStringConvertible, Sendable {
     var rawValue: UInt32
@@ -183,18 +211,17 @@ final class Subgraph: @unchecked Sendable {
 
 class AttributeGraph: @unchecked Sendable {
 
-    private struct Node {
-        var value: Any?
-        var rule: (() -> Any)?
-        var needsEvaluation: Bool = true
-        var isEvaluating: Bool = false  // for cycle detection
+    // Describes how a node computes its value.
+    // Exactly one case is active per node — mutual exclusion is guaranteed at the type level.
+    private enum NodeKind {
+        // Source-of-truth node — value is written externally via setValue(_:).
+        case input
 
-        // When true, this node is evaluated eagerly inside markNeedsEvaluation rather than
-        // waiting for a consumer to pull its value. Use for rules that produce side effects
-        // (callbacks, external state writes) whose return value no other node reads.
-        //
-        // Normal (pull-based) rules fire only when someone calls .value on them.
-        // Side-effect rules fire as soon as any of their inputs change via setValue(_:).
+        // Computed node with a plain closure rule.
+        // isSideEffect = true → re-evaluated eagerly inside markNeedsEvaluation
+        //   (i.e. synchronously when any input changes via setValue).
+        //   Used for gesture callbacks and other fire-and-forget side effects.
+        // isSideEffect = false → pull-based, evaluated lazily on first .value read.
         //
         // Cascade example (gesture callbacks):
         //   eventsAttr.setValue(events)
@@ -205,11 +232,28 @@ class AttributeGraph: @unchecked Sendable {
         //           → markNeedsEvaluation(callbackRule) [isSideEffect]
         //             → evaluateNode(callbackRule)       immediately
         //               → endedCallback()                ← fires here, inside setValue call stack
-        var isSideEffect: Bool = false
+        case rule(() -> Any, isSideEffect: Bool)
 
-        // KeyPath node info
-        var parent: AGAttribute?
-        var keyPath: AnyKeyPath?
+        // StatefulRule node — the box owns the rule struct and is reused across evaluations.
+        // Output is written by calling AttributeGraph.setStatefulOutput(_:) inside updateValue().
+        // If setStatefulOutput is not called during a given evaluation, the previous value is kept.
+        case stateful(any _AnyStatefulBox)
+
+        // KeyPath-derived node — value is projected from a parent node via a key path.
+        // The dependency on parent is fixed at creation time and never changes.
+        case keyPath(parent: AGAttribute, kp: AnyKeyPath)
+
+        var isSideEffect: Bool {
+            if case .rule(_, let se) = self { return se }
+            return false
+        }
+    }
+
+    private struct Node {
+        var value: Any?
+        var kind: NodeKind
+        var needsEvaluation: Bool = true
+        var isEvaluating: Bool = false  // for cycle detection
 
         // Dependency graph edges (stored as raw slot indices)
         var inputs: Set<UInt32> = []   // Nodes this node depends on
@@ -278,11 +322,39 @@ class AttributeGraph: @unchecked Sendable {
         return index
     }
 
+    /// Called from within `StatefulRule.updateValue()` to publish the node's output value.
+    ///
+    /// Must be called on `AttributeGraph.current` while `updateValue()` is executing.
+    /// If not called during a given evaluation, the previously cached value is retained.
+    static func setStatefulOutput<V>(_ value: V) {
+        guard let graph = AttributeGraph.current else {
+            fatalError("setStatefulOutput called outside of an AttributeGraph context.")
+        }
+        guard let nodeID = AttributeGraph.currentlyEvaluatingNode else {
+            fatalError("setStatefulOutput called outside of a StatefulRule.updateValue() call.")
+        }
+        graph.slots[Int(nodeID.rawValue)].node!.value = value
+    }
+
+    /// Creates a computed AG node backed by a `StatefulRule`.
+    ///
+    /// The rule struct is stored inside the node and reused across re-evaluations.
+    /// Use this instead of `makeRule` when the rule needs to lazily initialize a persistent
+    /// object (e.g. a ViewResponder) and update only its properties on subsequent calls.
+    func makeStatefulRule<R: StatefulRule>(_ rule: R) -> Attribute<R.Value> {
+        assert(AttributeGraph.current === self)
+        let index = allocateSlot()
+        slots[Int(index)].node = Node(value: nil, kind: .stateful(_StatefulBox(rule)))
+        let attr = Attribute<R.Value>(AGAttribute(rawValue: index))
+        Subgraph.current?.register(attr.identifier)
+        return attr
+    }
+
     /// Creates a source-of-truth input node (e.g., @State)
     func makeInput<Value>(value: Value) -> Attribute<Value> {
         assert(AttributeGraph.current === self)
         let index = allocateSlot()
-        slots[Int(index)].node = Node(value: value, rule: nil, needsEvaluation: false)
+        slots[Int(index)].node = Node(value: value, kind: .input, needsEvaluation: false)
         let attr = Attribute<Value>(AGAttribute(rawValue: index))
         Subgraph.current?.register(attr.identifier)
         return attr
@@ -292,7 +364,7 @@ class AttributeGraph: @unchecked Sendable {
     func makeRule<Value>(rule: @escaping () -> Value) -> Attribute<Value> {
         assert(AttributeGraph.current === self)
         let index = allocateSlot()
-        slots[Int(index)].node = Node(value: nil, rule: rule, needsEvaluation: true)
+        slots[Int(index)].node = Node(value: nil, kind: .rule(rule, isSideEffect: false))
         let attr = Attribute<Value>(AGAttribute(rawValue: index))
         Subgraph.current?.register(attr.identifier)
         return attr
@@ -316,9 +388,7 @@ class AttributeGraph: @unchecked Sendable {
     func makeSideEffectRule<Value>(rule: @escaping () -> Value) -> Attribute<Value> {
         assert(AttributeGraph.current === self)
         let index = allocateSlot()
-        var node = Node(value: nil, rule: rule, needsEvaluation: true)
-        node.isSideEffect = true
-        slots[Int(index)].node = node
+        slots[Int(index)].node = Node(value: nil, kind: .rule(rule, isSideEffect: true))
         let attr = Attribute<Value>(AGAttribute(rawValue: index))
         Subgraph.current?.register(attr.identifier)
         // Evaluate immediately so the rule body runs once and AG records which input
@@ -346,9 +416,8 @@ class AttributeGraph: @unchecked Sendable {
         }
 
         // 3. Remove from KeyPath cache if applicable
-        if let parent = slots[index].node?.parent,
-           let keyPath = slots[index].node?.keyPath {
-            pathIDs.removeValue(forKey: RelativePath(parentID: parent.rawValue, keyPath: keyPath))
+        if case .keyPath(let parent, let kp) = slots[index].node?.kind {
+            pathIDs.removeValue(forKey: RelativePath(parentID: parent.rawValue, keyPath: kp))
         }
 
         // 4. Invalidate: increment seed (all AGWeakAttributes pointing here are now stale),
@@ -426,42 +495,49 @@ class AttributeGraph: @unchecked Sendable {
 
     private func evaluateNode(_ id: AGAttribute) {
         let index = Int(id.rawValue)
-        guard slots[index].node != nil else {
+        guard let node = slots[index].node else {
             fatalError("evaluateNode called on AGAttribute @\(id.rawValue) that does not exist.")
         }
 
-        // KeyPath node: no rule, derive value from parent via KeyPath.
-        // clearInputs is intentionally omitted — the dependency on parent is established
-        // once at creation time in subscriptNode() and never changes.
-        // Note: value(for: parent) is called while currentlyEvaluatingNode is still set to
-        // the outer caller, so the caller also acquires a direct dependency on parent (in
-        // addition to its dependency on this KeyPath node). This is redundant but harmless —
-        // markNeedsEvaluation's BFS stops at already-dirty nodes, and the extra edge is
-        // cleaned up by clearInputs on the caller's next re-evaluation.
-        if slots[index].node!.rule == nil,
-           let parent = slots[index].node!.parent,
-           let kp = slots[index].node!.keyPath {
+        switch node.kind {
+        case .input:
+            fatalError("evaluateNode called on an input node @\(id.rawValue) — input nodes must never be marked needsEvaluation.")
+
+        case .stateful(let box):
+            // StatefulRule node: re-evaluate the stored rule struct.
+            // Dependency tracking works via currentlyEvaluatingNode (same as .rule).
+            // Output is written only when updateValue() calls setStatefulOutput(_:);
+            // if it doesn't, the previous cached value is retained unchanged.
+            clearInputs(for: id)
+            AttributeGraph.$currentlyEvaluatingNode.withValue(id) {
+                box.callUpdate()
+            }
+            slots[index].node!.needsEvaluation = false
+            slots[index].node!.isEvaluating = false
+
+        case .keyPath(let parent, let kp):
+            // KeyPath node: project value from parent via the stored key path.
+            // clearInputs is intentionally omitted — the dependency on parent is fixed
+            // at creation time in subscriptNode() and never changes.
+            // Note: value(for: parent) runs while currentlyEvaluatingNode is still set to
+            // the outer caller, so the caller also acquires a direct dependency on parent
+            // (in addition to its dependency on this KeyPath node). The redundant edge is
+            // cleaned up by clearInputs on the caller's next re-evaluation.
             let parentValue = value(for: parent)
             slots[index].node!.value = parentValue[keyPath: kp]
             slots[index].node!.needsEvaluation = false
             slots[index].node!.isEvaluating = false
-            return
+
+        case .rule(let rule, _):
+            // Regular computed rule — re-run the closure and store the result.
+            clearInputs(for: id)
+            let newValue = AttributeGraph.$currentlyEvaluatingNode.withValue(id) {
+                rule()
+            }
+            slots[index].node!.value = newValue
+            slots[index].node!.needsEvaluation = false
+            slots[index].node!.isEvaluating = false
         }
-
-        guard let rule = slots[index].node?.rule else {
-            fatalError("evaluateNode called on a node with no rule — input nodes must never be marked needsEvaluation.")
-        }
-
-        // Clear previous dynamic inputs before re-running the rule
-        clearInputs(for: id)
-
-        let newValue = AttributeGraph.$currentlyEvaluatingNode.withValue(id) {
-            rule()
-        }
-
-        slots[index].node!.value = newValue
-        slots[index].node!.needsEvaluation = false
-        slots[index].node!.isEvaluating = false
     }
 
     /// Marks `startID` and all its transitive dependents as needing re-evaluation.
@@ -486,7 +562,7 @@ class AttributeGraph: @unchecked Sendable {
             guard !node.needsEvaluation else { continue }          // already marked — stop propagation
             node.needsEvaluation = true
             slots[index].node = node
-            if node.isSideEffect {
+            if node.kind.isSideEffect {
                 sideEffects.append(UInt32(index))
             }
             queue.append(contentsOf: node.outputs)
@@ -546,10 +622,7 @@ class AttributeGraph: @unchecked Sendable {
         }
 
         let index = allocateSlot()
-        var node = Node(value: nil, rule: nil, needsEvaluation: true)
-        node.parent = parent.identifier
-        node.keyPath = keyPath
-        slots[Int(index)].node = node
+        slots[Int(index)].node = Node(value: nil, kind: .keyPath(parent: parent.identifier, kp: keyPath))
         pathIDs[rp] = index
         addDependency(from: AGAttribute(rawValue: index), dependsOn: parent.identifier)
         let attr = Attribute<U>(AGAttribute(rawValue: index))
@@ -558,11 +631,13 @@ class AttributeGraph: @unchecked Sendable {
     }
 
     func parent(of id: AGAttribute) -> AGAttribute? {
-        slots[Int(id.rawValue)].node?.parent
+        if case .keyPath(let parent, _) = slots[Int(id.rawValue)].node?.kind { return parent }
+        return nil
     }
 
     func keyPath(of id: AGAttribute) -> AnyKeyPath? {
-        slots[Int(id.rawValue)].node?.keyPath
+        if case .keyPath(_, let kp) = slots[Int(id.rawValue)].node?.kind { return kp }
+        return nil
     }
 
     // Deferred action queue — closures enqueued here are executed during drainActions().
@@ -605,17 +680,26 @@ class AttributeGraph: @unchecked Sendable {
         guard index < slots.count, let node = slots[index].node else {
             return "@\(id.rawValue)(invalid)"
         }
-        if node.keyPath != nil {
+        switch node.kind {
+        case .keyPath:
             var parts: [String] = []
             var currentIndex: Int? = index
             while let i = currentIndex, let n = slots[i].node {
-                if let kp = n.keyPath { parts.append("\(kp)") }
-                currentIndex = n.parent.map { Int($0.rawValue) }
+                if case .keyPath(let parent, let kp) = n.kind {
+                    parts.append("\(kp)")
+                    currentIndex = Int(parent.rawValue)
+                } else {
+                    break
+                }
             }
             let path = parts.reversed().joined(separator: " → ")
             return "@\(id.rawValue)(path: \(path))"
+        case .rule(_, let isSideEffect):
+            return "@\(id.rawValue)(\(isSideEffect ? "sideEffect" : "rule"))"
+        case .stateful:
+            return "@\(id.rawValue)(stateful)"
+        case .input:
+            return "@\(id.rawValue)(input)"
         }
-        if node.rule != nil { return "@\(id.rawValue)(rule)" }
-        return "@\(id.rawValue)(input)"
     }
 }
