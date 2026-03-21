@@ -135,11 +135,24 @@ class MultiViewResponder: ResponderNode {
     }
 
     func respondersContaining(point: CGPoint) -> [any ViewResponder] {
-        responders.filter { responder in
-            let result = responder.containsGlobalPoints(
+        collectHits(from: responders, point: point)
+    }
+
+    /// Recursively collects hit responders, following `ContainsPointsResult.children`
+    /// when a responder (e.g. `ContentShapeResponder`) delegates to inner responders.
+    private func collectHits(from responders: [any ViewResponder], point: CGPoint) -> [any ViewResponder] {
+        var result: [any ViewResponder] = []
+        for responder in responders {
+            let r = responder.containsGlobalPoints(
                 [point], cacheKey: nil, options: ContainsPointsOptions())
-            return result.mask & 1 != 0
+            guard r.mask & 1 != 0 else { continue }
+            if r.children.isEmpty {
+                result.append(responder)
+            } else {
+                result.append(contentsOf: collectHits(from: r.children, point: point))
+            }
         }
+        return result
     }
 }
 
