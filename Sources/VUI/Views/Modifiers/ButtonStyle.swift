@@ -27,7 +27,7 @@ public struct ButtonRole: Equatable, Sendable {
 typealias ButtonAction = ()->Void
 
 public struct PrimitiveButtonStyleConfiguration {
-    public struct Label: View {
+    public struct Label: View, ViewAlias {
         public typealias Body = Never
     }
     public let role: ButtonRole?
@@ -51,7 +51,7 @@ extension PrimitiveButtonStyleConfiguration.Label {
         var innerInputs = inputs
         innerInputs.position = innerPosAttr
         innerInputs.size = innerSizeAttr
-        let innerOutputs = source.makeView(inputs: innerInputs)
+        let innerOutputs = source.makeView(view: view, inputs: innerInputs)
         guard let innerLCAttr = innerOutputs._layoutComputer.attribute else {
             return innerOutputs
         }
@@ -286,7 +286,7 @@ public protocol ButtonStyle {
 }
 
 public struct ButtonStyleConfiguration {
-    public struct Label: View {
+    public struct Label: View, ViewAlias {
         public typealias Body = Never
     }
     public let role: ButtonRole?
@@ -307,7 +307,7 @@ extension ButtonStyleConfiguration.Label {
         var innerInputs = inputs
         innerInputs.position = innerPosAttr
         innerInputs.size = innerSizeAttr
-        let innerOutputs = source.makeView(inputs: innerInputs)
+        let innerOutputs = source.makeView(view: view, inputs: innerInputs)
         guard let innerLCAttr = innerOutputs._layoutComputer.attribute else {
             return innerOutputs
         }

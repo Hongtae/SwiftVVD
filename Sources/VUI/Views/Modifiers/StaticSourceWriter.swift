@@ -5,22 +5,88 @@
 //  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-// AnySource — type-erased _GraphValue<T> wrapper.
-// Stores closures that capture the concrete T so that makeView/makeViewList
-// can be called without knowing T at the call site.
-struct AnySource {
-    private let _makeViewFn: (_ViewInputs) -> _ViewOutputs
-    private let _makeViewListFn: (_ViewListInputs) -> _ViewListOutputs
-    let valueIsNil: Bool?
+// ViewAlias: marker protocol for "source alias" view types whose backing content
+// is provided at render time via SourceInput<Self>.
+// Conforming types: PrimitiveButtonStyleConfiguration.Label,
+//   ButtonStyleConfiguration.Label, LabelStyleConfiguration.Title/Icon,
+//   MenuStyleConfiguration.Label/Content, etc.
+protocol ViewAlias: View {}
 
-    init<T: View>(value: _GraphValue<T>, valueIsNil: Bool? = nil) {
-        _makeViewFn = { inputs in T._makeView(view: value, inputs: inputs) }
-        _makeViewListFn = { inputs in T._makeViewList(view: value, inputs: inputs) }
+// _ViewListCountInputs: empty struct used as the inputs parameter for
+// AnySourceFormula.viewListCount(source:inputs:).
+public struct _ViewListCountInputs {}
+
+// AnySourceFormula: protocol for type-erased view dispatch.
+// SourceFormula<T> conforms via its metatype stored in AnySource.formula.
+// The `view` parameter carries the alias view's _GraphValue (e.g. Label's node);
+// the `source` parameter carries the full AnySource (formula + backing AG node).
+protocol AnySourceFormula {
+    static func makeView<A: ViewAlias>(
+        view: _GraphValue<A>, source: AnySource, inputs: _ViewInputs
+    ) -> _ViewOutputs
+    static func makeViewList<A: ViewAlias>(
+        view: _GraphValue<A>, source: AnySource, inputs: _ViewListInputs
+    ) -> _ViewListOutputs
+    static func viewListCount(source: AnySource, inputs: _ViewListCountInputs) -> Int?
+}
+
+// SourceFormula<T>: zero-size empty struct with no stored properties.
+// Carries the backing view type T via its type parameter.
+// The alias view's _GraphValue (view:) is ignored; dispatch goes through source.value.
+struct SourceFormula<T: View>: AnySourceFormula {
+    static func makeView<A: ViewAlias>(
+        view: _GraphValue<A>, source: AnySource, inputs: _ViewInputs
+    ) -> _ViewOutputs {
+        T._makeView(view: _GraphValue(_attribute: Attribute<T>(source.value.toStrong())), inputs: inputs)
+    }
+    static func makeViewList<A: ViewAlias>(
+        view: _GraphValue<A>, source: AnySource, inputs: _ViewListInputs
+    ) -> _ViewListOutputs {
+        T._makeViewList(view: _GraphValue(_attribute: Attribute<T>(source.value.toStrong())), inputs: inputs)
+    }
+    static func viewListCount(source: AnySource, inputs: _ViewListCountInputs) -> Int? {
+        nil  // _viewListCount is not implemented yet. nil means dynamic/unknown count.
+    }
+}
+
+// AnySource: type-erased source descriptor stored in SourceInput<Source>.
+struct AnySource {
+    let formula: any AnySourceFormula.Type
+    let value: AGWeakAttribute
+    let valueIsNil: Optional<Attribute<Bool>>
+
+    init<T: View>(value: _GraphValue<T>, valueIsNil: Optional<Attribute<Bool>> = nil) {
+        self.formula = SourceFormula<T>.self
+        self.value = value._attribute.asWeak()
         self.valueIsNil = valueIsNil
     }
 
-    func makeView(inputs: _ViewInputs) -> _ViewOutputs { _makeViewFn(inputs) }
-    func makeViewList(inputs: _ViewListInputs) -> _ViewListOutputs { _makeViewListFn(inputs) }
+    // SE-0352: passing `any AnySourceFormula.Type` to a generic function opens the existential.
+    private static func _dispatchMakeView<F: AnySourceFormula, A: ViewAlias>(
+        _ f: F.Type, view: _GraphValue<A>, source: AnySource, inputs: _ViewInputs
+    ) -> _ViewOutputs {
+        F.makeView(view: view, source: source, inputs: inputs)
+    }
+    private static func _dispatchMakeViewList<F: AnySourceFormula, A: ViewAlias>(
+        _ f: F.Type, view: _GraphValue<A>, source: AnySource, inputs: _ViewListInputs
+    ) -> _ViewListOutputs {
+        F.makeViewList(view: view, source: source, inputs: inputs)
+    }
+    private static func _dispatchViewListCount<F: AnySourceFormula>(
+        _ f: F.Type, source: AnySource, inputs: _ViewListCountInputs
+    ) -> Int? {
+        F.viewListCount(source: source, inputs: inputs)
+    }
+
+    func makeView<A: ViewAlias>(view: _GraphValue<A>, inputs: _ViewInputs) -> _ViewOutputs {
+        Self._dispatchMakeView(formula, view: view, source: self, inputs: inputs)
+    }
+    func makeViewList<A: ViewAlias>(view: _GraphValue<A>, inputs: _ViewListInputs) -> _ViewListOutputs {
+        Self._dispatchMakeViewList(formula, view: view, source: self, inputs: inputs)
+    }
+    func viewListCount(inputs: _ViewListCountInputs) -> Int? {
+        Self._dispatchViewListCount(formula, source: self, inputs: inputs)
+    }
 }
 
 // SourceInput<Source> — PropertyItem key whose value is Stack<AnySource>.
@@ -42,10 +108,10 @@ struct StaticSourceWriter<Source, Type> {
 extension StaticSourceWriter: ViewModifier where Source: View, Type: View {
 }
 
-extension StaticSourceWriter: _ViewInputsModifier where Source: View, Type: View {
-    static func _makeViewInputs(modifier: _GraphValue<Self>, inputs: inout _ViewInputs) {
+extension StaticSourceWriter: _GraphInputsModifier where Source: View, Type: View {
+    static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GraphInputs) {
         let anySource = AnySource(value: modifier[\.source])
-        let stack = inputs.base.customInputs.value(forKey: SourceInput<Source>.self)
-        inputs.base.customInputs.setValue(stack.pushing(anySource), forKey: SourceInput<Source>.self)
+        let stack = inputs.customInputs.value(forKey: SourceInput<Source>.self)
+        inputs.customInputs.setValue(stack.pushing(anySource), forKey: SourceInput<Source>.self)
     }
 }

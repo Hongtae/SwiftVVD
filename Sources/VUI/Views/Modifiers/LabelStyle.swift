@@ -12,10 +12,10 @@ public protocol LabelStyle {
 }
 
 public struct LabelStyleConfiguration {
-    public struct Title {
+    public struct Title: ViewAlias {
         public typealias Body = Never
     }
-    public struct Icon {
+    public struct Icon: ViewAlias {
         public typealias Body = Never
     }
     public var title: LabelStyleConfiguration.Title { .init() }
@@ -41,7 +41,7 @@ extension LabelStyleConfiguration.Title {
         var innerInputs = inputs
         innerInputs.position = innerPosAttr
         innerInputs.size = innerSizeAttr
-        let innerOutputs = source.makeView(inputs: innerInputs)
+        let innerOutputs = source.makeView(view: view, inputs: innerInputs)
         guard let innerLCAttr = innerOutputs._layoutComputer.attribute else {
             return innerOutputs
         }
@@ -85,7 +85,7 @@ extension LabelStyleConfiguration.Icon {
         var innerInputs = inputs
         innerInputs.position = innerPosAttr
         innerInputs.size = innerSizeAttr
-        let innerOutputs = source.makeView(inputs: innerInputs)
+        let innerOutputs = source.makeView(view: view, inputs: innerInputs)
         guard let innerLCAttr = innerOutputs._layoutComputer.attribute else {
             return innerOutputs
         }

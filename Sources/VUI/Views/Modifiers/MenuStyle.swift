@@ -14,11 +14,11 @@ public protocol MenuStyle {
 }
 
 public struct MenuStyleConfiguration {
-    public struct Label: View {
+    public struct Label: View, ViewAlias {
         public typealias Body = Never
     }
 
-    public struct Content: View {
+    public struct Content: View, ViewAlias {
         public typealias Body = Never
     }
 
@@ -53,7 +53,7 @@ extension MenuStyleConfiguration.Label {
         var innerInputs = inputs
         innerInputs.position = innerPosAttr
         innerInputs.size = innerSizeAttr
-        let innerOutputs = source.makeView(inputs: innerInputs)
+        let innerOutputs = source.makeView(view: view, inputs: innerInputs)
         guard let innerLCAttr = innerOutputs._layoutComputer.attribute else {
             return innerOutputs
         }
@@ -98,7 +98,7 @@ extension MenuStyleConfiguration.Content {
         var innerInputs = inputs
         innerInputs.position = innerPosAttr
         innerInputs.size = innerSizeAttr
-        let innerOutputs = source.makeView(inputs: innerInputs)
+        let innerOutputs = source.makeView(view: view, inputs: innerInputs)
         guard let innerLCAttr = innerOutputs._layoutComputer.attribute else {
             return innerOutputs
         }
