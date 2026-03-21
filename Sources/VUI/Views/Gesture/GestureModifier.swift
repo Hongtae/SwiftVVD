@@ -330,6 +330,8 @@ extension AddGestureModifier {
         // Factory: called inside a session subgraph when a touch hits this view.
         // All AG nodes created here (phase, recognizer rules, callback rules) are
         // registered to the session subgraph and released when the session ends.
+        // Captures capturedGestureValue (a _GraphValue cursor), so at session-creation time
+        // it reads the CURRENT gesture value — enabling dynamic gesture switching.
         let factory: GestureResponder.Factory = { gestureInputs in
             guard let graph = AttributeGraph.current else {
                 fatalError("GestureResponder.factory requires AG context")
@@ -340,15 +342,58 @@ extension AddGestureModifier {
             return graph.makeRule { outputs.phase.value.isTerminal }
         }
 
-        let responder = GestureResponder(
-            position: inputs.position,
-            size: inputs.size,
-            exclusionPolicy: Combiner.exclusionPolicy,
-            gestureMask: modifier._attribute.value.gestureMask,
-            viewInputs: capturedViewInputs,
-            factory: factory
-        )
-        let respondersAttr: Attribute<[any ViewResponder]> = graph.makeInput(value: [responder])
+        // --- GestureFilter pattern ---
+        // Collect inner ViewRespondersKey nodes from the inner body outputs.
+        // These represent gesture responders from sub-views (e.g. Buttons inside this view).
+        let innerResponderNodes = outputs.preferences.preferences
+            .filter { $0.key == ViewRespondersKey.self }
+            .map { $0.value }
+
+        // Build a single Attribute<[any ViewResponder]> for inner responders.
+        // If there are multiple inner nodes, reduce them via ViewRespondersKey.reduce.
+        let innerRespondersAttr: Attribute<[any ViewResponder]>
+        if innerResponderNodes.isEmpty {
+            innerRespondersAttr = graph.makeInput(value: [])
+        } else if innerResponderNodes.count == 1 {
+            innerRespondersAttr = Attribute<[any ViewResponder]>(innerResponderNodes[0])
+        } else {
+            innerRespondersAttr = graph.makeRule {
+                var combined = ViewRespondersKey.defaultValue
+                for nodeID in innerResponderNodes {
+                    let val = Attribute<[any ViewResponder]>(nodeID).value
+                    ViewRespondersKey.reduce(value: &combined) { val }
+                }
+                return combined
+            }
+        }
+
+        // GestureFilter rule: re-evaluates when modifier or inner responders change.
+        // Creates the GestureResponder lazily on first evaluation and then updates
+        // its mutable properties (gestureMask, children) on subsequent evaluations.
+        let modAttr = modifier._attribute
+        var _responder: GestureResponder? = nil
+        let respondersAttr: Attribute<[any ViewResponder]> = graph.makeRule {
+            let currentModifier = modAttr.value
+
+            if _responder == nil {
+                _responder = GestureResponder(
+                    position: capturedViewInputs.position,
+                    size: capturedViewInputs.size,
+                    exclusionPolicy: Combiner.exclusionPolicy,
+                    gestureMask: currentModifier.gestureMask,
+                    viewInputs: capturedViewInputs,
+                    factory: factory
+                )
+            }
+            let responder = _responder!
+            responder.gestureMask = currentModifier.gestureMask
+            responder.responders = innerRespondersAttr.value
+            return [responder]
+        }
+
+        // Remove inner ViewRespondersKey entries from outputs — they are now consumed
+        // as GestureResponder.children. The outer preference is the GestureFilter output.
+        outputs.preferences.preferences.removeAll { $0.key == ViewRespondersKey.self }
         outputs.preferences.append(ViewRespondersKey.self, node: respondersAttr.identifier)
 
         return outputs

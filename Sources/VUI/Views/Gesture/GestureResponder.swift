@@ -139,7 +139,12 @@ class MultiViewResponder: ResponderNode {
     }
 
     /// Recursively collects hit responders, following `ContainsPointsResult.children`
-    /// when a responder (e.g. `ContentShapeResponder`) delegates to inner responders.
+    /// when a responder delegates to inner responders.
+    ///
+    /// `priority > 0` (e.g. GestureResponder returns 16.0) means the responder itself is
+    /// a gesture hit — include it in the result in addition to recursing into children.
+    /// `priority == 0` (e.g. ContentShapeResponder) means the responder is a shape filter
+    /// only — recurse into children but do not add self to the hit list.
     private func collectHits(from responders: [any ViewResponder], point: CGPoint) -> [any ViewResponder] {
         var result: [any ViewResponder] = []
         for responder in responders {
@@ -149,6 +154,9 @@ class MultiViewResponder: ResponderNode {
             if r.children.isEmpty {
                 result.append(responder)
             } else {
+                if r.priority > 0 {
+                    result.append(responder)
+                }
                 result.append(contentsOf: collectHits(from: r.children, point: point))
             }
         }
@@ -210,13 +218,19 @@ final class ActiveGestureSession {
 
 // GestureResponder
 
-/// Concrete ViewResponder created by AddGestureModifier._makeView.
+/// Concrete ViewResponder created by AddGestureModifier._makeView (via GestureFilter rule).
+///
+/// Subclass of `MultiViewResponder` — inherits `responders` (inner ViewResponder list)
+/// and `updateChildren` plumbing, exactly as in the reference framework.
 ///
 /// Stores view geometry for hit testing and a factory closure that calls
 /// `Gesture._makeGesture` on demand when a touch begins.
 /// This deferred approach means dynamic views get fresh gesture sessions
 /// each time they are touched.
-final class GestureResponder: ViewResponder {
+///
+/// `gestureMask` and `responders` are mutable so that the GestureFilter rule can update
+/// them reactively whenever the modifier or inner ViewRespondersKey changes.
+final class GestureResponder: MultiViewResponder, ViewResponder {
     private static let _nextKey = Mutex<UInt32>(1)
 
     let hitTestKey: UInt32
@@ -234,7 +248,12 @@ final class GestureResponder: ViewResponder {
     let exclusionPolicy: GestureResponderExclusionPolicy
 
     /// The gesture mask controlling which gesture types are active.
-    let gestureMask: GestureMask
+    /// Updated by the GestureFilter rule when the modifier changes.
+    var gestureMask: GestureMask
+
+    // Inner view responders (from the subtree below this gesture modifier) are
+    // stored in the inherited `responders: [any ViewResponder]` property from
+    // MultiViewResponder. The GestureFilter rule writes to `responders` directly.
 
     /// The _ViewInputs captured at _makeView time.
     /// Provides position, size, time, and preference key context to sessions.
@@ -265,6 +284,7 @@ final class GestureResponder: ViewResponder {
         self.gestureMask = gestureMask
         self.viewInputs = viewInputs
         self.factory = factory
+        super.init()
     }
 
     func hitTestPolicy(options: ContainsPointsOptions) -> HitTestPolicy {
@@ -285,6 +305,12 @@ final class GestureResponder: ViewResponder {
         for (i, localPt) in localPts.enumerated() {
             if localBounds.contains(localPt) { mask |= (1 << i) }
         }
-        return ContainsPointsResult(mask: mask, priority: 0, children: [])
+        guard mask != 0 else {
+            return ContainsPointsResult(mask: 0, priority: 0, children: [])
+        }
+        // priority=16 signals to collectHits that this responder is itself a gesture hit
+        // (not just a shape filter like ContentShapeResponder). responders carries the inner
+        // view responders so the traversal can also activate nested gesture sessions.
+        return ContainsPointsResult(mask: mask, priority: 16.0, children: responders)
     }
 }
