@@ -23,7 +23,7 @@ public struct TapGesture: Gesture {
         let tapCount = gesture._attribute.value.count
         let recognizer = TapGestureRecognizer(
             requiredCount: tapCount,
-            position: inputs.position,
+            transform: inputs.transform,
             size: inputs.size)
 
         // Create the phase source-of-truth attribute
@@ -81,18 +81,22 @@ final class TapGestureRecognizer: _GestureRecognizer<Void>, @unchecked Sendable 
     private var processedBeganIDs: Set<Int> = []
     private var processedEndedIDs: Set<Int> = []
 
-    // View frame for hit testing (eventsAttr is broadcast to all recognizers)
-    let position: Attribute<CGPoint>
+    // View geometry for hit testing (eventsAttr is broadcast to all recognizers)
+    let transform: Attribute<ViewTransform>
     let size: Attribute<ViewSize>
 
-    init(requiredCount: Int = 1, position: Attribute<CGPoint>, size: Attribute<ViewSize>) {
+    init(requiredCount: Int = 1, transform: Attribute<ViewTransform>, size: Attribute<ViewSize>) {
         self.requiredCount = requiredCount
-        self.position = position
+        self.transform = transform
         self.size = size
     }
 
-    private func viewFrame() -> CGRect {
-        CGRect(origin: position.value, size: size.value.value)
+    /// Returns true if `globalPoint` is inside this view's local bounds,
+    /// using the accumulated ViewTransform for the conversion.
+    private func containsGlobalPoint(_ globalPoint: CGPoint) -> Bool {
+        var pts = [globalPoint]
+        transform.value.convertGlobal(to: .local, points: &pts)
+        return CGRect(origin: .zero, size: size.value.value).contains(pts[0])
     }
 
     override func processEvents(_ events: [EventID: any EventType]) {
@@ -113,7 +117,7 @@ final class TapGestureRecognizer: _GestureRecognizer<Void>, @unchecked Sendable 
                     // Only start if tap is within this view's frame.
                     // eventsAttr is shared among all gesture recognizers so each
                     // recognizer must do its own hit test to avoid firing globally.
-                    guard viewFrame().contains(tap.location) else { continue }
+                    guard containsGlobalPoint(tap.location) else { continue }
 
                     // Check tap interval
                     let now = clock.now

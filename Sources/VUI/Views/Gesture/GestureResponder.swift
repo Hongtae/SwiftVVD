@@ -276,21 +276,14 @@ final class GestureResponder: ViewResponder {
         cacheKey: UInt32?,
         options: ContainsPointsOptions
     ) -> ContainsPointsResult {
-        let pos = position.value
         let sz = size.value.value
-        let globalToLocal = viewInputs.transform.value.matrix.inverted()
-        
-        // Use pos as the origin if transform does not include the view's position translation,
-        // or .zero if transform is the fully accumulated local transform. 
-        // Assuming VUI's transform does not automatically include the parent-assigned position:
-        let localBounds = CGRect(origin: pos, size: sz)
-
+        let t = viewInputs.transform.value
+        var localPts = Array(points.prefix(64))
+        t.convertGlobal(to: .local, points: &localPts)
+        let localBounds = CGRect(origin: .zero, size: sz)
         var mask: UInt64 = 0
-        for (i, globalPt) in points.prefix(64).enumerated() {
-            let localPt = globalPt.applying(globalToLocal)
-            if localBounds.contains(localPt) { 
-                mask |= (1 << i) 
-            }
+        for (i, localPt) in localPts.enumerated() {
+            if localBounds.contains(localPt) { mask |= (1 << i) }
         }
         return ContainsPointsResult(mask: mask, priority: 0, children: [])
     }

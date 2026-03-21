@@ -25,7 +25,7 @@ public struct _ButtonGesture: Gesture {
         let pressingAction = gesture._attribute.value.pressingAction
         let recognizer = ButtonGestureRecognizer(
             action: action, pressingAction: pressingAction,
-            position: inputs.position, size: inputs.size)
+            transform: inputs.transform, size: inputs.size)
 
         let phase: Attribute<GesturePhase<Void>> = graph.makeInput(value: .possible(nil))
         recognizer.phaseAttribute = phase
@@ -62,7 +62,7 @@ extension View {
 final class ButtonGestureRecognizer: _GestureRecognizer<Void> {
     let action: () -> Void
     let pressingAction: ((Bool) -> Void)?
-    let position: Attribute<CGPoint>
+    let transform: Attribute<ViewTransform>
     let size: Attribute<ViewSize>
 
     private var activeSerial: Int? = nil
@@ -70,17 +70,17 @@ final class ButtonGestureRecognizer: _GestureRecognizer<Void> {
     private var processedBeganSerials: Set<Int> = []
 
     init(action: @escaping () -> Void, pressingAction: ((Bool) -> Void)?,
-         position: Attribute<CGPoint>, size: Attribute<ViewSize>) {
+         transform: Attribute<ViewTransform>, size: Attribute<ViewSize>) {
         self.action = action
         self.pressingAction = pressingAction
-        self.position = position
+        self.transform = transform
         self.size = size
     }
 
-    private func viewFrame() -> CGRect {
-        let pos = position.value
-        let sz = size.value.value
-        return CGRect(origin: pos, size: sz)
+    private func containsGlobalPoint(_ globalPoint: CGPoint) -> Bool {
+        var pts = [globalPoint]
+        transform.value.convertGlobal(to: .local, points: &pts)
+        return CGRect(origin: .zero, size: size.value.value).contains(pts[0])
     }
 
     override func processEvents(_ events: [EventID: any EventType]) {
@@ -93,7 +93,7 @@ final class ButtonGestureRecognizer: _GestureRecognizer<Void> {
                 processedBeganSerials.insert(id.serial)
                 if activeSerial == nil {
                     // Only accept the event if the initial tap is within this view's frame.
-                    guard viewFrame().contains(tap.location) else { continue }
+                    guard containsGlobalPoint(tap.location) else { continue }
                     activeSerial = id.serial
                     isHovering = true
                     state = .processing
@@ -103,7 +103,7 @@ final class ButtonGestureRecognizer: _GestureRecognizer<Void> {
 
             case .moved:
                 if activeSerial == id.serial {
-                    let newHover = viewFrame().contains(tap.location)
+                    let newHover = containsGlobalPoint(tap.location)
                     if newHover != isHovering {
                         isHovering = newHover
                         AttributeGraph.withoutTracking { pressingAction?(isHovering) }

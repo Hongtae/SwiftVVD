@@ -82,15 +82,15 @@ final class ContentShapeResponder<S: Shape>: ViewResponder {
         cacheKey: UInt32?,
         options: ContainsPointsOptions
     ) -> ContainsPointsResult {
-        let pos = position.value
         let sz = size.value.value
-        let globalToLocal = transform.value.matrix.inverted()
-        let localBounds = CGRect(origin: pos, size: sz)
+        let t = transform.value
+        var localPts = Array(points.prefix(64))
+        t.convertGlobal(to: .local, points: &localPts)
+        let localBounds = CGRect(origin: .zero, size: sz)
         let shapePath = shape.value.path(in: localBounds)
 
         var mask: UInt64 = 0
-        for (i, globalPt) in points.prefix(64).enumerated() {
-            let localPt = globalPt.applying(globalToLocal)
+        for (i, localPt) in localPts.enumerated() {
             if shapePath.contains(localPt, eoFill: eoFill) {
                 mask |= (1 << i)
             }

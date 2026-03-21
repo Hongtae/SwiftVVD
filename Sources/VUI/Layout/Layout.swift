@@ -13,6 +13,7 @@ private struct WiredGenerator {
     var traitsList: OptionalAttribute<ViewList>
     var posAttr: Attribute<CGPoint>
     var sizeAttr: Attribute<ViewSize>
+    var transformAttr: Attribute<ViewTransform>
 }
 
 private final class _DynamicLayoutState {
@@ -107,10 +108,23 @@ extension Layout {
         func wireGenerator(_ gen: TypedUnaryViewGenerator) -> WiredGenerator? {
             let posAttr = graph.makeInput(value: CGPoint.zero)
             let sizeAttr = graph.makeInput(value: ViewSize(.zero))
+
+            // Build child transform = parent transform + appendPosition(child global pos).
+            // Converting the child's parent-local position to global accounts for any
+            // rotation/scale in the parent's transform chain.
+            let parentTransformAttr = inputs.transform
+            let childTransformAttr: Attribute<ViewTransform> = graph.makeRule {
+                var t = parentTransformAttr.value
+                var localPts = [posAttr.value]
+                t.convertGlobal(from: .local, points: &localPts)
+                t.appendPosition(localPts[0])
+                return t
+            }
+
             let childInputs = _ViewInputs(
                 base: gen.baseInputs,
                 preferences: inputs.preferences,
-                transform: inputs.transform,
+                transform: childTransformAttr,
                 position: posAttr,
                 containerPosition: inputs.position,
                 size: sizeAttr,
@@ -146,7 +160,8 @@ extension Layout {
             }
             return WiredGenerator(lc: wrapperLC, prefs: childOutputs.preferences,
                                   traitsList: OptionalAttribute(viewListAttr),
-                                  posAttr: posAttr, sizeAttr: sizeAttr)
+                                  posAttr: posAttr, sizeAttr: sizeAttr,
+                                  transformAttr: childTransformAttr)
         }
 
         // Recursive helper: traverse ViewListElements and produce flat LCs + merged preferences +
@@ -157,11 +172,12 @@ extension Layout {
         func wireElements(_ elements: ViewListElements)
             -> (lcs: [Attribute<LayoutComputer>], prefs: [PreferencesOutputs],
                 traitsLists: [OptionalAttribute<ViewList>],
-                posAttrs: [Attribute<CGPoint>], sizeAttrs: [Attribute<ViewSize>]) {
+                posAttrs: [Attribute<CGPoint>], sizeAttrs: [Attribute<ViewSize>],
+                transformAttrs: [Attribute<ViewTransform>]) {
             switch elements {
             case .unary(let gen):
-                guard let w = wireGenerator(gen) else { return ([], [], [], [], []) }
-                return ([w.lc], [w.prefs], [w.traitsList], [w.posAttr], [w.sizeAttr])
+                guard let w = wireGenerator(gen) else { return ([], [], [], [], [], []) }
+                return ([w.lc], [w.prefs], [w.traitsList], [w.posAttr], [w.sizeAttr], [w.transformAttr])
 
             case .merged(let childOutputsList):
                 var allLCs: [Attribute<LayoutComputer>] = []
@@ -169,15 +185,17 @@ extension Layout {
                 var allTraitsLists: [OptionalAttribute<ViewList>] = []
                 var allPosAttrs: [Attribute<CGPoint>] = []
                 var allSizeAttrs: [Attribute<ViewSize>] = []
+                var allTransformAttrs: [Attribute<ViewTransform>] = []
                 for childOutput in childOutputsList {
                     switch childOutput.views {
                     case .staticList(let innerElements):
-                        let (lcs, prefs, traitsLists, posAttrs, sizeAttrs) = wireElements(innerElements)
+                        let (lcs, prefs, traitsLists, posAttrs, sizeAttrs, transformAttrs) = wireElements(innerElements)
                         allLCs.append(contentsOf: lcs)
                         allPrefs.append(contentsOf: prefs)
                         allTraitsLists.append(contentsOf: traitsLists)
                         allPosAttrs.append(contentsOf: posAttrs)
                         allSizeAttrs.append(contentsOf: sizeAttrs)
+                        allTransformAttrs.append(contentsOf: transformAttrs)
                     case .dynamicList(let childViewListAttr, _):
                         // _TraitWritingModifier returns a dynamicList whose ViewList
                         // contains the child generators with trait-aware traitListAttr.
@@ -192,16 +210,17 @@ extension Layout {
                                 allTraitsLists.append(OptionalAttribute(childViewListAttr))
                                 allPosAttrs.append(w.posAttr)
                                 allSizeAttrs.append(w.sizeAttr)
+                                allTransformAttrs.append(w.transformAttr)
                             }
                         }
                     }
                 }
-                return (allLCs, allPrefs, allTraitsLists, allPosAttrs, allSizeAttrs)
+                return (allLCs, allPrefs, allTraitsLists, allPosAttrs, allSizeAttrs, allTransformAttrs)
 
             case .modified(let base, let layoutMod):
-                let (innerLCs, innerPrefs, innerTraitsLists, innerPosAttrs, innerSizeAttrs) = wireElements(base)
+                let (innerLCs, innerPrefs, innerTraitsLists, innerPosAttrs, innerSizeAttrs, innerTransformAttrs) = wireElements(base)
                 guard layoutMod.modifier.isValid(in: graph) else {
-                    return (innerLCs, innerPrefs, innerTraitsLists, innerPosAttrs, innerSizeAttrs)
+                    return (innerLCs, innerPrefs, innerTraitsLists, innerPosAttrs, innerSizeAttrs, innerTransformAttrs)
                 }
                 let modAttrID = layoutMod.modifier.toStrong()
 
@@ -209,7 +228,7 @@ extension Layout {
                     // Layout modifier path: wrap each child's LayoutComputer via modifyLayoutComputer.
                     func applyUnaryLayout<M: UnaryLayout>(_ type: M.Type)
                         -> ([Attribute<LayoutComputer>], [PreferencesOutputs], [OptionalAttribute<ViewList>],
-                            [Attribute<CGPoint>], [Attribute<ViewSize>]) {
+                            [Attribute<CGPoint>], [Attribute<ViewSize>], [Attribute<ViewTransform>]) {
                         let modAttr = Attribute<M>(modAttrID)
                         var outLCs: [Attribute<LayoutComputer>] = []
                         var outPrefs = innerPrefs
@@ -256,7 +275,7 @@ extension Layout {
                             outPosAttrs.append(outerPosAttr)
                             outSizeAttrs.append(outerSizeAttr)
                         }
-                        return (outLCs, outPrefs, innerTraitsLists, outPosAttrs, outSizeAttrs)
+                        return (outLCs, outPrefs, innerTraitsLists, outPosAttrs, outSizeAttrs, innerTransformAttrs)
                     }
                     return applyUnaryLayout(unaryLayoutType)
                 } else {
@@ -266,7 +285,7 @@ extension Layout {
                     // AG rules against the child's posAttr/sizeAttr.
                     func applyRenderingMod<M: PrimitiveViewModifier>(_ type: M.Type)
                         -> ([Attribute<LayoutComputer>], [PreferencesOutputs], [OptionalAttribute<ViewList>],
-                            [Attribute<CGPoint>], [Attribute<ViewSize>]) {
+                            [Attribute<CGPoint>], [Attribute<ViewSize>], [Attribute<ViewTransform>]) {
                         let modAttr = Attribute<M>(modAttrID)
                         var outLCs: [Attribute<LayoutComputer>] = []
                         var outPrefs: [PreferencesOutputs] = []
@@ -275,11 +294,15 @@ extension Layout {
                             let sizeAttr = innerSizeAttrs[i]
                             let innerLC  = innerLCs[i]
                             let innerPref = i < innerPrefs.count ? innerPrefs[i] : PreferencesOutputs()
-                            // Reconstruct _ViewInputs for this child using its position/size attrs.
+                            // Use the child's accumulated transform (includes child's global position).
+                            let childTransformAttr = i < innerTransformAttrs.count
+                                ? innerTransformAttrs[i]
+                                : inputs.transform
+                            // Reconstruct _ViewInputs for this child using its position/size/transform attrs.
                             let childInputs = _ViewInputs(
                                 base: layoutMod.baseInputs,
                                 preferences: inputs.preferences,
-                                transform: inputs.transform,
+                                transform: childTransformAttr,
                                 position: posAttr,
                                 containerPosition: inputs.position,
                                 size: sizeAttr,
@@ -304,9 +327,9 @@ extension Layout {
                             outLCs.append(resultLC)
                             outPrefs.append(modOutputs.preferences)
                         }
-                        // posAttrs/sizeAttrs: the inner attrs are still updated via the place chain
-                        // (resultLC.place → innerLC.place → wrapperLC.place → posAttr.setValue).
-                        return (outLCs, outPrefs, innerTraitsLists, innerPosAttrs, innerSizeAttrs)
+                        // posAttrs/sizeAttrs/transformAttrs: the inner attrs are still updated via
+                        // the place chain (resultLC.place → innerLC.place → wrapperLC.place → posAttr.setValue).
+                        return (outLCs, outPrefs, innerTraitsLists, innerPosAttrs, innerSizeAttrs, innerTransformAttrs)
                     }
                     return applyRenderingMod(layoutMod.modifierType)
                 }
@@ -362,7 +385,7 @@ extension Layout {
         switch childListOutputs.views {
         case .staticList(let elements):
             // Wire all generators once at graph-construction time.
-            let (layoutPairs, childPrefsList, childTraitsLists, _, _) = wireElements(elements)
+            let (layoutPairs, childPrefsList, childTraitsLists, _, _, _) = wireElements(elements)
 
             layoutComputerAttr = graph.makeRule {
                 let layout = root._attribute.value
