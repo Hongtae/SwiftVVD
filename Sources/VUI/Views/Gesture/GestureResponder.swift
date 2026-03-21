@@ -8,6 +8,18 @@
 import Foundation
 import Synchronization
 
+// AnyGestureResponder
+
+/// Type-erased protocol for gesture responders used by GestureGraph.
+/// Allows GestureGraph.createSession to work with any GestureResponder<M>
+/// without knowing the concrete modifier type M.
+protocol AnyGestureResponder: ViewResponder, AnyObject {
+    var gestureViewInputs: _ViewInputs { get }
+    var exclusionPolicy: GestureResponderExclusionPolicy { get }
+    var gestureMask: GestureMask { get set }
+    func makeGesture(inputs: _GestureInputs) -> _GestureOutputs<()>
+}
+
 // ViewRespondersKey
 
 /// Built-in PreferenceKey that carries gesture responders upward through the view tree.
@@ -184,13 +196,13 @@ final class ActiveGestureSession {
     let isTerminalAttr: Attribute<Bool>
 
     /// Weak reference to the responder that owns this session.
-    weak var responder: GestureResponder?
+    weak var responder: (any AnyGestureResponder)?
 
     init(
         subgraph: Subgraph,
         eventsAttr: Attribute<[EventID: any EventType]>,
         isTerminalAttr: Attribute<Bool>,
-        responder: GestureResponder
+        responder: any AnyGestureResponder
     ) {
         self.subgraph = subgraph
         self.eventsAttr = eventsAttr
@@ -220,71 +232,53 @@ final class ActiveGestureSession {
 
 /// Concrete ViewResponder created by AddGestureModifier._makeView (via GestureFilter rule).
 ///
+/// Generic on the modifier type M so that `makeGesture` can call `M._makeSessionGesture`
+/// directly at session-creation time — enabling dynamic gesture switching without a factory
+/// closure capture. Stores `modifierAttr: Attribute<M>` rather than a baked-in factory.
+///
 /// Subclass of `MultiViewResponder` — inherits `responders` (inner ViewResponder list)
-/// and `updateChildren` plumbing, exactly as in the reference framework.
-///
-/// Stores view geometry for hit testing and a factory closure that calls
-/// `Gesture._makeGesture` on demand when a touch begins.
-/// This deferred approach means dynamic views get fresh gesture sessions
-/// each time they are touched.
-///
-/// `gestureMask` and `responders` are mutable so that the GestureFilter rule can update
-/// them reactively whenever the modifier or inner ViewRespondersKey changes.
-final class GestureResponder: MultiViewResponder, ViewResponder {
-    private static let _nextKey = Mutex<UInt32>(1)
+/// and `updateChildren` plumbing. The GestureFilter<M> rule writes to `responders` directly.
+nonisolated(unsafe) private var _gestureResponderKeyCounter: UInt32 = 1
 
+final class GestureResponder<M: GestureViewModifier>: MultiViewResponder, ViewResponder, AnyGestureResponder {
     let hitTestKey: UInt32
     weak var nextResponder: ResponderNode?
     var gestureContainer: AnyObject? { nil }
 
-    /// AG attribute for the view's position (window-global coords, for hit testing).
-    let position: Attribute<CGPoint>
-
-    /// AG attribute for the view's proposed size (for hit testing).
-    let size: Attribute<ViewSize>
+    /// The modifier attribute — read inside `makeGesture` at session-creation time.
+    /// Using the attribute (not a baked value) ensures dynamic gesture changes are picked up.
+    let modifierAttr: Attribute<M>
 
     /// How this responder interacts with other simultaneously-hit responders.
-    /// Derived from `Combiner.exclusionPolicy` at _makeView time.
     let exclusionPolicy: GestureResponderExclusionPolicy
 
     /// The gesture mask controlling which gesture types are active.
-    /// Updated by the GestureFilter rule when the modifier changes.
+    /// Updated by GestureFilter<M>.updateValue() whenever the modifier changes.
     var gestureMask: GestureMask
 
-    // Inner view responders (from the subtree below this gesture modifier) are
-    // stored in the inherited `responders: [any ViewResponder]` property from
-    // MultiViewResponder. The GestureFilter rule writes to `responders` directly.
-
     /// The _ViewInputs captured at _makeView time.
-    /// Provides position, size, time, and preference key context to sessions.
-    let viewInputs: _ViewInputs
-
-    /// Factory closure: called inside a session subgraph to instantiate the gesture graph.
-    /// Takes the session-local _GestureInputs and returns an Attribute<Bool> that is
-    /// true when the gesture phase is terminal (.ended or .failed).
-    typealias Factory = (_GestureInputs) -> Attribute<Bool>
-    let factory: Factory
+    var viewInputs: _ViewInputs
+    var gestureViewInputs: _ViewInputs { viewInputs }
 
     init(
-        position: Attribute<CGPoint>,
-        size: Attribute<ViewSize>,
+        modifierAttr: Attribute<M>,
         exclusionPolicy: GestureResponderExclusionPolicy,
         gestureMask: GestureMask,
-        viewInputs: _ViewInputs,
-        factory: @escaping Factory
+        viewInputs: _ViewInputs
     ) {
-        self.hitTestKey = GestureResponder._nextKey.withLock { key in
-            defer { key &+= 1 }
-            return key
-        }
-
-        self.position = position
-        self.size = size
+        self.hitTestKey = _gestureResponderKeyCounter
+        _gestureResponderKeyCounter &+= 1
+        self.modifierAttr = modifierAttr
         self.exclusionPolicy = exclusionPolicy
         self.gestureMask = gestureMask
         self.viewInputs = viewInputs
-        self.factory = factory
         super.init()
+    }
+
+    /// Instantiates the gesture graph for one session by delegating to the modifier type.
+    /// Called inside a session Subgraph so all produced AG nodes are session-scoped.
+    func makeGesture(inputs: _GestureInputs) -> _GestureOutputs<()> {
+        M._makeSessionGesture(modifier: _GraphValue(_attribute: modifierAttr), inputs: inputs)
     }
 
     func hitTestPolicy(options: ContainsPointsOptions) -> HitTestPolicy {
@@ -296,7 +290,7 @@ final class GestureResponder: MultiViewResponder, ViewResponder {
         cacheKey: UInt32?,
         options: ContainsPointsOptions
     ) -> ContainsPointsResult {
-        let sz = size.value.value
+        let sz = viewInputs.size.value.value
         let t = viewInputs.transform.value
         var localPts = Array(points.prefix(64))
         t.convertGlobal(to: .local, points: &localPts)

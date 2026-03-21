@@ -242,11 +242,21 @@ struct GloballySimultaneousGestureCombiner: GestureCombiner {
 /// `ViewModifier._makeView` implementation that delegates to `makeView`.
 protocol GestureViewModifier: ViewModifier where Body == Never {
     associatedtype Combiner: GestureCombiner
+    var gestureMask: GestureMask { get }
     static func makeView(
         modifier: _GraphValue<Self>,
         inputs: _ViewInputs,
         body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
     ) -> _ViewOutputs
+
+    /// Produces `_GestureOutputs<()>` for one gesture session.
+    /// Called by `GestureResponder<Self>.makeGesture(inputs:)` at touch time.
+    /// The modifier is passed as a `_GraphValue` so the gesture type's `_makeGesture`
+    /// can subscript into it to get the inner gesture attribute.
+    static func _makeSessionGesture(
+        modifier: _GraphValue<Self>,
+        inputs: _GestureInputs
+    ) -> _GestureOutputs<()>
 }
 
 extension GestureViewModifier {
@@ -305,6 +315,58 @@ extension View {
     }
 }
 
+// AddGestureModifier _makeSessionGesture + GestureFilter
+
+extension AddGestureModifier {
+    /// Creates the gesture graph for one active session.
+    /// Maps the raw `_GestureOutputs<T.Value>` to `_GestureOutputs<()>` so the session
+    /// only needs to track terminal state, not the concrete value type.
+    static func _makeSessionGesture(
+        modifier: _GraphValue<Self>,
+        inputs: _GestureInputs
+    ) -> _GestureOutputs<()> {
+        guard let graph = AttributeGraph.current else {
+            fatalError("AddGestureModifier._makeSessionGesture requires AG context")
+        }
+        let rawOutputs = T._makeGesture(gesture: modifier[\.gesture], inputs: inputs)
+        let mappedPhase: Attribute<GesturePhase<()>> = graph.makeRule {
+            rawOutputs.phase.value.map { _ in () }
+        }
+        return rawOutputs.withPhase(mappedPhase)
+    }
+}
+
+/// StatefulRule that lazily creates a `GestureResponder<M>` and keeps it updated
+/// whenever the modifier or inner view responders change.
+///
+/// - First evaluation: creates the responder and calls `setStatefulOutput([responder])`.
+/// - Subsequent evaluations: updates `gestureMask` and `responders` in place — the
+///   output value (the array containing the same responder instance) never changes.
+struct GestureFilter<M: GestureViewModifier>: StatefulRule {
+    typealias Value = [any ViewResponder]
+
+    var modifierAttr: Attribute<M>
+    var innerRespondersAttr: Attribute<[any ViewResponder]>
+    var viewInputs: _ViewInputs
+    var exclusionPolicy: GestureResponderExclusionPolicy
+    var _responder: GestureResponder<M>? = nil
+
+    mutating func updateValue() {
+        let currentModifier = modifierAttr.value
+        if _responder == nil {
+            _responder = GestureResponder<M>(
+                modifierAttr: modifierAttr,
+                exclusionPolicy: exclusionPolicy,
+                gestureMask: currentModifier.gestureMask,
+                viewInputs: viewInputs
+            )
+            AttributeGraph.setStatefulOutput([_responder!])
+        }
+        _responder!.gestureMask = currentModifier.gestureMask
+        _responder!.responders = innerRespondersAttr.value
+    }
+}
+
 // AddGestureModifier makeView (via GestureViewModifier)
 
 extension AddGestureModifier {
@@ -322,27 +384,8 @@ extension AddGestureModifier {
         // Only register a gesture responder inside a gesture-enabled layout pass.
         guard GestureGraph._current != nil else { return outputs }
 
-        // Capture context needed to instantiate the gesture at touch time.
-        // These are all value-type AG attribute references (alive as long as the view exists).
         let capturedViewInputs = inputs
-        let capturedGestureValue = modifier[\.gesture]  // _GraphValue<T> in view subgraph
 
-        // Factory: called inside a session subgraph when a touch hits this view.
-        // All AG nodes created here (phase, recognizer rules, callback rules) are
-        // registered to the session subgraph and released when the session ends.
-        // Captures capturedGestureValue (a _GraphValue cursor), so at session-creation time
-        // it reads the CURRENT gesture value — enabling dynamic gesture switching.
-        let factory: GestureResponder.Factory = { gestureInputs in
-            guard let graph = AttributeGraph.current else {
-                fatalError("GestureResponder.factory requires AG context")
-            }
-            let outputs = T._makeGesture(gesture: capturedGestureValue, inputs: gestureInputs)
-            // Wrap the typed phase into an Attribute<Bool> so the session can check
-            // termination without knowing the concrete Value type.
-            return graph.makeRule { outputs.phase.value.isTerminal }
-        }
-
-        // --- GestureFilter pattern ---
         // Collect inner ViewRespondersKey nodes from the inner body outputs.
         // These represent gesture responders from sub-views (e.g. Buttons inside this view).
         let innerResponderNodes = outputs.preferences.preferences
@@ -367,29 +410,15 @@ extension AddGestureModifier {
             }
         }
 
-        // GestureFilter rule: re-evaluates when modifier or inner responders change.
-        // Creates the GestureResponder lazily on first evaluation and then updates
-        // its mutable properties (gestureMask, children) on subsequent evaluations.
-        let modAttr = modifier._attribute
-        var _responder: GestureResponder? = nil
-        let respondersAttr: Attribute<[any ViewResponder]> = graph.makeRule {
-            let currentModifier = modAttr.value
-
-            if _responder == nil {
-                _responder = GestureResponder(
-                    position: capturedViewInputs.position,
-                    size: capturedViewInputs.size,
-                    exclusionPolicy: Combiner.exclusionPolicy,
-                    gestureMask: currentModifier.gestureMask,
-                    viewInputs: capturedViewInputs,
-                    factory: factory
-                )
-            }
-            let responder = _responder!
-            responder.gestureMask = currentModifier.gestureMask
-            responder.responders = innerRespondersAttr.value
-            return [responder]
-        }
+        // GestureFilter StatefulRule: lazily creates GestureResponder<Self> on first evaluation,
+        // then updates gestureMask and inner responders in place on subsequent evaluations.
+        let gestureFilter = GestureFilter<Self>(
+            modifierAttr: modifier._attribute,
+            innerRespondersAttr: innerRespondersAttr,
+            viewInputs: capturedViewInputs,
+            exclusionPolicy: Combiner.exclusionPolicy
+        )
+        let respondersAttr = graph.makeStatefulRule(gestureFilter)
 
         // Remove inner ViewRespondersKey entries from outputs — they are now consumed
         // as GestureResponder.children. The outer preference is the GestureFilter output.

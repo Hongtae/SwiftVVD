@@ -143,11 +143,12 @@ class GestureGraph: @unchecked Sendable {
     /// Must be called inside an active `AttributeGraph.$current` context.
     /// All AG nodes created by `_makeGesture` are registered to the session's subgraph.
     private func createSession(
-        for responder: GestureResponder,
+        for responder: any AnyGestureResponder,
         in graph: AttributeGraph
     ) -> ActiveGestureSession {
         // Create a standalone subgraph (no parent — managed by GestureGraph directly)
         let subgraph = Subgraph()
+        let viewInputs = responder.gestureViewInputs
 
         let (eventsAttr, isTerminalAttr) = Subgraph.$current.withValue(subgraph) {
             let eventsAttr: Attribute<[EventID: any EventType]> = graph.makeInput(value: [:])
@@ -156,19 +157,22 @@ class GestureGraph: @unchecked Sendable {
                 graph.makeInput(value: [])
 
             let gestureInputs = _GestureInputs(
-                responder.viewInputs,
+                viewInputs,
                 viewSubgraph: nil,
                 events: eventsAttr,
-                time: responder.viewInputs.base.time,
+                time: viewInputs.base.time,
                 resetSeed: resetSeedAttr,
                 inheritedPhase: inheritedPhaseAttr,
-                gesturePreferenceKeys: responder.viewInputs.preferences.hostKeys
+                gesturePreferenceKeys: viewInputs.preferences.hostKeys
             )
             // Signal that this _makeGesture call is running inside the GestureGraph dispatch pipeline.
             var gestureInputsWithFlags = gestureInputs
             gestureInputsWithFlags.options = .gestureGraph
 
-            let isTerminalAttr: Attribute<Bool> = responder.factory(gestureInputsWithFlags)
+            let outputs = responder.makeGesture(inputs: gestureInputsWithFlags)
+            let isTerminalAttr: Attribute<Bool> = graph.makeRule {
+                outputs.phase.value.isTerminal
+            }
 
             return (eventsAttr, isTerminalAttr)
         }
@@ -211,7 +215,7 @@ class GestureGraph: @unchecked Sendable {
             // Hit test: find all GestureResponders that contain the touch point.
             // Results are in child-first order (ViewRespondersKey.reduce appends leaves before root).
             let hitResponders = rootResponder.respondersContaining(point: event.location)
-                .compactMap { $0 as? GestureResponder }
+                .compactMap { $0 as? any AnyGestureResponder }
                 .filter { $0.gestureMask.contains(.gesture) }
             guard !hitResponders.isEmpty else { return .failed }
 
@@ -222,7 +226,7 @@ class GestureGraph: @unchecked Sendable {
             //                     cancelled entirely when a .highPriority responder is hit
             //  .simultaneous(*) — always creates a session, coexists with all others
             let hasHighPriority = hitResponders.contains { $0.exclusionPolicy == .highPriority }
-            var activeResponders: [GestureResponder] = []
+            var activeResponders: [any AnyGestureResponder] = []
             var sawDefault = false
             for responder in hitResponders {
                 switch responder.exclusionPolicy {
