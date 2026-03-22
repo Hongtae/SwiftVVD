@@ -15,7 +15,7 @@ public struct Menu<Label, Content>: View where Label: View, Content: View {
             .modifier(StaticSourceWriter<MenuStyleConfiguration.Label, Label>(source: self.label))
             .modifier(
                 StaticSourceWriter<MenuStyleConfiguration.Content, ModifiedContent<Content, StyleContextWriter<MenuStyleContext>>>(
-                source: self.content.modifier(StyleContextWriter(style: MenuStyleContext()))
+                source: self.content.modifier(StyleContextWriter<MenuStyleContext>())
                 ))
     }
 }

@@ -17,7 +17,7 @@ extension View {
     public func contextMenu<MenuItems>(@ViewBuilder menuItems: () -> MenuItems) -> some View where MenuItems: View {
         let content = ZStack {
             menuItems()
-                .modifier(StyleContextWriter(style: MenuStyleContext()))
+                .modifier(StyleContextWriter<MenuStyleContext>())
         }
         return modifier(ContextMenuModifier(content: content))
     }

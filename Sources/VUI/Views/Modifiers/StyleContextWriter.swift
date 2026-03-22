@@ -5,24 +5,28 @@
 //  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-
-struct StyleContextWriter<Style>: ViewModifier where Style: StyleContext {
+// StyleContextWriter<T: StyleContext> — _GraphInputsModifier that pushes a
+// StyleContext type onto the current context stack in customInputs.
+//
+// Implementation:
+//   _makeInputs reads the current AnyStyleContextType from customInputs,
+//   calls pushing(T.self) to add T to the context set, then writes the
+//   new value back. This is a pure type-level operation — no instance is stored.
+struct StyleContextWriter<T: StyleContext>: ViewModifier, _GraphInputsModifier {
     typealias Body = Never
-    let style: Style
+
+    static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GraphInputs) {
+        let current = inputs.customInputs.value(forKey: StyleContextInput.self)
+        let new = current.pushing(T.self)
+        inputs.customInputs.setValue(new, forKey: StyleContextInput.self)
+    }
 }
 
-extension StyleContextWriter: _ViewInputsModifier {
-    static func _makeViewInputs(modifier: _GraphValue<Self>, inputs: inout _ViewInputs) {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeViewInputs called outside an active AttributeGraph context.")
-        }
-        let parentEnvAttr = inputs.base.cachedEnvironment.value.environment
-        let newEnvAttr: Attribute<EnvironmentValues> = graph.makeRule {
-            let m = modifier._attribute.value
-            var env = parentEnvAttr.value
-            env._overrideStyleContext = m.style
-            return env
-        }
-        inputs.base.cachedEnvironment = MutableBox(CachedEnvironment(environment: newEnvAttr))
+// DefaultStyleContextWriter — resets the context to NoStyleContext (defaultValue).
+struct DefaultStyleContextWriter: ViewModifier, _GraphInputsModifier {
+    typealias Body = Never
+
+    static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GraphInputs) {
+        inputs.customInputs.setValue(.defaultValue, forKey: StyleContextInput.self)
     }
 }

@@ -5,73 +5,74 @@
 //  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-protocol StyleContext: Sendable {
-    var minimumViewSize: CGSize { get }
-    var maximumViewSize: CGSize { get }
+// StyleContext — marker protocol for style context types.
+// Context behavior is implemented directly on AnyStyleContextType using
+// ObjectIdentifier-based tracking.
+protocol StyleContext: Sendable {}
 
-    var foregroundStyle: any ShapeStyle { get }
-    var backgroundStyle: any ShapeStyle { get }
+// Marker types — empty structs with no stored properties.
+struct NoStyleContext: StyleContext {}
+struct PlainListStyleContext: StyleContext {}
+struct GroupedFormStyleContext: StyleContext {}
+struct TableStyleContext: StyleContext {}
+struct SidebarListStyleContext: StyleContext {}
+struct InsetListStyleContext: StyleContext {}
+struct BorderedListStyleContext: StyleContext {}
+struct SystemPreferencesSidebarListStyleContext: StyleContext {}
+struct TextInputSuggestionsContext: StyleContext {}
+struct ToolbarStyleContext: StyleContext {}
+struct SectionHeaderStyleContext: StyleContext {}
+struct ListAccessoryBarStyleContext: StyleContext {}
+struct SwipeActionsStyleContext: StyleContext {}
+struct AccessibilityQuickActionStyleContext: StyleContext {}
+struct AccessibilityRepresentableStyleContext: StyleContext {}
 
-    var textOffset: Int { get }
-    var buttonStyle: (any StyleContext)? { get }
-    var buttonHighlightStyle: (any StyleContext)? { get }
+// Menu-related contexts (used by Menu; will be superseded when Menu is rewritten).
+struct MenuStyleContext: StyleContext {}
 
-    var viewSpacing: ViewSpacing { get }
-}
+// AnyStyleContextType — value type representing the current style context stack.
+// Uses a Set<ObjectIdentifier> to track accepted context types:
+//   - pushing(T) adds T's ObjectIdentifier to the set (union)
+//   - acceptsTop(T) checks if T's ObjectIdentifier is in the set
+struct AnyStyleContextType: Equatable {
+    private var contextIDs: Set<ObjectIdentifier>
 
-extension StyleContext {
-    var minimumViewSize: CGSize { CGSize(width: 0, height: 0) }
-    var maximumViewSize: CGSize { CGSize(width: Int.max, height: Int.max) }
-    var foregroundStyle: any ShapeStyle { .foreground }
-    var backgroundStyle: any ShapeStyle { .background }
+    fileprivate init(contextIDs: Set<ObjectIdentifier>) {
+        self.contextIDs = contextIDs
+    }
 
-    var textOffset: Int { 0 }
-    var buttonStyle: (any StyleContext)? { nil }
-    var buttonHighlightStyle: (any StyleContext)? { nil }
+    static var defaultValue: AnyStyleContextType {
+        AnyStyleContextType(contextIDs: [ObjectIdentifier(NoStyleContext.self)])
+    }
 
-    var viewSpacing: ViewSpacing { ViewSpacing() }
-}
+    func acceptsTop(_ type: any StyleContext.Type) -> Bool {
+        contextIDs.contains(ObjectIdentifier(type))
+    }
 
-private protocol _MenuItemStyleContext: StyleContext {
-}
+    func pushing<T: StyleContext>(_ type: T.Type) -> AnyStyleContextType {
+        var ids = contextIDs
+        ids.insert(ObjectIdentifier(type))
+        return AnyStyleContextType(contextIDs: ids)
+    }
 
-extension _MenuItemStyleContext {
-    var minimumViewSize: CGSize { CGSize(width: 120, height: 24) }
-    var maximumViewSize: CGSize { CGSize(width: 200, height: 200) }
-    var foregroundStyle: any ShapeStyle { Color.gray }
-    var backgroundStyle: any ShapeStyle { .background }
+    func acceptsAny(_ types: [any StyleContext.Type]) -> Bool {
+        types.contains { contextIDs.contains(ObjectIdentifier($0)) }
+    }
 
-    var textOffset: Int { 4 }
-    var buttonStyle: (any StyleContext)? { MenuButtonStyleContext() }
-    var buttonHighlightStyle: (any StyleContext)? { MenuButtonHighlightStyleContext() }
-
-    var viewSpacing: ViewSpacing { .zero }
-}
-
-struct MenuStyleContext: StyleContext, _MenuItemStyleContext {
-}
-
-struct MenuButtonStyleContext: _MenuItemStyleContext {
-    var foregroundStyle: any ShapeStyle { .foreground }
-    var backgroundStyle: any ShapeStyle { .background }
-}
-
-struct MenuButtonHighlightStyleContext: _MenuItemStyleContext {
-    var foregroundStyle: any ShapeStyle { .white }
-    var backgroundStyle: any ShapeStyle { .background }
-}
-
-private struct _OverrideStyleContextKey: EnvironmentKey {
-    static let defaultValue: (any StyleContext)? = nil
-}
-
-extension EnvironmentValues {
-    var _overrideStyleContext: (any StyleContext)? {
-        get { self[_OverrideStyleContextKey.self] }
-        set { self[_OverrideStyleContextKey.self] = newValue }
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.contextIDs == rhs.contextIDs
     }
 }
 
+// StyleContextInput — PropertyItem key storing the current AnyStyleContextType
+// in _GraphInputs.customInputs.
+struct StyleContextInput: PropertyItem {
+    typealias Item = AnyStyleContextType
+    static var defaultValue: AnyStyleContextType { .defaultValue }
+    var description: String { "StyleContextInput" }
+}
+
+// Menu-related context management (retained until Menu is fully rewritten).
 struct _SubmenuRegistration: @unchecked Sendable {
     var close: () -> Void
     var isHovered: () -> Bool

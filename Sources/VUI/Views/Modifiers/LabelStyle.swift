@@ -162,13 +162,218 @@ extension EnvironmentValues {
     }
 }
 
-public struct DefaultLabelStyle: LabelStyle {
-    public init() {}
-    public func makeBody(configuration: Configuration) -> some View {
-        HStack {
+// Context-specific label styles used in DefaultLabelStyle.makeBody's dispatch chain.
+// Provides minimal functional implementations for context-specific label styles.
+
+// ListLabelStyle — used in PlainList, InsetList, BorderedList contexts.
+struct ListLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(alignment: .center) {
             configuration.icon
             configuration.title
         }
+    }
+}
+
+// SidebarLabelStyle — used in Sidebar context.
+struct SidebarLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(alignment: .center) {
+            configuration.icon
+            configuration.title
+        }
+    }
+}
+
+// GroupedFormLabelStyle — used in GroupedForm and Table contexts.
+struct GroupedFormLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(alignment: .center) {
+            configuration.icon
+            configuration.title
+        }
+    }
+}
+
+// SystemPreferencesSidebarLabelStyle — used in system preferences sidebar.
+struct SystemPreferencesSidebarLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(alignment: .center) {
+            configuration.icon
+            configuration.title
+        }
+    }
+}
+
+// TextInputSuggestionLabelStyle — used in text input suggestions context.
+struct TextInputSuggestionLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(alignment: .center) {
+            configuration.icon
+            configuration.title
+        }
+    }
+}
+
+// ToolbarItemLabelStyle — used in toolbar contexts.
+struct ToolbarItemLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(alignment: .center) {
+            configuration.icon
+            configuration.title
+        }
+    }
+}
+
+// AccessibilityLabelStyle — used in accessibility representable contexts.
+struct AccessibilityLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(alignment: .center) {
+            configuration.icon
+            configuration.title
+        }
+    }
+}
+
+public struct DefaultLabelStyle: LabelStyle {
+    public init() {}
+    public func makeBody(configuration: Configuration) -> some View {
+        // Chain: innermost [16] is added first (.modifier first call),
+        //        outermost [0] is added last (.modifier last call).
+        // _makeView executes outermost→innermost; innermost pushes last onto
+        // the style stack → innermost wins over outermost.
+        // FallbackLabelStyle is outermost = default when no context matches.
+        Label(configuration)
+            // [16] innermost: (Plain, GroupedForm) → GroupedFormLabelStyle
+            .modifier(
+                StaticIf<StyleContextAcceptsPredicate<(PlainListStyleContext, GroupedFormStyleContext)>,
+                          LabelStyleWritingModifier<GroupedFormLabelStyle>, EmptyModifier>(
+                    trueBody: LabelStyleWritingModifier(style: GroupedFormLabelStyle()),
+                    falseBody: EmptyModifier()
+                )
+            )
+            // [15] (Table, GroupedForm) → GroupedFormLabelStyle
+            .modifier(
+                StaticIf<StyleContextAcceptsPredicate<(TableStyleContext, GroupedFormStyleContext)>,
+                          LabelStyleWritingModifier<GroupedFormLabelStyle>, EmptyModifier>(
+                    trueBody: LabelStyleWritingModifier(style: GroupedFormLabelStyle()),
+                    falseBody: EmptyModifier()
+                )
+            )
+            // [14] PlainList → ListLabelStyle
+            .modifier(
+                StaticIf<StyleContextAcceptsPredicate<PlainListStyleContext>,
+                          LabelStyleWritingModifier<ListLabelStyle>, EmptyModifier>(
+                    trueBody: LabelStyleWritingModifier(style: ListLabelStyle()),
+                    falseBody: EmptyModifier()
+                )
+            )
+            // [13] SidebarList → SidebarLabelStyle
+            .modifier(
+                StaticIf<StyleContextAcceptsPredicate<SidebarListStyleContext>,
+                          LabelStyleWritingModifier<SidebarLabelStyle>, EmptyModifier>(
+                    trueBody: LabelStyleWritingModifier(style: SidebarLabelStyle()),
+                    falseBody: EmptyModifier()
+                )
+            )
+            // [12] InsetList → ListLabelStyle
+            .modifier(
+                StaticIf<StyleContextAcceptsPredicate<InsetListStyleContext>,
+                          LabelStyleWritingModifier<ListLabelStyle>, EmptyModifier>(
+                    trueBody: LabelStyleWritingModifier(style: ListLabelStyle()),
+                    falseBody: EmptyModifier()
+                )
+            )
+            // [11] GroupedForm → GroupedFormLabelStyle
+            .modifier(
+                StaticIf<StyleContextAcceptsPredicate<GroupedFormStyleContext>,
+                          LabelStyleWritingModifier<GroupedFormLabelStyle>, EmptyModifier>(
+                    trueBody: LabelStyleWritingModifier(style: GroupedFormLabelStyle()),
+                    falseBody: EmptyModifier()
+                )
+            )
+            // [10] BorderedList → ListLabelStyle
+            .modifier(
+                StaticIf<StyleContextAcceptsPredicate<BorderedListStyleContext>,
+                          LabelStyleWritingModifier<ListLabelStyle>, EmptyModifier>(
+                    trueBody: LabelStyleWritingModifier(style: ListLabelStyle()),
+                    falseBody: EmptyModifier()
+                )
+            )
+            // [9] SystemPreferencesSidebar → SystemPreferencesSidebarLabelStyle
+            .modifier(
+                StaticIf<StyleContextAcceptsPredicate<SystemPreferencesSidebarListStyleContext>,
+                          LabelStyleWritingModifier<SystemPreferencesSidebarLabelStyle>, EmptyModifier>(
+                    trueBody: LabelStyleWritingModifier(style: SystemPreferencesSidebarLabelStyle()),
+                    falseBody: EmptyModifier()
+                )
+            )
+            // [8] TextInputSuggestions → TextInputSuggestionLabelStyle
+            .modifier(
+                StaticIf<StyleContextAcceptsPredicate<TextInputSuggestionsContext>,
+                          LabelStyleWritingModifier<TextInputSuggestionLabelStyle>, EmptyModifier>(
+                    trueBody: LabelStyleWritingModifier(style: TextInputSuggestionLabelStyle()),
+                    falseBody: EmptyModifier()
+                )
+            )
+            // [7] IsDefaultButtonLabel AND Toolbar → TitleOnlyLabelStyle
+            .modifier(
+                StaticIf<AndOperationViewInputPredicate<IsDefaultButtonLabel, StyleContextAcceptsAnyPredicate<ToolbarStyleContext>>,
+                          LabelStyleWritingModifier<TitleOnlyLabelStyle>, EmptyModifier>(
+                    trueBody: LabelStyleWritingModifier(style: TitleOnlyLabelStyle()),
+                    falseBody: EmptyModifier()
+                )
+            )
+            // [6] Toolbar → ToolbarItemLabelStyle
+            .modifier(
+                StaticIf<StyleContextAcceptsPredicate<ToolbarStyleContext>,
+                          LabelStyleWritingModifier<ToolbarItemLabelStyle>, EmptyModifier>(
+                    trueBody: LabelStyleWritingModifier(style: ToolbarItemLabelStyle()),
+                    falseBody: EmptyModifier()
+                )
+            )
+            // [5] SectionHeader → TitleOnlyLabelStyle
+            .modifier(
+                StaticIf<StyleContextAcceptsPredicate<SectionHeaderStyleContext>,
+                          LabelStyleWritingModifier<TitleOnlyLabelStyle>, EmptyModifier>(
+                    trueBody: LabelStyleWritingModifier(style: TitleOnlyLabelStyle()),
+                    falseBody: EmptyModifier()
+                )
+            )
+            // [4] ListAccessoryBar → IconOnlyLabelStyle
+            .modifier(
+                StaticIf<StyleContextAcceptsPredicate<ListAccessoryBarStyleContext>,
+                          LabelStyleWritingModifier<IconOnlyLabelStyle>, EmptyModifier>(
+                    trueBody: LabelStyleWritingModifier(style: IconOnlyLabelStyle()),
+                    falseBody: EmptyModifier()
+                )
+            )
+            // [3] SwipeActions → TitleAndIconLabelStyle
+            .modifier(
+                StaticIf<StyleContextAcceptsPredicate<SwipeActionsStyleContext>,
+                          LabelStyleWritingModifier<TitleAndIconLabelStyle>, EmptyModifier>(
+                    trueBody: LabelStyleWritingModifier(style: TitleAndIconLabelStyle()),
+                    falseBody: EmptyModifier()
+                )
+            )
+            // [2] AccessibilityQuickAction → TitleAndIconLabelStyle
+            .modifier(
+                StaticIf<StyleContextAcceptsPredicate<AccessibilityQuickActionStyleContext>,
+                          LabelStyleWritingModifier<TitleAndIconLabelStyle>, EmptyModifier>(
+                    trueBody: LabelStyleWritingModifier(style: TitleAndIconLabelStyle()),
+                    falseBody: EmptyModifier()
+                )
+            )
+            // [1] AccessibilityRepresentable → AccessibilityLabelStyle
+            .modifier(
+                StaticIf<StyleContextAcceptsPredicate<AccessibilityRepresentableStyleContext>,
+                          LabelStyleWritingModifier<AccessibilityLabelStyle>, EmptyModifier>(
+                    trueBody: LabelStyleWritingModifier(style: AccessibilityLabelStyle()),
+                    falseBody: EmptyModifier()
+                )
+            )
+            // [0] outermost: FallbackLabelStyle — default when no context matches
+            .modifier(LabelStyleWritingModifier(style: FallbackLabelStyle()))
     }
 }
 
