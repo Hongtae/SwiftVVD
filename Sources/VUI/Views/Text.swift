@@ -8,6 +8,31 @@
 import Foundation
 import VVD
 
+// TextAlignment: horizontal alignment for multi-line text.
+public enum TextAlignment: Hashable {
+    case leading
+    case center
+    case trailing
+}
+
+private struct MultilineTextAlignmentKey: EnvironmentKey {
+    static var defaultValue: TextAlignment { .leading }
+}
+
+extension EnvironmentValues {
+    public var multilineTextAlignment: TextAlignment {
+        get { self[MultilineTextAlignmentKey.self] }
+        set { self[MultilineTextAlignmentKey.self] = newValue }
+    }
+}
+
+extension View {
+    public func multilineTextAlignment(_ alignment: TextAlignment) -> some View {
+        environment(\.multilineTextAlignment, alignment)
+    }
+}
+
+
 class AnyTextStorage {
     func resolve(typeFaces: [TypeFace], context: GraphicsContext) -> GraphicsContext.ResolvedText {
         fatalError("This method should be overridden by subclasses.")

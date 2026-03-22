@@ -31,9 +31,8 @@ struct StyleModifierType<Modifier> {}
 struct ButtonStyleModifier<S: PrimitiveButtonStyle> {
     let style: S
 }
-struct LabelStyleModifier<S: LabelStyle> {
-    let style: S
-}
+
+// LabelStyleModifier<S> is defined in LabelStyle.swift.
 
 // Internal protocols for accessing the wrapped style value.
 protocol _HasPrimStyle {
@@ -45,9 +44,6 @@ extension ButtonStyleModifier: _HasPrimStyle {
 
 protocol _HasLabelStyle {
     func _labelStyle() -> any LabelStyle
-}
-extension LabelStyleModifier: _HasLabelStyle {
-    func _labelStyle() -> any LabelStyle { style }
 }
 
 // Dispatch protocols — conditional conformances of StyleModifierType allow
@@ -70,6 +66,8 @@ extension StyleModifierType: _StyleModifierLabelDispatch where Modifier: _HasLab
         Attribute<Modifier>(attrID).value._labelStyle()
     }
 }
+
+// Note: LabelStyleModifier<S>: _HasLabelStyle conformance is in LabelStyle.swift.
 
 // Type-erased style modifier. Two stored properties match reference Mirror output:
 //   value: AGAttribute             — points to the AG node storing the style
