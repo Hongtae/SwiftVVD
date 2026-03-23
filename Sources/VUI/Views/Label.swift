@@ -47,6 +47,8 @@ extension Label where Title == LabelStyleConfiguration.Title, Icon == LabelStyle
 }
 
 struct ResolvedLabelStyle: View {
+    var configuration: LabelStyleConfiguration = LabelStyleConfiguration()
+
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         guard let graph = AttributeGraph.current else {
             fatalError("\(self)._makeView called outside an active AttributeGraph context.")
@@ -80,6 +82,12 @@ struct ResolvedLabelStyle: View {
     }
 }
 
-extension ResolvedLabelStyle: _PrimitiveView {
+extension ResolvedLabelStyle: _PrimitiveView {}
+
+extension ResolvedLabelStyle: StyleableView {
+    typealias DefaultStyleModifier = LabelStyleModifier<DefaultLabelStyle>
+    static var defaultStyleModifier: LabelStyleModifier<DefaultLabelStyle> {
+        LabelStyleModifier(style: DefaultLabelStyle())
+    }
 }
 

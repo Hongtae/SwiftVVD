@@ -16,15 +16,45 @@ public protocol PrimitiveButtonStyle {
 public struct ButtonRole: Equatable, Sendable {
     public static let destructive = ButtonRole(_role: .destructive)
     public static let cancel = ButtonRole(_role: .cancel)
+    public static let confirm = ButtonRole(_role: .confirm)
+    public static let close = ButtonRole(_role: .close)
 
     enum Role: UInt8 {
         case destructive = 1
         case cancel = 4
+        case confirm = 5
+        case close = 6
     }
     let _role: Role
 }
 
-typealias ButtonAction = ()->Void
+// LinkDestination: stub type for URL/navigation button destinations.
+struct LinkDestination {
+    let url: URL
+}
+
+// ButtonAction: multi-payload enum, 3 cases.
+// Internal type. The public surface is PrimitiveButtonStyleConfiguration.trigger().
+enum ButtonAction {
+    // case 0: standard action closure
+    case handler(() -> Void)
+    // case 1: URL/navigation destination (internal, used by Link-style buttons)
+    case destination(LinkDestination)
+    // case 2: App Intents action (not implemented yet)
+    case appIntentAction(_AppIntentActionStorage)
+
+    func callAsFunction() {
+        switch self {
+        case .handler(let fn): fn()
+        case .destination, .appIntentAction: break
+        }
+    }
+}
+
+// _AppIntentActionStorage: 48-byte stub for App Intents ButtonAction payload.
+struct _AppIntentActionStorage {
+    private let _storage: (UInt64, UInt64, UInt64, UInt64, UInt64, UInt64) = (0,0,0,0,0,0)
+}
 
 public struct PrimitiveButtonStyleConfiguration {
     public struct Label: View, ViewAlias {
@@ -34,7 +64,7 @@ public struct PrimitiveButtonStyleConfiguration {
     public let label: Label
     let action: ButtonAction
     public func trigger() {
-        action()
+        action.callAsFunction()
     }
 }
 
@@ -85,158 +115,154 @@ extension PrimitiveButtonStyleConfiguration.Label {
 
 extension PrimitiveButtonStyleConfiguration.Label: _PrimitiveView {}
 
-protocol PrimitiveButtonStyleWithPressingBody {
-    associatedtype PressingBody: View
-    @ViewBuilder func makeBody(configuration: PrimitiveButtonStyleConfiguration,
-                               isPressing: Bool,
-                               callback: ((Bool)->Void)?) -> Self.PressingBody
-}
+// PrimitiveButtonStyle built-in implementations
 
-public struct DefaultButtonStyle: PrimitiveButtonStyle, PrimitiveButtonStyleWithPressingBody {
+public struct DefaultButtonStyle: PrimitiveButtonStyle {
     public init() {}
 
     public func makeBody(configuration: Configuration) -> some View {
-        makeBody(configuration: configuration, isPressing: false)
+        _DefaultButtonStyleBody(configuration: configuration)
     }
+}
 
-    func buttonColor(isPressed: Bool) -> Color {
-        isPressed ? Color(hue: 1, saturation: 0, brightness: 0.9) : .white
-    }
+private struct _DefaultButtonStyleBody: View {
+    let configuration: PrimitiveButtonStyleConfiguration
+    @State private var isPressed = false
 
-    func textColor(isPressed: Bool) -> Color {
-        .black
-    }
-
-    func makeBody(configuration: Configuration, isPressing: Bool, callback: ((Bool)->Void)? = nil) -> some View {
+    var body: some View {
         configuration.label
             .padding(4)
             .background {
-                RoundedRectangle(cornerRadius:4).inset(by: 0.1).fill(buttonColor(isPressed: isPressing))
-                RoundedRectangle(cornerRadius:4).strokeBorder(.black)
+                RoundedRectangle(cornerRadius: 4).inset(by: 0.1)
+                    .fill(isPressed ? Color(hue: 1, saturation: 0, brightness: 0.9) : .white)
+                RoundedRectangle(cornerRadius: 4).strokeBorder(.black)
             }
-            .foregroundStyle(textColor(isPressed: isPressing))
-            ._onButtonGesture(pressing: { isPressed in
-                callback?(isPressed)
-            }, perform: {
-                configuration.trigger()
-            })
+            .foregroundStyle(Color.black)
+            ._onButtonGesture(pressing: { isPressed = $0 }, perform: { configuration.trigger() })
             .hoverBackground {
                 RoundedRectangle(cornerRadius: 4).inset(by: -2).fill(.blue.opacity(0.7))
             }
     }
 }
 
-public struct BorderlessButtonStyle: PrimitiveButtonStyle, PrimitiveButtonStyleWithPressingBody {
+public struct BorderlessButtonStyle: PrimitiveButtonStyle {
     public init() {}
 
-    func textColor(isPressed: Bool) -> Color {
-        isPressed ?
-            .black : .gray
-    }
-
     public func makeBody(configuration: Configuration) -> some View {
-        makeBody(configuration: configuration, isPressing: false)
-    }
-
-    func makeBody(configuration: Configuration, isPressing: Bool, callback: ((Bool)->Void)? = nil) -> some View {
-        configuration.label
-            .padding(4)
-            .foregroundStyle(textColor(isPressed: isPressing))
-            ._onButtonGesture(pressing: { isPressed in
-                callback?(isPressed)
-            }, perform: {
-                configuration.trigger()
-            })
+        _BorderlessButtonStyleBody(configuration: configuration)
     }
 }
 
-public struct LinkButtonStyle: PrimitiveButtonStyle, PrimitiveButtonStyleWithPressingBody {
-    public init() {}
+private struct _BorderlessButtonStyleBody: View {
+    let configuration: PrimitiveButtonStyleConfiguration
+    @State private var isPressed = false
 
-    public func makeBody(configuration: Configuration) -> some View {
-        makeBody(configuration: configuration, isPressing: false)
-    }
-
-    func makeBody(configuration: Configuration, isPressing: Bool, callback: ((Bool)->Void)? = nil) -> some View {
+    var body: some View {
         configuration.label
             .padding(4)
-            .background {
-                RoundedRectangle(cornerRadius:4).strokeBorder(.black)
-            }
-            ._onButtonGesture(pressing: { isPressed in
-                callback?(isPressed)
-            }, perform: {
-                configuration.trigger()
-            })
+            .foregroundStyle(isPressed ? Color.black : Color.gray)
+            ._onButtonGesture(pressing: { isPressed = $0 }, perform: { configuration.trigger() })
     }
 }
 
-public struct PlainButtonStyle: PrimitiveButtonStyle, PrimitiveButtonStyleWithPressingBody {
+public struct LinkButtonStyle: PrimitiveButtonStyle {
     public init() {}
 
     public func makeBody(configuration: Configuration) -> some View {
-        makeBody(configuration: configuration, isPressing: false)
+        _LinkButtonStyleBody(configuration: configuration)
     }
+}
 
-    func makeBody(configuration: Configuration, isPressing: Bool, callback: ((Bool)->Void)? = nil) -> some View {
+private struct _LinkButtonStyleBody: View {
+    let configuration: PrimitiveButtonStyleConfiguration
+    @State private var isPressed = false
+
+    var body: some View {
         configuration.label
             .padding(4)
             .background {
-                RoundedRectangle(cornerRadius:4).strokeBorder(.black)
+                RoundedRectangle(cornerRadius: 4).strokeBorder(.black)
             }
-            ._onButtonGesture(pressing: { isPressed in
-                callback?(isPressed)
-            }, perform: {
-                configuration.trigger()
-            })
+            ._onButtonGesture(pressing: { isPressed = $0 }, perform: { configuration.trigger() })
     }
 }
 
-public struct BorderedButtonStyle: PrimitiveButtonStyle, PrimitiveButtonStyleWithPressingBody {
+public struct PlainButtonStyle: PrimitiveButtonStyle {
     public init() {}
 
     public func makeBody(configuration: Configuration) -> some View {
-        makeBody(configuration: configuration, isPressing: false)
-    }
-
-    func buttonColor(isPressed: Bool) -> Color {
-        isPressed ? Color(hue: 1, saturation: 0, brightness: 0.9) : .white
-    }
-
-    func textColor(isPressed: Bool) -> Color {
-        .black
-    }
-
-    func makeBody(configuration: Configuration, isPressing: Bool, callback: ((Bool)->Void)? = nil) -> some View {
-        configuration.label
-            .padding(4)
-            .background {
-                RoundedRectangle(cornerRadius:4).inset(by: 0.1).fill(buttonColor(isPressed: isPressing))
-                RoundedRectangle(cornerRadius:4).strokeBorder(.black)
-            }
-            .foregroundStyle(textColor(isPressed: isPressing))
-            ._onButtonGesture(pressing: { isPressed in
-                callback?(isPressed)
-            }, perform: {
-                configuration.trigger()
-            })
+        Button(configuration).buttonStyle(PlainButtonStyleBase())
     }
 }
 
-struct _MenuItemButtonStyle: PrimitiveButtonStyle, PrimitiveButtonStyleWithPressingBody {
+private struct PlainButtonStyleBase: ButtonStyle {
+    @Environment(\.isEnabled) var _isEnabled: Bool
+    @Environment(\.isFocused) var _isFocused: Bool
+
     func makeBody(configuration: Configuration) -> some View {
-        makeBody(configuration: configuration, isPressing: false, callback: nil)
+        HStack(alignment: .center) { configuration.label }
+            .opacity(_isEnabled ? (configuration.isPressed ? 0.75 : 1.0) : 0.5)
     }
+}
 
-    func makeBody(configuration: Configuration, isPressing: Bool, callback: ((Bool)->Void)? = nil) -> some View {
-        _MenuItemButtonBody(configuration: configuration, isPressing: isPressing, callback: callback)
+public struct BorderedButtonStyle: PrimitiveButtonStyle {
+    public init() {}
+
+    public func makeBody(configuration: Configuration) -> some View {
+        _BorderedButtonStyleBody(configuration: configuration)
+    }
+}
+
+private struct _BorderedButtonStyleBody: View {
+    let configuration: PrimitiveButtonStyleConfiguration
+    @State private var isPressed = false
+
+    var body: some View {
+        configuration.label
+            .padding(4)
+            .background {
+                RoundedRectangle(cornerRadius: 4).inset(by: 0.1)
+                    .fill(isPressed ? Color(hue: 1, saturation: 0, brightness: 0.9) : .white)
+                RoundedRectangle(cornerRadius: 4).strokeBorder(.black)
+            }
+            .foregroundStyle(Color.black)
+            ._onButtonGesture(pressing: { isPressed = $0 }, perform: { configuration.trigger() })
+    }
+}
+
+public struct BorderedProminentButtonStyle: PrimitiveButtonStyle {
+    public init() {}
+
+    public func makeBody(configuration: Configuration) -> some View {
+        _BorderedProminentButtonStyleBody(configuration: configuration)
+    }
+}
+
+private struct _BorderedProminentButtonStyleBody: View {
+    let configuration: PrimitiveButtonStyleConfiguration
+    @State private var isPressed = false
+
+    var body: some View {
+        configuration.label
+            .padding(4)
+            .background {
+                RoundedRectangle(cornerRadius: 4).inset(by: 0.1)
+                    .fill(isPressed ? Color(hue: 1, saturation: 0, brightness: 0.9) : .blue)
+                RoundedRectangle(cornerRadius: 4).strokeBorder(.black)
+            }
+            .foregroundStyle(Color.white)
+            ._onButtonGesture(pressing: { isPressed = $0 }, perform: { configuration.trigger() })
+    }
+}
+
+struct _MenuItemButtonStyle: PrimitiveButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        _MenuItemButtonBody(configuration: configuration)
     }
 }
 
 private struct _MenuItemButtonBody: View {
     let configuration: PrimitiveButtonStyleConfiguration
-    let isPressing: Bool
-    let callback: ((Bool)->Void)?
 
     @State private var isHovered = false
 
@@ -247,15 +273,10 @@ private struct _MenuItemButtonBody: View {
             configuration.label
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
-        }        
+        }
         .foregroundStyle(isHovered ? Color.white : Color.black)
-        ._onButtonGesture(pressing: { isPressed in
-            callback?(isPressed)
-        }, perform: {
-            configuration.trigger()
-        })
+        ._onButtonGesture(pressing: { _ in }, perform: { configuration.trigger() })
         .onHover { isHovered = $0 }
-        //.border(.red, width: 1)
     }
 }
 
@@ -278,6 +299,12 @@ extension PrimitiveButtonStyle where Self == PlainButtonStyle {
 extension PrimitiveButtonStyle where Self == BorderedButtonStyle {
     public static var bordered: BorderedButtonStyle { .init() }
 }
+
+extension PrimitiveButtonStyle where Self == BorderedProminentButtonStyle {
+    public static var borderedProminent: BorderedProminentButtonStyle { .init() }
+}
+
+// ButtonStyle (high-level, wraps PrimitiveButtonStyle)
 
 public protocol ButtonStyle {
     associatedtype Body: View
@@ -340,88 +367,140 @@ extension ButtonStyleConfiguration.Label {
 
 extension ButtonStyleConfiguration.Label: _PrimitiveView {}
 
-struct _DefaultButtonWithButtonStyle<Style>: PrimitiveButtonStyle, PrimitiveButtonStyleWithPressingBody where Style: ButtonStyle {
-    let style: Style
+// WrappedButtonStyle: ButtonStyle -> PrimitiveButtonStyle adapter
 
-    func makeBody(configuration: Configuration) -> some View {
-        makeBody(configuration: configuration, isPressing: false, callback: nil)
-    }
+struct WrappedButtonStyle<S: ButtonStyle>: PrimitiveButtonStyle {
+    let style: S
 
-    func makeBody(configuration: PrimitiveButtonStyleConfiguration, isPressing: Bool, callback: ((Bool) -> Void)?) -> some View {
-        let config = ButtonStyleConfiguration(role: configuration.role,
-                                              label: .init(),
-                                              isPressed: isPressing)
-        return self.style.makeBody(configuration: config)
-            ._onButtonGesture(pressing: { isPressed in
-                callback?(isPressed)
-            }, perform: {
-                configuration.trigger()
-            })
+    func makeBody(configuration: PrimitiveButtonStyleConfiguration) -> some View {
+        WrappedButtonStyleBody(style: style, configuration: configuration)
     }
 }
 
-struct PrimitiveButtonStyleContainerModifier<Style>: ViewModifier where Style: PrimitiveButtonStyle {
-    let style: Style
+// WrappedButtonStyleBody tracks isPressed state and calls S.makeBody(configuration:)
+struct WrappedButtonStyleBody<S: ButtonStyle>: View {
+    let style: S
+    let configuration: PrimitiveButtonStyleConfiguration
+
+    var body: some View {
+        ButtonBehavior(
+            action: configuration.trigger,
+            content: { isPressed in
+                style.resolvedBody(configuration: ButtonStyleConfiguration(
+                    role: configuration.role,
+                    label: ButtonStyleConfiguration.Label(),
+                    isPressed: isPressed
+                ))
+            }
+        )
+    }
+}
+
+// ButtonBehavior manages pressing state and attaches gesture.
+// WrappedButtonStyleBody.body returns ButtonBehavior<ResolvedButtonStyleBody<S>>.
+struct ButtonBehavior<V: View>: View {
+    let action: () -> Void
+    let content: (Bool) -> V
+    @State private var isPressed: Bool = false
+
+    func pressing(_ value: Bool) {
+        isPressed = value
+    }
+
+    func ended() {
+        action()
+    }
+
+    var body: some View {
+        content(isPressed)
+            ._onButtonGesture(pressing: pressing, perform: ended)
+    }
+}
+
+// ResolvedButtonStyleBody calls S.makeBody(configuration:) with isPressed from ButtonBehavior
+struct ResolvedButtonStyleBody<S: ButtonStyle>: View {
+    let style: S
+    let configuration: ButtonStyleConfiguration
+
+    var body: some View {
+        style.makeBody(configuration: configuration)
+    }
+}
+
+extension ButtonStyle {
+    func resolvedBody(configuration: ButtonStyleConfiguration) -> ResolvedButtonStyleBody<Self> {
+        ResolvedButtonStyleBody(style: self, configuration: configuration)
+    }
+}
+
+// ButtonStyleWriter: _GraphInputsModifier that injects AnyButtonStyleType into ButtonStyleInput.
+// 0 stored fields. The modifier instance is not used in _makeInputs.
+// StyleInput stack push is handled by ButtonStyleModifier via StyleModifier._makeView default impl.
+struct ButtonStyleWriter<S: PrimitiveButtonStyle>: _GraphInputsModifier, ViewModifier {
     typealias Body = Never
-}
 
-extension PrimitiveButtonStyleContainerModifier {
-    static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+    static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GraphInputs) {
+        let anyType = AnyButtonStyleType(S.self)
+        inputs.customInputs.setValue(anyType, forKey: ButtonStyleInput.self)
+        if anyType.isTopLevelStyle {
+            inputs.customInputs.setValue(anyType, forKey: EffectiveButtonStyleInput.self)
         }
-        let styleAttr: Attribute<ButtonStyleModifier<Style>> = graph.makeInput(
-            value: ButtonStyleModifier(style: modifier._attribute.value.style))
-        let anyMod = AnyStyleModifier(
-            value: styleAttr.identifier,
-            _type: StyleModifierType<ButtonStyleModifier<Style>>.self)
-        var inputs = inputs
-        let stack = inputs.base.customInputs.value(forKey: StyleInput<PrimitiveButtonStyleConfiguration>.self)
-        inputs.base.customInputs.setValue(stack.pushing(anyMod), forKey: StyleInput<PrimitiveButtonStyleConfiguration>.self)
-        return body(_Graph(), inputs)
-    }
-
-    static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeViewList called outside an active AttributeGraph context.")
-        }
-        let styleAttr: Attribute<ButtonStyleModifier<Style>> = graph.makeInput(
-            value: ButtonStyleModifier(style: modifier._attribute.value.style))
-        let anyMod = AnyStyleModifier(
-            value: styleAttr.identifier,
-            _type: StyleModifierType<ButtonStyleModifier<Style>>.self)
-        var inputs = inputs
-        let stack = inputs.base.customInputs.value(forKey: StyleInput<PrimitiveButtonStyleConfiguration>.self)
-        inputs.base.customInputs.setValue(stack.pushing(anyMod), forKey: StyleInput<PrimitiveButtonStyleConfiguration>.self)
-        return body(_Graph(), inputs)
     }
 }
 
-struct ButtonStyleContainerModifier<Style>: ViewModifier where Style: ButtonStyle {
-    let style: Style
-    typealias Body = Never
+// Container modifiers (body(content:) based)
 
-    var primitiveButtonStyle: some PrimitiveButtonStyle {
-        _DefaultButtonWithButtonStyle(style: style)
+struct PrimitiveButtonStyleContainerModifier<S: PrimitiveButtonStyle>: ViewModifier {
+    let style: S
+
+    func body(content: Content) -> some View {
+        content
+            .modifier(ButtonStyleModifier<S>(style: style))
+            .modifier(ButtonStyleWriter<S>())
+    }
+}
+
+struct ButtonStyleContainerModifier<S: ButtonStyle>: ViewModifier {
+    let style: S
+
+    func body(content: Content) -> some View {
+        content
+            .modifier(ButtonStyleModifier<WrappedButtonStyle<S>>(style: WrappedButtonStyle(style: style)))
+            .modifier(ButtonStyleWriter<WrappedButtonStyle<S>>())
+    }
+}
+
+// AnyButtonStyleType: type-erased PrimitiveButtonStyle type identity.
+// `any PrimitiveButtonStyle.Type` existential metatype has exactly this layout.
+// Stored by ButtonStyleWriter._makeInputs in ButtonStyleInput / EffectiveButtonStyleInput.
+struct AnyButtonStyleType: Equatable {
+    let _styleType: any PrimitiveButtonStyle.Type
+
+    init<S: PrimitiveButtonStyle>(_ type: S.Type) {
+        _styleType = type
     }
 
-    var modifier: some ViewModifier {
-        PrimitiveButtonStyleContainerModifier(style: primitiveButtonStyle)
-    }
+    var isTopLevelStyle: Bool { true }
 
-    static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        func make<T: ViewModifier>(modifier: _GraphValue<T>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-            T._makeView(modifier: modifier, inputs: inputs, body: body)
-        }
-        return make(modifier: modifier[\.modifier], inputs: inputs, body: body)
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        ObjectIdentifier(lhs._styleType as Any.Type) == ObjectIdentifier(rhs._styleType as Any.Type)
     }
+}
 
-    static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        func make<T: ViewModifier>(modifier: _GraphValue<T>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-            T._makeViewList(modifier: modifier, inputs: inputs, body: body)
-        }
-        return make(modifier: modifier[\.modifier], inputs: inputs, body: body)
-    }
+// ButtonStyleInput: PropertyItem — current active PrimitiveButtonStyle type.
+// Set by ButtonStyleWriter._makeInputs for every buttonStyle() application.
+struct ButtonStyleInput: PropertyItem {
+    typealias Item = AnyButtonStyleType
+    static var defaultValue: AnyButtonStyleType { AnyButtonStyleType(DefaultButtonStyle.self) }
+    var description: String { "ButtonStyleInput" }
+}
+
+// EffectiveButtonStyleInput: PropertyItem — top-level effective style type cache.
+// Set by ButtonStyleWriter._makeInputs when isTopLevelStyle == true.
+struct EffectiveButtonStyleInput: PropertyItem {
+    typealias Item = AnyButtonStyleType
+    static var defaultValue: AnyButtonStyleType { AnyButtonStyleType(DefaultButtonStyle.self) }
+    var description: String { "EffectiveButtonStyleInput" }
 }
 
 extension View {

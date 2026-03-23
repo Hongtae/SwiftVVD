@@ -23,7 +23,7 @@ public struct Button<Label>: View where Label: View {
             configuration: PrimitiveButtonStyleConfiguration(
                 role: role,
                 label: PrimitiveButtonStyleConfiguration.Label(),
-                action: action))
+                action: .handler(action)))
         .modifier(StaticSourceWriter<PrimitiveButtonStyleConfiguration.Label, Label>(source: label))
     }
 }
@@ -56,8 +56,7 @@ extension Button where Label == VUI.Label<Text, Image> {
 
 extension Button where Label == PrimitiveButtonStyleConfiguration.Label {
     public init(_ configuration: PrimitiveButtonStyleConfiguration) {
-        self.init(role: configuration.role, action: {
-        }, label: {
+        self.init(role: configuration.role, action: { configuration.trigger() }, label: {
             configuration.label
         })
     }
@@ -97,68 +96,22 @@ extension Button where Label == VUI.Label<Text, Image> {
     }
 }
 
-struct ResolvedButtonStyle: View {
-    typealias Body = Never
+// ResolvedButtonStyle reads the PrimitiveButtonStyle from StyleInput stack and evaluates it.
+// Non-generic. StyleableView._makeView pops the stack; falls back to body getter when stack is empty.
+struct ResolvedButtonStyle: StyleableView {
+    typealias Configuration = PrimitiveButtonStyleConfiguration
     var configuration: PrimitiveButtonStyleConfiguration
+    
     init(configuration: PrimitiveButtonStyleConfiguration) {
         self.configuration = configuration
     }
-
-    static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
-        }
-        let isPressingAttr: Attribute<Bool> = graph.makeInput(value: false)
-        let stack = inputs.base.customInputs.value(forKey: StyleInput<PrimitiveButtonStyleConfiguration>.self)
-
-        func wirePressingBody<S: PrimitiveButtonStyleWithPressingBody>(_ style: S, inputs: _ViewInputs) -> _ViewOutputs {
-            let bodyAttr = graph.makeRule {
-                let rs = view._attribute.value
-                let config = PrimitiveButtonStyleConfiguration(
-                    role: rs.configuration.role,
-                    label: rs.configuration.label,
-                    action: rs.configuration.action)
-                let isPressing = isPressingAttr.value
-                return style.makeBody(configuration: config, isPressing: isPressing, callback: { v in
-                    isPressingAttr.setValue(v)
-                })
-            }
-            return makeView(view: _GraphValue(_attribute: bodyAttr), inputs: inputs)
-        }
-
-        func wireBody(_ style: some PrimitiveButtonStyle, inputs: _ViewInputs) -> _ViewOutputs {
-            if let sp = style as? any PrimitiveButtonStyleWithPressingBody {
-                return wirePressingBody(sp, inputs: inputs)
-            }
-            let bodyAttr = graph.makeRule {
-                let rs = view._attribute.value
-                let config = PrimitiveButtonStyleConfiguration(
-                    role: rs.configuration.role,
-                    label: rs.configuration.label,
-                    action: rs.configuration.action)
-                return style.makeBody(configuration: config)
-            }
-            return makeView(view: _GraphValue(_attribute: bodyAttr), inputs: inputs)
-        }
-
-        if let (head, tail) = stack.popping() {
-            var poppedInputs = inputs
-            poppedInputs.base.customInputs.setValue(tail, forKey: StyleInput<PrimitiveButtonStyleConfiguration>.self)
-            let style = head.primStyle ?? DefaultButtonStyle.automatic
-            return wireBody(style, inputs: poppedInputs)
-        }
-        return wireBody(DefaultButtonStyle.automatic, inputs: inputs)
+    
+    var body: some View {
+        DefaultButtonStyle().makeBody(configuration: configuration)
     }
 
-    static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        _ViewListOutputs(
-            views: .staticList(.unary(TypedUnaryViewGenerator(view, inputs: inputs))),
-            nextImplicitID: 1,
-            staticCount: 1
-        )
+    typealias DefaultStyleModifier = ButtonStyleModifier<DefaultButtonStyle>
+    static var defaultStyleModifier: ButtonStyleModifier<DefaultButtonStyle> {
+        ButtonStyleModifier(style: DefaultButtonStyle())
     }
 }
-
-extension ResolvedButtonStyle: _PrimitiveView {
-}
-

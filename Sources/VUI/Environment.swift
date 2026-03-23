@@ -74,6 +74,25 @@ extension EnvironmentValues {
     }
 }
 
+public struct IsEnabledKey: EnvironmentKey {
+    public static let defaultValue: Bool = true
+}
+
+public struct IsFocusedKey: EnvironmentKey {
+    public static let defaultValue: Bool = false
+}
+
+extension EnvironmentValues {
+    public var isEnabled: Bool {
+        get { self[IsEnabledKey.self] }
+        set { self[IsEnabledKey.self] = newValue }
+    }
+    public var isFocused: Bool {
+        get { self[IsFocusedKey.self] }
+        set { self[IsFocusedKey.self] = newValue }
+    }
+}
+
 @propertyWrapper public struct Environment<Value> {
     @usableFromInline
     enum Content: @unchecked Sendable {

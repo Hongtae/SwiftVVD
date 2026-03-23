@@ -10,6 +10,7 @@ private final class _ConditionalBranchState {
     var isTrue: Bool? = nil
     var activeSubgraph: Subgraph? = nil
     var activeLCAttr: Attribute<LayoutComputer>? = nil
+    var activeDisplayListAttr: Attribute<DisplayList>? = nil
 }
 
 extension _ConditionalContent: View where TrueContent: View, FalseContent: View {
@@ -59,18 +60,28 @@ extension _ConditionalContent: View where TrueContent: View, FalseContent: View 
                         TrueContent._makeView(view: view[\._trueContent], inputs: inputs)
                     }
                     state.activeLCAttr = outputs._layoutComputer.attribute
+                    state.activeDisplayListAttr = outputs.preferences.reducedValue(for: DisplayList.Key.self, in: graph)
                 } else {
                     let outputs = Subgraph.$current.withValue(state.activeSubgraph) {
                         FalseContent._makeView(view: view[\._falseContent], inputs: inputs)
                     }
                     state.activeLCAttr = outputs._layoutComputer.attribute
+                    state.activeDisplayListAttr = outputs.preferences.reducedValue(for: DisplayList.Key.self, in: graph)
                 }
             }
             
             return state.activeLCAttr?.value ?? LayoutComputer.fixed(.zero)
         }
 
-        return _ViewOutputs(preferences: PreferencesOutputs(),
+        let dlRelayAttr: Attribute<DisplayList> = graph.makeRule {
+            // Depend on lcAttr to ensure branch state (activeDisplayListAttr) is updated first.
+            _ = lcAttr.value
+            return state.activeDisplayListAttr?.value ?? DisplayList()
+        }
+
+        var outPrefs = PreferencesOutputs()
+        outPrefs.append(DisplayList.Key.self, node: dlRelayAttr.identifier)
+        return _ViewOutputs(preferences: outPrefs,
                             layoutComputer: OptionalAttribute(lcAttr))
     }
 

@@ -510,40 +510,20 @@ extension LabelStyle where Self == TitleOnlyLabelStyle {
     public static var titleOnly: TitleOnlyLabelStyle { .init() }
 }
 
-// LabelStyleModifier<S> — ViewModifier that pushes S onto the
+// LabelStyleModifier<S>: StyleModifier — pushes S onto the
 // StyleInput<LabelStyleConfiguration> custom-inputs stack.
-struct LabelStyleModifier<S: LabelStyle>: ViewModifier {
-    var style: S
+// _makeView/_makeViewList are provided by StyleModifier default extension.
+struct LabelStyleModifier<S: LabelStyle>: StyleModifier {
     typealias Body = Never
+    typealias StyleConfiguration = LabelStyleConfiguration
+    typealias StyleBody = S.Body
 
-    static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
-        }
-        let styleAttr: Attribute<LabelStyleModifier<S>> = graph.makeInput(
-            value: modifier._attribute.value)
-        let anyMod = AnyStyleModifier(
-            value: styleAttr.identifier,
-            _type: StyleModifierType<LabelStyleModifier<S>>.self)
-        var inputs = inputs
-        let stack = inputs.base.customInputs.value(forKey: StyleInput<LabelStyleConfiguration>.self)
-        inputs.base.customInputs.setValue(stack.pushing(anyMod), forKey: StyleInput<LabelStyleConfiguration>.self)
-        return body(_Graph(), inputs)
-    }
+    var style: S
 
-    static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeViewList called outside an active AttributeGraph context.")
-        }
-        let styleAttr: Attribute<LabelStyleModifier<S>> = graph.makeInput(
-            value: modifier._attribute.value)
-        let anyMod = AnyStyleModifier(
-            value: styleAttr.identifier,
-            _type: StyleModifierType<LabelStyleModifier<S>>.self)
-        var inputs = inputs
-        let stack = inputs.base.customInputs.value(forKey: StyleInput<LabelStyleConfiguration>.self)
-        inputs.base.customInputs.setValue(stack.pushing(anyMod), forKey: StyleInput<LabelStyleConfiguration>.self)
-        return body(_Graph(), inputs)
+    init(style: S) { self.style = style }
+
+    func styleBody(configuration: LabelStyleConfiguration) -> S.Body {
+        style.makeBody(configuration: configuration)
     }
 }
 
