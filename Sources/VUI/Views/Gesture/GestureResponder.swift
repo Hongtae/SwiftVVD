@@ -10,14 +10,56 @@ import Synchronization
 
 // AnyGestureResponder
 
-/// Type-erased protocol for gesture responders used by GestureGraph.
-/// Allows GestureGraph.createSession to work with any GestureResponder<M>
-/// without knowing the concrete modifier type M.
-protocol AnyGestureResponder: ViewResponder, AnyObject {
-    var gestureViewInputs: _ViewInputs { get }
+/// Protocol for all gesture responders in the system.
+///
+/// Does NOT inherit ViewResponder. GestureResponder<M> conforms to both
+/// AnyGestureResponder and ViewResponder independently (via MultiViewResponder).
+protocol AnyGestureResponder: AnyObject {
+    /// AG attribute ID for the modifier — enables AG-level change tracking.
+    var relatedAttribute: AGAttribute { get }
+
+    /// View inputs captured at _makeView time (geometry, transform, environment, size).
+    var inputs: _ViewInputs { get }
+
+    /// Gesture-session subgraph. Created and managed by makeWrappedGesture.
+    var childSubgraph: Subgraph? { get set }
+
+    /// View-level subgraph that owns the responder's AG nodes.
+    var childViewSubgraph: Subgraph? { get set }
+
+    /// Controls how this responder coexists with other simultaneously-hit responders.
     var exclusionPolicy: GestureResponderExclusionPolicy { get }
-    var gestureMask: GestureMask { get set }
-    func makeGesture(inputs: _GestureInputs) -> _GestureOutputs<()>
+
+    /// Accessibility label for this gesture (optional).
+    var label: String? { get }
+
+    /// Mask controlling which gesture categories are recognised.
+    var mask: GestureMask { get }
+
+    /// The GestureGraph that owns this responder.
+    var gestureGraph: GestureGraph { get }
+
+    /// Produces gesture outputs for this responder's gesture cascade.
+    func makeSubviewsGesture(inputs: _GestureInputs) -> _GestureOutputs<()>
+}
+
+// AnyGestureResponder extension defaults 
+extension AnyGestureResponder {
+    /// Manages the childSubgraph lifecycle and delegates to makeSubviewsGesture.
+    func makeWrappedGesture(
+        inputs: _GestureInputs,
+        makeChild: (_GestureInputs) -> _GestureOutputs<()>
+    ) -> _GestureOutputs<()> {
+        makeChild(inputs)
+    }
+
+    /// Convenience entry point used by GestureGraph.createSession.
+    /// Not a protocol requirement — calls makeWrappedGesture which calls makeSubviewsGesture.
+    func makeGesture(inputs: _GestureInputs) -> _GestureOutputs<()> {
+        makeWrappedGesture(inputs: inputs) { [self] modifiedInputs in
+            makeSubviewsGesture(inputs: modifiedInputs)
+        }
+    }
 }
 
 // ViewRespondersKey
@@ -230,56 +272,65 @@ final class ActiveGestureSession {
 
 // GestureResponder
 
-/// Concrete ViewResponder created by AddGestureModifier._makeView (via GestureFilter rule).
+/// Concrete implementation of ViewResponder and AnyGestureResponder.
+/// Created by GestureFilter<M>.updateValue() inside a dedicated Subgraph on first evaluation.
+/// Updated in place on subsequent evaluations (mask, responders).
 ///
-/// Generic on the modifier type M so that `makeGesture` can call `M._makeSessionGesture`
-/// directly at session-creation time — enabling dynamic gesture switching without a factory
-/// closure capture. Stores `modifierAttr: Attribute<M>` rather than a baked-in factory.
+/// Subclass of MultiViewResponder — inherits `responders: [any ViewResponder]` (inner-view
+/// responder list) and `containsGlobalPoints` delegation logic.
 ///
-/// Subclass of `MultiViewResponder` — inherits `responders` (inner ViewResponder list)
-/// and `updateChildren` plumbing. The GestureFilter<M> rule writes to `responders` directly.
+/// Generic on M so makeSubviewsGesture can call M._makeSessionGesture without a factory closure.
 nonisolated(unsafe) private var _gestureResponderKeyCounter: UInt32 = 1
 
 final class GestureResponder<M: GestureViewModifier>: MultiViewResponder, ViewResponder, AnyGestureResponder {
+
+    // ViewResponder requirements
     let hitTestKey: UInt32
     weak var nextResponder: ResponderNode?
     var gestureContainer: AnyObject? { nil }
 
-    /// The modifier attribute — read inside `makeGesture` at session-creation time.
-    /// Using the attribute (not a baked value) ensures dynamic gesture changes are picked up.
+    // AnyGestureResponder — stored fields
     let modifierAttr: Attribute<M>
-
-    /// How this responder interacts with other simultaneously-hit responders.
     let exclusionPolicy: GestureResponderExclusionPolicy
+    var mask: GestureMask
+    var inputs: _ViewInputs
 
-    /// The gesture mask controlling which gesture types are active.
-    /// Updated by GestureFilter<M>.updateValue() whenever the modifier changes.
-    var gestureMask: GestureMask
-
-    /// The _ViewInputs captured at _makeView time.
-    var viewInputs: _ViewInputs
-    var gestureViewInputs: _ViewInputs { viewInputs }
+    // AnyGestureResponder — protocol stubs
+    var relatedAttribute: AGAttribute { modifierAttr.identifier }
+    var childSubgraph: Subgraph? = nil
+    var childViewSubgraph: Subgraph? = nil
+    var label: String? { nil }
+    var gestureGraph: GestureGraph
 
     init(
         modifierAttr: Attribute<M>,
         exclusionPolicy: GestureResponderExclusionPolicy,
-        gestureMask: GestureMask,
-        viewInputs: _ViewInputs
+        mask: GestureMask,
+        inputs: _ViewInputs
     ) {
         self.hitTestKey = _gestureResponderKeyCounter
         _gestureResponderKeyCounter &+= 1
         self.modifierAttr = modifierAttr
         self.exclusionPolicy = exclusionPolicy
-        self.gestureMask = gestureMask
-        self.viewInputs = viewInputs
+        self.mask = mask
+        self.inputs = inputs
+        guard let g = GestureGraph._current else {
+            fatalError("GestureResponder.init: must be called within an active GestureGraph context")
+        }
+        self.gestureGraph = g
         super.init()
     }
 
-    /// Instantiates the gesture graph for one session by delegating to the modifier type.
-    /// Called inside a session Subgraph so all produced AG nodes are session-scoped.
-    func makeGesture(inputs: _GestureInputs) -> _GestureOutputs<()> {
+    // AnyGestureResponder — gesture creation
+
+    func makeSubviewsGesture(inputs: _GestureInputs) -> _GestureOutputs<()> {
+        // Delegates to the modifier type's session-gesture factory.
+        // _makeSessionGesture maps the typed T.Value to () for session tracking.
         M._makeSessionGesture(modifier: _GraphValue(_attribute: modifierAttr), inputs: inputs)
     }
+
+    // ViewResponder — hit testing
+    // (keepthe priority=16 convention: signals to collectHits that this is a gesture hit)
 
     func hitTestPolicy(options: ContainsPointsOptions) -> HitTestPolicy {
         .include
@@ -290,8 +341,8 @@ final class GestureResponder<M: GestureViewModifier>: MultiViewResponder, ViewRe
         cacheKey: UInt32?,
         options: ContainsPointsOptions
     ) -> ContainsPointsResult {
-        let sz = viewInputs.size.value.value
-        let t = viewInputs.transform.value
+        let sz = inputs.size.value.value
+        let t = inputs.transform.value
         var localPts = Array(points.prefix(64))
         t.convertGlobal(to: .local, points: &localPts)
         let localBounds = CGRect(origin: .zero, size: sz)
@@ -302,9 +353,7 @@ final class GestureResponder<M: GestureViewModifier>: MultiViewResponder, ViewRe
         guard mask != 0 else {
             return ContainsPointsResult(mask: 0, priority: 0, children: [])
         }
-        // priority=16 signals to collectHits that this responder is itself a gesture hit
-        // (not just a shape filter like ContentShapeResponder). responders carries the inner
-        // view responders so the traversal can also activate nested gesture sessions.
+        // priority=16 → collectHits includes self as a gesture hit AND recurses into responders
         return ContainsPointsResult(mask: mask, priority: 16.0, children: responders)
     }
 }

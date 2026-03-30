@@ -7,127 +7,144 @@
 
 import Foundation
 
-// _GestureInputsModifier
+// GestureCallbacks
 
-/// A modifier that transforms `_GestureInputs` before passing them to an inner gesture.
-/// Used by `EndedCallbacks`, `ChangedCallbacks`, and similar callback-injection types.
-protocol _GestureInputsModifier {
-    static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GestureInputs)
+/// Marker protocol for gesture callback containers.
+/// Carries the `Value` type associated with the gesture that fires the callbacks.
+protocol GestureCallbacks {
+    associatedtype Value
 }
 
-// Callback Types
-
-struct EndedCallbacks<Value>: _GestureInputsModifier {
+struct EndedCallbacks<Value>: GestureCallbacks {
     let ended: (Value) -> Void
-    static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GestureInputs) {
-        // Callback registration is handled structurally via ModifierGesture chain;
-        // inputs modification is not needed here since callbacks are invoked from
-        // the phase-change AG rule.
-    }
 }
 
-struct ChangedCallbacks<Value>: _GestureInputsModifier {
+struct ChangedCallbacks<Value>: GestureCallbacks {
     let changed: (Value) -> Void
-    static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GestureInputs) {
-    }
 }
 
-struct PressableGestureCallbacks<Value>: _GestureInputsModifier {
+struct PressableGestureCallbacks<Value>: GestureCallbacks {
     let pressing: ((Value) -> Void)?
     let pressed: (() -> Void)?
-    static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GestureInputs) {
+}
+
+// GestureModifier
+
+/// Protocol for modifier gestures — gestures that wrap another gesture and transform
+/// its inputs or output. Inherits Gesture so conformers have associated Value/Body.
+///
+/// `ModifierGesture._makeGesture` dispatches to `Modifier.makeGesture(modifier:inputs:body:)`,
+/// passing a closure that calls `Body._makeGesture` for the inner gesture.
+protocol GestureModifier: Gesture {
+    associatedtype BodyValue
+    static func makeGesture(
+        modifier: _GraphValue<Self>,
+        inputs: _GestureInputs,
+        body: (_GestureInputs) -> _GestureOutputs<BodyValue>
+    ) -> _GestureOutputs<Value>
+}
+
+extension GestureModifier {
+    public static func _makeGesture(gesture: _GraphValue<Self>, inputs: _GestureInputs) -> _GestureOutputs<Value> {
+        fatalError("\(Self.self) is a GestureModifier — use it as Modifier inside ModifierGesture, not standalone")
     }
 }
 
-struct CallbacksGesture<Callbacks>: _GestureInputsModifier where Callbacks: _GestureInputsModifier {
-    let callbacks: Callbacks
-    static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GestureInputs) {
-        Callbacks._makeInputs(modifier: modifier[\.callbacks], inputs: &inputs)
+// CallbacksGesture
+
+/// Wraps a GestureCallbacks value as a GestureModifier.
+/// Used as the Modifier type in ModifierGesture by _EndedGesture and _ChangedGesture.
+struct CallbacksGesture<Callbacks: GestureCallbacks>: GestureModifier {
+    var callbacks: Callbacks
+
+    typealias Value = Callbacks.Value
+    typealias BodyValue = Callbacks.Value
+    typealias Body = Never
+
+    static func makeGesture(
+        modifier: _GraphValue<Self>,
+        inputs: _GestureInputs,
+        body: (_GestureInputs) -> _GestureOutputs<BodyValue>
+    ) -> _GestureOutputs<Value> {
+        // Placeholder: body(inputs) pass-through. Callback firing not yet implemented.
+        let outputs = body(inputs)
+        return outputs
     }
 }
 
 // ModifierGesture
 
-/// Wraps a gesture with an inputs modifier, threading the modified inputs through.
-struct ModifierGesture<Modifier, Content>: Gesture
-    where Modifier: _GestureInputsModifier, Content: Gesture
+/// Applies a GestureModifier to a Gesture, producing a combined gesture whose Value
+/// is the modifier's output type.
+///
+/// _makeGesture dispatches to Modifier.makeGesture(modifier:inputs:body:), passing a
+/// closure that calls Body._makeGesture for the inner gesture.
+struct ModifierGesture<Modifier: GestureModifier, Body: Gesture>: Gesture
+    where Modifier.BodyValue == Body.Value
 {
-    let content: Content
-    let modifier: Modifier
+    var modifier: Modifier
+    var body: Body
 
-    static func _makeGesture(gesture: _GraphValue<Self>, inputs: _GestureInputs) -> _GestureOutputs<Content.Value> {
-        var inputs = inputs
-        Modifier._makeInputs(modifier: gesture[\.modifier], inputs: &inputs)
-        return Content._makeGesture(gesture: gesture[\.content], inputs: inputs)
-    }
+    typealias Value = Modifier.Value
 
-    typealias Body = Never
-    typealias Value = Content.Value
-}
-
-// _EndedGesture / _ChangedGesture
-
-public struct _EndedGesture<Content> where Content: Gesture {
-    public typealias Body = Never
-    public typealias Value = Content.Value
-
-    typealias _Body = ModifierGesture<CallbacksGesture<EndedCallbacks<Content.Value>>, Content>
-    let _body: _Body
-}
-
-extension _EndedGesture: Gesture {
-    public static func _makeGesture(gesture: _GraphValue<Self>, inputs: _GestureInputs) -> _GestureOutputs<Content.Value> {
-        guard let graph = AttributeGraph.current else {
-            fatalError("_EndedGesture._makeGesture requires AG context")
-        }
-
-        // Get the inner gesture outputs
-        let inner = _Body._makeGesture(gesture: gesture[\._body], inputs: inputs)
-
-        // Create an AG rule that fires the ended callback when phase becomes .ended
-        let endedCallback = gesture._attribute.value._body.modifier.callbacks.ended
-        let phaseAttr = inner.phase
-        graph.makeSideEffectRule {
-            let phase = phaseAttr.value
-            if case .ended(let v) = phase {
-                AttributeGraph.withoutTracking {
-                    endedCallback(v)
-                }
+    static func _makeGesture(
+        gesture: _GraphValue<Self>,
+        inputs: _GestureInputs
+    ) -> _GestureOutputs<Modifier.Value> {
+        Modifier.makeGesture(
+            modifier: gesture[\.modifier],
+            inputs: inputs,
+            body: { modifiedInputs in
+                Body._makeGesture(gesture: gesture[\.body], inputs: modifiedInputs)
             }
-        }
-
-        return inner
+        )
     }
 }
 
-public struct _ChangedGesture<Content> where Content: Gesture, Content.Value: Equatable {
-    public typealias Body = Never
-    public typealias Value = Content.Value
+// _EndedGesture
 
-    typealias _Body = ModifierGesture<CallbacksGesture<ChangedCallbacks<Value>>, Content>
-    let _body: _Body
+/// Wraps a gesture to fire a callback when it ends.
+///
+/// Body = ModifierGesture<CallbacksGesture<EndedCallbacks<Content.Value>>, Content>,
+/// so Value == Body.Value and the default Gesture._makeGesture delegate is used:
+///   gesture[\.body] → ModifierGesture._makeGesture → CallbacksGesture.makeGesture
+public struct _EndedGesture<Content: Gesture>: Gesture {
+    public typealias Value = Content.Value
+    public typealias Body = Never
+
+    // Internal storage
+    var _body: ModifierGesture<CallbacksGesture<EndedCallbacks<Content.Value>>, Content>
+
+    // body: Never is satisfied by Gesture's default extension (fatalError)
+
+    public static func _makeGesture(
+        gesture: _GraphValue<Self>,
+        inputs: _GestureInputs
+    ) -> _GestureOutputs<Value> {
+        type(of: gesture._attribute.value._body)
+            ._makeGesture(gesture: gesture[\._body], inputs: inputs)
+    }
 }
 
-extension _ChangedGesture: Gesture {
-    public static func _makeGesture(gesture: _GraphValue<Self>, inputs: _GestureInputs) -> _GestureOutputs<Content.Value> {
-        guard let graph = AttributeGraph.current else {
-            fatalError("_ChangedGesture._makeGesture requires AG context")
-        }
+// _ChangedGesture
 
-        let inner = _Body._makeGesture(gesture: gesture[\._body], inputs: inputs)
+/// Wraps a gesture to fire a callback whenever its value changes (while active).
+///
+/// Sets options.allowsIncompleteEventSequences (bit 5) before delegating to Body._makeGesture.
+public struct _ChangedGesture<Content: Gesture>: Gesture where Content.Value: Equatable {
+    public typealias Value = Content.Value
+    public typealias Body = Never
 
-        let changedCallback = gesture._attribute.value._body.modifier.callbacks.changed
-        let phaseAttr = inner.phase
-        graph.makeSideEffectRule {
-            let phase = phaseAttr.value
-            if case .active(let v) = phase {
-                AttributeGraph.withoutTracking {
-                    changedCallback(v)
-                }
-            }
-        }
+    var _body: ModifierGesture<CallbacksGesture<ChangedCallbacks<Content.Value>>, Content>
 
-        return inner
+    public static func _makeGesture(
+        gesture: _GraphValue<Self>,
+        inputs: _GestureInputs
+    ) -> _GestureOutputs<Content.Value> {
+        var modifiedInputs = inputs
+        modifiedInputs.options.insert(.allowsIncompleteEventSequences)
+        return type(of: gesture._attribute.value._body)
+            ._makeGesture(gesture: gesture[\._body], inputs: modifiedInputs)
     }
 }
 
@@ -135,19 +152,17 @@ extension _ChangedGesture: Gesture {
 
 extension Gesture {
     public func onEnded(_ action: @escaping (Self.Value) -> Void) -> _EndedGesture<Self> {
-        .init(_body: ModifierGesture(
-            content: self,
-            modifier: CallbacksGesture(
-                callbacks: EndedCallbacks(ended: action))))
+        _EndedGesture(_body: ModifierGesture(
+            modifier: CallbacksGesture(callbacks: EndedCallbacks(ended: action)),
+            body: self))
     }
 }
 
 extension Gesture where Self.Value: Equatable {
     public func onChanged(_ action: @escaping (Self.Value) -> Void) -> _ChangedGesture<Self> {
-        .init(_body: ModifierGesture(
-            content: self,
-            modifier: CallbacksGesture(
-                callbacks: ChangedCallbacks(changed: action))))
+        _ChangedGesture(_body: ModifierGesture(
+            modifier: CallbacksGesture(callbacks: ChangedCallbacks(changed: action)),
+            body: self))
     }
 }
 
@@ -336,12 +351,13 @@ extension AddGestureModifier {
     }
 }
 
-/// StatefulRule that lazily creates a `GestureResponder<M>` and keeps it updated
-/// whenever the modifier or inner view responders change.
+/// StatefulRule that lazily creates a GestureResponder<M> inside a dedicated Subgraph
+/// and keeps it updated whenever the modifier or inner view responders change.
 ///
-/// - First evaluation: creates the responder and calls `setStatefulOutput([responder])`.
-/// - Subsequent evaluations: updates `gestureMask` and `responders` in place — the
-///   output value (the array containing the same responder instance) never changes.
+/// Subgraph ownership:
+///   GestureFilter owns a separate Subgraph in which GestureResponder<M> is born.
+///   On first updateValue() the responder is created inside self.subgraph context.
+///   On subsequent evaluations: mask and inner responders updated in place (same instance).
 struct GestureFilter<M: GestureViewModifier>: StatefulRule {
     typealias Value = [any ViewResponder]
 
@@ -349,20 +365,23 @@ struct GestureFilter<M: GestureViewModifier>: StatefulRule {
     var innerRespondersAttr: Attribute<[any ViewResponder]>
     var viewInputs: _ViewInputs
     var exclusionPolicy: GestureResponderExclusionPolicy
+    var subgraph: Subgraph
     var _responder: GestureResponder<M>? = nil
 
     mutating func updateValue() {
         let currentModifier = modifierAttr.value
         if _responder == nil {
-            _responder = GestureResponder<M>(
-                modifierAttr: modifierAttr,
-                exclusionPolicy: exclusionPolicy,
-                gestureMask: currentModifier.gestureMask,
-                viewInputs: viewInputs
-            )
+            Subgraph.$current.withValue(subgraph) {
+                _responder = GestureResponder<M>(
+                    modifierAttr: modifierAttr,
+                    exclusionPolicy: exclusionPolicy,
+                    mask: currentModifier.gestureMask,
+                    inputs: viewInputs
+                )
+            }
             AttributeGraph.setStatefulOutput([_responder!])
         }
-        _responder!.gestureMask = currentModifier.gestureMask
+        _responder!.mask = currentModifier.gestureMask
         _responder!.responders = innerRespondersAttr.value
     }
 }
@@ -410,13 +429,15 @@ extension AddGestureModifier {
             }
         }
 
-        // GestureFilter StatefulRule: lazily creates GestureResponder<Self> on first evaluation,
-        // then updates gestureMask and inner responders in place on subsequent evaluations.
+        // GestureFilter StatefulRule: lazily creates GestureResponder<Self> on first evaluation
+        // inside its own dedicated Subgraph, then updates mask/responders in place.
+        let responderSubgraph = Subgraph()
         let gestureFilter = GestureFilter<Self>(
             modifierAttr: modifier._attribute,
             innerRespondersAttr: innerRespondersAttr,
             viewInputs: capturedViewInputs,
-            exclusionPolicy: Combiner.exclusionPolicy
+            exclusionPolicy: Combiner.exclusionPolicy,
+            subgraph: responderSubgraph
         )
         let respondersAttr = graph.makeStatefulRule(gestureFilter)
 

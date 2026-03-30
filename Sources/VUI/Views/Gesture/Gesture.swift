@@ -209,7 +209,55 @@ public struct GestureMask: OptionSet, Sendable {
 /// Platform-specific gesture inputs. Empty for VUI (no UIKit/AppKit gesture recognizer pipeline).
 struct PlatformGestureInputs {}
 
+// EventListener
+
+/// Primitive gesture that listens for a specific EventType stream.
+/// All high-level gestures (TapGesture, LongPressGesture, DragGesture) are built on top
+/// of EventListener or compose it internally.
+///
+/// _makeGesture creates an EventListenerPhase<E> StatefulRule AG node that processes
+/// incoming events and transitions the phase.
+struct EventListener<E: EventType>: Gesture {
+    var ignoresOtherEvents: Bool
+
+    init(ignoresOtherEvents: Bool = false) {
+        self.ignoresOtherEvents = ignoresOtherEvents
+    }
+
+    typealias Value = Void
+    typealias Body = Never
+
+    static func _makeGesture(gesture: _GraphValue<Self>, inputs: _GestureInputs) -> _GestureOutputs<Value> {
+        guard let graph = AttributeGraph.current else {
+            fatalError("EventListener._makeGesture requires AG context")
+        }
+
+        // Placeholder: return a non-terminating possible phase.
+        let phase: Attribute<GesturePhase<Value>> = graph.makeInput(value: .possible(nil))
+        _ = graph.makeStatefulRule(EventListenerPhase<E>(
+            inputs: inputs,
+            ignoresOtherEvents: gesture._attribute.value.ignoresOtherEvents))
+        return _GestureOutputs(phase: phase)
+    }
+}
+
+// EventListenerPhase<E>: StatefulRule
+//
+// Low-level AG node that processes raw events for EventListener<E>.
+// Reads inputs._events, filters by E type, applies geometry checks,
+// and drives the phase attribute.
+struct EventListenerPhase<E: EventType>: StatefulRule {
+    typealias Value = GesturePhase<Void>
+
+    var inputs: _GestureInputs
+    var ignoresOtherEvents: Bool
+
+    mutating func updateValue() {
+    }
+}
+
 // _GestureInputs
+
 
 /// Inputs passed to `Gesture._makeGesture`.
 public struct _GestureInputs {

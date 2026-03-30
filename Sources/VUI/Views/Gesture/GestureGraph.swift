@@ -148,7 +148,7 @@ class GestureGraph: @unchecked Sendable {
     ) -> ActiveGestureSession {
         // Create a standalone subgraph (no parent — managed by GestureGraph directly)
         let subgraph = Subgraph()
-        let viewInputs = responder.gestureViewInputs
+        let viewInputs = responder.inputs
 
         let (eventsAttr, isTerminalAttr) = Subgraph.$current.withValue(subgraph) {
             let eventsAttr: Attribute<[EventID: any EventType]> = graph.makeInput(value: [:])
@@ -216,7 +216,7 @@ class GestureGraph: @unchecked Sendable {
             // Results are in child-first order (ViewRespondersKey.reduce appends leaves before root).
             let hitResponders = rootResponder.respondersContaining(point: event.location)
                 .compactMap { $0 as? any AnyGestureResponder }
-                .filter { $0.gestureMask.contains(.gesture) }
+                .filter { $0.mask.contains(.gesture) }
             guard !hitResponders.isEmpty else { return .failed }
 
             // --- GestureResponderExclusionPolicy filtering ---

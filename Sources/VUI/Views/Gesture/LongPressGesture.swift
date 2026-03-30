@@ -65,12 +65,12 @@ extension View {
     ) -> some View {
         self.gesture(
             ModifierGesture(
-                content: LongPressGesture(minimumDuration: minimumDuration,
-                                          maximumDistance: maximumDistance),
                 modifier: CallbacksGesture(
                     callbacks: PressableGestureCallbacks(pressing: onPressingChanged,
                                                          pressed: action)
-                )
+                ),
+                body: LongPressGesture(minimumDuration: minimumDuration,
+                                       maximumDistance: maximumDistance)
             )
         )
     }

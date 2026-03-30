@@ -13,6 +13,18 @@
 //  to this instance (via AttributeGraph.$current.withValue(self) { ... }) before
 //  they are called. Violating this precondition causes a runtime assertion failure.
 
+// Rule
+
+/// A pure computed AG node: derives a single value from dependencies each evaluation.
+/// Unlike StatefulRule, a Rule is stateless — `updateValue()` returns the value directly
+/// and has no mutable stored state between evaluations.
+///
+/// Used for combiner nodes such as ExclusiveState, ExclusivePhase, SequenceEvents.
+protocol Rule {
+    associatedtype Value
+    func updateValue() -> Value
+}
+
 // StatefulRule
 
 /// An AG computed node that maintains mutable state between re-evaluations.
@@ -368,6 +380,11 @@ class AttributeGraph: @unchecked Sendable {
         let attr = Attribute<Value>(AGAttribute(rawValue: index))
         Subgraph.current?.register(attr.identifier)
         return attr
+    }
+
+    /// Creates a computed node backed by a Rule struct (pure, stateless).
+    func makeRule<R: Rule>(_ rule: R) -> Attribute<R.Value> {
+        makeRule(rule: { rule.updateValue() })
     }
 
     /// Creates a side-effect rule that is evaluated eagerly whenever any of its inputs change.
