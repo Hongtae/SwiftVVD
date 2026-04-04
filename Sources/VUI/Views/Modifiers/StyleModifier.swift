@@ -221,13 +221,14 @@ struct AnyStyleModifier {
 }
 
 // ============================================================
-// PropertyItem key — value is Stack<AnyStyleModifier>.
+// PropertyKey — value is Stack<AnyStyleModifier>.
 // PrimitiveButtonStyle uses StyleInput<PrimitiveButtonStyleConfiguration>.
 // LabelStyle uses StyleInput<LabelStyleConfiguration>.
 // ============================================================
-struct StyleInput<Configuration>: PropertyItem {
-    typealias Item = Stack<AnyStyleModifier>
+struct StyleInput<Configuration>: PropertyKey {
+    typealias Value = Stack<AnyStyleModifier>
     static var defaultValue: Stack<AnyStyleModifier> { .empty }
+    static func valuesEqual(_ a: Value, _ b: Value) -> Bool { false }
     var description: String { "StyleInput<\(Configuration.self)>" }
 }
 

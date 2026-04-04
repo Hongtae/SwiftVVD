@@ -59,6 +59,7 @@ public struct _SizeFittingRoot: _VariadicView.UnaryViewRoot {
             let sizeAttr = graph.makeInput(value: ViewSize(.zero))
             let childInputs = _ViewInputs(
                 base: gen.baseInputs,
+                customInputs: PropertyList(),
                 preferences: inputs.preferences,
                 transform: inputs.transform,
                 position: posAttr,

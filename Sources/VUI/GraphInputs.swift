@@ -7,6 +7,61 @@
 
 import Foundation
 
+// PropertyKey hierarchy
+//
+// PropertyKey  (PropertyList.swift) — base: defaultValue, valuesEqual
+//   └── GraphInput   — adds AG reuse support (makeReusable, tryToReuse, isTriviallyReusable)
+//         └── ViewInput  — marker: keys stored in _ViewInputs.customInputs channel
+
+/// Opaque map passed to GraphReusable methods.
+/// AG reuse optimization not yet implemented.
+struct IndirectAttributeMap {}
+
+/// Protocol for values that support AG node reuse.
+protocol GraphReusable {
+    mutating func makeReusable(indirectMap: IndirectAttributeMap)
+    mutating func tryToReuse(by other: Self, indirectMap: IndirectAttributeMap, testOnly: Bool) -> Bool
+    static var isTriviallyReusable: Bool { get }
+}
+
+extension GraphReusable {
+    mutating func makeReusable(indirectMap: IndirectAttributeMap) {}
+    mutating func tryToReuse(by other: Self, indirectMap: IndirectAttributeMap, testOnly: Bool) -> Bool { false }
+    static var isTriviallyReusable: Bool { false }
+}
+
+/// Refinement of PropertyKey that participates in AG node reuse.
+/// Keys conforming to GraphInput can be stored in _GraphInputs.customInputs (base channel).
+protocol GraphInput: PropertyKey {
+    static func makeReusable(indirectMap: IndirectAttributeMap, value: inout Value)
+    static func tryToReuse(_ a: Value, by b: Value, indirectMap: IndirectAttributeMap, testOnly: Bool) -> Bool
+    static var isTriviallyReusable: Bool { get }
+}
+
+extension GraphInput {
+    static func makeReusable(indirectMap: IndirectAttributeMap, value: inout Value) {}
+    static func tryToReuse(_ a: Value, by b: Value, indirectMap: IndirectAttributeMap, testOnly: Bool) -> Bool { false }
+    static var isTriviallyReusable: Bool { false }
+}
+
+extension GraphInput where Value: GraphReusable {
+    static func makeReusable(indirectMap: IndirectAttributeMap, value: inout Value) {
+        value.makeReusable(indirectMap: indirectMap)
+    }
+    static func tryToReuse(_ a: Value, by b: Value, indirectMap: IndirectAttributeMap, testOnly: Bool) -> Bool {
+        var copy = a
+        return copy.tryToReuse(by: b, indirectMap: indirectMap, testOnly: testOnly)
+    }
+    static var isTriviallyReusable: Bool { Value.isTriviallyReusable }
+}
+
+/// Marker refinement of GraphInput for view-level channel.
+/// Keys conforming to ViewInput are stored in _ViewInputs.customInputs (view channel).
+/// No additional requirements.
+protocol ViewInput: GraphInput {}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 /// A generic single-owner reference box.
 /// Used in `_GraphInputs.cachedEnvironment` so that copying `_GraphInputs`
 /// (a struct) still shares the same `CachedEnvironment` instance across
@@ -17,7 +72,6 @@ final class MutableBox<Value>: @unchecked Sendable {
 }
 
 /// Animation time value passed through the AG graph.
-/// Only stored property: `seconds: Double` (8 bytes).
 struct Time {
     var seconds: Double
 
@@ -34,9 +88,6 @@ struct Time {
 }
 
 /// Render phase passed through the AG graph.
-/// Stored: isBeingRemoved: Bool, resetSeed: UInt32.
-/// Computed: isInserted (derived from stored fields).
-/// Total size: 8 bytes (Bool + 3-byte pad + UInt32).
 struct Phase {
     var isBeingRemoved: Bool = false
     var resetSeed: UInt32 = 0
@@ -57,8 +108,6 @@ struct Phase {
 }
 
 /// Animated view frame snapshot passed through the animation system.
-/// { origin: CGPoint (16 bytes), size: ViewSize (32 bytes) }
-/// Total size: 48 bytes.
 struct ViewFrame: Equatable {
     var origin: CGPoint
     var size: ViewSize
@@ -167,4 +216,10 @@ public struct _GraphInputs {
 
     /// Set of AG node IDs whose inputs have been merged into this context.
     var mergedInputs: Set<AGAttribute>
+
+    // Base-channel subscript — stores in customInputs (PropertyList).
+    subscript<T: GraphInput>(_ key: T.Type) -> T.Value {
+        get { customInputs.value(forKey: key) }
+        set { customInputs.setValue(newValue, forKey: key) }
+    }
 }

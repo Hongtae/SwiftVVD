@@ -35,8 +35,9 @@ public struct MenuStyleConfiguration {
 extension MenuStyleConfiguration.Label: _PrimitiveView {}
 extension MenuStyleConfiguration.Content: _PrimitiveView {}
 
-struct _MenuStyleKey: PropertyItem {
+struct _MenuStyleKey: PropertyKey {
     static var defaultValue: (any MenuStyle)? { nil }
+    static func valuesEqual(_ a: (any MenuStyle)?, _ b: (any MenuStyle)?) -> Bool { false }
     var description: String { "_MenuStyleKey" }
 }
 

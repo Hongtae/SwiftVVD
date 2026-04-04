@@ -40,9 +40,13 @@ public protocol TransactionKey {
 }
 
 extension Transaction {
-    struct TransactionKeyItem<T: TransactionKey>: PropertyItem {
+    struct TransactionKeyItem<T: TransactionKey>: PropertyKey {
         static var defaultValue: T.Value {
             T.defaultValue
+        }
+
+        static func valuesEqual(_ a: T.Value, _ b: T.Value) -> Bool {
+            T._valuesEqual(a, b)
         }
 
         var description: String {

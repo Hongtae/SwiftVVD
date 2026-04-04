@@ -166,6 +166,7 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
             let sizeAttr         = ownGraph.makeInput(value: ViewSize(.zero))
             let viewInputs = _ViewInputs(
                 base: graphInputs,
+                customInputs: PropertyList(),
                 preferences: prefsInputs,
                 transform: transformAttr,
                 position: positionAttr,

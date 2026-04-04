@@ -27,12 +27,13 @@ public struct ContainerValues {
     }
 }
 
-// ContainerValuesInput — PropertyItem key that carries ContainerValues
+// ContainerValuesInput — PropertyKey that carries ContainerValues
 // through the customInputs stack. Written by _ContainerValueWritingModifier,
 // read by containers (Layout, VariadicView) when collecting subview metadata.
-struct ContainerValuesInput: PropertyItem {
-    typealias Item = ContainerValues
+struct ContainerValuesInput: PropertyKey {
+    typealias Value = ContainerValues
     static var defaultValue: ContainerValues { ContainerValues() }
+    static func valuesEqual(_ a: ContainerValues, _ b: ContainerValues) -> Bool { false }
     var description: String { "ContainerValuesInput" }
 }
 

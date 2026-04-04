@@ -341,14 +341,19 @@ extension TypedUnaryViewGenerator: Hashable {
 }
 
 
-/// The bundle of AG context Attributes passed from parent → child during `_makeView`.
+/// The bundle of AG context Attributes passed from parent to child during `_makeView`.
 ///
-/// All geometry fields (`transform`, `position`, `size`, …) are Attribute references,
+/// All geometry fields (`transform`, `position`, `size`, etc.) are Attribute references,
 /// not concrete values: the parent creates the nodes at `_makeView` time (wiring phase)
 /// and fills in their values later during the layout pass.
 public struct _ViewInputs {
-    /// Shared graph-level inputs (time, environment, transaction, …).
+    /// Shared graph-level inputs (time, environment, transaction, etc.).
+    /// Base channel: _GraphInputs.customInputs stores GraphInput keys.
     var base: _GraphInputs
+
+    /// View-level input channel. Stores ViewInput keys.
+    /// Separate from base.customInputs.
+    var customInputs: PropertyList
 
     /// Which preference keys this subtree should collect.
     var preferences: PreferencesInputs
@@ -372,6 +377,12 @@ public struct _ViewInputs {
     /// The actual size of the parent container.
     /// `nil` when the parent has not yet been sized (e.g., during bootstrapping).
     var containerSize: OptionalAttribute<ViewSize>
+
+    // View-channel subscript. Stores in _ViewInputs.customInputs (ViewInput keys).
+    subscript<T: ViewInput>(_ key: T.Type) -> T.Value {
+        get { customInputs.value(forKey: key) }
+        set { customInputs.setValue(newValue, forKey: key) }
+    }
 }
 
 /// The bundle of AG context Attributes passed from parent → child during `_makeViewList`.
@@ -382,10 +393,10 @@ public struct _ViewInputs {
 /// threaded through the list-traversal phase so that per-child environment modifications
 /// (applied by ancestor modifiers) are captured in each child's `ViewProxy.baseInputs`.
 ///
-/// Additional list-specific fields (`implicitID`, `options`, `_traits`, …) are reserved
+/// Additional list-specific fields (`implicitID`, `options`, `_traits`, etc.) are reserved
 /// for ForEach ID tracking, ViewTrait propagation, and container-context injection respectively.
 public struct _ViewListInputs {
-    /// Shared graph-level inputs (time, environment, transaction, …).
+    /// Shared graph-level inputs (time, environment, transaction, etc.).
     var base: _GraphInputs
 
     /// Implicit order index assigned to each view within the list.
@@ -439,9 +450,9 @@ extension _ViewInputs {
 /// The AG nodes produced by a view's `_makeView` call.
 ///
 /// - `preferences`: one `AGAttribute` per registered `PreferenceKey` (type-erased)
-/// - `_layoutComputer`: `OptionalAttribute` — absent for invisible/preference-only views
+/// - `_layoutComputer`: `OptionalAttribute`, absent for invisible/preference-only views
 public struct _ViewOutputs {
-    /// Preference nodes produced by this view (e.g., DisplayList, Accessibility, …).
+    /// Preference nodes produced by this view (e.g., DisplayList, Accessibility, etc.).
     var preferences: PreferencesOutputs
 
     /// The layout-computation node for this view.
@@ -462,7 +473,7 @@ public struct _ViewOutputs {
 /// - `nextImplicitID`: next auto-assigned child index (equals child count for static lists)
 /// - `staticCount`: non-nil only for fully static lists (all children known at build time)
 public struct _ViewListOutputs {
-    /// The resolved list content — static (TupleView) or dynamic (ForEach / mixed).
+    /// The resolved list content: static (TupleView) or dynamic (ForEach / mixed).
     var views: ViewListContent
 
     /// The next implicit child index to assign.

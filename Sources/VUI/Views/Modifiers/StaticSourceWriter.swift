@@ -89,16 +89,16 @@ struct AnySource {
     }
 }
 
-// SourceInput<Source> — PropertyItem key whose value is Stack<AnySource>.
-// Written by StaticSourceWriter and read by Source._makeView implementations
-// (e.g. PrimitiveButtonStyleConfiguration.Label, LabelStyleConfiguration.Title/Icon).
-struct SourceInput<Source>: PropertyItem {
-    typealias Item = Stack<AnySource>
+// SourceInput<Source>: PropertyKey whose value is Stack<AnySource>.
+// Written by StaticSourceWriter; read by Source._makeView implementations.
+struct SourceInput<Source>: PropertyKey {
+    typealias Value = Stack<AnySource>
     static var defaultValue: Stack<AnySource> { .empty }
+    static func valuesEqual(_ a: Value, _ b: Value) -> Bool { false }
     var description: String { "SourceInput<\(Source.self)>" }
 }
 
-// StaticSourceWriter<Source, Type> — ViewModifier that writes a SourceInput entry
+// StaticSourceWriter<Source, Type>: ViewModifier that writes a SourceInput entry
 // for Source into customInputs, enabling Source._makeView to later render Type.
 struct StaticSourceWriter<Source, Type> {
     public typealias Body = Never

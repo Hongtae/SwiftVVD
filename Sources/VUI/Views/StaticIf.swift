@@ -5,16 +5,16 @@
 //  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-// ViewInputPredicate — protocol for predicates that can be evaluated
+// Protocol for predicates that can be evaluated
 // from _GraphInputs (the common base of _ViewInputs and _ViewListInputs).
 protocol ViewInputPredicate {
     static func evaluate(inputs: _GraphInputs) -> Bool
 }
 
-// StaticIf<Predicate, TrueContent, FalseContent> — evaluates Predicate once against
+// StaticIf evaluates Predicate once against
 // the current inputs and unconditionally routes to either TrueContent or FalseContent.
 // Unlike _ConditionalContent, the branch cannot change after view construction.
-// Unconstrained base struct — View and ViewModifier conformances are conditional.
+// View and ViewModifier conformances are conditional.
 struct StaticIf<Predicate, TrueContent, FalseContent> {
     var trueBody: TrueContent
     var falseBody: FalseContent
@@ -25,7 +25,7 @@ struct StaticIf<Predicate, TrueContent, FalseContent> {
     }
 }
 
-// View conformance — when both TrueContent and FalseContent are Views.
+// View conformance when both TrueContent and FalseContent are Views.
 extension StaticIf: View
     where Predicate: ViewInputPredicate, TrueContent: View, FalseContent: View {
     typealias Body = Never
@@ -50,7 +50,7 @@ extension StaticIf: View
 extension StaticIf: _PrimitiveView
     where Predicate: ViewInputPredicate, TrueContent: View, FalseContent: View {}
 
-// ViewModifier conformance — when both TrueContent and FalseContent are ViewModifiers.
+// ViewModifier conformance when both TrueContent and FalseContent are ViewModifiers.
 // Used in DefaultLabelStyle.makeBody:
 //   .modifier(StaticIf<StyleContextAcceptsPredicate<T>, LabelStyleWritingModifier<S>, EmptyModifier>)
 extension StaticIf: ViewModifier
@@ -82,7 +82,7 @@ extension StaticIf: ViewModifier
     }
 }
 
-// AndOperationViewInputPredicate<A, B> — ViewInputPredicate that is true
+// ViewInputPredicate that is true
 // when both A and B evaluate to true.
 struct AndOperationViewInputPredicate<A: ViewInputPredicate, B: ViewInputPredicate>: ViewInputPredicate {
     static func evaluate(inputs: _GraphInputs) -> Bool {
@@ -90,13 +90,10 @@ struct AndOperationViewInputPredicate<A: ViewInputPredicate, B: ViewInputPredica
     }
 }
 
-// ViewInput — protocol for types that can be stored as a customInputs key.
-protocol ViewInput: PropertyItem {}
+// ViewInput with Bool value semantics.
+protocol ViewInputFlag: ViewInput where Value == Bool {}
 
-// ViewInputFlag — ViewInput with Bool value semantics.
-protocol ViewInputFlag: ViewInput where Item == Bool {}
-
-// ViewInputBoolFlag — ViewInputFlag that also acts as a ViewInputPredicate.
+// ViewInputFlag that also acts as a ViewInputPredicate.
 // evaluate(inputs:) reads the Bool from customInputs.
 protocol ViewInputBoolFlag: ViewInputFlag, ViewInputPredicate {}
 
@@ -150,17 +147,17 @@ struct StyleContextAcceptsAnyPredicate<T>: ViewInputPredicate {
     }
 }
 
-// IsDefaultButtonLabel — ViewInputBoolFlag that is true when the label is inside
+// ViewInputBoolFlag that is true when the label is inside
 // a default-style button in a toolbar context (set by ButtonStyleContainerModifier).
 struct IsDefaultButtonLabel: ViewInputBoolFlag {
-    typealias Item = Bool
+    typealias Value = Bool
     static var defaultValue: Bool { false }
     var description: String { "IsDefaultButtonLabel" }
 }
 
-// InvertedViewInputPredicate<P> — NOT predicate wrapping P.
+// NOT predicate wrapping P.
 struct InvertedViewInputPredicate<P: ViewInputBoolFlag>: ViewInputBoolFlag, _GraphInputsModifier {
-    typealias Item = Bool
+    typealias Value = Bool
     typealias Body = Never
     static var defaultValue: Bool { false }
     var description: String { "InvertedViewInputPredicate<\(P.self)>" }
@@ -197,8 +194,8 @@ struct MultiViewLabel: ViewInputPredicate {
     }
 }
 
-private struct MultiViewLabelKey: PropertyItem {
-    typealias Item = Bool
+private struct MultiViewLabelKey: PropertyKey {
+    typealias Value = Bool
     static var defaultValue: Bool { false }
     var description: String { "MultiViewLabelKey" }
 }

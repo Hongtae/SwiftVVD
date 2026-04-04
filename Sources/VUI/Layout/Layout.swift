@@ -123,6 +123,7 @@ extension Layout {
 
             let childInputs = _ViewInputs(
                 base: gen.baseInputs,
+                customInputs: PropertyList(),
                 preferences: inputs.preferences,
                 transform: childTransformAttr,
                 position: posAttr,
@@ -301,6 +302,7 @@ extension Layout {
                             // Reconstruct _ViewInputs for this child using its position/size/transform attrs.
                             let childInputs = _ViewInputs(
                                 base: layoutMod.baseInputs,
+                                customInputs: PropertyList(),
                                 preferences: inputs.preferences,
                                 transform: childTransformAttr,
                                 position: posAttr,
@@ -714,8 +716,9 @@ public struct _LayoutRoot<L>: _VariadicView.UnaryViewRoot where L: Layout {
     public typealias Body = Never
 }
 
-struct DefaultLayoutProperty: PropertyItem {
+struct DefaultLayoutProperty: PropertyKey {
     static var defaultValue: any Layout { VStackLayout() }
+    static func valuesEqual(_ a: any Layout, _ b: any Layout) -> Bool { false }
 
     var description: String {
         "DefaultLayoutProperty"

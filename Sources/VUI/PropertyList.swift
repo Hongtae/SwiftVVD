@@ -13,12 +13,12 @@ import Foundation
 struct BloomFilter: CustomStringConvertible {
     var value: UInt64 = 0
 
-    mutating func insert(_ key: any PropertyItem.Type) {
+    mutating func insert(_ key: any PropertyKey.Type) {
         let h = UInt64(UInt(bitPattern: ObjectIdentifier(key)))
         value |= (UInt64(1) << (h & 63)) | (UInt64(1) << ((h >> 6) & 63))
     }
 
-    func mightContain(_ key: any PropertyItem.Type) -> Bool {
+    func mightContain(_ key: any PropertyKey.Type) -> Bool {
         let h = UInt64(UInt(bitPattern: ObjectIdentifier(key)))
         let bit1 = UInt64(1) << (h & 63)
         let bit2 = UInt64(1) << ((h >> 6) & 63)
@@ -71,7 +71,7 @@ struct PropertyList: CustomStringConvertible {
 }
 
 extension PropertyList {
-    mutating func setValue<T: PropertyItem>(_ value: T.Item, forKey key: T.Type) {
+    mutating func setValue<T: PropertyKey>(_ value: T.Value, forKey key: T.Type) {
         self.makeUnique()
         // Update in-place if key already exists.
         var element = self.elements
@@ -82,11 +82,11 @@ extension PropertyList {
             }
             element = current.after
         }
-        // Not found — prepend new element at head.
+        // Not found, prepend new element at head.
         self.prepend(TypedElement(key: key, value: value))
     }
 
-    mutating func setValue<T: PropertyItem>(_ value: T.Item, forKey key: T.Type) where T.Item: Equatable {
+    mutating func setValue<T: PropertyKey>(_ value: T.Value, forKey key: T.Type) where T.Value: Equatable {
         if let existing = self.nonDefaultValue(forKey: key) {
             if existing == value { return }
             if value == T.defaultValue {
@@ -109,7 +109,7 @@ extension PropertyList {
         }
     }
 
-    mutating func removeValue<T: PropertyItem>(forKey key: T.Type) {
+    mutating func removeValue<T: PropertyKey>(forKey key: T.Type) {
         if self.nonDefaultValue(forKey: key) != nil {
             self.makeUnique()
 
@@ -132,7 +132,7 @@ extension PropertyList {
         }
     }
 
-    func nonDefaultValue<T: PropertyItem>(forKey key: T.Type) -> T.Item? {
+    func nonDefaultValue<T: PropertyKey>(forKey key: T.Type) -> T.Value? {
         var element = self.elements
         while let current = element {
             if current.keyType == key {
@@ -148,7 +148,7 @@ extension PropertyList {
         return nil
     }
 
-    func value<T: PropertyItem>(forKey key: T.Type) -> T.Item {
+    func value<T: PropertyKey>(forKey key: T.Type) -> T.Value {
         nonDefaultValue(forKey: key) ?? T.defaultValue
     }
 
@@ -174,15 +174,22 @@ extension PropertyList {
     }
 }
 
-protocol PropertyItem: TransactionKey, CustomStringConvertible {
-    associatedtype Item
-    static var defaultValue: Item { get }
+// Base protocol for PropertyList key types.
+// PropertyKey is the root of the PropertyKey to GraphInput to ViewInput hierarchy.
+protocol PropertyKey {
+    associatedtype Value
+    static var defaultValue: Value { get }
+    static func valuesEqual(_ a: Value, _ b: Value) -> Bool
+}
+
+extension PropertyKey where Value: Equatable {
+    static func valuesEqual(_ a: Value, _ b: Value) -> Bool { a == b }
 }
 
 extension PropertyList {
     @usableFromInline
     class Element: CustomStringConvertible {
-        let keyType: any PropertyItem.Type
+        let keyType: any PropertyKey.Type
         var before: Element?               // doubly-linked (currently unused)
         var after: Element?                // next element in chain
         var skip: Unmanaged<Element>?      // skip-list pointer (nil = not used)
@@ -191,7 +198,7 @@ extension PropertyList {
         var skipFilter: BloomFilter        // bloom filter covering elements after this node
         let id: UniqueID
 
-        init(keyType: any PropertyItem.Type, after: Element? = nil) {
+        init(keyType: any PropertyKey.Type, after: Element? = nil) {
             self.keyType = keyType
             self.before = nil
             self.after = after
@@ -216,11 +223,11 @@ extension PropertyList {
         func clone() -> Element { fatalError("TypedElement must override clone()") }
     }
 
-    // Typed subclass — value is stored with the concrete Item type rather than Any.
-    final class TypedElement<T: PropertyItem>: Element {
-        var value: T.Item
+    // Typed subclass stores the value with the concrete Value type rather than Any.
+    final class TypedElement<T: PropertyKey>: Element {
+        var value: T.Value
 
-        init(key: T.Type, value: T.Item, after: Element? = nil) {
+        init(key: T.Type, value: T.Value, after: Element? = nil) {
             self.value = value
             super.init(keyType: key, after: after)
         }
@@ -238,7 +245,7 @@ extension PropertyList {
         }
     }
 
-    init<Item: PropertyItem>(_ item: Item.Type, value: Item.Item) {
-        self.elements = TypedElement(key: item, value: value)
+    init<Key: PropertyKey>(_ key: Key.Type, value: Key.Value) {
+        self.elements = TypedElement(key: key, value: value)
     }
 }

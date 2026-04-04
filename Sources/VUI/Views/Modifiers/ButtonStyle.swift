@@ -487,18 +487,18 @@ struct AnyButtonStyleType: Equatable {
     }
 }
 
-// ButtonStyleInput: PropertyItem — current active PrimitiveButtonStyle type.
+// ButtonStyleInput: ViewInput for the current active PrimitiveButtonStyle type.
 // Set by ButtonStyleWriter._makeInputs for every buttonStyle() application.
-struct ButtonStyleInput: PropertyItem {
-    typealias Item = AnyButtonStyleType
+struct ButtonStyleInput: ViewInput {
+    typealias Value = AnyButtonStyleType
     static var defaultValue: AnyButtonStyleType { AnyButtonStyleType(DefaultButtonStyle.self) }
     var description: String { "ButtonStyleInput" }
 }
 
-// EffectiveButtonStyleInput: PropertyItem — top-level effective style type cache.
+// EffectiveButtonStyleInput: ViewInput — top-level effective style type cache.
 // Set by ButtonStyleWriter._makeInputs when isTopLevelStyle == true.
-struct EffectiveButtonStyleInput: PropertyItem {
-    typealias Item = AnyButtonStyleType
+struct EffectiveButtonStyleInput: ViewInput {
+    typealias Value = AnyButtonStyleType
     static var defaultValue: AnyButtonStyleType { AnyButtonStyleType(DefaultButtonStyle.self) }
     var description: String { "EffectiveButtonStyleInput" }
 }

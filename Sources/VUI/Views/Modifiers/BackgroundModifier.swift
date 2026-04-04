@@ -28,6 +28,7 @@ public struct _BackgroundModifier<Background>: ViewModifier where Background: Vi
         let bgSizeAttr = graph.makeInput(value: ViewSize(.zero))
         let bgInputs = _ViewInputs(
             base: inputs.base,
+            customInputs: PropertyList(),
             preferences: inputs.preferences,
             transform: inputs.transform,
             position: bgPosAttr,

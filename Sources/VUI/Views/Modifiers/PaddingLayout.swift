@@ -86,7 +86,7 @@ extension View {
     }
 }
 
-struct DefaultPaddingEdgeInsetsProperty: PropertyItem {
+struct DefaultPaddingEdgeInsetsProperty: PropertyKey {
     static var defaultValue: EdgeInsets { .init(_all: 16) }
 
     var description: String {

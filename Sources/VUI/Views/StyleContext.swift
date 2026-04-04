@@ -64,10 +64,10 @@ struct AnyStyleContextType: Equatable {
     }
 }
 
-// StyleContextInput — PropertyItem key storing the current AnyStyleContextType
+// StyleContextInput — PropertyKey storing the current AnyStyleContextType
 // in _GraphInputs.customInputs.
-struct StyleContextInput: PropertyItem {
-    typealias Item = AnyStyleContextType
+struct StyleContextInput: PropertyKey {
+    typealias Value = AnyStyleContextType
     static var defaultValue: AnyStyleContextType { .defaultValue }
     var description: String { "StyleContextInput" }
 }

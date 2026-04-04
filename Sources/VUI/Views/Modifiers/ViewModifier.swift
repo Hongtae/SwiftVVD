@@ -7,13 +7,14 @@
 
 import Foundation
 
-struct _ViewModifierBodyInput<Content>: PropertyItem {
+struct _ViewModifierBodyInput<Content>: PropertyKey {
     struct Element: @unchecked Sendable {
         let makeView: (_Graph, _ViewInputs) -> _ViewOutputs
         let makeViewList: (_Graph, _ViewListInputs) -> _ViewListOutputs
     }
-    typealias Item = Element?
+    typealias Value = Element?
     static var defaultValue: Element? { nil }
+    static func valuesEqual(_ a: Element?, _ b: Element?) -> Bool { false }
     var description: String { "_ViewModifierBodyInput<\(Content.self)>" }
 }
 
@@ -145,6 +146,7 @@ extension _ViewInputsModifier {
         let stubPrefsKeys: Attribute<PreferenceKeys> = graph.makeInput(value: PreferenceKeys())
         var viewInputs = _ViewInputs(
             base: inputs.base,
+            customInputs: PropertyList(),
             preferences: PreferencesInputs(keys: PreferenceKeys(), hostKeys: stubPrefsKeys),
             transform: stubTransform,
             position: stubPoint,
