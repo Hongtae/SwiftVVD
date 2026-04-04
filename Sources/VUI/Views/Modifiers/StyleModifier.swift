@@ -5,22 +5,6 @@
 //  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-// Stack<Element> — linked list.
-//   empty  |  node(value: Element, next: Stack<Element>)
-enum Stack<Element> {
-    case empty
-    indirect case node(value: Element, next: Stack<Element>)
-
-    func pushing(_ element: Element) -> Stack<Element> {
-        .node(value: element, next: self)
-    }
-
-    func popping() -> (head: Element, tail: Stack<Element>)? {
-        guard case .node(let v, let next) = self else { return nil }
-        return (v, next)
-    }
-}
-
 // ============================================================
 // AnyStyleModifierType — protocol for type-erased dispatch
 // StyleModifierType<M: StyleModifier> conforms to this.
@@ -66,10 +50,10 @@ extension StyleModifier {
             value: styleAttr.identifier,
             _type: StyleModifierType<Self>.self)
         var newInputs = inputs
-        let stack = newInputs.base.customInputs.value(
+        var stack = newInputs.base.customInputs.value(
             forKey: StyleInput<Self.StyleConfiguration>.self)
-        newInputs.base.customInputs.setValue(
-            stack.pushing(anyMod),
+        stack = .node(anyMod, stack)
+        newInputs.base.customInputs.setValue(stack,
             forKey: StyleInput<Self.StyleConfiguration>.self)
         return body(_Graph(), newInputs)
     }
@@ -87,10 +71,10 @@ extension StyleModifier {
             value: styleAttr.identifier,
             _type: StyleModifierType<Self>.self)
         var newInputs = inputs
-        let stack = newInputs.base.customInputs.value(
+        var stack = newInputs.base.customInputs.value(
             forKey: StyleInput<Self.StyleConfiguration>.self)
-        newInputs.base.customInputs.setValue(
-            stack.pushing(anyMod),
+        stack = .node(anyMod, stack)
+        newInputs.base.customInputs.setValue(stack,
             forKey: StyleInput<Self.StyleConfiguration>.self)
         return body(_Graph(), newInputs)
     }
@@ -252,10 +236,10 @@ extension StyleableView {
     static var isScrapeable: Bool { false }
 
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let stack = inputs.base.customInputs.value(forKey: StyleInput<Configuration>.self)
-        if let (head, tail) = stack.popping() {
+        var stack = inputs.base.customInputs.value(forKey: StyleInput<Configuration>.self)
+        if let head = stack.pop() {
             var poppedInputs = inputs
-            poppedInputs.base.customInputs.setValue(tail, forKey: StyleInput<Configuration>.self)
+            poppedInputs.base.customInputs.setValue(stack, forKey: StyleInput<Configuration>.self)
             return head._type.makeView(view: view, modifier: head, inputs: poppedInputs)
         } else {
             guard !(Body.self is Never.Type) else {
@@ -267,10 +251,10 @@ extension StyleableView {
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        let stack = inputs.base.customInputs.value(forKey: StyleInput<Configuration>.self)
-        if let (head, tail) = stack.popping() {
+        var stack = inputs.base.customInputs.value(forKey: StyleInput<Configuration>.self)
+        if let head = stack.pop() {
             var poppedInputs = inputs
-            poppedInputs.base.customInputs.setValue(tail, forKey: StyleInput<Configuration>.self)
+            poppedInputs.base.customInputs.setValue(stack, forKey: StyleInput<Configuration>.self)
             return head._type.makeViewList(view: view, modifier: head, inputs: poppedInputs)
         } else {
             guard !(Body.self is Never.Type) else {

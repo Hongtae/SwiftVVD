@@ -111,7 +111,8 @@ extension StaticSourceWriter: ViewModifier where Source: View, Type: View {
 extension StaticSourceWriter: _GraphInputsModifier where Source: View, Type: View {
     static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GraphInputs) {
         let anySource = AnySource(value: modifier[\.source])
-        let stack = inputs.customInputs.value(forKey: SourceInput<Source>.self)
-        inputs.customInputs.setValue(stack.pushing(anySource), forKey: SourceInput<Source>.self)
+        var stack = inputs.customInputs.value(forKey: SourceInput<Source>.self)
+        stack = .node(anySource, stack)
+        inputs.customInputs.setValue(stack, forKey: SourceInput<Source>.self)
     }
 }

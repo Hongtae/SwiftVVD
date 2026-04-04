@@ -53,7 +53,7 @@ struct ResolvedLabelStyle: View {
         guard let graph = AttributeGraph.current else {
             fatalError("\(self)._makeView called outside an active AttributeGraph context.")
         }
-        let stack = inputs.base.customInputs.value(forKey: StyleInput<LabelStyleConfiguration>.self)
+        var stack = inputs.base.customInputs.value(forKey: StyleInput<LabelStyleConfiguration>.self)
         let configuration = LabelStyleConfiguration()
 
         func wireBody(_ style: some LabelStyle, inputs: _ViewInputs) -> _ViewOutputs {
@@ -64,9 +64,9 @@ struct ResolvedLabelStyle: View {
             return makeView(view: _GraphValue(_attribute: bodyAttr), inputs: inputs)
         }
 
-        if let (head, tail) = stack.popping() {
+        if let head = stack.pop() {
             var poppedInputs = inputs
-            poppedInputs.base.customInputs.setValue(tail, forKey: StyleInput<LabelStyleConfiguration>.self)
+            poppedInputs.base.customInputs.setValue(stack, forKey: StyleInput<LabelStyleConfiguration>.self)
             let style = head.labelStyle ?? DefaultLabelStyle.automatic
             return wireBody(style, inputs: poppedInputs)
         }

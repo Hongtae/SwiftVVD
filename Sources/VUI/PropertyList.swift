@@ -7,6 +7,40 @@
 
 import Foundation
 
+// Stack<Element> is a LIFO linked list used as the Value type for PropertyKey
+// conformers such as StyleInput, SourceInput, and BodyInput.
+enum Stack<Element> {
+    case empty
+    indirect case node(Element, Stack<Element>)
+
+    var top: Element? {
+        guard case .node(let v, _) = self else { return nil }
+        return v
+    }
+
+    var isEmpty: Bool {
+        guard case .empty = self else { return false }
+        return true
+    }
+
+    mutating func pop() -> Element? {
+        guard case .node(let v, let rest) = self else { return nil }
+        self = rest
+        return v
+    }
+
+    func map<T>(_ transform: (Element) -> T) -> Stack<T> {
+        switch self {
+        case .empty: return .empty
+        case .node(let v, let rest): return .node(transform(v), rest.map(transform))
+        }
+    }
+}
+
+extension Stack: IteratorProtocol {
+    mutating func next() -> Element? { pop() }
+}
+
 // Bloom filter for fast negative lookup in PropertyList chains.
 // 64-bit bit-array: if a key's bits are not set, it is definitely not in the chain.
 // False positives are possible (full scan still needed on hit).

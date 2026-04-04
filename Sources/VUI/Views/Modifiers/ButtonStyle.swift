@@ -73,7 +73,7 @@ extension PrimitiveButtonStyleConfiguration.Label {
         guard let graph = AttributeGraph.current else {
             fatalError("\(self)._makeView called outside an active AttributeGraph context.")
         }
-        guard case .node(let source, _) = inputs.base.customInputs.value(forKey: SourceInput<Self>.self) else {
+        guard let source = inputs.base.customInputs.value(forKey: SourceInput<Self>.self).top else {
             return _ViewOutputs()
         }
         let innerPosAttr = graph.makeInput(value: CGPoint.zero)
@@ -326,7 +326,7 @@ extension ButtonStyleConfiguration.Label {
         guard let graph = AttributeGraph.current else {
             fatalError("\(self)._makeView called outside an active AttributeGraph context.")
         }
-        guard case .node(let source, _) = inputs.base.customInputs.value(forKey: SourceInput<PrimitiveButtonStyleConfiguration.Label>.self) else {
+        guard let source = inputs.base.customInputs.value(forKey: SourceInput<PrimitiveButtonStyleConfiguration.Label>.self).top else {
             return _ViewOutputs()
         }
         let innerPosAttr = graph.makeInput(value: CGPoint.zero)
