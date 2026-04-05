@@ -7,39 +7,103 @@
 
 import Foundation
 
-struct _ViewModifierBodyInput<Content>: PropertyKey {
-    struct Element: @unchecked Sendable {
-        let makeView: (_Graph, _ViewInputs) -> _ViewOutputs
-        let makeViewList: (_Graph, _ViewListInputs) -> _ViewListOutputs
+// BodyInputElement
+// One entry on the BodyInput<Content> stack.
+struct BodyInputElement: @unchecked Sendable {
+    let isViewList: Bool
+    // Valid when isViewList == false:
+    let makeViewFn: ((_Graph, _ViewInputs) -> _ViewOutputs)?
+    // Valid when isViewList == true:
+    let makeViewListFn: ((_Graph, _ViewListInputs) -> _ViewListOutputs)?
+
+    init(makeView: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) {
+        self.isViewList = false
+        self.makeViewFn = makeView
+        self.makeViewListFn = nil
     }
-    typealias Value = Element?
-    static var defaultValue: Element? { nil }
-    static func valuesEqual(_ a: Element?, _ b: Element?) -> Bool { false }
-    var description: String { "_ViewModifierBodyInput<\(Content.self)>" }
+
+    init(makeViewList: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) {
+        self.isViewList = true
+        self.makeViewFn = nil
+        self.makeViewListFn = makeViewList
+    }
 }
+
+extension BodyInputElement: Equatable {
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        guard lhs.isViewList == rhs.isViewList else { return false }
+        return false
+    }
+}
+
+extension BodyInputElement: GraphReusable {
+    static var isTriviallyReusable: Bool { true }
+    mutating func tryToReuse(by other: Self, indirectMap: IndirectAttributeMap, testOnly: Bool) -> Bool { true }
+}
+
+// BodyInput<Content>
+// PropertyKey for the ViewModifier body closure stack.
+// Value = Stack<BodyInputElement>. defaultValue = .empty
+// Conforms to both ViewInput and GraphInput. Stored via _GraphInputs.append (base channel).
+struct BodyInput<Content>: ViewInput {
+    typealias Value = Stack<BodyInputElement>
+    static var defaultValue: Stack<BodyInputElement> { .empty }
+    static func valuesEqual(_ a: Value, _ b: Value) -> Bool { false }
+    // BodyInputElement.isTriviallyReusable=true → BodyInput is also trivially reusable.
+    static var isTriviallyReusable: Bool { true }
+}
+
+// ViewModifierContentProvider
+// Protocol adopted by _ViewModifier_Content<Modifier>.
+// providerMakeView: pops a BodyInputElement from the base stack and calls it.
+// isViewList=false: calls fn_ptr directly.
+// isViewList=true: routed via MakeViewRoot/_VariadicView_ImplicitRootVisitor (called directly).
+protocol ViewModifierContentProvider: View {
+    static func providerMakeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs
+    static func providerMakeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs
+}
+
 
 public struct _ViewModifier_Content<Modifier> where Modifier: ViewModifier {
     public typealias Body = Never
-
-    public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let item = inputs.base.customInputs.nonDefaultValue(forKey: _ViewModifierBodyInput<Self>.self),
-              let elem = item else {
-            fatalError("_ViewModifier_Content<\(Modifier.self)>._makeView called without a modifier body context.")
-        }
-        return elem.makeView(_Graph(), inputs)
-    }
-
-    public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        guard let item = inputs.base.customInputs.nonDefaultValue(forKey: _ViewModifierBodyInput<Self>.self),
-              let elem = item else {
-            fatalError("_ViewModifier_Content<\(Modifier.self)>._makeViewList called without a modifier body context.")
-        }
-        return elem.makeViewList(_Graph(), inputs)
-    }
 }
 
 extension _ViewModifier_Content: View {
     public var body: Never { neverBody() }
+
+    public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        Self.providerMakeView(view: view, inputs: inputs)
+    }
+
+    public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
+        Self.providerMakeViewList(view: view, inputs: inputs)
+    }
+}
+
+extension _ViewModifier_Content: ViewModifierContentProvider {
+    // Consumes via _ViewInputs.popLast<BodyInput<T>, BodyInputElement> then calls the closure.
+    static func providerMakeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        var inputs = inputs
+        guard let elem = inputs.popLast(BodyInput<Self>.self) else {
+            fatalError("_ViewModifier_Content<\(Modifier.self)>.providerMakeView called without a modifier body context.")
+        }
+        guard !elem.isViewList, let fn = elem.makeViewFn else {
+            fatalError("_ViewModifier_Content<\(Modifier.self)>.providerMakeView: expected isViewList=false.")
+        }
+        return fn(_Graph(), inputs)
+    }
+
+    // providerMakeViewList calls _GraphInputs.popLast directly.
+    static func providerMakeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
+        var inputs = inputs
+        guard let elem = inputs.base.popLast(BodyInput<Self>.self) else {
+            fatalError("_ViewModifier_Content<\(Modifier.self)>.providerMakeViewList called without a modifier body context.")
+        }
+        guard elem.isViewList, let fn = elem.makeViewListFn else {
+            fatalError("_ViewModifier_Content<\(Modifier.self)>.providerMakeViewList: expected isViewList=true.")
+        }
+        return fn(_Graph(), inputs)
+    }
 }
 
 public protocol ViewModifier {
@@ -75,13 +139,8 @@ extension ViewModifier {
             fatalError("\(Self.self) may not have Body == Never")
         }
         var inputs = inputs
-        inputs.base.customInputs.setValue(
-            _ViewModifierBodyInput<Content>.Element(
-                makeView: body,
-                makeViewList: { _, _ in fatalError("makeViewList called via makeView path") }
-            ),
-            forKey: _ViewModifierBodyInput<Content>.self
-        )
+        // ViewModifier._makeView calls _GraphInputs.append directly, not via pushModifierBody.
+        inputs.base.append(BodyInputElement(makeView: body), forKey: BodyInput<Content>.self)
         return Body._makeView(view: modifier[\._content], inputs: inputs)
     }
 
@@ -100,13 +159,7 @@ extension ViewModifier {
             fatalError("\(Self.self) may not have Body == Never")
         }
         var inputs = inputs
-        inputs.base.customInputs.setValue(
-            _ViewModifierBodyInput<Content>.Element(
-                makeView: { _, _ in fatalError("makeView called via makeViewList path") },
-                makeViewList: body
-            ),
-            forKey: _ViewModifierBodyInput<Content>.self
-        )
+        inputs.base.append(BodyInputElement(makeViewList: body), forKey: BodyInput<Content>.self)
         return Body._makeViewList(view: modifier[\._content], inputs: inputs)
     }
 }
@@ -181,13 +234,7 @@ extension ViewModifier where Self: Animatable {
             fatalError("\(Self.self) may not have Body == Never")
         }
         var inputs = inputs
-        inputs.base.customInputs.setValue(
-            _ViewModifierBodyInput<Content>.Element(
-                makeView: body,
-                makeViewList: { _, _ in fatalError("makeViewList called via makeView path") }
-            ),
-            forKey: _ViewModifierBodyInput<Content>.self
-        )
+        inputs.base.append(BodyInputElement(makeView: body), forKey: BodyInput<Content>.self)
         return Body._makeView(view: modifier[\._content], inputs: inputs)
     }
 
@@ -196,13 +243,7 @@ extension ViewModifier where Self: Animatable {
             fatalError("\(Self.self) may not have Body == Never")
         }
         var inputs = inputs
-        inputs.base.customInputs.setValue(
-            _ViewModifierBodyInput<Content>.Element(
-                makeView: { _, _ in fatalError("makeView called via makeViewList path") },
-                makeViewList: body
-            ),
-            forKey: _ViewModifierBodyInput<Content>.self
-        )
+        inputs.base.append(BodyInputElement(makeViewList: body), forKey: BodyInput<Content>.self)
         return Body._makeViewList(view: modifier[\._content], inputs: inputs)
     }
 }
@@ -226,7 +267,7 @@ extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
         // GestureViewModifier requires a TypedUnaryViewGenerator for the full
-        // ModifiedContent type so that wireGenerator → gen.makeView calls
+        // ModifiedContent type so that wireGenerator -> gen.makeView calls
         // ModifiedContent._makeView (which runs the gesture modifier's makeView
         // and registers the GestureViewResponder), not just Content._makeView.
         //
@@ -357,3 +398,34 @@ extension UnaryLayout {
     }
 }
 
+// _ViewInputs + pushModifierBody / popLast / top
+// ViewModifier body stack helpers.
+// pushModifierBody:
+//   Creates a BodyInputElement and calls _GraphInputs.append internally.
+//   (ViewModifier._makeView default path calls _GraphInputs.append directly, not via this)
+// popLast: Thin wrapper delegating to _GraphInputs.popLast.
+// top: Thin wrapper delegating to _GraphInputs.top.
+
+extension _ViewInputs {
+    /// Pushes a makeView closure onto the BodyInput stack.
+    mutating func pushModifierBody<T: ViewModifier>(_ type: T.Type, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) {
+        base.append(BodyInputElement(makeView: body), forKey: BodyInput<T.Content>.self)
+    }
+
+    /// Returns the top element of the Stack for a ViewInput key without consuming it. Delegates to _GraphInputs.top.
+    func top<T: ViewInput, E>(_ key: T.Type) -> E? where T.Value == Stack<E> {
+        base.top(key)
+    }
+
+    /// Pops the top element from the Stack for a ViewInput key. Thin wrapper delegating to _GraphInputs.popLast.
+    mutating func popLast<T: ViewInput, E>(_ key: T.Type) -> E? where T.Value == Stack<E> {
+        base.popLast(key)
+    }
+}
+
+extension _ViewListInputs {
+    /// Pushes a makeViewList closure onto the BodyInput stack.
+    mutating func pushModifierBody<T: ViewModifier>(_ type: T.Type, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) {
+        base.append(BodyInputElement(makeViewList: body), forKey: BodyInput<T.Content>.self)
+    }
+}

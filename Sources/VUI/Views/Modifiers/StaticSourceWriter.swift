@@ -91,7 +91,7 @@ struct AnySource {
 
 // SourceInput<Source>: PropertyKey whose value is Stack<AnySource>.
 // Written by StaticSourceWriter; read by Source._makeView implementations.
-struct SourceInput<Source>: PropertyKey {
+struct SourceInput<Source>: GraphInput {
     typealias Value = Stack<AnySource>
     static var defaultValue: Stack<AnySource> { .empty }
     static func valuesEqual(_ a: Value, _ b: Value) -> Bool { false }

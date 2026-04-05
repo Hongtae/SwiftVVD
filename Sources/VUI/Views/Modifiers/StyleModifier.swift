@@ -209,7 +209,7 @@ struct AnyStyleModifier {
 // PrimitiveButtonStyle uses StyleInput<PrimitiveButtonStyleConfiguration>.
 // LabelStyle uses StyleInput<LabelStyleConfiguration>.
 // ============================================================
-struct StyleInput<Configuration>: PropertyKey {
+struct StyleInput<Configuration>: GraphInput {
     typealias Value = Stack<AnyStyleModifier>
     static var defaultValue: Stack<AnyStyleModifier> { .empty }
     static func valuesEqual(_ a: Value, _ b: Value) -> Bool { false }

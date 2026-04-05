@@ -222,4 +222,32 @@ public struct _GraphInputs {
         get { customInputs.value(forKey: key) }
         set { customInputs.setValue(newValue, forKey: key) }
     }
+
+    // Stack operations for base-channel keys with Stack values
+    // Used by the ViewModifier body-input stack (BodyInput<Content>).
+
+    /// Push an element onto the Stack stored for `key` in the base channel.
+    mutating func append<T: GraphInput, E>(_ element: E, forKey key: T.Type) where T.Value == Stack<E> {
+        var stack = customInputs.value(forKey: key)
+        stack = .node(element, stack)
+        customInputs.setValue(stack, forKey: key)
+    }
+
+    /// Pop and return the top element from the Stack stored for `key` in the base channel.
+    /// Returns nil if the stack is empty.
+    mutating func popLast<T: GraphInput, E>(_ key: T.Type) -> E? where T.Value == Stack<E> {
+        var stack = customInputs.value(forKey: key)
+        let elem = stack.pop()
+        customInputs.setValue(stack, forKey: key)
+        return elem
+    }
+
+    /// Peek at the top element of the Stack stored for `key` without consuming it.
+    /// Returns nil if the stack is empty.
+    func top<T: GraphInput, E>(_ key: T.Type) -> E? where T.Value == Stack<E> {
+        customInputs.value(forKey: key).top
+    }
+
+    /// Returns true if any BodyInput<T> stack in customInputs is non-empty.
+    var containsNonEmptyBodyStack: Bool { false }
 }

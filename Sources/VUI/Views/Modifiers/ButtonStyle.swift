@@ -495,9 +495,10 @@ struct ButtonStyleInput: ViewInput {
     var description: String { "ButtonStyleInput" }
 }
 
-// EffectiveButtonStyleInput: ViewInput — top-level effective style type cache.
+// EffectiveButtonStyleInput: GraphInput for the top-level effective style type cache.
 // Set by ButtonStyleWriter._makeInputs when isTopLevelStyle == true.
-struct EffectiveButtonStyleInput: ViewInput {
+// No ViewInput conformance because it is stored in the base channel.
+struct EffectiveButtonStyleInput: GraphInput {
     typealias Value = AnyButtonStyleType
     static var defaultValue: AnyButtonStyleType { AnyButtonStyleType(DefaultButtonStyle.self) }
     var description: String { "EffectiveButtonStyleInput" }
