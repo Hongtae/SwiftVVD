@@ -7,70 +7,70 @@
 
 import Foundation
 
-// ViewGraphDelegate — receives view graph state change callbacks.
+// ViewGraphDelegate — update scheduling callbacks for the view graph.
 protocol ViewGraphDelegate: AnyObject {
     func setNeedsUpdate()
+    func requestUpdate(after: Double)
+    func `as`<T>(_ type: T.Type) -> T?
 }
 
 // ViewRendererHost — protocol for types that own a ViewGraph and drive rendering.
-// TODO: Add valuesNeedingUpdate after ViewGraphRootValues is defined.
 protocol ViewRendererHost: AnyObject {
     var viewGraph: ViewGraph { get }
 }
 
 // ViewGraphHostDelegate — lifecycle delegate for ViewGraphHost.
-// TODO: Add lifecycle methods when needed.
 protocol ViewGraphHostDelegate: AnyObject {}
 
-// ViewGraphRenderDelegate — delegate for rendering callbacks.
-// TODO: Add render callback methods when needed.
+// ViewGraphRenderDelegate — rendering callback delegate.
 protocol ViewGraphRenderDelegate: AnyObject {}
 
-// ViewGraphRootValueUpdater — delegate for root value update notifications.
-// TODO: Add update callback methods when needed.
+// ViewGraphRootValueUpdater — root value update notification delegate.
 protocol ViewGraphRootValueUpdater: AnyObject {}
 
-// ViewGraphHost — base class for view-graph lifecycle, display timing, and
-// environment management.
-// TODO: Add stored state as lifecycle, rendering, and update support grows.
-// TODO: Implement display timing, update scheduling, and environment methods.
-class ViewGraphHost {
+// ViewGraphHost — intermediate base class between GraphHost and ViewGraph.
+// Handles lifecycle, display link, and environment management.
+//
+// TODO: Add stored properties after AG ownership structure is migrated to GraphHost
+// TODO: Implement display link / update timer / environment methods
+class ViewGraphHost: GraphHost {
     weak var delegate: (any ViewGraphHostDelegate)?
 
-    // Returns self as the concrete ViewGraph.
+    // viewGraph — returns self cast to ViewGraph.
+    // Valid because ViewGraph IS-A ViewGraphHost.
     var viewGraph: ViewGraph { self as! ViewGraph }
 
-    init() {}
+    override init() { super.init() }
 }
 
 // ViewGraph — view-level AG host.
-// Stored directly by WindowController.viewGraph.
-// Responsibilities include root view instantiation, output tracking, display
-// list production, and event routing.
-// TODO: Move view construction into AttributeGraph and register _makeView closures.
-// TODO: Implement displayList() and connect it to the WindowContext render loop.
+//
+// TODO: Register _makeView closure as AG node
+// TODO: Implement displayList() and wire to WindowContext render loop
 class ViewGraph: ViewGraphHost {
-    weak var viewGraphDelegate: (any ViewGraphDelegate)?
 
-    // Outputs — requested output bit flags (OptionSet, RawValue: UInt8).
-    // Items: displayList, viewResponders, platformItemList, focus, layout,
-    // defaults, and all.
+    // delegate — update scheduling callback (ViewGraphDelegate).
+    weak var viewDelegate: (any ViewGraphDelegate)?
+
+    // graphDelegate — AG transaction lifecycle callback (GraphDelegate).
+    weak var graphDelegate: (any GraphDelegate)?
+
     struct Outputs: OptionSet {
         let rawValue: UInt8
-        static let displayList     = Outputs(rawValue: 1 << 0)
-        static let viewResponders  = Outputs(rawValue: 1 << 1)
-        static let platformItemList = Outputs(rawValue: 1 << 2)
-        static let focus           = Outputs(rawValue: 1 << 3)
-        static let layout          = Outputs(rawValue: 1 << 4)
-        // defaults and all use placeholder raw values for now.
-        static let defaults        = Outputs(rawValue: 0xFF)
-        static let all             = Outputs(rawValue: 0xFF)
+        static let displayList      = Outputs(rawValue: 0x01)  // bit 0
+        static let platformItemList = Outputs(rawValue: 0x02)  // bit 1
+        static let viewResponders   = Outputs(rawValue: 0x04)  // bit 2
+        // 0x08: unknown member (unused)
+        static let layout           = Outputs(rawValue: 0x10)  // bit 4
+        static let focus            = Outputs(rawValue: 0x20)  // bit 5
+        static let defaults         = Outputs(rawValue: 0x35)  // displayList | viewResponders | layout | focus
+        static let all              = Outputs(rawValue: 0xFF)
     }
 
-    // NextUpdate — value type for update scheduling.
-    // Stored by ViewGraph as nextUpdate: (views: NextUpdate, gestures: NextUpdate).
+    // NextUpdate — update scheduling value type (struct).
+    // Stored as a tuple: nextUpdate: (views: NextUpdate, gestures: NextUpdate)
     struct NextUpdate {
-        var time: Double = .infinity   // TODO: Replace with Time.
+        var time: Double = .infinity   // TODO: replace with Time type
         var interval: Double = .infinity
         var reasons: Set<UInt32> = []
 
@@ -79,15 +79,14 @@ class ViewGraph: ViewGraphHost {
             self.interval = dt
             if let r = reason { reasons.insert(r) }
         }
-        mutating func maxVelocity(_ v: Double) {}  // TODO: Implement.
+        mutating func maxVelocity(_ v: Double) {}  // TODO: implement
     }
 
-    // TODO: requestedOutputs — outputs requested during ViewGraph initialization.
+    // TODO: requestedOutputs — outputs requested at ViewGraph init time
     // TODO: rootView: AGAttribute
-    // TODO: Add AG attribute properties such as proposedSize and rootGeometry.
+    // TODO: Add AG attribute properties: proposedSize, rootGeometry, etc.
 
     override init() {
         super.init()
-        self.delegate = nil
     }
 }
