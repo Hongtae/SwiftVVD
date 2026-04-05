@@ -116,7 +116,7 @@ class AuxiliaryWindowSceneContext<Content>: AuxiliaryWindowClient, @unchecked Se
         guard let window = self.window else {
             fatalError("AuxiliaryWindowContext: Invalid window!")
         }
-        guard let layoutComputer = window.rootLayoutComputer else {
+        guard let layoutComputer = window.viewGraph.rootLayoutComputer else {
             fatalError("AuxiliaryWindowContext: rootLayoutComputer not set — AG wiring incomplete!")
         }
 

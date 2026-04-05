@@ -8,10 +8,12 @@
 import Foundation
 
 // GraphHost — root AG-owning base class.
-//
-// TODO: Implement AG ownership structure (subgraph, input attributes, evaluation context)
 class GraphHost {
-    init() {}
+    var data: AttributeGraph
+
+    init() {
+        self.data = AttributeGraph()
+    }
 }
 
 // GraphDelegate — AG transaction / graph change callbacks.

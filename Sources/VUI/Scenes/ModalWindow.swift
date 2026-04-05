@@ -194,8 +194,8 @@ class ModalWindowSceneContext<Content>: ModalWindowClient, @unchecked Sendable w
         guard let window = self.window else {
             fatalError("ModalWindowContext: Invalid window!")
         }
-        guard let layoutComputer = window.rootLayoutComputer else {
-            fatalError("ModalWindowContext: rootLayoutComputer not set — AG wiring incomplete!")
+        guard let layoutComputer = window.viewGraph.rootLayoutComputer else {
+            fatalError("ModalWindowContext: rootLayoutComputer not set. AG wiring incomplete!")
         }
 
         let padding: CGFloat = 4

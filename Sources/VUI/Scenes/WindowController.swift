@@ -22,16 +22,18 @@ protocol WindowInputEventHandler {
     func resetGestureHandlers()
 }
 
-// WindowController  View content, AG graph, and aux/modal window management.
+// WindowController — owns ViewGraph and drives rendering + event dispatch.
 // Non-generic: the Content type is used only at init for AG wiring, then discarded.
 // Optionally owns a WindowContext — created lazily on the first makeWindow() call.
 // Overlay-mode aux/modal controllers never call makeWindow(), so windowContext stays nil.
 class WindowController: AuxiliaryWindowHost, ModalWindowHost,
-                        WindowInputEventHandler, WindowDelegate, @unchecked Sendable {
+                        WindowInputEventHandler, WindowDelegate,
+                        ViewRendererHost, ViewGraphRootValueUpdater,
+                        ViewGraphRenderDelegate,
+                        @unchecked Sendable {
 
     var windowContext: WindowContext?
 
-    // Title graph captured at init; read when updateContent() is implemented.
     private var _titleGraph: _GraphValue<Text>?
     private var _titleString: String = ""
     private var _style: PlatformWindowStyle
@@ -40,42 +42,24 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
     var sharedContext: SharedContext
     let sceneResources: SceneResources
 
-    // AG context — owns the view-tree AttributeGraph (GraphHost).
-    // Created unconditionally in init; valid for the lifetime of this controller.
-    let graph: AttributeGraph
-    let gestureGraph: GestureGraph
-    var date: Date // date of initialization, for animation timing reference
+    // viewGraph — owns the view-tree AttributeGraph (GraphHost.data) and gesture routing.
+    let viewGraph: ViewGraph
 
-    // AG input nodes for the root of the view tree — updated on resize, environment change, etc.
-    private(set) var viewSizeAttr: Attribute<ViewSize>? = nil
-    private(set) var viewEnvAttr: Attribute<EnvironmentValues>? = nil
-    private(set) var timeAttr: Attribute<Time>? = nil
-    private(set) var phaseAttr: Attribute<Phase>? = nil
-
-    // AG root outputs — set after Content._makeView(...) completes.
-    private(set) var rootLayoutComputer: Attribute<LayoutComputer>? = nil
-    private(set) var rootDisplayList: Attribute<DisplayList>? = nil
-    private(set) var rootResourceList: Attribute<ResourceList>? = nil
+    var date: Date  // render loop timing reference (animation)
 
     var title: String { _titleString }
     var style: PlatformWindowStyle { _style }
 
-    // Creation-time window hints from scene modifiers (defaultSize, defaultPosition, …).
-    // Applied when makeWindow() creates the platform window (stub: stored for future use).
     var sceneConfiguration: SceneConfiguration = SceneConfiguration()
-
     var filterGestureTypes: Bool = true
     var allowedGestureTypes: _PrimitiveGestureTypes = .all
 
-    // true if the AG graph has been wired and the window is ready to render.
-    var isValid: Bool { rootLayoutComputer != nil }
+    var isValid: Bool { viewGraph.isValid }
 
     let scene: WindowKey
 
-    // Convenience passthrough to windowContext (nil when in overlay mode)
     var window: (any PlatformWindow)? { windowContext?.window }
 
-    // config is stored locally; applied to WindowContext when makeWindow() creates it.
     private var _config: WindowContext.Configuration = WindowContext.Configuration()
     var config: WindowContext.Configuration {
         get { windowContext?.config ?? _config }
@@ -84,19 +68,28 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
             windowContext?.config = newValue
         }
     }
-    
+
     enum InputEvent: @unchecked Sendable {
         case keyboard(KeyboardEvent)
         case mouse(MouseEvent)
     }
     private let inputEvents = Mutex<[InputEvent]>([])
-    
+
+    // ViewRendererHost / ViewGraphOwner stored state.
+    // WindowController tracks its own owner-side state separately from ViewGraph's internal state,
+    var currentTimestamp: Time = Time(seconds: 0)
+    var valuesNeedingUpdate: ViewGraphRootValues = []
+    var renderingPhase: ViewRenderingPhase = ViewRenderingPhase()
+    var externalUpdateCount: Int = 0
+
+    // ViewRendererHost
+    var responderNode: ResponderNode? { viewGraph.gestureGraph.rootResponder }
 
     init<Content: View>(content: _GraphValue<Content>,
                         title: _GraphValue<Text>? = nil,
                         style: PlatformWindowStyle = .genericWindow,
                         scene: WindowKey) {
-        self._titleGraph = title  // AppGraph-side reference: stays live across syncWindowControllers updates
+        self._titleGraph = title
         self._style = style
         self.environment = EnvironmentValues()
         self.sharedContext = SharedContext()
@@ -110,137 +103,23 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
             fatalError("\(Self.self).init called outside an active AttributeGraph context.")
         }
         let contentValue = content._attribute.value
-        // Snapshot the title string now; AppGraph has no periodic update cycle yet,
-        // so this is the only safe moment to read the AppGraph-side title node.
         if let titleText = title.map({ $0._attribute.value }) {
             self._titleString = titleText._resolveText(in: EnvironmentValues())
         }
 
-        // Create this window's own AttributeGraph (GraphHost).
-        // All view-tree nodes belong to ownGraph; AppGraph is only used for scene-level wiring.
-        let ownGraph = AttributeGraph()
-        let gestureGraph = GestureGraph()
-        let time = Time(seconds: 0)
-
-        var sizeAttrResult:  Attribute<ViewSize>?          = nil
-        var envAttrResult:   Attribute<EnvironmentValues>? = nil
-        var rootLCResult:    Attribute<LayoutComputer>?    = nil
-        var rootDLResult:    Attribute<DisplayList>?       = nil
-        var rootRLResult:    Attribute<ResourceList>?      = nil
-        var timeAttrResult:  Attribute<Time>?              = nil
-        var phaseAttrResult: Attribute<Phase>?             = nil
-
-        AttributeGraph.$current.withValue(ownGraph) {
-            // GestureGraph no longer requires global input attributes;
-            // sessions are created on-demand per touch event.
-
-            // Bridge: lift the extracted content value into ownGraph as an input node.
-            let contentAttr = ownGraph.makeInput(value: contentValue)
-            let contentGV   = _GraphValue<Content>(_attribute: contentAttr)
-
-            let timeAttr        = ownGraph.makeInput(value: time)
-            let phaseAttr       = ownGraph.makeInput(value: Phase(value: 1))
-            let transactionAttr = ownGraph.makeInput(value: Transaction())
-            let envAttr         = ownGraph.makeInput(value: EnvironmentValues())
-            let graphInputs = _GraphInputs(
-                customInputs: PropertyList(),
-                time: timeAttr,
-                cachedEnvironment: MutableBox(CachedEnvironment(environment: envAttr)),
-                phase: phaseAttr,
-                transaction: transactionAttr,
-                changedDebugProperties: 0,
-                options: 0,
-                mergedInputs: []
-            )
-            var prefKeys     = PreferenceKeys()
-            prefKeys.insert(DisplayList.Key.self)
-            prefKeys.insert(ResourceList.Key.self)
-            prefKeys.insert(ViewRespondersKey.self)
-            
-            let hostKeysAttr = ownGraph.makeInput(value: prefKeys)
-            let prefsInputs  = PreferencesInputs(keys: prefKeys, hostKeys: hostKeysAttr)
-
-            let transformAttr    = ownGraph.makeInput(value: ViewTransform.identity)
-            let positionAttr     = ownGraph.makeInput(value: CGPoint.zero)
-            let containerPosAttr = ownGraph.makeInput(value: CGPoint.zero)
-            let sizeAttr         = ownGraph.makeInput(value: ViewSize(.zero))
-            let viewInputs = _ViewInputs(
-                base: graphInputs,
-                customInputs: PropertyList(),
-                preferences: prefsInputs,
-                transform: transformAttr,
-                position: positionAttr,
-                containerPosition: containerPosAttr,
-                size: sizeAttr,
-                safeAreaInsets: OptionalAttribute(),
-                containerSize: OptionalAttribute()
-            )
-
-            let outputs: _ViewOutputs = GestureGraph.$_current.withValue(gestureGraph) {
-                Content._makeView(view: contentGV, inputs: viewInputs)
-            }
-
-            // 1. collect DisplayList and ResourceList nodes from preferences
-            let resourceNodes = outputs.preferences.values(for: ResourceList.Key.self)
-            let displayNodes = outputs.preferences.values(for: DisplayList.Key.self)
-            // 2. merge ResourceList
-            if !resourceNodes.isEmpty {
-                rootRLResult = ownGraph.makeRule {
-                    var combined = ResourceList.Key.defaultValue
-                    for nodeID in resourceNodes {
-                        let list = Attribute<ResourceList>(nodeID).value
-                        ResourceList.Key.reduce(value: &combined) { list }
-                    }
-                    return combined
-                }
-            }
-            // 3. merge DisplayList
-            if !displayNodes.isEmpty {
-                rootDLResult = ownGraph.makeRule {
-                    var combined = DisplayList.Key.defaultValue
-                    for nodeID in displayNodes {
-                        let list = Attribute<DisplayList>(nodeID).value
-                        DisplayList.Key.reduce(value: &combined) { list }
-                    }
-                    return combined
-                }
-            }
-
-            // 4. collect ViewRespondersKey and wire to gestureGraph
-            let responderNodes = outputs.preferences.values(for: ViewRespondersKey.self)
-            if !responderNodes.isEmpty {
-                let rootRespondersAttr: Attribute<[any ViewResponder]> = ownGraph.makeRule {
-                    var combined: [any ViewResponder] = ViewRespondersKey.defaultValue
-                    for nodeID in responderNodes {
-                        let list = Attribute<[any ViewResponder]>(nodeID).value
-                        ViewRespondersKey.reduce(value: &combined) { list }
-                    }
-                    return combined
-                }
-                let gg = gestureGraph
-                ownGraph.makeSideEffectRule {
-                    gg.updateResponders(rootRespondersAttr.value)
-                }
-            }
-
-            sizeAttrResult  = sizeAttr
-            envAttrResult   = envAttr
-            timeAttrResult  = timeAttr
-            phaseAttrResult = phaseAttr
-            rootLCResult    = outputs._layoutComputer.attribute
-        }
-
-        self.graph              = ownGraph
-        self.gestureGraph       = gestureGraph
-        self.viewSizeAttr       = sizeAttrResult
-        self.viewEnvAttr        = envAttrResult
-        self.timeAttr           = timeAttrResult
-        self.phaseAttr          = phaseAttrResult
-        self.rootLayoutComputer = rootLCResult
-        self.rootResourceList   = rootRLResult
-        self.rootDisplayList    = rootDLResult
-
+        // Create ViewGraph — this now owns the AttributeGraph and does full AG wiring.
+        self.viewGraph = ViewGraph(rootViewType: Content.self, content: contentValue)
         self.date = .now
+
+        // Wire ViewGraph delegate slots.
+        // renderDelegate: WindowController provides contentsScale, opaqueBackground, and
+        //   render thread handling. Implemented below (ViewGraphRenderDelegate).
+        self.viewGraph.renderDelegate = self
+        // updateDelegate: WindowController provides root value updates (size, env, etc.).
+        //   updateSize() / updateEnvironment() etc. called inline in updateView for now.
+        //   Full invalidateProperties(_:mayDeferUpdate:) wiring is a future step.
+        self.viewGraph.updateDelegate = self
+        // self.viewGraph.delegate = self
     }
 
     deinit {
@@ -280,9 +159,7 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
         }
         return window
     }
-    
-    // Set by drawView() when AG nodes change during rendering (e.g. lazy-evaluated views).
-    // Causes the next updateView() to force a redraw even if the update itself produced no changes.
+
     private var viewChangedWhileDrawing: Bool = false
     private var cachedContentSize: CGSize = .zero
 
@@ -290,25 +167,31 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
                      contentSize: CGSize, shouldDrawFrame: Bool,
                      _ withGC: WindowContext.WithGraphicsContext) {
 
+        // Pull render context from delegate (ViewGraphRenderDelegate).
+        // contentsScale: HiDPI scale factor for the current display.
+        // opaqueBackground: whether the background is fully opaque (skip alpha clear).
+        // calls this once per frame before updateOutputs/render.
+        var renderCtx = ViewGraphRenderContext(contentsScale: 1.0, opaqueBackground: false)
+        viewGraph.renderDelegate?.updateRenderContext(&renderCtx)
+        // TODO: propagate renderCtx.contentsScale to draw calls (HiDPI)
+
         var redraw = false
         self.updateView(tick: tick, delta: delta, date: date,
                         contentSize: contentSize, redraw: &redraw, withGC)
 
         if redraw || shouldDrawFrame {
             let clearColor = config.backgroundColor
-            withGC(true) { context in 
+            withGC(true) { context in
                 context.clear(with: clearColor)
                 self.drawFrame(offset: .zero, context)
             }
         }
     }
 
-    // Per-frame AG evaluation: drains the inbox, pull-evaluates the dirty sub-graph,
-    // then sets redraw = true if any AG node value changed.
     func updateView(tick: UInt64, delta: Double, date: Date,
                     contentSize: CGSize, redraw: inout Bool,
                     _ withGC: WindowContext.WithGraphicsContext) {
-        guard let rootLayoutComputer else { return }
+        guard let rootLayoutComputer = viewGraph.rootLayoutComputer else { return }
 
         let time = Time(seconds: date.timeIntervalSince(self.date))
 
@@ -317,78 +200,63 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
             cachedContentSize = contentSize
         }
 
-        AttributeGraph.$current.withValue(graph) {
+        AttributeGraph.$current.withValue(viewGraph.data) {
             let changeSet = AttributeGraph.ChangeSet()
             AttributeGraph.$changeSet.withValue(changeSet) {
-                
-                // handle deferred mouse event
+
+                // Drain deferred input events.
                 let events = self.inputEvents.withLock { events in
                     defer { events.removeAll() }
                     return events
                 }
                 events.forEach {
                     switch $0 {
-                    case .keyboard(let event):
-                        self.onKeyboardEvent(event: event)
-                    case .mouse(let event):
-                        self.onMouseEvent(event: event)
+                    case .keyboard(let event): self.onKeyboardEvent(event: event)
+                    case .mouse(let event):    self.onMouseEvent(event: event)
                     }
                 }
-                
-                // Flush @State / @Observable invalidations enqueued from arbitrary threads.
 
-                // 1. drain queue
-                graph.inbox.drain()
-                graph.drainActions()
+                // Flush @State / @Observable invalidations.
+                viewGraph.data.inbox.drain()
+                viewGraph.data.drainActions()
 
-                // 2. update layout if needed
                 if sizeChanged {
-                    viewSizeAttr?.setValue(ViewSize(contentSize))
+                    viewGraph.sizeAttr?.setValue(ViewSize(contentSize))
                 }
-                // 3. update time/tick inputs for animation interpolation.
-                self.timeAttr?.setValue(time)
+                self.viewGraph.timeAttr?.setValue(time)
 
-                // 4. load graphical resources if needed.
-                if let resourceList = self.rootResourceList?.value,
+                if let resourceList = viewGraph.rootResourceList?.value,
                    !resourceList.items.isEmpty {
                     withGC(false) { context in
                         for task in resourceList.items {
                             task(context)
                         }
                     }
-
-                    // update & synchronize from resource-loading
-                    graph.inbox.drain()
-                    graph.drainActions()
+                    viewGraph.data.inbox.drain()
+                    viewGraph.data.drainActions()
                 }
 
-                // 5. final update
-                // Pull-evaluate the root LC and run the full layout pass.
                 let lc = rootLayoutComputer.value
-                let proposal = ProposedViewSize(width: cachedContentSize.width, height: cachedContentSize.height)
-                let center = CGPoint(x: cachedContentSize.width / 2, y: cachedContentSize.height / 2)
+                let proposal = ProposedViewSize(width: cachedContentSize.width,
+                                               height: cachedContentSize.height)
+                let center = CGPoint(x: cachedContentSize.width / 2,
+                                     y: cachedContentSize.height / 2)
                 lc.place(at: center, anchor: .center, proposal: proposal)
             }
             redraw = !changeSet.ids.isEmpty || self.viewChangedWhileDrawing
         }
         self.viewChangedWhileDrawing = false
-
-        // TODO: aux window updates (refactor target)
-        // TODO: modal window updates (refactor target)
     }
 
-    // Per-frame AG rendering: evaluates the display list inside the AG context
-    // and records any node changes that occurred during drawing.
     func drawFrame(offset: CGPoint, _ context: GraphicsContext) {
-        guard let rootDisplayList else { return }
+        guard let rootDisplayList = viewGraph.rootDisplayList else { return }
 
         var context = context
         context.translateBy(x: offset.x, y: offset.y)
 
-        AttributeGraph.$current.withValue(graph) {
+        AttributeGraph.$current.withValue(viewGraph.data) {
             let changeSet = AttributeGraph.ChangeSet()
             AttributeGraph.$changeSet.withValue(changeSet) {
-                // draw with DisplayList (with offset of top-left)
                 let displayList = rootDisplayList.value
                 for item in displayList.items {
                     item(context)
@@ -399,9 +267,6 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
             }
             self.viewChangedWhileDrawing = !changeSet.ids.isEmpty
         }
-
-        // TODO: chain auxiliary window draw calls here (refactor target)
-        // TODO: draw modal windows last (refactor target)
     }
 
     func layoutBounds(_ bounds: CGRect) -> CGRect { bounds }
@@ -410,18 +275,15 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
         modalClients.isEmpty
     }
 
-    // Lifecycle hooks  called by WindowContext.
     func onWindowCreated(_: any PlatformWindow) {}
 
     func onWindowClosing(_: any PlatformWindow) {
-        // TODO: notify aux clients (refactor target)
         self.auxClients.forEach { $0.onHostWindowClosed() }
     }
 
     func onViewLoaded() {}
     func onViewLayoutUpdated() {}
 
-    // Window event handling forwarded from WindowContext after state update.
     @MainActor
     func handleWindowEvent(event: WindowEvent) {
         switch event.type {
@@ -429,36 +291,29 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
             DispatchQueue.main.async {
                 appContext?.checkWindowActivities()
             }
-            // TODO: aux clients (refactor target)
             self.auxClients.forEach { $0.onHostWindowClosed() }
 
         case .hidden:
-            // TODO: release focused views (Implement with AG)
             self.sharedContext.focusedViews.removeAll()
-            self.graph.inbox.enqueue {
-                self.gestureGraph.resetEvents()
+            viewGraph.data.inbox.enqueue {
+                self.viewGraph.gestureGraph.resetEvents()
             }
         case .activated:
-            // TODO: aux clients (refactor target)
             self.auxClients.forEach { $0.onHostWindowActivated() }
 
         case .inactivated:
-            // TODO: release focused views (Implement with AG)
             self.sharedContext.focusedViews.removeAll()
-            self.graph.inbox.enqueue {
-                self.gestureGraph.resetEvents()
+            viewGraph.data.inbox.enqueue {
+                self.viewGraph.gestureGraph.resetEvents()
             }
-            // TODO: aux clients (refactor target)
             self.auxClients.forEach { $0.onHostWindowInactivated() }
 
         case .minimized:
-            // TODO: release focused views (Implement with AG)
             self.sharedContext.focusedViews.removeAll()
-            self.graph.inbox.enqueue {
-                self.gestureGraph.resetEvents()
+            viewGraph.data.inbox.enqueue {
+                self.viewGraph.gestureGraph.resetEvents()
             }
         case .moved, .resized:
-            // TODO: aux clients (refactor target)
             self.auxClients.forEach { $0.onHostWindowMoved() }
 
         default:
@@ -466,7 +321,6 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
         }
     }
 
-    // Keyboard/Mouse routing  forwarded from WindowContext raw event receivers.
     func onKeyboardEvent(event: KeyboardEvent) {
         let modalClient = self.modalWindows.withLock { $0.first?.client }
         if let modalClient {
@@ -488,8 +342,7 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
                 event.location -= modalFrame.origin
 
                 if event.type == .wheel {
-                    handler.handleMouseWheel(at: event.location,
-                                             delta: event.delta)
+                    handler.handleMouseWheel(at: event.location, delta: event.delta)
                 } else {
                     if handler.handleMouseEvent(event: event) == false {
                         if event.type == .move || event.type == .buttonUp {
@@ -513,7 +366,6 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
             self.handleMouseWheel(at: event.location, delta: event.delta)
         } else {
             self.handleMouseEvent(event: event)
-
             if event.type == .move || event.type == .buttonUp {
                 self.handleMouseHover(at: event.location,
                                       deviceID: event.deviceID,
@@ -528,20 +380,14 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
     @discardableResult
     func handleKeyboardEvent(event: KeyboardEvent) -> Bool {
         let handleEvent = { (event: KeyboardEvent) -> Bool in
-
-            if let window = self.window, window !== event.window {
-                return false
-            }
-
+            if let window = self.window, window !== event.window { return false }
             Log.debug("WindowController.onKeyboardEvent: \(event)")
             if let _ = self.sharedContext.focusedViews[event.deviceID]?.value {
                 fatalError("Implement with AG")
-                // return focusedView.processKeyboardEvent(...)
             }
             return false
         }
 
-        // TODO: aux window keyboard routing (refactor target)
         var handlers = self.auxiliaryWindows.withLock {
             $0.reversed().compactMap {
                 if let client = $0.client {
@@ -558,13 +404,10 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
         }
         handlers.append((id: ObjectIdentifier(self), action: handleEvent))
 
-        if let _lastKeyboardEventHandler {
-            if let index = handlers.firstIndex(where: {
-                _lastKeyboardEventHandler == $0.id
-            }) {
-                let tmp = handlers.remove(at: index)
-                handlers.insert(tmp, at: 0)
-            }
+        if let _lastKeyboardEventHandler,
+           let index = handlers.firstIndex(where: { _lastKeyboardEventHandler == $0.id }) {
+            let tmp = handlers.remove(at: index)
+            handlers.insert(tmp, at: 0)
         }
         for handler in handlers {
             if handler.action(event) {
@@ -579,24 +422,15 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
     @discardableResult
     func handleMouseEvent(event: MouseEvent) -> Bool {
         let handleEvent = { (event: MouseEvent) -> Bool in
-
-            if let window = self.window, window !== event.window {
-                return false
-            }
-            if event.type == .wheel {
-                return false
-            }
-
-            let phase = self.gestureGraph.sendMouseEvent(event, in: self.graph)
+            if let window = self.window, window !== event.window { return false }
+            if event.type == .wheel { return false }
+            let phase = self.viewGraph.gestureGraph.sendMouseEvent(event, in: self.viewGraph.data)
             switch phase {
-            case .active, .ended:
-                return true
-            default:
-                return false
+            case .active, .ended: return true
+            default:              return false
             }
         }
 
-        // TODO: aux window mouse routing (refactor target)
         var handlers = self.auxiliaryWindows.withLock {
             $0.reversed().compactMap {
                 if let client = $0.client, let frame = $0.frame {
@@ -619,96 +453,126 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
         handlers.append((target: self as AnyObject, action: handleEvent))
 
         var clients: [AuxiliaryWindowClient] = []
-        if event.type == .buttonDown {
-            clients = self.auxClients
-        }
+        if event.type == .buttonDown { clients = self.auxClients }
 
-        if let _lastMouseEventHandler {
-            if let index = handlers.firstIndex(where: {
-                _lastMouseEventHandler == ObjectIdentifier($0.target)
-            }) {
-                let tmp = handlers.remove(at: index)
-                handlers.insert(tmp, at: 0)
-            }
+        if let _lastMouseEventHandler,
+           let index = handlers.firstIndex(where: {
+               _lastMouseEventHandler == ObjectIdentifier($0.target)
+           }) {
+            let tmp = handlers.remove(at: index)
+            handlers.insert(tmp, at: 0)
         }
         for handler in handlers {
             if handler.action(event) {
                 _lastMouseEventHandler = ObjectIdentifier(handler.target)
-                clients.forEach {
-                    $0.initiatedGesture(from: handler.target, location: event.location)
-                }
+                clients.forEach { $0.initiatedGesture(from: handler.target, location: event.location) }
                 return true
             }
         }
         _lastMouseEventHandler = nil
-        clients.forEach {
-            $0.initiatedGesture(from: nil, location: event.location)
-        }
+        clients.forEach { $0.initiatedGesture(from: nil, location: event.location) }
         return false
     }
 
     @discardableResult
     func handleMouseWheel(at location: CGPoint, delta: CGPoint) -> Bool {
-        // TODO: aux window wheel routing (refactor target)
         for aux in self.auxiliaryWindows.withLock({ $0.reversed() }) {
-            if let offset = aux.frame?.origin {
-                if let handler = aux.client?.auxiliaryWindowInputEventHandler() {
-                    let loc = location - offset
-                    if handler.handleMouseWheel(at: loc, delta: delta) {
-                        return true
-                    }
-                }
+            if let offset = aux.frame?.origin,
+               let handler = aux.client?.auxiliaryWindowInputEventHandler() {
+                let loc = location - offset
+                if handler.handleMouseWheel(at: loc, delta: delta) { return true }
             }
         }
-
-        // TODO: hit-test view tree and dispatch wheel event (Gesture system)
         return false
     }
 
     @discardableResult
     func handleMouseHover(at location: CGPoint, deviceID: Int, isTopMost: Bool) -> Bool {
         var topMost = isTopMost
-        // TODO: aux window hover routing (refactor target)
         self.auxiliaryWindows.withLock({ $0.reversed() }).forEach { aux in
-            if let offset = aux.frame?.origin {
-                if let handler = aux.client?.auxiliaryWindowInputEventHandler() {
-                    let loc = location - offset
-                    if handler.handleMouseHover(at: loc, deviceID: deviceID, isTopMost: topMost) {
-                        topMost = false
-                    }
+            if let offset = aux.frame?.origin,
+               let handler = aux.client?.auxiliaryWindowInputEventHandler() {
+                let loc = location - offset
+                if handler.handleMouseHover(at: loc, deviceID: deviceID, isTopMost: topMost) {
+                    topMost = false
                 }
             }
-            if topMost {
-                if let hitTest = aux.client?.auxiliaryWindowHitTest(location) {
-                    topMost = !hitTest
-                }
+            if topMost, let hitTest = aux.client?.auxiliaryWindowHitTest(location) {
+                topMost = !hitTest
             }
         }
-        // TODO: hit-test view tree and dispatch hover event (Gesture system)
         return isTopMost != topMost
     }
 
     func resetGestureHandlers() {
-        gestureGraph.resetEvents()
+        viewGraph.gestureGraph.resetEvents()
     }
 
-    // Aux/Modal management  TODO: refactor for new scene architecture
+    // MARK: - ViewGraphRenderDelegate
+    //
+    // viewGraph.renderDelegate = self is set at end of init.
+    // updateRenderContext is called once per frame in updateFrame (before updateView).
+
+    // renderingRootView — the root "platform view" being rendered.
+    // WindowController IS the rendering host, so return self.
+    var renderingRootView: AnyObject { self }
+
+    // updateRenderContext — fills in per-frame render parameters.
+    // contentsScale: from sceneResources (updated by WindowContext on window events).
+    // opaqueBackground: true if config background has no transparency.
+    func updateRenderContext(_ context: inout ViewGraphRenderContext) {
+        context.contentsScale = sceneResources.contentScaleFactor
+        // backgroundColor.opacity is 0.0–1.0; treat >= 1.0 as fully opaque.
+        // backgroundColor is VVD.Color; .a is the alpha Scalar (0.0–1.0).
+        context.opaqueBackground = (config.backgroundColor.a >= 1.0)
+    }
+
+    // withMainThreadRender — ensures body runs on the main render thread.
+    func withMainThreadRender(wasAsync: Bool, _ body: () -> Time) -> Time {
+        return body()
+    }
+
+    // renderIntervalForDisplayLink — how long until the next frame should be rendered.
+    func renderIntervalForDisplayLink(timestamp: Time) -> Double {
+        return 0.0
+    }
+
+    // MARK: - ViewGraphRootValueUpdater
+
+    func updateRootView() {
+    }
+
+    func updateEnvironment() {
+        viewGraph.envAttr?.setValue(self.environment)
+    }
+
+    func updateSize() {
+        viewGraph.sizeAttr?.setValue(ViewSize(cachedContentSize))
+    }
+
+    func updateSafeArea() {} // TODO: safe area not yet wired
+    func updateContainerSize() {} // TODO: container size not yet wired
+    func updateTransform() {}
+    func updateFocusStore() {}
+    func updateFocusedItem() {}
+    func updateFocusedValues() {}
+    func updateAccessibilityEnvironment() {}
+
+    // MARK: - Aux/Modal window management
+
     private struct AuxiliaryWindow: @unchecked Sendable {
         weak var client: AuxiliaryWindowClient?
-        var frame: CGRect? = nil // cached frame
+        var frame: CGRect? = nil
     }
     private let auxiliaryWindows = Mutex<[AuxiliaryWindow]>([])
 
     private struct ModalWindow: @unchecked Sendable {
         weak var client: ModalWindowClient?
-        var frame: CGRect? = nil // cached frame
+        var frame: CGRect? = nil
         var initiated: Bool = false
     }
     private let modalWindows = Mutex<[ModalWindow]>([])
 
-    // key-based slot registry for modal dedup  covers both platform and overlay modals.
-    // ModalWindowSceneContext is @unchecked Sendable; claimModalSlot/releaseModalSlot are
-    // always called on the main thread (same pattern as modalContext in ModalWindowSceneContext).
     private let modalSlots = Mutex<[AnyHashable: AnyWeakObject]>([:])
 
     func addAuxiliaryWindow(_ client: AuxiliaryWindowClient) -> Bool {
