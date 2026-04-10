@@ -18,7 +18,7 @@ private struct WiredGenerator {
 
 private final class _DynamicLayoutState {
     var items: [UInt32: WiredGenerator] = [:]
-    var subgraphs: [UInt32: Subgraph] = [:]
+    var subgraphs: [UInt32: AGSubgraph] = [:]
     init() {}
 }
 
@@ -404,10 +404,10 @@ extension Layout {
 
             // Eagerly wire the initial generators so that dynState is populated
             // before any AG rules fire. Each generator's nodes are owned by a
-            // dedicated Subgraph so they can be removed cleanly when the item leaves.
+            // dedicated AGSubgraph so they can be removed cleanly when the item leaves.
             for gen in viewListAttr.value.generators {
-                let subgraph = Subgraph()
-                if let wired = Subgraph.$current.withValue(subgraph, operation: { wireGenerator(gen) }) {
+                let subgraph = AGSubgraph()
+                if let wired = AGSubgraph.$current.withValue(subgraph, operation: { wireGenerator(gen) }) {
                     dynState.items[gen.view.identifier] = wired
                     dynState.subgraphs[gen.view.identifier] = subgraph
                 } else {
@@ -421,7 +421,7 @@ extension Layout {
                 let currentGens = viewListAttr.value.generators  // registers AG dependency
 
                 // Drop entries for generators no longer in the list.
-                // Invalidate each item's Subgraph to batch-remove its AG nodes.
+                // Invalidate each item's AGSubgraph to batch-remove its AG nodes.
                 let currentIDs = Set(currentGens.map { $0.view.identifier })
                 for id in dynState.items.keys where !currentIDs.contains(id) {
                     dynState.subgraphs[id]?.invalidate()
@@ -430,10 +430,10 @@ extension Layout {
                 }
                 dynState.items = dynState.items.filter { currentIDs.contains($0.key) }
 
-                // Wire newly appeared generators, each into its own Subgraph.
+                // Wire newly appeared generators, each into its own AGSubgraph.
                 for gen in currentGens where dynState.items[gen.view.identifier] == nil {
-                    let subgraph = Subgraph()
-                    if let wired = Subgraph.$current.withValue(subgraph, operation: { wireGenerator(gen) }) {
+                    let subgraph = AGSubgraph()
+                    if let wired = AGSubgraph.$current.withValue(subgraph, operation: { wireGenerator(gen) }) {
                         dynState.items[gen.view.identifier] = wired
                         dynState.subgraphs[gen.view.identifier] = subgraph
                     } else {

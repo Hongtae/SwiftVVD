@@ -5,18 +5,20 @@
 //  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-//  Single-threaded design — no internal synchronization.
-//  The caller is responsible for ensuring that all operations on a given
-//  AttributeGraph instance occur on a single thread (or equivalent serial context).
-//
-//  All methods on AttributeGraph require that AttributeGraph.current is already bound
-//  to this instance (via AttributeGraph.$current.withValue(self) { ... }) before
-//  they are called. Violating this precondition causes a runtime assertion failure.
+import Synchronization
 
-// Rule
+// Single-threaded design with no internal synchronization.
+// The caller is responsible for ensuring that all operations on a given
+// AttributeGraph instance occur on a single thread (or equivalent serial context).
+//
+// All methods on AttributeGraph require that AttributeGraph.current is already bound
+// to this instance (via AttributeGraph.$current.withValue(self) { ... }) before
+// they are called. Violating this precondition causes a runtime assertion failure.
+
+// MARK: - Protocols
 
 /// A pure computed AG node: derives a single value from dependencies each evaluation.
-/// Unlike StatefulRule, a Rule is stateless — `updateValue()` returns the value directly
+/// Unlike StatefulRule, a Rule is stateless. `updateValue()` returns the value directly
 /// and has no mutable stored state between evaluations.
 ///
 /// Used for combiner nodes such as ExclusiveState, ExclusivePhase, SequenceEvents.
@@ -30,7 +32,7 @@ protocol Rule {
 /// An AG computed node that maintains mutable state between re-evaluations.
 ///
 /// Unlike a plain `makeRule` closure, the conforming struct is stored inside the AG node
-/// and reused on each evaluation — enabling lazy initialization and conditional output updates.
+/// and reused on each evaluation, enabling lazy initialization and conditional output updates.
 ///
 /// Implement `updateValue()` to recompute the output. Call `AttributeGraph.setStatefulOutput(_:)`
 /// inside `updateValue()` to publish a new value. If `setStatefulOutput` is not called, the
@@ -53,7 +55,7 @@ private class _StatefulBox<R: StatefulRule>: _AnyStatefulBox {
     func callUpdate() { rule.updateValue() }
 }
 
-/// The raw identifier for an AG node — an index into the graph's slot array.
+/// The raw identifier for an AG node, backed by an index into the graph's slot array.
 struct AGAttribute: Hashable, CustomDebugStringConvertible, Sendable {
     var rawValue: UInt32
 
@@ -158,18 +160,18 @@ struct OptionalAttribute<Value> {
 /// Must be created while an AttributeGraph context is active (`AttributeGraph.current != nil`).
 /// The owning AttributeGraph is captured at creation time and validated on `invalidate()`.
 ///
-/// Wrap node-creation code in `Subgraph.$current.withValue(subgraph) { ... }` to
+/// Wrap node-creation code in `AGSubgraph.$current.withValue(subgraph) { ... }` to
 /// automatically register every node created in that scope to this subgraph.
 /// Call `invalidate()` to batch-remove all registered nodes at once.
 ///
-/// Subgraphs form a parent/child tree: a Subgraph created while another is active
+/// Subgraphs form a parent/child tree: an AGSubgraph created while another is active
 /// automatically becomes its child. `invalidate()` cascades depth-first,
-/// so invalidating a parent also destroys all descendant Subgraphs.
+/// so invalidating a parent also destroys all descendant subgraphs.
 ///
-/// Typical use — ForEach item lifecycle:
+/// Typical use for ForEach item lifecycle:
 /// ```swift
-/// let subgraph = Subgraph()
-/// Subgraph.$current.withValue(subgraph) {
+/// let subgraph = AGSubgraph()
+/// AGSubgraph.$current.withValue(subgraph) {
 ///     Content._makeView(view: itemGraph, inputs: inputs)
 /// }
 /// itemSubgraphs[id] = subgraph
@@ -179,20 +181,20 @@ struct OptionalAttribute<Value> {
 /// itemSubgraphs[id]?.removeFromParent()
 /// itemSubgraphs[id] = nil
 /// ```
-final class Subgraph: @unchecked Sendable {
+final class AGSubgraph: @unchecked Sendable {
     private(set) var nodes: [AGAttribute] = []
-    private(set) var children: [Subgraph] = []
-    private(set) weak var parent: Subgraph? = nil
+    private(set) var children: [AGSubgraph] = []
+    private(set) weak var parent: AGSubgraph? = nil
     weak let graph: AttributeGraph?
 
-    @TaskLocal static var current: Subgraph? = nil
+    @TaskLocal static var current: AGSubgraph? = nil
 
     init() {
         guard let graph = AttributeGraph.current else {
-            fatalError("Subgraph must be created within an active AttributeGraph context.")
+            fatalError("AGSubgraph must be created within an active AttributeGraph context.")
         }
         self.graph = graph
-        if let parent = Subgraph.current {
+        if let parent = AGSubgraph.current {
             parent.children.append(self)
             self.parent = parent
         }
@@ -204,10 +206,10 @@ final class Subgraph: @unchecked Sendable {
 
     func invalidate() {
         guard let graph = AttributeGraph.current else {
-            fatalError("Subgraph.invalidate() called outside an active AttributeGraph context.")
+            fatalError("AGSubgraph.invalidate() called outside an active AttributeGraph context.")
         }
         guard graph === self.graph else {
-            fatalError("Subgraph.invalidate() called from a different AttributeGraph than the one that owns this subgraph.")
+            fatalError("AGSubgraph.invalidate() called from a different AttributeGraph than the one that owns this subgraph.")
         }
         children.forEach { $0.invalidate() }
         children.removeAll()
@@ -221,32 +223,66 @@ final class Subgraph: @unchecked Sendable {
     }
 }
 
+// AttributeGraphRef
+//
+// Multiple AttributeGraphRef instances can share the same underlying AttributeGraph.
+// Each GraphHost subclass (ViewGraph, GestureGraph) owns one AttributeGraphRef and registers
+// itself as the `context`, enabling `GestureGraph.current` / `ViewGraph.current` resolution
+// via the AG evaluation context.
+//
+// Usage:
+//   let ref = AttributeGraphRef(graph: sharedCore)
+//   ref.context = self   // register this GraphHost as the context
+struct AttributeGraphRef: @unchecked Sendable {
+    let graph: AttributeGraph        // shared graph instance (one per window)
+    weak var context: AnyObject?     // the GraphHost that owns this ref (ViewGraph, GestureGraph, and others)
+
+    /// The currently active AttributeGraphRef for the running AG evaluation pass.
+    /// Set by withCurrent(_:). Reading context gives the owning GraphHost subclass.
+    @TaskLocal static var current: AttributeGraphRef? = nil
+
+    init(graph: AttributeGraph, context: AnyObject? = nil) {
+        self.graph = graph
+        self.context = context
+    }
+
+    /// Establishes both AttributeGraphRef.current (self) and AttributeGraph.current (self.graph)
+    /// for the duration of the closure. This is the canonical way to enter a GraphHost's AG context.
+    func withCurrent<R>(_ body: () throws -> R) rethrows -> R {
+        try AttributeGraphRef.$current.withValue(self) {
+            try AttributeGraph.$current.withValue(graph) {
+                try body()
+            }
+        }
+    }
+}
+
 class AttributeGraph: @unchecked Sendable {
 
     // Describes how a node computes its value.
-    // Exactly one case is active per node — mutual exclusion is guaranteed at the type level.
+    // Exactly one case is active per node, so mutual exclusion is guaranteed at the type level.
     private enum NodeKind {
-        // Source-of-truth node — value is written externally via setValue(_:).
+        // Source-of-truth node. The value is written externally via setValue(_:).
         case input
 
         // Computed node with a plain closure rule.
-        // isSideEffect = true → re-evaluated eagerly inside markNeedsEvaluation
+        // isSideEffect = true: re-evaluated eagerly inside markNeedsEvaluation
         //   (i.e. synchronously when any input changes via setValue).
         //   Used for gesture callbacks and other fire-and-forget side effects.
-        // isSideEffect = false → pull-based, evaluated lazily on first .value read.
+        // isSideEffect = false: pull-based, evaluated lazily on first .value read.
         //
         // Cascade example (gesture callbacks):
         //   eventsAttr.setValue(events)
-        //     → markNeedsEvaluation(eventRule)   [isSideEffect]
-        //       → evaluateNode(eventRule)          immediately
-        //         → recognizer.processEvents()
-        //         → phaseAttr.setValue(.ended)
-        //           → markNeedsEvaluation(callbackRule) [isSideEffect]
-        //             → evaluateNode(callbackRule)       immediately
-        //               → endedCallback()                ← fires here, inside setValue call stack
+        //     -> markNeedsEvaluation(eventRule) [isSideEffect]
+        //        -> evaluateNode(eventRule) immediately
+        //           -> recognizer.processEvents()
+        //           -> phaseAttr.setValue(.ended)
+        //              -> markNeedsEvaluation(callbackRule) [isSideEffect]
+        //                 -> evaluateNode(callbackRule) immediately
+        //                    -> endedCallback()
         case rule(() -> Any, isSideEffect: Bool)
 
-        // StatefulRule node — the box owns the rule struct and is reused across evaluations.
+        // StatefulRule node. The box owns the rule struct and is reused across evaluations.
         // Output is written by calling AttributeGraph.setStatefulOutput(_:) inside updateValue().
         // If setStatefulOutput is not called during a given evaluation, the previous value is kept.
         case stateful(any _AnyStatefulBox)
@@ -268,12 +304,12 @@ class AttributeGraph: @unchecked Sendable {
         var isEvaluating: Bool = false  // for cycle detection
 
         // Dependency graph edges (stored as raw slot indices)
-        var inputs: Set<UInt32> = []   // Nodes this node depends on
-        var outputs: Set<UInt32> = []  // Nodes that depend on this node
+        var inputs: Set<UInt32> = []    // nodes this node depends on
+        var outputs: Set<UInt32> = []   // nodes that depend on this node
     }
 
     private struct NodeSlot {
-        var seed: UInt32    // Generation counter — incremented on each removal
+        var seed: UInt32    // generation counter incremented on each removal
         var node: Node?     // nil = free slot
     }
 
@@ -290,7 +326,7 @@ class AttributeGraph: @unchecked Sendable {
         }
     }
 
-    // Contiguous slot array — index == AGAttribute.rawValue
+    // Contiguous slot array where index == AGAttribute.rawValue.
     private var slots: ContiguousArray<NodeSlot> = []
     // Freed slot indices available for reuse
     private var freeList: [UInt32] = []
@@ -358,7 +394,7 @@ class AttributeGraph: @unchecked Sendable {
         let index = allocateSlot()
         slots[Int(index)].node = Node(value: nil, kind: .stateful(_StatefulBox(rule)))
         let attr = Attribute<R.Value>(AGAttribute(rawValue: index))
-        Subgraph.current?.register(attr.identifier)
+        AGSubgraph.current?.register(attr.identifier)
         return attr
     }
 
@@ -368,7 +404,7 @@ class AttributeGraph: @unchecked Sendable {
         let index = allocateSlot()
         slots[Int(index)].node = Node(value: value, kind: .input, needsEvaluation: false)
         let attr = Attribute<Value>(AGAttribute(rawValue: index))
-        Subgraph.current?.register(attr.identifier)
+        AGSubgraph.current?.register(attr.identifier)
         return attr
     }
 
@@ -378,7 +414,7 @@ class AttributeGraph: @unchecked Sendable {
         let index = allocateSlot()
         slots[Int(index)].node = Node(value: nil, kind: .rule(rule, isSideEffect: false))
         let attr = Attribute<Value>(AGAttribute(rawValue: index))
-        Subgraph.current?.register(attr.identifier)
+        AGSubgraph.current?.register(attr.identifier)
         return attr
     }
 
@@ -396,10 +432,10 @@ class AttributeGraph: @unchecked Sendable {
     ///
     /// The rule is evaluated once immediately upon creation to register its AG dependencies.
     /// After that it is re-evaluated synchronously inside `markNeedsEvaluation` whenever an
-    /// input changes — i.e. within the same `setValue` call stack, not deferred to the next
+    /// input changes, i.e. within the same `setValue` call stack, not deferred to the next
     /// layout pass.
     ///
-    /// The node is registered in the current Subgraph and removed when the Subgraph is
+    /// The node is registered in the current AGSubgraph and removed when the AGSubgraph is
     /// invalidated (e.g. when the owning view is removed from the tree).
     @discardableResult
     func makeSideEffectRule<Value>(rule: @escaping () -> Value) -> Attribute<Value> {
@@ -407,9 +443,9 @@ class AttributeGraph: @unchecked Sendable {
         let index = allocateSlot()
         slots[Int(index)].node = Node(value: nil, kind: .rule(rule, isSideEffect: true))
         let attr = Attribute<Value>(AGAttribute(rawValue: index))
-        Subgraph.current?.register(attr.identifier)
+        AGSubgraph.current?.register(attr.identifier)
         // Evaluate immediately so the rule body runs once and AG records which input
-        // attributes it reads — establishing the dependency edges that will trigger
+        // attributes it reads, establishing the dependency edges that will trigger
         // future eager re-evaluations.
         evaluateNode(AGAttribute(rawValue: index))
         return attr
@@ -444,7 +480,7 @@ class AttributeGraph: @unchecked Sendable {
         freeList.append(id.rawValue)
 
         // 5. Mark former dependents as needing re-evaluation.
-        // evaluateSideEffects:false — the node is gone; side-effect rules that depended
+        // evaluateSideEffects:false because the node is gone. Side-effect rules that depended
         // on it must NOT fire now (they would crash reading a freed attribute).
         // They are simply marked dirty and will be removed or re-evaluated later.
         for outputIndex in outputs {
@@ -534,7 +570,7 @@ class AttributeGraph: @unchecked Sendable {
 
         case .keyPath(let parent, let kp):
             // KeyPath node: project value from parent via the stored key path.
-            // clearInputs is intentionally omitted — the dependency on parent is fixed
+            // clearInputs is intentionally omitted because the dependency on parent is fixed
             // at creation time in subscriptNode() and never changes.
             // Note: value(for: parent) runs while currentlyEvaluatingNode is still set to
             // the outer caller, so the caller also acquires a direct dependency on parent
@@ -562,7 +598,7 @@ class AttributeGraph: @unchecked Sendable {
     /// - Parameter evaluateSideEffects: When `true` (default, used by `setValue`),
     ///   side-effect nodes are evaluated eagerly within this call so that callbacks
     ///   fire synchronously. When `false` (used by `removeNode`), side-effect nodes
-    ///   are only marked dirty — they must NOT be evaluated because an input node
+    ///   are only marked dirty. They must not be evaluated because an input node
     ///   they depend on may have already been freed.
     func markNeedsEvaluation(_ startID: AGAttribute, evaluateSideEffects: Bool = true) {
         assert(AttributeGraph.current === self)
@@ -624,7 +660,7 @@ class AttributeGraph: @unchecked Sendable {
         let oldInputs = slots[index].node!.inputs
         slots[index].node!.inputs.removeAll()
         for inputIndex in oldInputs {
-            // Input node may have been removed already — optional chaining is intentional here.
+            // Input node may have been removed already, so optional chaining is intentional here.
             slots[Int(inputIndex)].node?.outputs.remove(id.rawValue)
         }
     }
@@ -643,7 +679,7 @@ class AttributeGraph: @unchecked Sendable {
         pathIDs[rp] = index
         addDependency(from: AGAttribute(rawValue: index), dependsOn: parent.identifier)
         let attr = Attribute<U>(AGAttribute(rawValue: index))
-        Subgraph.current?.register(attr.identifier)
+        AGSubgraph.current?.register(attr.identifier)
         return attr
     }
 
@@ -657,7 +693,7 @@ class AttributeGraph: @unchecked Sendable {
         return nil
     }
 
-    // Deferred action queue — closures enqueued here are executed during drainActions().
+    // Deferred action queue. Closures enqueued here are executed during drainActions().
     // Use enqueue() from button handlers or event callbacks to defer state mutations
     // to the appropriate point in the frame loop.
     private var pendingActions: [() -> Void] = []
@@ -669,7 +705,7 @@ class AttributeGraph: @unchecked Sendable {
 
     // Executes only the actions that are queued at the moment of the call, then returns.
     // Any actions enqueued during execution are deferred to the next drainActions() call.
-    // Use this variant for a single, bounded flush — e.g., at the start of a frame update.
+    // Use this variant for a single, bounded flush such as the start of a frame update.
     func drainActions() {
         assert(AttributeGraph.current === self)
         let actions = pendingActions

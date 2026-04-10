@@ -176,7 +176,7 @@ extension Never: View {
 // File-scope state class — cannot be nested inside a generic function in Swift.
 private final class _OptionalViewState {
     var hasValue: Bool? = nil
-    var subgraph: Subgraph? = nil
+    var subgraph: AGSubgraph? = nil
     var lcAttr: Attribute<LayoutComputer>? = nil
 }
 
@@ -185,7 +185,7 @@ extension Optional: View where Wrapped: View {
 
     /// Dynamic-subgraph implementation for optional views.
     ///
-    /// When `.none` → `.some`, creates a Subgraph and wires `Wrapped._makeView` into it.
+    /// When `.none` → `.some`, creates a AGSubgraph and wires `Wrapped._makeView` into it.
     /// When `.some` → `.none`, invalidates the subgraph; master rule returns `.fixed(.zero)`.
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         guard let graph = AttributeGraph.current else {
@@ -193,7 +193,7 @@ extension Optional: View where Wrapped: View {
         }
 
         let state = _OptionalViewState()
-        state.subgraph = Subgraph() // Created while parent Subgraph is active
+        state.subgraph = AGSubgraph() // Created while parent AGSubgraph is active
 
         let masterLC: Attribute<LayoutComputer> = graph.makeRule {
             // Retrieve the active graph from TaskLocal to avoid a retain cycle
@@ -210,10 +210,10 @@ extension Optional: View where Wrapped: View {
 
                 if nowHas {
                     // Force-unwrap is safe: node lives only while hasValue == true.
-                    let wrappedAttr: Attribute<Wrapped> = Subgraph.$current.withValue(state.subgraph) {
+                    let wrappedAttr: Attribute<Wrapped> = AGSubgraph.$current.withValue(state.subgraph) {
                         graph.makeRule { view._attribute.value! }
                     }
-                    let outputs = Subgraph.$current.withValue(state.subgraph) {
+                    let outputs = AGSubgraph.$current.withValue(state.subgraph) {
                         Wrapped._makeView(view: _GraphValue(_attribute: wrappedAttr), inputs: inputs)
                     }
                     state.lcAttr = outputs._layoutComputer.attribute

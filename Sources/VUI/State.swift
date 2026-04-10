@@ -76,9 +76,9 @@ extension State {
         }
 
         let inbox = graph.inbox
-        // Capture the active Subgraph at wiring time so the state node is registered
+        // Capture the active AGSubgraph at wiring time so the state node is registered
         // to the correct subgraph (e.g. the one created by Optional._makeView).
-        let wiringSubgraph = Subgraph.current
+        let wiringSubgraph = AGSubgraph.current
         // Shared across all body evaluations for this @State field.
         let mountedLocation = MutableBox<AnyLocation<Value>?>(nil)
 
@@ -104,7 +104,7 @@ extension State {
             // Synchronous cache so wrappedValue.get works outside AG context
             // (e.g. inside button action closures captured during body evaluation).
             let cache = MutableBox<Value>(initialValue)
-            let attr: Attribute<Value> = Subgraph.$current.withValue(wiringSubgraph) {
+            let attr: Attribute<Value> = AGSubgraph.$current.withValue(wiringSubgraph) {
                 graph.makeInput(value: initialValue)
             }
             let location = LocationBox(location: FunctionalLocation<Value>(

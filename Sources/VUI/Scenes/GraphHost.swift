@@ -8,11 +8,25 @@
 import Foundation
 
 // GraphHost — root AG-owning base class.
+//
+// data: AttributeGraphRef — wraps the shared AG::Graph core with a per-host context pointer.
+// Multiple GraphHost instances (e.g. ViewGraph + GestureGraph) may share the same
+// underlying AttributeGraph while each holding its own AttributeGraphRef.
 class GraphHost {
-    var data: AttributeGraph
+    var data: AttributeGraphRef
 
+    /// Creates a new AttributeGraph core and wraps it in an AttributeGraphRef owned by self.
     init() {
-        self.data = AttributeGraph()
+        let graph = AttributeGraph()
+        self.data = AttributeGraphRef(graph: graph)
+        self.data.context = self
+    }
+
+    /// Wraps an existing AttributeGraph core in a new AttributeGraphRef owned by self.
+    /// Used when a second GraphHost (e.g. GestureGraph) shares the same core as another.
+    init(graph: AttributeGraph) {
+        self.data = AttributeGraphRef(graph: graph)
+        self.data.context = self
     }
 }
 

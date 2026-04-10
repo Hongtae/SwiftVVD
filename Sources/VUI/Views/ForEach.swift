@@ -29,12 +29,12 @@ extension ForEach: View where Content: View {
     }
 
     // ForEach always returns .dynamicList(Attribute<ViewList>, nil).
-    // Per-element state class — holds content-Attribute generator and Subgraph for each ID.
-    // Each item's AG nodes are owned by its Subgraph; invalidating it on removal
+    // Per-element state class — holds content-Attribute generator and AGSubgraph for each ID.
+    // Each item's AG nodes are owned by its AGSubgraph; invalidating it on removal
     // batch-removes all nodes so the graph doesn't accumulate zombie entries.
     private final class _ItemState {
         var generators: [AnyHashable: TypedUnaryViewGenerator] = [:]
-        var subgraphs:  [AnyHashable: Subgraph] = [:]
+        var subgraphs:  [AnyHashable: AGSubgraph] = [:]
         var order: [AnyHashable] = []
     }
 
@@ -64,7 +64,7 @@ extension ForEach: View where Content: View {
             }
 
             // Drop entries that are no longer present.
-            // Invalidating the item's Subgraph removes all its AG nodes at once.
+            // Invalidating the item's AGSubgraph removes all its AG nodes at once.
             for id in state.order where !newIDs.contains(id) {
                 state.subgraphs[id]?.invalidate()
                 state.subgraphs[id]?.removeFromParent()
@@ -73,7 +73,7 @@ extension ForEach: View where Content: View {
             }
 
             // Create content Attributes for newly seen IDs.
-            // Each item's nodes are registered to a dedicated Subgraph so they can
+            // Each item's nodes are registered to a dedicated AGSubgraph so they can
             // be cleanly removed when the item disappears from the data source.
             dataIdx = forEach.data.startIndex
             for id in newOrder {
@@ -81,8 +81,8 @@ extension ForEach: View where Content: View {
                 dataIdx = forEach.data.index(after: dataIdx)
 
                 if state.generators[id] == nil {
-                    let subgraph = Subgraph()
-                    let contentAttr: Attribute<Content> = Subgraph.$current.withValue(subgraph) {
+                    let subgraph = AGSubgraph()
+                    let contentAttr: Attribute<Content> = AGSubgraph.$current.withValue(subgraph) {
                         graph.makeRule {
                             let fe = view._attribute.value
                             var si = fe.data.startIndex

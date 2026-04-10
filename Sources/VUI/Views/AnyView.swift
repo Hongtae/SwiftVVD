@@ -10,7 +10,7 @@ import Foundation
 // File-scope state class. It cannot be nested inside a generic function in Swift.
 private final class _AnyViewBranchState {
     var typeID: ObjectIdentifier? = nil
-    var subgraph: Subgraph? = nil
+    var subgraph: AGSubgraph? = nil
     var lcAttr: Attribute<LayoutComputer>? = nil
 }
 
@@ -52,8 +52,8 @@ public struct AnyView: View {
     /// A master LayoutComputer rule watches the wrapped view's concrete type.
     /// When the type changes (e.g. an `if/else` that switches between `AnyView`s
     /// wrapping different concrete types):
-    ///   1. The old Subgraph is invalidated.
-    ///   2. A fresh Subgraph is created.
+    ///   1. The old AGSubgraph is invalidated.
+    ///   2. A fresh AGSubgraph is created.
     ///   3. The new type's `_makeView` is dispatched via a generic helper that
     ///      opens the `any View` existential (SE-0352, Swift 5.7+).
     ///
@@ -66,7 +66,7 @@ public struct AnyView: View {
         }
 
         let state = _AnyViewBranchState()
-        state.subgraph = Subgraph() // Created while parent Subgraph is active
+        state.subgraph = AGSubgraph() // Created while parent AGSubgraph is active
 
         let masterLC: Attribute<LayoutComputer> = graph.makeRule {
             // Retrieve the active graph from TaskLocal to avoid a retain cycle
@@ -85,7 +85,7 @@ public struct AnyView: View {
                 state.typeID = typeID
 
                 func _makeView<V: View>(_: V) -> _ViewOutputs {
-                    Subgraph.$current.withValue(state.subgraph) {
+                    AGSubgraph.$current.withValue(state.subgraph) {
                         let vAttr: Attribute<V> = graph.makeRule {
                             view._attribute.value._view as! V
                         }

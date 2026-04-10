@@ -100,7 +100,7 @@ extension GestureState {
         }
 
         let inbox = graph.inbox
-        let wiringSubgraph = Subgraph.current
+        let wiringSubgraph = AGSubgraph.current
         let mountedLocation = MutableBox<AnyLocation<Value>?>(nil)
 
         assert(buffer.properties.contains { $0.offset == fieldOffset } == false)
@@ -120,7 +120,7 @@ extension GestureState {
 
             let initialValue = currentGS._value
             let cache = MutableBox<Value>(initialValue)
-            let attr: Attribute<Value> = Subgraph.$current.withValue(wiringSubgraph) {
+            let attr: Attribute<Value> = AGSubgraph.$current.withValue(wiringSubgraph) {
                 graph.makeInput(value: initialValue)
             }
             let location = LocationBox(location: FunctionalLocation<Value>(

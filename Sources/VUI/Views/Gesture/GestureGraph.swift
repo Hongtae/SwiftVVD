@@ -10,18 +10,17 @@ import Synchronization
 import VVD
 
 // GestureCategory
-
 /// Classifies the primary gesture type active in a gesture graph.
-struct GestureCategory: RawRepresentable, Equatable, Sendable {
+struct GestureCategory: OptionSet, Sendable {
     var rawValue: Int
     init(rawValue: Int) { self.rawValue = rawValue }
 
-    static let drag     = GestureCategory(rawValue: 1 << 0)
-    static let rotate   = GestureCategory(rawValue: 1 << 1)
-    static let magnify  = GestureCategory(rawValue: 1 << 2)
-    static let select   = GestureCategory(rawValue: 1 << 3)
-    static let longPress = GestureCategory(rawValue: 1 << 4)
-    static let windowDrag = GestureCategory(rawValue: 1 << 5)
+    static let magnify    = GestureCategory(rawValue: 1)   // bit 0
+    static let rotate     = GestureCategory(rawValue: 2)   // bit 1
+    static let drag       = GestureCategory(rawValue: 4)   // bit 2
+    static let select     = GestureCategory(rawValue: 8)   // bit 3
+    static let longPress  = GestureCategory(rawValue: 16)  // bit 4
+    static let windowDrag = GestureCategory(rawValue: 32)  // bit 5
 }
 
 // EventBinding / EventBindingManager
@@ -82,22 +81,19 @@ protocol GestureGraphDelegate: AnyObject {
 /// Manages the entire gesture processing pipeline for a single window/view-graph.
 ///
 /// Responsibilities:
-/// - Owns the `eventsAttribute: Attribute<[EventID: any EventType]>` input node that
-///   drives all gesture rules in the AG graph.
+/// - Owns an independent `AttributeGraph` (NOT shared with ViewGraph).
 /// - Performs hit testing via `MultiViewResponder` to determine which `ViewResponder`
 ///   receives each event stream.
-/// - Dispatches events to matched responders and updates the event bindings.
-class GestureGraph: @unchecked Sendable {
+/// - Dispatches events to matched responders and manages `ActiveGestureSession` lifecycles.
+/// GestureFilter nodes live in ViewGraph's AG. GestureGraph.current resolves via
+/// the active AttributeGraphRef context when GestureGraph's own AG is evaluated.
+class GestureGraph: GraphHost, @unchecked Sendable {
 
-    // TaskLocal current
-
-    @TaskLocal static var _current: GestureGraph? = nil
-
-    /// The currently active gesture graph for the running `_makeView` pass.
-    /// Fatal if accessed outside a view layout pass that set up the gesture graph.
+    // current — resolves the active GestureGraph from the AG evaluation context.
+    // reads AttributeGraphRef.current?.context (set by data.withCurrent).
     static var current: GestureGraph {
-        guard let g = _current else {
-            fatalError("GestureGraph.current accessed outside a gesture-enabled layout pass")
+        guard let ref = AttributeGraphRef.current, let g = ref.context as? GestureGraph else {
+            fatalError("GestureGraph.current accessed outside a gesture-enabled AG context")
         }
         return g
     }
@@ -114,6 +110,11 @@ class GestureGraph: @unchecked Sendable {
     /// The root multi-view responder that aggregates all ViewResponders from the view tree.
     let rootResponder: MultiViewResponder
 
+    /// Back-reference to the owning ViewRendererHost (WindowController).
+    /// Session nodes live in ViewGraph's AG (accessed via rendererHost.viewGraph).
+    /// Set by WindowController.init immediately after creating GestureGraph.
+    weak var rendererHost: (any ViewRendererHost)?
+
     // Active gesture sessions
     // Each EventID maps to a list of sessions (one per hit responder).
     var activeSessions: [EventID: [ActiveGestureSession]] = [:]
@@ -129,10 +130,11 @@ class GestureGraph: @unchecked Sendable {
     }
 
     // Init
-
-    public init() {
+    /// Creates a GestureGraph with its own independent AttributeGraph.
+    override init() {
         self.rootResponder = MultiViewResponder()
         self.eventBindingManager = EventBindingManager()
+        super.init()
         self.eventBindingManager.rootResponder = rootResponder
     }
 
@@ -140,17 +142,19 @@ class GestureGraph: @unchecked Sendable {
 
     /// Creates an `ActiveGestureSession` for a hit responder.
     ///
-    /// Must be called inside an active `AttributeGraph.$current` context.
-    /// All AG nodes created by `_makeGesture` are registered to the session's subgraph.
-    private func createSession(
-        for responder: any AnyGestureResponder,
-        in graph: AttributeGraph
-    ) -> ActiveGestureSession {
+    /// Must be called while ViewGraph's AG is current (established by sendMouseEvent).
+    /// All session nodes (eventsAttr, gesture recognizer nodes) live in ViewGraph's AG
+    /// because they read modifier attributes that belong to ViewGraph's AG.
+    private func createSession(for responder: any AnyGestureResponder) -> ActiveGestureSession {
+        // AttributeGraph.current is ViewGraph's AG (set by sendMouseEvent via viewGraph.data.withCurrent)
+        guard let graph = AttributeGraph.current else {
+            fatalError("GestureGraph.createSession: no active AttributeGraph context")
+        }
         // Create a standalone subgraph (no parent — managed by GestureGraph directly)
-        let subgraph = Subgraph()
+        let subgraph = AGSubgraph()
         let viewInputs = responder.inputs
 
-        let (eventsAttr, isTerminalAttr) = Subgraph.$current.withValue(subgraph) {
+        let (eventsAttr, isTerminalAttr) = AGSubgraph.$current.withValue(subgraph) {
             let eventsAttr: Attribute<[EventID: any EventType]> = graph.makeInput(value: [:])
             let resetSeedAttr: Attribute<UInt32> = graph.makeInput(value: UInt32(0))
             let inheritedPhaseAttr: Attribute<_GestureInputs.InheritedPhase> =
@@ -165,7 +169,6 @@ class GestureGraph: @unchecked Sendable {
                 inheritedPhase: inheritedPhaseAttr,
                 gesturePreferenceKeys: viewInputs.preferences.hostKeys
             )
-            // Signal that this _makeGesture call is running inside the GestureGraph dispatch pipeline.
             var gestureInputsWithFlags = gestureInputs
             gestureInputsWithFlags.options = .gestureGraph
 
@@ -204,12 +207,21 @@ class GestureGraph: @unchecked Sendable {
     /// All gesture AG rules fire synchronously inside `eventsAttr.setValue`, so
     /// session terminal state is accurate immediately after each setValue call.
     @discardableResult
-    func sendMouseEvent(
-        _ event: MouseEvent,
-        in graph: AttributeGraph
-    ) -> GesturePhase<Void> {
-        assert(AttributeGraph.current != nil, "GestureGraph.sendMouseEvent requires AG context")
+    func sendMouseEvent(_ event: MouseEvent) -> GesturePhase<Void> {
+        // Session nodes (eventsAttr, gesture recognizer nodes) live in ViewGraph's AG because
+        // they reference modifier attributes that belong there. Run all of event dispatch —
+        // including createSession and eventsAttr.setValue — in ViewGraph's AG context.
+        // GestureGraph holds weak rendererHost, and ViewGraph is accessed via rendererHost.viewGraph.
+        guard let viewGraph = rendererHost?.viewGraph else {
+            fatalError("GestureGraph.sendMouseEvent: rendererHost or its viewGraph not set")
+        }
+        return viewGraph.data.withCurrent {
+            _sendMouseEvent(event)
+        }
+    }
 
+    @discardableResult
+    private func _sendMouseEvent(_ event: MouseEvent) -> GesturePhase<Void> {
         switch event.type {
         case .buttonDown:
             // Hit test: find all GestureResponders that contain the touch point.
@@ -250,7 +262,7 @@ class GestureGraph: @unchecked Sendable {
             // Create one session per active responder.
             var sessions: [ActiveGestureSession] = []
             for responder in activeResponders {
-                let session = createSession(for: responder, in: graph)
+                let session = createSession(for: responder)
                 sessions.append(session)
             }
             activeSessions[eventID] = sessions

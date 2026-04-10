@@ -22,10 +22,10 @@ protocol AnyGestureResponder: AnyObject {
     var inputs: _ViewInputs { get }
 
     /// Gesture-session subgraph. Created and managed by makeWrappedGesture.
-    var childSubgraph: Subgraph? { get set }
+    var childSubgraph: AGSubgraph? { get set }
 
     /// View-level subgraph that owns the responder's AG nodes.
-    var childViewSubgraph: Subgraph? { get set }
+    var childViewSubgraph: AGSubgraph? { get set }
 
     /// Controls how this responder coexists with other simultaneously-hit responders.
     var exclusionPolicy: GestureResponderExclusionPolicy { get }
@@ -229,7 +229,7 @@ class MultiViewResponder: ResponderNode {
 /// Invalidating the subgraph releases the recognizer and all AG rules atomically.
 final class ActiveGestureSession {
     /// AG subgraph holding all nodes created by `_makeGesture` for this interaction.
-    let subgraph: Subgraph
+    let subgraph: AGSubgraph
 
     /// Session-local events attribute — only events for this EventID are written here.
     let eventsAttr: Attribute<[EventID: any EventType]>
@@ -241,7 +241,7 @@ final class ActiveGestureSession {
     weak var responder: (any AnyGestureResponder)?
 
     init(
-        subgraph: Subgraph,
+        subgraph: AGSubgraph,
         eventsAttr: Attribute<[EventID: any EventType]>,
         isTerminalAttr: Attribute<Bool>,
         responder: any AnyGestureResponder
@@ -273,7 +273,7 @@ final class ActiveGestureSession {
 // GestureResponder
 
 /// Concrete implementation of ViewResponder and AnyGestureResponder.
-/// Created by GestureFilter<M>.updateValue() inside a dedicated Subgraph on first evaluation.
+/// Created by GestureFilter<M>.updateValue() inside a dedicated AGSubgraph on first evaluation.
 /// Updated in place on subsequent evaluations (mask, responders).
 ///
 /// Subclass of MultiViewResponder — inherits `responders: [any ViewResponder]` (inner-view
@@ -297,8 +297,8 @@ final class GestureResponder<M: GestureViewModifier>: MultiViewResponder, ViewRe
 
     // AnyGestureResponder — protocol stubs
     var relatedAttribute: AGAttribute { modifierAttr.identifier }
-    var childSubgraph: Subgraph? = nil
-    var childViewSubgraph: Subgraph? = nil
+    var childSubgraph: AGSubgraph? = nil
+    var childViewSubgraph: AGSubgraph? = nil
     var label: String? { nil }
     var gestureGraph: GestureGraph
 
@@ -314,10 +314,14 @@ final class GestureResponder<M: GestureViewModifier>: MultiViewResponder, ViewRe
         self.exclusionPolicy = exclusionPolicy
         self.mask = mask
         self.inputs = inputs
-        guard let g = GestureGraph._current else {
-            fatalError("GestureResponder.init: must be called within an active GestureGraph context")
+        // AG context during GestureFilter evaluation is ViewGraph's.
+        // Read gestureGraph through rendererHost?.gestureGraph.
+        guard let ref = AttributeGraphRef.current,
+              let viewGraph = ref.context as? ViewGraph,
+              let gestureGraph = viewGraph.rendererHost?.gestureGraph else {
+            fatalError("GestureResponder.init: must be called within a ViewGraph AG context with rendererHost.gestureGraph")
         }
-        self.gestureGraph = g
+        self.gestureGraph = gestureGraph
         super.init()
     }
 

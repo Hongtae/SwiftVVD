@@ -44,12 +44,14 @@ protocol ViewGraphOwner: AnyObject {
     var externalUpdateCount: Int { get set }
 }
 
-// ViewRendererHost — extends ViewGraphOwner with a responder tree root.
+// ViewRendererHost extends ViewGraphOwner with a responder tree root and gesture graph.
+// WindowController conforms.
 protocol ViewRendererHost: ViewGraphOwner {
     var responderNode: ResponderNode? { get }
+    var gestureGraph: GestureGraph? { get }
 }
 
-// ViewGraphDelegate — update scheduling callbacks for the view graph.
+// ViewGraphDelegate provides update scheduling callbacks for the view graph.
 protocol ViewGraphDelegate: AnyObject {
     func setNeedsUpdate()
     func requestUpdate(after: Double)
@@ -118,30 +120,33 @@ class ViewGraphHost: GraphHost, ViewGraphOwner {
     }
 
     override init() { super.init() }
+
+    override init(graph: AttributeGraph) { super.init(graph: graph) }
 }
 
-// ViewGraph — view-level AG host.
+// ViewGraph is the view-level AG host.
 //
 // ViewGraph.init registers (AGAttribute, _ViewInputs) -> _ViewOutputs as AG rule
 // containing V._makeView.
 // init also takes `content: V` to lift the AppGraph-side view into ownGraph.
 //
-// GestureGraph owned here — equivalent of ViewGraph's event dispatch machinery.
+// GestureGraph is owned here as part of the view graph event dispatch machinery.
 class ViewGraph: ViewGraphHost {
 
-    // viewDelegate — update scheduling callback.
+    // viewDelegate is the update scheduling callback.
     weak var viewDelegate: (any ViewGraphDelegate)?
 
-    // graphDelegate — AG transaction lifecycle callback.
+    // graphDelegate is the AG transaction lifecycle callback.
     weak var graphDelegate: (any GraphDelegate)?
 
-    // requestedOutputs — outputs requested at init time.
+    // requestedOutputs are the outputs requested at init time.
     var requestedOutputs: Outputs
 
-    // gestureGraph — gesture routing (replaces ViewGraph.sendEvents + EventBindingManager).
-    let gestureGraph: GestureGraph
+    // rendererHost is a back-reference to the owning ViewRendererHost (WindowController).
+    // GestureResponder.init uses viewGraph.rendererHost?.gestureGraph.
+    weak var rendererHost: (any ViewRendererHost)?
 
-    // AG input attributes — updated by ViewGraphRootValueUpdater conformance on WindowController.
+    // AG input attributes updated by ViewGraphRootValueUpdater conformance on WindowController.
     private(set) var sizeAttr: Attribute<ViewSize>?
     private(set) var envAttr: Attribute<EnvironmentValues>?
     private(set) var timeAttr: Attribute<Time>?
@@ -183,13 +188,15 @@ class ViewGraph: ViewGraphHost {
 
     // init: takes a concrete view value to lift into ownGraph.
     // AG wiring moved from WindowController.init.
-    // Uses GraphHost.data (AttributeGraph created by super.init()) as the owned graph.
-    init<V: View>(rootViewType: V.Type, content: V, requestedOutputs: Outputs = .defaults) {
+    // GestureGraph owns an independent AG (NOT shared). GestureFilter nodes live in ViewGraph's AG.
+    // GestureResponder.init gets gestureGraph from ViewGraph.rendererHost?.gestureGraph (via currentHost),
+    // rendererHost must be set by caller (WindowController) before ViewGraph.init is called,
+    // since _makeView may create GestureResponder nodes during the init body.
+    init<V: View>(rootViewType: V.Type, content: V, rendererHost: any ViewRendererHost, requestedOutputs: Outputs = .defaults) {
         self.requestedOutputs = requestedOutputs
-        self.gestureGraph = GestureGraph()
         super.init()
-
-        let gestureGraph = self.gestureGraph
+        // Wire rendererHost before _makeView so GestureResponder.init can read rendererHost?.gestureGraph.
+        self.rendererHost = rendererHost
         let time = Time(seconds: 0)
 
         var sizeAttrResult:  Attribute<ViewSize>?          = nil
@@ -200,15 +207,16 @@ class ViewGraph: ViewGraphHost {
         var rootDLResult:    Attribute<DisplayList>?       = nil
         var rootRLResult:    Attribute<ResourceList>?      = nil
 
-        AttributeGraph.$current.withValue(self.data) {
+        self.data.withCurrent {
+            let g = self.data.graph
             // Lift the extracted content value into ownGraph as an input node.
-            let contentAttr = self.data.makeInput(value: content)
+            let contentAttr = g.makeInput(value: content)
             let contentGV   = _GraphValue<V>(_attribute: contentAttr)
 
-            let timeAttr        = self.data.makeInput(value: time)
-            let phaseAttr       = self.data.makeInput(value: Phase(value: 1))
-            let transactionAttr = self.data.makeInput(value: Transaction())
-            let envAttr         = self.data.makeInput(value: EnvironmentValues())
+            let timeAttr        = g.makeInput(value: time)
+            let phaseAttr       = g.makeInput(value: Phase(value: 1))
+            let transactionAttr = g.makeInput(value: Transaction())
+            let envAttr         = g.makeInput(value: EnvironmentValues())
             let graphInputs = _GraphInputs(
                 customInputs: PropertyList(),
                 time: timeAttr,
@@ -224,13 +232,13 @@ class ViewGraph: ViewGraphHost {
             prefKeys.insert(ResourceList.Key.self)
             prefKeys.insert(ViewRespondersKey.self)
 
-            let hostKeysAttr = self.data.makeInput(value: prefKeys)
+            let hostKeysAttr = g.makeInput(value: prefKeys)
             let prefsInputs  = PreferencesInputs(keys: prefKeys, hostKeys: hostKeysAttr)
 
-            let transformAttr    = self.data.makeInput(value: ViewTransform.identity)
-            let positionAttr     = self.data.makeInput(value: CGPoint.zero)
-            let containerPosAttr = self.data.makeInput(value: CGPoint.zero)
-            let sizeAttr         = self.data.makeInput(value: ViewSize(.zero))
+            let transformAttr    = g.makeInput(value: ViewTransform.identity)
+            let positionAttr     = g.makeInput(value: CGPoint.zero)
+            let containerPosAttr = g.makeInput(value: CGPoint.zero)
+            let sizeAttr         = g.makeInput(value: ViewSize(.zero))
             let viewInputs = _ViewInputs(
                 base: graphInputs,
                 customInputs: PropertyList(),
@@ -243,16 +251,18 @@ class ViewGraph: ViewGraphHost {
                 containerSize: OptionalAttribute()
             )
 
-            let outputs: _ViewOutputs = GestureGraph.$_current.withValue(gestureGraph) {
-                V._makeView(view: contentGV, inputs: viewInputs)
-            }
+            // Run _makeView in ViewGraph's own AG context.
+            // GestureResponder.init reads gestureGraph from ViewGraph (via currentHost cast),
+            // not from AttributeGraphRef.current?.context. GestureFilter nodes are created in
+            // ViewGraph's AG subgraph.
+            let outputs: _ViewOutputs = V._makeView(view: contentGV, inputs: viewInputs)
 
             // Collect DisplayList and ResourceList nodes from preferences.
             let resourceNodes = outputs.preferences.values(for: ResourceList.Key.self)
             let displayNodes  = outputs.preferences.values(for: DisplayList.Key.self)
 
             if !resourceNodes.isEmpty {
-                rootRLResult = self.data.makeRule {
+                rootRLResult = g.makeRule {
                     var combined = ResourceList.Key.defaultValue
                     for nodeID in resourceNodes {
                         let list = Attribute<ResourceList>(nodeID).value
@@ -262,7 +272,7 @@ class ViewGraph: ViewGraphHost {
                 }
             }
             if !displayNodes.isEmpty {
-                rootDLResult = self.data.makeRule {
+                rootDLResult = g.makeRule {
                     var combined = DisplayList.Key.defaultValue
                     for nodeID in displayNodes {
                         let list = Attribute<DisplayList>(nodeID).value
@@ -272,10 +282,11 @@ class ViewGraph: ViewGraphHost {
                 }
             }
 
-            // Wire ViewRespondersKey to gestureGraph.
+            // Wire ViewRespondersKey -> rendererHost?.gestureGraph.updateResponders.
+            // Side-effect rule fires in ViewGraph AG context; gestureGraph is owned by rendererHost.
             let responderNodes = outputs.preferences.values(for: ViewRespondersKey.self)
             if !responderNodes.isEmpty {
-                let rootRespondersAttr: Attribute<[any ViewResponder]> = self.data.makeRule {
+                let rootRespondersAttr: Attribute<[any ViewResponder]> = g.makeRule {
                     var combined: [any ViewResponder] = ViewRespondersKey.defaultValue
                     for nodeID in responderNodes {
                         let list = Attribute<[any ViewResponder]>(nodeID).value
@@ -283,9 +294,8 @@ class ViewGraph: ViewGraphHost {
                     }
                     return combined
                 }
-                let gg = gestureGraph
-                self.data.makeSideEffectRule {
-                    gg.updateResponders(rootRespondersAttr.value)
+                g.makeSideEffectRule { [weak self] in
+                    self?.rendererHost?.gestureGraph?.updateResponders(rootRespondersAttr.value)
                 }
             }
 

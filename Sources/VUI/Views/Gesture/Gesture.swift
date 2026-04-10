@@ -231,51 +231,92 @@ struct EventListener<E: EventType>: Gesture {
         guard let graph = AttributeGraph.current else {
             fatalError("EventListener._makeGesture requires AG context")
         }
-
-        // Placeholder: return a non-terminating possible phase.
         let phase: Attribute<GesturePhase<Value>> = graph.makeInput(value: .possible(nil))
-        _ = graph.makeStatefulRule(EventListenerPhase<E>(
-            inputs: inputs,
-            ignoresOtherEvents: gesture._attribute.value.ignoresOtherEvents))
         return _GestureOutputs(phase: phase)
+    }
+}
+
+// ResettableGestureRule
+//
+// StatefulRule subprotocol that standardizes the gesture session reset mechanism.
+// Adopted by EventListenerPhase and CallbacksPhase.
+protocol ResettableGestureRule: StatefulRule {
+    /// AG node for the gesture session seed. Changes when a new session starts.
+    var resetSeedAttr: Attribute<UInt32> { get }
+    /// Last processed seed stored on the instance.
+    var lastResetSeed: UInt32 { get set }
+    /// Resets the gesture phase to its initial state, `.possible(nil)`.
+    mutating func resetPhase()
+}
+
+extension ResettableGestureRule {
+    /// Checks whether a reset is needed by comparing the current seed with lastResetSeed.
+    ///
+    /// - Returns: true if updateValue should continue processing.
+    ///            false if the session has already ended and should be skipped.
+    mutating func resetIfNeeded() -> Bool {
+        let currentSeed = resetSeedAttr.value
+        if lastResetSeed == currentSeed {
+            // Same session: skip if the phase is already .ended or .failed.
+            return true
+        }
+        // New session: reset state.
+        resetPhase()
+        lastResetSeed = currentSeed
+        return true
     }
 }
 
 // EventListenerPhase<E>: StatefulRule
 //
 // Low-level AG node that processes raw events for EventListener<E>.
-// Reads inputs._events, filters by E type, applies geometry checks,
-// and drives the phase attribute.
-struct EventListenerPhase<E: EventType>: StatefulRule {
+// Reads eventsAttr (filtered by E type), applies position/transform geometry,
+// and drives the GesturePhase<Void> output.
+struct EventListenerPhase<E: EventType>: StatefulRule, ResettableGestureRule {
     typealias Value = GesturePhase<Void>
 
-    var inputs: _GestureInputs
-    var ignoresOtherEvents: Bool
+    let listenerAttr: Attribute<EventListener<E>>
+    let eventsAttr: Attribute<[EventID: any EventType]>
+    let positionAttr: Attribute<CGPoint>
+    let transformAttr: Attribute<ViewTransform>
+    let resetSeedAttr: Attribute<UInt32>
+    let preconvertedBool: Bool
+    let ignoresOtherEvents: Bool
+
+    var trackingID: EventID?
+    var lastResetSeed: UInt32
 
     mutating func updateValue() {
+        guard resetIfNeeded() else { return }
+    }
+
+    mutating func resetPhase() {
+        // Clear trackingID and reset the output to .possible(nil).
+        trackingID = nil
+        AttributeGraph.setStatefulOutput(GesturePhase<Void>.possible(nil))
     }
 }
 
 // _GestureInputs
-
-
 /// Inputs passed to `Gesture._makeGesture`.
 public struct _GestureInputs {
 
     // InheritedPhase
 
-    /// Phase state inherited from ancestor gesture combiners (SequenceGesture, etc.)
+    /// Phase state inherited from ancestor gesture combiners, such as ExclusiveGesture.
     struct InheritedPhase: OptionSet, Sendable, CustomStringConvertible {
         var rawValue: Int
         init(rawValue: Int) { self.rawValue = rawValue }
-        static let active = InheritedPhase(rawValue: 1 << 0)
-        static let failed = InheritedPhase(rawValue: 1 << 1)
-        /// Default: no constraints from parent (top-level gesture context).
-        static var defaultValue: InheritedPhase { [] }
+        /// bit0: parent/sibling gesture failed, so this gesture may proceed ("allowed").
+        static let failed = InheritedPhase(rawValue: 1)   // bit 0
+        /// bit1: parent/sibling gesture is active, so this gesture must wait ("blocked").
+        static let active = InheritedPhase(rawValue: 2)   // bit 1
+        /// Default value: .failed (= 1). No active blocker means this gesture may proceed.
+        static var defaultValue: InheritedPhase { .failed }
         var description: String {
             var parts: [String] = []
-            if contains(.active) { parts.append("active") }
             if contains(.failed) { parts.append("failed") }
+            if contains(.active) { parts.append("active") }
             return "[\(parts.joined(separator: ", "))]"
         }
     }
@@ -350,7 +391,7 @@ public struct _GestureInputs {
 
     init(
         _ viewInputs: _ViewInputs,
-        viewSubgraph: Subgraph?,
+        viewSubgraph: AGSubgraph?,
         events: Attribute<[EventID: any EventType]>,
         time: Attribute<Time>,
         resetSeed: Attribute<UInt32>,

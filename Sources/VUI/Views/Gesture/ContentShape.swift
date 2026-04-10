@@ -129,8 +129,7 @@ public struct _ContentShapeModifier<S: Shape>: ViewModifier, PrimitiveViewModifi
 
         var outputs = body(_Graph(), inputs)
 
-        // Only active inside a gesture-enabled layout pass with ViewRespondersKey registered.
-        guard GestureGraph._current != nil else { return outputs }
+        // Only active when ViewRespondersKey is in the preference keys (gesture-enabled pass).
         guard inputs.preferences.keys.contains(ViewRespondersKey.self) else { return outputs }
 
         // Collect inner ViewRespondersKey nodes from body outputs.
@@ -197,7 +196,6 @@ public struct _ContentShapeKindModifier<S: Shape>: ViewModifier, PrimitiveViewMo
 
         var outputs = body(_Graph(), inputs)
 
-        guard GestureGraph._current != nil else { return outputs }
         guard inputs.preferences.keys.contains(ViewRespondersKey.self) else { return outputs }
 
         let kinds = modifier._attribute.value.kind

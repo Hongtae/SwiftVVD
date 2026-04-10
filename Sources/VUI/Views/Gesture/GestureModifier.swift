@@ -9,23 +9,95 @@ import Foundation
 
 // GestureCallbacks
 
-/// Marker protocol for gesture callback containers.
-/// Carries the `Value` type associated with the gesture that fires the callbacks.
+/// Protocol for gesture callback containers.
+///
+/// Requirements:
+///   - associatedtype Value — gesture value type.
+///   - associatedtype StateType — mutable state kept during recognition.
+///   - static var initialState: StateType — initial state.
+///   - func dispatch(phase:state:) -> Optional<() -> ()>
+///       Invokes callbacks based on the current phase. May return an animation
+///       completion closure.
+///   - func cancel(state:) -> Optional<() -> ()>
+///       Cleanup callback for reset.
 protocol GestureCallbacks {
     associatedtype Value
+    associatedtype StateType
+    static var initialState: StateType { get }
+    func dispatch(phase: GesturePhase<Value>, state: inout StateType) -> (() -> ())?
+    func cancel(state: StateType) -> (() -> ())?
 }
 
+/// .onEnded { } callback container.
 struct EndedCallbacks<Value>: GestureCallbacks {
     let ended: (Value) -> Void
+    typealias StateType = Void
+    static var initialState: Void { () }
+    func dispatch(phase: GesturePhase<Value>, state: inout Void) -> (() -> ())? {
+        if case .ended(let value) = phase { ended(value) }
+        return nil
+    }
+    func cancel(state: Void) -> (() -> ())? { nil }
 }
 
+/// .onChanged { } callback container.
 struct ChangedCallbacks<Value>: GestureCallbacks {
     let changed: (Value) -> Void
+    typealias StateType = Void
+    static var initialState: Void { () }
+    func dispatch(phase: GesturePhase<Value>, state: inout Void) -> (() -> ())? {
+        if case .active(let value) = phase { changed(value) }
+        return nil
+    }
+    func cancel(state: Void) -> (() -> ())? { nil }
 }
 
+/// Container for .onEnded, .onChanged, and optional .onFailed callbacks.
+struct FullGestureCallbacks<Value>: GestureCallbacks {
+    var changed: ((Value) -> ())?
+    var ended: ((Value) -> ())?
+    var failed: (() -> ())?
+    typealias StateType = Void
+    static var initialState: Void { () }
+    func dispatch(phase: GesturePhase<Value>, state: inout Void) -> (() -> ())? {
+        switch phase {
+        case .active(let v): changed?(v)
+        case .ended(let v):  ended?(v)
+        case .failed:        failed?()
+        default: break
+        }
+        return nil
+    }
+    func cancel(state: Void) -> (() -> ())? { nil }
+}
+
+/// Container for failure callbacks.
+struct FailedCallbacks<Value>: GestureCallbacks {
+    let failed: () -> ()
+    typealias StateType = Void
+    static var initialState: Void { () }
+    func dispatch(phase: GesturePhase<Value>, state: inout Void) -> (() -> ())? {
+        if case .failed = phase { failed() }
+        return nil
+    }
+    func cancel(state: Void) -> (() -> ())? { nil }
+}
+
+/// LongPressGesture callback container.
 struct PressableGestureCallbacks<Value>: GestureCallbacks {
     let pressing: ((Value) -> Void)?
     let pressed: (() -> Void)?
+    typealias StateType = Void
+    static var initialState: Void { () }
+    func dispatch(phase: GesturePhase<Value>, state: inout Void) -> (() -> ())? {
+        switch phase {
+        case .active(let v): pressing?(v)
+        case .ended:         pressed?()
+        default: break
+        }
+        return nil
+    }
+    func cancel(state: Void) -> (() -> ())? { nil }
 }
 
 // GestureModifier
@@ -351,11 +423,11 @@ extension AddGestureModifier {
     }
 }
 
-/// StatefulRule that lazily creates a GestureResponder<M> inside a dedicated Subgraph
+/// StatefulRule that lazily creates a GestureResponder<M> inside a dedicated AGSubgraph
 /// and keeps it updated whenever the modifier or inner view responders change.
 ///
-/// Subgraph ownership:
-///   GestureFilter owns a separate Subgraph in which GestureResponder<M> is born.
+/// AGSubgraph ownership:
+///   GestureFilter owns a separate AGSubgraph in which GestureResponder<M> is born.
 ///   On first updateValue() the responder is created inside self.subgraph context.
 ///   On subsequent evaluations: mask and inner responders updated in place (same instance).
 struct GestureFilter<M: GestureViewModifier>: StatefulRule {
@@ -365,13 +437,13 @@ struct GestureFilter<M: GestureViewModifier>: StatefulRule {
     var innerRespondersAttr: Attribute<[any ViewResponder]>
     var viewInputs: _ViewInputs
     var exclusionPolicy: GestureResponderExclusionPolicy
-    var subgraph: Subgraph
+    var subgraph: AGSubgraph
     var _responder: GestureResponder<M>? = nil
 
     mutating func updateValue() {
         let currentModifier = modifierAttr.value
         if _responder == nil {
-            Subgraph.$current.withValue(subgraph) {
+            AGSubgraph.$current.withValue(subgraph) {
                 _responder = GestureResponder<M>(
                     modifierAttr: modifierAttr,
                     exclusionPolicy: exclusionPolicy,
@@ -400,8 +472,9 @@ extension AddGestureModifier {
 
         var outputs = body(_Graph(), inputs)
 
-        // Only register a gesture responder inside a gesture-enabled layout pass.
-        guard GestureGraph._current != nil else { return outputs }
+        // If ViewRespondersKey is not in the preference keys, there is no gesture host collecting
+        // responders — skip GestureFilter creation entirely.
+        guard inputs.preferences.keys.contains(ViewRespondersKey.self) else { return outputs }
 
         let capturedViewInputs = inputs
 
@@ -430,8 +503,8 @@ extension AddGestureModifier {
         }
 
         // GestureFilter StatefulRule: lazily creates GestureResponder<Self> on first evaluation
-        // inside its own dedicated Subgraph, then updates mask/responders in place.
-        let responderSubgraph = Subgraph()
+        // inside its own dedicated AGSubgraph, then updates mask/responders in place.
+        let responderSubgraph = AGSubgraph()
         let gestureFilter = GestureFilter<Self>(
             modifierAttr: modifier._attribute,
             innerRespondersAttr: innerRespondersAttr,

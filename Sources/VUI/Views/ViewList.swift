@@ -10,7 +10,7 @@ import Foundation
 /// Represents a dynamically-resolved list of views.
 /// Used by ForEach and any view that produces a variable number of children at runtime.
 /// The AG rule stored in `Attribute<ViewList>` is responsible for diffing items
-/// and managing per-item Subgraph lifecycles.
+/// and managing per-item AGSubgraph lifecycles.
 ///
 /// `generators` holds one `TypedUnaryViewGenerator` per currently-active element, in order.
 /// Layout reads this via `Attribute<ViewList>.value.generators`, the same way

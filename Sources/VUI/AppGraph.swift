@@ -26,17 +26,17 @@ class AppGraph<A: App>: @unchecked Sendable {
     let runtimeWindowConfigAttr: Attribute<_RuntimeWindowConfig>?
 
     init(app: A) {
-        let g = AttributeGraph()
+        let graph = AttributeGraph()
         let time = Time(seconds: 0)
         var sceneList: Attribute<[SceneList.Item]>? = nil
         var runtimeConfig: Attribute<_RuntimeWindowConfig>? = nil
 
-        AttributeGraph.$current.withValue(g) {
+        AttributeGraph.$current.withValue(graph) {
             // Stub AG input nodes for _GraphInputs fields.
-            let timeAttr        = g.makeInput(value: time)
-            let phaseAttr       = g.makeInput(value: Phase(value: 1))
-            let transactionAttr = g.makeInput(value: Transaction())
-            let envAttr         = g.makeInput(value: EnvironmentValues())
+            let timeAttr        = graph.makeInput(value: time)
+            let phaseAttr       = graph.makeInput(value: Phase(value: 1))
+            let transactionAttr = graph.makeInput(value: Transaction())
+            let envAttr         = graph.makeInput(value: EnvironmentValues())
 
             let graphInputs = _GraphInputs(
                 customInputs: PropertyList(),
@@ -53,13 +53,13 @@ class AppGraph<A: App>: @unchecked Sendable {
             var prefKeys = PreferenceKeys()
             prefKeys.insert(SceneList.Key.self)
             prefKeys.insert(_RuntimeWindowConfig.Key.self)
-            let hostKeysAttr = g.makeInput(value: prefKeys)
+            let hostKeysAttr = graph.makeInput(value: prefKeys)
             let prefsInputs  = PreferencesInputs(keys: prefKeys, hostKeys: hostKeysAttr)
 
             let sceneInputs = _SceneInputs(base: graphInputs, preferences: prefsInputs)
 
             // Wire the root scene graph.
-            let bodyAttr  = g.makeInput(value: app.body)
+            let bodyAttr  = graph.makeInput(value: app.body)
             let sceneGraph = _GraphValue<A.Body>(_attribute: bodyAttr)
             let outputs   = A.Body._makeScene(scene: sceneGraph, inputs: sceneInputs)
 
@@ -72,10 +72,10 @@ class AppGraph<A: App>: @unchecked Sendable {
             // _RuntimeWindowConfigKey: multiple modifiers may each append an entry
             // (e.g. .updateFrameRate + .drawDebugInfo), so reduce all entries into
             // one AG node using the stored _makeReduceRule.
-            runtimeConfig = outputs.preferences.reducedValue(for: _RuntimeWindowConfig.Key.self, in: g)
+            runtimeConfig = outputs.preferences.reducedValue(for: _RuntimeWindowConfig.Key.self, in: graph)
         }
 
-        self.graph = g
+        self.graph = graph
         self.sceneListAttr = sceneList
         self.runtimeWindowConfigAttr = runtimeConfig
     }

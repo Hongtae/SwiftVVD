@@ -42,8 +42,15 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
     var sharedContext: SharedContext
     let sceneResources: SceneResources
 
+    // gestureGraph — owned directly by WindowController.
+    // GestureGraph is the window-level coordinator.
+    var gestureGraph: GestureGraph?
+
     // viewGraph — owns the view-tree AttributeGraph (GraphHost.data) and gesture routing.
-    let viewGraph: ViewGraph
+    // moved from `let graph: AttributeGraph` + scattered input/output attrs.
+    // IUO because gestureGraph must be created and wired before ViewGraph.init runs _makeView.
+    var viewGraph: ViewGraph { _viewGraph }
+    private var _viewGraph: ViewGraph!
 
     var date: Date  // render loop timing reference (animation)
 
@@ -83,7 +90,7 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
     var externalUpdateCount: Int = 0
 
     // ViewRendererHost
-    var responderNode: ResponderNode? { viewGraph.gestureGraph.rootResponder }
+    var responderNode: ResponderNode? { gestureGraph?.rootResponder }
 
     init<Content: View>(content: _GraphValue<Content>,
                         title: _GraphValue<Text>? = nil,
@@ -106,11 +113,20 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
         if let titleText = title.map({ $0._attribute.value }) {
             self._titleString = titleText._resolveText(in: EnvironmentValues())
         }
-
-        // Create ViewGraph — this now owns the AttributeGraph and does full AG wiring.
-        self.viewGraph = ViewGraph(rootViewType: Content.self, content: contentValue)
         self.date = .now
 
+        // Create GestureGraph first — it owns an independent AG.
+        // GraphHost.Data.init() internally for an independent AG. ViewGraph's AG is separate.
+        // WindowController owns both GestureGraph and ViewGraph.
+        self.gestureGraph = GestureGraph()
+        // Wire rendererHost back-reference before ViewGraph.init — GestureResponder.init
+        // reads viewGraph.rendererHost?.gestureGraph during _makeView.
+        self.gestureGraph!.rendererHost = self
+
+        // Create ViewGraph — does full AG wiring including _makeView which may create GestureResponders.
+        // rendererHost: self must be set on GestureGraph before this call.
+        self._viewGraph = ViewGraph(rootViewType: Content.self, content: contentValue, rendererHost: self)
+        
         // Wire ViewGraph delegate slots.
         // renderDelegate: WindowController provides contentsScale, opaqueBackground, and
         //   render thread handling. Implemented below (ViewGraphRenderDelegate).
@@ -200,7 +216,7 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
             cachedContentSize = contentSize
         }
 
-        AttributeGraph.$current.withValue(viewGraph.data) {
+        viewGraph.data.withCurrent {
             let changeSet = AttributeGraph.ChangeSet()
             AttributeGraph.$changeSet.withValue(changeSet) {
 
@@ -217,8 +233,8 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
                 }
 
                 // Flush @State / @Observable invalidations.
-                viewGraph.data.inbox.drain()
-                viewGraph.data.drainActions()
+                viewGraph.data.graph.inbox.drain()
+                viewGraph.data.graph.drainActions()
 
                 if sizeChanged {
                     viewGraph.sizeAttr?.setValue(ViewSize(contentSize))
@@ -232,8 +248,8 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
                             task(context)
                         }
                     }
-                    viewGraph.data.inbox.drain()
-                    viewGraph.data.drainActions()
+                    viewGraph.data.graph.inbox.drain()
+                    viewGraph.data.graph.drainActions()
                 }
 
                 let lc = rootLayoutComputer.value
@@ -254,7 +270,7 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
         var context = context
         context.translateBy(x: offset.x, y: offset.y)
 
-        AttributeGraph.$current.withValue(viewGraph.data) {
+        viewGraph.data.withCurrent {
             let changeSet = AttributeGraph.ChangeSet()
             AttributeGraph.$changeSet.withValue(changeSet) {
                 let displayList = rootDisplayList.value
@@ -295,23 +311,23 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
 
         case .hidden:
             self.sharedContext.focusedViews.removeAll()
-            viewGraph.data.inbox.enqueue {
-                self.viewGraph.gestureGraph.resetEvents()
+            viewGraph.data.graph.inbox.enqueue {
+                self.gestureGraph!.resetEvents()
             }
         case .activated:
             self.auxClients.forEach { $0.onHostWindowActivated() }
 
         case .inactivated:
             self.sharedContext.focusedViews.removeAll()
-            viewGraph.data.inbox.enqueue {
-                self.viewGraph.gestureGraph.resetEvents()
+            viewGraph.data.graph.inbox.enqueue {
+                self.gestureGraph!.resetEvents()
             }
             self.auxClients.forEach { $0.onHostWindowInactivated() }
 
         case .minimized:
             self.sharedContext.focusedViews.removeAll()
-            viewGraph.data.inbox.enqueue {
-                self.viewGraph.gestureGraph.resetEvents()
+            viewGraph.data.graph.inbox.enqueue {
+                self.gestureGraph!.resetEvents()
             }
         case .moved, .resized:
             self.auxClients.forEach { $0.onHostWindowMoved() }
@@ -424,7 +440,7 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
         let handleEvent = { (event: MouseEvent) -> Bool in
             if let window = self.window, window !== event.window { return false }
             if event.type == .wheel { return false }
-            let phase = self.viewGraph.gestureGraph.sendMouseEvent(event, in: self.viewGraph.data)
+            let phase = self.gestureGraph!.sendMouseEvent(event)
             switch phase {
             case .active, .ended: return true
             default:              return false
@@ -505,7 +521,7 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
     }
 
     func resetGestureHandlers() {
-        viewGraph.gestureGraph.resetEvents()
+        gestureGraph!.resetEvents()
     }
 
     // MARK: - ViewGraphRenderDelegate

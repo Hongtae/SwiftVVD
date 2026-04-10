@@ -8,7 +8,7 @@
 // File-scope state class
 private final class _ConditionalBranchState {
     var isTrue: Bool? = nil
-    var activeSubgraph: Subgraph? = nil
+    var activeSubgraph: AGSubgraph? = nil
     var activeLCAttr: Attribute<LayoutComputer>? = nil
     /// Full preferences output of the currently active branch's _makeView result.
     /// Each relay rule reads its key's node(s) from here and forwards the value.
@@ -31,7 +31,7 @@ extension _ConditionalContent: View where TrueContent: View, FalseContent: View 
         }
 
         let state = _ConditionalBranchState()
-        state.activeSubgraph = Subgraph()
+        state.activeSubgraph = AGSubgraph()
 
         // Master branch rule: detects branch changes and replaces the active subgraph.
         // All relay rules depend on this node, ensuring state.activeOutputs is
@@ -51,11 +51,11 @@ extension _ConditionalContent: View where TrueContent: View, FalseContent: View 
 
                 let outputs: _ViewOutputs
                 if nowTrue {
-                    outputs = Subgraph.$current.withValue(state.activeSubgraph) {
+                    outputs = AGSubgraph.$current.withValue(state.activeSubgraph) {
                         TrueContent._makeView(view: view[\.._trueContent], inputs: inputs)
                     }
                 } else {
-                    outputs = Subgraph.$current.withValue(state.activeSubgraph) {
+                    outputs = AGSubgraph.$current.withValue(state.activeSubgraph) {
                         FalseContent._makeView(view: view[\._falseContent], inputs: inputs)
                     }
                 }
