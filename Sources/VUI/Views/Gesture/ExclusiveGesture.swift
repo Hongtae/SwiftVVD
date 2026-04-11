@@ -10,18 +10,30 @@ import Foundation
 // ExclusiveState<A>: Rule
 //
 // AG Rule node injected into Second's _GestureInputs.inheritedPhase.
-// When First is active/ended, emits .failed so Second's EventListenerPhase
-// knows to stop recognizing. 
+// Computes the InheritedPhase that Second sees, based on:
+//   - parentInheritedPhaseAttr: the phase passed from this gesture's parent
+//   - firstPhaseAttr: First gesture's current output phase
 private struct ExclusiveState<A>: Rule {
     typealias Value = _GestureInputs.InheritedPhase
-    let firstPhase: Attribute<GesturePhase<A>>
+
+    let parentInheritedPhaseAttr: Attribute<_GestureInputs.InheritedPhase>
+    let firstPhaseAttr: Attribute<GesturePhase<A>>
 
     func updateValue() -> _GestureInputs.InheritedPhase {
-        switch firstPhase.value {
-        case .active:  return .failed
-        case .ended:   return .failed
-        default:       return []
+        let parentIP = parentInheritedPhaseAttr.value
+        var result = parentIP.rawValue
+
+        let firstPhase = firstPhaseAttr.value
+        // bit0 (.failed): if First has not failed, clear parentIP's .failed bit.
+        // This means Second may proceed only after First fails.
+        if !firstPhase.isFailed {
+            result &= ~1
         }
+        // bit1 (.active): if First is active, set the .active bit so Second must wait.
+        if firstPhase.isActive {
+            result |= 2
+        }
+        return _GestureInputs.InheritedPhase(rawValue: result)
     }
 }
 
@@ -73,11 +85,12 @@ public struct ExclusiveGesture<First, Second>: Gesture where First: Gesture, Sec
         // Step 1: First gesture with original inputs.
         let firstOutputs = First._makeGesture(gesture: gesture[\.first], inputs: inputs)
 
-        // Step 2: ExclusiveState AG Rule — reads firstOutputs.phase, emits InheritedPhase.
-        // Injected into Second's inputs.inheritedPhase so Second's recognizer knows
-        // when First has claimed the interaction.
+        // Step 2: ExclusiveState AG Rule — reads firstOutputs.phase + parent inheritedPhase,
+        // emits the InheritedPhase Second should see.
         let exclusiveStateAttr: Attribute<_GestureInputs.InheritedPhase> =
-            graph.makeRule(ExclusiveState(firstPhase: firstOutputs.phase))
+            graph.makeRule(ExclusiveState(
+                parentInheritedPhaseAttr: inputs._inheritedPhase,
+                firstPhaseAttr: firstOutputs.phase))
 
         // Step 3: Second gesture with modified inputs (inheritedPhase = ExclusiveState output).
         var secondInputs = inputs
@@ -107,4 +120,3 @@ extension Gesture {
         ExclusiveGesture(self, other)
     }
 }
-

@@ -271,9 +271,56 @@ extension ResettableGestureRule {
 //
 // Low-level AG node that processes raw events for EventListener<E>.
 // Reads eventsAttr (filtered by E type), applies position/transform geometry,
-// and drives the GesturePhase<Void> output.
+// and drives the EventListenerPhase.Value output.
 struct EventListenerPhase<E: EventType>: StatefulRule, ResettableGestureRule {
-    typealias Value = GesturePhase<Void>
+
+    enum FailureReason: Equatable, Hashable {
+        case excluded
+        case failureDependency(on: AnyHashable)
+        case error(Error)
+
+        static func == (lhs: Self, rhs: Self) -> Bool {
+            switch (lhs, rhs) {
+            case (.excluded, .excluded): return true
+            case (.failureDependency(let a), .failureDependency(let b)): return a == b
+            case (.error, .error): return true
+            default: return false
+            }
+        }
+
+        func hash(into hasher: inout Hasher) {
+            switch self {
+            case .excluded:
+                hasher.combine(0)
+            case .failureDependency(let v):
+                hasher.combine(1)
+                hasher.combine(v)
+            case .error:
+                hasher.combine(2)
+            }
+        }
+    }
+
+    // StatefulRule.Value = EventListenerPhase<E>.Value, not GesturePhase<Void>.
+    // EventListener.Value is Void, so phase is GesturePhase<Void>.
+    struct Value: Equatable {
+        var phase: GesturePhase<Void>
+        var trackingID: EventID?
+        var failureReason: FailureReason?
+
+        // GesturePhase<Void> requires Void: Equatable, so synthesized Equatable is unavailable.
+        // Implement equality manually.
+        static func == (lhs: Self, rhs: Self) -> Bool {
+            guard lhs.trackingID == rhs.trackingID,
+                  lhs.failureReason == rhs.failureReason else { return false }
+            switch (lhs.phase, rhs.phase) {
+            case (.possible, .possible), (.active, .active), (.ended, .ended), (.failed, .failed):
+                return true
+            default:
+                return false
+            }
+        }
+    }
 
     let listenerAttr: Attribute<EventListener<E>>
     let eventsAttr: Attribute<[EventID: any EventType]>
@@ -287,13 +334,16 @@ struct EventListenerPhase<E: EventType>: StatefulRule, ResettableGestureRule {
     var lastResetSeed: UInt32
 
     mutating func updateValue() {
+        // updateValue() centers on creating and updating GestureComponentResponder<TapComponent<MouseEvent>>.
+        // Full implementation requires Gestures.framework integration, so this remains a stub.
+        // Flow: resetIfNeeded -> iterate eventsAttr -> filter TappableEvent -> GestureComponentResponder.
         guard resetIfNeeded() else { return }
     }
 
     mutating func resetPhase() {
         // Clear trackingID and reset the output to .possible(nil).
         trackingID = nil
-        AttributeGraph.setStatefulOutput(GesturePhase<Void>.possible(nil))
+        AttributeGraph.setStatefulOutput(Value(phase: .possible(nil), trackingID: nil, failureReason: nil))
     }
 }
 
@@ -327,12 +377,12 @@ public struct _GestureInputs {
     struct Options: OptionSet, Sendable {
         var rawValue: UInt32
         init(rawValue: UInt32) { self.rawValue = rawValue }
-        static let gestureGraph               = Options(rawValue: 1 << 0)
-        static let skipCombiners              = Options(rawValue: 1 << 1)
-        static let includeDebugOutput         = Options(rawValue: 1 << 2)
-        static let hasChangedCallbacks        = Options(rawValue: 1 << 3)
-        static let preconvertedEventLocations = Options(rawValue: 1 << 4)
-        static let allowsIncompleteEventSequences = Options(rawValue: 1 << 5)
+        static let preconvertedEventLocations    = Options(rawValue: 0x01)  // bit 0
+        static let allowsIncompleteEventSequences = Options(rawValue: 0x02) // bit 1
+        static let skipCombiners                 = Options(rawValue: 0x04)  // bit 2
+        static let includeDebugOutput            = Options(rawValue: 0x08)  // bit 3
+        static let gestureGraph                  = Options(rawValue: 0x10)  // bit 4
+        static let hasChangedCallbacks           = Options(rawValue: 0x20)  // bit 5
     }
 
     // Stored Properties

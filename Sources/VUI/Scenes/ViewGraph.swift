@@ -115,8 +115,35 @@ class ViewGraphHost: GraphHost, ViewGraphOwner {
     func startUpdateTimer(delay: Double) {}
     func clearUpdateTimer() {}
 
+    /// Central entry point for the AG evaluation cycle.
+    ///
+    /// Flow:
+    /// render loop -> WindowController.updateFrame -> viewGraph.updateOutputs
     func updateOutputs(at time: Time) {
-        // TODO: trigger AG evaluation cycle (Phase 4)
+        currentTimestamp = time
+
+        let dirty = valuesNeedingUpdate
+        valuesNeedingUpdate = []
+
+        data.withCurrent {
+            // Flush asynchronous invalidations from @State, @Observable, and similar sources.
+            data.graph.inbox.drain()
+            data.graph.drainActions()
+
+            // Call updateDelegate methods according to the dirty bitmask.
+            // Each method updates the corresponding ViewGraph input attribute with setValue.
+            if dirty.contains(.rootView)      { updateDelegate?.updateRootView() }
+            if dirty.contains(.environment)   { updateDelegate?.updateEnvironment() }
+            if dirty.contains(.size)          { updateDelegate?.updateSize() }
+            if dirty.contains(.safeArea)      { updateDelegate?.updateSafeArea() }
+            if dirty.contains(.transform)     { updateDelegate?.updateTransform() }
+            if dirty.contains(.focusStore)    { updateDelegate?.updateFocusStore() }
+            if dirty.contains(.focusedItem)   { updateDelegate?.updateFocusedItem() }
+            if dirty.contains(.focusedValues) { updateDelegate?.updateFocusedValues() }
+            if dirty.contains(.containerSize) { updateDelegate?.updateContainerSize() }
+
+            // ViewGraphHostDelegate.updateGraphInputs is called inside the AG rule update().
+        }
     }
 
     override init() { super.init() }
@@ -315,10 +342,19 @@ class ViewGraph: ViewGraphHost {
         self.rootResourceList   = rootRLResult
     }
 
-    // displayList() — returns the current display list from the AG graph.
+    /// ViewGraph-level updateOutputs override: parent implementation plus timeAttr update.
+    /// Time changes every frame, so it is always updated without a dirty bit.
+    override func updateOutputs(at time: Time) {
+        super.updateOutputs(at: time)
+        data.withCurrent {
+            timeAttr?.setValue(time)
+        }
+    }
+
+    // displayList() returns the current display list from the AG graph.
     func displayList() -> DisplayList? { rootDisplayList?.value }
 
-    // sendEvents — dispatches input events through the responder tree.
+    // sendEvents dispatches input events through the responder tree.
     // TODO: implement proper event routing via GestureGraph
     func sendEvents(_ events: [Any], rootNode: ResponderNode, at time: Time) {}
 }

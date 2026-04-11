@@ -9,6 +9,19 @@ import Foundation
 import Synchronization
 import VVD
 
+// EventRecord
+/// Event wrapper passed to EventGraphHost.sendEvents.
+/// Currently wraps a MouseEvent with its event time.
+struct EventRecord {
+    var mouseEvent: MouseEvent
+    var time: Time
+
+    init(_ mouseEvent: MouseEvent, at time: Time = Time(seconds: 0)) {
+        self.mouseEvent = mouseEvent
+        self.time = time
+    }
+}
+
 // GestureCategory
 /// Classifies the primary gesture type active in a gesture graph.
 struct GestureCategory: OptionSet, Sendable {
@@ -66,6 +79,20 @@ class EventBindingManager {
     func willRemoveResponder(_ responder: ResponderNode) {
         bindings = bindings.filter { $0.value.responder !== responder }
     }
+
+    /// Routes an EventRecord downstream to an EventGraphHost.
+    ///
+    /// Simplified path:
+    ///   EventBindingBridge is not implemented yet, so host is passed directly.
+    ///   Remove the host parameter once EventBindingBridge is implemented.
+    @discardableResult
+    func sendDownstream(
+        _ record: EventRecord,
+        host: any EventGraphHost
+    ) -> GesturePhase<Void> {
+        guard let rootNode = rootResponder else { return .possible(nil) }
+        return host.sendEvents([record], rootNode: rootNode, at: record.time)
+    }
 }
 
 // GestureGraphDelegate
@@ -76,8 +103,22 @@ protocol GestureGraphDelegate: AnyObject {
     func enqueueAction(_ action: @escaping @Sendable () -> Void)
 }
 
-// GestureGraph
+// EventGraphHost
+/// Protocol for objects that own an EventBindingManager and can receive event streams.
+protocol EventGraphHost: AnyObject {
+    /// Binding manager for EventID to ResponderNode mappings.
+    var eventBindingManager: EventBindingManager { get }
 
+    /// Delivers event streams through the responder tree to gesture recognizers.
+    @discardableResult
+    func sendEvents(
+        _ records: [EventRecord],
+        rootNode: ResponderNode,
+        at time: Time
+    ) -> GesturePhase<Void>
+}
+
+// GestureGraph
 /// Manages the entire gesture processing pipeline for a single window/view-graph.
 ///
 /// Responsibilities:
@@ -86,8 +127,8 @@ protocol GestureGraphDelegate: AnyObject {
 ///   receives each event stream.
 /// - Dispatches events to matched responders and manages `ActiveGestureSession` lifecycles.
 /// GestureFilter nodes live in ViewGraph's AG. GestureGraph.current resolves via
-/// the active AttributeGraphRef context when GestureGraph's own AG is evaluated.
-class GestureGraph: GraphHost, @unchecked Sendable {
+/// GraphHost.currentHost (AGGraphGetContext) when GestureGraph's own AG is evaluated.
+class GestureGraph: GraphHost, EventGraphHost, @unchecked Sendable {
 
     // current — resolves the active GestureGraph from the AG evaluation context.
     // reads AttributeGraphRef.current?.context (set by data.withCurrent).
@@ -103,12 +144,18 @@ class GestureGraph: GraphHost, @unchecked Sendable {
     var responderNode: ResponderNode?
     var focusedResponder: ResponderNode?
     var delegate: GestureGraphDelegate?
-    var nextGestureUpdateTime: Time = .zero
+    var nextGestureUpdateTime: Time = .infinity
 
     let eventBindingManager: EventBindingManager
 
     /// The root multi-view responder that aggregates all ViewResponders from the view tree.
-    let rootResponder: MultiViewResponder
+    ///
+    /// Injected by GestureGraph.init(rootResponder:), with lifetime managed by the caller.
+    ///
+    /// _ownedRootResponder: WindowController should own this when used together,
+    /// but GestureGraph keeps it internally for now. Ownership will move later.
+    private var _ownedRootResponder: MultiViewResponder  // Currently owned by GestureGraph.
+    weak var rootResponder: MultiViewResponder?          
 
     /// Back-reference to the owning ViewRendererHost (WindowController).
     /// Session nodes live in ViewGraph's AG (accessed via rendererHost.viewGraph).
@@ -132,10 +179,12 @@ class GestureGraph: GraphHost, @unchecked Sendable {
     // Init
     /// Creates a GestureGraph with its own independent AttributeGraph.
     override init() {
-        self.rootResponder = MultiViewResponder()
+        let mvr = MultiViewResponder()
+        self._ownedRootResponder = mvr
         self.eventBindingManager = EventBindingManager()
         super.init()
-        self.eventBindingManager.rootResponder = rootResponder
+        self.rootResponder = mvr
+        self.eventBindingManager.rootResponder = mvr
     }
 
     // Session Management
@@ -220,12 +269,29 @@ class GestureGraph: GraphHost, @unchecked Sendable {
         }
     }
 
+    // MARK: - EventGraphHost
+
+    /// EventGraphHost.sendEvents implementation.
+    /// Current implementation converts EventRecord to MouseEvent and routes through sendMouseEvent.
+    @discardableResult
+    func sendEvents(
+        _ records: [EventRecord],
+        rootNode: ResponderNode,
+        at time: Time
+    ) -> GesturePhase<Void> {
+        // Current path: EventRecord to MouseEvent bridge by unwrapping the simple wrapper.
+        // This becomes the main path after EventBindingManager.sendDownstream is connected.
+        guard let first = records.first else { return .possible(nil) }
+        return sendMouseEvent(first.mouseEvent)
+    }
+
     @discardableResult
     private func _sendMouseEvent(_ event: MouseEvent) -> GesturePhase<Void> {
         switch event.type {
         case .buttonDown:
             // Hit test: find all GestureResponders that contain the touch point.
             // Results are in child-first order (ViewRespondersKey.reduce appends leaves before root).
+            guard let rootResponder else { return .failed }
             let hitResponders = rootResponder.respondersContaining(point: event.location)
                 .compactMap { $0 as? any AnyGestureResponder }
                 .filter { $0.mask.contains(.gesture) }
@@ -268,7 +334,7 @@ class GestureGraph: GraphHost, @unchecked Sendable {
             activeSessions[eventID] = sessions
 
             // Bind the event for future move/up routing.
-            eventBindingManager.rebindEvent(eventID, to: rootResponder)
+            eventBindingManager.rebindEvent(eventID, to: rootResponder as ResponderNode?)
 
             // Feed the initial began event to all sessions.
             let events: [EventID: any EventType] = [eventID: initialEvent]
@@ -366,7 +432,7 @@ class GestureGraph: GraphHost, @unchecked Sendable {
 
     /// Called when the ViewRespondersKey preference value changes at the root.
     func updateResponders(_ responders: [any ViewResponder]) {
-        rootResponder.updateChildren((value: responders, changed: true))
+        rootResponder?.updateChildren((value: responders, changed: true))
     }
 }
 

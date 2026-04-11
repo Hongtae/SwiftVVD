@@ -122,6 +122,70 @@ extension GestureModifier {
     }
 }
 
+// CallbacksPhase
+
+/// AG StatefulRule that fires GestureCallbacks when the gesture phase changes.
+///
+/// pass-through: output phase = inner phase (from phaseAttr).
+/// side-effect: calls callbacks.dispatch(phase:state:) on each phase change.
+struct CallbacksPhase<C: GestureCallbacks>: StatefulRule, ResettableGestureRule {
+    typealias Value = GesturePhase<C.Value>
+
+    let modifierAttr:    Attribute<CallbacksGesture<C>>
+    let phaseAttr:       Attribute<GesturePhase<C.Value>>
+    let resetSeedAttr:   Attribute<UInt32>
+    let useGestureGraph: Bool
+
+    // Generic-dependent fields (metadata offset: +0x30, +0x38)
+    var state: C.StateType
+    var lastResetSeed: UInt32
+
+    // Back-reference for async dispatch through enqueueAction when useGestureGraph is true.
+    weak var gestureGraph: GestureGraph?
+
+    init(modifierAttr: Attribute<CallbacksGesture<C>>,
+         phaseAttr: Attribute<GesturePhase<C.Value>>,
+         resetSeedAttr: Attribute<UInt32>,
+         useGestureGraph: Bool,
+         gestureGraph: GestureGraph?) {
+        self.modifierAttr    = modifierAttr
+        self.phaseAttr       = phaseAttr
+        self.resetSeedAttr   = resetSeedAttr
+        self.useGestureGraph = useGestureGraph
+        self.gestureGraph    = gestureGraph
+        self.state           = C.initialState
+        self.lastResetSeed   = 0
+    }
+
+    mutating func resetPhase() {
+        state = C.initialState
+        AttributeGraph.setStatefulOutput(GesturePhase<C.Value>.possible(nil))
+    }
+
+    mutating func updateValue() {
+        guard resetIfNeeded() else { return }
+
+        let currentPhase = phaseAttr.value
+        let callbacks = modifierAttr.value.callbacks
+
+        // Call dispatch to run user callbacks. withoutTracking is required to avoid
+        // polluting AG dependencies.
+        // The dispatch return value is an animation completion closure, currently unused.
+        var stateRef = state
+        let animCompletion: (() -> Void)? = AttributeGraph.withoutTracking {
+            callbacks.dispatch(phase: currentPhase, state: &stateRef)
+        }
+        state = stateRef
+
+        if let action = animCompletion {
+            // transaction/animation system is not implemented yet, so call directly as fallback.
+            action()
+        }
+
+        AttributeGraph.setStatefulOutput(currentPhase)
+    }
+}
+
 // CallbacksGesture
 
 /// Wraps a GestureCallbacks value as a GestureModifier.
@@ -138,9 +202,30 @@ struct CallbacksGesture<Callbacks: GestureCallbacks>: GestureModifier {
         inputs: _GestureInputs,
         body: (_GestureInputs) -> _GestureOutputs<BodyValue>
     ) -> _GestureOutputs<Value> {
-        // Placeholder: body(inputs) pass-through. Callback firing not yet implemented.
+        guard let graph = AttributeGraph.current else {
+            fatalError("CallbacksGesture.makeGesture requires AG context")
+        }
         let outputs = body(inputs)
-        return outputs
+
+        // Create the CallbacksPhase StatefulRule for phase pass-through and callback firing.
+        let useGestureGraph = inputs.options.contains(.gestureGraph)
+        // GestureGraph reference: this runs in the ViewGraph AG context, so it must
+        // be reached through rendererHost.
+        // AttributeGraph context is ViewGraph's context, not GestureGraph's.
+        // A separate path is needed to reference GestureGraph. For now, nil falls back
+        // to direct dispatch.
+        // TODO: Connect through rendererHost?.gestureGraph.
+        let gg: GestureGraph? = nil  // placeholder until connected
+
+        let callbacksPhase = CallbacksPhase<Callbacks>(
+            modifierAttr:    modifier._attribute,
+            phaseAttr:       outputs.phase,
+            resetSeedAttr:   inputs.resetSeed,
+            useGestureGraph: useGestureGraph,
+            gestureGraph:    gg
+        )
+        let phaseAttr = graph.makeStatefulRule(callbacksPhase)
+        return outputs.withPhase(phaseAttr)
     }
 }
 

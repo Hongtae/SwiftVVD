@@ -211,36 +211,34 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
 
         let time = Time(seconds: date.timeIntervalSince(self.date))
 
+        // Detect size changes and set the dirty bit.
         let sizeChanged = (contentSize != cachedContentSize)
         if sizeChanged {
             cachedContentSize = contentSize
+            valuesNeedingUpdate.insert(.size)
         }
 
-        viewGraph.data.withCurrent {
-            let changeSet = AttributeGraph.ChangeSet()
-            AttributeGraph.$changeSet.withValue(changeSet) {
+        let changeSet = AttributeGraph.ChangeSet()
+        AttributeGraph.$changeSet.withValue(changeSet) {
 
-                // Drain deferred input events.
-                let events = self.inputEvents.withLock { events in
-                    defer { events.removeAll() }
-                    return events
+            // Drain platform input events before AG evaluation.
+            let events = self.inputEvents.withLock { events in
+                defer { events.removeAll() }
+                return events
+            }
+            events.forEach {
+                switch $0 {
+                case .keyboard(let event): self.onKeyboardEvent(event: event)
+                case .mouse(let event):    self.onMouseEvent(event: event)
                 }
-                events.forEach {
-                    switch $0 {
-                    case .keyboard(let event): self.onKeyboardEvent(event: event)
-                    case .mouse(let event):    self.onMouseEvent(event: event)
-                    }
-                }
+            }
 
-                // Flush @State / @Observable invalidations.
-                viewGraph.data.graph.inbox.drain()
-                viewGraph.data.graph.drainActions()
+            // updateOutputs handles dirty bits, flushes @State/@Observable, and evaluates AG.
+            // Internally it performs data.withCurrent, inbox.drain, updateDelegate, and timeAttr.setValue.
+            viewGraph.updateOutputs(at: time)
 
-                if sizeChanged {
-                    viewGraph.sizeAttr?.setValue(ViewSize(contentSize))
-                }
-                self.viewGraph.timeAttr?.setValue(time)
-
+            // Resource loading requires GraphicsContext, so handle it separately after updateOutputs.
+            viewGraph.data.withCurrent {
                 if let resourceList = viewGraph.rootResourceList?.value,
                    !resourceList.items.isEmpty {
                     withGC(false) { context in
@@ -251,7 +249,10 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
                     viewGraph.data.graph.inbox.drain()
                     viewGraph.data.graph.drainActions()
                 }
+            }
 
+            // Layout placement determines the root view size and position after AG evaluation.
+            viewGraph.data.withCurrent {
                 let lc = rootLayoutComputer.value
                 let proposal = ProposedViewSize(width: cachedContentSize.width,
                                                height: cachedContentSize.height)
@@ -259,8 +260,8 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
                                      y: cachedContentSize.height / 2)
                 lc.place(at: center, anchor: .center, proposal: proposal)
             }
-            redraw = !changeSet.ids.isEmpty || self.viewChangedWhileDrawing
         }
+        redraw = !changeSet.ids.isEmpty || self.viewChangedWhileDrawing
         self.viewChangedWhileDrawing = false
     }
 
@@ -440,7 +441,12 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
         let handleEvent = { (event: MouseEvent) -> Bool in
             if let window = self.window, window !== event.window { return false }
             if event.type == .wheel { return false }
-            let phase = self.gestureGraph!.sendMouseEvent(event)
+            guard let gg = self.gestureGraph else { return false }
+
+            // Route through EventBindingManager.sendDownstream.
+            // Wrap as EventRecord -> eventBindingManager.sendDownstream -> GestureGraph.sendEvents.
+            let record = EventRecord(event, at: self.currentTimestamp)
+            let phase = gg.eventBindingManager.sendDownstream(record, host: gg)
             switch phase {
             case .active, .ended: return true
             default:              return false
