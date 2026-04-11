@@ -8,6 +8,10 @@
 import Foundation
 
 // TapGesture
+//
+// _makeGesture -> create SingleTapGesture<TappableEvent> -> map TappableEvent to Void
+//
+// TapGesture._makeGesture -> SingleTapGesture<TappableEvent>._makeGesture -> map { _ in () }
 
 public struct TapGesture: Gesture {
     public var count: Int
@@ -15,200 +19,34 @@ public struct TapGesture: Gesture {
         self.count = count
     }
 
-    public static func _makeGesture(gesture: _GraphValue<TapGesture>, inputs: _GestureInputs) -> _GestureOutputs<Value> {
+    public typealias Body = Never
+    public typealias Value = Void
+
+    public static func _makeGesture(
+        gesture: _GraphValue<TapGesture>,
+        inputs: _GestureInputs
+    ) -> _GestureOutputs<Void> {
         guard let graph = AttributeGraph.current else {
             fatalError("TapGesture._makeGesture requires AG context")
         }
-
-        let tapCount = gesture._attribute.value.count
-        let recognizer = TapGestureRecognizer(
-            requiredCount: tapCount,
-            transform: inputs.transform,
-            size: inputs.size)
-
-        // Create the phase source-of-truth attribute
-        let phase: Attribute<GesturePhase<Void>> = graph.makeInput(value: .possible(nil))
-        recognizer.phaseAttribute = phase
-
-        // Create an AG rule that reads the events attribute and feeds them to the recognizer.
-        // Whenever the events attribute changes, AG re-evaluates this rule automatically.
-        let eventsAttr = inputs.events
-        let resetSeedAttr = inputs.resetSeed
-        var lastResetSeed: UInt32 = 0
-
-        graph.makeSideEffectRule { () -> Void in
-            let events = eventsAttr.value          // establishes AG dependency on events
-            let currentSeed = resetSeedAttr.value  // establishes dependency on reset seed
-
-            if currentSeed != lastResetSeed {
-                lastResetSeed = currentSeed
-                recognizer.reset()
-            }
-
-            recognizer.processEvents(events)
+        // create SingleTapGesture<TappableEvent> -> AG input node -> run body chain
+        let count = gesture._attribute.value.count
+        let singleTap = SingleTapGesture<TappableEvent>(count: count)
+        let singleTapAttr: Attribute<SingleTapGesture<TappableEvent>> = graph.makeInput(value: singleTap)
+        let rawOutputs = SingleTapGesture<TappableEvent>._makeGesture(
+            gesture: _GraphValue(_attribute: singleTapAttr),
+            inputs: inputs
+        )
+        // map TappableEvent to Void (TapGesture.Value = Void)
+        let mappedPhase: Attribute<GesturePhase<Void>> = graph.makeRule {
+            rawOutputs.phase.value.map { _ in () }
         }
-
-        return _GestureOutputs(phase: phase)
+        return rawOutputs.withPhase(mappedPhase)
     }
-
-    public typealias Body = Never
-    public typealias Value = Void
 }
 
 extension View {
     public func onTapGesture(count: Int = 1, perform action: @escaping () -> Void) -> some View {
         self.gesture(TapGesture(count: count).onEnded(action), including: .all)
-    }
-}
-
-// TapGestureRecognizer
-
-final class TapGestureRecognizer: _GestureRecognizer<Void>, @unchecked Sendable {
-    let requiredCount: Int
-
-    // Per-interaction tracking
-    private var activeDeviceID: Int? = nil
-    private var completedTaps: Int = 0
-    private var lastTapTime: ContinuousClock.Instant = .now
-    private let clock = ContinuousClock()
-
-    private let maximumInterval: ContinuousClock.Duration = .seconds(0.5)
-    private let maximumPressDuration: ContinuousClock.Duration = .seconds(1.0)
-    private var pressStart: ContinuousClock.Instant = .now
-    private var timeoutTask: Task<Void, Never>? = nil
-
-    // Track which event IDs we have already processed to avoid re-processing
-    private var processedBeganIDs: Set<Int> = []
-    private var processedEndedIDs: Set<Int> = []
-
-    // View geometry for hit testing (eventsAttr is broadcast to all recognizers)
-    let transform: Attribute<ViewTransform>
-    let size: Attribute<ViewSize>
-
-    init(requiredCount: Int = 1, transform: Attribute<ViewTransform>, size: Attribute<ViewSize>) {
-        self.requiredCount = requiredCount
-        self.transform = transform
-        self.size = size
-    }
-
-    /// Returns true if `globalPoint` is inside this view's local bounds,
-    /// using the accumulated ViewTransform for the conversion.
-    private func containsGlobalPoint(_ globalPoint: CGPoint) -> Bool {
-        var pts = [globalPoint]
-        transform.value.convertGlobal(to: .local, points: &pts)
-        return CGRect(origin: .zero, size: size.value.value).contains(pts[0])
-    }
-
-    override func processEvents(_ events: [EventID: any EventType]) {
-        guard let graph = AttributeGraph.current else {
-            fatalError("TapGestureRecognizer.processEvents requires AG context")
-        }
-        let inbox = graph.inbox
-
-        for (id, event) in events {
-            guard let tap = event as? TappableEvent else { continue }
-
-            switch tap.phase {
-            case .began:
-                guard !processedBeganIDs.contains(id.serial) else { continue }
-                processedBeganIDs.insert(id.serial)
-
-                if state == .ready {
-                    // Only start if tap is within this view's frame.
-                    // eventsAttr is shared among all gesture recognizers so each
-                    // recognizer must do its own hit test to avoid firing globally.
-                    guard containsGlobalPoint(tap.location) else { continue }
-
-                    // Check tap interval
-                    let now = clock.now
-                    let interval = lastTapTime.duration(to: now)
-                    if completedTaps > 0 && interval > maximumInterval {
-                        completedTaps = 0
-                    }
-                    activeDeviceID = id.serial
-                    pressStart = now
-                    state = .processing
-                    updatePhase(.active(()))
-
-                    let duration = maximumPressDuration
-                    timeoutTask = Task { @MainActor [weak self] in
-                        try? await Task.sleep(for: duration)
-                        guard !Task.isCancelled else { return }
-
-                        inbox.enqueue { [weak self] in
-                            guard let self, self.state == .processing else { return }
-                            self.state = .failed
-                            self.activeDeviceID = nil
-                            self.processedBeganIDs.remove(id.serial)
-                            self.processedEndedIDs.remove(id.serial)
-                            self.updatePhase(.failed)
-                        }
-                    }
-                }
-
-            case .moved:
-                if state == .processing, activeDeviceID == id.serial {
-                    let pressDuration = pressStart.duration(to: clock.now)
-                    if pressDuration > maximumPressDuration {
-                        state = .failed
-                        processedBeganIDs.remove(id.serial)
-                        processedEndedIDs.remove(id.serial)
-                        activeDeviceID = nil
-                        updatePhase(.failed)
-                    }
-                }
-
-            case .ended:
-                timeoutTask?.cancel()
-                timeoutTask = nil
-                guard !processedEndedIDs.contains(id.serial) else { continue }
-                processedEndedIDs.insert(id.serial)
-
-                if state == .processing, activeDeviceID == id.serial {
-                    let now = clock.now
-                    let pressDuration = pressStart.duration(to: now)
-                    if pressDuration > maximumPressDuration {
-                        state = .failed
-                        activeDeviceID = nil
-                        updatePhase(.failed)
-                    } else {
-                        completedTaps += 1
-                        lastTapTime = now
-                        activeDeviceID = nil
-
-                        if completedTaps >= requiredCount {
-                            state = .done
-                            completedTaps = 0
-                            updatePhase(.ended(()))
-                        } else {
-                            state = .ready
-                            updatePhase(.possible(nil))
-                        }
-                    }
-                }
-
-            case .cancelled:
-                timeoutTask?.cancel()
-                timeoutTask = nil
-                if activeDeviceID == id.serial {
-                    activeDeviceID = nil
-                    state = .failed
-                    processedBeganIDs.remove(id.serial)
-                    processedEndedIDs.remove(id.serial)
-                    updatePhase(.failed)
-                }
-            }
-        }
-    }
-
-    override func reset() {
-        timeoutTask?.cancel()
-        timeoutTask = nil
-        super.reset()
-        activeDeviceID = nil
-        completedTaps = 0
-        processedBeganIDs.removeAll()
-        processedEndedIDs.removeAll()
-        updatePhase(.possible(nil))
     }
 }

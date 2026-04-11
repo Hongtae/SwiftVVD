@@ -87,13 +87,13 @@ final class ButtonGestureRecognizer: _GestureRecognizer<Void> {
         for (id, event) in events {
             guard let tap = event as? TappableEvent else { continue }
 
-            switch tap.phase {
+            switch tap.eventPhase {
             case .began:
                 guard !processedBeganSerials.contains(id.serial) else { continue }
                 processedBeganSerials.insert(id.serial)
                 if activeSerial == nil {
                     // Only accept the event if the initial tap is within this view's frame.
-                    guard containsGlobalPoint(tap.location) else { continue }
+                    guard let loc = tap.location, containsGlobalPoint(loc) else { continue }
                     activeSerial = id.serial
                     isHovering = true
                     state = .processing
@@ -103,7 +103,7 @@ final class ButtonGestureRecognizer: _GestureRecognizer<Void> {
 
             case .moved:
                 if activeSerial == id.serial {
-                    let newHover = containsGlobalPoint(tap.location)
+                    let newHover = tap.location.map { containsGlobalPoint($0) } ?? isHovering
                     if newHover != isHovering {
                         isHovering = newHover
                         AttributeGraph.withoutTracking { pressingAction?(isHovering) }

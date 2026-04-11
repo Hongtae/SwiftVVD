@@ -160,19 +160,33 @@ struct EventID: Hashable, CustomStringConvertible {
     var description: String { "\(type)#\(serial)" }
 }
 
+// EventPhase
+//
+/// Common lifecycle phase shared by all EventType values.
+enum EventPhase: UInt8 {
+    case began     = 0
+    case moved     = 1
+    case ended     = 2
+    case cancelled = 3
+}
+
 /// Base protocol for all event payloads carried in the event dictionary.
-protocol EventType {}
+protocol EventType {
+    /// The lifecycle phase of this event.
+    var eventPhase: EventPhase { get }
+    /// The global position of this event, if applicable.
+    var location: CGPoint? { get }
+}
 
 /// Represents a tap/click interaction on desktop (mouse button press).
 struct TappableEvent: EventType {
-    enum Phase { case began, moved, ended, cancelled }
-    var location: CGPoint
-    var phase: Phase
+    var location: CGPoint?
+    var eventPhase: EventPhase
     var buttonID: Int
 
-    init(location: CGPoint, phase: Phase, buttonID: Int = 0) {
+    init(location: CGPoint, phase: EventPhase, buttonID: Int = 0) {
         self.location = location
-        self.phase = phase
+        self.eventPhase = phase
         self.buttonID = buttonID
     }
 }
@@ -181,14 +195,17 @@ struct TappableEvent: EventType {
 struct PanEvent: EventType {
     var translation: CGSize
     var globalTranslation: CGSize
-    var location: CGPoint
+    var location: CGPoint?
     var velocity: CGSize
+    var eventPhase: EventPhase
 
-    init(translation: CGSize, globalTranslation: CGSize, location: CGPoint, velocity: CGSize = .zero) {
+    init(translation: CGSize, globalTranslation: CGSize, location: CGPoint,
+         velocity: CGSize = .zero, phase: EventPhase = .moved) {
         self.translation = translation
         self.globalTranslation = globalTranslation
         self.location = location
         self.velocity = velocity
+        self.eventPhase = phase
     }
 }
 
@@ -224,15 +241,29 @@ struct EventListener<E: EventType>: Gesture {
         self.ignoresOtherEvents = ignoresOtherEvents
     }
 
-    typealias Value = Void
+    // EventListener<E>.Value = E — projects the EventListenerPhase output phase: GesturePhase<E>.
+    typealias Value = E
     typealias Body = Never
 
     static func _makeGesture(gesture: _GraphValue<Self>, inputs: _GestureInputs) -> _GestureOutputs<Value> {
         guard let graph = AttributeGraph.current else {
             fatalError("EventListener._makeGesture requires AG context")
         }
-        let phase: Attribute<GesturePhase<Value>> = graph.makeInput(value: .possible(nil))
-        return _GestureOutputs(phase: phase)
+        let phase = EventListenerPhase<E>(
+            listenerAttr: gesture._attribute,
+            eventsAttr: inputs.events,
+            positionAttr: inputs.position,
+            transformAttr: inputs.transform,
+            resetSeedAttr: inputs.resetSeed,
+            preconvertedBool: inputs.options.contains(.preconvertedEventLocations),
+            ignoresOtherEvents: false,
+            trackingID: nil,
+            lastResetSeed: 0,
+            isTerminal: false
+        )
+        let valueAttr = graph.makeStatefulRule(phase)
+        let phaseAttr: Attribute<GesturePhase<E>> = graph.subscriptNode(parent: valueAttr, keyPath: \.phase)
+        return _GestureOutputs(phase: phaseAttr)
     }
 }
 
@@ -301,15 +332,14 @@ struct EventListenerPhase<E: EventType>: StatefulRule, ResettableGestureRule {
         }
     }
 
-    // StatefulRule.Value = EventListenerPhase<E>.Value, not GesturePhase<Void>.
-    // EventListener.Value is Void, so phase is GesturePhase<Void>.
+    // StatefulRule.Value = EventListenerPhase<E>.Value
     struct Value: Equatable {
-        var phase: GesturePhase<Void>
+        var phase: GesturePhase<E>
         var trackingID: EventID?
         var failureReason: FailureReason?
 
-        // GesturePhase<Void> requires Void: Equatable, so synthesized Equatable is unavailable.
-        // Implement equality manually.
+        // GesturePhase<E> has no E: Equatable constraint, so synthesized Equatable is unavailable.
+        // Implement equality manually by comparing cases only.
         static func == (lhs: Self, rhs: Self) -> Bool {
             guard lhs.trackingID == rhs.trackingID,
                   lhs.failureReason == rhs.failureReason else { return false }
@@ -333,16 +363,63 @@ struct EventListenerPhase<E: EventType>: StatefulRule, ResettableGestureRule {
     var trackingID: EventID?
     var lastResetSeed: UInt32
 
+    // tracks terminal state. 
+    var isTerminal: Bool
+
     mutating func updateValue() {
-        // updateValue() centers on creating and updating GestureComponentResponder<TapComponent<MouseEvent>>.
-        // Full implementation requires Gestures.framework integration, so this remains a stub.
-        // Flow: resetIfNeeded -> iterate eventsAttr -> filter TappableEvent -> GestureComponentResponder.
-        guard resetIfNeeded() else { return }
+        let currentSeed = resetSeedAttr.value
+        if lastResetSeed != currentSeed {
+            // New session: reset state, then continue.
+            resetPhase()
+            lastResetSeed = currentSeed
+        } else if isTerminal {
+            // Same session and already terminal: keep the previous output and skip setStatefulOutput.
+            return
+        }
+        let events = eventsAttr.value
+        let output: Value
+        if let tid = trackingID {
+            if let event = events[tid] as? E {
+                switch event.eventPhase {
+                case .began, .moved:
+                    output = Value(phase: .active(event), trackingID: tid, failureReason: nil)
+                case .ended:
+                    trackingID = nil
+                    isTerminal = true
+                    output = Value(phase: .ended(event), trackingID: nil, failureReason: nil)
+                case .cancelled:
+                    trackingID = nil
+                    isTerminal = true
+                    output = Value(phase: .failed, trackingID: nil, failureReason: nil)
+                }
+            } else {
+                // Tracked event disappeared, so treat it as an implicit cancellation.
+                trackingID = nil
+                isTerminal = true
+                output = Value(phase: .failed, trackingID: nil, failureReason: nil)
+            }
+        } else {
+            // Look for a new began event.
+            var found: (EventID, E)?
+            for (id, event) in events {
+                if let typed = event as? E, typed.eventPhase == .began {
+                    found = (id, typed)
+                    break
+                }
+            }
+            if let (id, event) = found {
+                trackingID = id
+                output = Value(phase: .active(event), trackingID: id, failureReason: nil)
+            } else {
+                output = Value(phase: .possible(nil), trackingID: nil, failureReason: nil)
+            }
+        }
+        AttributeGraph.setStatefulOutput(output)
     }
 
     mutating func resetPhase() {
-        // Clear trackingID and reset the output to .possible(nil).
         trackingID = nil
+        isTerminal = false
         AttributeGraph.setStatefulOutput(Value(phase: .possible(nil), trackingID: nil, failureReason: nil))
     }
 }

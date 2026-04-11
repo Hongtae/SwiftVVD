@@ -6,8 +6,11 @@
 //
 
 import Foundation
-import VVD
 
+// LongPressGesture
+//
+// _makeGesture -> create SingleLongPressGesture<TappableEvent> -> run body chain
+//
 public struct LongPressGesture: Gesture {
     public var minimumDuration: Double
     public var maximumDistance: CGFloat {
@@ -22,38 +25,26 @@ public struct LongPressGesture: Gesture {
         self._maximumDistance = maximumDistance
     }
 
-    public static func _makeGesture(gesture: _GraphValue<Self>, inputs: _GestureInputs) -> _GestureOutputs<Value> {
+    public typealias Value = Bool
+    public typealias Body = Never
+
+    public static func _makeGesture(
+        gesture: _GraphValue<Self>,
+        inputs: _GestureInputs
+    ) -> _GestureOutputs<Bool> {
         guard let graph = AttributeGraph.current else {
             fatalError("LongPressGesture._makeGesture requires AG context")
         }
-
+        // create SingleLongPressGesture<TappableEvent> -> run body chain
+        // maximumDistance will be handled at EventFilter level, currently unimplemented
         let minimumDuration = gesture._attribute.value.minimumDuration
-        let maximumDistance = gesture._attribute.value._maximumDistance
-        let recognizer = LongPressGestureRecognizer(
-            minimumDuration: minimumDuration, maximumDistance: maximumDistance)
-
-        let phase: Attribute<GesturePhase<Bool>> = graph.makeInput(value: .possible(nil))
-        recognizer.phaseAttribute = phase
-
-        let eventsAttr = inputs.events
-        let resetSeedAttr = inputs.resetSeed
-        var lastResetSeed: UInt32 = 0
-
-        graph.makeSideEffectRule { () -> Void in
-            let events = eventsAttr.value
-            let currentSeed = resetSeedAttr.value
-            if currentSeed != lastResetSeed {
-                lastResetSeed = currentSeed
-                recognizer.reset()
-            }
-            recognizer.processEvents(events)
-        }
-
-        return _GestureOutputs(phase: phase)
+        let singleLongPress = SingleLongPressGesture<TappableEvent>(minimumDuration: minimumDuration)
+        let attr: Attribute<SingleLongPressGesture<TappableEvent>> = graph.makeInput(value: singleLongPress)
+        return SingleLongPressGesture<TappableEvent>._makeGesture(
+            gesture: _GraphValue(_attribute: attr),
+            inputs: inputs
+        )
     }
-
-    public typealias Value = Bool
-    public typealias Body = Never
 }
 
 extension View {
@@ -73,96 +64,5 @@ extension View {
                                        maximumDistance: maximumDistance)
             )
         )
-    }
-}
-
-// LongPressGestureRecognizer
-
-final class LongPressGestureRecognizer: _GestureRecognizer<Bool>, @unchecked Sendable {
-    let minimumDuration: Double
-    let maximumDistance: CGFloat
-
-    private var activeSerial: Int? = nil
-    private var startLocation: CGPoint = .zero
-    private var pressTask: Task<Void, Never>? = nil
-    private var processedBeganSerials: Set<Int> = []
-
-    init(minimumDuration: Double, maximumDistance: CGFloat) {
-        self.minimumDuration = minimumDuration
-        self.maximumDistance = maximumDistance
-    }
-
-    override func processEvents(_ events: [EventID: any EventType]) {
-        guard let graph = AttributeGraph.current else {
-            fatalError("LongPressGestureRecognizer.processEvents requires AG context")
-        }
-        let inbox = graph.inbox
-        for (id, event) in events {
-            guard let tap = event as? TappableEvent else { continue }
-
-            switch tap.phase {
-            case .began:
-                guard !processedBeganSerials.contains(id.serial) else { continue }
-                processedBeganSerials.insert(id.serial)
-                if activeSerial == nil {
-                    activeSerial = id.serial
-                    startLocation = tap.location
-                    state = .processing
-                    updatePhase(.active(false))
-
-                    let duration = minimumDuration
-                    pressTask = Task { @MainActor [weak self] in
-                        try? await Task.sleep(nanoseconds: UInt64(duration * 1_000_000_000))
-                        guard !Task.isCancelled else { return }
-
-                        inbox.enqueue { [weak self] in
-                            guard let self else { return }
-                            self.state = .done
-                            self.activeSerial = nil
-                            self.updatePhase(.ended(true))
-                        }
-                    }
-                }
-
-            case .moved:
-                if activeSerial == id.serial {
-                    let dist = (tap.location - startLocation).magnitude
-                    if dist > maximumDistance {
-                        pressTask?.cancel()
-                        pressTask = nil
-                        activeSerial = nil
-                        state = .failed
-                        updatePhase(.failed)
-                    }
-                }
-
-            case .ended:
-                if activeSerial == id.serial {
-                    pressTask?.cancel()
-                    pressTask = nil
-                    activeSerial = nil
-                    state = .failed
-                    updatePhase(.failed)
-                }
-
-            case .cancelled:
-                if activeSerial == id.serial {
-                    pressTask?.cancel()
-                    pressTask = nil
-                    activeSerial = nil
-                    state = .failed
-                    updatePhase(.failed)
-                }
-            }
-        }
-    }
-
-    override func reset() {
-        pressTask?.cancel()
-        pressTask = nil
-        activeSerial = nil
-        processedBeganSerials.removeAll()
-        super.reset()
-        updatePhase(.possible(nil))
     }
 }
