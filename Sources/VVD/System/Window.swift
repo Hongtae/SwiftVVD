@@ -64,6 +64,29 @@ public struct KeyboardEvent {
     public var text: String
 }
 
+public enum GestureEventType {
+    case pan
+    case magnify
+    case rotate
+}
+
+public enum GestureEventPhase {
+    case began
+    case changed
+    case ended
+    case cancelled
+}
+
+public struct GestureEvent {
+    public var type: GestureEventType
+    public weak var window: (any Window)?
+    public var phase: GestureEventPhase
+    public var location: CGPoint
+    public var delta: CGPoint = .zero
+    public var magnification: CGFloat = 0.0
+    public var rotation: CGFloat = 0.0
+}
+
 public enum WindowEventType {
     case created
     case closed
@@ -124,6 +147,7 @@ public protocol WindowEventObserver {
     mutating func addEventObserver(_: AnyObject, handler: @escaping (_: WindowEvent)->Void)
     mutating func addEventObserver(_: AnyObject, handler: @escaping (_: MouseEvent)->Void)
     mutating func addEventObserver(_: AnyObject, handler: @escaping (_: KeyboardEvent)->Void)
+    mutating func addEventObserver(_: AnyObject, handler: @escaping (_: GestureEvent)->Void)
     mutating func removeEventObserver(_: AnyObject)
 }
 
@@ -216,6 +240,10 @@ public extension Window {
         self.eventObservers.addEventObserver(observer, handler: handler)
     }
 
+    func addEventObserver(_ observer: AnyObject, handler: @escaping (_: GestureEvent)->Void) {
+        self.eventObservers.addEventObserver(observer, handler: handler)
+    }
+
     func removeEventObserver(_ observer: AnyObject) {
         self.eventObservers.removeEventObserver(observer)
     }
@@ -232,6 +260,7 @@ public struct WindowEventObserverContainer: WindowEventObserver {
         var windowEventHandler: ((_ event: WindowEvent) -> Void)? = nil
         var mouseEventHandler: ((_ event: MouseEvent) -> Void)? = nil
         var keyboardEventHandler: ((_ event: KeyboardEvent) -> Void)? = nil
+        var gestureEventHandler: ((_ event: GestureEvent) -> Void)? = nil
     }
     private var handlers: [ObjectIdentifier: Handler] = [:]
 
@@ -275,6 +304,16 @@ public struct WindowEventObserverContainer: WindowEventObserver {
         }
     }
 
+    public mutating func addEventObserver(_ observer: AnyObject, handler: @escaping (_: GestureEvent)->Void) {
+        let key = ObjectIdentifier(observer)
+        if var handlers = self.handlers[key] {
+            handlers.gestureEventHandler = handler
+            self.handlers[key] = handlers
+        } else {
+            self.handlers[key] = Handler(observer: observer, gestureEventHandler: handler)
+        }
+    }
+
     public mutating func removeEventObserver(_ observer: AnyObject) {
         let key = ObjectIdentifier(observer)
         self.handlers[key] = nil
@@ -309,6 +348,13 @@ extension Window where Self.EventObserver == WindowEventObserverContainer {
         assert(event.window === self)
         self.eventObservers.activeHandlers().forEach {
             $0.mouseEventHandler?(event)
+        }
+    }
+
+    func postGestureEvent(_ event: GestureEvent) {
+        assert(event.window === self)
+        self.eventObservers.activeHandlers().forEach {
+            $0.gestureEventHandler?(event)
         }
     }
 }
