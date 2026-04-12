@@ -17,8 +17,20 @@ final class MetalSwapChain: SwapChain, @unchecked Sendable {
     private var layer: CAMetalLayer
 
     var displaySyncEnabled: Bool {
-        get { self.layer.displaySyncEnabled }
-        set { self.layer.displaySyncEnabled = newValue }
+        get {
+#if os(macOS) || targetEnvironment(macCatalyst)
+            self.layer.displaySyncEnabled
+#else
+            return true
+#endif
+        }
+        set {
+#if os(macOS) || targetEnvironment(macCatalyst)
+            self.layer.displaySyncEnabled = newValue
+#else
+            Log.warn("[MetalSwapChain] displaySyncEnabled is not supported on this platform.")
+#endif
+        }
     }
 
     private var _pixelFormat: PixelFormat
