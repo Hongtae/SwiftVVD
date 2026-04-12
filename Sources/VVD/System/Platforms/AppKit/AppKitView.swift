@@ -168,7 +168,15 @@ private final class AppKitViewImpl: NSView, NSTextInputClient, NSWindowDelegate,
     override func rightMouseUp(with event: NSEvent) { self.handleMouseUp(event: event) }
     override func otherMouseUp(with event: NSEvent) { self.handleMouseUp(event: event) }
 
-    override func scrollWheel(with event: NSEvent)  { self.postMouseEvent(event) }
+    override func scrollWheel(with event: NSEvent) {
+        if event.phase != [] {
+            // Trackpad pan gesture — forward as GestureEvent.
+            self.postGestureEvent(event)
+        } else {
+            // Traditional mouse wheel — existing path.
+            self.postMouseEvent(event)
+        }
+    }
 
 //    override func mouseEntered(with event: NSEvent) {}
 //    override func mouseExited(with event: NSEvent) {}
@@ -192,6 +200,43 @@ private final class AppKitViewImpl: NSView, NSTextInputClient, NSWindowDelegate,
     override func pressureChange(with event: NSEvent)   { self.postMouseEvent(event) }
     override func tabletPoint(with event: NSEvent)      { self.postMouseEvent(event) }
     override func tabletProximity(with event: NSEvent)  { self.postMouseEvent(event) }
+
+    // MARK: - Gesture Event
+    override func magnify(with event: NSEvent) { self.postGestureEvent(event) }
+    override func rotate(with event: NSEvent)  { self.postGestureEvent(event) }
+
+    func postGestureEvent(_ event: NSEvent) {
+        guard let window = self.proxyWindow else { return }
+
+        let type: GestureEventType
+        switch event.type {
+        case .magnify: type = .magnify
+        case .rotate:  type = .rotate
+        default:       type = .pan  // scrollWheel with phase
+        }
+
+        let phase: GestureEventPhase
+        switch event.phase {
+        case .began:     phase = .began
+        case .changed:   phase = .changed
+        case .ended:     phase = .ended
+        case .cancelled: phase = .cancelled
+        default:         return  // .mayBegin, .stationary, etc. — ignored
+        }
+
+        let location = self.convert(event.locationInWindow, from: nil)
+        let delta = CGPoint(x: event.scrollingDeltaX, y: event.scrollingDeltaY)
+
+        window.postGestureEvent(GestureEvent(
+            type: type,
+            window: window,
+            phase: phase,
+            location: location,
+            delta: delta,
+            magnification: CGFloat(event.magnification),
+            rotation: CGFloat(event.rotation)
+        ))
+    }
 
     // MARK: - Keyboard Event
     override func keyDown(with event: NSEvent) {

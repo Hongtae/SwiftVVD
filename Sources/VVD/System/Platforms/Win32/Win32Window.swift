@@ -36,6 +36,7 @@ private func win32ErrorString(_ code: DWORD) -> String {
     return "Unknown error: \(code)"
 }
 
+@inline(__always)
 private func dpiScaleForWindow(_ hWnd: HWND) -> CGFloat {
     let dpi = GetDpiForWindow(hWnd)
     if dpi != 0 {
@@ -51,6 +52,25 @@ private let updateKeyboardMouseTimeInterval: UINT = 10
 // WINDOW MESSAGE
 private let WM_VVDWINDOW_SHOWCURSOR = (WM_USER + 0x1175)
 private let WM_VVDWINDOW_UPDATEMOUSECAPTURE = (WM_USER + 0x1180)
+
+// WM_GESTURE / WM_GESTURENOTIFY constants (User32, Windows 7+)
+// private let GID_ZOOM: DWORD = 3
+// private let GID_ROTATE: DWORD = 5
+
+// private let GF_BEGIN: DWORD = 0x00000001
+// private let GF_END: DWORD = 0x00000004
+
+// private let GC_ZOOM: DWORD   = 0x00000001
+// private let GC_ROTATE: DWORD = 0x00000001
+
+// Converts GID_ROTATE ullArguments to a cumulative angle in radians.
+// Maps WORD range [0, 65535] to [-2pi, +2pi].
+@inline(__always)
+private func gestureRotateAngle(_ arg: ULONGLONG) -> Double {
+    let word = Double(arg & 0xFFFF)
+    return (word / 65535.0) * (4.0 * Double.pi) - 2.0 * Double.pi
+}
+
 
 nonisolated(unsafe) private let HWND_TOP:HWND? = nil
 nonisolated(unsafe) private let HWND_TOPMOST:HWND = HWND(bitPattern: -1)!
@@ -102,6 +122,10 @@ final class Win32Window: Window {
     private var mouseLocked: Bool = false
     private var textCompositionMode: Bool = false
     private var keyboardStates: [UInt8] = [UInt8](repeating: 0, count: 256)
+
+    // WM_GESTURE tracking for previous values used by incremental delta computation.
+    private var _lastGestureDistance: DWORD = 0
+    private var _lastGestureAngle: Double = 0.0
 
     private var dropTarget: UnsafeMutablePointer<Win32DropTarget>?
 
@@ -1183,6 +1207,62 @@ final class Win32Window: Window {
                 }
                 PostMessageW(hWnd, UINT(WM_VVDWINDOW_UPDATEMOUSECAPTURE), 0, 0)                  
                 return 1 // should return TRUE
+            case UINT(WM_GESTURENOTIFY):
+                // Enable Zoom and Rotate; block Pan so it falls through as WM_MOUSEWHEEL.
+                var configs: [GESTURECONFIG] = [
+                    GESTURECONFIG(dwID: DWORD(GID_ZOOM),   dwWant: DWORD(GC_ZOOM),   dwBlock: 0),
+                    GESTURECONFIG(dwID: DWORD(GID_ROTATE), dwWant: DWORD(GC_ROTATE), dwBlock: 0),
+                ]
+                _ = configs.withUnsafeMutableBufferPointer {
+                    SetGestureConfig(hWnd, 0, UINT($0.count), $0.baseAddress!,
+                                     UINT(MemoryLayout<GESTURECONFIG>.size))
+                }
+                return 0
+
+            case UINT(WM_GESTURE):
+                let hGesture = HGESTUREINFO(bitPattern: Int(lParam))
+                guard let hGesture else { break }
+                var gi = GESTUREINFO()
+                gi.cbSize = UINT(MemoryLayout<GESTUREINFO>.size)
+                guard GetGestureInfo(hGesture, &gi) else { break }
+                defer { _ = CloseGestureInfoHandle(hGesture) }
+
+                var pt = POINT(x: LONG(gi.ptsLocation.x), y: LONG(gi.ptsLocation.y))
+                ScreenToClient(hWnd, &pt)
+                let location = CGPoint(x: Int(pt.x), y: Int(pt.y)) * (1.0 / window.contentScaleFactor)
+
+                let isBegin = gi.dwFlags & DWORD(GF_BEGIN) != 0
+                let isEnd   = gi.dwFlags & DWORD(GF_END)   != 0
+                let phase: GestureEventPhase = isBegin ? .began : (isEnd ? .ended : .changed)
+
+                switch gi.dwID {
+                case DWORD(GID_ZOOM):
+                    let dist = DWORD(gi.ullArguments & 0xFFFFFFFF)
+                    if isBegin { window._lastGestureDistance = dist }
+                    // Incremental magnification: current/previous ratio - 1, matching NSEvent.magnification.
+                    let magnification: CGFloat = window._lastGestureDistance > 0
+                        ? CGFloat(dist) / CGFloat(window._lastGestureDistance) - 1.0
+                        : 0.0
+                    window._lastGestureDistance = dist
+                    window.postGestureEvent(GestureEvent(
+                        type: .magnify, window: window, phase: phase,
+                        location: location, magnification: magnification))
+
+                case DWORD(GID_ROTATE):
+                    let angle = gestureRotateAngle(gi.ullArguments)
+                    if isBegin { window._lastGestureAngle = angle }
+                    // Incremental delta in degrees, negated to match macOS convention.
+                    let rotationDeg = CGFloat(-(angle - window._lastGestureAngle) * 180.0 / .pi)
+                    window._lastGestureAngle = angle
+                    window.postGestureEvent(GestureEvent(
+                        type: .rotate, window: window, phase: phase,
+                        location: location, rotation: rotationDeg))
+
+                default:
+                    break
+                }
+                return 0
+
             case UINT(WM_MOUSEWHEEL):
                 let pts = MAKEPOINTS(lParam)
                 var pt = POINT(x: LONG(pts.x), y: LONG(pts.y))

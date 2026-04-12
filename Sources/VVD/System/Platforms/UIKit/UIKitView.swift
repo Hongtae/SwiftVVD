@@ -58,6 +58,10 @@ private final class UIKitViewImpl: UIView, UITextFieldDelegate, UIKitView {
     nonisolated(unsafe) var observers: [NSObjectProtocol] = []
     var uiActions: [(event: UIControl.Event, action: UIAction)] = []
 
+    // Gesture tracking — previous values for incremental delta computation.
+    private var _lastPinchScale: CGFloat = 1.0
+    private var _lastRotation: CGFloat = 0.0
+
     weak var proxyWindow: UIKitWindow?
 
     override var canBecomeFirstResponder: Bool { true }
@@ -203,6 +207,14 @@ private final class UIKitViewImpl: UIView, UITextFieldDelegate, UIKitView {
         ]
 
         self.appActivated = UIApplication.shared.applicationState == .active
+
+        // Gesture recognizers for GestureEvent delivery.
+        // Pinch and rotation only — pan has no clean platform equivalent on iOS.
+        let pinchGesture = UIPinchGestureRecognizer(target: self, action: #selector(handlePinchGesture(_:)))
+        self.addGestureRecognizer(pinchGesture)
+
+        let rotationGesture = UIRotationGestureRecognizer(target: self, action: #selector(handleRotationGesture(_:)))
+        self.addGestureRecognizer(rotationGesture)
     }
 
     deinit {
@@ -434,6 +446,51 @@ private final class UIKitViewImpl: UIView, UITextFieldDelegate, UIKitView {
                 self.postWindowEvent(type: .activated)
             }
         }
+    }
+
+    // MARK: - Gesture Event
+
+    @objc func handlePinchGesture(_ recognizer: UIPinchGestureRecognizer) {
+        guard let window = self.proxyWindow else { return }
+        let phase: GestureEventPhase
+        switch recognizer.state {
+        case .began:              phase = .began;    _lastPinchScale = 1.0
+        case .changed:            phase = .changed
+        case .ended:              phase = .ended
+        case .cancelled, .failed: phase = .cancelled
+        default: return
+        }
+        // Compute incremental magnification to match AppKit NSEvent.magnification semantics.
+        let magnification = recognizer.scale - _lastPinchScale
+        _lastPinchScale = recognizer.scale
+        window.postGestureEvent(GestureEvent(
+            type: .magnify,
+            window: window,
+            phase: phase,
+            location: recognizer.location(in: self),
+            magnification: magnification))
+    }
+
+    @objc func handleRotationGesture(_ recognizer: UIRotationGestureRecognizer) {
+        guard let window = self.proxyWindow else { return }
+        let phase: GestureEventPhase
+        switch recognizer.state {
+        case .began:              phase = .began;    _lastRotation = 0.0
+        case .changed:            phase = .changed
+        case .ended:              phase = .ended
+        case .cancelled, .failed: phase = .cancelled
+        default: return
+        }
+        // UIKit rotation is cumulative radians; convert increment to degrees
+        // to match AppKit NSEvent.rotation semantics.
+        let rotationDeg = (recognizer.rotation - _lastRotation) * (180.0 / .pi)
+        _lastRotation = recognizer.rotation
+        window.postGestureEvent(GestureEvent(
+            type: .rotate,
+            window: window,
+            phase: phase,
+            location: recognizer.location(in: self),
+            rotation: rotationDeg))
     }
 
     // MARK: - Event
