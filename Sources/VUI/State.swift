@@ -107,15 +107,24 @@ extension State {
             let attr: Attribute<Value> = AGSubgraph.$current.withValue(wiringSubgraph) {
                 graph.makeInput(value: initialValue)
             }
+            // Capture the owning graph so the getter can detect cross-graph calls.
+            // When a button action fires inside GestureGraph's AG context, the current
+            // AttributeGraph is GestureGraph — not the ViewGraph that owns this attr.
+            // Accessing attr.value from the wrong graph causes an index-out-of-range
+            // because each AttributeGraph has its own independent nodes array.
+            let owningGraph = graph
             let location = LocationBox(location: FunctionalLocation<Value>(
                 get: {
-                    // Inside a rule: read the AG node (registers dependency).
-                    if AttributeGraph.current != nil {
+                    // Read the AG node only when executing inside the same graph that
+                    // owns this attribute. Any other context (no AG, or a different
+                    // graph such as GestureGraph) must fall back to the cache.
+                    if AttributeGraph.current === owningGraph {
                         let v = attr.value
                         cache.value = v
                         return v
                     }
-                    // Outside AG context (e.g. action closure): return cached value.
+                    // Outside AG context, or different graph (e.g. GestureGraph firing
+                    // a button action): return cached value without accessing the node.
                     return cache.value
                 },
                 set: { newValue, _ in

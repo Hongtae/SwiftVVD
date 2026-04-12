@@ -118,7 +118,14 @@ final class ButtonGestureRecognizer: _GestureRecognizer<Void> {
                     state = .done
                     AttributeGraph.withoutTracking { pressingAction?(false) }
                     if wasHovering {
-                        AttributeGraph.withoutTracking { action() }
+                        // enqueue via GestureGraph so the action fires in the
+                        // pendingActions drain phase, outside AG evaluation context.
+                        let act = action
+                        if let gg = AttributeGraphRef.current?.context as? GestureGraph {
+                            gg.enqueueAction { act() }
+                        } else {
+                            AttributeGraph.withoutTracking { act() }
+                        }
                         updatePhase(.ended(()))
                     } else {
                         updatePhase(.possible(nil))

@@ -46,6 +46,19 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
     // GestureGraph is the window-level coordinator.
     var gestureGraph: GestureGraph?
 
+    // Platform event -> EventID routing table.
+    // WindowController performs this mapping before forwarding to GestureGraph.
+    private let _nextEventSerial: Atomic<Int> = Atomic(1)
+    private var _touchEventIDs: [Int: EventID] = [:]    // deviceID -> EventID (touch/stylus)
+    private var _mouseEventID: EventID?                   // single mouse pointer EventID
+    private var _panEventID: EventID?                     // trackpad pan gesture EventID
+    private var _panTranslation: CGPoint = .zero
+    private var _activeEvents: [EventID: any EventType] = [:]  // current live event dict
+
+    private func nextEventSerial() -> Int {
+        _nextEventSerial.wrappingAdd(1, ordering: .relaxed).oldValue
+    }
+
     // viewGraph — owns the view-tree AttributeGraph (GraphHost.data) and gesture routing.
     // moved from `let graph: AttributeGraph` + scattered input/output attrs.
     // IUO because gestureGraph must be created and wired before ViewGraph.init runs _makeView.
@@ -79,6 +92,7 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
     enum InputEvent: @unchecked Sendable {
         case keyboard(KeyboardEvent)
         case mouse(MouseEvent)
+        case gesture(GestureEvent)
     }
     private let inputEvents = Mutex<[InputEvent]>([])
 
@@ -171,6 +185,11 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
                     events.append(.mouse(event))
                 }
             }
+            window.addEventObserver(self) { [weak self] (event: GestureEvent) in
+                self?.inputEvents.withLock { events in
+                    events.append(.gesture(event))
+                }
+            }
             self.onWindowCreated(window)
         }
         return window
@@ -211,7 +230,7 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
 
         let time = Time(seconds: date.timeIntervalSince(self.date))
 
-        // Detect size changes and set the dirty bit.
+        // Detect size change and mark the dirty bit.
         let sizeChanged = (contentSize != cachedContentSize)
         if sizeChanged {
             cachedContentSize = contentSize
@@ -230,14 +249,26 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
                 switch $0 {
                 case .keyboard(let event): self.onKeyboardEvent(event: event)
                 case .mouse(let event):    self.onMouseEvent(event: event)
+                case .gesture(let event):  self.handleGestureEvent(event: event)
                 }
             }
 
-            // updateOutputs handles dirty bits, flushes @State/@Observable, and evaluates AG.
-            // Internally it performs data.withCurrent, inbox.drain, updateDelegate, and timeAttr.setValue.
+            // Drain GestureGraph's action outbox — closures deferred from within GestureGraph
+            // AG evaluation (enqueueAction fallback). Run here, outside any AG context,
+            // after gesture events are fully processed.
+            if let gg = self.gestureGraph {
+                let actions = gg.data.graph.actionOutbox
+                if !actions.isEmpty {
+                    gg.data.graph.actionOutbox.removeAll()
+                    actions.forEach { $0() }
+                }
+            }
+
+            // updateOutputs: flush dirty bits, @State/@Observable changes, then evaluate AG.
+            // Internally: data.withCurrent -> inbox.drain -> updateDelegate -> timeAttr.setValue.
             viewGraph.updateOutputs(at: time)
 
-            // Resource loading requires GraphicsContext, so handle it separately after updateOutputs.
+            // Resource loading: requires GraphicsContext, handled separately after updateOutputs.
             viewGraph.data.withCurrent {
                 if let resourceList = viewGraph.rootResourceList?.value,
                    !resourceList.items.isEmpty {
@@ -251,7 +282,7 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
                 }
             }
 
-            // Layout placement determines the root view size and position after AG evaluation.
+            // Layout pass: determine root view size/position after AG evaluation completes.
             viewGraph.data.withCurrent {
                 let lc = rootLayoutComputer.value
                 let proposal = ProposedViewSize(width: cachedContentSize.width,
@@ -441,12 +472,44 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
         let handleEvent = { (event: MouseEvent) -> Bool in
             if let window = self.window, window !== event.window { return false }
             if event.type == .wheel { return false }
-            guard let gg = self.gestureGraph else { return false }
+            guard let gg = self.gestureGraph,
+                  let rootResponder = gg.rootResponder else { return false }
 
-            // Route through EventBindingManager.sendDownstream.
-            // Wrap as EventRecord -> eventBindingManager.sendDownstream -> GestureGraph.sendEvents.
-            let record = EventRecord(event, at: self.currentTimestamp)
-            let phase = gg.eventBindingManager.sendDownstream(record, host: gg)
+            // map deviceID → EventID, build [EventID: EventType] dict,
+            // then forward to GestureGraph via EventGraphHost.sendEvents.
+            let time = self.currentTimestamp
+            let isTouch = event.device == .touch || event.device == .stylus
+
+            let phase: GesturePhase<Void>
+            switch event.type {
+            case .buttonDown:
+                let eventID = EventID(type: TappableEvent.self, serial: self.nextEventSerial())
+                if isTouch { self._touchEventIDs[event.deviceID] = eventID }
+                else        { self._mouseEventID = eventID }
+                self._activeEvents[eventID] = TappableEvent(
+                    location: event.location, phase: .began, buttonID: event.buttonID)
+                phase = gg.sendEvents(self._activeEvents, rootNode: rootResponder, at: time)
+
+            case .move:
+                let eventID = isTouch ? self._touchEventIDs[event.deviceID] : self._mouseEventID
+                guard let eventID else { return false }
+                self._activeEvents[eventID] = TappableEvent(
+                    location: event.location, phase: .moved, buttonID: event.buttonID)
+                phase = gg.sendEvents(self._activeEvents, rootNode: rootResponder, at: time)
+
+            case .buttonUp:
+                let eventID: EventID?
+                if isTouch { eventID = self._touchEventIDs.removeValue(forKey: event.deviceID) }
+                else        { eventID = self._mouseEventID; self._mouseEventID = nil }
+                guard let eventID else { return false }
+                self._activeEvents[eventID] = TappableEvent(
+                    location: event.location, phase: .ended, buttonID: event.buttonID)
+                phase = gg.sendEvents(self._activeEvents, rootNode: rootResponder, at: time)
+                self._activeEvents.removeValue(forKey: eventID)
+
+            default:
+                return false
+            }
             switch phase {
             case .active, .ended: return true
             default:              return false
@@ -509,6 +572,69 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
     }
 
     @discardableResult
+    func handleGestureEvent(event: GestureEvent) -> Bool {
+        if let window = self.window, window !== event.window { return false }
+        guard let gg = self.gestureGraph,
+              let rootResponder = gg.rootResponder else { return false }
+        let time = currentTimestamp
+
+        switch event.type {
+        case .pan:
+            let phase: GesturePhase<Void>
+            switch event.phase {
+            case .began:
+                let eventID = EventID(type: PanEvent.self, serial: nextEventSerial())
+                _panEventID = eventID
+                _panTranslation = .zero
+                _activeEvents[eventID] = PanEvent(
+                    translation: .zero, globalTranslation: .zero,
+                    location: event.location, velocity: .zero, phase: .began)
+                phase = gg.sendEvents(_activeEvents, rootNode: rootResponder, at: time)
+
+            case .changed:
+                guard let eventID = _panEventID else { return false }
+                _panTranslation.x += event.delta.x
+                _panTranslation.y += event.delta.y
+                let t = CGSize(width: _panTranslation.x, height: _panTranslation.y)
+                _activeEvents[eventID] = PanEvent(
+                    translation: t, globalTranslation: t,
+                    location: event.location, velocity: .zero, phase: .moved)
+                phase = gg.sendEvents(_activeEvents, rootNode: rootResponder, at: time)
+
+            case .ended:
+                guard let eventID = _panEventID else { return false }
+                let t = CGSize(width: _panTranslation.x, height: _panTranslation.y)
+                _activeEvents[eventID] = PanEvent(
+                    translation: t, globalTranslation: t,
+                    location: event.location, velocity: .zero, phase: .ended)
+                phase = gg.sendEvents(_activeEvents, rootNode: rootResponder, at: time)
+                _activeEvents.removeValue(forKey: eventID)
+                _panEventID = nil
+                _panTranslation = .zero
+
+            case .cancelled:
+                guard let eventID = _panEventID else { return false }
+                let t = CGSize(width: _panTranslation.x, height: _panTranslation.y)
+                _activeEvents[eventID] = PanEvent(
+                    translation: t, globalTranslation: t,
+                    location: event.location, velocity: .zero, phase: .cancelled)
+                _ = gg.sendEvents(_activeEvents, rootNode: rootResponder, at: time)
+                _activeEvents.removeValue(forKey: eventID)
+                _panEventID = nil
+                _panTranslation = .zero
+                return false
+            }
+            switch phase {
+            case .active, .ended: return true
+            default:              return false
+            }
+
+        case .magnify, .rotate:
+            return false
+        }
+    }
+
+    @discardableResult
     func handleMouseHover(at location: CGPoint, deviceID: Int, isTopMost: Bool) -> Bool {
         var topMost = isTopMost
         self.auxiliaryWindows.withLock({ $0.reversed() }).forEach { aux in
@@ -527,7 +653,12 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
     }
 
     func resetGestureHandlers() {
-        gestureGraph!.resetEvents()
+        gestureGraph?.resetEvents()
+        _touchEventIDs.removeAll()
+        _mouseEventID = nil
+        _panEventID = nil
+        _panTranslation = .zero
+        _activeEvents.removeAll()
     }
 
     // MARK: - ViewGraphRenderDelegate

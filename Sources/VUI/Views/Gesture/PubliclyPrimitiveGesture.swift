@@ -11,9 +11,8 @@ import Foundation
 
 /// Marker protocol for gesture types that implement recognition via `body` computed property.
 ///
-/// Implementation: the default Gesture extension where Self.Value == Self.Body.Value
-/// handles body-based _makeGesture through a gesture[\.body] keypath-derived node.
-/// GestureBodyAccessor StaticBody/DynamicBody is simplified.
+/// The base Gesture extension where Self.Value == Self.Body.Value handles body-based
+/// _makeGesture through gesture[\.body] keypath-derived nodes.
 protocol PubliclyPrimitiveGesture: Gesture {}
 
 // MARK: - TappableEventType
@@ -34,7 +33,7 @@ extension TappableEvent: TappableEventType {}
 ///   EventListener<E>
 ///   -> CategoryGesture<E>         (GestureCategory.select)
 ///   -> RepeatGesture<E>           (requires count taps)
-///   -> RequiredTapCountWriter<E>  (records RequiredTapCountKey preference)
+///   -> RequiredTapCountWriter<E>  (writes RequiredTapCountKey preference)
 struct SingleTapGesture<E: EventType>: Gesture, PubliclyPrimitiveGesture {
     var count: Int
 
@@ -70,13 +69,13 @@ struct SingleTapGesture<E: EventType>: Gesture, PubliclyPrimitiveGesture {
 /// Internal gesture type used by DragGesture.
 /// Implements drag recognition via an AG modifier chain.
 ///
-/// Implementation: GestureGraph converts platform MouseEvent to TappableEvent,
-/// so EventListener<TappableEvent> is used instead.
+/// GestureGraph converts platform MouseEvent to TappableEvent, so
+/// EventListener<TappableEvent> is used.
 ///
 /// body chain (inner -> outer):
 ///   EventListener<TappableEvent>
-///   -> EventFilter<TappableEvent>              (button filtering)
-///   -> CoordinateSpaceGesture<TappableEvent>   (coordinate-space conversion)
+///   -> EventFilter<TappableEvent>                                (button filtering)
+///   -> CoordinateSpaceGesture<TappableEvent>                     (coordinate space transform)
 ///   -> StateContainerGesture<InternalState, TappableEvent, DragGesture.Value>
 struct SpatialDragGesture: Gesture, PubliclyPrimitiveGesture {
     var minimumDistance: CGFloat
@@ -84,7 +83,7 @@ struct SpatialDragGesture: Gesture, PubliclyPrimitiveGesture {
 
     typealias Value = DragGesture.Value
 
-    /// Intermediate state during drag recognition.
+    /// Intermediate state for drag recognition.
     struct InternalState {
         var startLocation: CGPoint = .zero
         var currentLocation: CGPoint = .zero

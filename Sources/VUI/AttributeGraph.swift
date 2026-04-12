@@ -287,9 +287,16 @@ class AttributeGraph: @unchecked Sendable {
         // If setStatefulOutput is not called during a given evaluation, the previous value is kept.
         case stateful(any _AnyStatefulBox)
 
-        // KeyPath-derived node — value is projected from a parent node via a key path.
+        // KeyPath-derived node. The value is projected from a parent node via a key path.
         // The dependency on parent is fixed at creation time and never changes.
         case keyPath(parent: AGAttribute, kp: AnyKeyPath)
+
+        // Cross-graph mirror node. Reads its cached value from a node in another AttributeGraph.
+        // Evaluated lazily via cachedValue(for:) on the source graph (no context switch needed).
+        // Invalidated reactively: when the source node changes, the source graph enqueues a
+        // markNeedsEvaluation call into this graph's inbox. This graph drains the inbox at
+        // the start of each withCurrent block (e.g. GestureGraph.sendEvents).
+        case crossGraphRef(sourceAttr: AGAttribute, sourceGraph: WeakObject<AttributeGraph>)
 
         var isSideEffect: Bool {
             if case .rule(_, let se) = self { return se }
@@ -336,6 +343,23 @@ class AttributeGraph: @unchecked Sendable {
     // Thread-safe bridge for scheduling AG invalidations from arbitrary threads.
     let inbox: AGInbox = AGInbox()
 
+    // Cross-graph observer registry.
+    // When a crossGraphRef node in another graph mirrors a node in this graph, an entry is
+    // registered here. On every setValue / markNeedsEvaluation for that source node, the
+    // target graph is notified via its inbox so that it can invalidate the mirror node when
+    // it next enters an AG context, such as GestureGraph.sendEvents -> data.withCurrent.
+    private struct CrossGraphObserver {
+        weak var targetGraph: AttributeGraph?
+        var targetNodeID: UInt32
+    }
+    private var crossGraphObservers: [UInt32: [CrossGraphObserver]] = [:]
+
+    // Deferred action outbox for closures executed outside AG evaluation context.
+    // Enqueue from within AG evaluation; WindowController drains after all AG work is done.
+    var actionOutbox: [() -> Void] = []
+
+    // MARK: Task Locals
+
     final class ChangeSet: @unchecked Sendable {
         private var _ids: Set<AGAttribute> = []
         var ids: Set<AGAttribute> { _ids }
@@ -370,6 +394,20 @@ class AttributeGraph: @unchecked Sendable {
         return index
     }
 
+    /// Reads the current cached output of the executing StatefulRule node.
+    ///
+    /// Returns the value stored by the most recent setStatefulOutput call.
+    /// This is the output from the previous evaluation.
+    /// Returns nil if no output has been set yet (first evaluation).
+    ///
+    /// Must be called from within StatefulRule.updateValue(). Used by ResettableGestureRule
+    /// to implement phaseValue.getter by reading the previous phase without redundant storage.
+    static func currentStatefulOutput<V>(_ type: V.Type = V.self) -> V? {
+        guard let graph = AttributeGraph.current,
+              let nodeID = AttributeGraph.currentlyEvaluatingNode else { return nil }
+        return graph.slots[Int(nodeID.rawValue)].node?.value as? V
+    }
+
     /// Called from within `StatefulRule.updateValue()` to publish the node's output value.
     ///
     /// Must be called on `AttributeGraph.current` while `updateValue()` is executing.
@@ -395,6 +433,104 @@ class AttributeGraph: @unchecked Sendable {
         slots[Int(index)].node = Node(value: nil, kind: .stateful(_StatefulBox(rule)))
         let attr = Attribute<R.Value>(AGAttribute(rawValue: index))
         AGSubgraph.current?.register(attr.identifier)
+        return attr
+    }
+
+    // MARK: - Cross-Graph Reference
+
+    /// Returns the cached value of a node without requiring this graph to be current.
+    ///
+    /// Used exclusively by crossGraphRef node evaluation: a node in graph B reads a cached
+    /// value from graph A while graph B is current. No evaluation is triggered, so the source
+    /// graph must have already evaluated and cached the value. fatalError if the node has
+    /// never been evaluated (no cached value available yet).
+    func cachedValue(for id: AGAttribute) -> Any? {
+        let index = Int(id.rawValue)
+        guard let node = slots[index].node else {
+            fatalError("cachedValue: node @\(id.rawValue) does not exist in source graph.")
+        }
+        guard let cached = node.value else {
+            fatalError("cachedValue: node @\(id.rawValue) has no cached value — source graph must evaluate first.")
+        }
+        return cached
+    }
+
+    /// Registers a cross-graph observer: when node `sourceAttr` in this graph changes,
+    /// `targetNode` in `targetGraph` is marked dirty via the target graph's inbox.
+    func addCrossGraphObserver(
+        for sourceAttr: AGAttribute,
+        notifying targetGraph: AttributeGraph,
+        targetNode: AGAttribute
+    ) {
+        let entry = CrossGraphObserver(targetGraph: targetGraph, targetNodeID: targetNode.rawValue)
+        crossGraphObservers[sourceAttr.rawValue, default: []].append(entry)
+    }
+
+    /// Removes the cross-graph observer entry for `targetNode` in `targetGraph`
+    /// watching `sourceAttr` in this graph. Called when the crossGraphRef node is removed.
+    func removeCrossGraphObserver(
+        for sourceAttr: AGAttribute,
+        targetGraph: AttributeGraph,
+        targetNode: AGAttribute
+    ) {
+        crossGraphObservers[sourceAttr.rawValue]?.removeAll {
+            $0.targetGraph === targetGraph && $0.targetNodeID == targetNode.rawValue
+        }
+        if crossGraphObservers[sourceAttr.rawValue]?.isEmpty == true {
+            crossGraphObservers.removeValue(forKey: sourceAttr.rawValue)
+        }
+    }
+
+    /// Notifies cross-graph observers of `sourceNodeID` by enqueueing a markNeedsEvaluation
+    /// call into each target graph's inbox. Dead entries (target graph deallocated) are removed.
+    private func notifyCrossGraphObservers(for sourceNodeID: UInt32) {
+        guard var entries = crossGraphObservers[sourceNodeID] else { return }
+        var hasDeadEntries = false
+        for entry in entries {
+            guard let targetGraph = entry.targetGraph else {
+                hasDeadEntries = true
+                continue
+            }
+            let targetID = AGAttribute(rawValue: entry.targetNodeID)
+            targetGraph.inbox.enqueue { [weak targetGraph] in
+                targetGraph?.markNeedsEvaluation(targetID)
+            }
+        }
+        if hasDeadEntries {
+            entries.removeAll { $0.targetGraph == nil }
+            crossGraphObservers[sourceNodeID] = entries.isEmpty ? nil : entries
+        }
+    }
+
+    /// Creates a cross-graph mirror node in this graph that reflects a node from `sourceGraph`.
+    ///
+    /// Must be called within this graph's context (self == AttributeGraph.current).
+    /// The source and target graphs must be different.
+    ///
+    /// The returned attribute is evaluated lazily: on first read, `cachedValue(for:)` is
+    /// called on `sourceGraph`. The node is automatically invalidated whenever the source
+    /// node changes, `sourceGraph` enqueues a `markNeedsEvaluation` into this graph's inbox,
+    /// and the inbox is drained at the start of the next `withCurrent` block.
+    func makeCrossGraphRef<V>(source: Attribute<V>, in sourceGraph: AttributeGraph) -> Attribute<V> {
+        assert(AttributeGraph.current === self,
+               "makeCrossGraphRef: must be called within the target graph's context")
+        precondition(sourceGraph !== self,
+                     "makeCrossGraphRef: source and target graph must be different")
+        let index = allocateSlot()
+        slots[Int(index)].node = Node(
+            value: nil,
+            kind: .crossGraphRef(
+                sourceAttr: source.identifier,
+                sourceGraph: WeakObject(sourceGraph)
+            )
+        )
+        let attr = Attribute<V>(AGAttribute(rawValue: index))
+        AGSubgraph.current?.register(attr.identifier)
+        sourceGraph.addCrossGraphObserver(
+            for: source.identifier,
+            notifying: self,
+            targetNode: attr.identifier
+        )
         return attr
     }
 
@@ -468,10 +604,19 @@ class AttributeGraph: @unchecked Sendable {
             slots[Int(outputIndex)].node?.inputs.remove(id.rawValue)
         }
 
-        // 3. Remove from KeyPath cache if applicable
-        if case .keyPath(let parent, let kp) = slots[index].node?.kind {
+        // 3. Remove from KeyPath cache / cross-graph observer registry if applicable
+        switch slots[index].node?.kind {
+        case .keyPath(let parent, let kp):
             pathIDs.removeValue(forKey: RelativePath(parentID: parent.rawValue, keyPath: kp))
+        case .crossGraphRef(let sourceAttr, let sourceGraphRef):
+            // Unregister from the source graph's observer list so it stops notifying us.
+            sourceGraphRef.value?.removeCrossGraphObserver(
+                for: sourceAttr, targetGraph: self, targetNode: id)
+        default:
+            break
         }
+        // Remove any cross-graph observers that were watching this node (it was a source).
+        crossGraphObservers.removeValue(forKey: id.rawValue)
 
         // 4. Invalidate: increment seed (all AGWeakAttributes pointing here are now stale),
         //    free the slot, and push index to freeList for reuse
@@ -581,8 +726,19 @@ class AttributeGraph: @unchecked Sendable {
             slots[index].node!.needsEvaluation = false
             slots[index].node!.isEvaluating = false
 
+        case .crossGraphRef(let sourceAttr, let sourceGraphRef):
+            // Cross-graph mirror node: read the cached value from the source graph.
+            // No context switch. cachedValue(for:) bypasses the current-graph assertion.
+            // If the source graph has been deallocated, retain the last cached value.
+            if let sourceGraph = sourceGraphRef.value {
+                slots[index].node!.value = sourceGraph.cachedValue(for: sourceAttr)
+            }
+            // If the source graph is gone, keep the last cached value silently.
+            slots[index].node!.needsEvaluation = false
+            slots[index].node!.isEvaluating = false
+
         case .rule(let rule, _):
-            // Regular computed rule — re-run the closure and store the result.
+            // Regular computed rule. Re-run the closure and store the result.
             clearInputs(for: id)
             let newValue = AttributeGraph.$currentlyEvaluatingNode.withValue(id) {
                 rule()
@@ -619,9 +775,11 @@ class AttributeGraph: @unchecked Sendable {
                 sideEffects.append(UInt32(index))
             }
             queue.append(contentsOf: node.outputs)
+            // Propagate to cross-graph mirror nodes watching this node.
+            notifyCrossGraphObservers(for: UInt32(index))
         }
         // Eagerly evaluate side-effect nodes in dependency order (parents before children).
-        // Skipped when called from removeNode — inputs may already be freed.
+        // Skipped when called from removeNode because inputs may already be freed.
         guard evaluateSideEffects else { return }
         for id in sideEffects {
             let index = Int(id)
@@ -753,6 +911,9 @@ class AttributeGraph: @unchecked Sendable {
             return "@\(id.rawValue)(stateful)"
         case .input:
             return "@\(id.rawValue)(input)"
+        case .crossGraphRef(let sourceAttr, let sourceGraphRef):
+            let srcDesc = sourceGraphRef.value != nil ? "@\(sourceAttr.rawValue)" : "@\(sourceAttr.rawValue)(dead)"
+            return "@\(id.rawValue)(crossRef→\(srcDesc))"
         }
     }
 }

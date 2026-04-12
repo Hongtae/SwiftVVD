@@ -53,6 +53,20 @@ public struct ExclusiveGesture<First, Second>: Gesture where First: Gesture, Sec
     // ExclusivePhase<A, B>: Rule (nested to access ExclusiveGesture.Value)
     //
     // Combines first/second outputs into the exclusive combined phase.
+    //
+    // Decision tree:
+    //   f.active -> .active(.first(v))
+    //   f.ended -> .ended(.first(v))
+    //   f.failed -> delegate to second:
+    //     s.active -> .active(.second(v))
+    //     s.ended -> .ended(.second(v))
+    //     s.failed -> .failed
+    //     s.possible -> .possible(nil)
+    //   f.possible -> delegate to second:
+    //     s.active -> .active(.second(v))
+    //     s.ended -> .ended(.second(v))
+    //     s.failed -> .possible(nil)   // remains possible, not failed
+    //     s.possible -> .possible(nil)
     private struct ExclusivePhase: Rule {
         typealias Value = GesturePhase<ExclusiveGesture.Value>
         let firstPhase: Attribute<GesturePhase<First.Value>>
@@ -72,7 +86,12 @@ public struct ExclusiveGesture<First, Second>: Gesture where First: Gesture, Sec
                 case .possible:      return .possible(nil)
                 }
             case .possible:
-                return .possible(nil)
+                switch s {
+                case .ended(let v):  return .ended(.second(v))
+                case .active(let v): return .active(.second(v))
+                case .failed:        return .possible(nil)  // .possible, NOT .failed
+                case .possible:      return .possible(nil)
+                }
             }
         }
     }
