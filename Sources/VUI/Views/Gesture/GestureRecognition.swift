@@ -7,9 +7,7 @@
 
 import Foundation
 
-// ─────────────────────────────────────────────────────────────────────────────
 // MARK: - DependentGesture
-// ─────────────────────────────────────────────────────────────────────────────
 
 // DependentGesture<E>._makeGesture -> DependentPhase<E>: Rule
 // DependentPhase reads GestureDependency.Key preference to determine priority
@@ -29,9 +27,7 @@ struct DependentGesture<E: EventType>: GestureModifier {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // MARK: - EventFilter
-// ─────────────────────────────────────────────────────────────────────────────
 
 // EventFilter<E>._makeGesture -> EventFilterEvents<E>: Rule + filtered events attr
 struct EventFilter<E: EventType>: GestureModifier {
@@ -40,7 +36,7 @@ struct EventFilter<E: EventType>: GestureModifier {
     typealias Body = Never
 
     // EventFilter is used to filter events before they reach the body gesture.
-    // currently pass-through without predicate because type filtering happens in EventListenerPhase
+    // Currently pass-through without predicate because type filtering happens in EventListenerPhase.
     var predicate: ((E) -> Bool)?
 
     static func makeGesture(
@@ -48,14 +44,12 @@ struct EventFilter<E: EventType>: GestureModifier {
         inputs: _GestureInputs,
         body: (_GestureInputs) -> _GestureOutputs<E>
     ) -> _GestureOutputs<E> {
-        // predicate filtering happens at EventListenerPhase level, so pass through
+        // Predicate filtering happens at EventListenerPhase level, so pass through.
         body(inputs)
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // MARK: - CategoryGesture
-// ─────────────────────────────────────────────────────────────────────────────
 
 // CategoryGesture<E>: calls body as-is, then injects GestureCategory.Key preference
 struct CategoryGesture<E: EventType>: GestureModifier {
@@ -70,15 +64,13 @@ struct CategoryGesture<E: EventType>: GestureModifier {
         inputs: _GestureInputs,
         body: (_GestureInputs) -> _GestureOutputs<E>
     ) -> _GestureOutputs<E> {
-        // inject GestureCategory.Key preference into outputs
-        // preference injection is not implemented yet, so pass through
+        // Inject GestureCategory.Key preference into outputs.
+        // Preference injection is not implemented yet, so pass through.
         body(inputs)
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // MARK: - RepeatGesture / RepeatResetSeed / RepeatPhase
-// ─────────────────────────────────────────────────────────────────────────────
 
 // RepeatGesture<E>: handles multi-tap recognition
 // RepeatResetSeed: Rule -> Value=UInt32 (sum of two attrs)
@@ -177,7 +169,7 @@ struct RepeatPhase<E: EventType>: StatefulRule, ResettableGestureRule {
 
         // Check inter-tap timeout (maximumDelay exceeded since last tap)
         if !isFirstTap && lastTapTime > 0 && (now - lastTapTime) > maximumDelay {
-            // tap interval exceeded, fail
+            // Tap interval exceeded, fail.
             isFirstTap = true
             completedTaps = 0
             AttributeGraph.setStatefulOutput(GesturePhase<E>.failed)
@@ -189,13 +181,13 @@ struct RepeatPhase<E: EventType>: StatefulRule, ResettableGestureRule {
             if completedTaps == 0 {
                 AttributeGraph.setStatefulOutput(GesturePhase<E>.possible(nil))
             }
-            // keep possible while a tap sequence is in progress
+            // Keep possible while a tap sequence is in progress.
         case .active(let v):
             lastActivePhase = childPhase
             if completedTaps == 0 {
                 isFirstTap = false
             }
-            // count==1: become active immediately
+            // count==1: become active immediately.
             if requiredCount == 1 {
                 AttributeGraph.setStatefulOutput(GesturePhase<E>.active(v))
             } else {
@@ -206,15 +198,15 @@ struct RepeatPhase<E: EventType>: StatefulRule, ResettableGestureRule {
             lastTapTime = now
 
             if completedTaps >= requiredCount {
-                // required tap count reached, succeed
+                // Required tap count reached, succeed.
                 completedTaps = 0
                 isFirstTap = true
-                // increment tapCountAttr to signal RepeatResetSeed
+                // Increment tapCountAttr to signal RepeatResetSeed.
                 let newCount = tapCountAttr.value &+ 1
                 tapCountAttr.setValue(newCount)
                 AttributeGraph.setStatefulOutput(GesturePhase<E>.ended(v))
             } else {
-                // more taps needed, stay possible
+                // More taps needed, stay possible.
                 AttributeGraph.setStatefulOutput(GesturePhase<E>.possible(nil))
             }
         case .failed:
@@ -225,9 +217,7 @@ struct RepeatPhase<E: EventType>: StatefulRule, ResettableGestureRule {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // MARK: - RequiredTapCountKey / RequiredTapCountWriter
-// ─────────────────────────────────────────────────────────────────────────────
 
 // RequiredTapCountKey: PreferenceKey propagates required tap count up the view tree
 enum RequiredTapCountKey: PreferenceKey {
@@ -259,5 +249,151 @@ struct RequiredTapCountWriter<E: EventType>: GestureModifier {
         let countAttr: Attribute<Int?> = graph.makeInput(value: modifier._attribute.value.count)
         bodyOutputs.appendPreference(key: RequiredTapCountKey.self, value: countAttr)
         return bodyOutputs
+    }
+}
+
+// MARK: - SizeGesture / SizeGestureChild
+
+// SizeGesture<T>: wraps inner gesture T with reactive CGSize from inputs.size.
+// _makeGesture reads the ViewSize AG attribute, calls content(size), and then
+// calls T._makeGesture with the resulting _GraphValue<T>.
+struct SizeGesture<T: Gesture>: Gesture {
+    typealias Value = T.Value
+    typealias Body = Never
+
+    var content: (CGSize) -> T
+
+    public var body: Never { fatalError("SizeGesture.body must not be called") }
+
+    static func _makeGesture(
+        gesture: _GraphValue<Self>,
+        inputs: _GestureInputs
+    ) -> _GestureOutputs<T.Value> {
+        guard let graph = AttributeGraph.current else {
+            fatalError("SizeGesture._makeGesture requires AG context")
+        }
+        let sizeAttr = inputs.size
+        let contentGV = gesture[\.content]
+
+        // Reactive rule that calls content(currentSize) -> T.
+        let contentAttr = contentGV._attribute
+        let childAttr: Attribute<T> = graph.makeRule {
+            let size = sizeAttr.value.value      // CGSize
+            let content = contentAttr.value      // (CGSize) -> T
+            return content(size)
+        }
+        return T._makeGesture(gesture: _GraphValue(_attribute: childAttr), inputs: inputs)
+    }
+}
+
+// MARK: - DelayedGesture / DelayedPhase
+
+// DelayedGesture<T>: GestureModifier that requires T to be active for `duration` seconds
+//   before passing through. Used in PrimitiveButtonGestureCore.body with duration=0.
+struct DelayedGesture<T: EventType>: GestureModifier {
+    typealias BodyValue = T
+    typealias Value = T
+    typealias Body = Never
+
+    var duration: Double      // required hold duration (0 = immediate)
+    var filter: (T) -> Bool   // event pre-filter
+
+    init(duration: Double = 0.0, filter: @escaping (T) -> Bool = { _ in true }) {
+        self.duration = duration
+        self.filter = filter
+    }
+
+    static func makeGesture(
+        modifier: _GraphValue<Self>,
+        inputs: _GestureInputs,
+        body: (_GestureInputs) -> _GestureOutputs<T>
+    ) -> _GestureOutputs<T> {
+        guard let graph = AttributeGraph.current else {
+            fatalError("DelayedGesture.makeGesture requires AG context")
+        }
+        let innerOutputs = body(inputs)
+        let delayed = DelayedPhase(
+            modifierAttr:   modifier._attribute,
+            innerPhaseAttr: innerOutputs.phase,
+            resetSeedAttr:  inputs.resetSeed,
+            timeAttr:       inputs.time
+        )
+        let resultAttr = graph.makeStatefulRule(delayed)
+        return innerOutputs.withPhase(resultAttr)
+    }
+}
+
+// DelayedPhase<T>: StatefulRule + ResettableGestureRule
+// Holds state: startTimestamp, pendingFlag (0=idle,1=waiting,2=fired), lastResetSeed.
+// When duration==0: immediate pass-through (common case for _ButtonGesture).
+// When duration>0: waits until elapsed >= duration before becoming .active.
+struct DelayedPhase<T: EventType>: StatefulRule, ResettableGestureRule {
+    typealias Value = GesturePhase<T>
+    typealias PhaseValue = T
+
+    let modifierAttr:   Attribute<DelayedGesture<T>>
+    let innerPhaseAttr: Attribute<GesturePhase<T>>
+    let resetSeedAttr:  Attribute<UInt32>
+    let timeAttr:       Attribute<Time>
+
+    var startTimestamp: Double = 0  // delay start time
+    var pendingFlag: UInt8 = 0      // 0=idle, 1=waiting, 2=fired
+    var lastResetSeed: UInt32 = 0
+
+    // ResettableGestureRule
+    var resetSeed: UInt32 { resetSeedAttr.value }
+    var phaseValue: GesturePhase<T> {
+        AttributeGraph.currentStatefulOutput() ?? .possible(nil)
+    }
+
+    mutating func resetPhase() {
+        pendingFlag = 0
+        startTimestamp = 0
+        AttributeGraph.setStatefulOutput(GesturePhase<T>.possible(nil))
+    }
+
+    mutating func updateValue() {
+        guard resetIfNeeded() else { return }
+
+        let modifier = modifierAttr.value
+        let inner = innerPhaseAttr.value
+
+        switch inner {
+        case .possible(let v):
+            pendingFlag = 0
+            AttributeGraph.setStatefulOutput(GesturePhase<T>.possible(v))
+        case .failed:
+            pendingFlag = 0
+            AttributeGraph.setStatefulOutput(GesturePhase<T>.failed)
+        case .active(let ev):
+            // duration=0 or pendingFlag==2: immediate pass-through.
+            if modifier.duration <= 0 {
+                pendingFlag = 2  // mark fired so .ended passes through correctly
+                AttributeGraph.setStatefulOutput(GesturePhase<T>.active(ev))
+            } else if pendingFlag == 0 {
+                startTimestamp = timeAttr.value.seconds
+                pendingFlag = 1
+                AttributeGraph.setStatefulOutput(GesturePhase<T>.possible(nil))
+                // Re-evaluate on the next event delivery.
+            } else if pendingFlag == 1 {
+                let elapsed = timeAttr.value.seconds - startTimestamp
+                if elapsed >= modifier.duration {
+                    AttributeGraph.setStatefulOutput(GesturePhase<T>.active(ev))
+                    pendingFlag = 2
+                } else {
+                    AttributeGraph.setStatefulOutput(GesturePhase<T>.possible(nil))
+                }
+            } else {  // pendingFlag == 2: already fired
+                AttributeGraph.setStatefulOutput(GesturePhase<T>.active(ev))
+            }
+        case .ended(let ev):
+            // End before duration fails; end after duration succeeds.
+            if pendingFlag == 2 {
+                AttributeGraph.setStatefulOutput(GesturePhase<T>.ended(ev))
+            } else {
+                AttributeGraph.setStatefulOutput(GesturePhase<T>.failed)
+            }
+            pendingFlag = 0
+        }
     }
 }

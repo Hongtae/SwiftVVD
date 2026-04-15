@@ -22,9 +22,9 @@ protocol WindowInputEventHandler {
     func resetGestureHandlers()
 }
 
-// WindowController — owns ViewGraph and drives rendering + event dispatch.
+// WindowController owns ViewGraph and drives rendering + event dispatch.
 // Non-generic: the Content type is used only at init for AG wiring, then discarded.
-// Optionally owns a WindowContext — created lazily on the first makeWindow() call.
+// Optionally owns a WindowContext, created lazily on the first makeWindow() call.
 // Overlay-mode aux/modal controllers never call makeWindow(), so windowContext stays nil.
 class WindowController: AuxiliaryWindowHost, ModalWindowHost,
                         WindowInputEventHandler, WindowDelegate,
@@ -42,7 +42,7 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
     var sharedContext: SharedContext
     let sceneResources: SceneResources
 
-    // gestureGraph — owned directly by WindowController.
+    // gestureGraph is owned directly by WindowController.
     // GestureGraph is the window-level coordinator.
     var gestureGraph: GestureGraph?
 
@@ -51,6 +51,8 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
     private let _nextEventSerial: Atomic<Int> = Atomic(1)
     private var _touchEventIDs: [Int: EventID] = [:]    // deviceID -> EventID (touch/stylus)
     private var _mouseEventID: EventID?                   // single mouse pointer EventID
+    private var _spatialEventIDs: [Int: EventID] = [:]   // deviceID -> spatial EventID (touch)
+    private var _mouseSpatialEventID: EventID? = nil      // single mouse pointer spatial EventID
     private var _panEventID: EventID?                     // trackpad pan gesture EventID
     private var _panTranslation: CGPoint = .zero
     private var _activeEvents: [EventID: any EventType] = [:]  // current live event dict
@@ -59,7 +61,7 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
         _nextEventSerial.wrappingAdd(1, ordering: .relaxed).oldValue
     }
 
-    // viewGraph — owns the view-tree AttributeGraph (GraphHost.data) and gesture routing.
+    // viewGraph owns the view-tree AttributeGraph (GraphHost.data) and gesture routing.
     // moved from `let graph: AttributeGraph` + scattered input/output attrs.
     // IUO because gestureGraph must be created and wired before ViewGraph.init runs _makeView.
     var viewGraph: ViewGraph { _viewGraph }
@@ -129,15 +131,15 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
         }
         self.date = .now
 
-        // Create GestureGraph first — it owns an independent AG.
+        // Create GestureGraph first. It owns an independent AG.
         // GraphHost.Data.init() internally for an independent AG. ViewGraph's AG is separate.
         // WindowController owns both GestureGraph and ViewGraph.
         self.gestureGraph = GestureGraph()
-        // Wire rendererHost back-reference before ViewGraph.init — GestureResponder.init
+        // Wire rendererHost back-reference before ViewGraph.init. GestureResponder.init
         // reads viewGraph.rendererHost?.gestureGraph during _makeView.
         self.gestureGraph!.rendererHost = self
 
-        // Create ViewGraph — does full AG wiring including _makeView which may create GestureResponders.
+        // Create ViewGraph. It does full AG wiring including _makeView, which may create GestureResponders.
         // rendererHost: self must be set on GestureGraph before this call.
         self._viewGraph = ViewGraph(rootViewType: Content.self, content: contentValue, rendererHost: self)
         
@@ -253,7 +255,7 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
                 }
             }
 
-            // Drain GestureGraph's action outbox — closures deferred from within GestureGraph
+            // Drain GestureGraph's action outbox. Closures deferred from within GestureGraph
             // AG evaluation (enqueueAction fallback). Run here, outside any AG context,
             // after gesture events are fully processed.
             if let gg = self.gestureGraph {
@@ -475,7 +477,7 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
             guard let gg = self.gestureGraph,
                   let rootResponder = gg.rootResponder else { return false }
 
-            // map deviceID → EventID, build [EventID: EventType] dict,
+            // Map deviceID -> EventID, build [EventID: EventType] dict,
             // then forward to GestureGraph via EventGraphHost.sendEvents.
             let time = self.currentTimestamp
             let isTouch = event.device == .touch || event.device == .stylus
@@ -483,29 +485,57 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
             let phase: GesturePhase<Void>
             switch event.type {
             case .buttonDown:
-                let eventID = EventID(type: TappableEvent.self, serial: self.nextEventSerial())
-                if isTouch { self._touchEventIDs[event.deviceID] = eventID }
-                else        { self._mouseEventID = eventID }
-                self._activeEvents[eventID] = TappableEvent(
+                let serial = self.nextEventSerial()
+                let tapEventID     = EventID(type: TappableEvent.self, serial: serial)
+                let spatialEventID = EventID(type: SpatialEvent.self,  serial: serial)
+                if isTouch {
+                    self._touchEventIDs[event.deviceID] = tapEventID
+                    self._spatialEventIDs[event.deviceID] = spatialEventID
+                } else {
+                    self._mouseEventID = tapEventID
+                    self._mouseSpatialEventID = spatialEventID
+                }
+                self._activeEvents[tapEventID]     = TappableEvent(
                     location: event.location, phase: .began, buttonID: event.buttonID)
+                self._activeEvents[spatialEventID] = SpatialEvent(
+                    location: event.location, globalLocation: event.location,
+                    phase: .began, timestamp: time.seconds)
                 phase = gg.sendEvents(self._activeEvents, rootNode: rootResponder, at: time)
 
             case .move:
-                let eventID = isTouch ? self._touchEventIDs[event.deviceID] : self._mouseEventID
-                guard let eventID else { return false }
-                self._activeEvents[eventID] = TappableEvent(
+                let tapEventID     = isTouch ? self._touchEventIDs[event.deviceID]   : self._mouseEventID
+                let spatialEventID = isTouch ? self._spatialEventIDs[event.deviceID] : self._mouseSpatialEventID
+                guard let tapEventID else { return false }
+                self._activeEvents[tapEventID] = TappableEvent(
                     location: event.location, phase: .moved, buttonID: event.buttonID)
+                if let spatialEventID {
+                    self._activeEvents[spatialEventID] = SpatialEvent(
+                        location: event.location, globalLocation: event.location,
+                        phase: .moved, timestamp: time.seconds)
+                }
                 phase = gg.sendEvents(self._activeEvents, rootNode: rootResponder, at: time)
 
             case .buttonUp:
-                let eventID: EventID?
-                if isTouch { eventID = self._touchEventIDs.removeValue(forKey: event.deviceID) }
-                else        { eventID = self._mouseEventID; self._mouseEventID = nil }
-                guard let eventID else { return false }
-                self._activeEvents[eventID] = TappableEvent(
+                let tapEventID: EventID?
+                let spatialEventID: EventID?
+                if isTouch {
+                    tapEventID     = self._touchEventIDs.removeValue(forKey: event.deviceID)
+                    spatialEventID = self._spatialEventIDs.removeValue(forKey: event.deviceID)
+                } else {
+                    tapEventID     = self._mouseEventID;        self._mouseEventID = nil
+                    spatialEventID = self._mouseSpatialEventID; self._mouseSpatialEventID = nil
+                }
+                guard let tapEventID else { return false }
+                self._activeEvents[tapEventID] = TappableEvent(
                     location: event.location, phase: .ended, buttonID: event.buttonID)
+                if let spatialEventID {
+                    self._activeEvents[spatialEventID] = SpatialEvent(
+                        location: event.location, globalLocation: event.location,
+                        phase: .ended, timestamp: time.seconds)
+                }
                 phase = gg.sendEvents(self._activeEvents, rootNode: rootResponder, at: time)
-                self._activeEvents.removeValue(forKey: eventID)
+                self._activeEvents.removeValue(forKey: tapEventID)
+                if let spatialEventID { self._activeEvents.removeValue(forKey: spatialEventID) }
 
             default:
                 return false
@@ -656,6 +686,8 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
         gestureGraph?.resetEvents()
         _touchEventIDs.removeAll()
         _mouseEventID = nil
+        _spatialEventIDs.removeAll()
+        _mouseSpatialEventID = nil
         _panEventID = nil
         _panTranslation = .zero
         _activeEvents.removeAll()
@@ -666,26 +698,26 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
     // viewGraph.renderDelegate = self is set at end of init.
     // updateRenderContext is called once per frame in updateFrame (before updateView).
 
-    // renderingRootView — the root "platform view" being rendered.
+    // renderingRootView is the root "platform view" being rendered.
     // WindowController IS the rendering host, so return self.
     var renderingRootView: AnyObject { self }
 
-    // updateRenderContext — fills in per-frame render parameters.
+    // updateRenderContext fills in per-frame render parameters.
     // contentsScale: from sceneResources (updated by WindowContext on window events).
     // opaqueBackground: true if config background has no transparency.
     func updateRenderContext(_ context: inout ViewGraphRenderContext) {
         context.contentsScale = sceneResources.contentScaleFactor
-        // backgroundColor.opacity is 0.0–1.0; treat >= 1.0 as fully opaque.
-        // backgroundColor is VVD.Color; .a is the alpha Scalar (0.0–1.0).
+        // backgroundColor.opacity is 0.0-1.0. Treat >= 1.0 as fully opaque.
+        // backgroundColor is VVD.Color. .a is the alpha Scalar (0.0-1.0).
         context.opaqueBackground = (config.backgroundColor.a >= 1.0)
     }
 
-    // withMainThreadRender — ensures body runs on the main render thread.
+    // withMainThreadRender ensures body runs on the main render thread.
     func withMainThreadRender(wasAsync: Bool, _ body: () -> Time) -> Time {
         return body()
     }
 
-    // renderIntervalForDisplayLink — how long until the next frame should be rendered.
+    // renderIntervalForDisplayLink returns how long until the next frame should be rendered.
     func renderIntervalForDisplayLink(timestamp: Time) -> Double {
         return 0.0
     }

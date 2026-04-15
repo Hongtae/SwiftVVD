@@ -184,7 +184,8 @@ extension AddGestureModifier {
         guard let graph = AttributeGraph.current else {
             fatalError("AddGestureModifier._makeSessionGesture requires AG context")
         }
-        let rawOutputs = T._makeGesture(gesture: modifier[\.gesture], inputs: inputs)
+        let gestureGV = modifier[\.gesture]
+        let rawOutputs = T._makeGesture(gesture: gestureGV, inputs: inputs)
         let mappedPhase: Attribute<GesturePhase<()>> = graph.makeRule {
             rawOutputs.phase.value.map { _ in () }
         }

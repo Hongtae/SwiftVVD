@@ -175,7 +175,7 @@ protocol EventType {
     /// The lifecycle phase of this event.
     var eventPhase: EventPhase { get }
     /// The global position of this event, if applicable.
-    /// { get set } — required so CoordinateSpaceGesture can create transformed copies by mutating location.
+    /// { get set } is required so CoordinateSpaceGesture can create transformed copies by mutating location.
     var location: CGPoint? { get set }
 }
 
@@ -189,6 +189,53 @@ struct TappableEvent: EventType {
         self.location = location
         self.eventPhase = phase
         self.buttonID = buttonID
+    }
+}
+
+// SpatialEventType: EventType refinement for spatial pointer/touch events.
+protocol SpatialEventType: EventType {
+    var globalLocation: CGPoint { get set }
+    var radius: CGFloat { get }
+    var kind: SpatialEvent.Kind? { get }
+}
+
+// SpatialEvent
+// Spatial event used by PrimitiveButtonGestureCore.
+// Separate from TappableEvent because it carries spatial movement metadata.
+struct SpatialEvent: EventType, SpatialEventType, Equatable {
+    // MouseEvent.kind=1(pointer), PanEvent.kind=2(touch), default nil=3(sentinel)
+    enum Kind: UInt8, Hashable, Equatable {
+        case pointer = 1  // mouse/trackpad pointer
+        case touch   = 2  // direct touch (finger/pencil)
+    }
+
+    // EventType requirement
+    var location: CGPoint?          // always non-nil for spatial events in VUI
+    // SpatialEventType requirements
+    var globalLocation: CGPoint
+    var radius: CGFloat
+    var kind: Kind?
+    // Common EventType fields
+    var eventPhase: EventPhase
+
+    var timestamp: Double              // event timestamp (seconds)
+
+    init(location: CGPoint?, globalLocation: CGPoint, phase: EventPhase,
+         timestamp: Double = 0.0, kind: Kind? = nil, radius: CGFloat = 0.0) {
+        self.location = location
+        self.globalLocation = globalLocation
+        self.eventPhase = phase
+        self.timestamp = timestamp
+        self.kind = kind
+        self.radius = radius
+    }
+
+    static func == (lhs: SpatialEvent, rhs: SpatialEvent) -> Bool {
+        lhs.location == rhs.location &&
+        lhs.globalLocation == rhs.globalLocation &&
+        lhs.eventPhase == rhs.eventPhase &&
+        lhs.radius == rhs.radius &&
+        lhs.kind == rhs.kind
     }
 }
 
@@ -242,7 +289,7 @@ struct EventListener<E: EventType>: Gesture {
         self.ignoresOtherEvents = ignoresOtherEvents
     }
 
-    // EventListener<E>.Value = E — projects phase: GesturePhase<E> from EventListenerPhase output
+    // EventListener<E>.Value = E. Projects phase: GesturePhase<E> from EventListenerPhase output.
     typealias Value = E
     typealias Body = Never
 
@@ -280,7 +327,7 @@ protocol ResettableGestureRule: StatefulRule {
     var resetSeed: UInt32 { get }
     /// Last seed value processed by this rule.
     var lastResetSeed: UInt32 { get set }
-    /// Current output phase — read from the AG node's cached stateful output.
+    /// Current output phase, read from the AG node's cached stateful output.
     /// Reads the phase from the cached stateful output.
     var phaseValue: GesturePhase<PhaseValue> { get }
     /// Resets the gesture phase to its initial state (.possible(nil)).
@@ -394,14 +441,26 @@ struct EventListenerPhase<E: EventType>: StatefulRule, ResettableGestureRule {
         guard resetIfNeeded() else { return }
         let events = eventsAttr.value
         let output: Value
+
+        // Helper: convert an event's global location to local view coordinates when needed.
+        // preconvertedBool=true skips this because events are already in local coordinates.
+        func localised(_ event: E) -> E {
+            guard !preconvertedBool, let globalLoc = event.location else { return event }
+            var e = event
+            var pts = [globalLoc]
+            transformAttr.value.convertGlobal(to: .local, points: &pts)
+            e.location = pts[0]
+            return e
+        }
+
         if let tid = trackingID {
             if let event = events[tid] as? E {
                 switch event.eventPhase {
                 case .began, .moved:
-                    output = Value(phase: .active(event), trackingID: tid, failureReason: nil)
+                    output = Value(phase: .active(localised(event)), trackingID: tid, failureReason: nil)
                 case .ended:
                     trackingID = nil
-                    output = Value(phase: .ended(event), trackingID: nil, failureReason: nil)
+                    output = Value(phase: .ended(localised(event)), trackingID: nil, failureReason: nil)
                 case .cancelled:
                     trackingID = nil
                     output = Value(phase: .failed, trackingID: nil, failureReason: nil)
@@ -422,7 +481,7 @@ struct EventListenerPhase<E: EventType>: StatefulRule, ResettableGestureRule {
             }
             if let (id, event) = found {
                 trackingID = id
-                output = Value(phase: .active(event), trackingID: id, failureReason: nil)
+                output = Value(phase: .active(localised(event)), trackingID: id, failureReason: nil)
             } else {
                 output = Value(phase: .possible(nil), trackingID: nil, failureReason: nil)
             }
@@ -447,9 +506,9 @@ public struct _GestureInputs {
     struct InheritedPhase: OptionSet, Sendable, CustomStringConvertible {
         var rawValue: Int
         init(rawValue: Int) { self.rawValue = rawValue }
-        /// bit0: a parent/sibling gesture has failed → this gesture may proceed ("allowed")
+        /// bit0: a parent/sibling gesture has failed, so this gesture may proceed ("allowed")
         static let failed = InheritedPhase(rawValue: 1)   // bit 0
-        /// bit1: a parent/sibling gesture is active → this gesture must wait ("blocked")
+        /// bit1: a parent/sibling gesture is active, so this gesture must wait ("blocked")
         static let active = InheritedPhase(rawValue: 2)   // bit 1
         /// Default value: .failed (= 1). "Nobody is blocking" = proceed allowed.
         static var defaultValue: InheritedPhase { .failed }

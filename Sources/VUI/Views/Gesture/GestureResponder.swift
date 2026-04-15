@@ -14,6 +14,10 @@ import Synchronization
 ///
 /// Does NOT inherit ViewResponder. GestureResponder<M> conforms to both
 /// AnyGestureResponder and ViewResponder independently (via MultiViewResponder).
+///
+/// - makeSubviewsGesture calls M._makeSessionGesture.
+/// - makeWrappedGesture manages childSubgraph reuse and rebuild.
+/// - gestureGraph is stored at init from rendererHost?.gestureGraph.
 protocol AnyGestureResponder: AnyObject {
     /// AG attribute ID for the modifier, enabling AG-level change tracking.
     var relatedAttribute: AGAttribute { get }
@@ -51,7 +55,7 @@ protocol AnyGestureResponder: AnyObject {
     /// The GestureGraph that owns this responder.
     var gestureGraph: GestureGraph { get }
 
-    // Snapshot fields
+    // Snapshot fields.
     // GestureFilter (ViewGraph AG context) writes these plain Swift values.
     // createSession (GestureGraph AG context) reads them to create local input attrs
     // without touching cross-graph attribute slots.
@@ -85,7 +89,7 @@ protocol AnyGestureResponder: AnyObject {
 
 extension ViewResponder {
     /// Returns true if self appears in the nextResponder chain leading up to ancestor.
-    /// ResponderNode.parent chain is NOT used.
+    /// ResponderNode.parent chain is not used.
     func isDescendant(of ancestor: ResponderNode) -> Bool {
         var node: ResponderNode? = nextResponder
         while let n = node {
@@ -110,10 +114,10 @@ extension AnyGestureResponder {
     /// Returns true if first and second should run simultaneously given policy.
     ///
     /// exclusionPolicy is applied as first's policy:
-    ///   .descendants: isDescendant(first, of: second)
-    ///   .ancestors:   isDescendant(second, of: first)
-    ///   .global:      true
-    ///   default/highPriority: false
+    ///   tag 0 (.descendants): isDescendant(first, of: second)
+    ///   tag 1 (.ancestors):   isDescendant(second, of: first)
+    ///   tag 2 (.global):      true
+    ///   tag 3/4:              false
     static func isSimultaneous(
         _ first: any AnyGestureResponder,
         with second: any AnyGestureResponder,
@@ -136,9 +140,9 @@ extension AnyGestureResponder {
 
     /// Evaluates whether self and other should run simultaneously, using other's policy.
     ///
-    /// self.exclusionPolicy is NOT consulted. Result is asymmetric:
-    ///   child.isSimultaneous(with: parent) = true  (parent has .descendants -> child is in subtree)
-    ///   parent.isSimultaneous(with: child) = false (child has .default -> both calls return false)
+    /// self.exclusionPolicy is NOT consulted. Result can be asymmetric:
+    ///   child.isSimultaneous(with: parent) = true  (parent has .descendants, child is in subtree)
+    ///   parent.isSimultaneous(with: child) = false (child has .default, both calls return false)
     ///
     /// call1 = static(self,  other, other.policy)
     /// call2 = static(other, self,  other.policy)
@@ -154,7 +158,7 @@ extension AnyGestureResponder {
     ///
     /// Build path (first call, or after invalidation):
     ///   - Creates childSubgraph, stores eventsAttr/resetSeedAttr from inputs.
-    ///   - Calls makeChild inside the subgraph to build the gesture chain.
+    ///   - Calls makeChild inside the subgraph, building the gesture chain.
     ///   - Caches _GestureOutputs.
     ///
     /// Reuse path (childSubgraph already built, needsRebuild == false):
@@ -175,12 +179,14 @@ extension AnyGestureResponder {
             return cached
         }
 
-        // Rebuild path: modifier changed, tear down the old chain.
-        if needsRebuild, let sub = childSubgraph {
-            sub.invalidate()
-            childSubgraph = nil
-            cachedGestureOutputs = nil
-            needsRebuild = false
+        // Rebuild path: modifier changed, tear down the old chain if one exists.
+        if needsRebuild {
+            if let sub = childSubgraph {
+                sub.invalidate()
+                childSubgraph = nil
+                cachedGestureOutputs = nil
+            }
+            needsRebuild = false  // always reset, even when no prior chain exists
         }
 
         // Build path.
@@ -244,7 +250,7 @@ protocol ViewResponder: AnyObject {
     /// The next node up the responder chain (usually the containing view's responder).
     var nextResponder: ResponderNode? { get set }
 
-    /// An optional opaque gesture container for grouping and priority resolution.
+    /// An optional opaque gesture container (for grouping/priority resolution).
     var gestureContainer: AnyObject? { get }
 
     /// Determines how this responder participates in hit testing.
@@ -348,7 +354,7 @@ class MultiViewResponder: ResponderNode {
     /// `priority > 0` (e.g. GestureResponder returns 16.0) means the responder itself is
     /// a gesture hit, so include it in the result in addition to recursing into children.
     /// `priority == 0` (e.g. ContentShapeResponder) means the responder is a shape filter
-    /// only, so recurse into children but do not add self to the hit list.
+    /// only. Recurse into children but do not add self to the hit list.
     private func collectHits(from responders: [any ViewResponder], point: CGPoint) -> [any ViewResponder] {
         var result: [any ViewResponder] = []
         for responder in responders {
@@ -375,10 +381,10 @@ class MultiViewResponder: ResponderNode {
 /// Created when a touch hits a `GestureResponder` (touch began).
 /// Torn down when the gesture phase becomes terminal (.ended or .failed).
 ///
-/// eventsAttr lives at GestureGraph level and is shared across all sessions.
+/// The shared eventsAttr lives at the GestureGraph level.
 /// This session holds only the isTerminal check and per-responder teardown handle.
 /// On teardown, the per-responder resetSeedAttr is incremented to signal the persistent
-/// gesture chain to reset through EventListenerPhase.resetPhase().
+/// gesture chain to reset.
 final class ActiveGestureSession {
     /// Derived attribute: true when the gesture phase is .ended or .failed.
     let isTerminalAttr: Attribute<Bool>
@@ -395,7 +401,7 @@ final class ActiveGestureSession {
 
     /// Ends this session: increments the responder's per-session resetSeedAttr so the
     /// persistent gesture chain resets itself.
-    /// Does NOT invalidate childSubgraph because it persists for the next session.
+    /// Does NOT invalidate childSubgraph. It persists for the next session.
     func teardown() {
 #if DEBUG
         assert(!_tornDown, "ActiveGestureSession.teardown() called more than once")
@@ -418,8 +424,8 @@ final class ActiveGestureSession {
 /// Created by GestureFilter<M>.updateValue() inside a dedicated AGSubgraph on first evaluation.
 /// Updated in place on subsequent evaluations (mask, responders).
 ///
-/// Subclass of MultiViewResponder. Inherits `responders: [any ViewResponder]`
-/// and `containsGlobalPoints` delegation logic.
+/// Subclass of MultiViewResponder. Inherits `responders: [any ViewResponder]` (inner-view
+/// responder list) and `containsGlobalPoints` delegation logic.
 ///
 /// Generic on M so makeSubviewsGesture can call M._makeSessionGesture without a factory closure.
 nonisolated(unsafe) private var _gestureResponderKeyCounter: UInt32 = 1
@@ -431,14 +437,14 @@ final class GestureResponder<M: GestureViewModifier>: MultiViewResponder, ViewRe
     weak var nextResponder: ResponderNode?
     var gestureContainer: AnyObject? { nil }
 
-    // AnyGestureResponder stored fields
+    // AnyGestureResponder stored fields.
     let modifierAttr: Attribute<M>
     let exclusionPolicy: GestureResponderExclusionPolicy
     var mask: GestureMask
     var inputs: _ViewInputs
 
-    // AnyGestureResponder protocol fields
-    // gestureGraph is stored at init via ViewGraph AG context and rendererHost?.gestureGraph
+    // AnyGestureResponder protocol fields.
+    // gestureGraph is resolved at init through the current ViewGraph context.
     var relatedAttribute: AGAttribute { modifierAttr.identifier }
     var childSubgraph: AGSubgraph? = nil
     var childViewSubgraph: AGSubgraph? = nil
@@ -450,8 +456,8 @@ final class GestureResponder<M: GestureViewModifier>: MultiViewResponder, ViewRe
     var transformAttr: Attribute<ViewTransform>? = nil
     var sizeAttr: Attribute<ViewSize>? = nil
 
-    // Snapshot fields written by GestureFilter in ViewGraph AG context.
-    // Read by GestureGraph.createSession to construct GestureGraph-local input attrs.
+    // Snapshot fields written by GestureFilter (ViewGraph AG context),
+    // read by GestureGraph.createSession to construct GestureGraph-local input attrs.
     // These are plain Swift values (no AG attribute slots) so there is no cross-graph access.
 
     /// Current modifier value; updated by GestureFilter.updateValue() on each evaluation.
@@ -483,8 +489,7 @@ final class GestureResponder<M: GestureViewModifier>: MultiViewResponder, ViewRe
         self.exclusionPolicy = exclusionPolicy
         self.mask = mask
         self.inputs = inputs
-        // AG context during GestureFilter evaluation is ViewGraph's.
-        // Read gestureGraph through rendererHost?.gestureGraph.
+        // Resolve GestureGraph through the current ViewGraph context.
         guard let ref = AttributeGraphRef.current,
               let viewGraph = ref.context as? ViewGraph,
               let gestureGraph = viewGraph.rendererHost?.gestureGraph else {
@@ -494,7 +499,7 @@ final class GestureResponder<M: GestureViewModifier>: MultiViewResponder, ViewRe
         super.init()
     }
 
-    // AnyGestureResponder gesture creation
+    // AnyGestureResponder gesture creation.
 
     func makeSubviewsGesture(inputs: _GestureInputs) -> _GestureOutputs<()> {
         // Runs in GestureGraph's AG context (called via createSession -> makeGesture).
@@ -507,8 +512,8 @@ final class GestureResponder<M: GestureViewModifier>: MultiViewResponder, ViewRe
         return M._makeSessionGesture(modifier: _GraphValue(_attribute: localModifierAttr), inputs: inputs)
     }
 
-    // ViewResponder hit testing
-    // keep the priority=16 convention to signal that this is a gesture hit
+    // ViewResponder hit testing.
+    // Keep the priority=16 convention: signals to collectHits that this is a gesture hit.
 
     func hitTestPolicy(options: ContainsPointsOptions) -> HitTestPolicy {
         .include
@@ -535,7 +540,7 @@ final class GestureResponder<M: GestureViewModifier>: MultiViewResponder, ViewRe
         guard mask != 0 else {
             return ContainsPointsResult(mask: 0, priority: 0, children: [])
         }
-        // priority=16 makes collectHits include self as a gesture hit and recurse into responders
+        // priority=16 means collectHits includes self as a gesture hit and recurses into responders.
         return ContainsPointsResult(mask: mask, priority: 16.0, children: responders)
     }
 }

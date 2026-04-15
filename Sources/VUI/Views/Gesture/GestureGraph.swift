@@ -262,10 +262,10 @@ class GestureGraph: GraphHost, EventGraphHost, @unchecked Sendable {
             fatalError("GestureGraph.createSession: no active AttributeGraph context")
         }
         guard let sharedEventsAttr = eventsAttr else {
-            fatalError("GestureGraph.createSession: eventsAttr not initialised — call sendEvents first")
+            fatalError("GestureGraph.createSession: eventsAttr not initialised. Call sendEvents first.")
         }
         guard let sharedInheritedPhaseAttr = inheritedPhaseAttr else {
-            fatalError("GestureGraph.createSession: inheritedPhaseAttr not initialised — call sendEvents first")
+            fatalError("GestureGraph.createSession: inheritedPhaseAttr not initialised. Call sendEvents first.")
         }
 
         let timeAttr = globalTimeAttr ?? {
@@ -442,9 +442,17 @@ class GestureGraph: GraphHost, EventGraphHost, @unchecked Sendable {
             publishEvents()
 
             // Session lifecycle after publishing.
+            // For .ended/.cancelled: evaluate gesture chain first so dispatch() fires
+            // (e.g. action() for triggered gestures), THEN tear down sessions.
+            // For .began/.moved: cleanup already-terminal sessions only.
             for eventID in events.keys {
                 switch events[eventID]!.eventPhase {
                 case .ended, .cancelled:
+                    // Force AG evaluation before teardown so triggered gestures fire action().
+                    // teardownSessions increments resetSeedAttr which resets the chain;
+                    // dispatch must run while the phase is still .ended/.triggered.
+                    cleanupTerminatedSessions(for: eventID)
+                    runEventLoop()
                     teardownSessions(for: eventID)
                 default:
                     cleanupTerminatedSessions(for: eventID)
