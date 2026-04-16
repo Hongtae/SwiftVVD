@@ -88,14 +88,41 @@ struct AGWeakAttribute: Hashable, Sendable {
 /// Value type parameter is used only in method signatures; no Value is retained here.
 struct Attribute<Value>: @unchecked Sendable {
     var identifier: AGAttribute
+#if DEBUG
+    /// The ObjectIdentifier of the AttributeGraph that owns this attribute.
+    /// Set at creation time (makeInput/makeRule). Used to detect cross-graph access.
+    private var _owningGraphID: ObjectIdentifier
+    fileprivate func _debugValidate() {
+        guard let graph = AttributeGraph.current else {
+            fatalError("Attribute<\(Value.self)> accessed outside an active AttributeGraph context.")
+        }
+        if _owningGraphID != ObjectIdentifier(graph) {
+            fatalError(
+                "Attribute<\(Value.self)> @\(identifier.rawValue): " +
+                "accessed from a different AttributeGraph than the one it was created in " +
+                "(e.g. reading a ViewGraph attribute inside a GestureGraph rule). " +
+                "Use the owning graph's cachedValue(for:) for cross-graph reads."
+            )
+        }
+    }
+#else
+    fileprivate func _debugValidate() {}
+#endif
 
     init(_ id: AGAttribute) {
         self.identifier = id
+#if DEBUG
+        guard let graph = AttributeGraph.current else {
+            fatalError("Attribute<\(Value.self)> created outside an active AttributeGraph context.")
+        }
+        self._owningGraphID = ObjectIdentifier(graph)
+#endif
     }
 
     /// Pulls the latest value from the graph, triggering evaluation if needed,
     /// and implicitly recording a dependency if another node is currently evaluating.
     var value: Value {
+        _debugValidate()
         guard let graph = AttributeGraph.current else {
             fatalError("Attempted to read an Attribute outside of an active AttributeGraph context.")
         }
@@ -106,6 +133,7 @@ struct Attribute<Value>: @unchecked Sendable {
     // Can also be used to inject an initial fallback value into a rule node
     // to resolve potential dependency cycles before it is first evaluated.
     func setValue(_ newValue: Value, transaction: Transaction = Transaction()) {
+        _debugValidate()
         guard let graph = AttributeGraph.current else {
             fatalError("Attempted to write to an Attribute outside of an active AttributeGraph context.")
         }
@@ -114,6 +142,7 @@ struct Attribute<Value>: @unchecked Sendable {
 
     /// Creates a weak reference to this attribute, capturing the current generation seed.
     func asWeak() -> AGWeakAttribute {
+        _debugValidate()
         guard let graph = AttributeGraph.current else {
             fatalError("Attempted to read an Attribute outside of an active AttributeGraph context.")
         }
@@ -123,6 +152,7 @@ struct Attribute<Value>: @unchecked Sendable {
 
 extension Attribute where Value: Equatable {
     func setValue(_ newValue: Value, transaction: Transaction = Transaction()) {
+        _debugValidate()
         guard let graph = AttributeGraph.current else {
             fatalError("Attempted to write to an Attribute outside of an active AttributeGraph context.")
         }
@@ -450,7 +480,7 @@ class AttributeGraph: @unchecked Sendable {
             fatalError("cachedValue: node @\(id.rawValue) does not exist in source graph.")
         }
         guard let cached = node.value else {
-            fatalError("cachedValue: node @\(id.rawValue) has no cached value — source graph must evaluate first.")
+            fatalError("cachedValue: node @\(id.rawValue) has no cached value. Source graph must evaluate first.")
         }
         return cached
     }
@@ -592,7 +622,7 @@ class AttributeGraph: @unchecked Sendable {
         assert(AttributeGraph.current === self)
         let index = Int(id.rawValue)
         guard slots[index].node != nil else {
-            fatalError("removeNode called on @\(id.rawValue) which does not exist — double-remove is a usage error.")
+            fatalError("removeNode called on @\(id.rawValue) which does not exist. Double-remove is a usage error.")
         }
 
         // 1. Break input connections (removes this node from its inputs' output sets)
@@ -699,7 +729,7 @@ class AttributeGraph: @unchecked Sendable {
 
         switch node.kind {
         case .input:
-            fatalError("evaluateNode called on an input node @\(id.rawValue) — input nodes must never be marked needsEvaluation.")
+            fatalError("evaluateNode called on an input node @\(id.rawValue). Input nodes must never be marked needsEvaluation.")
 
         case .stateful(let box):
             // StatefulRule node: re-evaluate the stored rule struct.
@@ -903,7 +933,7 @@ class AttributeGraph: @unchecked Sendable {
                     break
                 }
             }
-            let path = parts.reversed().joined(separator: " → ")
+            let path = parts.reversed().joined(separator: " -> ")
             return "@\(id.rawValue)(path: \(path))"
         case .rule(_, let isSideEffect):
             return "@\(id.rawValue)(\(isSideEffect ? "sideEffect" : "rule"))"
@@ -913,7 +943,7 @@ class AttributeGraph: @unchecked Sendable {
             return "@\(id.rawValue)(input)"
         case .crossGraphRef(let sourceAttr, let sourceGraphRef):
             let srcDesc = sourceGraphRef.value != nil ? "@\(sourceAttr.rawValue)" : "@\(sourceAttr.rawValue)(dead)"
-            return "@\(id.rawValue)(crossRef→\(srcDesc))"
+            return "@\(id.rawValue)(crossRef->\(srcDesc))"
         }
     }
 }

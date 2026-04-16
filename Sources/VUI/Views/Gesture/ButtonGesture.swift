@@ -57,7 +57,6 @@ typealias ButtonPressingAction = (ButtonPressPhase) -> ()
 //   -> SizeGesture<...>               (provides CGSize for bounds check)
 struct PrimitiveButtonGestureCore: Gesture {
     var outset: CGFloat       // effectiveOutset for hit-test expansion
-    var reserved1: AnyObject? // reserved context field
     var alwaysActive: Bool    // if true, gesture stays active even outside view
 
     struct Value: Equatable {
@@ -221,10 +220,18 @@ struct PrimitiveButtonGesture: Gesture {
 
         let gestureAttr = gesture._attribute
 
-        // Environment buttonOutset overrides the gesture's own outset.
+        // GestureGraph has a separate AG from ViewGraph, so inputs.environment cannot be read
+        // directly inside a GestureGraph rule. Use cachedValue on the ViewGraph's AG instead.
         let envAttr = inputs.environment
+        let viewGraphAG: AttributeGraph? = (AttributeGraphRef.current?.context as? GestureGraph)?
+            .rendererHost?.viewGraph.data.graph
         let outsetAttr: Attribute<CGFloat> = graph.makeRule {
-            envAttr.value.buttonOutset ?? gestureAttr.value.outset
+            if let vg = viewGraphAG,
+               let env = vg.cachedValue(for: envAttr.identifier) as? EnvironmentValues,
+               let outset = env.buttonOutset {
+                return outset
+            }
+            return gestureAttr.value.outset
         }
 
         // Build the callback modifier and core gesture reactively.
@@ -243,7 +250,6 @@ struct PrimitiveButtonGesture: Gesture {
                 )),
                 body: PrimitiveButtonGestureCore(
                     outset: outset,
-                    reserved1: nil,
                     alwaysActive: pbg.alwaysActive
                 )
             )
