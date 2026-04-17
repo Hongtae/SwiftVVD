@@ -7,9 +7,7 @@
 
 import Foundation
 
-// ─────────────────────────────────────────────────────────────────────────────
 // MARK: - MapGesture / MapPhase
-// ─────────────────────────────────────────────────────────────────────────────
 
 // MapGesture<A,B>._makeGesture -> creates MapPhase<A,B>: StatefulRule
 struct MapGesture<A, B>: GestureModifier {
@@ -52,9 +50,7 @@ struct MapPhase<A, B>: StatefulRule {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // MARK: - DurationGesture / DurationPhase
-// ─────────────────────────────────────────────────────────────────────────────
 
 // DurationGesture<E>._makeGesture -> creates DurationPhase<E>: StatefulRule
 // Output type is GesturePhase<Double> (Double, not E!)
@@ -145,9 +141,7 @@ struct DurationPhase<E>: StatefulRule, ResettableGestureRule {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // MARK: - CoordinateSpaceGesture / CoordinateSpacePhase
-// ─────────────────────────────────────────────────────────────────────────────
 
 // CoordinateSpaceGesture<E>._makeGesture transforms location via animatedPosition pattern
 // Transforms GesturePhase<E>.location in body outputs to the target coordinateSpace.
@@ -218,9 +212,7 @@ struct CoordinateSpacePhase<E: EventType>: StatefulRule {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // MARK: - Map2Gesture / Map2Phase
-// ─────────────────────────────────────────────────────────────────────────────
 
 // Map2Gesture<A,B,C>: merges two child gestures to produce a value of type C
 struct Map2Gesture<A, B, C>: GestureModifier {
@@ -268,9 +260,7 @@ struct Map2Phase<A, B, C>: StatefulRule {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // MARK: - StateContainerGesture / StateContainerPhase
-// ─────────────────────────────────────────────────────────────────────────────
 
 // StateContainerGesture<S,E,V>: transform closure (inout S, GesturePhase<E>) -> GesturePhase<V>
 // StateContainerPhase<S,E,V>: StatefulRule, ResettableGestureRule
@@ -358,5 +348,112 @@ struct StateContainerPhase<S, E: EventType, V>: StatefulRule, ResettableGestureR
         // invoke transform closure: (inout S, GesturePhase<E>) -> GesturePhase<V>
         let newPhase = transform(&state, childPhase)
         AttributeGraph.setStatefulOutput(newPhase)
+    }
+}
+
+// MARK: - CombineGesture / CombinePhase
+
+// CombineGesture<A,B,C>: phase-level combiner for two gestures.
+// Uses a direct phase closure (GesturePhase<A>, GesturePhase<B>) -> GesturePhase<C>
+// to support gated(by:) semantics without conflating value-level and phase-level combining.
+struct CombineGesture<A, B, C>: GestureModifier {
+    typealias BodyValue = A
+    typealias Value = C
+    typealias Body = Never
+
+    // Factory for the secondary gesture outputs (captures the secondary gesture value).
+    var secondaryMakeGesture: (_GestureInputs) -> _GestureOutputs<B>
+    // Phase-level combine closure: decides output phase from both inputs.
+    var combine: (GesturePhase<A>, GesturePhase<B>) -> GesturePhase<C>
+
+    static func makeGesture(
+        modifier: _GraphValue<Self>,
+        inputs: _GestureInputs,
+        body: (_GestureInputs) -> _GestureOutputs<A>
+    ) -> _GestureOutputs<C> {
+        guard let graph = AttributeGraph.current else {
+            fatalError("CombineGesture.makeGesture requires AG context")
+        }
+        let primaryOutputs = body(inputs)
+        let self_ = modifier._attribute.value
+        let secondaryOutputs = self_.secondaryMakeGesture(inputs)
+
+        let phase = CombinePhase<A, B, C>(
+            source1: primaryOutputs.phase,
+            source2: secondaryOutputs.phase,
+            combine: self_.combine
+        )
+        let resultAttr = graph.makeStatefulRule(phase)
+        return primaryOutputs.withPhase(resultAttr)
+    }
+}
+
+struct CombinePhase<A, B, C>: StatefulRule {
+    typealias Value = GesturePhase<C>
+
+    var source1: Attribute<GesturePhase<A>>
+    var source2: Attribute<GesturePhase<B>>
+    var combine: (GesturePhase<A>, GesturePhase<B>) -> GesturePhase<C>
+
+    mutating func updateValue() {
+        AttributeGraph.setStatefulOutput(combine(source1.value, source2.value))
+    }
+}
+
+// MARK: - Gesture builder extensions (4-7)
+
+extension Gesture {
+
+    // duration(minimum:maximum:)
+    // DurationGesture<E> outputs GesturePhase<Double> (elapsed time).
+    func duration(
+        minimum: Double,
+        maximum: Double = .infinity
+    ) -> ModifierGesture<DurationGesture<Value>, Self> {
+        ModifierGesture(modifier: DurationGesture(minimumDuration: minimum), body: self)
+    }
+
+    // longPressPhase()
+    // Transform: .active(e)/.ended(e) -> .active(true)/.ended(true).
+    // .possible/.failed pass through.
+    func longPressPhase() -> ModifierGesture<MapGesture<Value, Bool>, Self> {
+        ModifierGesture(modifier: MapGesture(transform: { _ in true }), body: self)
+    }
+
+    // combined(with:body:)
+    // Backed by CombineGesture with a phase-level closure.
+    func combined<G: Gesture, V>(
+        with other: G,
+        body combineFn: @escaping (GesturePhase<Value>, GesturePhase<G.Value>) -> GesturePhase<V>
+    ) -> ModifierGesture<CombineGesture<Value, G.Value, V>, Self> {
+        let capturedOther = other
+        let secondary: (_GestureInputs) -> _GestureOutputs<G.Value> = { inputs in
+            guard let graph = AttributeGraph.current else {
+                fatalError("Gesture.combined secondary requires AG context")
+            }
+            let attr = graph.makeInput(value: capturedOther)
+            return G._makeGesture(gesture: _GraphValue(_attribute: attr), inputs: inputs)
+        }
+        return ModifierGesture(
+            modifier: CombineGesture(secondaryMakeGesture: secondary, combine: combineFn),
+            body: self
+        )
+    }
+
+    // gated(by:)
+    // Uses combined(with:body:) with enabler-gate semantics.
+    // Output type = Self.Value (primary gesture value, not the enabler's).
+    // Enabler active/ended passes self phase through; possible -> .possible(nil); failed -> .failed.
+    func gated<G: Gesture>(
+        by enabler: G
+    ) -> ModifierGesture<CombineGesture<Value, G.Value, Value>, Self> {
+        combined(with: enabler) { selfPhase, enablerPhase in
+            switch enablerPhase {
+            case .active:   return selfPhase
+            case .ended:    return selfPhase
+            case .possible: return .possible(nil)
+            case .failed:   return .failed
+            }
+        }
     }
 }

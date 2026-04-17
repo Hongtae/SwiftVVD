@@ -9,8 +9,7 @@ import Foundation
 
 // MARK: - DependentGesture
 
-// DependentGesture<E>._makeGesture -> DependentPhase<E>: Rule
-// DependentPhase reads GestureDependency.Key preference to determine priority
+// DependentGesture reads gesture dependency preferences to determine priority.
 struct DependentGesture<E: EventType>: GestureModifier {
     typealias BodyValue = E
     typealias Value = E
@@ -21,7 +20,7 @@ struct DependentGesture<E: EventType>: GestureModifier {
         inputs: _GestureInputs,
         body: (_GestureInputs) -> _GestureOutputs<E>
     ) -> _GestureOutputs<E> {
-        // GestureDependency handling is not implemented because ExclusiveGesture handles it separately.
+        // GestureDependency handling is not implemented yet because ExclusiveGesture handles it separately.
         // DependentGesture acts as pass-through.
         body(inputs)
     }
@@ -29,13 +28,12 @@ struct DependentGesture<E: EventType>: GestureModifier {
 
 // MARK: - EventFilter
 
-// EventFilter<E>._makeGesture -> EventFilterEvents<E>: Rule + filtered events attr
+// EventFilter is used to filter events before they reach the body gesture.
 struct EventFilter<E: EventType>: GestureModifier {
     typealias BodyValue = E
     typealias Value = E
     typealias Body = Never
 
-    // EventFilter is used to filter events before they reach the body gesture.
     // Currently pass-through without predicate because type filtering happens in EventListenerPhase.
     var predicate: ((E) -> Bool)?
 
@@ -44,17 +42,19 @@ struct EventFilter<E: EventType>: GestureModifier {
         inputs: _GestureInputs,
         body: (_GestureInputs) -> _GestureOutputs<E>
     ) -> _GestureOutputs<E> {
-        // Predicate filtering happens at EventListenerPhase level, so pass through.
+        // Predicate filtering happens at the EventListenerPhase level, so pass through.
         body(inputs)
     }
 }
 
 // MARK: - CategoryGesture
 
-// CategoryGesture<E>: calls body as-is, then injects GestureCategory.Key preference
-struct CategoryGesture<E: EventType>: GestureModifier {
-    typealias BodyValue = E
-    typealias Value = E
+// CategoryGesture<V>: pass-through modifier that injects GestureCategory.Key preference.
+// No EventType constraint on V, so it works with both EventType values (TapGesture)
+// and arbitrary Value types (DragGesture.Value, Bool, etc.).
+struct CategoryGesture<V>: GestureModifier {
+    typealias BodyValue = V
+    typealias Value = V
     typealias Body = Never
 
     var category: GestureCategory
@@ -62,19 +62,30 @@ struct CategoryGesture<E: EventType>: GestureModifier {
     static func makeGesture(
         modifier: _GraphValue<Self>,
         inputs: _GestureInputs,
-        body: (_GestureInputs) -> _GestureOutputs<E>
-    ) -> _GestureOutputs<E> {
-        // Inject GestureCategory.Key preference into outputs.
+        body: (_GestureInputs) -> _GestureOutputs<V>
+    ) -> _GestureOutputs<V> {
+        // Injects GestureCategory.Key preference into outputs.
         // Preference injection is not implemented yet, so pass through.
         body(inputs)
     }
 }
 
+// Gesture.category(_:includeChildren:) -> ModifierGesture<CategoryGesture<Value>, Self>.
+// DragGesture uses .drag, LongPressGesture uses .longPress, TapGesture uses .select.
+extension Gesture {
+    func category(
+        _ cat: GestureCategory,
+        includeChildren: Bool = false
+    ) -> ModifierGesture<CategoryGesture<Value>, Self> {
+        ModifierGesture(modifier: CategoryGesture(category: cat), body: self)
+    }
+}
+
 // MARK: - RepeatGesture / RepeatResetSeed / RepeatPhase
 
-// RepeatGesture<E>: handles multi-tap recognition
-// RepeatResetSeed: Rule -> Value=UInt32 (sum of two attrs)
-// RepeatPhase<E>: StatefulRule -> tap count tracking
+// RepeatGesture<E>: handles multi-tap recognition.
+// RepeatResetSeed: Rule -> Value=UInt32 (sum of two attrs).
+// RepeatPhase<E>: StatefulRule -> tap count tracking.
 
 struct RepeatGesture<E: EventType>: GestureModifier {
     typealias BodyValue = E
@@ -100,7 +111,7 @@ struct RepeatGesture<E: EventType>: GestureModifier {
         let bodyOutputs = body(inputs)
         let self_ = modifier._attribute.value
 
-        // RepeatResetSeed: sum of global resetSeed + local tap-count modifier attr
+        // RepeatResetSeed: sum of global resetSeed + local tap-count modifier attr.
         let tapCountAttr: Attribute<UInt32> = graph.makeInput(value: 0)
         let repeatResetSeed = RepeatResetSeed(
             globalSeedAttr: inputs.resetSeed,
@@ -121,7 +132,7 @@ struct RepeatGesture<E: EventType>: GestureModifier {
     }
 }
 
-// RepeatResetSeed: Rule -> Value=UInt32 (globalSeed + localCount)
+// RepeatResetSeed: Rule -> Value=UInt32 (globalSeed + localCount).
 struct RepeatResetSeed {
     var globalSeedAttr: Attribute<UInt32>
     var localCountAttr: Attribute<UInt32>
@@ -131,7 +142,7 @@ struct RepeatResetSeed {
     }
 }
 
-// RepeatPhase<E>: StatefulRule, ResettableGestureRule
+// RepeatPhase<E>: StatefulRule, ResettableGestureRule.
 struct RepeatPhase<E: EventType>: StatefulRule, ResettableGestureRule {
     typealias Value = GesturePhase<E>
 
@@ -187,7 +198,7 @@ struct RepeatPhase<E: EventType>: StatefulRule, ResettableGestureRule {
             if completedTaps == 0 {
                 isFirstTap = false
             }
-            // count==1: become active immediately.
+            // count == 1: become active immediately.
             if requiredCount == 1 {
                 AttributeGraph.setStatefulOutput(GesturePhase<E>.active(v))
             } else {
@@ -219,7 +230,7 @@ struct RepeatPhase<E: EventType>: StatefulRule, ResettableGestureRule {
 
 // MARK: - RequiredTapCountKey / RequiredTapCountWriter
 
-// RequiredTapCountKey: PreferenceKey propagates required tap count up the view tree
+// RequiredTapCountKey propagates required tap count up the view tree.
 enum RequiredTapCountKey: PreferenceKey {
     typealias Value = Int?
     static var defaultValue: Int? { nil }
@@ -228,7 +239,7 @@ enum RequiredTapCountKey: PreferenceKey {
     }
 }
 
-// RequiredTapCountWriter<E>._makeGesture writes RequiredTapCountKey preference
+// RequiredTapCountWriter<E>._makeGesture writes RequiredTapCountKey preference.
 struct RequiredTapCountWriter<E: EventType>: GestureModifier {
     typealias BodyValue = E
     typealias Value = E
