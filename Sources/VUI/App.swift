@@ -28,7 +28,9 @@ protocol AppContext: AnyObject {
     func setResource(data: (any DataProtocol)?, forURL: URL)
 
     func checkWindowActivities()
-    
+
+    var appWindowsController: AppWindowsController? { get }
+
     var isActive: Bool { get }
 }
 
@@ -56,6 +58,7 @@ class AppMain<A>: ApplicationDelegate, AppContext where A: App {
     let app: A
     var appGraph: AppGraph<A>?
     var windowsController: AppWindowsController?
+    var appWindowsController: AppWindowsController? { windowsController }
     var terminateAfterLastWindowClosed = true
 
     var activeWindows: [WindowController] {

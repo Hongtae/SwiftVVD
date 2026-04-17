@@ -8,70 +8,36 @@
 import Foundation
 import VVD
 
-protocol AuxiliaryWindowClient: AnyObject {
-    func auxiliaryWindowFrame() -> CGRect?
-    func drawAuxiliaryWindowBackground(offset: CGPoint, with context: GraphicsContext)
-    func drawAuxiliaryWindowOverlay(offset: CGPoint, with context: GraphicsContext)
-    func drawAuxiliaryWindowContent(offset: CGPoint, with context: GraphicsContext)
-    func updateAuxiliaryWindowContent(tick: UInt64, delta: Double, date: Date,
-                                      redraw: inout Bool, _: WindowContext.WithGraphicsContext)
-
-    func auxiliaryWindowInputEventHandler() -> WindowInputEventHandler?
-    func auxiliaryWindowHitTest(_ point: CGPoint) -> Bool
-
-    func activateAuxiliaryWindow()
-    func inactivateAuxiliaryWindow()
-
-    func onHostWindowActivated()
-    func onHostWindowInactivated()
-    func onHostWindowMoved()
-    func onHostWindowClosed()
-    func initiatedGesture(from: AnyObject?, location: CGPoint)
-}
-
-protocol AuxiliaryWindowHost {
-    func addAuxiliaryWindow(_ client: AuxiliaryWindowClient) -> Bool
-    func removeAuxiliaryWindow(_ client: AuxiliaryWindowClient)
-}
-
-struct AuxiliarySceneContext {
-    weak var hostContext: SharedContext?
-    weak var hostController: WindowController?
-    var sceneContext: Any?
-    
-    let dismissOnDeactivate: Bool
-    let dismiss: () -> Void
-    let dismissPopup: () -> Void
-    
-    func dismiss(withParentContext: Bool) {
-        if withParentContext {
-            hostContext?.auxiliarySceneContext?.dismiss(withParentContext: true)
-        }
-        self.dismiss()
-    }
-    
-    func dismissPopup(withParentContext: Bool) {
-        if withParentContext {
-            hostContext?.auxiliarySceneContext?.dismissPopup(withParentContext: true)
-        }
-        self.dismissPopup()
-    }
-}
+// AuxiliaryWindowClient / AuxiliaryWindowHost protocols removed (2026-04-17).
+// Replaced by direct WindowController nesting:
+//   - AppWindowsController owns strong refs to all dynamic aux windows.
+//   - WindowController.auxChildWindows holds weak refs to overlay children.
+//   - Parent calls child.updateView() / drawFrame() / onParentWindow*() directly.
 
 // utility window (popup-window or layered window) scene
 struct AuxiliaryWindowScene<Content>: _PrimitiveScene where Content: View {
     var content: Content
 
     static func _makeScene(scene: _GraphValue<Self>, inputs: _SceneInputs) -> _SceneOutputs {
-        fatalError("Implement with AG")
+        guard let graph = AttributeGraph.current else {
+            fatalError("AuxiliaryWindowScene._makeScene requires AG context")
+        }
+        let context = AuxiliaryWindowSceneContext<Content>(graph: scene, inputs: inputs)
+        // Keep the context alive for the lifetime of the AG subgraph.
+        graph.makeSideEffectRule { [context] in _ = context }
+        return _SceneOutputs(preferences: PreferencesOutputs())
     }
 }
 
 // scene context for utility window scene
-class AuxiliaryWindowSceneContext<Content>: AuxiliaryWindowClient, @unchecked Sendable where Content: View {
+class AuxiliaryWindowSceneContext<Content>: @unchecked Sendable where Content: View {
     typealias Scene = AuxiliaryWindowScene<Content>
-    
+
     let layoutPadding = 4
+
+    // Stored at _makeScene time to access content graph and environment.
+    private let contentGraph: _GraphValue<Content>
+    private let inputs: _SceneInputs
 
     private struct _ActivationContext: @unchecked Sendable {
         let window: AuxiliaryWindowController<Content>
@@ -88,8 +54,15 @@ class AuxiliaryWindowSceneContext<Content>: AuxiliaryWindowClient, @unchecked Se
     private var window: AuxiliaryWindowController<Content>? {
         self.activationContext?.window
     }
-    
+
+    // Read from stored scene inputs, e.g. auxiliaryWindowUsingPlatformWindow.
+    private var environment: EnvironmentValues {
+        inputs.base.cachedEnvironment.value.environment.value
+    }
+
     init(graph: _GraphValue<Scene>, inputs: _SceneInputs) {
+        self.contentGraph = graph[\.content]
+        self.inputs = inputs
         self.activationContext = nil
     }
 
@@ -117,7 +90,7 @@ class AuxiliaryWindowSceneContext<Content>: AuxiliaryWindowClient, @unchecked Se
             fatalError("AuxiliaryWindowContext: Invalid window!")
         }
         guard let layoutComputer = window.viewGraph.rootLayoutComputer else {
-            fatalError("AuxiliaryWindowContext: rootLayoutComputer not set — AG wiring incomplete!")
+            fatalError("AuxiliaryWindowContext: rootLayoutComputer not set. AG wiring incomplete!")
         }
 
         let padding = CGFloat(self.layoutPadding)
@@ -158,15 +131,94 @@ class AuxiliaryWindowSceneContext<Content>: AuxiliaryWindowClient, @unchecked Se
     }
 
     @MainActor
-    func activate(at location: CGPoint, context parentContext: SharedContext, dismissOnDeactivate: Bool) -> Bool {
-         fatalError("Implement with AG")
-        return false
+    func activate(at location: CGPoint,
+                  in parentController: WindowController,
+                  dismissOnDeactivate: Bool) -> Bool {
+        // Already active, just reposition.
+        if activationContext != nil {
+            activationContext?.windowOffset = location
+            activationContext?.activateFirstTime = true
+            return true
+        }
+
+        // Read environment from the scene to decide platform vs overlay mode.
+        // Editors set auxiliaryWindowUsingPlatformWindow = true.
+        // Games keep it false for overlay-only rendering.
+        let usePlatformWindow = environment.auxiliaryWindowUsingPlatformWindow
+
+        let windowKey = WindowKey(namespace: .app, sceneID: SceneID(Content.self, index: 0))
+        let window = AuxiliaryWindowController<Content>(
+            content: contentGraph, sceneContext: self, windowKey: windowKey)
+
+        var ctx = _ActivationContext(
+            window: window,
+            parentController: parentController,
+            windowOffset: location,
+            dismissOnDeactivate: dismissOnDeactivate
+        )
+
+        if usePlatformWindow, let hostPlatformWindow = parentController.window {
+            // Platform window mode: create a real OS popup window.
+            guard Platform.factory.supportedWindowStyles([.auxiliaryWindow])
+                    .contains(.auxiliaryWindow) else {
+                Log.error("AuxiliaryWindow: auxiliaryWindow style not supported on this platform")
+                return false
+            }
+            guard let popup = window.makeWindow() else {
+                Log.error("AuxiliaryWindow: failed to create platform window")
+                return false
+            }
+            let screenPos = hostPlatformWindow.convertPointToScreen(location)
+            popup.contentSize = CGSize(width: 10, height: 10)
+            popup.origin = screenPos
+            ctx.popupWindow = popup
+            self.activationContext = ctx
+
+            // Forward host window events (move/close/deactivate) to this popup.
+            hostPlatformWindow.addEventObserver(self) { [weak self] (event: WindowEvent) in
+                guard let self else { return }
+                switch event.type {
+                case .activated:   self.onParentWindowActivated()
+                case .inactivated: self.onParentWindowInactivated()
+                case .closed:      self.onParentWindowClosed()
+                case .moved, .resized: self.onParentWindowMoved()
+                default: break
+                }
+            }
+            // Clicking inside the host while popup is open inactivates the popup.
+            hostPlatformWindow.addEventObserver(self) { [weak self] (event: MouseEvent) in
+                if event.type == .buttonDown { self?.onParentWindowInactivated() }
+            }
+            parentController.appWindowsController?.presentAuxiliaryWindow(window, in: parentController)
+            return true
+        } else {
+            // Overlay mode: render inside the parent window.
+            let contentScale = parentController.window?.contentScaleFactor ?? 1.0
+            window.sharedContext.contentScaleFactor = contentScale
+            let shadow = GraphicsContext.Filter.shadow(radius: 4.0, x: 0, y: 0)
+            ctx.filter = shadow
+            self.activationContext = ctx
+            parentController.appWindowsController?.presentAuxiliaryWindow(window, in: parentController)
+            return true
+        }
+    }
+
+    // MARK: - Parent window event forwarding
+
+    func onParentWindowActivated()   {}
+    func onParentWindowInactivated() { dismissPopup() }
+    func onParentWindowMoved()       { dismissPopup() }
+    func onParentWindowClosed()      { dismiss() }
+    func onGestureInitiated(from initiator: AnyObject?, location: CGPoint) {
+        guard initiator !== self else { return }
+        if let frame = auxiliaryWindowFrame(), frame.contains(location) { return }
+        dismissPopup()
     }
 
     func dismiss() {
         if let context = self.activationContext {
             self.activationContext = nil
-            context.parentController?.removeAuxiliaryWindow(self)
+            context.parentController?.removeAuxChild(context.window)
 
             context.window.dismissAllModalWindows()
             context.window.dismissAllAuxiliaryWindows()
@@ -207,121 +259,80 @@ class AuxiliaryWindowSceneContext<Content>: AuxiliaryWindowClient, @unchecked Se
         RoundedRectangle(cornerRadius: 5)
     }
 
-    func drawAuxiliaryWindowBackground(offset: CGPoint, with context: GraphicsContext) {
-        if let activationContext, let frame = self.auxiliaryWindowFrame() {
-
-            let auxFrame = frame.offsetBy(dx: offset.x, dy: offset.y)
-            //let path = Rectangle().path(in: auxFrame)
-            let path = auxiliaryWindowShape.path(in: auxFrame)
-
-            if let filter = activationContext.filter {
-                var context = context
-                context.addFilter(filter)
-                context.fill(path, with: .color(.white))
-            } else {
-                context.fill(path, with: .color(.white))
-            }
-            context.stroke(path, with: .color(.black.opacity(0.7)), style: StrokeStyle(lineWidth: 1))
+    // Called by AuxiliaryWindowController.drawFrame (overlay mode).
+    func drawBackground(offset: CGPoint, frame: CGRect, with context: GraphicsContext) {
+        guard let activationContext else { return }
+        let rect = frame.offsetBy(dx: offset.x, dy: offset.y)
+        let path = auxiliaryWindowShape.path(in: rect)
+        if let filter = activationContext.filter {
+            var ctx = context; ctx.addFilter(filter)
+            ctx.fill(path, with: .color(.white))
+        } else {
+            context.fill(path, with: .color(.white))
         }
+        context.stroke(path, with: .color(.black.opacity(0.7)), style: StrokeStyle(lineWidth: 1))
     }
 
-    func drawAuxiliaryWindowOverlay(offset: CGPoint, with context: GraphicsContext) {
+    func drawOverlay(offset: CGPoint, frame: CGRect, with context: GraphicsContext) {
+        // Reserved for future overlay decorations.
     }
 
-    func drawAuxiliaryWindowContent(offset: CGPoint, with context: GraphicsContext) {
-        if let activationContext {
-            activationContext.window
-                .drawFrame(offset: activationContext.windowOffset + offset, context)
-        }
-    }
-
-    func updateAuxiliaryWindowContent(tick: UInt64, delta: Double, date: Date,
-                                      redraw: inout Bool,
-                                      _ withGC: WindowContext.WithGraphicsContext) {
-        if let frame = self.auxiliaryWindowFrame() {
-            self.window?.updateView(tick: tick, delta: delta, date: date,
-                                    contentSize: frame.size, redraw: &redraw,
-                                    withGC)
-        }
-    }
-
-    func auxiliaryWindowInputEventHandler() -> WindowInputEventHandler? {
-        return self.window
-    }
-    
-    func auxiliaryWindowHitTest(_ point: CGPoint) -> Bool {
-        if let frame = self.auxiliaryWindowFrame() {
-            let path = auxiliaryWindowShape.path(in: frame)
-            return path.contains(point)
-        }
-        return false
-    }
-
-    // AuxiliaryWindowDelegate
-    func activateAuxiliaryWindow() {
-    }
-
-    func inactivateAuxiliaryWindow() {
-        self.dismissPopup()
-    }
-
-    func onHostWindowActivated() {
-    }
-
-    func onHostWindowInactivated() {
-        self.dismissPopup()
-    }
-
-    func onHostWindowMoved() {
-        self.dismissPopup()
-    }
-
-    func onHostWindowClosed() {
-        self.dismiss()
-    }
-
-    func initiatedGesture(from target: AnyObject?, location: CGPoint) {
-        if target !== self {
-            if let frame = self.auxiliaryWindowFrame(), frame.contains(location) {
-                return
-            }
-            self.dismissPopup()
-        }
-    }
 }
 
-// popup-window for auxiliary window scene
+// WindowController subclass for auxiliary popup windows.
 private class AuxiliaryWindowController<Content: View>: WindowController, @unchecked Sendable {
     override var style: PlatformWindowStyle { [.auxiliaryWindow, .autoResize] }
 
-    private weak var _scene: AuxiliaryWindowSceneContext<Content>?
+    private weak var sceneContext: AuxiliaryWindowSceneContext<Content>?
 
-    init(content: _GraphValue<Content>, scene: WindowKey) {
-        super.init(content: content, scene: scene)
-        guard let scene = scene as? AuxiliaryWindowSceneContext<Content> else {
-            fatalError("AuxiliaryWindowController: invalid scene context")
-        }
-        self._scene = scene
+    init(content: _GraphValue<Content>,
+         sceneContext: AuxiliaryWindowSceneContext<Content>,
+         windowKey: WindowKey) {
+        super.init(content: content, scene: windowKey)
+        self.sceneContext = sceneContext
     }
 
     override func onViewLoaded() {
-        //if view != nil {
-            _scene?.onViewLoaded()
-        //}
+        sceneContext?.onViewLoaded()
     }
 
     override func layoutBounds(_ bounds: CGRect) -> CGRect {
-        _scene?.layoutBounds(bounds) ?? bounds
+        sceneContext?.layoutBounds(bounds) ?? bounds
     }
-    
+
     override func onViewLayoutUpdated() {
-        //if view != nil {
-            _scene?.onViewLayoutChanged()
-        //}
+        sceneContext?.onViewLayoutChanged()
     }
 
     override func onWindowClosing(_: any PlatformWindow) {
-        _scene?.onWindowClosed()
+        sceneContext?.onWindowClosed()
+    }
+
+    // Overlay mode: draw background behind content, then content.
+    override func drawFrame(offset: CGPoint, _ context: GraphicsContext) {
+        if let scene = sceneContext, let frame = scene.auxiliaryWindowFrame() {
+            scene.drawBackground(offset: offset, frame: frame, with: context)
+        }
+        super.drawFrame(offset: offset, context)
+        if let scene = sceneContext, let frame = scene.auxiliaryWindowFrame() {
+            scene.drawOverlay(offset: offset, frame: frame, with: context)
+        }
+    }
+
+    // Overlay hit-test: use the aux window's shape.
+    override func overlayHitTest(_ locationInParent: CGPoint) -> Bool {
+        guard let scene = sceneContext,
+              let frame = scene.auxiliaryWindowFrame() else { return false }
+        return scene.auxiliaryWindowShape.path(in: frame).contains(locationInParent)
+    }
+
+    // Parent window event callbacks.
+    override func onParentWindowActivated()   { sceneContext?.onParentWindowActivated() }
+    override func onParentWindowInactivated() { sceneContext?.onParentWindowInactivated() }
+    override func onParentWindowMoved()       { sceneContext?.onParentWindowMoved() }
+    override func onParentWindowClosed()      { sceneContext?.onParentWindowClosed() }
+    override func onGestureInitiated(from initiator: AnyObject?, location: CGPoint) {
+        sceneContext?.onGestureInitiated(from: initiator, location: location)
     }
 }
 
@@ -335,4 +346,3 @@ extension EnvironmentValues {
         set { self[AuxiliaryWindowUsingPlatformWindow.self] = newValue }
     }
 }
-

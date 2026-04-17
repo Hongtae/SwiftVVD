@@ -8,49 +8,18 @@
 import Foundation
 import VVD
 
-protocol ModalWindowClient: AnyObject {
-    // Stable key identifying the view-tree slot of this modal.
-    // Used by ModalWindowHost to detect duplicate presentation when multiple
-    // client instances are created for the same logical slot — e.g. when a
-    // A modifier may be applied to multiple subviews, generating duplicate modal slots.
-    var windowContextKey: AnyHashable { get }
-
-    func modalWindowFrame() -> CGRect?
-    func drawModalWindowBackground(offset: CGPoint, with context: GraphicsContext)
-    func drawModalWindowOverlay(offset: CGPoint, with context: GraphicsContext)
-    func drawModalWindowContent(offset: CGPoint, with context: GraphicsContext)
-    func updateModalWindowContent(tick: UInt64, delta: Double, date: Date,
-                                  redraw: inout Bool, _: WindowContext.WithGraphicsContext)
-
-    func modalWindowInputEventHandler() -> WindowInputEventHandler?
-
-    // called when the modal window is shown for the first time
-    func onModalSessionInitiated()
-    // called when the modal is closed by user action (e.g. gesture, close button)
-    func onModalSessionDismissedByUser()
-    // called when the modal is closed because its parent was dismissed
-    func onModalSessionDismissedByParent()
-    // called when the modal was never shown — cancelled before being initiated
-    func onModalSessionCancelled()
-}
-
-protocol ModalWindowHost {
-    func addModalWindow(_ client: ModalWindowClient) -> Bool
-    func removeModalWindow(_ client: ModalWindowClient)
-    // removes the client from the host without triggering any session callbacks
-    func detachModalWindow(_ client: ModalWindowClient)
-
-    // key-based slot claim for dedup — platform/overlay agnostic
-    // returns false if a live modal already occupies the slot
-    func claimModalSlot(key: AnyHashable, client: ModalWindowClient) -> Bool
-    func releaseModalSlot(key: AnyHashable)
-}
+// ModalWindowClient / ModalWindowHost protocols removed (2026-04-17).
+// Replaced by direct WindowController nesting:
+//   - AppWindowsController owns strong refs + enforces single-modal constraint.
+//   - WindowController.modalChildWindows holds weak ref to the active modal.
+//   - Session callbacks (onModalSession*) are overridable methods on WindowController.
+//   - Modal slot dedup managed by AppWindowsController.modalSlots.
 
 enum ModalResponse {
     case dismissed   // dismiss() was called programmatically
     case userAction  // closed by user action (e.g. gesture, close button)
     case byParent    // closed because the parent modal was dismissed
-    case cancelled   // never shown — cancelled before being initiated
+    case cancelled   // never shown because it was cancelled before being initiated
 }
 
 struct ModalWindowScene<Content>: _PrimitiveScene where Content: View {
@@ -59,7 +28,12 @@ struct ModalWindowScene<Content>: _PrimitiveScene where Content: View {
     fileprivate var _content: Content { content() }
 
     static func _makeScene(scene: _GraphValue<Self>, inputs: _SceneInputs) -> _SceneOutputs {
-        fatalError("Implement with AG")
+        guard let graph = AttributeGraph.current else {
+            fatalError("ModalWindowScene._makeScene requires AG context")
+        }
+        let context = ModalWindowSceneContext<Content>(graph: scene, inputs: inputs)
+        graph.makeSideEffectRule { [context] in _ = context }
+        return _SceneOutputs(preferences: PreferencesOutputs())
     }
 }
 
@@ -100,7 +74,7 @@ struct TransitionAnimationConfiguration<Key: Hashable> {
 }
 
 // scene context for modal window scene
-class ModalWindowSceneContext<Content>: ModalWindowClient, @unchecked Sendable where Content: View {
+class ModalWindowSceneContext<Content>: @unchecked Sendable where Content: View {
     typealias Scene = ModalWindowScene<Content>
     typealias AnimationKey = TransitionAnimationKey
     typealias AnimationTrack = TransitionAnimationConfiguration<AnimationKey>.Track
@@ -151,7 +125,6 @@ class ModalWindowSceneContext<Content>: ModalWindowClient, @unchecked Sendable w
     private struct _ModalContext: @unchecked Sendable {
         let window: ModalWindowController<Content>
         weak var parentController: WindowController?
-        weak var parentContext: SharedContext?
         weak var modalWindow: (any PlatformWindow)?
         var windowOffset: CGPoint
         var windowSize: CGSize = .zero
@@ -176,15 +149,31 @@ class ModalWindowSceneContext<Content>: ModalWindowClient, @unchecked Sendable w
         return track.value(at: rawProgress)
     }
     
-    var windowContextKey: AnyHashable {
-        // _GraphValue hash is stable across rebuilds (ObjectIdentifier(root) + index),
-        // so different instances created for the same view-tree position share the same key.
+    // Stored at _makeScene time.
+    private let contentGraph: _GraphValue<Content>
+    private let inputs: _SceneInputs
 
-        fatalError("Implement with AG")
+    var windowContextKey: AnyHashable {
+        // _GraphValue identity is stable across rebuilds (ObjectIdentifier + index),
+        // so different instances for the same view-tree slot share the same key.
+        AnyHashable(ObjectIdentifier(contentGraph._attribute.identifier as AnyObject))
+    }
+
+    private var environment: EnvironmentValues {
+        inputs.base.cachedEnvironment.value.environment.value
     }
 
     init(graph: _GraphValue<Scene>, inputs: _SceneInputs) {
+        self.contentGraph = graph[\._content]
+        self.inputs = inputs
         self.modalContext = nil
+    }
+
+    private func releaseModalSlotIfNeeded() {
+        // Release the modal slot in AppWindowsController via the parent controller's app context.
+        if let parentWC = self.modalContext?.parentController {
+            parentWC.appWindowsController?.releaseModalSlot(key: self.windowContextKey)
+        }
     }
 
     fileprivate func onViewLoaded() {
@@ -237,9 +226,8 @@ class ModalWindowSceneContext<Content>: ModalWindowClient, @unchecked Sendable w
                                        anchor: .center,
                                        proposal: ProposedViewSize(windowSize))
 
-            // set modal window offset to center of parent
-            if let parentContext = self.modalContext?.parentContext {
-                let parentSize = parentContext.contentBounds.size
+            // Center the modal overlay in the parent window.
+            if let parentSize = self.modalContext?.parentController?.cachedContentSize {
                 self.modalContext?.windowOffset = CGPoint(
                     x: (parentSize.width - windowSize.width) * 0.5,
                     y: (parentSize.height - windowSize.height) * 0.5)
@@ -248,7 +236,7 @@ class ModalWindowSceneContext<Content>: ModalWindowClient, @unchecked Sendable w
     }
 
     fileprivate func onWindowClosed() {
-        // Platform window was closed by user action — extract and clear
+        // Platform window was closed by user action, so extract and clear
         // the callback before tearDownModal() is called.
         let onDismiss = self.modalContext?.onDismiss
         self.modalContext?.onDismiss = nil
@@ -257,20 +245,109 @@ class ModalWindowSceneContext<Content>: ModalWindowClient, @unchecked Sendable w
     }
 
     @MainActor
-    func present(context parentContext: SharedContext, withAnimation: Bool, onDismiss: ((ModalResponse) -> Void)? = nil) -> Bool {
-        present(context: parentContext, withAnimation: withAnimation, alertDismissAction: nil, onDismiss: onDismiss)
+    func present(in parentController: WindowController,
+                 withAnimation: Bool,
+                 onDismiss: ((ModalResponse) -> Void)? = nil) -> Bool {
+        present(in: parentController, withAnimation: withAnimation,
+                alertDismissAction: nil, onDismiss: onDismiss)
     }
 
     @MainActor
-    func present(context parentContext: SharedContext, withAnimation: Bool, alertDismissAction: (() -> Void)?, onDismiss: ((ModalResponse) -> Void)? = nil) -> Bool {
-        fatalError("Implement with AG")
+    func present(in parentController: WindowController,
+                 withAnimation: Bool,
+                 alertDismissAction: (() -> Void)?,
+                 onDismiss: ((ModalResponse) -> Void)? = nil) -> Bool {
+        if modalContext != nil {
+            modalContext?.activateFirstTime = true
+            return true
+        }
+
+        let key = self.windowContextKey
+        guard let awc = parentController.appWindowsController else {
+            Log.error("ModalWindow: no AppWindowsController available")
+            return false
+        }
+
+        // Read environment to decide platform vs overlay.
+        let usePlatformModal = environment.modalSessionUsingPlatformWindow
+
+        let windowKey = WindowKey(namespace: .app, sceneID: SceneID(Content.self, index: 0))
+        let window = ModalWindowController<Content>(
+            content: contentGraph,
+            sceneContext: self,
+            windowKey: windowKey)
+
+        var ctx = _ModalContext(
+            window: window,
+            parentController: parentController,
+            windowOffset: .zero,
+            windowSize: .zero
+        )
+        ctx.onDismiss = onDismiss
+
+        if usePlatformModal, let hostPlatformWindow = parentController.window {
+            guard hostPlatformWindow.canPresentModalWindow else {
+                Log.error("ModalWindow: platform does not support modal windows")
+                return false
+            }
+            guard let modal = window.makeWindow() else {
+                Log.error("ModalWindow: failed to create modal platform window")
+                return false
+            }
+            modal.contentSize = CGSize(width: 10, height: 10)
+            modal.origin = .zero
+            ctx.modalWindow = modal
+
+            modal.addEventObserver(self) { [weak self] (event: WindowEvent) in
+                guard let self else { return }
+                switch event.type {
+                case .created: self.onModalSessionInitiated()
+                case .closed:  self.onWindowClosed()
+                default: break
+                }
+            }
+            guard awc.presentModalWindow(window, in: parentController,
+                                         key: key, initiated: true) else {
+                modal.removeEventObserver(self)
+                Log.error("ModalWindow: modal slot already occupied")
+                return false
+            }
+            guard hostPlatformWindow.presentModalWindow(modal) else {
+                awc.dismissModalWindow(window)
+                modal.removeEventObserver(self)
+                Log.error("ModalWindow: presentModalWindow failed")
+                return false
+            }
+            window.sharedContext.alertDismissAction = alertDismissAction
+            self.modalContext = ctx
+            return true
+        } else {
+            // Overlay mode.
+            guard awc.presentModalWindow(window, in: parentController,
+                                         key: key, initiated: true) else {
+                Log.debug("ModalWindow: duplicate modal slot — skipped")
+                return false
+            }
+            let shadow = GraphicsContext.Filter.shadow(radius: 8.0, x: 0, y: 0)
+            ctx.filter = shadow
+            if withAnimation {
+                ctx.transition = TransitionAnimation(
+                    duration: transitionDuration,
+                    configuration: transitionPresentAnimation)
+            }
+            let contentScale = parentController.window?.contentScaleFactor ?? 1.0
+            window.sharedContext.contentScaleFactor = contentScale
+            window.sharedContext.alertDismissAction = alertDismissAction
+            self.modalContext = ctx
+            return true
+        }
     }
 
     func dismiss(withAnimation: Bool) {
         guard let context = self.modalContext else { return }
 
         // Remove the onDismiss callback before dismissing so that
-        // onModalSessionDismissed() does not trigger it — .dismissed
+        // onModalSessionDismissed() does not trigger it. .dismissed
         // is handled here after performImmediateDismiss completes.
         let onDismiss = context.onDismiss
         self.modalContext?.onDismiss = nil
@@ -296,10 +373,12 @@ class ModalWindowSceneContext<Content>: ModalWindowClient, @unchecked Sendable w
     private func tearDownModal() {
         guard let context = self.modalContext else { return }
         if let host = context.parentController {
-            // detach without triggering session callbacks — caller handles response
-            host.detachModalWindow(self)
-            host.releaseModalSlot(key: self.windowContextKey)
+            // detach without triggering session callbacks. Caller handles response.
+            host.detachModalChild(context.window)
+            // detachModalChild does not touch AppWindowsController.dynamicModalWindows, so clean up here.
+            host.appWindowsController?.dynamicModalWindows.removeAll { $0 === context.window }
         }
+        self.releaseModalSlotIfNeeded()
         let parentWindow = context.parentController?.window
         if let window = context.modalWindow {
             runOnMainQueue { [weak window, weak self] in
@@ -333,93 +412,68 @@ class ModalWindowSceneContext<Content>: ModalWindowClient, @unchecked Sendable w
         return nil
     }
 
-    func drawModalWindowBackground(offset: CGPoint, with context: GraphicsContext) {
-        if let modalContext, let frame = self.modalWindowFrame() {
-            let progress = self.animationProgress
-            let alpha = self.valueForProgress(progress, key: .alpha)
+    var isAnimating: Bool { modalContext?.transition != nil }
 
-            if let parentContext = modalContext.parentContext {
-                let parentFrame = parentContext.contentBounds
-                let backgroundOpacity = 0.3 * alpha
-                context.fill(Path(parentFrame), with: .color(.black.opacity(backgroundOpacity)))
-            }
+    // MARK: - Drawing (called by ModalWindowController.drawFrame in overlay mode)
 
-            let modal = frame.offsetBy(dx: offset.x, dy: offset.y)
-            let scale = self.valueForProgress(progress, key: .scale)
-            let center = CGPoint(x: modal.midX, y: modal.midY)
+    func drawModalBackground(offset: CGPoint, with context: GraphicsContext) {
+        guard let ctx = modalContext, let frame = modalWindowFrame() else { return }
+        let progress = animationProgress
+        let alpha = valueForProgress(progress, key: .alpha)
 
-            var context = context
-            context.opacity = alpha
-            context.translateBy(x: center.x, y: center.y)
-            context.scaleBy(x: scale, y: scale)
-            context.translateBy(x: -center.x, y: -center.y)
+        // Dim the parent window behind the modal.
+        if let parentController = ctx.parentController {
+            let parentBounds = CGRect(origin: .zero,
+                                     size: parentController.cachedContentSize)
+            context.fill(Path(parentBounds), with: .color(.black.opacity(0.3 * alpha)))
+        }
 
-            let path = RoundedRectangle(cornerRadius: 5).path(in: modal)
+        let modal = frame.offsetBy(dx: offset.x, dy: offset.y)
+        let scale = valueForProgress(progress, key: .scale)
+        let center = CGPoint(x: modal.midX, y: modal.midY)
 
-            if let filter = modalContext.filter {
-                var filteredContext = context
-                filteredContext.addFilter(filter)
-                filteredContext.fill(path, with: .color(.white))
-            } else {
-                context.fill(path, with: .color(.white))
-            }
-            context.stroke(path, with: .color(.black.opacity(0.7)), style: StrokeStyle(lineWidth: 1))
+        var ctx2 = context
+        ctx2.opacity = alpha
+        ctx2.translateBy(x: center.x, y: center.y)
+        ctx2.scaleBy(x: scale, y: scale)
+        ctx2.translateBy(x: -center.x, y: -center.y)
+
+        let path = RoundedRectangle(cornerRadius: 5).path(in: modal)
+        if let filter = ctx.filter {
+            var fc = ctx2; fc.addFilter(filter)
+            fc.fill(path, with: .color(.white))
+        } else {
+            ctx2.fill(path, with: .color(.white))
+        }
+        ctx2.stroke(path, with: .color(.black.opacity(0.7)),
+                    style: StrokeStyle(lineWidth: 1))
+    }
+
+    // drawBody: closure that draws the window's actual display list.
+    func drawModalContent(offset: CGPoint, with context: GraphicsContext,
+                          drawBody: (CGPoint, GraphicsContext) -> Void) {
+        guard let ctx = modalContext, let frame = modalWindowFrame() else { return }
+        let progress = animationProgress
+        let alpha = valueForProgress(progress, key: .alpha)
+        let scale = valueForProgress(progress, key: .scale)
+        let modal = frame.offsetBy(dx: offset.x, dy: offset.y)
+        let center = CGPoint(x: modal.midX, y: modal.midY)
+
+        var context = context
+        context.opacity = alpha
+        context.translateBy(x: center.x, y: center.y)
+        context.scaleBy(x: scale, y: scale)
+        context.translateBy(x: -center.x, y: -center.y)
+
+        let contentOffset = ctx.windowOffset + offset
+        if alpha < 1.0 {
+            context.drawLayer { ctx in drawBody(contentOffset, ctx) }
+        } else {
+            drawBody(contentOffset, context)
         }
     }
 
-    func drawModalWindowOverlay(offset: CGPoint, with context: GraphicsContext) {
-    }
-
-    func drawModalWindowContent(offset: CGPoint, with context: GraphicsContext) {
-        if let modalContext, let frame = self.modalWindowFrame() {
-            let progress = self.animationProgress
-
-            let alpha = self.valueForProgress(progress, key: .alpha)
-            let modal = frame.offsetBy(dx: offset.x, dy: offset.y)
-            let scale = self.valueForProgress(progress, key: .scale)
-            let center = CGPoint(x: modal.midX, y: modal.midY)
-
-            var context = context
-            context.opacity = alpha
-            context.translateBy(x: center.x, y: center.y)
-            context.scaleBy(x: scale, y: scale)
-            context.translateBy(x: -center.x, y: -center.y)
-
-            if alpha < 1.0 {                
-                context.drawLayer { context in
-                    modalContext.window
-                        .drawFrame(offset: modalContext.windowOffset + offset, context)
-                }
-            } else {
-                modalContext.window
-                    .drawFrame(offset: modalContext.windowOffset + offset, context)
-            }
-        }
-    }
-
-    func updateModalWindowContent(tick: UInt64, delta: Double, date: Date,
-                                  redraw: inout Bool,
-                                  _ withGC: WindowContext.WithGraphicsContext) {
-        if var transition = self.modalContext?.transition {
-            transition.elapsed += delta
-            if transition.isComplete {
-                self.modalContext?.transition = nil
-                transition.completion?()
-            } else {
-                self.modalContext?.transition = transition
-            }
-        }
-        if let frame = self.modalWindowFrame() {
-            self.window?.updateView(tick: tick, delta: delta, date: date,
-                                    contentSize: frame.size, redraw: &redraw,
-                                    withGC)
-        }
-    }
-
-    func modalWindowInputEventHandler() -> WindowInputEventHandler? {
-        if self.modalContext?.transition != nil { return nil }
-        return self.window
-    }
+    func drawModalOverlay(offset: CGPoint, with context: GraphicsContext) {}
 
     func onModalSessionInitiated() {
         Log.debug("ModalWindowSceneContext: modal session initiated")
@@ -428,8 +482,8 @@ class ModalWindowSceneContext<Content>: ModalWindowClient, @unchecked Sendable w
     private func endModalSession(response: ModalResponse?) {
         if let context = self.modalContext {
             let onDismiss = context.onDismiss
-            if let host = context.parentController {
-                host.releaseModalSlot(key: self.windowContextKey)
+            if context.parentController != nil {
+                self.releaseModalSlotIfNeeded()
             }
             self.modalContext = nil
             context.window.dismissAllModalWindows()
@@ -453,35 +507,47 @@ class ModalWindowSceneContext<Content>: ModalWindowClient, @unchecked Sendable w
     }
 }
 
-// popup-window for modal window scene
+// WindowController subclass for modal windows.
 private class ModalWindowController<Content: View>: WindowController, @unchecked Sendable {
     override var style: PlatformWindowStyle { [.autoResize] }
 
-    private weak var _scene: ModalWindowSceneContext<Content>?
+    private weak var sceneContext: ModalWindowSceneContext<Content>?
 
-    init(content: _GraphValue<Content>, scene: WindowKey) {
-        super.init(content: content, scene: scene)
-        guard let scene = scene as? ModalWindowSceneContext<Content> else {
-            fatalError("ModalWindowController: invalid scene context")
+    init(content: _GraphValue<Content>,
+         sceneContext: ModalWindowSceneContext<Content>,
+         windowKey: WindowKey) {
+        super.init(content: content, scene: windowKey)
+        self.sceneContext = sceneContext
+    }
+
+    override func onViewLoaded()        { sceneContext?.onViewLoaded() }
+    override func onViewLayoutUpdated() { sceneContext?.onViewLayoutChanged() }
+    override func onWindowClosing(_: any PlatformWindow) { sceneContext?.onWindowClosed() }
+
+    // Overlay mode: apply animation transform then draw content.
+    override func drawFrame(offset: CGPoint, _ context: GraphicsContext) {
+        guard let scene = sceneContext else {
+            super.drawFrame(offset: offset, context)
+            return
         }
-        self._scene = scene
+        scene.drawModalBackground(offset: offset, with: context)
+        scene.drawModalContent(offset: offset, with: context) {
+            super.drawFrame(offset: $0, $1)
+        }
+        scene.drawModalOverlay(offset: offset, with: context)
     }
 
-    override func onViewLoaded() {
-        //if view != nil {
-            _scene?.onViewLoaded()
-        //}
+    // Input is blocked during animation.
+    override func handleMouseEvent(event: MouseEvent) -> Bool {
+        guard sceneContext?.isAnimating == false else { return true }
+        return super.handleMouseEvent(event: event)
     }
 
-    override func onViewLayoutUpdated() {
-        //if view != nil {
-            _scene?.onViewLayoutChanged()
-        //}
-    }
-
-    override func onWindowClosing(_: any PlatformWindow) {
-        _scene?.onWindowClosed()
-    }
+    // Modal session callbacks forward to scene context.
+    override func onModalSessionInitiated()         { sceneContext?.onModalSessionInitiated() }
+    override func onModalSessionDismissedByUser()   { sceneContext?.onModalSessionDismissedByUser() }
+    override func onModalSessionDismissedByParent() { sceneContext?.onModalSessionDismissedByParent() }
+    override func onModalSessionCancelled()         { sceneContext?.onModalSessionCancelled() }
 }
 
 

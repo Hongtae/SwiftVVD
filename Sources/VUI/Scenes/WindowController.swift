@@ -22,12 +22,14 @@ protocol WindowInputEventHandler {
     func resetGestureHandlers()
 }
 
-// WindowController owns ViewGraph and drives rendering + event dispatch.
+// WindowController: owns ViewGraph and drives rendering + event dispatch.
 // Non-generic: the Content type is used only at init for AG wiring, then discarded.
 // Optionally owns a WindowContext, created lazily on the first makeWindow() call.
 // Overlay-mode aux/modal controllers never call makeWindow(), so windowContext stays nil.
-class WindowController: AuxiliaryWindowHost, ModalWindowHost,
-                        WindowInputEventHandler, WindowDelegate,
+//
+// Conforms to ViewRendererHost and ViewGraphRootValueUpdater.
+// AG ownership lives in ViewGraph.
+class WindowController: WindowInputEventHandler, WindowDelegate,
                         ViewRendererHost, ViewGraphRootValueUpdater,
                         ViewGraphRenderDelegate,
                         @unchecked Sendable {
@@ -42,16 +44,15 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
     var sharedContext: SharedContext
     let sceneResources: SceneResources
 
-    // gestureGraph is owned directly by WindowController.
-    // GestureGraph is the window-level coordinator.
+    // gestureGraph is owned directly by WindowController as the window-level gesture coordinator.
     var gestureGraph: GestureGraph?
 
-    // Platform event -> EventID routing table.
+    // Platform event to EventID routing table.
     // WindowController performs this mapping before forwarding to GestureGraph.
     private let _nextEventSerial: Atomic<Int> = Atomic(1)
-    private var _touchEventIDs: [Int: EventID] = [:]    // deviceID -> EventID (touch/stylus)
+    private var _touchEventIDs: [Int: EventID] = [:]    // deviceID to EventID (touch/stylus)
     private var _mouseEventID: EventID?                   // single mouse pointer EventID
-    private var _spatialEventIDs: [Int: EventID] = [:]   // deviceID -> spatial EventID (touch)
+    private var _spatialEventIDs: [Int: EventID] = [:]   // deviceID to spatial EventID (touch)
     private var _mouseSpatialEventID: EventID? = nil      // single mouse pointer spatial EventID
     private var _panEventID: EventID?                     // trackpad pan gesture EventID
     private var _panTranslation: CGPoint = .zero
@@ -62,7 +63,6 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
     }
 
     // viewGraph owns the view-tree AttributeGraph (GraphHost.data) and gesture routing.
-    // moved from `let graph: AttributeGraph` + scattered input/output attrs.
     // IUO because gestureGraph must be created and wired before ViewGraph.init runs _makeView.
     var viewGraph: ViewGraph { _viewGraph }
     private var _viewGraph: ViewGraph!
@@ -95,11 +95,13 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
         case keyboard(KeyboardEvent)
         case mouse(MouseEvent)
         case gesture(GestureEvent)
+        case action(@Sendable () -> Void)
     }
     private let inputEvents = Mutex<[InputEvent]>([])
 
     // ViewRendererHost / ViewGraphOwner stored state.
     // WindowController tracks its own owner-side state separately from ViewGraph's internal state,
+    // matching ViewRendererHost ownership needs.
     var currentTimestamp: Time = Time(seconds: 0)
     var valuesNeedingUpdate: ViewGraphRootValues = []
     var renderingPhase: ViewRenderingPhase = ViewRenderingPhase()
@@ -132,7 +134,6 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
         self.date = .now
 
         // Create GestureGraph first. It owns an independent AG.
-        // GraphHost.Data.init() internally for an independent AG. ViewGraph's AG is separate.
         // WindowController owns both GestureGraph and ViewGraph.
         self.gestureGraph = GestureGraph()
         // Wire rendererHost back-reference before ViewGraph.init. GestureResponder.init
@@ -151,7 +152,7 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
         //   updateSize() / updateEnvironment() etc. called inline in updateView for now.
         //   Full invalidateProperties(_:mayDeferUpdate:) wiring is a future step.
         self.viewGraph.updateDelegate = self
-        // self.viewGraph.delegate = self
+        // self.viewGraph.delegate is not wired yet.
     }
 
     deinit {
@@ -198,7 +199,7 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
     }
 
     private var viewChangedWhileDrawing: Bool = false
-    private var cachedContentSize: CGSize = .zero
+    private(set) var cachedContentSize: CGSize = .zero
 
     func updateFrame(tick: UInt64, delta: Double, date: Date,
                      contentSize: CGSize, shouldDrawFrame: Bool,
@@ -207,10 +208,10 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
         // Pull render context from delegate (ViewGraphRenderDelegate).
         // contentsScale: HiDPI scale factor for the current display.
         // opaqueBackground: whether the background is fully opaque (skip alpha clear).
-        // calls this once per frame before updateOutputs/render.
+        // Called once per frame before updateOutputs/render.
         var renderCtx = ViewGraphRenderContext(contentsScale: 1.0, opaqueBackground: false)
         viewGraph.renderDelegate?.updateRenderContext(&renderCtx)
-        // TODO: propagate renderCtx.contentsScale to draw calls (HiDPI)
+        // TODO: propagate renderCtx.contentsScale to draw calls (HiDPI, Phase 5)
 
         var redraw = false
         self.updateView(tick: tick, delta: delta, date: date,
@@ -252,10 +253,11 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
                 case .keyboard(let event): self.onKeyboardEvent(event: event)
                 case .mouse(let event):    self.onMouseEvent(event: event)
                 case .gesture(let event):  self.handleGestureEvent(event: event)
+                case .action(let action):  action()
                 }
             }
 
-            // Drain GestureGraph's action outbox. Closures deferred from within GestureGraph
+            // Drain GestureGraph's action outbox: closures deferred from within GestureGraph
             // AG evaluation (enqueueAction fallback). Run here, outside any AG context,
             // after gesture events are fully processed.
             if let gg = self.gestureGraph {
@@ -267,7 +269,7 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
             }
 
             // updateOutputs: flush dirty bits, @State/@Observable changes, then evaluate AG.
-            // Internally: data.withCurrent -> inbox.drain -> updateDelegate -> timeAttr.setValue.
+            // Internally: data.withCurrent, inbox.drain, updateDelegate, then timeAttr.setValue.
             viewGraph.updateOutputs(at: time)
 
             // Resource loading: requires GraphicsContext, handled separately after updateOutputs.
@@ -296,6 +298,19 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
         }
         redraw = !changeSet.ids.isEmpty || self.viewChangedWhileDrawing
         self.viewChangedWhileDrawing = false
+
+        // Overlay aux children: update after self.
+        for entry in self.auxChildWindows.withLock({ $0 }) {
+            guard let child = entry.controller, entry.frame == nil else { continue }
+            child.updateView(tick: tick, delta: delta, date: date,
+                             contentSize: contentSize, redraw: &redraw, withGC)
+        }
+        // Overlay modal child (at most one): update last.
+        if let entry = self.modalChildWindows.withLock({ $0.first }),
+           let child = entry.controller, entry.frame == nil {
+            child.updateView(tick: tick, delta: delta, date: date,
+                             contentSize: contentSize, redraw: &redraw, withGC)
+        }
     }
 
     func drawFrame(offset: CGPoint, _ context: GraphicsContext) {
@@ -317,23 +332,55 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
             }
             self.viewChangedWhileDrawing = !changeSet.ids.isEmpty
         }
+        // Overlay aux children: draw on top after self.
+        for entry in self.auxChildWindows.withLock({ $0 }) {
+            guard let child = entry.controller, entry.frame == nil else { continue }
+            child.drawFrame(offset: offset, context)
+        }
+        // Overlay modal child (at most one): draw on top of everything.
+        if let entry = self.modalChildWindows.withLock({ $0.first }),
+           let child = entry.controller, entry.frame == nil {
+            child.drawFrame(offset: offset, context)
+        }
     }
 
     func layoutBounds(_ bounds: CGRect) -> CGRect { bounds }
 
     func shouldClose(window: any PlatformWindow) -> Bool {
-        modalClients.isEmpty
+        modalChildWindows.withLock { $0.allSatisfy { $0.controller == nil } }
     }
 
     func onWindowCreated(_: any PlatformWindow) {}
 
+    var appWindowsController: AppWindowsController? { appContext?.appWindowsController }
+
+    // MARK: - Parent window event callbacks (override in subclass)
+    func onParentWindowActivated()   {}
+    func onParentWindowInactivated() {}
+    func onParentWindowMoved()       {}
+    func onParentWindowClosed()      { dismissAllAuxiliaryWindows(); dismissAllModalWindows() }
+
+    // MARK: - Gesture initiation callback for dismissOnDeactivate logic
+    func onGestureInitiated(from initiator: AnyObject?, location: CGPoint) {}
+
+    // MARK: - Overlay hit-test (used by parent for mouse routing in overlay mode)
+    // Override to define the hit-testable region. Default: bounding rect of content.
+    func overlayHitTest(_ locationInParent: CGPoint) -> Bool { false }
+
+    // MARK: - Modal session callbacks (override in ModalWindowController)
+    func onModalSessionInitiated()         {}
+    func onModalSessionDismissedByUser()   {}
+    func onModalSessionDismissedByParent() {}
+    func onModalSessionCancelled()         {}
+
     func onWindowClosing(_: any PlatformWindow) {
-        self.auxClients.forEach { $0.onHostWindowClosed() }
+        self.auxChildWindows.withLock { $0.compactMap(\.controller) }
+            .forEach { $0.onParentWindowClosed() }
     }
 
     func onViewLoaded() {}
     func onViewLayoutUpdated() {}
-
+    
     @MainActor
     func handleWindowEvent(event: WindowEvent) {
         switch event.type {
@@ -341,73 +388,84 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
             DispatchQueue.main.async {
                 appContext?.checkWindowActivities()
             }
-            self.auxClients.forEach { $0.onHostWindowClosed() }
-
+            inputEvents.withLock {
+                $0.append(.action { [weak self] in
+                    self?.auxChildWindows.withLock {
+                        $0.compactMap(\.controller) }
+                    .forEach { $0.onParentWindowClosed() }
+                })
+            }
         case .hidden:
             self.sharedContext.focusedViews.removeAll()
-            viewGraph.data.graph.inbox.enqueue {
-                self.gestureGraph!.resetEvents()
+            viewGraph.data.graph.inbox.enqueue { [weak self] in
+                self?.gestureGraph!.resetEvents()
             }
         case .activated:
-            self.auxClients.forEach { $0.onHostWindowActivated() }
-
+            inputEvents.withLock {
+                $0.append(.action { [weak self] in
+                    self?.auxChildWindows.withLock {
+                        $0.compactMap(\.controller) }
+                    .forEach { $0.onParentWindowActivated() }
+                })
+            }
         case .inactivated:
             self.sharedContext.focusedViews.removeAll()
-            viewGraph.data.graph.inbox.enqueue {
-                self.gestureGraph!.resetEvents()
+            viewGraph.data.graph.inbox.enqueue { [weak self] in
+                self?.gestureGraph!.resetEvents()
             }
-            self.auxClients.forEach { $0.onHostWindowInactivated() }
-
+            inputEvents.withLock {
+                $0.append(.action { [weak self] in
+                    self?.auxChildWindows.withLock {
+                        $0.compactMap(\.controller) }
+                    .forEach { $0.onParentWindowInactivated() }
+                })
+            }
         case .minimized:
             self.sharedContext.focusedViews.removeAll()
-            viewGraph.data.graph.inbox.enqueue {
-                self.gestureGraph!.resetEvents()
+            viewGraph.data.graph.inbox.enqueue { [weak self] in
+                self?.gestureGraph!.resetEvents()
             }
         case .moved, .resized:
-            self.auxClients.forEach { $0.onHostWindowMoved() }
-
+            inputEvents.withLock {
+                $0.append(.action { [weak self] in
+                    self?.auxChildWindows.withLock {
+                        $0.compactMap(\.controller) }
+                    .forEach { $0.onParentWindowMoved() }
+                })
+            }
         default:
             break
         }
     }
 
     func onKeyboardEvent(event: KeyboardEvent) {
-        let modalClient = self.modalWindows.withLock { $0.first?.client }
-        if let modalClient {
-            modalClient.modalWindowInputEventHandler()?
-                .handleKeyboardEvent(event: event)
+        let topModal = self.modalChildWindows.withLock { $0.first?.controller }
+        if let topModal {
+            topModal.onKeyboardEvent(event: event)
         } else {
             self.handleKeyboardEvent(event: event)
         }
     }
 
     func onMouseEvent(event: MouseEvent) {
-        let modalWindow = self.modalWindows.withLock { $0.first }
-        if let modalClient = modalWindow?.client,
-           let modalFrame = modalWindow?.frame {
-
-            var updateHover = false
-            if let handler = modalClient.modalWindowInputEventHandler() {
-                var event = event
-                event.location -= modalFrame.origin
-
-                if event.type == .wheel {
-                    handler.handleMouseWheel(at: event.location, delta: event.delta)
-                } else {
-                    if handler.handleMouseEvent(event: event) == false {
-                        if event.type == .move || event.type == .buttonUp {
-                            handler.handleMouseHover(at: event.location,
-                                                     deviceID: event.deviceID,
-                                                     isTopMost: true)
-                            updateHover = true
-                        }
+        let topModal = self.modalChildWindows.withLock { $0.first }
+        if let modalController = topModal?.controller,
+           let modalFrame = topModal?.frame {
+            var event = event
+            event.location -= modalFrame.origin
+            if event.type == .wheel {
+                modalController.handleMouseWheel(at: event.location, delta: event.delta)
+            } else {
+                if !modalController.handleMouseEvent(event: event) {
+                    if event.type == .move || event.type == .buttonUp {
+                        modalController.handleMouseHover(at: event.location,
+                                                        deviceID: event.deviceID,
+                                                        isTopMost: true)
+                        self.handleMouseHover(at: event.location,
+                                              deviceID: event.deviceID,
+                                              isTopMost: false)
                     }
                 }
-            }
-            if updateHover {
-                self.handleMouseHover(at: event.location,
-                                      deviceID: event.deviceID,
-                                      isTopMost: false)
             }
             return
         }
@@ -438,18 +496,12 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
             return false
         }
 
-        var handlers = self.auxiliaryWindows.withLock {
-            $0.reversed().compactMap {
-                if let client = $0.client {
-                    return (id: ObjectIdentifier(client),
-                            action: { (event: KeyboardEvent) -> Bool in
-                        if let handler = client.auxiliaryWindowInputEventHandler() {
-                            return handler.handleKeyboardEvent(event: event)
-                        }
-                        return false
-                    })
-                }
-                return nil
+        var handlers = self.auxChildWindows.withLock {
+            $0.reversed().compactMap { entry -> (id: ObjectIdentifier, action: (KeyboardEvent) -> Bool)? in
+                guard let child = entry.controller else { return nil }
+                return (id: ObjectIdentifier(child), action: { event in
+                    child.handleKeyboardEvent(event: event)
+                })
             }
         }
         handlers.append((id: ObjectIdentifier(self), action: handleEvent))
@@ -477,8 +529,8 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
             guard let gg = self.gestureGraph,
                   let rootResponder = gg.rootResponder else { return false }
 
-            // Map deviceID -> EventID, build [EventID: EventType] dict,
-            // then forward to GestureGraph via EventGraphHost.sendEvents.
+            // Map deviceID to EventID, build the live event dictionary,
+            // then forward it to GestureGraph.
             let time = self.currentTimestamp
             let isTouch = event.device == .touch || event.device == .stylus
 
@@ -546,29 +598,27 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
             }
         }
 
-        var handlers = self.auxiliaryWindows.withLock {
-            $0.reversed().compactMap {
-                if let client = $0.client, let frame = $0.frame {
-                    return (target: client as AnyObject,
-                            action: { (event: MouseEvent) -> Bool in
-                        if client.auxiliaryWindowHitTest(event.location) {
-                            if let handler = client.auxiliaryWindowInputEventHandler() {
-                                var event = event
-                                event.location -= frame.origin
-                                handler.handleMouseEvent(event: event)
-                            }
-                            return true
-                        }
-                        return false
-                    })
-                }
-                return nil
+        // Build handler list: aux children (reversed = top-first) then self.
+        var handlers = self.auxChildWindows.withLock {
+            $0.reversed().compactMap { entry -> (target: AnyObject, action: (MouseEvent) -> Bool)? in
+                guard let child = entry.controller, let frame = entry.frame else { return nil }
+                return (target: child, action: { event in
+                    let loc = event.location - frame.origin
+                    if child.overlayHitTest(loc) {
+                        var e = event; e.location = loc
+                        child.handleMouseEvent(event: e)
+                        return true
+                    }
+                    return false
+                })
             }
         }
         handlers.append((target: self as AnyObject, action: handleEvent))
 
-        var clients: [AuxiliaryWindowClient] = []
-        if event.type == .buttonDown { clients = self.auxClients }
+        // Track which aux child initiated a gesture (for dismissOnDeactivate).
+        let auxChildren = event.type == .buttonDown
+            ? self.auxChildWindows.withLock { $0.compactMap(\.controller) }
+            : []
 
         if let _lastMouseEventHandler,
            let index = handlers.firstIndex(where: {
@@ -580,22 +630,23 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
         for handler in handlers {
             if handler.action(event) {
                 _lastMouseEventHandler = ObjectIdentifier(handler.target)
-                clients.forEach { $0.initiatedGesture(from: handler.target, location: event.location) }
+                auxChildren.forEach { $0.onGestureInitiated(from: handler.target, location: event.location) }
                 return true
             }
         }
         _lastMouseEventHandler = nil
-        clients.forEach { $0.initiatedGesture(from: nil, location: event.location) }
+        auxChildren.forEach { $0.onGestureInitiated(from: nil, location: event.location) }
         return false
     }
 
     @discardableResult
     func handleMouseWheel(at location: CGPoint, delta: CGPoint) -> Bool {
-        for aux in self.auxiliaryWindows.withLock({ $0.reversed() }) {
-            if let offset = aux.frame?.origin,
-               let handler = aux.client?.auxiliaryWindowInputEventHandler() {
-                let loc = location - offset
-                if handler.handleMouseWheel(at: loc, delta: delta) { return true }
+        for entry in self.auxChildWindows.withLock({ $0.reversed() }) {
+            guard let child = entry.controller, let frame = entry.frame else { continue }
+            let loc = location - frame.origin
+            if child.overlayHitTest(loc) {
+                child.handleMouseWheel(at: loc, delta: delta)
+                return true
             }
         }
         return false
@@ -667,16 +718,16 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
     @discardableResult
     func handleMouseHover(at location: CGPoint, deviceID: Int, isTopMost: Bool) -> Bool {
         var topMost = isTopMost
-        self.auxiliaryWindows.withLock({ $0.reversed() }).forEach { aux in
-            if let offset = aux.frame?.origin,
-               let handler = aux.client?.auxiliaryWindowInputEventHandler() {
+        self.auxChildWindows.withLock({ $0.reversed() }).forEach { entry in
+            guard let child = entry.controller else { return }
+            if let offset = entry.frame?.origin {
                 let loc = location - offset
-                if handler.handleMouseHover(at: loc, deviceID: deviceID, isTopMost: topMost) {
+                if child.handleMouseHover(at: loc, deviceID: deviceID, isTopMost: topMost) {
                     topMost = false
                 }
             }
-            if topMost, let hitTest = aux.client?.auxiliaryWindowHitTest(location) {
-                topMost = !hitTest
+            if topMost && child.overlayHitTest(location - (entry.frame?.origin ?? .zero)) {
+                topMost = false
             }
         }
         return isTopMost != topMost
@@ -695,11 +746,13 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
 
     // MARK: - ViewGraphRenderDelegate
     //
+    // WindowController is the rendering host.
+    //
     // viewGraph.renderDelegate = self is set at end of init.
     // updateRenderContext is called once per frame in updateFrame (before updateView).
 
     // renderingRootView is the root "platform view" being rendered.
-    // WindowController IS the rendering host, so return self.
+    // WindowController is the rendering host, so return self.
     var renderingRootView: AnyObject { self }
 
     // updateRenderContext fills in per-frame render parameters.
@@ -713,11 +766,13 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
     }
 
     // withMainThreadRender ensures body runs on the main render thread.
+    // The VVD render loop already runs on the appropriate thread, so call body() directly.
     func withMainThreadRender(wasAsync: Bool, _ body: () -> Time) -> Time {
         return body()
     }
 
     // renderIntervalForDisplayLink returns how long until the next frame should be rendered.
+    // VVD controls frame pacing; returning 0.0 means "render at VVD frame rate".
     func renderIntervalForDisplayLink(timestamp: Time) -> Double {
         return 0.0
     }
@@ -725,6 +780,7 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
     // MARK: - ViewGraphRootValueUpdater
 
     func updateRootView() {
+        // VUI: content is lifted into ViewGraph at init time; no separate root view setter.
     }
 
     func updateEnvironment() {
@@ -735,138 +791,169 @@ class WindowController: AuxiliaryWindowHost, ModalWindowHost,
         viewGraph.sizeAttr?.setValue(ViewSize(cachedContentSize))
     }
 
-    func updateSafeArea() {} // TODO: safe area not yet wired
-    func updateContainerSize() {} // TODO: container size not yet wired
-    func updateTransform() {}
-    func updateFocusStore() {}
-    func updateFocusedItem() {}
-    func updateFocusedValues() {}
+    func updateSafeArea()      {}  // TODO: safe area not yet wired
+    func updateContainerSize() {}  // TODO: container size not yet wired
+    func updateTransform()         {}
+    func updateFocusStore()        {}
+    func updateFocusedItem()       {}
+    func updateFocusedValues()     {}
     func updateAccessibilityEnvironment() {}
 
-    // MARK: - Aux/Modal window management
+    // MARK: - Aux/Modal window management (nested structure)
+    // AppWindowsController owns all instances (strong refs).
+    // WindowController holds weak refs for overlay rendering and cascade dismiss.
 
-    private struct AuxiliaryWindow: @unchecked Sendable {
-        weak var client: AuxiliaryWindowClient?
+    // Parent that opened this window (nil = root window).
+    weak var parentWindow: WindowController?
+
+    private struct AuxChildEntry: @unchecked Sendable {
+        weak var controller: WindowController?
         var frame: CGRect? = nil
     }
-    private let auxiliaryWindows = Mutex<[AuxiliaryWindow]>([])
+    private let auxChildWindows = Mutex<[AuxChildEntry]>([])
 
-    private struct ModalWindow: @unchecked Sendable {
-        weak var client: ModalWindowClient?
+    private struct ModalChildEntry: @unchecked Sendable {
+        weak var controller: WindowController?
         var frame: CGRect? = nil
         var initiated: Bool = false
     }
-    private let modalWindows = Mutex<[ModalWindow]>([])
+    // Active modal (at most one per WindowController).
+    private let modalChildWindows = Mutex<[ModalChildEntry]>([])
+    // Queue: waiting modals shown one-by-one as the active one is dismissed.
+    private struct PendingModal: @unchecked Sendable {
+        let controller: WindowController
+        let initiated: Bool
+    }
+    private let pendingModalChildren = Mutex<[PendingModal]>([])
 
-    private let modalSlots = Mutex<[AnyHashable: AnyWeakObject]>([:])
-
-    func addAuxiliaryWindow(_ client: AuxiliaryWindowClient) -> Bool {
-        let aux = AuxiliaryWindow(client: client)
-        self.auxiliaryWindows.withLock { auxiliaryWindows in
-            if let index = auxiliaryWindows.firstIndex(where: { $0.client === client }) {
-                auxiliaryWindows.remove(at: index)
-            }
-            auxiliaryWindows = auxiliaryWindows.filter { $0.client != nil }
-            auxiliaryWindows.append(aux)
+    // Called by AppWindowsController to register a child aux window.
+    func addAuxChild(_ child: WindowController) {
+        child.parentWindow = self
+        let entry = AuxChildEntry(controller: child)
+        self.auxChildWindows.withLock { entries in
+            entries.removeAll { $0.controller == nil || $0.controller === child }
+            entries.append(entry)
         }
-        return true
     }
 
-    func removeAuxiliaryWindow(_ client: AuxiliaryWindowClient) {
-        self.auxiliaryWindows.withLock { auxiliaryWindows in
-            if let index = auxiliaryWindows.firstIndex(where: { $0.client === client }) {
-                auxiliaryWindows.remove(at: index)
+    func removeAuxChild(_ child: WindowController) {
+        child.parentWindow = nil
+        self.auxChildWindows.withLock { $0.removeAll { $0.controller === child } }
+    }
+
+    func updateAuxChildFrame(_ child: WindowController, frame: CGRect?) {
+        self.auxChildWindows.withLock { entries in
+            if let i = entries.firstIndex(where: { $0.controller === child }) {
+                entries[i].frame = frame
             }
         }
     }
 
     func dismissAllAuxiliaryWindows() {
-        let clients = self.auxiliaryWindows.withLock { aux in
-            defer { aux.removeAll() }
-            return aux.compactMap(\.client)
+        let children = self.auxChildWindows.withLock { entries in
+            defer { entries.removeAll() }
+            return entries.compactMap(\.controller)
         }
-        clients.forEach { $0.onHostWindowClosed() }
-    }
-
-    var auxClients: [AuxiliaryWindowClient] {
-        self.auxiliaryWindows.withLock { $0.compactMap(\.client) }
-    }
-
-    var modalClients: [ModalWindowClient] {
-        self.modalWindows.withLock { $0.compactMap(\.client) }
-    }
-
-    func claimModalSlot(key: AnyHashable, client: ModalWindowClient) -> Bool {
-        let key = UnsafeBox(key)
-        let slot = UnsafeBox(client)
-        return modalSlots.withLock { slots in
-            slots = slots.filter { _, value in value.value != nil }
-            let key = key.value
-            if slots[key]?.value != nil { return false }
-            slots[key] = AnyWeakObject(slot.value as AnyObject)
-            return true
+        children.forEach { child in
+            child.parentWindow = nil
+            child.onParentWindowClosed()
         }
     }
 
-    func releaseModalSlot(key: AnyHashable) {
-        let key = UnsafeBox(key)
-        modalSlots.withLock { slots in
-            let key = key.value
-            slots.removeValue(forKey: key)
+    // Called by AppWindowsController to register a child modal window.
+    // If a modal is already active, the child is queued and shown after the current one is dismissed.
+    func addModalChild(_ child: WindowController, initiated: Bool) {
+        child.parentWindow = self
+        let hasActive = self.modalChildWindows.withLock {
+            $0.contains { $0.controller != nil }
+        }
+        if hasActive {
+            self.pendingModalChildren.withLock { $0.append(PendingModal(controller: child, initiated: initiated)) }
+        } else {
+            _showModalChild(child, initiated: initiated)
         }
     }
 
-    func addModalWindow(_ client: ModalWindowClient) -> Bool {
-        var prepareForFirstModal = false
-        let modal = ModalWindow(client: client)
-        self.modalWindows.withLock { modalWindows in
-            prepareForFirstModal = modalWindows.isEmpty
-            if modalWindows.contains(where: { $0.client === client }) { return }
-            modalWindows.append(modal)
+    private func _showModalChild(_ child: WindowController, initiated: Bool) {
+        let entry = ModalChildEntry(controller: child, initiated: initiated)
+        let isFirst = self.modalChildWindows.withLock { entries in
+            let first = entries.isEmpty
+            entries = [entry]
+            return first
         }
-        if prepareForFirstModal {
+        if isFirst {
             self.resetGestureHandlers()
             self.handleMouseHover(at: .zero, deviceID: 0, isTopMost: false)
         }
-        return true
     }
 
-    func detachModalWindow(_ client: ModalWindowClient) {
-        self.modalWindows.withLock { modalWindows in
-            modalWindows.removeAll { $0.client === client }
+    private func _showNextModal() {
+        let next = self.pendingModalChildren.withLock { pending -> PendingModal? in
+            guard !pending.isEmpty else { return nil }
+            return pending.removeFirst()
+        }
+        if let next {
+            next.controller.parentWindow = self
+            _showModalChild(next.controller, initiated: next.initiated)
         }
     }
 
-    func removeModalWindow(_ client: ModalWindowClient) {
-        var initiated: Bool? = nil
-        self.modalWindows.withLock { modalWindows in
-            if let index = modalWindows.firstIndex(where: { $0.client === client }) {
-                initiated = modalWindows[index].initiated
-                modalWindows.remove(at: index)
+    func removeModalChild(_ child: WindowController) {
+        var initiated: Bool?
+        self.modalChildWindows.withLock { entries in
+            if let i = entries.firstIndex(where: { $0.controller === child }) {
+                initiated = entries[i].initiated
+                entries.remove(at: i)
             }
         }
+        child.parentWindow = nil
         guard let initiated else { return }
         if initiated {
-            client.onModalSessionDismissedByParent()
+            child.onModalSessionDismissedByParent()
         } else {
-            client.onModalSessionCancelled()
+            child.onModalSessionCancelled()
+        }
+        _showNextModal()
+    }
+
+    func detachModalChild(_ child: WindowController) {
+        var wasActive = false
+        self.modalChildWindows.withLock {
+            let before = $0.count
+            $0.removeAll { $0.controller === child }
+            wasActive = $0.count < before
+        }
+        self.pendingModalChildren.withLock { $0.removeAll { $0.controller === child } }
+        child.parentWindow = nil
+        if wasActive { _showNextModal() }
+    }
+
+    func updateModalChildFrame(_ child: WindowController, frame: CGRect?) {
+        self.modalChildWindows.withLock { entries in
+            if let i = entries.firstIndex(where: { $0.controller === child }) {
+                entries[i].frame = frame
+            }
         }
     }
 
     func dismissAllModalWindows() {
-        let clients = self.modalWindows.withLock { modals in
-            defer { modals.removeAll() }
-            return modals.compactMap {
-                modal -> (client: ModalWindowClient, initiated: Bool)? in
-                guard let client = modal.client else { return nil }
-                return (client, modal.initiated)
-            }
+        // Cancel queued modals first.
+        let pending = self.pendingModalChildren.withLock { p in defer { p.removeAll() }; return p }
+        pending.forEach { item in
+            item.controller.parentWindow = nil
+            item.controller.onModalSessionCancelled()
         }
-        for (client, initiated) in clients {
-            if initiated {
-                client.onModalSessionDismissedByParent()
+        let entries = self.modalChildWindows.withLock { entries in
+            defer { entries.removeAll() }
+            return entries
+        }
+        for entry in entries {
+            guard let child = entry.controller else { continue }
+            child.parentWindow = nil
+            if entry.initiated {
+                child.onModalSessionDismissedByParent()
             } else {
-                client.onModalSessionCancelled()
+                child.onModalSessionCancelled()
             }
         }
     }

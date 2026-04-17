@@ -29,7 +29,6 @@ final class SharedContext: @unchecked Sendable {
 
     var window: WindowController { fatalError("Implement with AG") }
     
-    var auxiliarySceneContext: AuxiliarySceneContext?
     var alertDismissAction: (() -> Void)?
 
     init() {
