@@ -274,6 +274,20 @@ public struct GestureMask: OptionSet, Sendable {
 /// Platform-specific gesture inputs. Empty for VUI (no UIKit/AppKit gesture recognizer pipeline).
 struct PlatformGestureInputs {}
 
+// PubliclyPrimitiveGesture / TappableEventType
+
+/// Marker protocol for gesture types that implement recognition via `body` computed property.
+/// The base Gesture extension (Self.Value == Self.Body.Value) covers body-based
+/// _makeGesture via gesture[\.body] keypath nodes.
+protocol PubliclyPrimitiveGesture: Gesture {}
+
+/// Protocol for tap/click event types that carry a button identifier.
+protocol TappableEventType: EventType {
+    var buttonID: Int { get }
+}
+
+extension TappableEvent: TappableEventType {}
+
 // EventListener
 
 /// Primitive gesture that listens for a specific EventType stream.

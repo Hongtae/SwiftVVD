@@ -7,11 +7,49 @@
 
 import Foundation
 
-// TapGesture
-//
-// _makeGesture -> create SingleTapGesture<TappableEvent> -> map TappableEvent to Void
-//
-// TapGesture._makeGesture -> SingleTapGesture<TappableEvent>._makeGesture -> map { _ in () }
+// MARK: - SingleTapGesture
+
+/// Internal gesture type used by TapGesture.
+/// Implements single/multi-tap recognition via an AG modifier chain.
+///
+/// Body chain, from inner to outer:
+///   EventListener<E>
+///   -> CategoryGesture<E>         (GestureCategory.select)
+///   -> RepeatGesture<E>           (requires count taps)
+///   -> RequiredTapCountWriter<E>  (writes RequiredTapCountKey preference)
+struct SingleTapGesture<E: TappableEventType>: Gesture, PubliclyPrimitiveGesture {
+    var count: Int
+
+    typealias Value = E
+
+    typealias Body = ModifierGesture<
+        RequiredTapCountWriter<E>,
+        ModifierGesture<
+            RepeatGesture<E>,
+            ModifierGesture<
+                CategoryGesture<E>,
+                EventListener<E>
+            >
+        >
+    >
+
+    var body: Body {
+        ModifierGesture(
+            modifier: RequiredTapCountWriter(count: count),
+            body: ModifierGesture(
+                modifier: RepeatGesture(count: count),
+                body: ModifierGesture(
+                    modifier: CategoryGesture(category: .select),
+                    body: EventListener<E>()
+                )
+            )
+        )
+    }
+}
+
+// MARK: - TapGesture
+
+// _makeGesture -> SingleTapGesture<TappableEvent> -> map TappableEvent to Void.
 
 public struct TapGesture: Gesture {
     public var count: Int
@@ -29,7 +67,6 @@ public struct TapGesture: Gesture {
         guard let graph = AttributeGraph.current else {
             fatalError("TapGesture._makeGesture requires AG context")
         }
-        // create SingleTapGesture<TappableEvent> -> AG input node -> run body chain
         let count = gesture._attribute.value.count
         let singleTap = SingleTapGesture<TappableEvent>(count: count)
         let singleTapAttr: Attribute<SingleTapGesture<TappableEvent>> = graph.makeInput(value: singleTap)
@@ -37,7 +74,7 @@ public struct TapGesture: Gesture {
             gesture: _GraphValue(_attribute: singleTapAttr),
             inputs: inputs
         )
-        // map TappableEvent to Void (TapGesture.Value = Void)
+        // Map TappableEvent to Void (TapGesture.Value = Void).
         let mappedPhase: Attribute<GesturePhase<Void>> = graph.makeRule {
             rawOutputs.phase.value.map { _ in () }
         }

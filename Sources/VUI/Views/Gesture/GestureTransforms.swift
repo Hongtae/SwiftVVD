@@ -9,7 +9,7 @@ import Foundation
 
 // MARK: - MapGesture / MapPhase
 
-// MapGesture<A,B>._makeGesture -> creates MapPhase<A,B>: StatefulRule
+// MapGesture<A,B>._makeGesture creates MapPhase<A,B>: StatefulRule.
 struct MapGesture<A, B>: GestureModifier {
     typealias BodyValue = A
     typealias Value = B
@@ -52,9 +52,9 @@ struct MapPhase<A, B>: StatefulRule {
 
 // MARK: - DurationGesture / DurationPhase
 
-// DurationGesture<E>._makeGesture -> creates DurationPhase<E>: StatefulRule
+// DurationGesture<E>._makeGesture creates DurationPhase<E>: StatefulRule.
 // Output type is GesturePhase<Double> (Double, not E!)
-// No E: EventType constraint, so DurationGesture<Void> is valid in SingleLongPressGesture.body chain
+// No E: EventType constraint, so DurationGesture<Void> is valid.
 struct DurationGesture<E>: GestureModifier {
     typealias BodyValue = E
     typealias Value = Double
@@ -82,15 +82,15 @@ struct DurationGesture<E>: GestureModifier {
     }
 }
 
-// DurationPhase<E>: StatefulRule outputs GesturePhase<Double>
-// No E: EventType constraint, so DurationPhase<Void> is valid
+// DurationPhase<E>: StatefulRule outputs GesturePhase<Double>.
+// No E: EventType constraint, so DurationPhase<Void> is valid.
 struct DurationPhase<E>: StatefulRule, ResettableGestureRule {
     typealias Value = GesturePhase<Double>
 
     var source: Attribute<GesturePhase<E>>
     var timeAttr: Attribute<Time>
     var minimumDuration: Double
-    // DurationPhase does not use seed-based reset and always returns 0
+    // DurationPhase does not use seed-based reset and always returns 0.
     var resetSeed: UInt32 { 0 }
     var lastResetSeed: UInt32 = 0
     var startTime: Double = 0
@@ -143,7 +143,7 @@ struct DurationPhase<E>: StatefulRule, ResettableGestureRule {
 
 // MARK: - CoordinateSpaceGesture / CoordinateSpacePhase
 
-// CoordinateSpaceGesture<E>._makeGesture transforms location via animatedPosition pattern
+// CoordinateSpaceGesture<E>._makeGesture transforms event locations.
 // Transforms GesturePhase<E>.location in body outputs to the target coordinateSpace.
 // .global -> pass-through, .local -> global-to-local via ViewTransform, .named -> stub.
 struct CoordinateSpaceGesture<E: EventType>: GestureModifier {
@@ -161,7 +161,7 @@ struct CoordinateSpaceGesture<E: EventType>: GestureModifier {
         let bodyOutputs = body(inputs)
         let cs = modifier._attribute.value.coordinateSpace
 
-        // .global: location is already in global coordinates, so pass through
+        // .global: location is already in global coordinates, so pass through.
         if cs == .global { return bodyOutputs }
 
         guard let graph = AttributeGraph.current else {
@@ -177,7 +177,7 @@ struct CoordinateSpaceGesture<E: EventType>: GestureModifier {
     }
 }
 
-// CoordinateSpacePhase<E>: StatefulRule transforms the location field of GesturePhase<E>
+// CoordinateSpacePhase<E>: StatefulRule that transforms the location field of GesturePhase<E>.
 struct CoordinateSpacePhase<E: EventType>: StatefulRule {
     typealias Value = GesturePhase<E>
 
@@ -206,7 +206,7 @@ struct CoordinateSpacePhase<E: EventType>: StatefulRule {
             }
             AttributeGraph.setStatefulOutput(transformed)
         case .named:
-            // named coordinate space transform is not implemented yet, so pass through
+            // Named coordinate space transform is not implemented yet, so pass through.
             AttributeGraph.setStatefulOutput(phase)
         }
     }
@@ -214,13 +214,13 @@ struct CoordinateSpacePhase<E: EventType>: StatefulRule {
 
 // MARK: - Map2Gesture / Map2Phase
 
-// Map2Gesture<A,B,C>: merges two child gestures to produce a value of type C
+// Map2Gesture<A,B,C>: merges two child gestures to produce a value of type C.
 struct Map2Gesture<A, B, C>: GestureModifier {
     typealias BodyValue = A   // Value type of the primary body
     typealias Value = C
     typealias Body = Never
 
-    // secondary gesture factory closure
+    // Secondary gesture factory closure.
     var secondaryMakeGesture: (_GestureInputs) -> _GestureOutputs<B>
     var combine: (A, B) -> C
 
@@ -262,8 +262,8 @@ struct Map2Phase<A, B, C>: StatefulRule {
 
 // MARK: - StateContainerGesture / StateContainerPhase
 
-// StateContainerGesture<S,E,V>: transform closure (inout S, GesturePhase<E>) -> GesturePhase<V>
-// StateContainerPhase<S,E,V>: StatefulRule, ResettableGestureRule
+// StateContainerGesture<S,E,V>: transform closure (inout S, GesturePhase<E>) -> GesturePhase<V>.
+// StateContainerPhase<S,E,V>: StatefulRule, ResettableGestureRule.
 struct StateContainerGesture<S, E: EventType, V>: GestureModifier {
     typealias BodyValue = E
     typealias Value = V
@@ -303,7 +303,7 @@ struct StateContainerGesture<S, E: EventType, V>: GestureModifier {
     }
 }
 
-// StateContainerPhase<S,E,V>: StatefulRule, ResettableGestureRule
+// StateContainerPhase<S,E,V>: StatefulRule, ResettableGestureRule.
 struct StateContainerPhase<S, E: EventType, V>: StatefulRule, ResettableGestureRule {
     typealias Value = GesturePhase<V>
 
@@ -336,7 +336,7 @@ struct StateContainerPhase<S, E: EventType, V>: StatefulRule, ResettableGestureR
     }
 
     mutating func resetPhase() {
-        // restore initial state by re-invoking initialState() from modifierAttr
+        // Rebuild the initial state from modifierAttr.initialState().
         state = modifierAttr.value.initialState()
         AttributeGraph.setStatefulOutput(GesturePhase<V>.possible(nil))
     }
@@ -345,9 +345,86 @@ struct StateContainerPhase<S, E: EventType, V>: StatefulRule, ResettableGestureR
         guard resetIfNeeded() else { return }
 
         let childPhase = childPhaseAttr.value
-        // invoke transform closure: (inout S, GesturePhase<E>) -> GesturePhase<V>
+        // Invoke transform closure: (inout S, GesturePhase<E>) -> GesturePhase<V>.
         let newPhase = transform(&state, childPhase)
         AttributeGraph.setStatefulOutput(newPhase)
+    }
+}
+
+// MARK: - EndedByWrapper / EndedByWrapperPhase
+
+// EndedByWrapper<Base: Gesture>: forces .failed when condition(event, startLocation)
+// returns true while base is active.
+// Used by SingleLongPressGesture for _maximumDistance: when the pointer/touch moves
+// more than maximumDistance from the initial press location, the gesture is cancelled.
+struct EndedByWrapper<Base: Gesture>: Gesture {
+    typealias Value = Base.Value
+    typealias Body = Never
+
+    var base: Base
+    // condition: (currentEvent, startLocation) -> Bool
+    // startLocation is tracked by EndedByWrapperPhase across AG evaluations.
+    var condition: (TappableEvent, CGPoint?) -> Bool
+
+    static func _makeGesture(
+        gesture: _GraphValue<Self>,
+        inputs: _GestureInputs
+    ) -> _GestureOutputs<Base.Value> {
+        guard let graph = AttributeGraph.current else {
+            fatalError("EndedByWrapper._makeGesture requires AG context")
+        }
+        let baseOutputs = Base._makeGesture(gesture: gesture[\.base], inputs: inputs)
+        let phase = EndedByWrapperPhase<Base.Value>(
+            basePhaseAttr: baseOutputs.phase,
+            eventsAttr: inputs.events,
+            condition: gesture._attribute.value.condition
+        )
+        let resultAttr = graph.makeStatefulRule(phase)
+        return baseOutputs.withPhase(resultAttr)
+    }
+}
+
+// EndedByWrapperPhase: StatefulRule that monitors base gesture phase and applies condition.
+// Tracks startLocation internally so the condition can compare against initial press position.
+struct EndedByWrapperPhase<V>: StatefulRule {
+    typealias Value = GesturePhase<V>
+
+    var basePhaseAttr: Attribute<GesturePhase<V>>
+    var eventsAttr: Attribute<[EventID: any EventType]>
+    var condition: (TappableEvent, CGPoint?) -> Bool
+    var startLocation: CGPoint? = nil
+
+    mutating func updateValue() {
+        let base = basePhaseAttr.value
+        switch base {
+        case .possible:
+            startLocation = nil
+            AttributeGraph.setStatefulOutput(base)
+        case .failed, .ended:
+            startLocation = nil
+            AttributeGraph.setStatefulOutput(base)
+        case .active:
+            let events = eventsAttr.value
+            for (_, event) in events {
+                guard let e = event as? TappableEvent else { continue }
+                if startLocation == nil { startLocation = e.location }
+                if condition(e, startLocation) {
+                    startLocation = nil
+                    AttributeGraph.setStatefulOutput(GesturePhase<V>.failed)
+                    return
+                }
+            }
+            AttributeGraph.setStatefulOutput(base)
+        }
+    }
+}
+
+extension Gesture {
+    // Convenience wrapper to build EndedByWrapper with a (event, startLocation) condition.
+    func endedBy(
+        condition: @escaping (TappableEvent, CGPoint?) -> Bool
+    ) -> EndedByWrapper<Self> {
+        EndedByWrapper(base: self, condition: condition)
     }
 }
 
