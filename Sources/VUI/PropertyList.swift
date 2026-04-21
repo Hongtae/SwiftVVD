@@ -7,7 +7,7 @@
 
 import Foundation
 
-// Stack<Element> is a LIFO linked list used as the Value type for PropertyKey
+// Stack<Element>: LIFO linked list used as the Value type for PropertyKey
 // conformers such as StyleInput, SourceInput, and BodyInput.
 enum Stack<Element> {
     case empty
@@ -62,13 +62,11 @@ struct BloomFilter: CustomStringConvertible {
     var description: String { "BloomFilter(value: \(value))" }
 }
 
-// Monotonic counter for PropertyList element IDs.
-private nonisolated(unsafe) var _uniqueIDCounter: UInt32 = 0
+// Unique ID assigned to each PropertyList element.
 struct UniqueID: Equatable, CustomStringConvertible {
     let value: UInt32
     init() {
-        _uniqueIDCounter &+= 1
-        value = _uniqueIDCounter
+        value = UInt32(truncatingIfNeeded: AGMakeUniqueID())
     }
     var description: String { "UniqueID(value: \(value))" }
 }
@@ -209,7 +207,8 @@ extension PropertyList {
 }
 
 // Base protocol for PropertyList key types.
-// PropertyKey is the root of the PropertyKey to GraphInput to ViewInput hierarchy.
+// PropertyKey is the root of the PropertyKey -> GraphInput -> ViewInput hierarchy.
+@usableFromInline
 protocol PropertyKey {
     associatedtype Value
     static var defaultValue: Value { get }

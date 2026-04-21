@@ -14,14 +14,15 @@ public struct Namespace: DynamicProperty, Sendable {
     @inlinable
     public init() { id = 0 }
 
-    // TODO: allocate a stable unique ID through the dynamic property pipeline.
+    // _makeProperty stores a Box for this Namespace field.
+    // container and inputs are currently unused.
     public static func _makeProperty<V>(
         in buffer: inout _DynamicPropertyBuffer,
         container: _GraphValue<V>,
         fieldOffset: Int,
         inputs: inout _GraphInputs
     ) {
-        fatalError("Namespace._makeProperty: unique ID allocation is not implemented")
+        buffer.append(Box(), fieldOffset: fieldOffset)
     }
 
     public var wrappedValue: Namespace.ID {
@@ -35,9 +36,41 @@ public struct Namespace: DynamicProperty, Sendable {
 
         @inlinable
         init(id: Int) { self.id = id }
+    }
+}
 
-        public static func == (a: ID, b: ID) -> Bool { a.id == b.id }
-        public func hash(into hasher: inout Hasher) { hasher.combine(id) }
-        public var hashValue: Int { id }
+extension Namespace: BitwiseCopyable {}
+
+// MARK: - Namespace.Box
+
+extension Namespace {
+    // Backing box for Namespace dynamic property storage.
+    // reset(): id = 0.
+    // update(property:phase:): allocates a global ID on first update and writes it to property.id.
+    struct Box: DynamicPropertyBox {
+        typealias Property = Namespace
+
+        var id: Int = 0
+
+        mutating func reset() { id = 0 }
+
+        // phase is currently unused.
+        mutating func update(property: inout Namespace, phase: Phase) -> Bool {
+            let changed = (id == 0)
+            if changed { id = Namespace._allocateID() }
+            property.id = id
+            return changed
+        }
+
+        func getState<T>(type: T.Type) -> Binding<T>? { nil }
+    }
+}
+
+// MARK: - ID allocation
+
+extension Namespace {
+    // Allocates a process-wide unique namespace ID.
+    static func _allocateID() -> Int {
+        AGMakeUniqueID()
     }
 }

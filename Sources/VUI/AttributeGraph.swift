@@ -947,3 +947,13 @@ class AttributeGraph: @unchecked Sendable {
         }
     }
 }
+
+// MARK: - AGMakeUniqueID
+
+// Process-wide monotonic counter used for unique identity allocation.
+private let _agUniqueIDCounter: Atomic<Int> = Atomic(1)
+
+func AGMakeUniqueID() -> Int {
+    let (old, _) = _agUniqueIDCounter.add(1, ordering: .relaxed)
+    return old
+}

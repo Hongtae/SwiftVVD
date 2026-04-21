@@ -9,9 +9,9 @@ import Foundation
 
 // PropertyKey hierarchy
 //
-// PropertyKey  (PropertyList.swift) — base: defaultValue, valuesEqual
-//   └── GraphInput   — adds AG reuse support (makeReusable, tryToReuse, isTriviallyReusable)
-//         └── ViewInput  — marker: keys stored in _ViewInputs.customInputs channel
+// PropertyKey (PropertyList.swift): base defaultValue and valuesEqual.
+// GraphInput: adds AG reuse support.
+// ViewInput: marker for keys stored in _ViewInputs.customInputs.
 
 /// Opaque map passed to GraphReusable methods.
 /// AG reuse optimization not yet implemented.
@@ -59,8 +59,6 @@ extension GraphInput where Value: GraphReusable {
 /// Keys conforming to ViewInput are stored in _ViewInputs.customInputs (view channel).
 /// No additional requirements.
 protocol ViewInput: GraphInput {}
-
-// ─────────────────────────────────────────────────────────────────────────────
 
 /// A generic single-owner reference box.
 /// Used in `_GraphInputs.cachedEnvironment` so that copying `_GraphInputs`
@@ -134,12 +132,9 @@ struct ViewFrame: Equatable {
 /// (via `MutableBox`) so all descendants share a single environment Attribute.
 struct CachedEnvironment {
 
-    struct UniqueID {
-        var value: Int
-    }
-
+    // ID is represented directly as an Int value.
     struct ID {
-        var base: UniqueID
+        var value: Int
     }
 
     struct MapItem {
@@ -173,7 +168,7 @@ struct CachedEnvironment {
     var animatedFrame: AnimatedFrame?
 
     /// Cache of resolved shape styles keyed by ResolvedShapeStyles.
-    /// Placeholder — ResolvedShapeStyles / _ShapeStyle_Pack types TBD.
+    /// Placeholder for resolved shape-style storage.
     var resolvedShapeStyles: Any?
 
     /// Platform-specific renderer cache (e.g. Metal layer reference).
@@ -192,7 +187,7 @@ struct CachedEnvironment {
 /// `_makeView` traversal.  All fields are Attribute references (IDs), so
 /// copying this struct is cheap.
 public struct _GraphInputs {
-    /// Arbitrary typed values threaded through the view tree (styles, options, …).
+    /// Arbitrary typed values threaded through the view tree, such as styles and options.
     var customInputs: PropertyList
 
     /// Current animation time.
@@ -217,7 +212,7 @@ public struct _GraphInputs {
     /// Set of AG node IDs whose inputs have been merged into this context.
     var mergedInputs: Set<AGAttribute>
 
-    // Base-channel subscript — stores in customInputs (PropertyList).
+    // Base-channel subscript backed by customInputs.
     subscript<T: GraphInput>(_ key: T.Type) -> T.Value {
         get { customInputs.value(forKey: key) }
         set { customInputs.setValue(newValue, forKey: key) }

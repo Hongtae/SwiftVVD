@@ -2,8 +2,20 @@
 //  File: DynamicProperty.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
+
+/// Protocol for managing a DynamicProperty's backing storage in _DynamicPropertyBuffer.
+/// Requirements:
+///   reset() -> ()
+///   update(property: inout Property, phase: Phase) -> Bool
+///   getState<T>(type: T.Type) -> Binding<T>?
+protocol DynamicPropertyBox {
+    associatedtype Property: DynamicProperty
+    mutating func reset()
+    mutating func update(property: inout Property, phase: Phase) -> Bool
+    func getState<T>(type: T.Type) -> Binding<T>?
+}
 
 public protocol DynamicProperty {
     static func _makeProperty<V>(in buffer: inout _DynamicPropertyBuffer, container: _GraphValue<V>, fieldOffset: Int, inputs: inout _GraphInputs)
@@ -35,6 +47,18 @@ public struct _DynamicPropertyBuffer {
     }
     var properties: [FieldInfo] = []
     var contexts: [Int: Any] = [:]
+
+    // Box instance is stored in contexts keyed by fieldOffset.
+    // update closure writes back to the View struct field at that offset.
+    mutating func append<T: DynamicPropertyBox>(_ box: T, fieldOffset: Int) {
+        let boxRef = MutableBox(box)
+        properties.append(.init(type: T.Property.self, offset: fieldOffset))
+        contexts[fieldOffset] = { (ptr: UnsafeMutableRawPointer) in
+            var property = ptr.assumingMemoryBound(to: T.Property.self).pointee
+            _ = boxRef.value.update(property: &property, phase: Phase())
+            ptr.assumingMemoryBound(to: T.Property.self).pointee = property
+        }
+    }
 }
 
 func _hasDynamicProperty<V: View>(_ view: V.Type) -> Bool {
@@ -76,4 +100,3 @@ func _getDynamicProperty<V: View>(at offset: Int, from view: V) -> any DynamicPr
     if let property { return property }
     fatalError("Unable to find dynamic property at offset: \(offset)")
 }
-
