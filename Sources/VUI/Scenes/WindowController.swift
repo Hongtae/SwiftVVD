@@ -965,7 +965,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     // shown in arrival order.
 
     private struct SheetEntry: @unchecked Sendable {
-        var session: SheetPreference.Session
+        var session: SheetPreference
         var controller: WindowController?
     }
 
@@ -973,15 +973,21 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     private var _activeSheet: SheetEntry?
     // Sessions waiting to be shown (FIFO).
     // Not Mutex because access is single-threaded (AG side-effect rule / user dismiss callback).
-    private var _pendingSheetSessions: [SheetPreference.Session] = []
+    private var _pendingSheetSessions: [SheetPreference] = []
 
-    /// Called from ViewGraph side-effect rule. `value.sessions` = all currently-active
-    /// sheet sessions from the entire view tree, collected via preference merge.
+    /// Called from ViewGraph side-effect rule.
     func updateSheetPresentation(_ value: SheetPreference.Value) {
-        let incoming = value.sessions
+        // Flatten SheetPreference.Value enum into an array of presentations.
+        // .keyed is for multiple sheets by Namespace.ID and is not implemented yet.
+        let incoming: [SheetPreference]
+        switch value {
+        case .single(let pref): incoming = [pref]
+        case .keyed:            incoming = []   // Phase 2
+        case .none:             incoming = []
+        }
 
         // Compute stable IDs using the Binding's base-pointer identity.
-        func id(of session: SheetPreference.Session) -> ObjectIdentifier {
+        func id(of session: SheetPreference) -> ObjectIdentifier {
             ObjectIdentifier(session.isPresented as AnyObject)
         }
 

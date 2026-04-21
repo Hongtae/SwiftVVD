@@ -9,33 +9,50 @@ import Foundation
 
 // MARK: - SheetPreference
 
-/// Namespace for sheet presentation preference types.
+/// Outer struct holding runtime data for a single sheet presentation.
 struct SheetPreference {
+    let makeContent: () -> AnyView
+    let isPresented: Binding<Bool>
+    let onDismiss: (() -> Void)?
+    let drawsBackground: Bool
+    let placement: Placement
+    let activeInspector: Bool?
 
     enum Placement: Equatable {
         case automatic
     }
 
-    /// Runtime data for a single sheet presentation.
-    struct Session {
-        let makeContent: () -> AnyView
-        let isPresented: Binding<Bool>
-        let onDismiss: (() -> Void)?
-        let drawsBackground: Bool
-        let placement: Placement
-    }
-
-    /// Preference value containing all active sessions from the view tree.
-    struct Value {
-        var sessions: [Session]
-        init(sessions: [Session] = []) { self.sessions = sessions }
+    /// Preference value merged through the view tree.
+    ///
+    /// Merge behavior:
+    ///   .keyed + .keyed: keyed values are merged.
+    ///   .keyed + .single: next single value wins.
+    ///   .keyed + .none: none clears the value.
+    ///   .single + _: existing single value is kept.
+    ///   .none + next: next value is used.
+    enum Value {
+        case keyed([Namespace.ID: Transaction])
+        case single(SheetPreference)
+        case none
     }
 
     struct Key: HostPreferenceKey {
         typealias Value = SheetPreference.Value
-        static var defaultValue: Value { Value() }
+        static var defaultValue: Value { .none }
         static func reduce(value: inout Value, nextValue: () -> Value) {
-            value.sessions.append(contentsOf: nextValue().sessions)
+            switch value {
+            case .keyed(let d1):
+                switch nextValue() {
+                case .keyed(let d2):
+                    value = .keyed(d1.merging(d2) { _, new in new })
+                case let next:
+                    value = next
+                }
+            case .single:
+                break  // first wins, existing single presentation is kept
+            case .none:
+                value = nextValue()
+            }
         }
     }
 }
@@ -52,7 +69,7 @@ protocol SheetAnchorProvider {
 
 // MARK: - NullSheetAnchor
 
-/// Default anchor with no geometry, using a standard preference transform.
+/// Default anchor with no geometry.
 /// Drops Transaction when wrapping into _PreferenceTransformModifier.
 struct NullSheetAnchor<Key: PreferenceKey>: SheetAnchorProvider {
     typealias Modifier = _PreferenceTransformModifier<SheetPreference.Key>
@@ -88,15 +105,19 @@ struct CoreSheetPresentationModifier<AnchorProvider: SheetAnchorProvider>: Envir
         let onDismiss = onDismiss
         let placement = placement
         let drawsBackground = drawsBackground
+        let activeInspector = activeInspector
 
         return anchorProvider.preferenceTransformModifier { value, _ in
             if isPresented.wrappedValue {
-                value.sessions.append(SheetPreference.Session(
+                // isPresented == true -> value = .single(pref).
+                // isPresented == false leaves value unchanged (stays .none / default).
+                value = .single(SheetPreference(
                     makeContent: makeContent,
                     isPresented: isPresented,
                     onDismiss: onDismiss,
                     drawsBackground: drawsBackground,
-                    placement: placement
+                    placement: placement,
+                    activeInspector: activeInspector
                 ))
             }
         }

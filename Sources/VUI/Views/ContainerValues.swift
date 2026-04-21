@@ -5,13 +5,13 @@
 //  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-// ContainerValueKey — protocol for keys into ContainerValues.
+// ContainerValueKey is the protocol for keys into ContainerValues.
 public protocol ContainerValueKey {
     associatedtype Value
     static var defaultValue: Self.Value { get }
 }
 
-// ContainerValues — dictionary-like store for container-specific values
+// ContainerValues is a dictionary-like store for container-specific values
 // attached to individual views inside variadic containers (List, Grid, etc.).
 // Read via LayoutSubview.containerValues in Layout.placeSubviews.
 public struct ContainerValues {
@@ -27,7 +27,7 @@ public struct ContainerValues {
     }
 }
 
-// ContainerValuesInput — PropertyKey that carries ContainerValues
+// ContainerValuesInput is the PropertyKey that carries ContainerValues
 // through the customInputs stack. Written by _ContainerValueWritingModifier,
 // read by containers (Layout, VariadicView) when collecting subview metadata.
 struct ContainerValuesInput: GraphInput {
@@ -37,11 +37,10 @@ struct ContainerValuesInput: GraphInput {
     var description: String { "ContainerValuesInput" }
 }
 
-// _ContainerValueWritingModifier<Value> — ViewModifier that writes a single
+// _ContainerValueWritingModifier<Value> writes a single
 // ContainerValues entry (identified by keyPath) into customInputs so that
 // the enclosing container can read it via LayoutSubview.containerValues.
 // Body=Never + custom _makeView/_makeViewList (pass-through with input mutation).
-@frozen
 public struct _ContainerValueWritingModifier<Value> {
     public var keyPath: WritableKeyPath<ContainerValues, Value>
     public var value: Value
