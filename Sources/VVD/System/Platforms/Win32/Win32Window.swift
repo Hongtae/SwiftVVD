@@ -130,7 +130,7 @@ final class Win32Window: Window {
     private var dropTarget: UnsafeMutablePointer<Win32DropTarget>?
 
     private struct ModalEntry: @unchecked Sendable {
-        weak var window: Win32Window?
+        let window: Win32Window
         let completionHandler: (()->Void)?
     }
     private var modalEntries: [ModalEntry] = []
@@ -289,7 +289,7 @@ final class Win32Window: Window {
     }
 
     deinit {
-        let modals = self.modalEntries.compactMap { $0.window }
+        let modals = self.modalEntries.map { $0.window }
         let hWnd = self.hWnd
 
         Task { @MainActor in
@@ -411,10 +411,8 @@ final class Win32Window: Window {
         self.modalEntries.removeAll()
         let completionHandlers = entries.compactMap { $0.completionHandler }
         entries.forEach { 
-            if let window = $0.window {
-                window.removeEventObserver(self)
-                window.close()
-            }
+            $0.window.removeEventObserver(self)
+            $0.window.close()
         }
         if !completionHandlers.isEmpty {
             Task { completionHandlers.forEach { $0() } }
@@ -674,7 +672,7 @@ final class Win32Window: Window {
     }
 
     var modalWindows: [any Window] {
-        self.modalEntries.compactMap { $0.window }
+        self.modalEntries.map { $0.window }
     }
 
     func presentModalWindow(_ window: any Window, completionHandler: (()->Void)?) -> Bool {
@@ -708,14 +706,14 @@ final class Win32Window: Window {
 
         // check if the window to be dismissed is the current modal-window
         if let current = self.modalEntries.first {
-            if current.window == nil || current.window === modalWindow {
+            if current.window === modalWindow {
                 presentNext = true
             }
         }
         // remove modal-entry from the list and collect completion handlers
         var completionHandlers: [(() -> Void)] = []
         self.modalEntries = self.modalEntries.filter {
-            if let window = $0.window, window !== modalWindow {
+            if $0.window !== modalWindow {
                 return true
             }
             if let handler = $0.completionHandler {
@@ -742,13 +740,10 @@ final class Win32Window: Window {
     }
 
     private func presentNextModal() {
-        // temporary hold strong reference to modal windows
-        let tmp = self.modalEntries.compactMap { $0.window }
-        defer { _=consume tmp }
         // remove invalid windows from the list
         var cancelledHandlers: [()->Void] = []
         self.modalEntries = self.modalEntries.filter {
-            if $0.window?.isValid ?? false { return true }
+            if $0.window.isValid { return true }
             if let handler = $0.completionHandler {
                 cancelledHandlers.append(handler)
             }

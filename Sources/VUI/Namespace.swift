@@ -25,8 +25,11 @@ public struct Namespace: DynamicProperty, Sendable {
         buffer.append(Box(), fieldOffset: fieldOffset)
     }
 
+    // Return the stored ID after dynamic-property update, or allocate a temporary ID
+    // when accessed before that update completes.
     public var wrappedValue: Namespace.ID {
-        ID(id: id)
+        if id != 0 { return ID(id: id) }
+        return ID(id: Namespace._allocateID())
     }
 
     public struct ID: Hashable, Sendable, BitwiseCopyable {

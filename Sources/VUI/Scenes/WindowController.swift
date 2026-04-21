@@ -28,7 +28,6 @@ protocol WindowInputEventHandler {
 // Overlay-mode aux/modal controllers never call makeWindow(), so windowContext stays nil.
 //
 // Conforms to ViewRendererHost and ViewGraphRootValueUpdater.
-// AG ownership lives in ViewGraph.
 class WindowController: WindowInputEventHandler, WindowDelegate,
                         ViewRendererHost, ViewGraphRootValueUpdater,
                         ViewGraphRenderDelegate,
@@ -62,7 +61,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         _nextEventSerial.wrappingAdd(1, ordering: .relaxed).oldValue
     }
 
-    // viewGraph owns the view-tree AttributeGraph (GraphHost.data) and gesture routing.
+    // viewGraph owns the view-tree AttributeGraph and gesture routing.
     // IUO because gestureGraph must be created and wired before ViewGraph.init runs _makeView.
     var viewGraph: ViewGraph { _viewGraph }
     private var _viewGraph: ViewGraph!
@@ -101,7 +100,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
 
     // ViewRendererHost / ViewGraphOwner stored state.
     // WindowController tracks its own owner-side state separately from ViewGraph's internal state,
-    // matching ViewRendererHost ownership needs.
+    // so host state and graph state can evolve independently.
     var currentTimestamp: Time = Time(seconds: 0)
     var valuesNeedingUpdate: ViewGraphRootValues = []
     var renderingPhase: ViewRenderingPhase = ViewRenderingPhase()
@@ -133,14 +132,13 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         }
         self.date = .now
 
-        // Create GestureGraph first. It owns an independent AG.
-        // WindowController owns both GestureGraph and ViewGraph.
+        // Create GestureGraph first because ViewGraph wiring may create GestureResponders.
         self.gestureGraph = GestureGraph()
         // Wire rendererHost back-reference before ViewGraph.init. GestureResponder.init
         // reads viewGraph.rendererHost?.gestureGraph during _makeView.
         self.gestureGraph!.rendererHost = self
 
-        // Create ViewGraph. It does full AG wiring including _makeView, which may create GestureResponders.
+        // Create ViewGraph. This performs full AG wiring including _makeView.
         // rendererHost: self must be set on GestureGraph before this call.
         self._viewGraph = ViewGraph(rootViewType: Content.self, content: contentValue, rendererHost: self)
         
@@ -152,7 +150,36 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         //   updateSize() / updateEnvironment() etc. called inline in updateView for now.
         //   Full invalidateProperties(_:mayDeferUpdate:) wiring is a future step.
         self.viewGraph.updateDelegate = self
-        // self.viewGraph.delegate is not wired yet.
+        // delegate (ViewGraphHostDelegate): not set yet.
+        // self.viewGraph.delegate = self
+    }
+
+    // Sheet-specific init: content comes from a reactive attribute in a parent AG.
+    // The ViewGraph creates a crossGraphRef to mirror the parent's attribute, so that
+    // when parent @State changes, parent contentAttr re-evaluates and the child graph updates.
+    // contentAttr must already have a non-nil cached value in sourceGraph before this is called.
+    init(crossGraphContent contentAttr: Attribute<AnyView>,
+         sourceGraph: AttributeGraph,
+         scene: WindowKey) {
+        self._titleGraph = nil
+        self._style = .genericWindow
+        self.environment = EnvironmentValues()
+        self.sharedContext = SharedContext()
+        self.sceneResources = SceneResources()
+        self.windowContext = nil
+        self.scene = scene
+        self.date = .now
+
+        self.gestureGraph = GestureGraph()
+        self.gestureGraph!.rendererHost = self
+
+        self._viewGraph = ViewGraph(
+            crossGraphContentAttr: contentAttr,
+            sourceGraph: sourceGraph,
+            rendererHost: self
+        )
+        self.viewGraph.renderDelegate = self
+        self.viewGraph.updateDelegate = self
     }
 
     deinit {
@@ -208,7 +235,6 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         // Pull render context from delegate (ViewGraphRenderDelegate).
         // contentsScale: HiDPI scale factor for the current display.
         // opaqueBackground: whether the background is fully opaque (skip alpha clear).
-        // Called once per frame before updateOutputs/render.
         var renderCtx = ViewGraphRenderContext(contentsScale: 1.0, opaqueBackground: false)
         viewGraph.renderDelegate?.updateRenderContext(&renderCtx)
         // TODO: propagate renderCtx.contentsScale to draw calls (HiDPI, Phase 5)
@@ -306,8 +332,8 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                              contentSize: contentSize, redraw: &redraw, withGC)
         }
         // Overlay modal child (at most one): update last.
-        if let entry = self.modalChildWindows.withLock({ $0.first }),
-           let child = entry.controller, entry.frame == nil {
+        if let entry = self.modalChildren.withLock({ $0.first }),
+           let child = entry.controller, entry.isOverlay, entry.initiated {
             child.updateView(tick: tick, delta: delta, date: date,
                              contentSize: contentSize, redraw: &redraw, withGC)
         }
@@ -338,8 +364,8 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
             child.drawFrame(offset: offset, context)
         }
         // Overlay modal child (at most one): draw on top of everything.
-        if let entry = self.modalChildWindows.withLock({ $0.first }),
-           let child = entry.controller, entry.frame == nil {
+        if let entry = self.modalChildren.withLock({ $0.first }),
+           let child = entry.controller, entry.isOverlay, entry.initiated {
             child.drawFrame(offset: offset, context)
         }
     }
@@ -347,7 +373,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     func layoutBounds(_ bounds: CGRect) -> CGRect { bounds }
 
     func shouldClose(window: any PlatformWindow) -> Bool {
-        modalChildWindows.withLock { $0.allSatisfy { $0.controller == nil } }
+        modalChildren.withLock { $0.allSatisfy { $0.controller == nil } }
     }
 
     func onWindowCreated(_: any PlatformWindow) {}
@@ -368,7 +394,22 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     func overlayHitTest(_ locationInParent: CGPoint) -> Bool { false }
 
     // MARK: - Modal session callbacks (override in ModalWindowController)
-    func onModalSessionInitiated()         {}
+    // Called by parent's _activateModal at presentation time.
+    // platformWindowReady == nil means overlay forced. The child must not create a window.
+    // platformWindowReady != nil means the child may create a platform window via makeWindow(),
+    //   then call the closure with the created window. The closure (running @MainActor)
+    //   sets entry.isOverlay = false and presents the window via the platform modal queue.
+    //   If child never calls the closure, entry.isOverlay stays true and is treated as overlay.
+    func onModalSessionInitiated(platformWindowReady: (@Sendable ((any PlatformWindow)?) -> Void)?) {
+        guard let platformWindowReady else { return }  // nil → overlay forced, nothing to do
+        guard window == nil else {
+            fatalError("\(type(of: self)).onModalSessionInitiated: window already exists")
+        }
+        Task { @MainActor [weak self] in
+            let w = self?.makeWindow()   // nil if creation fails → fallback to overlay
+            platformWindowReady(w)
+        }
+    }
     func onModalSessionDismissedByUser()   {}
     func onModalSessionDismissedByParent() {}
     func onModalSessionCancelled()         {}
@@ -376,7 +417,6 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     func onWindowClosing(_: any PlatformWindow) {
         self.auxChildWindows.withLock { $0.compactMap(\.controller) }
             .forEach { $0.onParentWindowClosed() }
-        _onSheetWindowClosed?()
     }
 
     func onViewLoaded() {}
@@ -440,7 +480,10 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     }
 
     func onKeyboardEvent(event: KeyboardEvent) {
-        let topModal = self.modalChildWindows.withLock { $0.first?.controller }
+        // Only route to overlay modal if fully initiated (async Task may still be pending).
+        let topModal = self.modalChildren.withLock {
+            $0.first.flatMap { ($0.initiated && $0.isOverlay) ? $0.controller : nil }
+        }
         if let topModal {
             topModal.onKeyboardEvent(event: event)
         } else {
@@ -449,11 +492,12 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     }
 
     func onMouseEvent(event: MouseEvent) {
-        let topModal = self.modalChildWindows.withLock { $0.first }
+        let topModal = self.modalChildren.withLock { $0.first }
         if let modalController = topModal?.controller,
-           let modalFrame = topModal?.frame {
+           topModal?.isOverlay == true, topModal?.initiated == true {
             var event = event
-            event.location -= modalFrame.origin
+            // No coordinate offset for full-area overlays (sheet/alert).
+            // Positioned overlays (e.g. ModalWindowScene) apply offset via their own drawFrame.
             if event.type == .wheel {
                 modalController.handleMouseWheel(at: event.location, delta: event.delta)
             } else {
@@ -530,8 +574,8 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
             guard let gg = self.gestureGraph,
                   let rootResponder = gg.rootResponder else { return false }
 
-            // Map deviceID to EventID, build the live event dictionary,
-            // then forward it to GestureGraph.
+            // Map deviceID to EventID, build the active event dictionary,
+            // then forward to GestureGraph.
             let time = self.currentTimestamp
             let isTouch = event.device == .touch || event.device == .stylus
 
@@ -747,33 +791,30 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
 
     // MARK: - ViewGraphRenderDelegate
     //
-    // WindowController is the rendering host.
-    //
-    // viewGraph.renderDelegate = self is set at end of init.
+    // viewGraph.renderDelegate = self is set at the end of init.
     // updateRenderContext is called once per frame in updateFrame (before updateView).
 
-    // renderingRootView is the root "platform view" being rendered.
-    // WindowController is the rendering host, so return self.
+    // The root object being rendered.
     var renderingRootView: AnyObject { self }
 
-    // updateRenderContext fills in per-frame render parameters.
+    // Fills in per-frame render parameters.
     // contentsScale: from sceneResources (updated by WindowContext on window events).
     // opaqueBackground: true if config background has no transparency.
     func updateRenderContext(_ context: inout ViewGraphRenderContext) {
         context.contentsScale = sceneResources.contentScaleFactor
-        // backgroundColor.opacity is 0.0-1.0. Treat >= 1.0 as fully opaque.
-        // backgroundColor is VVD.Color. .a is the alpha Scalar (0.0-1.0).
+        // backgroundColor opacity is 0.0...1.0. Treat >= 1.0 as fully opaque.
+        // backgroundColor is VVD.Color, and .a is the alpha Scalar.
         context.opaqueBackground = (config.backgroundColor.a >= 1.0)
     }
 
-    // withMainThreadRender ensures body runs on the main render thread.
+    // Ensures body runs on the main render thread.
     // The VVD render loop already runs on the appropriate thread, so call body() directly.
     func withMainThreadRender(wasAsync: Bool, _ body: () -> Time) -> Time {
         return body()
     }
 
-    // renderIntervalForDisplayLink returns how long until the next frame should be rendered.
-    // VVD controls frame pacing; returning 0.0 means "render at VVD frame rate".
+    // How long until the next frame should be rendered.
+    // VVD controls frame pacing. Returning 0.0 means render at the VVD frame rate.
     func renderIntervalForDisplayLink(timestamp: Time) -> Double {
         return 0.0
     }
@@ -781,7 +822,6 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     // MARK: - ViewGraphRootValueUpdater
 
     func updateRootView() {
-        // VUI: content is lifted into ViewGraph at init time; no separate root view setter.
     }
 
     func updateEnvironment() {
@@ -813,21 +853,28 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     }
     private let auxChildWindows = Mutex<[AuxChildEntry]>([])
 
+    // Unified modal queue: first entry = active, rest = pending.
+    // Single active modal queue.
+    //
+    // isOverlay is set at _activateModal time (not at enqueue time) based on:
+    //   - parent's window state (self.window == nil means overlay is required)
+    //   - session semantics (.alert/.confirmationDialog always use overlay)
+    // Before activation, isOverlay defaults to true (safe: queued entries are never drawn).
+    //
+    // session: .legacy = ModalWindowScene-based; .sheet/.alert/.confirmationDialog = preference-driven.
+    //   In dismissAllModalWindows, position (first vs rest) determines reason:
+    //   first = was active, so .byParent; rest = queued and never shown, so .cancelled.
     private struct ModalChildEntry: @unchecked Sendable {
         weak var controller: WindowController?
-        var frame: CGRect? = nil
-        var initiated: Bool = false
+        var isOverlay: Bool = true    // set inside platformWindowReady closure or overlay path
+        var initiated: Bool = false   // true once onModalSessionInitiated completes;
+                                      // updateView/drawFrame ignore the entry until then
+        var session: PresentationSession = .legacy
     }
-    // Active modal (at most one per WindowController).
-    private let modalChildWindows = Mutex<[ModalChildEntry]>([])
-    // Queue: waiting modals shown one-by-one as the active one is dismissed.
-    private struct PendingModal: @unchecked Sendable {
-        let controller: WindowController
-        let initiated: Bool
-    }
-    private let pendingModalChildren = Mutex<[PendingModal]>([])
+    private let modalChildren = Mutex<[ModalChildEntry]>([])
 
-    // Called by AppWindowsController to register a child aux window.
+    // MARK: Aux child management
+
     func addAuxChild(_ child: WindowController) {
         child.parentWindow = self
         let entry = AuxChildEntry(controller: child)
@@ -861,124 +908,201 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         }
     }
 
-    // Called by AppWindowsController to register a child modal window.
-    // If a modal is already active, the child is queued and shown after the current one is dismissed.
-    func addModalChild(_ child: WindowController, initiated: Bool) {
-        child.parentWindow = self
-        let hasActive = self.modalChildWindows.withLock {
-            $0.contains { $0.controller != nil }
-        }
-        if hasActive {
-            self.pendingModalChildren.withLock { $0.append(PendingModal(controller: child, initiated: initiated)) }
-        } else {
-            _showModalChild(child, initiated: initiated)
-        }
-    }
+    // MARK: Modal child management
 
-    private func _showModalChild(_ child: WindowController, initiated: Bool) {
-        let entry = ModalChildEntry(controller: child, initiated: initiated)
-        let isFirst = self.modalChildWindows.withLock { entries in
-            let first = entries.isEmpty
-            entries = [entry]
+    // Called by AppWindowsController (scene-based) or internally (preference-driven).
+    // isOverlay is not determined here. It is deferred to _activateModal when the entry
+    // reaches the front of the queue and the parent's window state is known.
+    func addModalChild(_ child: WindowController,
+                       session: PresentationSession = .legacy) {
+        child.parentWindow = self
+        let entry = ModalChildEntry(controller: child, session: session)
+        let isFirst = modalChildren.withLock {
+            let first = $0.isEmpty
+            $0.append(entry)
             return first
         }
         if isFirst {
+            _activateModal(entry: entry)
+        }
+    }
+
+    // Activate the front-of-queue entry.
+    // Determines overlay vs platform-window based on session semantics + self.window,
+    // then calls entry.activate(asOverlay:) to let the child prepare itself.
+    private func _activateModal(entry: ModalChildEntry) {
+        guard let child = entry.controller else {
+            _showNextInQueue()
+            return
+        }
+
+        // .alert and .confirmationDialog are always overlay in VUI (no NSAlert available).
+        // .sheet and .legacy follow parent's window state.
+        let asOverlay: Bool
+        switch entry.session {
+        case .alert, .confirmationDialog:
+            asOverlay = true
+        case .sheet, .legacy:
+            asOverlay = (self.window == nil)
+        }
+
+        // Commit isOverlay synchronously so drawFrame/event routing immediately
+        // reflects the correct mode (even before the async Task below runs).
+        modalChildren.withLock { entries in
+            if let i = entries.firstIndex(where: { $0.controller === child }) {
+                entries[i].isOverlay = asOverlay
+            }
+        }
+
+        if asOverlay {
+            // Overlay forced: pass nil so child knows not to create a window.
+            child.onModalSessionInitiated(platformWindowReady: nil)
+            // Mark as initiated synchronously. The entry is ready for updateView/drawFrame.
+            modalChildren.withLock { entries in
+                if let i = entries.firstIndex(where: { $0.controller === child }) {
+                    entries[i].initiated = true
+                }
+            }
             self.resetGestureHandlers()
             self.handleMouseHover(at: .zero, deviceID: 0, isTopMost: false)
+        } else {
+            // Race guard. _activateModal runs on the main thread.
+            if let presented = modalChildren.withLock({ $0.first?.session.isPresented }),
+               !presented.wrappedValue {
+                removeModalChild(child, reason: .cancelled)
+                return
+            }
+
+            // Build closure the child calls back with its platform window (or nil for overlay).
+            // modalChildren updates are synchronous; only presentModalWindow needs a Task.
+            let platformWindowReady: @Sendable ((any PlatformWindow)?) -> Void = {
+                [weak self, weak child] childWindow in
+                guard let self else { return }
+                let isOverlay = (childWindow == nil)
+                self.modalChildren.withLock { entries in
+                    if let i = entries.firstIndex(where: { $0.controller === child }) {
+                        entries[i].isOverlay = isOverlay
+                        entries[i].initiated = true
+                    }
+                }
+                guard let childWindow else { return }  // overlay: parent draws it, done
+                nonisolated(unsafe) let childWindowRef = childWindow
+                Task { @MainActor [weak self, weak child] in
+                    guard let self else { return }
+                    let ok = self.window?.presentModalWindow(
+                        childWindowRef,
+                        completionHandler: { [weak self, weak child] in
+                            Task { @MainActor [weak self, weak child] in
+                                guard let self, let child else { return }
+                                self.removeModalChild(child, reason: .userAction)
+                            }
+                        }
+                    ) ?? false
+                    if !ok {
+                        Log.error("WindowController: presentModalWindow failed")
+                        if let child { self.removeModalChild(child, reason: .cancelled) }
+                    }
+                }
+            }
+            child.onModalSessionInitiated(platformWindowReady: platformWindowReady)
         }
     }
 
-    private func _showNextModal() {
-        let next = self.pendingModalChildren.withLock { pending -> PendingModal? in
-            guard !pending.isEmpty else { return nil }
-            return pending.removeFirst()
+    // Show the front of the queue after the previous active modal was removed.
+    private func _showNextInQueue() {
+        guard let entry = modalChildren.withLock({ $0.first }),
+              let child = entry.controller else { return }
+        // Race guard: skip if preference-driven session is already dismissed.
+        if let presented = entry.session.isPresented, !presented.wrappedValue {
+            removeModalChild(child, reason: .cancelled)
+            return
         }
-        if let next {
-            next.controller.parentWindow = self
-            _showModalChild(next.controller, initiated: next.initiated)
-        }
+        // entry.initiated is false here because it was newly dequeued.
+        // _activateModal will set it after init.
+        _activateModal(entry: entry)
     }
 
-    func removeModalChild(_ child: WindowController) {
-        var initiated: Bool?
-        self.modalChildWindows.withLock { entries in
+    // Remove a modal (active or queued) and clean up its session / callbacks.
+    func removeModalChild(_ child: WindowController,
+                          reason: ModalDismissReason = .byParent) {
+        var removedEntry: ModalChildEntry?
+        var wasFirst = false
+        modalChildren.withLock { entries in
             if let i = entries.firstIndex(where: { $0.controller === child }) {
-                initiated = entries[i].initiated
+                wasFirst = (i == 0)
+                removedEntry = entries.remove(at: i)
+            }
+        }
+        child.parentWindow = nil
+
+        if let e = removedEntry {
+            switch e.session {
+            case .sheet, .alert, .confirmationDialog:
+                // Preference-driven: clean up binding + onDismiss.
+                e.session.cleanup(reason: reason)
+                // Close the platform window if one was created.
+                let ctrl = child
+                Task { @MainActor [weak self, ctrl] in
+                    if let w = ctrl.window {
+                        self?.window?.dismissModalWindow(w)
+                        w.close()
+                    }
+                }
+            case .legacy:
+                // Scene-based: fire session callbacks on the child controller.
+                switch reason {
+                case .userAction:
+                    child.onModalSessionDismissedByUser()
+                case .dismissed, .byParent:
+                    child.onModalSessionDismissedByParent()
+                case .cancelled:
+                    child.onModalSessionCancelled()
+                }
+            }
+        }
+
+        if wasFirst { _showNextInQueue() }
+    }
+
+    // Detach without firing session callbacks (caller handles the response).
+    func detachModalChild(_ child: WindowController) {
+        var wasFirst = false
+        modalChildren.withLock { entries in
+            if let i = entries.firstIndex(where: { $0.controller === child }) {
+                wasFirst = (i == 0)
                 entries.remove(at: i)
             }
         }
         child.parentWindow = nil
-        guard let initiated else { return }
-        if initiated {
-            child.onModalSessionDismissedByParent()
-        } else {
-            child.onModalSessionCancelled()
-        }
-        _showNextModal()
+        if wasFirst { _showNextInQueue() }
     }
 
-    func detachModalChild(_ child: WindowController) {
-        var wasActive = false
-        self.modalChildWindows.withLock {
-            let before = $0.count
-            $0.removeAll { $0.controller === child }
-            wasActive = $0.count < before
-        }
-        self.pendingModalChildren.withLock { $0.removeAll { $0.controller === child } }
-        child.parentWindow = nil
-        if wasActive { _showNextModal() }
-    }
-
-    func updateModalChildFrame(_ child: WindowController, frame: CGRect?) {
-        self.modalChildWindows.withLock { entries in
-            if let i = entries.firstIndex(where: { $0.controller === child }) {
-                entries[i].frame = frame
-            }
-        }
-    }
 
     func dismissAllModalWindows() {
-        // Cancel queued modals first.
-        let pending = self.pendingModalChildren.withLock { p in defer { p.removeAll() }; return p }
-        pending.forEach { item in
-            item.controller.parentWindow = nil
-            item.controller.onModalSessionCancelled()
-        }
-        let entries = self.modalChildWindows.withLock { entries in
+        let entries = modalChildren.withLock { entries in
             defer { entries.removeAll() }
             return entries
         }
-        for entry in entries {
+        for (i, entry) in entries.enumerated() {
             guard let child = entry.controller else { continue }
             child.parentWindow = nil
-            if entry.initiated {
-                child.onModalSessionDismissedByParent()
-            } else {
-                child.onModalSessionCancelled()
+            // first (index 0) was active, so byParent; rest were queued and never shown, so cancelled.
+            let reason: ModalDismissReason = (i == 0) ? .byParent : .cancelled
+            switch entry.session {
+            case .sheet, .alert, .confirmationDialog:
+                entry.session.cleanup(reason: reason)
+            case .legacy:
+                if reason == .byParent { child.onModalSessionDismissedByParent() }
+                else                   { child.onModalSessionCancelled() }
             }
         }
     }
 
-    // MARK: - Sheet presentation queue
-    // Independent of modalChildWindows (which is for scene-based overlay modals).
-    // Overlay and platform-window sheets are both queued here, one at a time,
-    // shown in arrival order.
+    // MARK: - Preference-driven presentation (sheet / alert)
+    // Sheets and alerts go through the unified modalChildren queue.
 
-    private struct SheetEntry: @unchecked Sendable {
-        var session: SheetPreference
-        var controller: WindowController?
-    }
-
-    // Active sheet being shown right now.
-    private var _activeSheet: SheetEntry?
-    // Sessions waiting to be shown (FIFO).
-    // Not Mutex because access is single-threaded (AG side-effect rule / user dismiss callback).
-    private var _pendingSheetSessions: [SheetPreference] = []
-
-    /// Called from ViewGraph side-effect rule.
+    /// Called from ViewGraph side-effect rule when SheetPreference.Key changes.
     func updateSheetPresentation(_ value: SheetPreference.Value) {
-        // Flatten SheetPreference.Value enum into an array of presentations.
-        // .keyed is for multiple sheets by Namespace.ID and is not implemented yet.
         let incoming: [SheetPreference]
         switch value {
         case .single(let pref): incoming = [pref]
@@ -986,109 +1110,111 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         case .none:             incoming = []
         }
 
-        // Compute stable IDs using the Binding's base-pointer identity.
-        func id(of session: SheetPreference) -> ObjectIdentifier {
-            ObjectIdentifier(session.isPresented as AnyObject)
+        // Binding<Bool>.location is a stable object identity for a presentation.
+        func sid(_ p: SheetPreference) -> ObjectIdentifier {
+            ObjectIdentifier(p.isPresented.location)
         }
 
-        let activeID   = _activeSheet.map { id(of: $0.session) }
-        let pendingIDs = _pendingSheetSessions.map { id(of: $0) }
-
-        // Enqueue newly-arrived sessions that aren't already active or pending.
-        for session in incoming {
-            let sid = id(of: session)
-            guard sid != activeID, !pendingIDs.contains(sid) else { continue }
-            _pendingSheetSessions.append(session)
+        // Collect existing sheet sessions from the queue.
+        let existing: [(ObjectIdentifier, WindowController)] = modalChildren.withLock {
+            $0.compactMap { entry in
+                guard case .sheet(let p) = entry.session,
+                      let ctrl = entry.controller else { return nil }
+                return (sid(p), ctrl)
+            }
         }
+        let existingIDs = Set(existing.map { $0.0 })
 
-        // Dismiss the active sheet if its session is no longer in incoming.
-        if let active = _activeSheet {
-            if !incoming.contains(where: { id(of: $0) == id(of: active.session) }) {
-                _tearDownActiveSheet(reason: .dismissed)
+        // Dismiss sessions that are no longer in incoming.
+        for (id, ctrl) in existing {
+            if !incoming.contains(where: { sid($0) == id }) {
+                removeModalChild(ctrl, reason: .dismissed)
             }
         }
 
-        // Start the next sheet if nothing is showing.
-        if _activeSheet == nil {
-            _showNextSheet()
+        // Enqueue new sessions (requires AG context for reactive content rule).
+        guard let graph = AttributeGraph.current else { return }
+        for pref in incoming {
+            guard !existingIDs.contains(sid(pref)) else { continue }
+
+            // Reactive content rule mirrors parent @State changes into the sheet's ViewGraph.
+            let contentRuleAttr: Attribute<AnyView> = graph.makeRule { pref.makeContent() }
+            _ = contentRuleAttr.value  // force initial evaluation in parent AG context
+
+            let sheetKey = WindowKey(namespace: scene.namespace, sceneID: scene.sceneID)
+            let ctrl = WindowController(crossGraphContent: contentRuleAttr,
+                                        sourceGraph: graph,
+                                        scene: sheetKey)
+            addModalChild(ctrl, session: .sheet(pref))
+
         }
     }
 
-    private enum SheetDismissReason {
-        case userAction   // user closed window, reset binding + onDismiss
-        case dismissed    // programmatic (binding=false already), onDismiss only
-        case byParent     // parent closed, reset binding + onDismiss
-        case cancelled    // queued but never shown, reset binding and no onDismiss
-    }
-
-    private func _showNextSheet() {
-        guard _activeSheet == nil else { return }
-        guard !_pendingSheetSessions.isEmpty else { return }
-        let session = _pendingSheetSessions.removeFirst()
-        guard let graph = AttributeGraph.current else {
-            // Called outside AG context (e.g. after user dismiss).
-            // Re-enqueue at front. The side-effect rule will fire again.
-            _pendingSheetSessions.insert(session, at: 0)
-            return
+    /// Called from ViewGraph side-effect rule when ConfirmationDialogStorage.PreferenceKey changes.
+    func updateConfirmationDialogPresentation(_ dialogs: [ConfirmationDialogPreference]) {
+        func sid(_ p: ConfirmationDialogPreference) -> ObjectIdentifier {
+            ObjectIdentifier(p.isPresented.location)
         }
-
-        let contentAttr = graph.makeInput(value: session.makeContent())
-        let contentGV   = _GraphValue<AnyView>(_attribute: contentAttr)
-        let sheetKey    = WindowKey(namespace: scene.namespace, sceneID: scene.sceneID)
-        let controller  = WindowController(content: contentGV, scene: sheetKey)
-
-        _activeSheet = SheetEntry(session: session, controller: controller)
-
-        // .userAction: user closes the sheet window.
-        controller._onSheetWindowClosed = { [weak self] in
-            guard let self else { return }
-            self._tearDownActiveSheet(reason: .userAction)
-            self._showNextSheet()
-        }
-
-        Task { @MainActor [weak self, weak controller] in
-            guard let self, let controller else { return }
-            guard let parentWindow = self.window,
-                  let sheetWindow  = controller.makeWindow() else { return }
-            if !parentWindow.presentModalWindow(sheetWindow) {
-                Log.error("WindowController: sheet window presentation failed")
-                self._activeSheet = nil
-                self._showNextSheet()
+        let existing: [(ObjectIdentifier, WindowController)] = modalChildren.withLock {
+            $0.compactMap { entry in
+                guard case .confirmationDialog(let p) = entry.session,
+                      let ctrl = entry.controller else { return nil }
+                return (sid(p), ctrl)
             }
         }
-    }
-
-    private func _tearDownActiveSheet(reason: SheetDismissReason) {
-        guard let entry = _activeSheet else { return }
-        _activeSheet = nil
-        entry.controller?._onSheetWindowClosed = nil  // prevent re-entrancy
-
-        switch reason {
-        case .userAction:
-            entry.session.isPresented.wrappedValue = false
-            entry.session.onDismiss?()
-        case .dismissed:
-            entry.session.onDismiss?()
-        case .byParent:
-            entry.session.isPresented.wrappedValue = false
-            entry.session.onDismiss?()
-        case .cancelled:
-            entry.session.isPresented.wrappedValue = false
-            // onDismiss is not called because the sheet was never shown.
-        }
-
-        let sheetController = entry.controller
-        Task { @MainActor [weak self, weak sheetController] in
-            if let w = sheetController?.window {
-                self?.window?.dismissModalWindow(w)
-                w.close()
+        let existingIDs = Set(existing.map { $0.0 })
+        for (id, ctrl) in existing {
+            if !dialogs.contains(where: { sid($0) == id }) {
+                removeModalChild(ctrl, reason: .dismissed)
             }
         }
+        guard let graph = AttributeGraph.current else { return }
+        for pref in dialogs {
+            guard !existingIDs.contains(sid(pref)) else { continue }
+            let content = ConfirmationDialogOverlayView(preference: pref)
+            let attr: Attribute<AnyView> = graph.makeInput(value: AnyView(content))
+            let key = WindowKey(namespace: scene.namespace, sceneID: scene.sceneID)
+            let ctrl = WindowController(crossGraphContent: attr, sourceGraph: graph, scene: key)
+            addModalChild(ctrl, session: .confirmationDialog(pref))
+        }
     }
 
-    /// Set by the parent when this WindowController is acting as a sheet window.
-    /// Fires on user-driven close only.
-    fileprivate var _onSheetWindowClosed: (() -> Void)?
+    /// Called from ViewGraph side-effect rule when AlertStorage.PreferenceKey changes.
+    func updateAlertPresentation(_ alerts: [AlertPreference]) {
+        func sid(_ p: AlertPreference) -> ObjectIdentifier {
+            ObjectIdentifier(p.isPresented.location)
+        }
+
+        let existing: [(ObjectIdentifier, WindowController)] = modalChildren.withLock {
+            $0.compactMap { entry in
+                guard case .alert(let p) = entry.session,
+                      let ctrl = entry.controller else { return nil }
+                return (sid(p), ctrl)
+            }
+        }
+        let existingIDs = Set(existing.map { $0.0 })
+
+        // Dismiss removed alerts.
+        for (id, ctrl) in existing {
+            if !alerts.contains(where: { sid($0) == id }) {
+                removeModalChild(ctrl, reason: .dismissed)
+            }
+        }
+
+        // Enqueue new alerts as overlay controllers.
+        guard let graph = AttributeGraph.current else { return }
+        for pref in alerts {
+            guard !existingIDs.contains(sid(pref)) else { continue }
+
+            let alertContent = AlertOverlayView(preference: pref)
+            let alertAttr: Attribute<AnyView> = graph.makeInput(value: AnyView(alertContent))
+            let alertKey = WindowKey(namespace: scene.namespace, sceneID: scene.sceneID)
+            let ctrl = WindowController(crossGraphContent: alertAttr,
+                                        sourceGraph: graph,
+                                        scene: alertKey)
+            addModalChild(ctrl, session: .alert(pref))
+        }
+    }
 }
 
 public struct _WindowContextDebugDraw: EnvironmentKey {

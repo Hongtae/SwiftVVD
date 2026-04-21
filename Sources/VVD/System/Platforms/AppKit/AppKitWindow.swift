@@ -135,7 +135,7 @@ final class AppKitWindow: Window {
     var eventObservers = WindowEventObserverContainer()
 
     private struct ModalQueueEntry {
-        weak var window: AppKitWindow?
+        let window: AppKitWindow
         let completionHandler: (()->Void)?
     }
     private var modalWindowQueue: [ModalQueueEntry] = []
@@ -251,13 +251,12 @@ final class AppKitWindow: Window {
             self.modalWindowQueue.removeAll()
             let completionHandlers = entries.compactMap { $0.completionHandler }
             entries.forEach {
-                if let modalWindow = $0.window {
-                    modalWindow.removeEventObserver(self)
-                    if let nsWindow = modalWindow.window {
-                        window.endSheet(nsWindow)
-                    }
-                    modalWindow.close()
+                let modalWindow = $0.window
+                modalWindow.removeEventObserver(self)
+                if let nsWindow = modalWindow.window {
+                    window.endSheet(nsWindow)
                 }
+                modalWindow.close()
             }
             if !completionHandlers.isEmpty {
                 Task { completionHandlers.forEach { $0() } }
@@ -360,7 +359,7 @@ final class AppKitWindow: Window {
     }
 
     var modalWindows: [any Window] {
-        self.modalWindowQueue.compactMap { $0.window }
+        self.modalWindowQueue.map { $0.window }
     }
 
     func presentModalWindow(_ window: any Window, completionHandler: (()->Void)?) -> Bool {
@@ -373,23 +372,17 @@ final class AppKitWindow: Window {
             self.modalWindowQueue.append(
                 ModalQueueEntry(window: modalWindow,
                                 completionHandler: completionHandler))
-            host.beginSheet(modal) { [weak self, weak modalWindow] response in
+            // modalWindow is held strongly by modalWindowQueue, so it cannot be nil here.
+            host.beginSheet(modal) { [weak self, modalWindow] response in
                 Log.debug("Modal window sheet ended with response: \(response.rawValue)")
                 guard let self else { return }
-                if let modalWindow, let index = self.modalWindowQueue
+                if let index = self.modalWindowQueue
                     .firstIndex(where: { $0.window === modalWindow }) {
                     // remove all entries up to and including the matched entry
                     // (earlier entries may have been orphaned if NSWindow skipped their callbacks)
                     let handlers = self.modalWindowQueue[...index].compactMap { $0.completionHandler }
                     self.modalWindowQueue.removeSubrange(...index)
                     handlers.forEach { $0() }
-                } else {
-                    // modalWindow deallocated, clean up all nil entries
-                    let cancelledHandlers = self.modalWindowQueue
-                        .filter { $0.window == nil }
-                        .compactMap { $0.completionHandler }
-                    self.modalWindowQueue.removeAll { $0.window == nil }
-                    cancelledHandlers.forEach { $0() }
                 }
             }
             return true
@@ -402,15 +395,6 @@ final class AppKitWindow: Window {
         guard let modalWindow = window as? AppKitWindow else {
             Log.err("Window.dismissModalWindow failed: incompatible window type.")
             return false
-        }
-
-        // clean up cancelled entries (nil windows) and call their completion handlers
-        let cancelledHandlers = self.modalWindowQueue
-            .filter { $0.window == nil }
-            .compactMap { $0.completionHandler }
-        self.modalWindowQueue.removeAll { $0.window == nil }
-        if !cancelledHandlers.isEmpty {
-            Task { cancelledHandlers.forEach { $0() } }
         }
 
         if let host = self.window, let modalWindow = modalWindow.window {

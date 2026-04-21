@@ -312,10 +312,11 @@ private class AuxiliaryWindowController<Content: View>: WindowController, @unche
     override func drawFrame(offset: CGPoint, _ context: GraphicsContext) {
         if let scene = sceneContext, let frame = scene.auxiliaryWindowFrame() {
             scene.drawBackground(offset: offset, frame: frame, with: context)
-        }
-        super.drawFrame(offset: offset, context)
-        if let scene = sceneContext, let frame = scene.auxiliaryWindowFrame() {
+            // Content must be drawn at offset + frame.origin so it lands inside the aux window rect.
+            super.drawFrame(offset: offset + frame.origin, context)
             scene.drawOverlay(offset: offset, frame: frame, with: context)
+        } else {
+            super.drawFrame(offset: offset, context)
         }
     }
 

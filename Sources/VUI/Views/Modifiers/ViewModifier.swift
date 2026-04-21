@@ -7,7 +7,8 @@
 
 import Foundation
 
-// BodyInputElement
+// MARK: - BodyInputElement
+
 // One entry on the BodyInput<Content> stack.
 struct BodyInputElement: @unchecked Sendable {
     let isViewList: Bool
@@ -30,6 +31,7 @@ struct BodyInputElement: @unchecked Sendable {
 }
 
 extension BodyInputElement: Equatable {
+    // Closure identity is not directly comparable, so equality stays conservative.
     static func == (lhs: Self, rhs: Self) -> Bool {
         guard lhs.isViewList == rhs.isViewList else { return false }
         return false
@@ -41,28 +43,30 @@ extension BodyInputElement: GraphReusable {
     mutating func tryToReuse(by other: Self, indirectMap: IndirectAttributeMap, testOnly: Bool) -> Bool { true }
 }
 
-// BodyInput<Content>
+// MARK: - BodyInput
+
 // PropertyKey for the ViewModifier body closure stack.
-// Value = Stack<BodyInputElement>. defaultValue = .empty
+// Value = Stack<BodyInputElement>. defaultValue = .empty.
 // Conforms to both ViewInput and GraphInput. Stored via _GraphInputs.append (base channel).
 struct BodyInput<Content>: ViewInput {
     typealias Value = Stack<BodyInputElement>
     static var defaultValue: Stack<BodyInputElement> { .empty }
     static func valuesEqual(_ a: Value, _ b: Value) -> Bool { false }
-    // BodyInputElement.isTriviallyReusable=true → BodyInput is also trivially reusable.
     static var isTriviallyReusable: Bool { true }
 }
 
-// ViewModifierContentProvider
+// MARK: - ViewModifierContentProvider
+
 // Protocol adopted by _ViewModifier_Content<Modifier>.
 // providerMakeView: pops a BodyInputElement from the base stack and calls it.
-// isViewList=false: calls fn_ptr directly.
-// isViewList=true: routed via MakeViewRoot/_VariadicView_ImplicitRootVisitor (called directly).
+// isViewList=false calls makeViewFn.
+// isViewList=true calls makeViewListFn.
 protocol ViewModifierContentProvider: View {
     static func providerMakeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs
     static func providerMakeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs
 }
 
+// MARK: - _ViewModifier_Content
 
 public struct _ViewModifier_Content<Modifier> where Modifier: ViewModifier {
     public typealias Body = Never
@@ -81,7 +85,7 @@ extension _ViewModifier_Content: View {
 }
 
 extension _ViewModifier_Content: ViewModifierContentProvider {
-    // Consumes via _ViewInputs.popLast<BodyInput<T>, BodyInputElement> then calls the closure.
+    // Consumes a BodyInputElement from _ViewInputs, then calls the stored closure.
     static func providerMakeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         var inputs = inputs
         guard let elem = inputs.popLast(BodyInput<Self>.self) else {
@@ -93,7 +97,7 @@ extension _ViewModifier_Content: ViewModifierContentProvider {
         return fn(_Graph(), inputs)
     }
 
-    // providerMakeViewList calls _GraphInputs.popLast directly.
+    // Consumes a BodyInputElement from _ViewListInputs, then calls the stored closure.
     static func providerMakeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
         var inputs = inputs
         guard let elem = inputs.base.popLast(BodyInput<Self>.self) else {
@@ -105,6 +109,8 @@ extension _ViewModifier_Content: ViewModifierContentProvider {
         return fn(_Graph(), inputs)
     }
 }
+
+// MARK: - ViewModifier
 
 public protocol ViewModifier {
     associatedtype Body: View
@@ -138,10 +144,46 @@ extension ViewModifier {
         if Body.self is Never.Type {
             fatalError("\(Self.self) may not have Body == Never")
         }
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(Self.self)._makeView called outside an active AttributeGraph context.")
+        }
+
+        // Process DynamicProperty fields before creating the modifier body content.
+        var graphInputs = inputs.base
+        var buffer = _DynamicPropertyBuffer()
+        _forEachField(of: Self.self) { _, offset, fieldType in
+            if let dpType = fieldType as? any DynamicProperty.Type {
+                dpType._makeProperty(in: &buffer, container: modifier,
+                                     fieldOffset: offset, inputs: &graphInputs)
+            }
+            return true
+        }
+
+        let liveModifierAttr: Attribute<Self>
+        if buffer.contexts.isEmpty {
+            liveModifierAttr = modifier._attribute
+        } else {
+            let capturedContexts = buffer.contexts
+            liveModifierAttr = graph.makeRule {
+                var m = modifier._attribute.value
+                withUnsafeMutableBytes(of: &m) { rawBytes in
+                    guard let base = rawBytes.baseAddress else { return }
+                    for (offset, anyCtx) in capturedContexts {
+                        if let ctx = anyCtx as? (UnsafeMutableRawPointer) -> Void {
+                            ctx(base.advanced(by: offset))
+                        }
+                    }
+                }
+                return m
+            }
+        }
+
         var inputs = inputs
-        // ViewModifier._makeView calls _GraphInputs.append directly, not via pushModifierBody.
+        inputs.base = graphInputs
+        // Store the body closure on the base BodyInput stack.
         inputs.base.append(BodyInputElement(makeView: body), forKey: BodyInput<Content>.self)
-        return Body._makeView(view: modifier[\._content], inputs: inputs)
+        let contentGV = _GraphValue<Self>(_attribute: liveModifierAttr)[\._content]
+        return Body._makeView(view: contentGV, inputs: inputs)
     }
 
     public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
@@ -158,9 +200,44 @@ extension ViewModifier {
         if Body.self is Never.Type {
             fatalError("\(Self.self) may not have Body == Never")
         }
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(Self.self)._makeViewList called outside an active AttributeGraph context.")
+        }
+
+        var graphInputs = inputs.base
+        var buffer = _DynamicPropertyBuffer()
+        _forEachField(of: Self.self) { _, offset, fieldType in
+            if let dpType = fieldType as? any DynamicProperty.Type {
+                dpType._makeProperty(in: &buffer, container: modifier,
+                                     fieldOffset: offset, inputs: &graphInputs)
+            }
+            return true
+        }
+
+        let liveModifierAttr: Attribute<Self>
+        if buffer.contexts.isEmpty {
+            liveModifierAttr = modifier._attribute
+        } else {
+            let capturedContexts = buffer.contexts
+            liveModifierAttr = graph.makeRule {
+                var m = modifier._attribute.value
+                withUnsafeMutableBytes(of: &m) { rawBytes in
+                    guard let base = rawBytes.baseAddress else { return }
+                    for (offset, anyCtx) in capturedContexts {
+                        if let ctx = anyCtx as? (UnsafeMutableRawPointer) -> Void {
+                            ctx(base.advanced(by: offset))
+                        }
+                    }
+                }
+                return m
+            }
+        }
+
         var inputs = inputs
+        inputs.base = graphInputs
         inputs.base.append(BodyInputElement(makeViewList: body), forKey: BodyInput<Content>.self)
-        return Body._makeViewList(view: modifier[\._content], inputs: inputs)
+        let contentGV = _GraphValue<Self>(_attribute: liveModifierAttr)[\._content]
+        return Body._makeViewList(view: contentGV, inputs: inputs)
     }
 }
 
@@ -273,8 +350,8 @@ extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
         //
         // The separate `extension ModifiedContent where Modifier: GestureViewModifier`
         // approach does NOT work here because TupleView._makeViewList dispatches via
-        // the protocol witness table (generic <V: View> context), which resolves to
-        // the conformance-site implementation — ignoring more-specific extensions.
+        // generic View conformance, which resolves to the conformance-site implementation
+        // and ignores more-specific extensions.
         // A runtime `is` check is the correct solution.
         if Modifier.self is any GestureViewModifier.Type {
             return _ViewListOutputs(
@@ -309,11 +386,11 @@ extension View {
     }
 }
 
-/// Internal protocol that all `Body == Never` modifiers needing `_makeViewList` → `ModifiedElements`
+/// Internal protocol for `Body == Never` modifiers that need `_makeViewList` to emit `ModifiedElements`.
 /// must conform to. The default extension creates a `_ViewListLayoutModifier` wrapping the inner
 /// elements, which `wireElements` later dispatches on.
 ///
-/// Conformers: layout modifiers (`UnaryLayout`) and rendering modifiers (background, overlay, …).
+/// Conformers include layout modifiers and rendering modifiers such as background and overlay.
 protocol PrimitiveViewModifier: ViewModifier where Self.Body == Never {
 }
 
@@ -348,7 +425,7 @@ extension PrimitiveViewModifier {
 /// also conform to this, signalling that they support multi-child lists (MergedElements).
 protocol MultiViewModifier: PrimitiveViewModifier {}
 
-/// Layout-specific `PrimitiveViewModifier`. Geometry-only modifiers (frame, padding, fixedSize …)
+/// Layout-specific `PrimitiveViewModifier`. Geometry-only modifiers such as frame, padding, and fixedSize
 /// conform to this protocol. Conforming types implement `modifyLayoutComputer(_:)` and receive a
 /// correct `_makeView` implementation for free. `_makeViewList` is inherited from `PrimitiveViewModifier`.
 ///
@@ -398,13 +475,11 @@ extension UnaryLayout {
     }
 }
 
-// _ViewInputs + pushModifierBody / popLast / top
+// MARK: - _ViewInputs body stack helpers
+
 // ViewModifier body stack helpers.
-// pushModifierBody:
-//   Creates a BodyInputElement and calls _GraphInputs.append internally.
-//   (ViewModifier._makeView default path calls _GraphInputs.append directly, not via this)
-// popLast: Thin wrapper delegating to _GraphInputs.popLast.
-// top: Thin wrapper delegating to _GraphInputs.top.
+// pushModifierBody creates a BodyInputElement and calls _GraphInputs.append internally.
+// popLast and top are thin wrappers over _GraphInputs.
 
 extension _ViewInputs {
     /// Pushes a makeView closure onto the BodyInput stack.

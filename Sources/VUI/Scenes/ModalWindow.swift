@@ -154,9 +154,9 @@ class ModalWindowSceneContext<Content>: @unchecked Sendable where Content: View 
     private let inputs: _SceneInputs
 
     var windowContextKey: AnyHashable {
-        // _GraphValue identity is stable across rebuilds (ObjectIdentifier + index),
-        // so different instances for the same view-tree slot share the same key.
-        AnyHashable(ObjectIdentifier(contentGraph._attribute.identifier as AnyObject))
+        // AGAttribute (rawValue: UInt32) is a value type. Use it directly, not via AnyObject boxing.
+        // ObjectIdentifier(x as AnyObject) creates a new heap object each call, producing an unstable key.
+        AnyHashable(contentGraph._attribute.identifier)
     }
 
     private var environment: EnvironmentValues {
@@ -236,7 +236,7 @@ class ModalWindowSceneContext<Content>: @unchecked Sendable where Content: View 
     }
 
     fileprivate func onWindowClosed() {
-        // Platform window was closed by user action, so extract and clear
+        // Platform window was closed by user action. Extract and clear
         // the callback before tearDownModal() is called.
         let onDismiss = self.modalContext?.onDismiss
         self.modalContext?.onDismiss = nil
@@ -298,11 +298,12 @@ class ModalWindowSceneContext<Content>: @unchecked Sendable where Content: View 
             modal.origin = .zero
             ctx.modalWindow = modal
 
-            modal.addEventObserver(self) { [weak self] (event: WindowEvent) in
+            modal.addEventObserver(self) { [weak self, weak window] (event: WindowEvent) in
                 guard let self else { return }
                 switch event.type {
-                case .created: self.onModalSessionInitiated()
-                case .closed:  self.onWindowClosed()
+                case .created:
+                    break
+                case .closed: self.onWindowClosed()
                 default: break
                 }
             }
@@ -475,8 +476,12 @@ class ModalWindowSceneContext<Content>: @unchecked Sendable where Content: View 
 
     func drawModalOverlay(offset: CGPoint, with context: GraphicsContext) {}
 
-    func onModalSessionInitiated() {
-        Log.debug("ModalWindowSceneContext: modal session initiated")
+    func onModalSessionInitiated(platformWindowReady: (@Sendable ((any PlatformWindow)?) -> Void)?) {
+        Log.debug("ModalWindowSceneContext: modal session initiated (overlay=\(platformWindowReady == nil))")
+        if let platformWindowReady {
+            // Pass the existing platform window if available, nil for overlay.
+            platformWindowReady(modalContext?.modalWindow)
+        }
     }
 
     private func endModalSession(response: ModalResponse?) {
@@ -543,8 +548,10 @@ private class ModalWindowController<Content: View>: WindowController, @unchecked
         return super.handleMouseEvent(event: event)
     }
 
-    // Modal session callbacks forward to scene context.
-    override func onModalSessionInitiated()         { sceneContext?.onModalSessionInitiated() }
+    // Forward modal session callbacks to the scene context.
+    override func onModalSessionInitiated(platformWindowReady: (@Sendable ((any PlatformWindow)?) -> Void)?) {
+        sceneContext?.onModalSessionInitiated(platformWindowReady: platformWindowReady)
+    }
     override func onModalSessionDismissedByUser()   { sceneContext?.onModalSessionDismissedByUser() }
     override func onModalSessionDismissedByParent() { sceneContext?.onModalSessionDismissedByParent() }
     override func onModalSessionCancelled()         { sceneContext?.onModalSessionCancelled() }

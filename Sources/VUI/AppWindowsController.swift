@@ -7,15 +7,9 @@
 
 import Foundation
 
-// AppWindowsController manages all WindowControllers for the app.
-//
-// Owns four registries keyed by WindowKey, matching the scene type:
-//   mainWindowControllers      <- WindowGroup (multiple instances allowed per key)
-//   singleWindowControllers    <- Window       (one instance per key)
-//   auxiliaryWindowControllers <- auxiliary/popover windows
-//   settingsWindowController   <- Settings scene (at most one)
-//
-// AppMain owns this alongside AppGraph.
+// AppWindowsController manages scene WindowControllers for the app.
+// Dynamic presentation windows are tracked here until ownership moves fully
+// to parent WindowController instances.
 class AppWindowsController: @unchecked Sendable {
 
     // WindowGroup: array because openWindow() can open multiple instances per key.
@@ -24,16 +18,19 @@ class AppWindowsController: @unchecked Sendable {
     // Window scene: single instance per key.
     var singleWindowControllers: [WindowKey: WindowController] = [:]
 
-    // Auxiliary / popover windows, single instance per key.
+    // AuxiliaryWindowScene controllers are statically declared in the scene builder only.
+    // Dynamic aux windows (popovers, context menus) are NOT stored here;
+    // see dynamicAuxWindows below.
     var auxiliaryWindowControllers: [WindowKey: WindowController] = [:]
 
     // Settings scene, at most one app-wide.
     var settingsWindowController: WindowController? = nil
 
-    // Dynamic aux windows (popups, popovers), strong ownership, nested under a parent.
+    // Dynamic aux windows, such as popovers and context menus opened programmatically.
     var dynamicAuxWindows: [WindowController] = []
 
-    // Dynamic modal windows, single active at a time per parent.
+    // Dynamic modal windows opened via ModalWindowScene.
+    // Note: .sheet() modifier windows bypass this registry.
     var dynamicModalWindows: [WindowController] = []
 
     // Modal slot dedup prevents the same logical slot from showing twice.
@@ -45,11 +42,12 @@ class AppWindowsController: @unchecked Sendable {
     // Tracks the number of open windows per key (for openWindow action).
     var windowCounts: [WindowKey: UInt32] = [:]
 
-    // Cascade offset per key, applied when opening successive windows of the same type.
+    // Cascade offset per key applied when opening successive windows of the same type.
     var cascadeNumbers: [WindowKey: UInt32] = [:]
     var auxiliaryCascadeNumber: UInt32 = 0
 
     // All currently live controllers (flattened across all registries).
+    // Note: .sheet() modal windows are NOT included here (owned by WindowController._activeSheet).
     var allWindowControllers: [WindowController] {
         var result: [WindowController] = []
         mainWindowControllers.values.forEach { result.append(contentsOf: $0) }
@@ -107,7 +105,7 @@ class AppWindowsController: @unchecked Sendable {
         modalSlots[key] = AnyWeakObject(modal)
 
         dynamicModalWindows.append(modal)
-        parent.addModalChild(modal, initiated: initiated)
+        parent.addModalChild(modal)
         return true
     }
 

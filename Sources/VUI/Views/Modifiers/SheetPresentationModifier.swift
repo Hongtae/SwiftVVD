@@ -14,6 +14,8 @@ struct SheetPreference {
     let makeContent: () -> AnyView
     let isPresented: Binding<Bool>
     let onDismiss: (() -> Void)?
+    // Stable namespace identifier for this presentation.
+    let namespaceID: Namespace.ID
     let drawsBackground: Bool
     let placement: Placement
     let activeInspector: Bool?
@@ -36,6 +38,7 @@ struct SheetPreference {
         case none
     }
 
+    /// Host-readable preference key for sheet presentations.
     struct Key: HostPreferenceKey {
         typealias Value = SheetPreference.Value
         static var defaultValue: Value { .none }
@@ -91,6 +94,8 @@ struct NullSheetAnchor<Key: PreferenceKey>: SheetAnchorProvider {
 struct CoreSheetPresentationModifier<AnchorProvider: SheetAnchorProvider>: EnvironmentalModifier {
     typealias ResolvedModifier = AnchorProvider.Modifier
 
+    // Namespace used to generate stable presentation identity.
+    var _namespace: Namespace
     let _isPresented: Binding<Bool>
     let onDismiss: (() -> Void)?
     let makeContent: () -> AnyView
@@ -100,6 +105,7 @@ struct CoreSheetPresentationModifier<AnchorProvider: SheetAnchorProvider>: Envir
     let anchorProvider: AnchorProvider
 
     func resolve(in environment: EnvironmentValues) -> AnchorProvider.Modifier {
+        let namespace = _namespace
         let isPresented = _isPresented
         let makeContent = makeContent
         let onDismiss = onDismiss
@@ -109,12 +115,11 @@ struct CoreSheetPresentationModifier<AnchorProvider: SheetAnchorProvider>: Envir
 
         return anchorProvider.preferenceTransformModifier { value, _ in
             if isPresented.wrappedValue {
-                // isPresented == true -> value = .single(pref).
-                // isPresented == false leaves value unchanged (stays .none / default).
                 value = .single(SheetPreference(
                     makeContent: makeContent,
                     isPresented: isPresented,
                     onDismiss: onDismiss,
+                    namespaceID: namespace.wrappedValue,
                     drawsBackground: drawsBackground,
                     placement: placement,
                     activeInspector: activeInspector
@@ -127,7 +132,7 @@ struct CoreSheetPresentationModifier<AnchorProvider: SheetAnchorProvider>: Envir
 // MARK: - SheetContent
 
 /// Wrapper view that decorates the sheet body content.
-/// Currently a pass-through stub for future sheet-specific styling.
+/// Currently passes content through unchanged.
 struct SheetContent<Content: View>: View {
     var content: Content
     var body: some View { content }
@@ -144,18 +149,35 @@ struct SheetPresentationModifier<Content: View, AnchorProvider: SheetAnchorProvi
         >
     >
 
-    let _isPresented: Binding<Bool>
+    // Backing binding for the presentation state.
+    @Binding var isPresented: Bool
     let onDismiss: (() -> Void)?
     let sheetContent: () -> Content
     let placement: SheetPreference.Placement
     let drawsBackground: Bool
     let anchorProvider: AnchorProvider
+    // Reserved for inspector-specific presentation state.
     let activeInspector: Bool?
 
-    var isPresented: Bool { _isPresented.wrappedValue }
+    init(isPresented: Binding<Bool>,
+         onDismiss: (() -> Void)?,
+         sheetContent: @escaping () -> Content,
+         placement: SheetPreference.Placement,
+         drawsBackground: Bool,
+         anchorProvider: AnchorProvider) {
+        self._isPresented = isPresented
+        self.onDismiss = onDismiss
+        self.sheetContent = sheetContent
+        self.placement = placement
+        self.drawsBackground = drawsBackground
+        self.anchorProvider = anchorProvider
+        self.activeInspector = nil
+    }
 
     func body(content: _ViewModifier_Content<SheetPresentationModifier>) -> Body {
         let coreModifier = CoreSheetPresentationModifier<AnchorProvider>(
+            // DynamicProperty processing assigns this namespace a stable ID.
+            _namespace: Namespace(),
             _isPresented: _isPresented,
             onDismiss: onDismiss,
             makeContent: { AnyView(sheetContent()) },
@@ -188,6 +210,20 @@ struct ItemSheetPresentationModifier<Item: Identifiable, Content: View, AnchorPr
 
     var isPresented: Bool { _item.wrappedValue != nil }
 
+    init(item: Binding<Item?>,
+         onDismiss: (() -> Void)?,
+         sheetContent: @escaping (Item) -> Content,
+         placement: SheetPreference.Placement,
+         drawsBackground: Bool,
+         anchorProvider: AnchorProvider) {
+        self._item = item
+        self.onDismiss = onDismiss
+        self.sheetContent = sheetContent
+        self.placement = placement
+        self.drawsBackground = drawsBackground
+        self.anchorProvider = anchorProvider
+    }
+
     func body(content: _ViewModifier_Content<ItemSheetPresentationModifier>) -> Body {
         let item = _item
         let sheetContent = sheetContent
@@ -196,6 +232,7 @@ struct ItemSheetPresentationModifier<Item: Identifiable, Content: View, AnchorPr
             set: { if !$0 { item.wrappedValue = nil } }
         )
         let coreModifier = CoreSheetPresentationModifier<AnchorProvider>(
+            _namespace: Namespace(),
             _isPresented: isPresentedBinding,
             onDismiss: onDismiss,
             makeContent: {
@@ -224,13 +261,12 @@ extension View {
     ) -> some View {
         modifier(
             SheetPresentationModifier(
-                _isPresented: isPresented,
+                isPresented: isPresented,
                 onDismiss: onDismiss,
                 sheetContent: content,
                 placement: .automatic,
                 drawsBackground: true,
-                anchorProvider: NullSheetAnchor<SheetPreference.Key>(),
-                activeInspector: nil
+                anchorProvider: NullSheetAnchor<SheetPreference.Key>()
             )
         )
     }
@@ -243,7 +279,7 @@ extension View {
     ) -> some View {
         modifier(
             ItemSheetPresentationModifier(
-                _item: item,
+                item: item,
                 onDismiss: onDismiss,
                 sheetContent: content,
                 placement: .automatic,
