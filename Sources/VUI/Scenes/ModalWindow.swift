@@ -8,12 +8,31 @@
 import Foundation
 import VVD
 
-// ModalWindowClient / ModalWindowHost protocols removed (2026-04-17).
-// Replaced by direct WindowController nesting:
-//   - AppWindowsController owns strong refs + enforces single-modal constraint.
-//   - WindowController.modalChildWindows holds weak ref to the active modal.
-//   - Session callbacks (onModalSession*) are overridable methods on WindowController.
-//   - Modal slot dedup managed by AppWindowsController.modalSlots.
+// MARK: - Deprecated ModalWindowScene
+//
+// ModalWindowScene is kept as legacy scaffolding for modal overlay animation.
+// The intended modal path is:
+//   .sheet() / .alert() / .confirmationDialog() modifier
+//   -> preference key -> ViewGraph side-effect
+//   -> WindowController.updateSheetPresentation / updateAlertPresentation
+//   -> WindowController.addModalChild, with the matching presentation session
+//
+// ModalWindowSceneContext.present() is the OLD path:
+//   -> AppWindowsController.presentModalWindow (now removed)
+//   -> ModalWindowController (private subclass)
+// Both AppWindowsController involvement and the ModalWindowScene scene-builder
+// API are removed from the production path. This file is kept because:
+//
+//   1. ModalWindowController.drawFrame contains overlay animation logic
+//      (scale / alpha TransitionAnimation) that MUST be referenced when
+//      implementing overlay animation for the new path (TO-DO).
+//
+//   2. ModalWindowSceneContext contains the platform-window vs overlay
+//      selection logic (environment.modalSessionUsingPlatformWindow branch)
+//      that is also needed as a reference for the TO-DO overlay mode work.
+//
+// Do NOT use ModalWindowScene or ModalWindowSceneContext in new code.
+// Remove this file once overlay animation is ported to WindowController.
 
 enum ModalResponse {
     case dismissed   // dismiss() was called programmatically
@@ -154,7 +173,7 @@ class ModalWindowSceneContext<Content>: @unchecked Sendable where Content: View 
     private let inputs: _SceneInputs
 
     var windowContextKey: AnyHashable {
-        // AGAttribute (rawValue: UInt32) is a value type. Use it directly, not via AnyObject boxing.
+        // AGAttribute is a value type. Use it directly, not via AnyObject boxing.
         // ObjectIdentifier(x as AnyObject) creates a new heap object each call, producing an unstable key.
         AnyHashable(contentGraph._attribute.identifier)
     }
@@ -167,13 +186,6 @@ class ModalWindowSceneContext<Content>: @unchecked Sendable where Content: View 
         self.contentGraph = graph[\._content]
         self.inputs = inputs
         self.modalContext = nil
-    }
-
-    private func releaseModalSlotIfNeeded() {
-        // Release the modal slot in AppWindowsController via the parent controller's app context.
-        if let parentWC = self.modalContext?.parentController {
-            parentWC.appWindowsController?.releaseModalSlot(key: self.windowContextKey)
-        }
     }
 
     fileprivate func onViewLoaded() {
@@ -262,12 +274,6 @@ class ModalWindowSceneContext<Content>: @unchecked Sendable where Content: View 
             return true
         }
 
-        let key = self.windowContextKey
-        guard let awc = parentController.appWindowsController else {
-            Log.error("ModalWindow: no AppWindowsController available")
-            return false
-        }
-
         // Read environment to decide platform vs overlay.
         let usePlatformModal = environment.modalSessionUsingPlatformWindow
 
@@ -298,37 +304,22 @@ class ModalWindowSceneContext<Content>: @unchecked Sendable where Content: View 
             modal.origin = .zero
             ctx.modalWindow = modal
 
-            modal.addEventObserver(self) { [weak self, weak window] (event: WindowEvent) in
+            modal.addEventObserver(self) { [weak self] (event: WindowEvent) in
                 guard let self else { return }
                 switch event.type {
-                case .created:
-                    break
-                case .closed: self.onWindowClosed()
-                default: break
+                case .created: break
+                case .closed:  self.onWindowClosed()
+                default:       break
                 }
             }
-            guard awc.presentModalWindow(window, in: parentController,
-                                         key: key, initiated: true) else {
-                modal.removeEventObserver(self)
-                Log.error("ModalWindow: modal slot already occupied")
-                return false
-            }
-            guard hostPlatformWindow.presentModalWindow(modal) else {
-                awc.dismissModalWindow(window)
-                modal.removeEventObserver(self)
-                Log.error("ModalWindow: presentModalWindow failed")
-                return false
-            }
             window.sharedContext.alertDismissAction = alertDismissAction
+            // modalContext must be set before addModalChild: _activateModal fires
+            // onModalSessionInitiated synchronously, which reads modalContext?.modalWindow.
             self.modalContext = ctx
+            parentController.addModalChild(window, session: .legacy)
             return true
         } else {
             // Overlay mode.
-            guard awc.presentModalWindow(window, in: parentController,
-                                         key: key, initiated: true) else {
-                Log.debug("ModalWindow: duplicate modal slot — skipped")
-                return false
-            }
             let shadow = GraphicsContext.Filter.shadow(radius: 8.0, x: 0, y: 0)
             ctx.filter = shadow
             if withAnimation {
@@ -339,7 +330,9 @@ class ModalWindowSceneContext<Content>: @unchecked Sendable where Content: View 
             let contentScale = parentController.window?.contentScaleFactor ?? 1.0
             window.sharedContext.contentScaleFactor = contentScale
             window.sharedContext.alertDismissAction = alertDismissAction
+            // modalContext must be set before addModalChild (same reason as platform path).
             self.modalContext = ctx
+            parentController.addModalChild(window, session: .legacy)
             return true
         }
     }
@@ -376,10 +369,7 @@ class ModalWindowSceneContext<Content>: @unchecked Sendable where Content: View 
         if let host = context.parentController {
             // detach without triggering session callbacks. Caller handles response.
             host.detachModalChild(context.window)
-            // detachModalChild does not touch AppWindowsController.dynamicModalWindows, so clean up here.
-            host.appWindowsController?.dynamicModalWindows.removeAll { $0 === context.window }
         }
-        self.releaseModalSlotIfNeeded()
         let parentWindow = context.parentController?.window
         if let window = context.modalWindow {
             runOnMainQueue { [weak window, weak self] in
@@ -487,9 +477,6 @@ class ModalWindowSceneContext<Content>: @unchecked Sendable where Content: View 
     private func endModalSession(response: ModalResponse?) {
         if let context = self.modalContext {
             let onDismiss = context.onDismiss
-            if context.parentController != nil {
-                self.releaseModalSlotIfNeeded()
-            }
             self.modalContext = nil
             context.window.dismissAllModalWindows()
             context.window.dismissAllAuxiliaryWindows()

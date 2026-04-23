@@ -327,15 +327,15 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
 
         // Overlay aux children: update after self.
         for entry in self.auxChildWindows.withLock({ $0 }) {
-            guard let child = entry.controller, entry.frame == nil else { continue }
-            child.updateView(tick: tick, delta: delta, date: date,
-                             contentSize: contentSize, redraw: &redraw, withGC)
+            guard entry.isOverlay, entry.initiated else { continue }
+            entry.controller.updateView(tick: tick, delta: delta, date: date,
+                                        contentSize: contentSize, redraw: &redraw, withGC)
         }
         // Overlay modal child (at most one): update last.
         if let entry = self.modalChildren.withLock({ $0.first }),
-           let child = entry.controller, entry.isOverlay, entry.initiated {
-            child.updateView(tick: tick, delta: delta, date: date,
-                             contentSize: contentSize, redraw: &redraw, withGC)
+           entry.isOverlay, entry.initiated {
+            entry.controller.updateView(tick: tick, delta: delta, date: date,
+                                        contentSize: contentSize, redraw: &redraw, withGC)
         }
     }
 
@@ -360,53 +360,52 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         }
         // Overlay aux children: draw on top after self.
         for entry in self.auxChildWindows.withLock({ $0 }) {
-            guard let child = entry.controller, entry.frame == nil else { continue }
-            child.drawFrame(offset: offset, context)
+            guard entry.isOverlay, entry.initiated else { continue }
+            entry.controller.drawFrame(offset: offset, context)
         }
         // Overlay modal child (at most one): draw on top of everything.
         if let entry = self.modalChildren.withLock({ $0.first }),
-           let child = entry.controller, entry.isOverlay, entry.initiated {
-            child.drawFrame(offset: offset, context)
+           entry.isOverlay, entry.initiated {
+            entry.controller.drawFrame(offset: offset, context)
         }
     }
 
     func layoutBounds(_ bounds: CGRect) -> CGRect { bounds }
 
     func shouldClose(window: any PlatformWindow) -> Bool {
-        modalChildren.withLock { $0.allSatisfy { $0.controller == nil } }
+        modalChildren.withLock { $0.isEmpty }
     }
 
     func onWindowCreated(_: any PlatformWindow) {}
 
     var appWindowsController: AppWindowsController? { appContext?.appWindowsController }
 
-    // MARK: - Parent window event callbacks (override in subclass)
+    // MARK: - Aux child session callbacks (override in AuxiliaryWindowController)
+    // Called by the parent on this controller when used as an aux child.
     func onParentWindowActivated()   {}
     func onParentWindowInactivated() {}
     func onParentWindowMoved()       {}
-    func onParentWindowClosed()      { dismissAllAuxiliaryWindows(); dismissAllModalWindows() }
-
-    // MARK: - Gesture initiation callback for dismissOnDeactivate logic
+    func onParentWindowClosed() {
+        dismissAllAuxiliaryWindows()
+        dismissAllModalWindows() 
+    }
     func onGestureInitiated(from initiator: AnyObject?, location: CGPoint) {}
-
-    // MARK: - Overlay hit-test (used by parent for mouse routing in overlay mode)
-    // Override to define the hit-testable region. Default: bounding rect of content.
+    // Override to define the overlay hit-testable region (used by parent for mouse routing).
     func overlayHitTest(_ locationInParent: CGPoint) -> Bool { false }
 
     // MARK: - Modal session callbacks (override in ModalWindowController)
-    // Called by parent's _activateModal at presentation time.
+    // Called by the parent's _activateModal / removeModalChild on this controller.
     // platformWindowReady == nil means overlay forced. The child must not create a window.
-    // platformWindowReady != nil means the child may create a platform window via makeWindow(),
-    //   then call the closure with the created window. The closure (running @MainActor)
-    //   sets entry.isOverlay = false and presents the window via the platform modal queue.
-    //   If child never calls the closure, entry.isOverlay stays true and is treated as overlay.
+    // platformWindowReady != nil means the child may call makeWindow() and pass the result to the
+    //   closure. The closure sets entry.initiated and presents the window via the platform
+    //   modal queue. Passing nil signals overlay fallback.
     func onModalSessionInitiated(platformWindowReady: (@Sendable ((any PlatformWindow)?) -> Void)?) {
-        guard let platformWindowReady else { return }  // nil → overlay forced, nothing to do
+        guard let platformWindowReady else { return }
         guard window == nil else {
             fatalError("\(type(of: self)).onModalSessionInitiated: window already exists")
         }
         Task { @MainActor [weak self] in
-            let w = self?.makeWindow()   // nil if creation fails → fallback to overlay
+            let w = self?.makeWindow()
             platformWindowReady(w)
         }
     }
@@ -415,7 +414,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     func onModalSessionCancelled()         {}
 
     func onWindowClosing(_: any PlatformWindow) {
-        self.auxChildWindows.withLock { $0.compactMap(\.controller) }
+        self.auxChildWindows.withLock { $0.map(\.controller) }
             .forEach { $0.onParentWindowClosed() }
     }
 
@@ -431,9 +430,8 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
             }
             inputEvents.withLock {
                 $0.append(.action { [weak self] in
-                    self?.auxChildWindows.withLock {
-                        $0.compactMap(\.controller) }
-                    .forEach { $0.onParentWindowClosed() }
+                    self?.auxChildWindows.withLock { $0.map(\.controller) }
+                        .forEach { $0.onParentWindowClosed() }
                 })
             }
         case .hidden:
@@ -444,9 +442,8 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         case .activated:
             inputEvents.withLock {
                 $0.append(.action { [weak self] in
-                    self?.auxChildWindows.withLock {
-                        $0.compactMap(\.controller) }
-                    .forEach { $0.onParentWindowActivated() }
+                    self?.auxChildWindows.withLock { $0.map(\.controller) }
+                        .forEach { $0.onParentWindowActivated() }
                 })
             }
         case .inactivated:
@@ -456,9 +453,8 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
             }
             inputEvents.withLock {
                 $0.append(.action { [weak self] in
-                    self?.auxChildWindows.withLock {
-                        $0.compactMap(\.controller) }
-                    .forEach { $0.onParentWindowInactivated() }
+                    self?.auxChildWindows.withLock { $0.map(\.controller) }
+                        .forEach { $0.onParentWindowInactivated() }
                 })
             }
         case .minimized:
@@ -469,9 +465,8 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         case .moved, .resized:
             inputEvents.withLock {
                 $0.append(.action { [weak self] in
-                    self?.auxChildWindows.withLock {
-                        $0.compactMap(\.controller) }
-                    .forEach { $0.onParentWindowMoved() }
+                    self?.auxChildWindows.withLock { $0.map(\.controller) }
+                        .forEach { $0.onParentWindowMoved() }
                 })
             }
         default:
@@ -481,8 +476,9 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
 
     func onKeyboardEvent(event: KeyboardEvent) {
         // Only route to overlay modal if fully initiated (async Task may still be pending).
-        let topModal = self.modalChildren.withLock {
-            $0.first.flatMap { ($0.initiated && $0.isOverlay) ? $0.controller : nil }
+        let topModal: WindowController? = self.modalChildren.withLock {
+            guard let e = $0.first, e.initiated, e.isOverlay else { return nil }
+            return e.controller
         }
         if let topModal {
             topModal.onKeyboardEvent(event: event)
@@ -493,9 +489,9 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
 
     func onMouseEvent(event: MouseEvent) {
         let topModal = self.modalChildren.withLock { $0.first }
-        if let modalController = topModal?.controller,
-           topModal?.isOverlay == true, topModal?.initiated == true {
-            var event = event
+        if let topModal, topModal.isOverlay, topModal.initiated {
+            let modalController = topModal.controller
+            let event = event
             // No coordinate offset for full-area overlays (sheet/alert).
             // Positioned overlays (e.g. ModalWindowScene) apply offset via their own drawFrame.
             if event.type == .wheel {
@@ -542,8 +538,8 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         }
 
         var handlers = self.auxChildWindows.withLock {
-            $0.reversed().compactMap { entry -> (id: ObjectIdentifier, action: (KeyboardEvent) -> Bool)? in
-                guard let child = entry.controller else { return nil }
+            $0.reversed().map { entry -> (id: ObjectIdentifier, action: (KeyboardEvent) -> Bool) in
+                let child = entry.controller
                 return (id: ObjectIdentifier(child), action: { event in
                     child.handleKeyboardEvent(event: event)
                 })
@@ -646,7 +642,8 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         // Build handler list: aux children (reversed = top-first) then self.
         var handlers = self.auxChildWindows.withLock {
             $0.reversed().compactMap { entry -> (target: AnyObject, action: (MouseEvent) -> Bool)? in
-                guard let child = entry.controller, let frame = entry.frame else { return nil }
+                guard let frame = entry.frame else { return nil }
+                let child = entry.controller
                 return (target: child, action: { event in
                     let loc = event.location - frame.origin
                     if child.overlayHitTest(loc) {
@@ -662,7 +659,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
 
         // Track which aux child initiated a gesture (for dismissOnDeactivate).
         let auxChildren = event.type == .buttonDown
-            ? self.auxChildWindows.withLock { $0.compactMap(\.controller) }
+            ? self.auxChildWindows.withLock { $0.map(\.controller) }
             : []
 
         if let _lastMouseEventHandler,
@@ -687,7 +684,8 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     @discardableResult
     func handleMouseWheel(at location: CGPoint, delta: CGPoint) -> Bool {
         for entry in self.auxChildWindows.withLock({ $0.reversed() }) {
-            guard let child = entry.controller, let frame = entry.frame else { continue }
+            guard let frame = entry.frame else { continue }
+            let child = entry.controller
             let loc = location - frame.origin
             if child.overlayHitTest(loc) {
                 child.handleMouseWheel(at: loc, delta: delta)
@@ -764,7 +762,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     func handleMouseHover(at location: CGPoint, deviceID: Int, isTopMost: Bool) -> Bool {
         var topMost = isTopMost
         self.auxChildWindows.withLock({ $0.reversed() }).forEach { entry in
-            guard let child = entry.controller else { return }
+            let child = entry.controller
             if let offset = entry.frame?.origin {
                 let loc = location - offset
                 if child.handleMouseHover(at: loc, deviceID: deviceID, isTopMost: topMost) {
@@ -841,15 +839,17 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     func updateAccessibilityEnvironment() {}
 
     // MARK: - Aux/Modal window management (nested structure)
-    // AppWindowsController owns all instances (strong refs).
-    // WindowController holds weak refs for overlay rendering and cascade dismiss.
+    // WindowController owns its dynamic children directly (strong refs).
+    // AppWindowsController is not involved in dynamic aux/modal lifetime.
 
     // Parent that opened this window (nil = root window).
     weak var parentWindow: WindowController?
 
     private struct AuxChildEntry: @unchecked Sendable {
-        weak var controller: WindowController?
-        var frame: CGRect? = nil
+        let controller: WindowController   // strong owner for aux children
+        var initiated: Bool = false        // true once async activation completes (MainActor)
+        var frame: CGRect? = nil           // nil = platform window, non-nil = overlay position
+        var isOverlay: Bool { frame != nil }
     }
     private let auxChildWindows = Mutex<[AuxChildEntry]>([])
 
@@ -865,7 +865,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     //   In dismissAllModalWindows, position (first vs rest) determines reason:
     //   first = was active, so .byParent; rest = queued and never shown, so .cancelled.
     private struct ModalChildEntry: @unchecked Sendable {
-        weak var controller: WindowController?
+        let controller: WindowController   // strong owner for modal children
         var isOverlay: Bool = true    // set inside platformWindowReady closure or overlay path
         var initiated: Bool = false   // true once onModalSessionInitiated completes;
                                       // updateView/drawFrame ignore the entry until then
@@ -879,7 +879,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         child.parentWindow = self
         let entry = AuxChildEntry(controller: child)
         self.auxChildWindows.withLock { entries in
-            entries.removeAll { $0.controller == nil || $0.controller === child }
+            entries.removeAll { $0.controller === child }
             entries.append(entry)
         }
     }
@@ -900,7 +900,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     func dismissAllAuxiliaryWindows() {
         let children = self.auxChildWindows.withLock { entries in
             defer { entries.removeAll() }
-            return entries.compactMap(\.controller)
+            return entries.map(\.controller)
         }
         children.forEach { child in
             child.parentWindow = nil
@@ -931,10 +931,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     // Determines overlay vs platform-window based on session semantics + self.window,
     // then calls entry.activate(asOverlay:) to let the child prepare itself.
     private func _activateModal(entry: ModalChildEntry) {
-        guard let child = entry.controller else {
-            _showNextInQueue()
-            return
-        }
+        let child = entry.controller
 
         // .alert and .confirmationDialog are always overlay in VUI (no NSAlert available).
         // .sheet and .legacy follow parent's window state.
@@ -1010,8 +1007,8 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
 
     // Show the front of the queue after the previous active modal was removed.
     private func _showNextInQueue() {
-        guard let entry = modalChildren.withLock({ $0.first }),
-              let child = entry.controller else { return }
+        guard let entry = modalChildren.withLock({ $0.first }) else { return }
+        let child = entry.controller
         // Race guard: skip if preference-driven session is already dismissed.
         if let presented = entry.session.isPresented, !presented.wrappedValue {
             removeModalChild(child, reason: .cancelled)
@@ -1084,7 +1081,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
             return entries
         }
         for (i, entry) in entries.enumerated() {
-            guard let child = entry.controller else { continue }
+            let child = entry.controller
             child.parentWindow = nil
             // first (index 0) was active, so byParent; rest were queued and never shown, so cancelled.
             let reason: ModalDismissReason = (i == 0) ? .byParent : .cancelled
@@ -1118,9 +1115,8 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         // Collect existing sheet sessions from the queue.
         let existing: [(ObjectIdentifier, WindowController)] = modalChildren.withLock {
             $0.compactMap { entry in
-                guard case .sheet(let p) = entry.session,
-                      let ctrl = entry.controller else { return nil }
-                return (sid(p), ctrl)
+                guard case .sheet(let p) = entry.session else { return nil }
+                return (sid(p), entry.controller)
             }
         }
         let existingIDs = Set(existing.map { $0.0 })
@@ -1157,9 +1153,8 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         }
         let existing: [(ObjectIdentifier, WindowController)] = modalChildren.withLock {
             $0.compactMap { entry in
-                guard case .confirmationDialog(let p) = entry.session,
-                      let ctrl = entry.controller else { return nil }
-                return (sid(p), ctrl)
+                guard case .confirmationDialog(let p) = entry.session else { return nil }
+                return (sid(p), entry.controller)
             }
         }
         let existingIDs = Set(existing.map { $0.0 })
@@ -1187,9 +1182,8 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
 
         let existing: [(ObjectIdentifier, WindowController)] = modalChildren.withLock {
             $0.compactMap { entry in
-                guard case .alert(let p) = entry.session,
-                      let ctrl = entry.controller else { return nil }
-                return (sid(p), ctrl)
+                guard case .alert(let p) = entry.session else { return nil }
+                return (sid(p), entry.controller)
             }
         }
         let existingIDs = Set(existing.map { $0.0 })

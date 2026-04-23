@@ -7,9 +7,9 @@
 
 import Foundation
 
-// AppWindowsController manages scene WindowControllers for the app.
-// Dynamic presentation windows are tracked here until ownership moves fully
-// to parent WindowController instances.
+// AppWindowsController manages statically declared scene WindowControllers for the app.
+// Dynamic presentation children, such as popovers, modals, and sheets, are owned
+// directly by their parent WindowController.
 class AppWindowsController: @unchecked Sendable {
 
     // WindowGroup: array because openWindow() can open multiple instances per key.
@@ -19,22 +19,10 @@ class AppWindowsController: @unchecked Sendable {
     var singleWindowControllers: [WindowKey: WindowController] = [:]
 
     // AuxiliaryWindowScene controllers are statically declared in the scene builder only.
-    // Dynamic aux windows (popovers, context menus) are NOT stored here;
-    // see dynamicAuxWindows below.
     var auxiliaryWindowControllers: [WindowKey: WindowController] = [:]
 
     // Settings scene, at most one app-wide.
     var settingsWindowController: WindowController? = nil
-
-    // Dynamic aux windows, such as popovers and context menus opened programmatically.
-    var dynamicAuxWindows: [WindowController] = []
-
-    // Dynamic modal windows opened via ModalWindowScene.
-    // Note: .sheet() modifier windows bypass this registry.
-    var dynamicModalWindows: [WindowController] = []
-
-    // Modal slot dedup prevents the same logical slot from showing twice.
-    var modalSlots: [AnyHashable: AnyWeakObject] = [:]
 
     // Controllers that have been closed but may be restored.
     var dismissedWindowControllers: [WindowController] = []
@@ -46,78 +34,16 @@ class AppWindowsController: @unchecked Sendable {
     var cascadeNumbers: [WindowKey: UInt32] = [:]
     var auxiliaryCascadeNumber: UInt32 = 0
 
-    // All currently live controllers (flattened across all registries).
-    // Note: .sheet() modal windows are NOT included here (owned by WindowController._activeSheet).
+    // All currently live static-scene controllers (flattened across all registries).
+    // Dynamic children (sheets, popovers, modals) are not included here because they are
+    // owned by their parent WindowController.
     var allWindowControllers: [WindowController] {
         var result: [WindowController] = []
         mainWindowControllers.values.forEach { result.append(contentsOf: $0) }
         singleWindowControllers.values.forEach { result.append($0) }
         auxiliaryWindowControllers.values.forEach { result.append($0) }
         if let s = settingsWindowController { result.append(s) }
-        result.append(contentsOf: dynamicAuxWindows)
-        result.append(contentsOf: dynamicModalWindows)
         return result
-    }
-
-    // MARK: - Dynamic aux window management
-
-    /// Register a dynamic aux window under a parent (platform-window or overlay).
-    /// AppWindowsController owns the strong ref; parent holds a weak ref.
-    func presentAuxiliaryWindow(_ aux: WindowController, in parent: WindowController) {
-        dynamicAuxWindows.removeAll { $0.parentWindow == nil }
-        dynamicAuxWindows.append(aux)
-        parent.addAuxChild(aux)
-    }
-
-    /// Recursively dismiss an aux window and all its descendants.
-    func dismissAuxiliaryWindow(_ aux: WindowController) {
-        // Dismiss descendants first (DFS).
-        let descendants = dynamicAuxWindows.filter { isDescendant($0, of: aux) }
-        descendants.forEach { _remove(aux: $0) }
-        _remove(aux: aux)
-    }
-
-    private func _remove(aux: WindowController) {
-        aux.parentWindow?.removeAuxChild(aux)
-        dynamicAuxWindows.removeAll { $0 === aux }
-    }
-
-    private func isDescendant(_ controller: WindowController,
-                               of ancestor: WindowController) -> Bool {
-        var current = controller.parentWindow
-        while let p = current {
-            if p === ancestor { return true }
-            current = p.parentWindow
-        }
-        return false
-    }
-
-    // MARK: - Dynamic modal window management
-
-    /// Returns false if a modal is already active in the parent (single-modal constraint).
-    func presentModalWindow(_ modal: WindowController,
-                            in parent: WindowController,
-                            key: AnyHashable,
-                            initiated: Bool = true) -> Bool {
-        // Dedup: reject if the slot is already occupied.
-        modalSlots = modalSlots.filter { $0.value.value != nil }
-        if modalSlots[key]?.value != nil { return false }
-        modalSlots[key] = AnyWeakObject(modal)
-
-        dynamicModalWindows.append(modal)
-        parent.addModalChild(modal)
-        return true
-    }
-
-    func dismissModalWindow(_ modal: WindowController) {
-        modal.parentWindow?.removeModalChild(modal)
-        dynamicModalWindows.removeAll { $0 === modal }
-        // Release modal slot.
-        modalSlots = modalSlots.filter { $0.value.value != nil && $0.value.value !== modal }
-    }
-
-    func releaseModalSlot(key: AnyHashable) {
-        modalSlots.removeValue(forKey: key)
     }
 
     // Synchronizes the controller registries against the current SceneList,

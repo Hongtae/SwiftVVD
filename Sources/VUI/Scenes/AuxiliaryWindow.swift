@@ -8,11 +8,33 @@
 import Foundation
 import VVD
 
-// AuxiliaryWindowClient / AuxiliaryWindowHost protocols removed (2026-04-17).
-// Replaced by direct WindowController nesting:
-//   - AppWindowsController owns strong refs to all dynamic aux windows.
-//   - WindowController.auxChildWindows holds weak refs to overlay children.
-//   - Parent calls child.updateView() / drawFrame() / onParentWindow*() directly.
+// MARK: - Deprecated AuxiliaryWindowScene
+//
+// AuxiliaryWindowScene is kept as legacy scaffolding for overlay aux rendering.
+// The intended aux-window path is:
+//   .contextMenu() / .popover() modifier
+//   -> preference key -> ViewGraph side-effect
+//   -> WindowController.updateContextMenuPresentation / updatePopoverPresentation
+//   -> WindowController.addAuxChild, where the parent decides overlay or platform mode
+//
+// Problems with the current AuxiliaryWindowSceneContext.activate() approach:
+//   1. Child (AuxiliaryWindowSceneContext) decides overlay vs platform window
+//      by reading an environment value. The parent should be the decision-maker
+//      (parent owns self.window and knows whether it is itself in overlay mode).
+//
+// This file is kept because:
+//   1. AuxiliaryWindowController.drawFrame contains the overlay drawing logic
+//      (background fill, shadow filter, content offset) needed by the new aux path.
+//   2. AuxiliaryWindowController.overlayHitTest contains the shape-based hit-test
+//      used for overlay aux children.
+//   3. AuxiliaryWindowSceneContext.onViewLayoutChanged contains the overlay layout
+//      / platform-window resize logic to be ported.
+//
+// Do NOT use AuxiliaryWindowScene or AuxiliaryWindowSceneContext in new code.
+// Remove this file once overlay drawing is ported to the new path.
+//
+// Note: .contextMenu._makeView and .popover._makeView are currently fatalError,
+// so no code path currently reaches activate(). This is effectively dead code.
 
 // utility window (popup-window or layered window) scene
 struct AuxiliaryWindowScene<Content>: _PrimitiveScene where Content: View {
@@ -189,7 +211,9 @@ class AuxiliaryWindowSceneContext<Content>: @unchecked Sendable where Content: V
             hostPlatformWindow.addEventObserver(self) { [weak self] (event: MouseEvent) in
                 if event.type == .buttonDown { self?.onParentWindowInactivated() }
             }
-            parentController.appWindowsController?.presentAuxiliaryWindow(window, in: parentController)
+            // DEPRECATED: addAuxChild called here in the old pattern.
+            // New path: parent decides overlay/platform and calls addAuxChild itself.
+            // parentController.addAuxChild(window)
             return true
         } else {
             // Overlay mode: render inside the parent window.
@@ -198,7 +222,9 @@ class AuxiliaryWindowSceneContext<Content>: @unchecked Sendable where Content: V
             let shadow = GraphicsContext.Filter.shadow(radius: 4.0, x: 0, y: 0)
             ctx.filter = shadow
             self.activationContext = ctx
-            parentController.appWindowsController?.presentAuxiliaryWindow(window, in: parentController)
+            // DEPRECATED: addAuxChild called here in the old pattern.
+            // New path: parent decides overlay/platform and calls addAuxChild itself.
+            // parentController.addAuxChild(window)
             return true
         }
     }
@@ -218,7 +244,8 @@ class AuxiliaryWindowSceneContext<Content>: @unchecked Sendable where Content: V
     func dismiss() {
         if let context = self.activationContext {
             self.activationContext = nil
-            context.parentController?.removeAuxChild(context.window)
+            // DEPRECATED: removeAuxChild called here in the old pattern.
+            // context.parentController?.removeAuxChild(context.window)
 
             context.window.dismissAllModalWindows()
             context.window.dismissAllAuxiliaryWindows()
