@@ -314,9 +314,14 @@ class ModalWindowSceneContext<Content>: @unchecked Sendable where Content: View 
             }
             window.sharedContext.alertDismissAction = alertDismissAction
             // modalContext must be set before addModalChild: _activateModal fires
-            // onModalSessionInitiated synchronously, which reads modalContext?.modalWindow.
+            // attachWindow synchronously, which reads modalContext?.modalWindow.
             self.modalContext = ctx
-            parentController.addModalChild(window, session: .legacy)
+            parentController.addModalChild(window, session: .legacy) { [weak self] attach in
+                guard let attach else { return }
+                if let w = self?.modalContext?.modalWindow {
+                    attach(w)
+                }
+            }
             return true
         } else {
             // Overlay mode.
@@ -332,7 +337,7 @@ class ModalWindowSceneContext<Content>: @unchecked Sendable where Content: View 
             window.sharedContext.alertDismissAction = alertDismissAction
             // modalContext must be set before addModalChild (same reason as platform path).
             self.modalContext = ctx
-            parentController.addModalChild(window, session: .legacy)
+            parentController.addModalChild(window, session: .legacy)  // overlay: no attachWindow needed
             return true
         }
     }
@@ -466,12 +471,8 @@ class ModalWindowSceneContext<Content>: @unchecked Sendable where Content: View 
 
     func drawModalOverlay(offset: CGPoint, with context: GraphicsContext) {}
 
-    func onModalSessionInitiated(platformWindowReady: (@Sendable ((any PlatformWindow)?) -> Void)?) {
-        Log.debug("ModalWindowSceneContext: modal session initiated (overlay=\(platformWindowReady == nil))")
-        if let platformWindowReady {
-            // Pass the existing platform window if available, nil for overlay.
-            platformWindowReady(modalContext?.modalWindow)
-        }
+    func onModalSessionInitiated() {
+        Log.debug("ModalWindowSceneContext: modal session initiated")
     }
 
     private func endModalSession(response: ModalResponse?) {
@@ -536,8 +537,8 @@ private class ModalWindowController<Content: View>: WindowController, @unchecked
     }
 
     // Forward modal session callbacks to the scene context.
-    override func onModalSessionInitiated(platformWindowReady: (@Sendable ((any PlatformWindow)?) -> Void)?) {
-        sceneContext?.onModalSessionInitiated(platformWindowReady: platformWindowReady)
+    override func onModalSessionInitiated() {
+        sceneContext?.onModalSessionInitiated()
     }
     override func onModalSessionDismissedByUser()   { sceneContext?.onModalSessionDismissedByUser() }
     override func onModalSessionDismissedByParent() { sceneContext?.onModalSessionDismissedByParent() }

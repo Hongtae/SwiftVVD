@@ -33,6 +33,8 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                         ViewGraphRenderDelegate,
                         @unchecked Sendable {
 
+    typealias AttachWindow = @MainActor (any PlatformWindow) -> Void
+
     var windowContext: WindowContext?
 
     private var _titleGraph: _GraphValue<Text>?
@@ -100,7 +102,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
 
     // ViewRendererHost / ViewGraphOwner stored state.
     // WindowController tracks its own owner-side state separately from ViewGraph's internal state,
-    // so host state and graph state can evolve independently.
+    // matching the pattern where NSHostingView also conforms to ViewGraphOwner independently.
     var currentTimestamp: Time = Time(seconds: 0)
     var valuesNeedingUpdate: ViewGraphRootValues = []
     var renderingPhase: ViewRenderingPhase = ViewRenderingPhase()
@@ -394,21 +396,9 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     func overlayHitTest(_ locationInParent: CGPoint) -> Bool { false }
 
     // MARK: - Modal session callbacks (override in ModalWindowController)
-    // Called by the parent's _activateModal / removeModalChild on this controller.
-    // platformWindowReady == nil means overlay forced. The child must not create a window.
-    // platformWindowReady != nil means the child may call makeWindow() and pass the result to the
-    //   closure. The closure sets entry.initiated and presents the window via the platform
-    //   modal queue. Passing nil signals overlay fallback.
-    func onModalSessionInitiated(platformWindowReady: (@Sendable ((any PlatformWindow)?) -> Void)?) {
-        guard let platformWindowReady else { return }
-        guard window == nil else {
-            fatalError("\(type(of: self)).onModalSessionInitiated: window already exists")
-        }
-        Task { @MainActor [weak self] in
-            let w = self?.makeWindow()
-            platformWindowReady(w)
-        }
-    }
+    // Called by the parent's _activateModal after attachWindow has been invoked.
+    // At this point the entry is already initiated and the modal is visible.
+    func onModalSessionInitiated() {}
     func onModalSessionDismissedByUser()   {}
     func onModalSessionDismissedByParent() {}
     func onModalSessionCancelled()         {}
@@ -847,40 +837,72 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
 
     private struct AuxChildEntry: @unchecked Sendable {
         let controller: WindowController   // strong owner for aux children
-        var initiated: Bool = false        // true once async activation completes (MainActor)
-        var frame: CGRect? = nil           // nil = platform window, non-nil = overlay position
-        var isOverlay: Bool { frame != nil }
+        var isOverlay: Bool = true
+        var initiated: Bool = false
+        var frame: CGRect? = nil           // overlay hit-test / draw offset (independent of isOverlay)
     }
     private let auxChildWindows = Mutex<[AuxChildEntry]>([])
 
     // Unified modal queue: first entry = active, rest = pending.
-    // Single active modal queue.
+    // Equivalent to NSWindow's sheet queue at the VUI level.
     //
     // isOverlay is set at _activateModal time (not at enqueue time) based on:
     //   - parent's window state (self.window == nil means overlay is required)
     //   - session semantics (.alert/.confirmationDialog always use overlay)
-    // Before activation, isOverlay defaults to true (safe: queued entries are never drawn).
+    // Before activation, isOverlay defaults to false; queued entries are never drawn (initiated = false).
     //
     // session: .legacy = ModalWindowScene-based; .sheet/.alert/.confirmationDialog = preference-driven.
     //   In dismissAllModalWindows, position (first vs rest) determines reason:
     //   first = was active, so .byParent; rest = queued and never shown, so .cancelled.
     private struct ModalChildEntry: @unchecked Sendable {
         let controller: WindowController   // strong owner for modal children
-        var isOverlay: Bool = true    // set inside platformWindowReady closure or overlay path
-        var initiated: Bool = false   // true once onModalSessionInitiated completes;
-                                      // updateView/drawFrame ignore the entry until then
+        var isOverlay: Bool = false   // set to true only when overlay mode is selected; false = platform window
+        var initiated: Bool = false   // true once activation completes; updateView/drawFrame gate on this
         var session: PresentationSession = .legacy
+        var attachWindow: ((AttachWindow?) -> Void)? = nil
     }
     private let modalChildren = Mutex<[ModalChildEntry]>([])
 
     // MARK: Aux child management
 
-    func addAuxChild(_ child: WindowController) {
+    func addAuxChild(_ child: WindowController,
+                     attachWindow: ((AttachWindow?) -> Void)? = nil) {
         child.parentWindow = self
-        let entry = AuxChildEntry(controller: child)
+        let asOverlay = (self.window == nil)
+        var entry = AuxChildEntry(controller: child)
+        entry.isOverlay = false
         self.auxChildWindows.withLock { entries in
             entries.removeAll { $0.controller === child }
             entries.append(entry)
+        }
+
+        if !asOverlay, let attachWindow {
+            attachWindow { [weak self, weak child] _ in
+                self?.auxChildWindows.withLock { entries in
+                    if let i = entries.firstIndex(where: { $0.controller === child }) {
+                        entries[i].isOverlay = false
+                        entries[i].initiated = true
+                    }
+                }
+            }
+            // Fallback: if attach was not called (caller chose overlay), correct and mark initiated.
+            Task { @MainActor [weak self, weak child] in
+                self?.auxChildWindows.withLock { entries in
+                    if let i = entries.firstIndex(where: { $0.controller === child }),
+                       !entries[i].initiated {
+                        entries[i].isOverlay = true
+                        entries[i].initiated = true
+                    }
+                }
+            }
+        } else {
+            attachWindow?(nil)
+            self.auxChildWindows.withLock { entries in
+                if let i = entries.firstIndex(where: { $0.controller === child }) {
+                    entries[i].isOverlay = true
+                    entries[i].initiated = true
+                }
+            }
         }
     }
 
@@ -914,9 +936,11 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     // isOverlay is not determined here. It is deferred to _activateModal when the entry
     // reaches the front of the queue and the parent's window state is known.
     func addModalChild(_ child: WindowController,
-                       session: PresentationSession = .legacy) {
+                       session: PresentationSession = .legacy,
+                       attachWindow: ((AttachWindow?) -> Void)? = nil) {
         child.parentWindow = self
-        let entry = ModalChildEntry(controller: child, session: session)
+        var entry = ModalChildEntry(controller: child, session: session)
+        entry.attachWindow = attachWindow
         let isFirst = modalChildren.withLock {
             let first = $0.isEmpty
             $0.append(entry)
@@ -943,26 +967,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
             asOverlay = (self.window == nil)
         }
 
-        // Commit isOverlay synchronously so drawFrame/event routing immediately
-        // reflects the correct mode (even before the async Task below runs).
-        modalChildren.withLock { entries in
-            if let i = entries.firstIndex(where: { $0.controller === child }) {
-                entries[i].isOverlay = asOverlay
-            }
-        }
-
-        if asOverlay {
-            // Overlay forced: pass nil so child knows not to create a window.
-            child.onModalSessionInitiated(platformWindowReady: nil)
-            // Mark as initiated synchronously. The entry is ready for updateView/drawFrame.
-            modalChildren.withLock { entries in
-                if let i = entries.firstIndex(where: { $0.controller === child }) {
-                    entries[i].initiated = true
-                }
-            }
-            self.resetGestureHandlers()
-            self.handleMouseHover(at: .zero, deviceID: 0, isTopMost: false)
-        } else {
+        if !asOverlay, let attachWindow = entry.attachWindow {
             // Race guard. _activateModal runs on the main thread.
             if let presented = modalChildren.withLock({ $0.first?.session.isPresented }),
                !presented.wrappedValue {
@@ -970,38 +975,56 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                 return
             }
 
-            // Build closure the child calls back with its platform window (or nil for overlay).
-            // modalChildren updates are synchronous; only presentModalWindow needs a Task.
-            let platformWindowReady: @Sendable ((any PlatformWindow)?) -> Void = {
-                [weak self, weak child] childWindow in
+            attachWindow { [weak self, weak child] childWindow in
                 guard let self else { return }
-                let isOverlay = (childWindow == nil)
+                let ok = self.window?.presentModalWindow(
+                    childWindow,
+                    completionHandler: { [weak self, weak child] in
+                        Task { @MainActor [weak self, weak child] in
+                            guard let self, let child else { return }
+                            self.removeModalChild(child, reason: .userAction)
+                        }
+                    }
+                ) ?? false
+                if ok {
+                    self.modalChildren.withLock { entries in
+                        if let i = entries.firstIndex(where: { $0.controller === child }) {
+                            entries[i].isOverlay = false
+                            entries[i].initiated = true
+                        }
+                    }
+                    child?.onModalSessionInitiated()
+                } else {
+                    Log.error("WindowController: presentModalWindow failed")
+                    if let child { self.removeModalChild(child, reason: .cancelled) }
+                }
+            }
+            // Fallback: if attach was not called (caller chose overlay), mark as overlay and initiate.
+            Task { @MainActor [weak self, weak child] in
+                guard let self, let child else { return }
                 self.modalChildren.withLock { entries in
-                    if let i = entries.firstIndex(where: { $0.controller === child }) {
-                        entries[i].isOverlay = isOverlay
+                    if let i = entries.firstIndex(where: { $0.controller === child }),
+                       !entries[i].initiated {
+                        entries[i].isOverlay = true
                         entries[i].initiated = true
                     }
                 }
-                guard let childWindow else { return }  // overlay: parent draws it, done
-                nonisolated(unsafe) let childWindowRef = childWindow
-                Task { @MainActor [weak self, weak child] in
-                    guard let self else { return }
-                    let ok = self.window?.presentModalWindow(
-                        childWindowRef,
-                        completionHandler: { [weak self, weak child] in
-                            Task { @MainActor [weak self, weak child] in
-                                guard let self, let child else { return }
-                                self.removeModalChild(child, reason: .userAction)
-                            }
-                        }
-                    ) ?? false
-                    if !ok {
-                        Log.error("WindowController: presentModalWindow failed")
-                        if let child { self.removeModalChild(child, reason: .cancelled) }
-                    }
+                child.onModalSessionInitiated()
+                self.resetGestureHandlers()
+                self.handleMouseHover(at: .zero, deviceID: 0, isTopMost: false)
+            }
+        } else {
+            // Overlay forced or no attachWindow: notify with nil, then mark initiated.
+            entry.attachWindow?(nil)
+            modalChildren.withLock { entries in
+                if let i = entries.firstIndex(where: { $0.controller === child }) {
+                    entries[i].isOverlay = true
+                    entries[i].initiated = true
                 }
             }
-            child.onModalSessionInitiated(platformWindowReady: platformWindowReady)
+            child.onModalSessionInitiated()
+            self.resetGestureHandlers()
+            self.handleMouseHover(at: .zero, deviceID: 0, isTopMost: false)
         }
     }
 
