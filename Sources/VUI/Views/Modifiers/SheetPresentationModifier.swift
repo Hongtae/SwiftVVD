@@ -11,11 +11,10 @@ import Foundation
 
 /// Outer struct holding runtime data for a single sheet presentation.
 struct SheetPreference {
-    let makeContent: () -> AnyView
-    let isPresented: Binding<Bool>
+    let content: AnyView
     let onDismiss: (() -> Void)?
-    // Stable namespace identifier for this presentation.
     let namespaceID: Namespace.ID
+    let itemID: AnyHashable?
     let drawsBackground: Bool
     let placement: Placement
     let activeInspector: Bool?
@@ -73,7 +72,6 @@ protocol SheetAnchorProvider {
 // MARK: - NullSheetAnchor
 
 /// Default anchor with no geometry.
-/// Drops Transaction when wrapping into _PreferenceTransformModifier.
 struct NullSheetAnchor<Key: PreferenceKey>: SheetAnchorProvider {
     typealias Modifier = _PreferenceTransformModifier<SheetPreference.Key>
 
@@ -81,7 +79,7 @@ struct NullSheetAnchor<Key: PreferenceKey>: SheetAnchorProvider {
         for body: @escaping (inout SheetPreference.Value, Transaction) -> Void
     ) -> _PreferenceTransformModifier<SheetPreference.Key> {
         _PreferenceTransformModifier<SheetPreference.Key> { value in
-            body(&value, Transaction())
+            body(&value, Transaction._current?.transaction ?? Transaction())
         }
     }
 }
@@ -96,9 +94,9 @@ struct CoreSheetPresentationModifier<AnchorProvider: SheetAnchorProvider>: Envir
 
     // Namespace used to generate stable presentation identity.
     var _namespace: Namespace
-    let _isPresented: Binding<Bool>
+    let content: AnyView?
     let onDismiss: (() -> Void)?
-    let makeContent: () -> AnyView
+    let itemID: AnyHashable?
     let placement: SheetPreference.Placement
     let drawsBackground: Bool
     let activeInspector: Bool?
@@ -106,24 +104,42 @@ struct CoreSheetPresentationModifier<AnchorProvider: SheetAnchorProvider>: Envir
 
     func resolve(in environment: EnvironmentValues) -> AnchorProvider.Modifier {
         let namespace = _namespace
-        let isPresented = _isPresented
-        let makeContent = makeContent
+        let content = content
         let onDismiss = onDismiss
+        let itemID = itemID
         let placement = placement
         let drawsBackground = drawsBackground
         let activeInspector = activeInspector
 
-        return anchorProvider.preferenceTransformModifier { value, _ in
-            if isPresented.wrappedValue {
-                value = .single(SheetPreference(
-                    makeContent: makeContent,
-                    isPresented: isPresented,
-                    onDismiss: onDismiss,
-                    namespaceID: namespace.wrappedValue,
-                    drawsBackground: drawsBackground,
-                    placement: placement,
-                    activeInspector: activeInspector
-                ))
+        return anchorProvider.preferenceTransformModifier { value, transaction in
+            let namespaceID = namespace.wrappedValue
+
+            if let content {
+                switch value {
+                case .single:
+                    Log.warning(
+                        "Currently, only presenting a single sheet is supported.\n" +
+                        "The next sheet will be presented when the currently presented sheet gets dismissed."
+                    )
+                case .keyed, .none:
+                    value = .single(SheetPreference(
+                        content: content,
+                        onDismiss: onDismiss,
+                        namespaceID: namespaceID,
+                        itemID: itemID,
+                        drawsBackground: drawsBackground,
+                        placement: placement,
+                        activeInspector: activeInspector
+                    ))
+                }
+            } else {
+                switch value {
+                case .keyed(var dict):
+                    dict[namespaceID] = transaction
+                    value = .keyed(dict)
+                case .single, .none:
+                    value = .keyed([namespaceID: transaction])
+                }
             }
         }
     }
@@ -175,12 +191,16 @@ struct SheetPresentationModifier<Content: View, AnchorProvider: SheetAnchorProvi
     }
 
     func body(content: _ViewModifier_Content<SheetPresentationModifier>) -> Body {
+        let dismiss = {
+            isPresented = false
+            onDismiss?()
+        }
         let coreModifier = CoreSheetPresentationModifier<AnchorProvider>(
             // DynamicProperty processing assigns this namespace a stable ID.
             _namespace: Namespace(),
-            _isPresented: _isPresented,
-            onDismiss: onDismiss,
-            makeContent: { AnyView(sheetContent()) },
+            content: isPresented ? AnyView(sheetContent()) : nil,
+            onDismiss: dismiss,
+            itemID: nil,
             placement: placement,
             drawsBackground: drawsBackground,
             activeInspector: activeInspector,
@@ -227,20 +247,16 @@ struct ItemSheetPresentationModifier<Item: Identifiable, Content: View, AnchorPr
     func body(content: _ViewModifier_Content<ItemSheetPresentationModifier>) -> Body {
         let item = _item
         let sheetContent = sheetContent
-        let isPresentedBinding = Binding<Bool>(
-            get: { item.wrappedValue != nil },
-            set: { if !$0 { item.wrappedValue = nil } }
-        )
+        let currentItem = item.wrappedValue
+        let dismiss = {
+            item.wrappedValue = nil
+            onDismiss?()
+        }
         let coreModifier = CoreSheetPresentationModifier<AnchorProvider>(
             _namespace: Namespace(),
-            _isPresented: isPresentedBinding,
-            onDismiss: onDismiss,
-            makeContent: {
-                if let current = item.wrappedValue {
-                    return AnyView(sheetContent(current))
-                }
-                return AnyView(EmptyView())
-            },
+            content: currentItem.map { AnyView(sheetContent($0)) },
+            onDismiss: dismiss,
+            itemID: currentItem.map { AnyHashable($0.id) },
             placement: placement,
             drawsBackground: drawsBackground,
             activeInspector: nil,

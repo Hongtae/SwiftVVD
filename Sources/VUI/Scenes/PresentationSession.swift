@@ -25,7 +25,7 @@ enum PresentationSession: @unchecked Sendable {
 
     var isPresented: Binding<Bool>? {
         switch self {
-        case .sheet(let p):              return p.isPresented
+        case .sheet:                     return nil
         case .alert(let p):              return p.isPresented
         case .confirmationDialog(let p): return p.isPresented
         case .legacy:                    return nil
@@ -47,6 +47,15 @@ enum PresentationSession: @unchecked Sendable {
     func cleanup(reason: ModalDismissReason) {
         if case .legacy = self {
             return  // handled via onModalSession* callbacks, not here
+        }
+        if case .sheet(let p) = self {
+            switch reason {
+            case .userAction, .dismissed, .byParent:
+                p.onDismiss?()
+            case .cancelled:
+                break
+            }
+            return
         }
         switch reason {
         case .userAction, .byParent:

@@ -102,7 +102,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
 
     // ViewRendererHost / ViewGraphOwner stored state.
     // WindowController tracks its own owner-side state separately from ViewGraph's internal state,
-    // matching the pattern where NSHostingView also conforms to ViewGraphOwner independently.
+    // so host state and graph state can evolve independently.
     var currentTimestamp: Time = Time(seconds: 0)
     var valuesNeedingUpdate: ViewGraphRootValues = []
     var renderingPhase: ViewRenderingPhase = ViewRenderingPhase()
@@ -844,7 +844,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     private let auxChildWindows = Mutex<[AuxChildEntry]>([])
 
     // Unified modal queue: first entry = active, rest = pending.
-    // Equivalent to NSWindow's sheet queue at the VUI level.
+    // Uses the same active-plus-pending shape as window sheet queues.
     //
     // isOverlay is set at _activateModal time (not at enqueue time) based on:
     //   - parent's window state (self.window == nil means overlay is required)
@@ -859,6 +859,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         var isOverlay: Bool = false   // set to true only when overlay mode is selected; false = platform window
         var initiated: Bool = false   // true once activation completes; updateView/drawFrame gate on this
         var session: PresentationSession = .legacy
+        var contentAttr: Attribute<AnyView>? = nil
         var attachWindow: ((AttachWindow?) -> Void)? = nil
     }
     private let modalChildren = Mutex<[ModalChildEntry]>([])
@@ -937,9 +938,11 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     // reaches the front of the queue and the parent's window state is known.
     func addModalChild(_ child: WindowController,
                        session: PresentationSession = .legacy,
+                       contentAttr: Attribute<AnyView>? = nil,
                        attachWindow: ((AttachWindow?) -> Void)? = nil) {
         child.parentWindow = self
         var entry = ModalChildEntry(controller: child, session: session)
+        entry.contentAttr = contentAttr
         entry.attachWindow = attachWindow
         let isFirst = modalChildren.withLock {
             let first = $0.isEmpty
@@ -957,7 +960,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     private func _activateModal(entry: ModalChildEntry) {
         let child = entry.controller
 
-        // .alert and .confirmationDialog are always overlay in VUI (no NSAlert available).
+        // .alert and .confirmationDialog are always overlay when no platform alert bridge is available.
         // .sheet and .legacy follow parent's window state.
         let asOverlay: Bool
         switch entry.session {
@@ -1126,45 +1129,56 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         let incoming: [SheetPreference]
         switch value {
         case .single(let pref): incoming = [pref]
-        case .keyed:            incoming = []   // Phase 2
+        case .keyed:            incoming = []
         case .none:             incoming = []
         }
 
-        // Binding<Bool>.location is a stable object identity for a presentation.
-        func sid(_ p: SheetPreference) -> ObjectIdentifier {
-            ObjectIdentifier(p.isPresented.location)
+        func sid(_ p: SheetPreference) -> Namespace.ID {
+            p.namespaceID
         }
 
         // Collect existing sheet sessions from the queue.
-        let existing: [(ObjectIdentifier, WindowController)] = modalChildren.withLock {
+        let existing: [(Namespace.ID, WindowController)] = modalChildren.withLock {
             $0.compactMap { entry in
                 guard case .sheet(let p) = entry.session else { return nil }
                 return (sid(p), entry.controller)
             }
         }
-        let existingIDs = Set(existing.map { $0.0 })
+        let incomingIDs = Set(incoming.map(sid))
 
         // Dismiss sessions that are no longer in incoming.
         for (id, ctrl) in existing {
-            if !incoming.contains(where: { sid($0) == id }) {
+            if !incomingIDs.contains(id) {
                 removeModalChild(ctrl, reason: .dismissed)
             }
         }
 
-        // Enqueue new sessions (requires AG context for reactive content rule).
+        // Update existing sessions and enqueue new ones.
         guard let graph = AttributeGraph.current else { return }
+        let transaction = Transaction._current?.transaction ?? Transaction()
         for pref in incoming {
-            guard !existingIDs.contains(sid(pref)) else { continue }
+            let existingContentAttr: Attribute<AnyView>? = modalChildren.withLock { entries in
+                guard let index = entries.firstIndex(where: {
+                    guard case .sheet(let existing) = $0.session else { return false }
+                    return sid(existing) == sid(pref)
+                }) else {
+                    return nil
+                }
+                entries[index].session = .sheet(pref)
+                return entries[index].contentAttr
+            }
+            if let existingContentAttr {
+                existingContentAttr.setValue(pref.content, transaction: transaction)
+                continue
+            }
 
-            // Reactive content rule mirrors parent @State changes into the sheet's ViewGraph.
-            let contentRuleAttr: Attribute<AnyView> = graph.makeRule { pref.makeContent() }
-            _ = contentRuleAttr.value  // force initial evaluation in parent AG context
+            let contentAttr: Attribute<AnyView> = graph.makeInput(value: pref.content)
 
             let sheetKey = WindowKey(namespace: scene.namespace, sceneID: scene.sceneID)
-            let ctrl = WindowController(crossGraphContent: contentRuleAttr,
+            let ctrl = WindowController(crossGraphContent: contentAttr,
                                         sourceGraph: graph,
                                         scene: sheetKey)
-            addModalChild(ctrl, session: .sheet(pref))
+            addModalChild(ctrl, session: .sheet(pref), contentAttr: contentAttr)
 
         }
     }

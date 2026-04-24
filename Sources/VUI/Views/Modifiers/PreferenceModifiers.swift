@@ -60,6 +60,7 @@ public struct _PreferenceTransformModifier<Key: PreferenceKey>: ViewModifier {
         outputs.preferences.makePreferenceTransformer(
             key: Key.self,
             transformAttr: transformAttr,
+            transactionAttr: inputs.base.transaction,
             graph: graph
         )
         return outputs
