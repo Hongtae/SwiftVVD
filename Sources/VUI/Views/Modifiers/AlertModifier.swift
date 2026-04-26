@@ -14,6 +14,20 @@ struct ViewIdentity: Hashable {
     private static let counter = Atomic<UInt64>(0)
     let id: UInt64
     init() { id = ViewIdentity.counter.wrappingAdd(1, ordering: .relaxed).newValue }
+
+    // Tracker owns a stable identity for one modifier instance.
+    struct Tracker {
+        private var current: ViewIdentity?
+
+        init() {}
+
+        mutating func update(for phase: Phase) -> ViewIdentity {
+            if current == nil || phase.isInserted {
+                current = ViewIdentity()
+            }
+            return current!
+        }
+    }
 }
 
 // MARK: - AlertPreference
@@ -21,7 +35,9 @@ struct ViewIdentity: Hashable {
 struct AlertPreference: @unchecked Sendable {
     let title: Text
     let makeActions: () -> AnyView
+    let actionsItemList: PlatformItemList?
     let makeMessage: (() -> AnyView)?
+    let messageItemList: PlatformItemList?
     let isPresented: Binding<Bool>
     let onDismiss: (() -> Void)?
     let severity: DialogSeverity
@@ -47,12 +63,28 @@ struct AlertStorage: @unchecked Sendable {
 struct MakeAlertStorage<Actions: View, Message: View>: StatefulRule {
     typealias Value = (inout [ViewIdentity: AlertStorage]) -> Void
 
+    let environment: Attribute<EnvironmentValues>
     let modifier: Attribute<AlertModifier<Actions, Message>>
-    // Stable identity assigned once and preserved across re-evaluations.
-    let identity: ViewIdentity
+    let actionsItemList: AGWeakAttribute
+    let messageItemList: AGWeakAttribute
+    let phase: Attribute<Phase>
+    var identityTracker: ViewIdentity.Tracker
 
     mutating func updateValue() {
+        guard let graph = AttributeGraph.current else {
+            fatalError("MakeAlertStorage.updateValue called outside AG context")
+        }
+        _ = environment.value
+        var actionsList: PlatformItemList?
+        var messageList: PlatformItemList?
+        if actionsItemList.isValid(in: graph) {
+            actionsList = Attribute<PlatformItemList>(actionsItemList.toStrong()).value
+        }
+        if messageItemList.isValid(in: graph) {
+            messageList = Attribute<PlatformItemList>(messageItemList.toStrong()).value
+        }
         let m = modifier.value
+        let identity = identityTracker.update(for: phase.value)
         guard m.isPresented.wrappedValue else {
             let id = identity
             AttributeGraph.setStatefulOutput({ (dict: inout [ViewIdentity: AlertStorage]) in
@@ -63,7 +95,9 @@ struct MakeAlertStorage<Actions: View, Message: View>: StatefulRule {
         let pref = AlertPreference(
             title: m.title,
             makeActions: { AnyView(m.actions) },
+            actionsItemList: actionsList,
             makeMessage: (m.message is EmptyView) ? nil : { AnyView(m.message) },
+            messageItemList: messageList,
             isPresented: m.isPresented,
             onDismiss: nil,
             severity: m.severity
@@ -76,24 +110,105 @@ struct MakeAlertStorage<Actions: View, Message: View>: StatefulRule {
     }
 }
 
+// MARK: - PlatformItemList
+
+// Collects button and text-field descriptors before MakeAlertStorage consumes them.
+struct PlatformItemList {
+    struct Item: Identifiable {
+        var id: AnyHashable
+        var label: AnyView
+        var action: (() -> Void)?
+        var role: ButtonRole?
+        var keyboardShortcut: KeyboardShortcut?
+        var isEnabled: Bool
+
+        init(id: AnyHashable = UUID(),
+             label: AnyView,
+             action: (() -> Void)?,
+             role: ButtonRole?,
+             keyboardShortcut: KeyboardShortcut? = nil,
+             isEnabled: Bool = true) {
+            self.id = id
+            self.label = label
+            self.action = action
+            self.role = role
+            self.keyboardShortcut = keyboardShortcut
+            self.isEnabled = isEnabled
+        }
+    }
+
+    var buttonItems: [Item] = []
+    var textFieldItems: [AnyView] = []
+
+    var flattenedItems: [Item] { buttonItems }
+    var mergedContentItem: Item? { buttonItems.first }
+
+    mutating func append(_ item: Item) {
+        buttonItems.append(item)
+    }
+
+    mutating func merge(_ other: PlatformItemList) {
+        buttonItems.append(contentsOf: other.buttonItems)
+        textFieldItems.append(contentsOf: other.textFieldItems)
+    }
+
+    mutating func modify(_ transform: (inout Item) -> Void) {
+        for index in buttonItems.indices {
+            transform(&buttonItems[index])
+        }
+    }
+
+    struct Key: PreferenceKey {
+        typealias Value = PlatformItemList
+        static var defaultValue: PlatformItemList { PlatformItemList() }
+
+        static func reduce(value: inout PlatformItemList, nextValue: () -> PlatformItemList) {
+            value.merge(nextValue())
+        }
+    }
+}
+
+struct PlatformItemListButtonStyle: PrimitiveButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        PlatformItemListButtonBody(configuration: configuration)
+    }
+}
+
+private struct PlatformItemListButtonBody: View {
+    let configuration: PrimitiveButtonStyleConfiguration
+    @Environment(\.isEnabled) private var isEnabled: Bool
+
+    var body: some View {
+        configuration.label
+            .preference(key: PlatformItemList.Key.self, value: itemList)
+            ._onButtonGesture(pressing: { _ in }, perform: { configuration.trigger() })
+    }
+
+    private var itemList: PlatformItemList {
+        var list = PlatformItemList()
+        list.append(PlatformItemList.Item(
+            label: AnyView(configuration.label),
+            action: { configuration.trigger() },
+            role: configuration.role,
+            isEnabled: isEnabled
+        ))
+        return list
+    }
+}
+
 // MARK: - ActionsModifier
 // Pass-through modifier for alert actions rendered directly in the overlay.
 struct ActionsModifier: ViewModifier {
-    typealias Body = Never
-}
-
-extension ActionsModifier {
-    static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs,
-                          body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        body(_Graph(), inputs)
-    }
-    public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs,
-                                     body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        body(_Graph(), inputs)
+    func body(content: Content) -> some View {
+        content
+            .modifier(PrimitiveButtonStyleContainerModifier(style: PlatformItemListButtonStyle()))
+        // TextFieldStyleModifier<PlatformItemListTextFieldStyle> is still pending:
+        // TextField/TextFieldStyle infrastructure is not implemented yet.
     }
 }
 
 // MARK: - AlertModifier
+// ViewModifier for presenting an alert when isPresented is true.
 struct AlertModifier<Actions: View, Message: View>: ViewModifier {
     typealias Body = Never
 
@@ -111,10 +226,33 @@ extension AlertModifier {
         guard let graph = AttributeGraph.current else {
             fatalError("AlertModifier._makeView called outside AG context")
         }
-        let identity = ViewIdentity()
+        func makePlatformItemList<C: View>(view: _GraphValue<C>, inputs: _ViewInputs) -> Attribute<PlatformItemList> {
+            var itemInputs = inputs
+            var keys = itemInputs.preferences.keys
+            keys.insert(PlatformItemList.Key.self)
+            itemInputs.preferences = PreferencesInputs(keys: keys,
+                                                       hostKeys: itemInputs.preferences.hostKeys)
+            let outputs = C._makeView(view: view, inputs: itemInputs)
+            let nodes = outputs.preferences.values(for: PlatformItemList.Key.self)
+            return graph.makeRule {
+                var combined = PlatformItemList.Key.defaultValue
+                for nodeID in nodes {
+                    let value = Attribute<PlatformItemList>(nodeID).value
+                    PlatformItemList.Key.reduce(value: &combined) { value }
+                }
+                return combined
+            }
+        }
+
+        let actionsItemList = makePlatformItemList(view: modifier[\.actions], inputs: inputs)
+        let messageItemList = makePlatformItemList(view: modifier[\.message], inputs: inputs)
         let storageRule = MakeAlertStorage<Actions, Message>(
+            environment: inputs.base.cachedEnvironment.value.environment,
             modifier: modifier._attribute,
-            identity: identity
+            actionsItemList: actionsItemList.asWeak(),
+            messageItemList: messageItemList.asWeak(),
+            phase: inputs.base.phase,
+            identityTracker: ViewIdentity.Tracker()
         )
         let storageAttr: Attribute<MakeAlertStorage<Actions, Message>.Value> =
             graph.makeStatefulRule(storageRule)
@@ -144,7 +282,7 @@ struct AlertOverlayView: View {
 
     var body: some View {
         ZStack {
-            // Dim background that absorbs taps outside the alert panel.
+            // Dim background absorbs taps outside the alert panel.
             Color.black.opacity(0.3)
                 .onTapGesture {}
 
@@ -164,11 +302,33 @@ struct AlertOverlayView: View {
 
                 Divider()
 
-                preference.makeActions()
+                actions
                     .padding(8)
             }
             .frame(width: 280)
             .background(Color(white: 0.97), in: RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
+    @ViewBuilder
+    private var actions: some View {
+        if let list = preference.actionsItemList, !list.buttonItems.isEmpty {
+            VStack(spacing: 8) {
+                // Show only the first three action items.
+                ForEach(Array(list.buttonItems.prefix(3))) { item in
+                    Button(role: item.role, action: {
+                        guard item.isEnabled else { return }
+                        item.action?()
+                        preference.isPresented.wrappedValue = false
+                        preference.onDismiss?()
+                    }) {
+                        item.label
+                    }
+                    .environment(\.isEnabled, item.isEnabled)
+                }
+            }
+        } else {
+            preference.makeActions()
         }
     }
 }

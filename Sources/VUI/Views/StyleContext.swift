@@ -5,12 +5,12 @@
 //  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-// StyleContext — marker protocol for style context types.
+// Marker protocol for style context types.
 // Context behavior is implemented directly on AnyStyleContextType using
 // ObjectIdentifier-based tracking.
 protocol StyleContext: Sendable {}
 
-// Marker types — empty structs with no stored properties.
+// Marker types with no stored properties.
 struct NoStyleContext: StyleContext {}
 struct PlainListStyleContext: StyleContext {}
 struct GroupedFormStyleContext: StyleContext {}
@@ -30,7 +30,17 @@ struct AccessibilityRepresentableStyleContext: StyleContext {}
 // Menu-related contexts (used by Menu; will be superseded when Menu is rewritten).
 struct MenuStyleContext: StyleContext {}
 
-// AnyStyleContextType — value type representing the current style context stack.
+// SheetStyleContext: StyleContext + ViewInputFlag.
+// styleContext(.sheet) pushes SheetStyleContext into customInputs via StyleContextWriter<SheetStyleContext>.
+// input(SheetStyleContext.self) writes the Bool flag via ViewInputFlagModifier<SheetStyleContext>.
+// StyleContextAcceptsPredicate<SheetStyleContext> is used by NavigationSplitView in sheet context.
+struct SheetStyleContext: StyleContext, ViewInputFlag {
+    typealias Value = Bool
+    static var defaultValue: Bool { false }
+    var description: String { "SheetStyleContext" }
+}
+
+// Value type representing the current style context stack.
 // Uses a Set<ObjectIdentifier> to track accepted context types:
 //   - pushing(T) adds T's ObjectIdentifier to the set (union)
 //   - acceptsTop(T) checks if T's ObjectIdentifier is in the set
@@ -64,7 +74,7 @@ struct AnyStyleContextType: Equatable {
     }
 }
 
-// StyleContextInput — PropertyKey storing the current AnyStyleContextType
+// PropertyKey storing the current AnyStyleContextType
 // in _GraphInputs.customInputs.
 struct StyleContextInput: PropertyKey {
     typealias Value = AnyStyleContextType
@@ -84,6 +94,24 @@ class MenuContext: @unchecked Sendable {
 
 private struct _MenuContextKey: EnvironmentKey {
     static let defaultValue: MenuContext? = nil
+}
+
+// StyleContext static accessors for use in styleContext(_:) calls.
+extension StyleContext where Self == SheetStyleContext {
+    static var sheet: SheetStyleContext { SheetStyleContext() }
+}
+
+extension View {
+    // styleContext(_:) pushes T into the StyleContextInput via StyleContextWriter<T>.
+    // The context parameter value is unused at the call site. Only T.Type matters.
+    func styleContext<T: StyleContext>(_ context: T) -> some View {
+        modifier(StyleContextWriter<T>())
+    }
+
+    // input(_:) marks T as active in customInputs via ViewInputFlagModifier<T>(value: true).
+    func input<T: ViewInputFlag>(_ type: T.Type) -> some View {
+        modifier(ViewInputFlagModifier<T>(value: true))
+    }
 }
 
 extension EnvironmentValues {

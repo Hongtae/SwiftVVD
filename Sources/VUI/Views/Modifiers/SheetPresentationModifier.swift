@@ -87,8 +87,6 @@ struct NullSheetAnchor<Key: PreferenceKey>: SheetAnchorProvider {
 // MARK: - CoreSheetPresentationModifier
 
 /// EnvironmentalModifier that writes SheetPreference.Value into the view tree.
-/// resolve(in:) creates a (inout Value, Transaction) -> Void closure,
-/// passes it to anchorProvider.preferenceTransformModifier(for:).
 struct CoreSheetPresentationModifier<AnchorProvider: SheetAnchorProvider>: EnvironmentalModifier {
     typealias ResolvedModifier = AnchorProvider.Modifier
 
@@ -145,13 +143,70 @@ struct CoreSheetPresentationModifier<AnchorProvider: SheetAnchorProvider>: Envir
     }
 }
 
+// MARK: - InteractiveResizeDisabledKey is declared in SheetToolbarModifier.swift
+
 // MARK: - SheetContent
 
 /// Wrapper view that decorates the sheet body content.
-/// Currently passes content through unchanged.
 struct SheetContent<Content: View>: View {
     var content: Content
-    var body: some View { content }
+
+    // FixedSidebarModifier: writes Optional<Binding<SidebarState>>.some(Binding.constant(SidebarState(rawValue: 2)))
+    // to the env, fixing the sidebar state for sheet presentations.
+    // Applied via StaticIf<_SemanticFeature<Semantics_v4>, ...> in body.
+    struct FixedSidebarModifier: ViewModifier {
+        func body(content: _ViewModifier_Content<FixedSidebarModifier>) -> some View {
+            content.environment(\._sidebarStateBinding, .constant(SidebarState(rawValue: 2)))
+        }
+    }
+
+    var body: some View {
+        content
+            // Step 1: push SheetStyleContext into StyleContextInput
+            .styleContext(.sheet)
+            // Step 2: signal to hosting view to render container background
+            .renderContainerBackgroundInHostingView(ContainerBackgroundKeys.PresentationKey.self)
+            // Step 3: anonymous Optional<Bool> env key (CoreSheetPresentationModifier-associated)
+            .environment(\._sheetHostingContext, Optional<Bool>.none)
+            // Step 4: reset tint adjustment mode
+            .environment(\.tintAdjustmentMode, Optional<TintAdjustmentMode>.none)
+            // Step 5: reset scroll environment (gated on Semantics_v6)
+            .modifier(StaticIf<_SemanticFeature<Semantics_v6>,
+                               ResetScrollEnvironmentModifier,
+                               EmptyModifier>(trueBody: ResetScrollEnvironmentModifier(),
+                                             falseBody: EmptyModifier()))
+            // Step 6: reset list stack behavior
+            .resetListStackBehavior()
+            // Step 7: reset search environment
+            .modifier(ResetSearchEnvironmentModifier())
+            // Step 8: reset form environment
+            .modifier(ResetFormEnvironmentModifier())
+            // Step 9: reset tab view environment
+            .modifier(ResetTabViewEnvironmentModifier())
+            // Step 10: mark sheet as not presented (resets inherited isSheetPresented)
+            .environment(\.isSheetPresented, false)
+            // Step 11: clear navigation context via ViewInputsModifier path
+            .modifier(ClearNavigationContextModifier())
+            // Step 12: reset internal navigation enabled state
+            .environment(\.isNavigationEnabledInternal, NavigationEnabled())
+            // Step 13: reset navigation selection seed
+            .environment(\.navigationSelectionSeed, NavigationState.SelectionSeed())
+            // Step 14: clear sharing picker host
+            .clearSharingPickerHost()
+            // Step 15: mark SheetStyleContext ViewInputFlag in AG customInputs
+            .input(SheetStyleContext.self)
+            // Step 16: apply fixed sidebar state (gated on Semantics_v4)
+            .modifier(StaticIf<_SemanticFeature<Semantics_v4>,
+                               FixedSidebarModifier,
+                               EmptyModifier>(trueBody: FixedSidebarModifier(),
+                                             falseBody: EmptyModifier()))
+            // Step 17: apply toolbar (search bar + toolbar buttons + layout)
+            .modifier(SheetToolbarModifier())
+            // Step 18: write InteractiveResizeDisabledKey = true (first-writer-wins)
+            .transformPreference(InteractiveResizeDisabledKey.self) { (value: inout Bool?) in
+                if value == nil { value = true }
+            }
+    }
 }
 
 // MARK: - SheetPresentationModifier

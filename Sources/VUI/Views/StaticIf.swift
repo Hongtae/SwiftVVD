@@ -103,9 +103,8 @@ extension ViewInputBoolFlag {
     }
 }
 
-// ViewInputFlagModifier<T: ViewInputFlag> — _GraphInputsModifier that writes
-// a Bool flag into customInputs.
-struct ViewInputFlagModifier<T: ViewInputFlag>: _GraphInputsModifier {
+// ViewModifier and _GraphInputsModifier that writes a Bool flag into customInputs.
+struct ViewInputFlagModifier<T: ViewInputFlag>: ViewModifier, _GraphInputsModifier {
     typealias Body = Never
     let value: Bool
 
@@ -209,6 +208,18 @@ struct InterfaceIdiomPredicate<Idiom>: ViewInputPredicate {
     }
 }
 
-// VisionInterfaceIdiom — marker type for visionOS interface idiom.
+// Marker type for visionOS interface idiom.
 // Used as InterfaceIdiomPredicate<VisionInterfaceIdiom>.
 struct VisionInterfaceIdiom {}
+
+// Semantic version marker types used with _SemanticFeature<T>.
+struct Semantics_v4 {}
+struct Semantics_v6 {}
+
+// _SemanticFeature<T>: ViewInputPredicate that gates behavior on semantic version.
+// Modern semantics are enabled by default, so evaluate always returns true.
+struct _SemanticFeature<T>: ViewInputPredicate {
+    static func evaluate(inputs: _GraphInputs) -> Bool {
+        return true
+    }
+}
