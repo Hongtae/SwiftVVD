@@ -78,6 +78,15 @@ enum ModalDismissReason {
     case cancelled    // queued but never shown
 }
 
+// MARK: - Visibility
+
+// Used by confirmationDialog titleVisibility parameter.
+public enum Visibility: Hashable, CaseIterable, Sendable {
+    case automatic
+    case visible
+    case hidden
+}
+
 // MARK: - DialogSeverity
 
 // Severity used by alert and confirmation dialog presentations.

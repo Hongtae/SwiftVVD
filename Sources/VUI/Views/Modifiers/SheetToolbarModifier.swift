@@ -9,35 +9,39 @@ import Foundation
 
 // MARK: - Toolbar support primitives
 
-// ToolbarItemPlacement.Role is the role value read by ToolbarFilterModifier.Predicate
-// and ModalButtonRow.firstView(in:).
+// Toolbar item placement roles used by toolbar collection and modal button rows.
 public struct ToolbarItemPlacement: Equatable, Hashable, Sendable {
     struct Role: RawRepresentable, Equatable, Hashable, Sendable {
         var rawValue: UInt8
         init(rawValue: UInt8) { self.rawValue = rawValue }
 
-        static let automatic = Role(rawValue: 255)
-        static let leading = Role(rawValue: 0)
+        static let automatic          = Role(rawValue: 255)
+        static let destructiveAction  = Role(rawValue: 0)   // leading slot in dialog
         static let cancellationAction = Role(rawValue: 1)
-        static let confirmation = Role(rawValue: 2)
+        static let confirmation       = Role(rawValue: 2)   // internal alias
         static let confirmationAction = Role(rawValue: 5)
+        static let principal          = Role(rawValue: 10)
+        static let navigation         = Role(rawValue: 11)
 
-        var isLeading: Bool { self == .leading }
+        // Convenience predicates used by ModalButtonRow and ToolbarFilterModifier.
+        var isDestructiveAction: Bool { self == .destructiveAction }
         var isCancellationAction: Bool { self == .cancellationAction }
         var isConfirmationAction: Bool { self == .confirmationAction || self == .confirmation }
-        var isModalAction: Bool { isLeading || isCancellationAction || isConfirmationAction }
+        var isModalAction: Bool { isDestructiveAction || isCancellationAction || isConfirmationAction }
     }
 
-    var role: Role?
+    var role: Role
 
-    init(role: Role?) {
+    init(role: Role) {
         self.role = role
     }
 
-    public static let automatic = ToolbarItemPlacement(role: nil)
+    public static let automatic         = ToolbarItemPlacement(role: .automatic)
     public static let confirmationAction = ToolbarItemPlacement(role: .confirmationAction)
     public static let cancellationAction = ToolbarItemPlacement(role: .cancellationAction)
-    public static let destructiveAction = ToolbarItemPlacement(role: .leading)
+    public static let destructiveAction  = ToolbarItemPlacement(role: .destructiveAction)
+    public static let principal          = ToolbarItemPlacement(role: .principal)
+    public static let navigation         = ToolbarItemPlacement(role: .navigation)
 }
 
 // Minimal KeyboardShortcut representation used by the sheet modal button row trait.
@@ -68,10 +72,10 @@ struct ToolbarStorage {
 
     struct Item: Identifiable {
         var id: ID
-        var placement: ToolbarItemPlacement.Role?
+        var placement: ToolbarItemPlacement.Role
         var view: AnyView
 
-        init(id: ID, placement: ToolbarItemPlacement.Role?, view: AnyView) {
+        init(id: ID, placement: ToolbarItemPlacement.Role, view: AnyView) {
             self.id = id
             self.placement = placement
             self.view = view
@@ -84,7 +88,7 @@ struct ToolbarStorage {
 
     struct Entry {
         var item: Item
-        var placement: ToolbarItemPlacement.Role? { item.placement }
+        var placement: ToolbarItemPlacement.Role { item.placement }
     }
 
     var items: [Item] = []
@@ -116,22 +120,36 @@ struct ToolbarKey: PreferenceKey {
     }
 }
 
-// MARK: - Toolbar item writer
+// MARK: - ToolbarContent protocol
 
-// Minimal ToolbarItem writer for the ToolbarKey preference path used by sheet
-// modal buttons. This type is also a View so existing ViewBuilder-based toolbar
-// modifiers can collect the same ToolbarKey preference until the full toolbar
-// content pipeline exists.
+// Marker protocol for toolbar content collected through ToolbarKey preferences.
+public protocol ToolbarContent {
+}
+
+// MARK: - ToolbarDefaultItemKind
+
+// Placeholder for default toolbar item classification.
+public struct ToolbarDefaultItemKind: Equatable, Sendable {
+    var rawValue: Int
+    public init(rawValue: Int) { self.rawValue = rawValue }
+}
+
+// MARK: - ToolbarItem
+
+// Toolbar item content collected through the toolbar preference path.
 public struct _ToolbarItemDefaultID: Hashable, Sendable {
     public init() {}
 }
 
-public struct ToolbarItem<ID: Hashable, Content: View>: View, Identifiable {
-    public var id: ID { itemID }
+public struct ToolbarItem<ID: Hashable, Content: View>: View, ToolbarContent, Identifiable {
+    public var id: ID { identifier }
 
-    var itemID: ID
+    var identifier: ID
     var placement: ToolbarItemPlacement
     var content: Content
+    var showsByDefault: Bool
+    var isEmpty: Bool
+    var defaultItemKind: ToolbarDefaultItemKind?
 
     public typealias Body = Never
 
@@ -139,12 +157,12 @@ public struct ToolbarItem<ID: Hashable, Content: View>: View, Identifiable {
         guard let graph = AttributeGraph.current else {
             fatalError("ToolbarItem._makeView called outside AG context")
         }
-
         let storageAttr: Attribute<ToolbarStorage> = graph.makeRule {
             let item = view._attribute.value
+            guard !item.isEmpty else { return ToolbarStorage() }
             var storage = ToolbarStorage()
             storage.items.append(ToolbarStorage.Item(
-                id: ToolbarStorage.ID(AnyHashable(item.itemID)),
+                id: ToolbarStorage.ID(AnyHashable(item.identifier)),
                 placement: item.placement.role,
                 view: AnyView(item.content)
             ))
@@ -167,27 +185,178 @@ public struct ToolbarItem<ID: Hashable, Content: View>: View, Identifiable {
 extension ToolbarItem: _PrimitiveView {}
 
 extension ToolbarItem where ID == _ToolbarItemDefaultID {
-    public init(placement: ToolbarItemPlacement = .automatic, @ViewBuilder content: () -> Content) {
-        self.itemID = _ToolbarItemDefaultID()
+    public init(placement: ToolbarItemPlacement = .automatic,
+                showsByDefault: Bool = true,
+                @ViewBuilder content: () -> Content) {
+        self.identifier = _ToolbarItemDefaultID()
         self.placement = placement
         self.content = content()
+        self.showsByDefault = showsByDefault
+        self.isEmpty = false
+        self.defaultItemKind = nil
     }
 }
 
 extension ToolbarItem where ID == String {
     public init(id: String,
                 placement: ToolbarItemPlacement = .automatic,
+                showsByDefault: Bool = true,
                 @ViewBuilder content: () -> Content) {
-        self.itemID = id
+        self.identifier = id
         self.placement = placement
         self.content = content()
+        self.showsByDefault = showsByDefault
+        self.isEmpty = false
+        self.defaultItemKind = nil
     }
 }
 
-struct ToolbarModifier<ToolbarContent: View>: ViewModifier {
+// MARK: - TupleToolbarContent
+
+// @ToolbarContentBuilder produces TupleToolbarContent<C> (single) or
+// TupleToolbarContent<(C0, C1, ...)> (multiple items, C = tuple).
+// _forEachField reflects over C to find View-typed fields.
+// Declared public so builder output types can be referenced by source-compiled clients.
+public struct TupleToolbarContent<C>: View, ToolbarContent {
+    public var value: C
+    public init(_ value: C) { self.value = value }
+
+    public typealias Body = Never
+
+    public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        guard let graph = AttributeGraph.current else {
+            fatalError("TupleToolbarContent._makeView called outside AG context")
+        }
+        var allOutputs: [_ViewOutputs] = []
+        func makeChild<V: View>(_: V.Type, offset: Int) {
+            let childAttr: Attribute<V> = graph.makeRule {
+                withUnsafeBytes(of: view._attribute.value.value) { buf in
+                    buf.baseAddress!.advanced(by: offset)
+                        .assumingMemoryBound(to: V.self).pointee
+                }
+            }
+            allOutputs.append(V._makeView(view: _GraphValue(_attribute: childAttr), inputs: inputs))
+        }
+        _forEachField(of: C.self) { _, offset, fieldType in
+            if let vt = fieldType as? any View.Type {
+                func open<V: View>(_: V.Type) { makeChild(V.self, offset: offset) }
+                _openExistential(vt, do: open)
+            }
+            return true
+        }
+        if allOutputs.isEmpty { return _ViewOutputs() }
+        var merged = allOutputs[0]
+        for i in 1..<allOutputs.count {
+            merged.preferences = PreferencesOutputs.merge(
+                [merged.preferences, allOutputs[i].preferences], in: graph)
+        }
+        return merged
+    }
+
+    public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
+        guard let graph = AttributeGraph.current else {
+            fatalError("TupleToolbarContent._makeViewList called outside AG context")
+        }
+        var children: [_ViewListOutputs] = []
+        func makeChild<V: View>(_: V.Type, offset: Int) {
+            let childAttr: Attribute<V> = graph.makeRule {
+                withUnsafeBytes(of: view._attribute.value.value) { buf in
+                    buf.baseAddress!.advanced(by: offset)
+                        .assumingMemoryBound(to: V.self).pointee
+                }
+            }
+            children.append(V._makeViewList(view: _GraphValue(_attribute: childAttr), inputs: inputs))
+        }
+        _forEachField(of: C.self) { _, offset, fieldType in
+            if let vt = fieldType as? any View.Type {
+                func open<V: View>(_: V.Type) { makeChild(V.self, offset: offset) }
+                _openExistential(vt, do: open)
+            }
+            return true
+        }
+        let count = children.count
+        return _ViewListOutputs(
+            views: .staticList(.merged(children)),
+            nextImplicitID: count,
+            staticCount: count
+        )
+    }
+}
+
+extension TupleToolbarContent: _PrimitiveView {}
+
+// MARK: - ToolbarContentBuilder
+
+// Result builder for toolbar content.
+// buildBlock methods are @inlinable so TupleToolbarContent is available to public callers.
+@_functionBuilder
+public struct ToolbarContentBuilder {
+    @inlinable
+    public static func buildBlock<C: ToolbarContent>(_ c: C) -> TupleToolbarContent<C> {
+        TupleToolbarContent(c)
+    }
+
+    @inlinable
+    public static func buildBlock<C0: ToolbarContent, C1: ToolbarContent>(
+        _ c0: C0, _ c1: C1
+    ) -> TupleToolbarContent<(C0, C1)> {
+        TupleToolbarContent((c0, c1))
+    }
+
+    @inlinable
+    public static func buildBlock<C0: ToolbarContent, C1: ToolbarContent, C2: ToolbarContent>(
+        _ c0: C0, _ c1: C1, _ c2: C2
+    ) -> TupleToolbarContent<(C0, C1, C2)> {
+        TupleToolbarContent((c0, c1, c2))
+    }
+
+    @inlinable
+    public static func buildBlock<C0: ToolbarContent, C1: ToolbarContent,
+                                  C2: ToolbarContent, C3: ToolbarContent>(
+        _ c0: C0, _ c1: C1, _ c2: C2, _ c3: C3
+    ) -> TupleToolbarContent<(C0, C1, C2, C3)> {
+        TupleToolbarContent((c0, c1, c2, c3))
+    }
+
+    @inlinable
+    public static func buildBlock<C0: ToolbarContent, C1: ToolbarContent,
+                                  C2: ToolbarContent, C3: ToolbarContent,
+                                  C4: ToolbarContent>(
+        _ c0: C0, _ c1: C1, _ c2: C2, _ c3: C3, _ c4: C4
+    ) -> TupleToolbarContent<(C0, C1, C2, C3, C4)> {
+        TupleToolbarContent((c0, c1, c2, c3, c4))
+    }
+
+    public static func buildEither<T: ToolbarContent, F: ToolbarContent>(
+        first: T
+    ) -> _ConditionalContent<T, F> {
+        .init(storage: .trueContent(first))
+    }
+
+    public static func buildEither<T: ToolbarContent, F: ToolbarContent>(
+        second: F
+    ) -> _ConditionalContent<T, F> {
+        .init(storage: .falseContent(second))
+    }
+
+    public static func buildIf<C: ToolbarContent>(_ c: C?) -> C? { c }
+    public static func buildExpression<C: ToolbarContent>(_ c: C) -> C { c }
+}
+
+// MARK: - _ConditionalContent ToolbarContent conformance
+
+extension _ConditionalContent: ToolbarContent where TrueContent: ToolbarContent, FalseContent: ToolbarContent {}
+
+// MARK: - ToolbarModifier
+
+// Modifier that collects toolbar content into ToolbarKey preferences.
+struct ToolbarModifier<CustomizationID, Content: ToolbarContent & View>: ViewModifier {
     typealias Body = Never
 
-    var toolbarContent: ToolbarContent
+    var id: String?
+    var content: Content
+    // Reserved for tab/picker integration.
+    var selection: Binding<Int>?
 
     static func _makeView(
         modifier: _GraphValue<Self>,
@@ -204,8 +373,8 @@ struct ToolbarModifier<ToolbarContent: View>: ViewModifier {
         keys.insert(ToolbarKey.self)
         toolbarInputs.preferences = PreferencesInputs(keys: keys,
                                                        hostKeys: toolbarInputs.preferences.hostKeys)
-        let toolbarOutputs = ToolbarContent._makeView(
-            view: modifier[\.toolbarContent],
+        let toolbarOutputs = Content._makeView(
+            view: modifier[\.content],
             inputs: toolbarInputs
         )
         outputs.preferences = PreferencesOutputs.merge(
@@ -225,8 +394,10 @@ struct ToolbarModifier<ToolbarContent: View>: ViewModifier {
 }
 
 extension View {
-    public func toolbar<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        modifier(ToolbarModifier(toolbarContent: content()))
+    public func toolbar<Content: ToolbarContent & View>(
+        @ToolbarContentBuilder content: () -> Content
+    ) -> some View {
+        modifier(ToolbarModifier<Void, Content>(id: nil, content: content(), selection: nil))
     }
 }
 
@@ -339,7 +510,7 @@ struct ToolbarFilterModifier: ViewModifier {
         }
 
         func matches(_ entry: ToolbarStorage.Entry) -> Bool {
-            guard let role = entry.placement else { return false }
+            let role = entry.placement
             switch self {
             case .role(let expected):
                 return role == expected
@@ -645,7 +816,7 @@ struct SheetToolbarModifier: ViewModifier {
 
         private func modalOnlyStorage(_ storage: ToolbarStorage) -> ToolbarStorage {
             var copy = storage
-            copy.items = storage.items.filter { $0.placement?.isModalAction == true }
+            copy.items = storage.items.filter { $0.placement.isModalAction }
             return copy
         }
     }
@@ -670,7 +841,7 @@ struct SheetToolbarModifier: ViewModifier {
         }
 
         var leadingItems: [ToolbarStorage.Item] {
-            storage.toolbarItems(in: .leading)
+            storage.toolbarItems(in: .destructiveAction)
         }
 
         func firstView(in role: ToolbarItemPlacement.Role) -> IDView<AnyView, ToolbarStorage.ID>? {

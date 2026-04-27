@@ -277,59 +277,97 @@ extension AlertModifier {
 
 // MARK: - AlertOverlayView
 // The view rendered inside the overlay WindowController for an alert.
+//
+// Button layout rules:
+//   - Only first 3 items are materialized.
+//   - 2 items use HStack with cancel on the left and default on the right.
+//   - 3 items use VStack with default/custom top, destructive middle, cancel bottom.
+//
+// Keyboard shortcuts:
+//   - ButtonRole.cancel uses Escape (.cancelAction).
+//   - Default (nil role or .defaultAction) uses Return (.defaultAction).
+//   - Overlay keyboard shortcut handling is not wired to the render pipeline yet.
+//     These are annotated on the buttons but require keyboard event routing to take effect.
 struct AlertOverlayView: View {
     let preference: AlertPreference
 
     var body: some View {
         ZStack {
-            // Dim background absorbs taps outside the alert panel.
             Color.black.opacity(0.3)
                 .onTapGesture {}
-
-            // Alert panel
-            VStack(spacing: 0) {
-                VStack(spacing: 6) {
-                    preference.title
-                        .font(.headline)
-                    if let makeMessage = preference.makeMessage {
-                        makeMessage()
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 16)
-
-                Divider()
-
-                actions
-                    .padding(8)
-            }
-            .frame(width: 280)
-            .background(Color(white: 0.97), in: RoundedRectangle(cornerRadius: 8))
+            alertPanel
         }
+    }
+
+    private var alertPanel: some View {
+        VStack(spacing: 0) {
+            VStack(spacing: 6) {
+                preference.title
+                    .font(.headline)
+                if let makeMessage = preference.makeMessage {
+                    makeMessage()
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 16)
+
+            Divider()
+
+            actions
+                .padding(8)
+        }
+        .frame(width: 280)
+        .background(Color(white: 0.97), in: RoundedRectangle(cornerRadius: 8))
     }
 
     @ViewBuilder
     private var actions: some View {
         if let list = preference.actionsItemList, !list.buttonItems.isEmpty {
-            VStack(spacing: 8) {
-                // Show only the first three action items.
-                ForEach(Array(list.buttonItems.prefix(3))) { item in
-                    Button(role: item.role, action: {
-                        guard item.isEnabled else { return }
-                        item.action?()
-                        preference.isPresented.wrappedValue = false
-                        preference.onDismiss?()
-                    }) {
-                        item.label
+            // Show only the first three action items in role order.
+            let items = Array(orderedItems(list.buttonItems).prefix(3))
+            if items.count == 2 {
+                // 2 buttons: horizontal, cancel left / default right.
+                HStack(spacing: 8) {
+                    actionButton(items[0])
+                    actionButton(items[1])
+                }
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(0..<items.count, id: \.self) { i in
+                        actionButton(items[i])
                     }
-                    .environment(\.isEnabled, item.isEnabled)
                 }
             }
         } else {
             preference.makeActions()
         }
+    }
+
+    // 2-button HStack: cancel first (left), default second (right).
+    // 3-button VStack: other/default top, destructive middle, cancel bottom.
+    private func orderedItems(_ items: [PlatformItemList.Item]) -> [PlatformItemList.Item] {
+        let cancel      = items.filter { $0.role == .cancel }
+        let destructive = items.filter { $0.role == .destructive }
+        let other       = items.filter { $0.role != .cancel && $0.role != .destructive }
+        if items.count == 2 {
+            return cancel + other + destructive
+        }
+        return other + destructive + cancel
+    }
+
+    private func actionButton(_ item: PlatformItemList.Item) -> some View {
+        Button(role: item.role, action: {
+            guard item.isEnabled else { return }
+            item.action?()
+            preference.isPresented.wrappedValue = false
+            preference.onDismiss?()
+        }) {
+            item.label
+                .frame(maxWidth: .infinity)
+        }
+        .environment(\.isEnabled, item.isEnabled)
     }
 }
 

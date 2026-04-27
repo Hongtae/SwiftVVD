@@ -267,7 +267,7 @@ class ViewGraph: ViewGraphHost {
             prefKeys.insert(ViewRespondersKey.self)
             prefKeys.insert(SheetPreference.Key.self)
             prefKeys.insert(AlertStorage.PreferenceKey.self)
-            prefKeys.insert(ConfirmationDialogStorage.PreferenceKey.self)
+            prefKeys.insert(ConfirmationDialog.PreferenceKey.self)
 
             let hostKeysAttr = g.makeInput(value: prefKeys)
             let prefsInputs  = PreferencesInputs(keys: prefKeys, hostKeys: hostKeysAttr)
@@ -361,13 +361,13 @@ class ViewGraph: ViewGraphHost {
                 }
             }
 
-            let dialogNodes = outputs.preferences.values(for: ConfirmationDialogStorage.PreferenceKey.self)
+            let dialogNodes = outputs.preferences.values(for: ConfirmationDialog.PreferenceKey.self)
             if !dialogNodes.isEmpty {
-                let dialogAttr: Attribute<ConfirmationDialogStorage.PreferenceKey.Value> = g.makeRule {
-                    var combined = ConfirmationDialogStorage.PreferenceKey.defaultValue
+                let dialogAttr: Attribute<ConfirmationDialog.PreferenceKey.Value> = g.makeRule {
+                    var combined = ConfirmationDialog.PreferenceKey.defaultValue
                     for nodeID in dialogNodes {
-                        let val = Attribute<ConfirmationDialogStorage.PreferenceKey.Value>(nodeID).value
-                        ConfirmationDialogStorage.PreferenceKey.reduce(value: &combined) { val }
+                        let val = Attribute<ConfirmationDialog.PreferenceKey.Value>(nodeID).value
+                        ConfirmationDialog.PreferenceKey.reduce(value: &combined) { val }
                     }
                     return combined
                 }
