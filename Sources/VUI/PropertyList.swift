@@ -71,6 +71,9 @@ struct UniqueID: Equatable, CustomStringConvertible {
     var description: String { "UniqueID(value: \(value))" }
 }
 
+// Tracks per-key environment changes when attached by the graph infrastructure.
+class _PropertyListTracker {}
+
 @usableFromInline
 struct PropertyList: CustomStringConvertible {
 
@@ -103,66 +106,26 @@ struct PropertyList: CustomStringConvertible {
 }
 
 extension PropertyList {
-    mutating func setValue<T: PropertyKey>(_ value: T.Value, forKey key: T.Type) {
-        self.makeUnique()
-        // Update in-place if key already exists.
-        var element = self.elements
-        while let current = element {
-            if current.keyType == key {
-                (current as! TypedElement<T>).value = value
+    // Early exit when new value equals the current value (no structural change).
+    // Dead nodes (same key, older value) accumulate in the after-chain but are
+    // shadowed by the head. find() returns the first match.
+    @usableFromInline
+    subscript<K: PropertyKey>(_ key: K.Type) -> K.Value {
+        get { value(forKey: key) }
+        mutating set {
+            if let existing = nonDefaultValue(forKey: key), K.valuesEqual(existing, newValue) {
                 return
             }
-            element = current.after
-        }
-        // Not found, prepend new element at head.
-        self.prepend(TypedElement(key: key, value: value))
-    }
-
-    mutating func setValue<T: PropertyKey>(_ value: T.Value, forKey key: T.Type) where T.Value: Equatable {
-        if let existing = self.nonDefaultValue(forKey: key) {
-            if existing == value { return }
-            if value == T.defaultValue {
-                self.removeValue(forKey: key)
-                return
-            }
-            self.makeUnique()
-            var element = self.elements
-            while let current = element {
-                if current.keyType == key {
-                    (current as! TypedElement<T>).value = value
-                    return
-                }
-                element = current.after
-            }
-        } else {
-            if value == T.defaultValue { return }
-            self.makeUnique()
-            self.prepend(TypedElement(key: key, value: value))
+            elements = TypedElement(key: key, value: newValue, after: elements)
         }
     }
 
-    mutating func removeValue<T: PropertyKey>(forKey key: T.Type) {
-        if self.nonDefaultValue(forKey: key) != nil {
-            self.makeUnique()
-
-            if let head = self.elements, head.keyType == key {
-                self.elements = head.after
-                return
-            }
-            var next = elements?.after
-            var prev = elements
-            while let current = next {
-                if current.keyType == key {
-                    prev!.after = current.after
-                    break
-                }
-                prev = current
-                next = current.after
-            }
-            // BloomFilter false positives for the removed key are acceptable because
-            // they cause at most one extra scan step, not incorrect results.
-        }
+    // Unconditionally prepends a value for `key`.
+    mutating func prependValue<K: PropertyKey>(_ value: K.Value, for key: K.Type) {
+        elements = TypedElement(key: key, value: value, after: elements)
     }
+
+    // MARK: - Convenience helpers
 
     func nonDefaultValue<T: PropertyKey>(forKey key: T.Type) -> T.Value? {
         var element = self.elements
@@ -170,11 +133,7 @@ extension PropertyList {
             if current.keyType == key {
                 return (current as! TypedElement<T>).value
             }
-            // skipFilter covers all elements after current.
-            // If key is definitely absent in the remaining chain, stop early.
-            if !current.skipFilter.mightContain(key) {
-                return nil
-            }
+            if !current.skipFilter.mightContain(key) { return nil }
             element = current.after
         }
         return nil
@@ -184,25 +143,8 @@ extension PropertyList {
         nonDefaultValue(forKey: key) ?? T.defaultValue
     }
 
-    // Insert newElem at the head of the chain, updating length and skipFilter.
-    // skipFilter on each node covers all elements AFTER that node.
-    // Invariant: node.skipFilter = bloom(node.after.key) | node.after.skipFilter
-    private mutating func prepend(_ newElem: Element) {
-        let oldHead = self.elements
-        newElem.after = oldHead
-        newElem.length = 1 + (oldHead?.length ?? 0)
-        if let oldHead {
-            var filter = oldHead.skipFilter
-            filter.insert(oldHead.keyType)
-            newElem.skipFilter = filter
-        }
-        self.elements = newElem
-    }
-
-    private mutating func makeUnique() {
-        if isKnownUniquelyReferenced(&self.elements) == false {
-            self.elements = elements?.clone()
-        }
+    mutating func setValue<T: PropertyKey>(_ value: T.Value, forKey key: T.Type) {
+        self[key] = value
     }
 }
 
@@ -223,22 +165,28 @@ extension PropertyList {
     @usableFromInline
     class Element: CustomStringConvertible {
         let keyType: any PropertyKey.Type
-        var before: Element?               // doubly-linked (currently unused)
-        var after: Element?                // next element in chain
+        let before: Element?               // set by init, caller passes nil in the persistent-list setter path
+        let after: Element?                // next element in chain
         var skip: Unmanaged<Element>?      // skip-list pointer (nil = not used)
-        var length: UInt32                 // chain length from this node to end
+        let length: UInt32                 // chain length from this node to end
         var skipCount: UInt32              // number of elements the skip pointer jumps
-        var skipFilter: BloomFilter        // bloom filter covering elements after this node
+        let skipFilter: BloomFilter        // bloom filter covering elements after this node
         let id: UniqueID
 
-        init(keyType: any PropertyKey.Type, after: Element? = nil) {
+        init(keyType: any PropertyKey.Type, before: Element? = nil, after: Element? = nil) {
             self.keyType = keyType
-            self.before = nil
+            self.before = before
             self.after = after
             self.skip = nil
             self.length = 1 + (after?.length ?? 0)
             self.skipCount = 0
-            self.skipFilter = BloomFilter()
+            if let after {
+                var filter = after.skipFilter
+                filter.insert(after.keyType)
+                self.skipFilter = filter
+            } else {
+                self.skipFilter = BloomFilter()
+            }
             self.id = UniqueID()
         }
 
@@ -253,10 +201,11 @@ extension PropertyList {
 
         var valueDescription: String { fatalError("TypedElement must override valueDescription") }
 
-        func clone() -> Element { fatalError("TypedElement must override clone()") }
+        // Rebuild this node with `tail` at the end of the chain (subclass must override).
+        func rebuilt(appending tail: Element?) -> Element { fatalError("TypedElement must override rebuilt(appending:)") }
     }
 
-    // Typed subclass stores the value with the concrete Value type rather than Any.
+    // Typed subclass where value is stored with the concrete Value type rather than Any.
     final class TypedElement<T: PropertyKey>: Element {
         var value: T.Value
 
@@ -267,15 +216,22 @@ extension PropertyList {
 
         override var valueDescription: String { "\(value)" }
 
-        override func clone() -> Element {
-            let copy = TypedElement(key: T.self, value: value, after: after?.clone())
-            // skipFilter covers the same keys after cloning (structure is identical).
-            copy.skipFilter = skipFilter
-            copy.length = length
-            copy.skipCount = skipCount
-            // skip pointers reference old elements, so do not copy.
-            return copy
+        // Rebuild this node with `tail` appended at the end of the chain.
+        // Used by PropertyList.merge to create a new chain where self's entries have
+        // higher priority (appear first) and `tail` (other's chain) fills in the rest.
+        override func rebuilt(appending tail: Element?) -> Element {
+            TypedElement<T>(key: T.self, value: value,
+                            after: after?.rebuilt(appending: tail) ?? tail)
         }
+    }
+
+    // Merge `other`'s entries into `self` at lower priority.
+    // Self's existing entries remain at the head (higher priority);
+    // other's entries are appended at the tail as fallbacks.
+    mutating func merge(_ other: PropertyList) {
+        guard !other.isEmpty else { return }
+        guard !self.isEmpty else { self = other; return }
+        elements = elements!.rebuilt(appending: other.elements)
     }
 
     init<Key: PropertyKey>(_ key: Key.Type, value: Key.Value) {

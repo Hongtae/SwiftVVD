@@ -9,7 +9,8 @@ import Foundation
 
 // MARK: - Toolbar support primitives
 
-// Toolbar item placement roles used by toolbar collection and modal button rows.
+// Roles used by toolbar items and modal button placement.
+// Raw values are internal assignments.
 public struct ToolbarItemPlacement: Equatable, Hashable, Sendable {
     struct Role: RawRepresentable, Equatable, Hashable, Sendable {
         var rawValue: UInt8
@@ -22,6 +23,7 @@ public struct ToolbarItemPlacement: Equatable, Hashable, Sendable {
         static let confirmationAction = Role(rawValue: 5)
         static let principal          = Role(rawValue: 10)
         static let navigation         = Role(rawValue: 11)
+        static let keyboard           = Role(rawValue: 12)
 
         // Convenience predicates used by ModalButtonRow and ToolbarFilterModifier.
         var isDestructiveAction: Bool { self == .destructiveAction }
@@ -36,12 +38,13 @@ public struct ToolbarItemPlacement: Equatable, Hashable, Sendable {
         self.role = role
     }
 
-    public static let automatic         = ToolbarItemPlacement(role: .automatic)
+    public static let automatic          = ToolbarItemPlacement(role: .automatic)
     public static let confirmationAction = ToolbarItemPlacement(role: .confirmationAction)
     public static let cancellationAction = ToolbarItemPlacement(role: .cancellationAction)
     public static let destructiveAction  = ToolbarItemPlacement(role: .destructiveAction)
     public static let principal          = ToolbarItemPlacement(role: .principal)
     public static let navigation         = ToolbarItemPlacement(role: .navigation)
+    public static let keyboard           = ToolbarItemPlacement(role: .keyboard)
 }
 
 // Minimal KeyboardShortcut representation used by the sheet modal button row trait.
@@ -63,7 +66,8 @@ struct KeyboardShortcutPickerOptionTraitKey: _ViewTraitKey {
     static var defaultValue: KeyboardShortcut? { nil }
 }
 
-// Toolbar storage used by sheet modal button rows.
+// Toolbar storage for items rendered by the sheet toolbar path.
+// It keeps identity, role placement, and a view payload for ModalButtonRow rendering.
 struct ToolbarStorage {
     struct ID: Hashable {
         var rawValue: AnyHashable
@@ -111,6 +115,7 @@ struct ToolbarStorage {
     }
 }
 
+// Internal preference key for toolbar storage.
 struct ToolbarKey: PreferenceKey {
     typealias Value = ToolbarStorage
     static var defaultValue: ToolbarStorage { ToolbarStorage() }
@@ -122,13 +127,14 @@ struct ToolbarKey: PreferenceKey {
 
 // MARK: - ToolbarContent protocol
 
-// Marker protocol for toolbar content collected through ToolbarKey preferences.
+// ToolbarContent items are currently collected via View._makeView + ToolbarKey preferences.
 public protocol ToolbarContent {
+    // TODO: add a dedicated toolbar-output path.
 }
 
 // MARK: - ToolbarDefaultItemKind
 
-// Placeholder for default toolbar item classification.
+// Placeholder for default toolbar item kinds.
 public struct ToolbarDefaultItemKind: Equatable, Sendable {
     var rawValue: Int
     public init(rawValue: Int) { self.rawValue = rawValue }
@@ -136,7 +142,8 @@ public struct ToolbarDefaultItemKind: Equatable, Sendable {
 
 // MARK: - ToolbarItem
 
-// Toolbar item content collected through the toolbar preference path.
+// Toolbar item content. Also conforms to View until the dedicated ToolbarContent
+// materialization path is implemented.
 public struct _ToolbarItemDefaultID: Hashable, Sendable {
     public init() {}
 }
@@ -174,11 +181,7 @@ public struct ToolbarItem<ID: Hashable, Content: View>: View, ToolbarContent, Id
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        _ViewListOutputs(
-            views: .staticList(.unary(TypedUnaryViewGenerator(view, inputs: inputs))),
-            nextImplicitID: 1,
-            staticCount: 1
-        )
+        _ViewListOutputs.unaryViewList(view: view, inputs: inputs)
     }
 }
 
@@ -215,8 +218,9 @@ extension ToolbarItem where ID == String {
 
 // @ToolbarContentBuilder produces TupleToolbarContent<C> (single) or
 // TupleToolbarContent<(C0, C1, ...)> (multiple items, C = tuple).
-// _forEachField reflects over C to find View-typed fields.
-// Declared public so builder output types can be referenced by source-compiled clients.
+// Uses TupleView-style field reflection to find View-typed fields in C.
+// TupleToolbarContent is public because result-builder output types are part of
+// the source-level API surface.
 public struct TupleToolbarContent<C>: View, ToolbarContent {
     public var value: C
     public init(_ value: C) { self.value = value }
@@ -287,9 +291,9 @@ extension TupleToolbarContent: _PrimitiveView {}
 
 // MARK: - ToolbarContentBuilder
 
-// Result builder for toolbar content.
-// buildBlock methods are @inlinable so TupleToolbarContent is available to public callers.
-@_functionBuilder
+// Builds TupleToolbarContent values for one or more toolbar items.
+// buildBlock methods are @inlinable so TupleToolbarContent is usable at call sites.
+@resultBuilder
 public struct ToolbarContentBuilder {
     @inlinable
     public static func buildBlock<C: ToolbarContent>(_ c: C) -> TupleToolbarContent<C> {
@@ -347,15 +351,82 @@ public struct ToolbarContentBuilder {
 
 extension _ConditionalContent: ToolbarContent where TrueContent: ToolbarContent, FalseContent: ToolbarContent {}
 
+// MARK: - ToolbarItemGroup
+
+// Toolbar item group with placement, content, and an empty-state flag.
+public struct ToolbarItemGroup<Content: View>: View, ToolbarContent {
+    public typealias Body = Never
+
+    var placement: ToolbarItemPlacement
+    var content: Content
+    var isEmpty: Bool
+
+    public init(placement: ToolbarItemPlacement = .automatic,
+                @ViewBuilder content: () -> Content) {
+        self.placement = placement
+        self.content = content()
+        self.isEmpty = false
+    }
+
+    public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        guard let graph = AttributeGraph.current else {
+            fatalError("ToolbarItemGroup._makeView called outside AG context")
+        }
+        let storageAttr: Attribute<ToolbarStorage> = graph.makeRule {
+            let group = view._attribute.value
+            guard !group.isEmpty else { return ToolbarStorage() }
+            var storage = ToolbarStorage()
+            // ToolbarItemGroup uses placement.role. Use a stable hash for identity.
+            let id = ToolbarStorage.ID(AnyHashable(ObjectIdentifier(Content.self)))
+            storage.items.append(ToolbarStorage.Item(
+                id: id,
+                placement: group.placement.role,
+                view: AnyView(group.content)
+            ))
+            return storage
+        }
+        var outputs = _ViewOutputs()
+        outputs.preferences.append(ToolbarKey.self, node: storageAttr.identifier)
+        return outputs
+    }
+
+    public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
+        _ViewListOutputs.unaryViewList(view: view, inputs: inputs)
+    }
+}
+
+extension ToolbarItemGroup: _PrimitiveView {}
+
+// MARK: - EmptyToolbarContent
+
+// EmptyToolbarContent: ToolbarContent and CustomizableToolbarContent conformance.
+// Produces no toolbar items.
+public struct EmptyToolbarContent: View, ToolbarContent {
+    public typealias Body = Never
+
+    public init() {}
+
+    public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        _ViewOutputs()
+    }
+
+    public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
+        _ViewListOutputs(views: .staticList(.merged([])), nextImplicitID: 0, staticCount: 0)
+    }
+}
+
+extension EmptyToolbarContent: _PrimitiveView {}
+
 // MARK: - ToolbarModifier
 
-// Modifier that collects toolbar content into ToolbarKey preferences.
+// Modifier that materializes toolbar content and merges ToolbarKey preferences.
+// TODO: Move this to a dedicated toolbar-output path.
 struct ToolbarModifier<CustomizationID, Content: ToolbarContent & View>: ViewModifier {
     typealias Body = Never
 
     var id: String?
     var content: Content
-    // Reserved for tab/picker integration.
+    // Selection is reserved for tab and picker integration.
     var selection: Binding<Int>?
 
     static func _makeView(
@@ -394,6 +465,7 @@ struct ToolbarModifier<CustomizationID, Content: ToolbarContent & View>: ViewMod
 }
 
 extension View {
+    // Requires Content to also conform to View until toolbar content has a dedicated output path.
     public func toolbar<Content: ToolbarContent & View>(
         @ToolbarContentBuilder content: () -> Content
     ) -> some View {
@@ -431,13 +503,17 @@ extension EnvironmentValues {
     }
 }
 
-// Primitive toolbar reader. It re-evaluates its content after collecting
-// ToolbarKey preferences so SheetToolbarModifier can feed ToolbarStorage back
-// into ModalButtonRow in the same view tree.
+// Primitive reader payload for ToolbarReader.
+// Only storage is needed for ModalButtonRow.
 struct ToolbarPrimitiveReader {
     var storage: ToolbarStorage
 }
 
+// Cycle-free design:
+// - primitiveReaderAttr is an AG *input* node, not a rule.
+// - bodyAttr depends on primitiveReaderAttr (input), not on storageAttr.
+// - An update rule reads storageAttr and calls primitiveReaderAttr.setValue when
+//   the item IDs change, converging after at most two AG evaluation passes.
 struct ToolbarReader<Edges, Content: View>: View {
     typealias Body = Never
     typealias PrimitiveReader = ToolbarPrimitiveReader
@@ -452,10 +528,15 @@ struct ToolbarReader<Edges, Content: View>: View {
         guard let graph = AttributeGraph.current else {
             fatalError("ToolbarReader._makeView called outside AG context")
         }
-        let storageBox = MutableBox<Attribute<ToolbarStorage>?>(nil)
+
+        // PrimitiveReader as AG input, not a rule, so it has a stable cached value
+        // that is safe to read even when other rules are evaluating.
+        let primitiveReaderAttr: Attribute<ToolbarPrimitiveReader> =
+            graph.makeInput(value: ToolbarPrimitiveReader(storage: ToolbarStorage()))
+
+        // bodyAttr depends only on primitiveReaderAttr (input): no cycle with storageAttr.
         let bodyAttr: Attribute<Content> = graph.makeRule {
-            let storage = storageBox.value?.value ?? ToolbarStorage()
-            return view._attribute.value.content(ToolbarPrimitiveReader(storage: storage))
+            view._attribute.value.content(primitiveReaderAttr.value)
         }
 
         var contentInputs = inputs
@@ -465,6 +546,8 @@ struct ToolbarReader<Edges, Content: View>: View {
         contentInputs.preferences = PreferencesInputs(keys: keys,
                                                       hostKeys: contentInputs.preferences.hostKeys)
         let outputs = Content._makeView(view: _GraphValue(_attribute: bodyAttr), inputs: contentInputs)
+
+        // Collect ToolbarKey preference from content outputs.
         let toolbarNodes = outputs.preferences.values(for: ToolbarKey.self)
         let storageAttr: Attribute<ToolbarStorage> = graph.makeRule {
             var storage = ToolbarKey.defaultValue
@@ -474,19 +557,22 @@ struct ToolbarReader<Edges, Content: View>: View {
             }
             return storage
         }
-        storageBox.value = storageAttr
-        graph.markNeedsEvaluation(bodyAttr.identifier)
+
+        // Write new storage into primitiveReaderAttr only when item IDs change,
+        // which guarantees convergence in at most two passes.
+        let _ = graph.makeRule {
+            let newStorage = storageAttr.value
+            let newIDs = newStorage.items.map { $0.id }
+            let currentIDs = primitiveReaderAttr.value.storage.items.map { $0.id }
+            guard newIDs != currentIDs else { return }
+            primitiveReaderAttr.setValue(ToolbarPrimitiveReader(storage: newStorage))
+        }
+
         return outputs
     }
 
     static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("ToolbarReader._makeViewList called outside AG context")
-        }
-        let bodyAttr: Attribute<Content> = graph.makeRule {
-            view._attribute.value.content(ToolbarPrimitiveReader(storage: ToolbarStorage()))
-        }
-        return Content._makeViewList(view: _GraphValue(_attribute: bodyAttr), inputs: inputs)
+        _ViewListOutputs.unaryViewList(view: view, inputs: inputs)
     }
 }
 
@@ -659,7 +745,7 @@ struct SheetContentRoot<L: Layout>: Layout {
 
 // Layout for modal sheet bottom buttons. The exact baseline math is still a
 // follow-up item; this places leading content at the leading edge and action
-// buttons from the trailing edge while keeping slot separation.
+// buttons from the trailing edge.
 struct DialogBottomButtonsHLayout: Layout {
     typealias AnimatableData = EmptyAnimatableData
 
@@ -709,7 +795,7 @@ struct DialogBottomButtonsHLayout: Layout {
 
 // MARK: - ContainerBackgroundKeys
 
-// Namespace for container background preference keys.
+// ContainerBackgroundKeys: namespace for container background preference keys.
 // PresentationKey is used by SheetContent.body via renderContainerBackgroundInHostingView.
 enum ContainerBackgroundKeys {
     // PresentationKey: signals to the hosting view that the sheet should render
@@ -726,7 +812,7 @@ enum ContainerBackgroundKeys {
 extension View {
     // renderContainerBackgroundInHostingView signals to the host that the presentation
     // should render a container background. Full implementation requires hosting layer.
-    // Placeholder: no-op passthrough.
+    // Currently a no-op passthrough.
     func renderContainerBackgroundInHostingView<K: PreferenceKey>(_ keyType: K.Type) -> some View {
         self
     }
@@ -737,7 +823,7 @@ extension View {
 // SidebarState: 1-byte enum/struct controlling sidebar visibility in sheets.
 // Used by SheetContent.FixedSidebarModifier to write a fixed Binding<SidebarState>.
 // rawValue 2 is written as the constant value (Binding.constant(SidebarState(rawValue: 2))).
-// Case names can be added when sidebar behavior is implemented.
+// Specific named cases can be added when more sidebar states are supported.
 struct SidebarState: RawRepresentable, Equatable {
     var rawValue: UInt8
     init(rawValue: UInt8) { self.rawValue = rawValue }
@@ -781,6 +867,7 @@ struct SheetToolbarModifier: ViewModifier {
         )
     }
 
+    // ReaderBody feeds toolbar storage into the modal toolbar row.
     struct ReaderBody: View {
         var content: _ViewModifier_Content<SheetToolbarModifier>
 
@@ -794,7 +881,6 @@ struct SheetToolbarModifier: ViewModifier {
             .environment(\._toolbarUpdateContext, Optional<Toolbar.UpdateContext>.none)
             .modifier(ToolbarFilterModifier(predicate: .keyPath(\ToolbarItemPlacement.Role.isModalAction)))
             .transformPreference(SearchContentKey.self) { value in
-                // Search adaptor wiring is deferred until ToolbarStorage.SearchItem is produced.
                 value = nil
             }
         }

@@ -41,17 +41,6 @@ extension _PaddingLayout: UnaryLayout {
                 )
             },
             spacing: lc.spacing,
-            dimensions: { proposal in
-                let childProposal = ProposedViewSize(
-                    width:  proposal.width.map  { max(0, $0 - horizontal) },
-                    height: proposal.height.map { max(0, $0 - vertical) }
-                )
-                let childSize = lc.sizeThatFits(childProposal)
-                return ViewDimensions(
-                    width:  childSize.width  + horizontal,
-                    height: childSize.height + vertical
-                )
-            },
             place: { position, anchor, proposal in
                 let childProposal = ProposedViewSize(
                     width:  proposal.width.map  { max(0, $0 - horizontal) },
@@ -66,7 +55,8 @@ extension _PaddingLayout: UnaryLayout {
                     y: position.y - parentH * anchor.y + top
                 )
                 lc.place(at: origin, anchor: .topLeading, proposal: childProposal)
-            }
+            },
+            explicitAlignment: { lc.explicitAlignment($0, at: $1) }
         )
     }
 }

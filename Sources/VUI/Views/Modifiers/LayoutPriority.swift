@@ -15,6 +15,7 @@ public struct LayoutPriorityTraitKey: _ViewTraitKey {
 /// Wraps the child LC and overrides its `priority` field.
 struct LayoutPriorityLayout: UnaryLayout {
     var value: Double
+    typealias Body = Never
 
     var animatableData: Double {
         get { value }
@@ -22,9 +23,13 @@ struct LayoutPriorityLayout: UnaryLayout {
     }
 
     func modifyLayoutComputer(_ lc: LayoutComputer) -> LayoutComputer {
-        var modified = lc
-        modified.priority = value
-        return modified
+        LayoutComputer(
+            sizeThatFits: { lc.sizeThatFits($0) },
+            spacing: lc.spacing,
+            place: { lc.place(at: $0, anchor: $1, proposal: $2) },
+            priority: value,
+            explicitAlignment: { lc.explicitAlignment($0, at: $1) }
+        )
     }
 }
 

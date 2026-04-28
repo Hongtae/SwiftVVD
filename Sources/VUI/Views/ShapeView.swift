@@ -27,11 +27,7 @@ public struct _ShapeView<Content, Style>: View where Content: Shape, Style: Shap
         let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
             let v = view._attribute.value   // dep: shape/style changes
             return LayoutComputer(
-                sizeThatFits: { proposal in v.shape.sizeThatFits(proposal) },
-                dimensions: { proposal in
-                    let size = v.shape.sizeThatFits(proposal)
-                    return ViewDimensions(width: size.width, height: size.height)
-                }
+                sizeThatFits: { proposal in v.shape.sizeThatFits(proposal) }
             )
         }
         let dlAttr: Attribute<DisplayList> = graph.makeRule {

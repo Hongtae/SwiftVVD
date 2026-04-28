@@ -23,6 +23,10 @@ extension PreferenceKey {
     public static var _isReadableByHost: Bool { false }
 }
 
+extension PreferenceKey where Self.Value: ExpressibleByNilLiteral {
+    public static var defaultValue: Self.Value { nil }
+}
+
 /// Sub-protocol of PreferenceKey whose _isReadableByHost is always true.
 public protocol HostPreferenceKey: PreferenceKey {}
 
@@ -114,6 +118,15 @@ struct PreferencesOutputs {
         /// Builds a new AG rule that reduces `nodes` into a single value using
         /// the concrete `PreferenceKey.reduce` implementation captured at append time.
         let _makeReduceRule: (_ nodes: [AGAttribute], _ graph: AttributeGraph) -> AGAttribute
+        /// Points the indirect placeholder at the matching concrete attr in `concrete`.
+        /// Non-placeholder outputs leave this nil.
+        let _attachIndirect: ((_ concrete: PreferencesOutputs, _ graph: AttributeGraph) -> Void)?
+        /// Detaches the indirect placeholder (points it to nil for the default value).
+        /// Non-placeholder outputs leave this nil.
+        let _detachIndirect: ((_ graph: AttributeGraph) -> Void)?
+        /// Registers a permanent AG dependency on `dep` so this placeholder is
+        /// invalidated whenever `dep` changes. Non-placeholder outputs leave this nil.
+        let _setIndirectDependency: ((_ dep: AGAttribute, _ graph: AttributeGraph) -> Void)?
     }
 
     var preferences: [KeyValue] = []
@@ -133,7 +146,10 @@ struct PreferencesOutputs {
                     return combined
                 }
                 return attr.identifier
-            }
+            },
+            _attachIndirect: nil,
+            _detachIndirect: nil,
+            _setIndirectDependency: nil
         ))
     }
 
@@ -156,10 +172,97 @@ struct PreferencesOutputs {
             result.preferences.append(KeyValue(
                 key: entry.representative.key,
                 value: reducedNode,
-                _makeReduceRule: entry.representative._makeReduceRule
+                _makeReduceRule: entry.representative._makeReduceRule,
+                _attachIndirect: nil,
+                _detachIndirect: nil,
+                _setIndirectDependency: nil
             ))
         }
         return result
+    }
+}
+
+extension PreferencesInputs {
+    /// Creates placeholder preference outputs for the requested keys.
+    func makeIndirectOutputs() -> PreferencesOutputs {
+        guard let graph = AttributeGraph.current else {
+            fatalError("PreferencesInputs.makeIndirectOutputs called outside AG context.")
+        }
+        var outputs = PreferencesOutputs()
+        for key in keys.keys {
+            _appendIndirectPreference(key, to: &outputs, in: graph)
+        }
+        return outputs
+    }
+
+    private func _appendIndirectPreference<K: PreferenceKey>(
+        _ key: K.Type,
+        to outputs: inout PreferencesOutputs,
+        in graph: AttributeGraph
+    ) {
+        let indirectAttr: Attribute<K.Value> = graph.makeIndirectAttribute(defaultValue: K.defaultValue)
+        outputs.preferences.append(PreferencesOutputs.KeyValue(
+            key: K.self,
+            value: indirectAttr.identifier,
+            _makeReduceRule: { nodes, graph in
+                let reduced: Attribute<K.Value> = graph.makeRule {
+                    var combined = K.defaultValue
+                    for nodeID in nodes {
+                        let val = Attribute<K.Value>(nodeID).value
+                        K.reduce(value: &combined) { val }
+                    }
+                    return combined
+                }
+                return reduced.identifier
+            },
+            _attachIndirect: { concrete, graph in
+                // Point the indirect attr at the matching concrete attr for key K.
+                if let concreteKV = concrete.preferences.first(where: { $0.key == K.self }) {
+                    graph.setIndirectTarget(indirectAttr.identifier, to: concreteKV.value)
+                } else {
+                    graph.setIndirectTarget(indirectAttr.identifier, to: nil)
+                }
+            },
+            _detachIndirect: { graph in
+                graph.setIndirectTarget(indirectAttr.identifier, to: nil)
+            },
+            _setIndirectDependency: { dep, graph in
+                graph.setIndirectDependency(indirectAttr.identifier, dependsOn: dep)
+            }
+        ))
+    }
+}
+
+extension PreferencesOutputs {
+    /// Points each placeholder preference attr at the matching concrete attr.
+    func attachIndirectOutputs(to placeholders: PreferencesOutputs) {
+        guard let graph = AttributeGraph.current else {
+            fatalError("PreferencesOutputs.attachIndirectOutputs called outside AG context.")
+        }
+        for placeholder in placeholders.preferences {
+            placeholder._attachIndirect?(self, graph)
+        }
+    }
+
+    /// Registers a permanent AG dependency on `attr` for all placeholder slots.
+    func setIndirectDependency(_ attr: AGAttribute?) {
+        guard let dep = attr else { return }
+        guard let graph = AttributeGraph.current else {
+            fatalError("PreferencesOutputs.setIndirectDependency called outside AG context.")
+        }
+        for kv in preferences {
+            kv._setIndirectDependency?(dep, graph)
+        }
+    }
+
+    /// Detaches all placeholder slots (points them to nil for the default value).
+    func detachIndirectOutputs() {
+        guard let graph = AttributeGraph.current else {
+            fatalError("PreferencesOutputs.detachIndirectOutputs called outside AG context.")
+        }
+        for kv in preferences {
+            kv._detachIndirect?(graph)
+        }
     }
 }
 

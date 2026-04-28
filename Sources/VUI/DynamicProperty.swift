@@ -6,6 +6,7 @@
 //
 
 /// Protocol for managing a DynamicProperty's backing storage in _DynamicPropertyBuffer.
+///
 /// Requirements:
 ///   reset() -> ()
 ///   update(property: inout Property, phase: Phase) -> Bool
@@ -48,7 +49,9 @@ public struct _DynamicPropertyBuffer {
     var properties: [FieldInfo] = []
     var contexts: [Int: Any] = [:]
 
-    // Box instance is stored in contexts keyed by fieldOffset.
+    var isEmpty: Bool { contexts.isEmpty }
+
+    // Box instance is stored in contexts keyed by fieldOffset;
     // update closure writes back to the View struct field at that offset.
     mutating func append<T: DynamicPropertyBox>(_ box: T, fieldOffset: Int) {
         let boxRef = MutableBox(box)
@@ -57,6 +60,27 @@ public struct _DynamicPropertyBuffer {
             var property = ptr.assumingMemoryBound(to: T.Property.self).pointee
             _ = boxRef.value.update(property: &property, phase: Phase())
             ptr.assumingMemoryBound(to: T.Property.self).pointee = property
+        }
+    }
+
+    // Calls addFields which loops over DynamicPropertyCache.Fields and calls _makeProperty per entry.
+    init<T>(fields: DynamicPropertyCache.Fields, container: _GraphValue<T>, inputs: inout _GraphInputs) {
+        for entry in fields.entries {
+            entry.type._makeProperty(in: &self, container: container,
+                                     fieldOffset: entry.offset, inputs: &inputs)
+        }
+    }
+
+    // Applies stored update closures to the container's fields in-place.
+    func applyContexts<T>(to container: inout T) {
+        guard !contexts.isEmpty else { return }
+        withUnsafeMutableBytes(of: &container) { rawBytes in
+            guard let base = rawBytes.baseAddress else { return }
+            for (offset, anyCtx) in contexts {
+                if let fn = anyCtx as? (UnsafeMutableRawPointer) -> Void {
+                    fn(base.advanced(by: offset))
+                }
+            }
         }
     }
 }

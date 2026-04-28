@@ -7,84 +7,252 @@
 
 import Foundation
 
-/// Internal backing storage for a single `LayoutSubview`.
-/// Holds the child's `LayoutComputer` AG node and an optional AG-backed ViewList for traits.
-struct LayoutSubviewProxy {
-    /// The child's layout-computation node.
-    /// Reading `.value` inside a parent layout rule registers a re-layout dependency.
-    var layoutComputerAttr: Attribute<LayoutComputer>
-    /// AG-backed ViewList for this subview's trait collection.
-    /// The ViewList's first generator carries `traitListAttr: OptionalAttribute<ViewTraitCollection>`,
-    /// which is the final computed `ViewTraitCollection` for this child.
-    /// Non-null whenever `_TraitWritingModifier` is in the `_makeViewList` chain;
-    /// also created for children without traits so Layout can uniformly read `_trait(key:)`.
-    /// Reading inside a layout rule registers a dependency, so trait changes trigger re-layout.
-    var _traitsList: OptionalAttribute<ViewList>
+// MARK: - LayoutProxyAttributes
 
-    init(layoutComputerAttr: Attribute<LayoutComputer>,
-         traitsList: OptionalAttribute<ViewList> = OptionalAttribute()) {
-        self.layoutComputerAttr = layoutComputerAttr
-        self._traitsList = traitsList
+/// Attributes for LayoutProxy: layoutComputer + traitsList.
+/// Both fields use a sentinel value for nil encoding (OptionalAttribute pattern).
+struct LayoutProxyAttributes {
+    /// Optional AG attribute for the child's layout computation.
+    var layoutComputer: OptionalAttribute<LayoutComputer>
+    /// Optional AG attribute for this child's ViewList (used for trait access).
+    /// Reading `.value.traits` inside a layout rule registers a re-layout dependency.
+    var traitsList: OptionalAttribute<any ViewList>
+
+    init(layoutComputer: Attribute<LayoutComputer>,
+         traitsList: OptionalAttribute<any ViewList> = OptionalAttribute()) {
+        self.layoutComputer = OptionalAttribute(layoutComputer)
+        self.traitsList = traitsList
+    }
+
+    init(traitsList: OptionalAttribute<any ViewList>) {
+        self.layoutComputer = OptionalAttribute()
+        self.traitsList = traitsList
+    }
+
+    init() {
+        self.layoutComputer = OptionalAttribute()
+        self.traitsList = OptionalAttribute()
+    }
+
+    var isEmpty: Bool {
+        layoutComputer.attribute == nil && traitsList.attribute == nil
     }
 }
 
-/// A proxy for a single child view, providing the sizing and placement API
-/// used by `Layout` implementations.
+// MARK: - LayoutProxy
+
+/// Proxy for a child view in a Layout.
+/// Dependency tracking uses @TaskLocal; context is stored as the layoutComputer rawValue.
+struct LayoutProxy {
+    /// AG rule context.
+    var context: UInt32
+    var attributes: LayoutProxyAttributes
+
+    init(attributes: LayoutProxyAttributes) {
+        self.context = attributes.layoutComputer.attribute?.identifier.rawValue ?? 0
+        self.attributes = attributes
+    }
+
+    /// The child's LayoutComputer value (reads AG attribute; registers dependency).
+    var layoutComputer: LayoutComputer {
+        guard let attr = attributes.layoutComputer.attribute else {
+            return LayoutComputer.defaultValue
+        }
+        return attr.value
+    }
+
+    /// The child's ViewTraitCollection if a traitsList attribute is present.
+    /// Reads traitsList attr and returns ViewList.traits.
+    /// Returns nil if no traitsList attribute is set.
+    var traits: ViewTraitCollection? {
+        guard let viewList = attributes.traitsList.attribute?.value else { return nil }
+        return viewList.traits  // ViewList protocol method WT[7]
+    }
+
+    /// Returns the trait value for key K.
+    subscript<K: _ViewTraitKey>(key: K.Type) -> K.Value {
+        traits?[key] ?? K.defaultValue
+    }
+}
+
+// MARK: - PlacementData
+
+/// Local placement buffer used by ViewLayoutEngine.childGeometries(at:origin:).
+/// LayoutSubview.place writes into it via setGeometry(_:at:layoutDirection:).
+struct PlacementData {
+    var isLocked: Bool
+    var geometries: [ViewGeometry]
+    var placedCount: Int
+    var bounds: CGRect
+    var layoutDirection: LayoutDirection
+
+    init(count: Int,
+         bounds: CGRect,
+         layoutDirection: LayoutDirection) {
+        self.isLocked = false
+        self.geometries = Array(repeating: .invalidValue, count: count)
+        self.placedCount = 0
+        self.bounds = bounds
+        self.layoutDirection = layoutDirection
+    }
+
+    mutating func setGeometry(_ geometry: ViewGeometry,
+                              at index: Int,
+                              layoutDirection: LayoutDirection) {
+        precondition(!isLocked)
+        precondition(index >= 0 && index < geometries.count)
+
+        let old = geometries[index]
+        if old.isInvalid && !geometry.isInvalid {
+            placedCount += 1
+        }
+
+        var stored = geometry
+        if layoutDirection != self.layoutDirection {
+            let maxX = bounds.maxX
+            stored.origin.x = maxX - (geometry.origin.x + geometry.dimensions.width)
+        }
+        geometries[index] = stored
+    }
+
+    mutating func resolvedGeometries(children: [LayoutProxyAttributes],
+                                     proposal: ProposedViewSize) -> [ViewGeometry] {
+        guard placedCount != geometries.count else { return geometries }
+        for index in geometries.indices where geometries[index].isInvalid {
+            let computer = children[index].layoutComputer.attribute?.value ?? LayoutComputer.defaultValue
+            let dimensions = computer.dimensions(in: proposal)
+            let origin = CGPoint(
+                x: bounds.midX - dimensions.width * 0.5,
+                y: bounds.midY - dimensions.height * 0.5
+            )
+            geometries[index] = ViewGeometry(origin: origin, dimensions: dimensions)
+        }
+        placedCount = geometries.count
+        return geometries
+    }
+}
+
+private extension ViewGeometry {
+    static var invalidValue: ViewGeometry {
+        ViewGeometry(
+            origin: CGPoint(x: CGFloat.infinity, y: CGFloat.infinity),
+            dimensions: ViewDimensions(guideComputer: LayoutComputer.defaultValue,
+                                       size: ViewSize(width: CGFloat.infinity,
+                                                      height: CGFloat.infinity))
+        )
+    }
+
+    var isInvalid: Bool {
+        !origin.x.isFinite || !origin.y.isFinite
+    }
+}
+
+enum ThreadLayoutData {
+    nonisolated(unsafe) private static var current: UnsafeMutablePointer<PlacementData>?
+
+    static func withPlacementData<R>(
+        _ pointer: UnsafeMutablePointer<PlacementData>,
+        _ body: () -> R
+    ) -> R {
+        let previous = current
+        current = pointer
+        defer { current = previous }
+        return body()
+    }
+
+    static func setGeometry(_ geometry: ViewGeometry,
+                            at index: Int,
+                            layoutDirection: LayoutDirection) -> Bool {
+        guard let current else { return false }
+        current.pointee.setGeometry(geometry, at: index, layoutDirection: layoutDirection)
+        return true
+    }
+}
+
+// MARK: - LayoutSubview
+
+/// A proxy for a single child view in a Layout.
 public struct LayoutSubview: Equatable {
 
-    var proxy: LayoutSubviewProxy
+    var proxy: LayoutProxy
 
-    /// Returns the trait value for the given key.
-    /// Reads from the AG-backed ViewList → first generator's traitListAttr → ViewTraitCollection.
-    /// Reading inside a layout rule registers a dependency so trait changes trigger re-layout.
+    /// Index used by PlacementData.setGeometry(at:).
+    /// Currently unused for final placement.
+    var placementIndex: Int32
+
+    /// Per-subview layout direction.
+    var layoutDirection: LayoutDirection
+
+    init(proxy: LayoutProxy,
+         placementIndex: Int32 = 0,
+         layoutDirection: LayoutDirection = .leftToRight) {
+        self.proxy = proxy
+        self.placementIndex = placementIndex
+        self.layoutDirection = layoutDirection
+    }
+
+    // MARK: - Trait access
+
+    /// Returns the trait value for key K.
+    /// Delegates to LayoutProxy.subscript.
     public func _trait<K>(key: K.Type) -> K.Value where K: _ViewTraitKey {
-        guard let viewList = proxy._traitsList.attribute?.value else { return K.defaultValue }
-        return viewList.generators.first?.traitListAttr.attribute?.value[key] ?? K.defaultValue
+        proxy[key]
     }
 
     public subscript<K>(key: K.Type) -> K.Value where K: LayoutValueKey {
         _trait(key: _LayoutTrait<K>.self)
     }
 
-    /// The view's layout priority.
-    /// Read from the `LayoutComputer` node, which is set by `LayoutPriorityLayout`.
+    // MARK: - Layout API
+
     public var priority: Double {
-        proxy.layoutComputerAttr.value.priority
+        proxy.layoutComputer.priority
     }
 
-    /// Asks the child for the size that best fits `proposal`.
-    /// Reading this inside a parent layout rule registers a dependency on the
-    /// child's `LayoutComputer` AG node.
     public func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
-        proxy.layoutComputerAttr.value.sizeThatFits(proposal)
+        proxy.layoutComputer.sizeThatFits(proposal)
     }
 
-    /// Returns the child's layout dimensions for `proposal`.
     public func dimensions(in proposal: ProposedViewSize) -> ViewDimensions {
-        proxy.layoutComputerAttr.value.dimensions(in: proposal)
+        proxy.layoutComputer.dimensions(in: proposal)
     }
 
-    /// The child's preferred spacing to neighbouring views.
     public var spacing: ViewSpacing {
-        proxy.layoutComputerAttr.value.spacing
+        proxy.layoutComputer.spacing
     }
 
-    /// Assigns a final position to the child.
-    /// Forwards the call into the child's own `LayoutComputer` for further propagation
-    /// and writing to the child's position and size AG nodes.
     public func place(at position: CGPoint, anchor: UnitPoint = .topLeading, proposal: ProposedViewSize) {
-        proxy.layoutComputerAttr.value.place(at: position, anchor: anchor, proposal: proposal)
+        let dimensions = self.dimensions(in: proposal)
+        place(at: position, anchor: anchor, dimensions: dimensions)
+    }
+
+    public func place(at position: CGPoint, anchor: UnitPoint = .topLeading, dimensions: ViewDimensions) {
+        let origin = CGPoint(
+            x: position.x - dimensions.width * anchor.x,
+            y: position.y - dimensions.height * anchor.y
+        )
+        guard origin.x.isFinite && origin.y.isFinite else {
+            fatalError("view origin is invalid: \(position), \(anchor), \(CGSize(width: dimensions.width, height: dimensions.height))")
+        }
+        place(in: ViewGeometry(origin: origin, dimensions: dimensions), layoutDirection: .leftToRight)
+    }
+
+    func place(in geometry: ViewGeometry, layoutDirection: LayoutDirection) {
+        if !ThreadLayoutData.setGeometry(geometry,
+                                         at: Int(placementIndex),
+                                         layoutDirection: layoutDirection) {
+            proxy.layoutComputer.place(at: geometry.origin,
+                                       anchor: .topLeading,
+                                       proposal: geometry.dimensions.size.proposal)
+        }
     }
 
     public static func == (a: LayoutSubview, b: LayoutSubview) -> Bool {
-        a.proxy.layoutComputerAttr.identifier == b.proxy.layoutComputerAttr.identifier
-    }
-
-    var traitListAttr: OptionalAttribute<ViewTraitCollection> {
-        guard let viewList = proxy._traitsList.attribute?.value else { return OptionalAttribute() }
-        return viewList.generators.first?.traitListAttr ?? OptionalAttribute()
+        a.proxy.attributes.layoutComputer.base.identifier == b.proxy.attributes.layoutComputer.base.identifier
     }
 }
+
+// MARK: - LayoutSubviews
 
 public struct LayoutSubviews: Equatable, RandomAccessCollection {
     public typealias SubSequence = LayoutSubviews

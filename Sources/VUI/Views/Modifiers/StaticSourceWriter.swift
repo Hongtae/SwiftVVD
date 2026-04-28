@@ -57,7 +57,7 @@ struct AnySource {
 
     init<T: View>(value: _GraphValue<T>, valueIsNil: Optional<Attribute<Bool>> = nil) {
         self.formula = SourceFormula<T>.self
-        self.value = value._attribute.asWeak()
+        self.value = value._attribute.asWeak().raw
         self.valueIsNil = valueIsNil
     }
 

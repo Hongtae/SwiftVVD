@@ -88,9 +88,8 @@ extension PrimitiveButtonStyleConfiguration.Label {
         let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
             let innerLC = innerLCAttr.value
             return LayoutComputer(
-                sizeThatFits: innerLC._sizeThatFits,
-                spacing: innerLC._spacing,
-                dimensions: innerLC._dimensions,
+                sizeThatFits: { innerLC.sizeThatFits($0) },
+                spacing: innerLC.spacing,
                 place: { position, anchor, proposal in
                     let size = innerLC.sizeThatFits(proposal)
                     let origin = CGPoint(x: position.x - size.width * anchor.x,
@@ -98,18 +97,15 @@ extension PrimitiveButtonStyleConfiguration.Label {
                     innerPosAttr.setValue(origin)
                     innerSizeAttr.setValue(ViewSize(size))
                     innerLC.place(at: position, anchor: anchor, proposal: proposal)
-                }
+                },
+                explicitAlignment: { innerLC.explicitAlignment($0, at: $1) }
             )
         }
         return _ViewOutputs(preferences: innerOutputs.preferences, layoutComputer: OptionalAttribute(lcAttr))
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        _ViewListOutputs(
-            views: .staticList(.unary(TypedUnaryViewGenerator(view, inputs: inputs))),
-            nextImplicitID: 1,
-            staticCount: 1
-        )
+        _ViewListOutputs.unaryViewList(view: view, inputs: inputs)
     }
 }
 
@@ -341,9 +337,8 @@ extension ButtonStyleConfiguration.Label {
         let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
             let innerLC = innerLCAttr.value
             return LayoutComputer(
-                sizeThatFits: innerLC._sizeThatFits,
-                spacing: innerLC._spacing,
-                dimensions: innerLC._dimensions,
+                sizeThatFits: { innerLC.sizeThatFits($0) },
+                spacing: innerLC.spacing,
                 place: { position, anchor, proposal in
                     let size = innerLC.sizeThatFits(proposal)
                     let origin = CGPoint(x: position.x - size.width * anchor.x,
@@ -351,17 +346,14 @@ extension ButtonStyleConfiguration.Label {
                     innerPosAttr.setValue(origin)
                     innerSizeAttr.setValue(ViewSize(size))
                     innerLC.place(at: position, anchor: anchor, proposal: proposal)
-                }
+                },
+                explicitAlignment: { innerLC.explicitAlignment($0, at: $1) }
             )
         }
         return _ViewOutputs(preferences: innerOutputs.preferences, layoutComputer: OptionalAttribute(lcAttr))
     }
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        _ViewListOutputs(
-            views: .staticList(.unary(TypedUnaryViewGenerator(view, inputs: inputs))),
-            nextImplicitID: 1,
-            staticCount: 1
-        )
+        _ViewListOutputs.unaryViewList(view: view, inputs: inputs)
     }
 }
 

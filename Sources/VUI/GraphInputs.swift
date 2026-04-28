@@ -245,4 +245,123 @@ public struct _GraphInputs {
 
     /// Returns true if any BodyInput<T> stack in customInputs is non-empty.
     var containsNonEmptyBodyStack: Bool { false }
+
+    // MARK: - merge(_:ignoringPhase:)
+    // Merges `other`'s fields into `self`:
+    //   1. PropertyList merge (customInputs)
+    //   2. Environment: create MergedEnvironment AG rule if attrs differ
+    //   3. Transaction: create MergedTransaction AG rule if attrs differ
+    //   4. Phase (skipped when ignoringPhase==true): create MergedPhase AG rule if attrs differ
+    //   5. flags OR, options bit-0 OR, mergedInputs union
+    //
+    // mergedInputs (Set<AGAttribute>) prevents duplicate rule creation for the same attr pair.
+    mutating func merge(_ other: _GraphInputs, ignoringPhase: Bool) {
+        guard let graph = AttributeGraph.current else {
+            fatalError("_GraphInputs.merge(_:ignoringPhase:) called outside an active AttributeGraph context.")
+        }
+
+        // Step 1: PropertyList
+        customInputs.merge(other.customInputs)
+
+        // Step 2: Environment
+        let selfEnvID  = cachedEnvironment.value.environment.identifier
+        let otherEnvID = other.cachedEnvironment.value.environment.identifier
+        if selfEnvID != otherEnvID, mergedInputs.insert(otherEnvID).inserted {
+            let selfWeak = cachedEnvironment.value.environment.asWeak().raw
+            let newEnvAttr = graph.makeRule(MergedEnvironment(selfWeak: selfWeak,
+                                                               otherRaw: otherEnvID.rawValue))
+            var newCE = cachedEnvironment.value
+            newCE.environment = newEnvAttr
+            cachedEnvironment = MutableBox(newCE)
+            changedDebugProperties |= 0x20
+        }
+
+        // Step 3: Transaction
+        let selfTxID  = transaction.identifier
+        let otherTxID = other.transaction.identifier
+        if selfTxID != otherTxID, mergedInputs.insert(otherTxID).inserted {
+            let selfWeak = transaction.asWeak().raw
+            transaction = graph.makeRule(MergedTransaction(selfWeak: selfWeak,
+                                                            otherRaw: otherTxID.rawValue))
+        }
+
+        // Step 4: Phase
+        if !ignoringPhase {
+            let selfPhaseID  = phase.identifier
+            let otherPhaseID = other.phase.identifier
+            if selfPhaseID != otherPhaseID, mergedInputs.insert(otherPhaseID).inserted {
+                let selfWeak = phase.asWeak().raw
+                phase = graph.makeRule(MergedPhase(selfWeak: selfWeak,
+                                                    otherRaw: otherPhaseID.rawValue))
+                changedDebugProperties |= 0x40
+            }
+        }
+
+        // Step 5: remaining fields
+        changedDebugProperties |= other.changedDebugProperties
+        options |= (other.options & 1)
+        mergedInputs.formUnion(other.mergedInputs)
+    }
+
+    // Alias: merge(_:) == merge(_:ignoringPhase: false)
+    mutating func merge(_ other: _GraphInputs) {
+        merge(other, ignoringPhase: false)
+    }
+}
+
+// MARK: - Merged* AG Rules
+// All three follow the same pattern: weak ref to self attr + strong raw of other attr.
+// updateValue() reads both (registering AG dependencies), merges, returns result.
+// When the weak ref is invalid (subgraph was deallocated), returns other's value unchanged.
+
+// Merges two EnvironmentValues by chaining their PropertyLists (self = higher priority).
+struct MergedEnvironment: Rule {
+    typealias Value = EnvironmentValues
+    let selfWeak: AGWeakAttribute
+    let otherRaw: UInt32
+
+    func updateValue() -> EnvironmentValues {
+        let graph = AttributeGraph.current!
+        let otherAttr = Attribute<EnvironmentValues>(AGAttribute(rawValue: otherRaw))
+        let otherEnv = otherAttr.value
+        guard selfWeak.isValid(in: graph) else { return otherEnv }
+        var result = Attribute<EnvironmentValues>(selfWeak.toStrong()).value
+        result._plist.merge(otherEnv._plist)
+        return result
+    }
+}
+
+// Merges two Transactions by chaining their PropertyLists (self = higher priority).
+struct MergedTransaction: Rule {
+    typealias Value = Transaction
+    let selfWeak: AGWeakAttribute
+    let otherRaw: UInt32
+
+    func updateValue() -> Transaction {
+        let graph = AttributeGraph.current!
+        let otherAttr = Attribute<Transaction>(AGAttribute(rawValue: otherRaw))
+        let otherTx = otherAttr.value
+        guard selfWeak.isValid(in: graph) else { return otherTx }
+        var result = Attribute<Transaction>(selfWeak.toStrong()).value
+        result.plist.merge(otherTx.plist)
+        return result
+    }
+}
+
+// Merges two Phases: isBeingRemoved OR'd, resetSeed updated when other is nonzero.
+// Phase.merge(_:) defines the concrete field-level merge semantics.
+struct MergedPhase: Rule {
+    typealias Value = Phase
+    let selfWeak: AGWeakAttribute
+    let otherRaw: UInt32
+
+    func updateValue() -> Phase {
+        let graph = AttributeGraph.current!
+        let otherAttr = Attribute<Phase>(AGAttribute(rawValue: otherRaw))
+        let otherPhase = otherAttr.value
+        guard selfWeak.isValid(in: graph) else { return otherPhase }
+        var result = Attribute<Phase>(selfWeak.toStrong()).value
+        result.merge(otherPhase)
+        return result
+    }
 }

@@ -30,15 +30,15 @@ public struct _AlignmentWritingModifier: ViewModifier {
             let m = modifier._attribute.value   // dep: key/computeValue changes
             let childLC = childLCAttr.value     // dep: child layout changes
             return LayoutComputer(
-                sizeThatFits: { proposal in childLC.sizeThatFits(proposal) },
+                sizeThatFits: { childLC.sizeThatFits($0) },
                 spacing: childLC.spacing,
-                dimensions: { proposal in
-                    var d = childLC.dimensions(in: proposal)
-                    d.explicitAlignments[m.key] = m.computeValue(d)
-                    return d
-                },
-                place: { position, anchor, proposal in
-                    childLC.place(at: position, anchor: anchor, proposal: proposal)
+                place: { childLC.place(at: $0, anchor: $1, proposal: $2) },
+                explicitAlignment: { key, size in
+                    if key == m.key {
+                        let dims = ViewDimensions(guideComputer: childLC, size: size)
+                        return m.computeValue(dims)
+                    }
+                    return childLC.explicitAlignment(key, at: size)
                 }
             )
         }

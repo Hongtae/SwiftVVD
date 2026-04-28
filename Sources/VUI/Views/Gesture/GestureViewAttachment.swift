@@ -96,7 +96,8 @@ struct GloballySimultaneousGestureCombiner: GestureCombiner {
 /// Internal protocol for view modifiers that attach gestures to views.
 /// `AddGestureModifier` conforms to this; the protocol provides a default
 /// `ViewModifier._makeView` implementation that delegates to `makeView`.
-protocol GestureViewModifier: ViewModifier where Body == Never {
+// Adding MultiViewModifier here makes the ModifiedContent._makeViewList check unified.
+protocol GestureViewModifier: MultiViewModifier where Body == Never {
     associatedtype Combiner: GestureCombiner
     var gestureMask: GestureMask { get }
     static func makeView(
@@ -123,14 +124,8 @@ extension GestureViewModifier {
     ) -> _ViewOutputs {
         makeView(modifier: modifier, inputs: inputs, body: body)
     }
-
-    static func _makeViewList(
-        modifier: _GraphValue<Self>,
-        inputs: _ViewListInputs,
-        body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs
-    ) -> _ViewListOutputs {
-        body(_Graph(), inputs)
-    }
+    // _makeViewList: inherited from MultiViewModifier (creates ModifiedElements).
+    // ModifiedElements materialization calls _makeView per child.
 }
 
 // AddGestureModifier
@@ -140,7 +135,7 @@ extension GestureViewModifier {
 ///   - `DefaultGestureCombiner`              -> `.gesture(_:including:)`
 ///   - `HighPriorityGestureCombiner`         -> `.highPriorityGesture(_:including:)`
 ///   - `SimultaneousGestureCombiner`         -> `.simultaneousGesture(_:including:)`
-///   - `GloballySimultaneousGestureCombiner` -> internal
+///   - `GloballySimultaneousGestureCombiner` -> globally simultaneous
 struct AddGestureModifier<T: Gesture, Combiner: GestureCombiner>: GestureViewModifier {
     var gesture: T
     var name: String?

@@ -32,11 +32,6 @@ extension Spacer: _PrimitiveView {
                         width:  proposal.width.map  { max($0, minLen) } ?? minLen,
                         height: proposal.height.map { max($0, minLen) } ?? minLen
                     )
-                },
-                dimensions: { proposal in
-                    let w = proposal.width.map  { max($0, minLen) } ?? minLen
-                    let h = proposal.height.map { max($0, minLen) } ?? minLen
-                    return ViewDimensions(width: w, height: h)
                 }
             )
         }
@@ -60,9 +55,6 @@ extension Divider: _PrimitiveView {
             LayoutComputer(
                 sizeThatFits: { proposal in
                     CGSize(width: proposal.width ?? 0, height: 1)
-                },
-                dimensions: { proposal in
-                    ViewDimensions(width: proposal.width ?? 0, height: 1)
                 }
             )
         }

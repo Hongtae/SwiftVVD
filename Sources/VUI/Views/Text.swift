@@ -383,17 +383,17 @@ extension Text: View {
             }
 
             return LayoutComputer(
-                sizeThatFits: { proposal in
-                    sizeThatFits(proposal)
-                },
-                dimensions: { proposal in
-                    let size = sizeThatFits(proposal)
-                    var d = ViewDimensions(width: size.width, height: size.height)
-                    if let r = resolved {
-                        d.explicitAlignments[VerticalAlignment.firstTextBaseline.key] = r.firstBaseline(in: size)
-                        d.explicitAlignments[VerticalAlignment.lastTextBaseline.key] = r.lastBaseline(in: size)
+                sizeThatFits: { sizeThatFits($0) },
+                explicitAlignment: { key, size in
+                    guard let r = resolved else { return nil }
+                    let cgSize = CGSize(width: size.width, height: size.height)
+                    if key == VerticalAlignment.firstTextBaseline.key {
+                        return r.firstBaseline(in: cgSize)
                     }
-                    return d
+                    if key == VerticalAlignment.lastTextBaseline.key {
+                        return r.lastBaseline(in: cgSize)
+                    }
+                    return nil
                 }
             )
         }
@@ -449,4 +449,3 @@ extension Text: View {
 
 extension Text: _PrimitiveView {
 }
-

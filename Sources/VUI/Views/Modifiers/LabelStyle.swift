@@ -48,9 +48,8 @@ extension LabelStyleConfiguration.Title {
         let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
             let innerLC = innerLCAttr.value
             return LayoutComputer(
-                sizeThatFits: innerLC._sizeThatFits,
-                spacing: innerLC._spacing,
-                dimensions: innerLC._dimensions,
+                sizeThatFits: { innerLC.sizeThatFits($0) },
+                spacing: innerLC.spacing,
                 place: { position, anchor, proposal in
                     let size = innerLC.sizeThatFits(proposal)
                     let origin = CGPoint(x: position.x - size.width * anchor.x,
@@ -58,17 +57,14 @@ extension LabelStyleConfiguration.Title {
                     innerPosAttr.setValue(origin)
                     innerSizeAttr.setValue(ViewSize(size))
                     innerLC.place(at: position, anchor: anchor, proposal: proposal)
-                }
+                },
+                explicitAlignment: { innerLC.explicitAlignment($0, at: $1) }
             )
         }
         return _ViewOutputs(preferences: innerOutputs.preferences, layoutComputer: OptionalAttribute(lcAttr))
     }
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        _ViewListOutputs(
-            views: .staticList(.unary(TypedUnaryViewGenerator(view, inputs: inputs))),
-            nextImplicitID: 1,
-            staticCount: 1
-        )
+        _ViewListOutputs.unaryViewList(view: view, inputs: inputs)
     }
 }
 
@@ -92,9 +88,8 @@ extension LabelStyleConfiguration.Icon {
         let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
             let innerLC = innerLCAttr.value
             return LayoutComputer(
-                sizeThatFits: innerLC._sizeThatFits,
-                spacing: innerLC._spacing,
-                dimensions: innerLC._dimensions,
+                sizeThatFits: { innerLC.sizeThatFits($0) },
+                spacing: innerLC.spacing,
                 place: { position, anchor, proposal in
                     let size = innerLC.sizeThatFits(proposal)
                     let origin = CGPoint(x: position.x - size.width * anchor.x,
@@ -102,22 +97,19 @@ extension LabelStyleConfiguration.Icon {
                     innerPosAttr.setValue(origin)
                     innerSizeAttr.setValue(ViewSize(size))
                     innerLC.place(at: position, anchor: anchor, proposal: proposal)
-                }
+                },
+                explicitAlignment: { innerLC.explicitAlignment($0, at: $1) }
             )
         }
         return _ViewOutputs(preferences: innerOutputs.preferences, layoutComputer: OptionalAttribute(lcAttr))
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        _ViewListOutputs(
-            views: .staticList(.unary(TypedUnaryViewGenerator(view, inputs: inputs))),
-            nextImplicitID: 1,
-            staticCount: 1
-        )
+        _ViewListOutputs.unaryViewList(view: view, inputs: inputs)
     }
 }
 
-// EffectiveLabelStyle — subset of LabelStyle that can be expressed as an enum.
+// EffectiveLabelStyle: subset of LabelStyle that can be expressed as an enum.
 // Set in EffectiveLabelStyle environment key alongside StyleInput<LabelStyleConfiguration>.
 enum EffectiveLabelStyle: Equatable, Sendable {
     case titleAndIcon
@@ -165,7 +157,7 @@ extension EnvironmentValues {
 // Context-specific label styles used in DefaultLabelStyle.makeBody's dispatch chain.
 // Provides minimal functional implementations for context-specific label styles.
 
-// ListLabelStyle — used in PlainList, InsetList, BorderedList contexts.
+// ListLabelStyle: used in PlainList, InsetList, BorderedList contexts.
 struct ListLabelStyle: LabelStyle {
     func makeBody(configuration: Configuration) -> some View {
         HStack(alignment: .center) {
@@ -175,7 +167,7 @@ struct ListLabelStyle: LabelStyle {
     }
 }
 
-// SidebarLabelStyle — used in Sidebar context.
+// SidebarLabelStyle: used in Sidebar context.
 struct SidebarLabelStyle: LabelStyle {
     func makeBody(configuration: Configuration) -> some View {
         HStack(alignment: .center) {
@@ -185,7 +177,7 @@ struct SidebarLabelStyle: LabelStyle {
     }
 }
 
-// GroupedFormLabelStyle — used in GroupedForm and Table contexts.
+// GroupedFormLabelStyle: used in GroupedForm and Table contexts.
 struct GroupedFormLabelStyle: LabelStyle {
     func makeBody(configuration: Configuration) -> some View {
         HStack(alignment: .center) {
@@ -195,7 +187,7 @@ struct GroupedFormLabelStyle: LabelStyle {
     }
 }
 
-// SystemPreferencesSidebarLabelStyle — used in system preferences sidebar.
+// SystemPreferencesSidebarLabelStyle: used in system preferences sidebar.
 struct SystemPreferencesSidebarLabelStyle: LabelStyle {
     func makeBody(configuration: Configuration) -> some View {
         HStack(alignment: .center) {
@@ -205,7 +197,7 @@ struct SystemPreferencesSidebarLabelStyle: LabelStyle {
     }
 }
 
-// TextInputSuggestionLabelStyle — used in text input suggestions context.
+// TextInputSuggestionLabelStyle: used in text input suggestions context.
 struct TextInputSuggestionLabelStyle: LabelStyle {
     func makeBody(configuration: Configuration) -> some View {
         HStack(alignment: .center) {
@@ -215,7 +207,7 @@ struct TextInputSuggestionLabelStyle: LabelStyle {
     }
 }
 
-// ToolbarItemLabelStyle — used in toolbar contexts.
+// ToolbarItemLabelStyle: used in toolbar contexts.
 struct ToolbarItemLabelStyle: LabelStyle {
     func makeBody(configuration: Configuration) -> some View {
         HStack(alignment: .center) {
@@ -225,7 +217,7 @@ struct ToolbarItemLabelStyle: LabelStyle {
     }
 }
 
-// AccessibilityLabelStyle — used in accessibility representable contexts.
+// AccessibilityLabelStyle: used in accessibility representable contexts.
 struct AccessibilityLabelStyle: LabelStyle {
     func makeBody(configuration: Configuration) -> some View {
         HStack(alignment: .center) {
@@ -240,11 +232,11 @@ public struct DefaultLabelStyle: LabelStyle {
     public func makeBody(configuration: Configuration) -> some View {
         // Chain: innermost [16] is added first (.modifier first call),
         //        outermost [0] is added last (.modifier last call).
-        // _makeView executes outermost→innermost; innermost pushes last onto
-        // the style stack → innermost wins over outermost.
+        // _makeView executes outermost to innermost. The innermost style pushes
+        // last onto the style stack, so innermost wins over outermost.
         // FallbackLabelStyle is outermost = default when no context matches.
         Label(configuration)
-            // [16] innermost: (Plain, GroupedForm) → GroupedFormLabelStyle
+            // [16] innermost: (Plain, GroupedForm) -> GroupedFormLabelStyle
             .modifier(
                 StaticIf<StyleContextAcceptsPredicate<(PlainListStyleContext, GroupedFormStyleContext)>,
                           LabelStyleWritingModifier<GroupedFormLabelStyle>, EmptyModifier>(
@@ -252,7 +244,7 @@ public struct DefaultLabelStyle: LabelStyle {
                     falseBody: EmptyModifier()
                 )
             )
-            // [15] (Table, GroupedForm) → GroupedFormLabelStyle
+            // [15] (Table, GroupedForm) -> GroupedFormLabelStyle
             .modifier(
                 StaticIf<StyleContextAcceptsPredicate<(TableStyleContext, GroupedFormStyleContext)>,
                           LabelStyleWritingModifier<GroupedFormLabelStyle>, EmptyModifier>(
@@ -260,7 +252,7 @@ public struct DefaultLabelStyle: LabelStyle {
                     falseBody: EmptyModifier()
                 )
             )
-            // [14] PlainList → ListLabelStyle
+            // [14] PlainList -> ListLabelStyle
             .modifier(
                 StaticIf<StyleContextAcceptsPredicate<PlainListStyleContext>,
                           LabelStyleWritingModifier<ListLabelStyle>, EmptyModifier>(
@@ -268,7 +260,7 @@ public struct DefaultLabelStyle: LabelStyle {
                     falseBody: EmptyModifier()
                 )
             )
-            // [13] SidebarList → SidebarLabelStyle
+            // [13] SidebarList -> SidebarLabelStyle
             .modifier(
                 StaticIf<StyleContextAcceptsPredicate<SidebarListStyleContext>,
                           LabelStyleWritingModifier<SidebarLabelStyle>, EmptyModifier>(
@@ -276,7 +268,7 @@ public struct DefaultLabelStyle: LabelStyle {
                     falseBody: EmptyModifier()
                 )
             )
-            // [12] InsetList → ListLabelStyle
+            // [12] InsetList -> ListLabelStyle
             .modifier(
                 StaticIf<StyleContextAcceptsPredicate<InsetListStyleContext>,
                           LabelStyleWritingModifier<ListLabelStyle>, EmptyModifier>(
@@ -284,7 +276,7 @@ public struct DefaultLabelStyle: LabelStyle {
                     falseBody: EmptyModifier()
                 )
             )
-            // [11] GroupedForm → GroupedFormLabelStyle
+            // [11] GroupedForm -> GroupedFormLabelStyle
             .modifier(
                 StaticIf<StyleContextAcceptsPredicate<GroupedFormStyleContext>,
                           LabelStyleWritingModifier<GroupedFormLabelStyle>, EmptyModifier>(
@@ -292,7 +284,7 @@ public struct DefaultLabelStyle: LabelStyle {
                     falseBody: EmptyModifier()
                 )
             )
-            // [10] BorderedList → ListLabelStyle
+            // [10] BorderedList -> ListLabelStyle
             .modifier(
                 StaticIf<StyleContextAcceptsPredicate<BorderedListStyleContext>,
                           LabelStyleWritingModifier<ListLabelStyle>, EmptyModifier>(
@@ -300,7 +292,7 @@ public struct DefaultLabelStyle: LabelStyle {
                     falseBody: EmptyModifier()
                 )
             )
-            // [9] SystemPreferencesSidebar → SystemPreferencesSidebarLabelStyle
+            // [9] SystemPreferencesSidebar -> SystemPreferencesSidebarLabelStyle
             .modifier(
                 StaticIf<StyleContextAcceptsPredicate<SystemPreferencesSidebarListStyleContext>,
                           LabelStyleWritingModifier<SystemPreferencesSidebarLabelStyle>, EmptyModifier>(
@@ -308,7 +300,7 @@ public struct DefaultLabelStyle: LabelStyle {
                     falseBody: EmptyModifier()
                 )
             )
-            // [8] TextInputSuggestions → TextInputSuggestionLabelStyle
+            // [8] TextInputSuggestions -> TextInputSuggestionLabelStyle
             .modifier(
                 StaticIf<StyleContextAcceptsPredicate<TextInputSuggestionsContext>,
                           LabelStyleWritingModifier<TextInputSuggestionLabelStyle>, EmptyModifier>(
@@ -316,7 +308,7 @@ public struct DefaultLabelStyle: LabelStyle {
                     falseBody: EmptyModifier()
                 )
             )
-            // [7] IsDefaultButtonLabel AND Toolbar → TitleOnlyLabelStyle
+            // [7] IsDefaultButtonLabel AND Toolbar -> TitleOnlyLabelStyle
             .modifier(
                 StaticIf<AndOperationViewInputPredicate<IsDefaultButtonLabel, StyleContextAcceptsAnyPredicate<ToolbarStyleContext>>,
                           LabelStyleWritingModifier<TitleOnlyLabelStyle>, EmptyModifier>(
@@ -324,7 +316,7 @@ public struct DefaultLabelStyle: LabelStyle {
                     falseBody: EmptyModifier()
                 )
             )
-            // [6] Toolbar → ToolbarItemLabelStyle
+            // [6] Toolbar -> ToolbarItemLabelStyle
             .modifier(
                 StaticIf<StyleContextAcceptsPredicate<ToolbarStyleContext>,
                           LabelStyleWritingModifier<ToolbarItemLabelStyle>, EmptyModifier>(
@@ -332,7 +324,7 @@ public struct DefaultLabelStyle: LabelStyle {
                     falseBody: EmptyModifier()
                 )
             )
-            // [5] SectionHeader → TitleOnlyLabelStyle
+            // [5] SectionHeader -> TitleOnlyLabelStyle
             .modifier(
                 StaticIf<StyleContextAcceptsPredicate<SectionHeaderStyleContext>,
                           LabelStyleWritingModifier<TitleOnlyLabelStyle>, EmptyModifier>(
@@ -340,7 +332,7 @@ public struct DefaultLabelStyle: LabelStyle {
                     falseBody: EmptyModifier()
                 )
             )
-            // [4] ListAccessoryBar → IconOnlyLabelStyle
+            // [4] ListAccessoryBar -> IconOnlyLabelStyle
             .modifier(
                 StaticIf<StyleContextAcceptsPredicate<ListAccessoryBarStyleContext>,
                           LabelStyleWritingModifier<IconOnlyLabelStyle>, EmptyModifier>(
@@ -348,7 +340,7 @@ public struct DefaultLabelStyle: LabelStyle {
                     falseBody: EmptyModifier()
                 )
             )
-            // [3] SwipeActions → TitleAndIconLabelStyle
+            // [3] SwipeActions -> TitleAndIconLabelStyle
             .modifier(
                 StaticIf<StyleContextAcceptsPredicate<SwipeActionsStyleContext>,
                           LabelStyleWritingModifier<TitleAndIconLabelStyle>, EmptyModifier>(
@@ -356,7 +348,7 @@ public struct DefaultLabelStyle: LabelStyle {
                     falseBody: EmptyModifier()
                 )
             )
-            // [2] AccessibilityQuickAction → TitleAndIconLabelStyle
+            // [2] AccessibilityQuickAction -> TitleAndIconLabelStyle
             .modifier(
                 StaticIf<StyleContextAcceptsPredicate<AccessibilityQuickActionStyleContext>,
                           LabelStyleWritingModifier<TitleAndIconLabelStyle>, EmptyModifier>(
@@ -364,7 +356,7 @@ public struct DefaultLabelStyle: LabelStyle {
                     falseBody: EmptyModifier()
                 )
             )
-            // [1] AccessibilityRepresentable → AccessibilityLabelStyle
+            // [1] AccessibilityRepresentable -> AccessibilityLabelStyle
             .modifier(
                 StaticIf<StyleContextAcceptsPredicate<AccessibilityRepresentableStyleContext>,
                           LabelStyleWritingModifier<AccessibilityLabelStyle>, EmptyModifier>(
@@ -372,7 +364,7 @@ public struct DefaultLabelStyle: LabelStyle {
                     falseBody: EmptyModifier()
                 )
             )
-            // [0] outermost: FallbackLabelStyle — default when no context matches
+            // [0] outermost: FallbackLabelStyle, used when no context matches.
             .modifier(LabelStyleWritingModifier(style: FallbackLabelStyle()))
     }
 }
@@ -384,7 +376,7 @@ public struct IconOnlyLabelStyle: LabelStyle {
     }
 }
 
-// LabelItemRole — internal enum for tagging label components in multi-view contexts.
+// LabelItemRole: internal enum for tagging label components in multi-view contexts.
 // Used via _ContainerValueWritingModifier in TitleAndIconLabelStyle.makeBody.
 enum LabelItemRole {
     case icon
@@ -402,7 +394,7 @@ private struct LabelItemRoleKey: ContainerValueKey {
     static var defaultValue: LabelItemRole? { nil }
 }
 
-// LabelIconPlatformItemModifier — zero-size ViewModifier applied to the icon
+// LabelIconPlatformItemModifier: zero-size ViewModifier applied to the icon
 // in TitleAndIconLabelStyle.makeBody. Handles platform-specific icon rendering
 // adjustments (foreground style, rendering mode, etc.).
 struct LabelIconPlatformItemModifier: ViewModifier {
@@ -468,7 +460,7 @@ public struct TitleOnlyLabelStyle: LabelStyle {
     }
 }
 
-// FallbackLabelStyle — internal zero-size style applied unconditionally as the
+// FallbackLabelStyle: internal zero-size style applied unconditionally as the
 // last item in DefaultLabelStyle.makeBody's dispatch chain.
 // Handles generic label rendering when no style context is active.
 struct FallbackLabelStyle: LabelStyle {
@@ -510,7 +502,7 @@ extension LabelStyle where Self == TitleOnlyLabelStyle {
     public static var titleOnly: TitleOnlyLabelStyle { .init() }
 }
 
-// LabelStyleModifier<S>: StyleModifier — pushes S onto the
+// LabelStyleModifier<S>: StyleModifier that pushes S onto the
 // StyleInput<LabelStyleConfiguration> custom-inputs stack.
 // _makeView/_makeViewList are provided by StyleModifier default extension.
 struct LabelStyleModifier<S: LabelStyle>: StyleModifier {
@@ -531,7 +523,7 @@ extension LabelStyleModifier: _HasLabelStyle {
     func _labelStyle() -> any LabelStyle { style }
 }
 
-// LabelStyleWritingModifier<S> — public-facing ViewModifier applied by .labelStyle(_:).
+// LabelStyleWritingModifier<S>: public-facing ViewModifier applied by .labelStyle(_:).
 // body(content:) composes LabelStyleModifier (style stack push) with
 // environment(\.effectiveLabelStyle, ...) for the three concrete built-in styles.
 struct LabelStyleWritingModifier<Style: LabelStyle>: ViewModifier {

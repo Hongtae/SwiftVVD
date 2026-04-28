@@ -34,21 +34,14 @@ extension _FixedSizeLayout: UnaryLayout {
                 return lc.sizeThatFits(fixedProposal)
             },
             spacing: lc.spacing,
-            dimensions: { proposal in
-                let fixedProposal = ProposedViewSize(
-                    width:  h ? nil : proposal.width,
-                    height: v ? nil : proposal.height
-                )
-                let size = lc.sizeThatFits(fixedProposal)
-                return ViewDimensions(width: size.width, height: size.height)
-            },
             place: { position, anchor, proposal in
                 let fixedProposal = ProposedViewSize(
                     width:  h ? nil : proposal.width,
                     height: v ? nil : proposal.height
                 )
                 lc.place(at: position, anchor: anchor, proposal: fixedProposal)
-            }
+            },
+            explicitAlignment: { lc.explicitAlignment($0, at: $1) }
         )
     }
 }

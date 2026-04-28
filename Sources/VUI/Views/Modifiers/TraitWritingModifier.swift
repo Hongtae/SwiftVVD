@@ -40,10 +40,9 @@ public struct _TraitWritingModifier<Trait>: ViewModifier where Trait: _ViewTrait
         // Convert the static body output to a dynamicList so the parent Layout
         // receives an Attribute<ViewList> as _traitsList for each child.
         if case .staticList(let elements) = bodyOut.views {
-            let generators = _VariadicView_Children.extractGenerators(from: elements)
-            let viewListAttr: Attribute<ViewList> = graph.makeRule {
+            let viewListAttr: Attribute<any ViewList> = graph.makeRule {
                 let _ = newTraitAttr.value   // re-evaluate when trait value changes
-                return ViewList(generators: generators)
+                return BaseViewList(elements: elements)
             }
             return _ViewListOutputs(views: .dynamicList(viewListAttr, nil),
                                     nextImplicitID: 0, staticCount: nil)

@@ -12,9 +12,12 @@ import Synchronization
 // the outer protocol name. Use a private typealias to keep the conformance unambiguous.
 private typealias _PreferenceKeyProto = PreferenceKey
 
+// Confirmation dialogs are emitted through preferences and rendered by the modal overlay path.
+// Actions are collected directly into PlatformItemListButtonStyle-backed items.
+
 // MARK: - ConfirmationDialogPreference
 
-// Runtime data needed to render a confirmation dialog overlay.
+// Presentation preference used by the modal queue.
 struct ConfirmationDialogPreference: @unchecked Sendable {
     let title: Text
     let titleVisibility: Visibility
@@ -23,16 +26,17 @@ struct ConfirmationDialogPreference: @unchecked Sendable {
     let makeMessage: (() -> AnyView)?
     let messageItemList: PlatformItemList?
     let isPresented: Binding<Bool>
-    // Used by the modal queue during PresentationSession cleanup.
+    // Used by the modal queue when the presentation is dismissed.
     let onDismiss: (() -> Void)?
 }
 
 // MARK: - ConfirmationDialog
-// Stores the confirmation dialog preference written into view preferences.
+
+// Storage value emitted through preferences.
+// Dictionary<ViewIdentity, ConfirmationDialog> is the preference value.
 struct ConfirmationDialog: @unchecked Sendable {
     let preference: ConfirmationDialogPreference
 
-    // Merges confirmation dialog storage by identity. The next value wins on collision.
     struct PreferenceKey: _PreferenceKeyProto {
         typealias Value = [ViewIdentity: ConfirmationDialog]
         static var defaultValue: Value { [:] }
@@ -43,19 +47,22 @@ struct ConfirmationDialog: @unchecked Sendable {
 }
 
 // MARK: - MakeConfirmationDialog
-// StatefulRule that produces the confirmation dialog preference mutation closure.
-// Position, size, and transform are reserved for popover-style anchor positioning.
+
+// Builds the preference mutation for active confirmation dialogs.
+// Position, size, and transform are retained for popover-style anchor positioning.
+// The current modal overlay path does not use those fields yet.
 struct MakeConfirmationDialog<Actions: View, Message: View>: StatefulRule {
     typealias Value = (inout [ViewIdentity: ConfirmationDialog]) -> Void
 
     let environment: Attribute<EnvironmentValues>
     let modifier: Attribute<ConfirmationDialogModifier<Actions, Message>>
-    let actionsItemList: AGWeakAttribute
-    let messageItemList: AGWeakAttribute
+    let actionsItemList: WeakAttribute<PlatformItemList>
+    let messageItemList: WeakAttribute<PlatformItemList>
     let phase: Attribute<Phase>
-    // Popover anchor inputs are currently passed through and not used by the overlay path.
+    // Passed through from _ViewInputs for future popover anchor support.
     let position: Attribute<CGPoint>
-    let size: Attribute<ViewTransform>   // TODO: replace with Attribute<CGSize> when the size path is available.
+    // Extracted from Attribute<ViewSize>.value.
+    let size: Attribute<CGSize>
     let transform: Attribute<ViewTransform>
     var identityTracker: ViewIdentity.Tracker
 
@@ -67,10 +74,10 @@ struct MakeConfirmationDialog<Actions: View, Message: View>: StatefulRule {
         var actionsList: PlatformItemList?
         var messageList: PlatformItemList?
         if actionsItemList.isValid(in: graph) {
-            actionsList = Attribute<PlatformItemList>(actionsItemList.toStrong()).value
+            actionsList = actionsItemList.toStrong().value
         }
         if messageItemList.isValid(in: graph) {
-            messageList = Attribute<PlatformItemList>(messageItemList.toStrong()).value
+            messageList = messageItemList.toStrong().value
         }
         let m = modifier.value
         let identity = identityTracker.update(for: phase.value)
@@ -100,7 +107,8 @@ struct MakeConfirmationDialog<Actions: View, Message: View>: StatefulRule {
 }
 
 // MARK: - ConfirmationDialogModifier
-// ViewModifier for presenting a confirmation dialog when isPresented is true.
+
+// MultiViewModifier that records confirmation-dialog presentation state.
 struct ConfirmationDialogModifier<Actions: View, Message: View>: ViewModifier, MultiViewModifier {
     typealias Body = Never
 
@@ -113,43 +121,40 @@ struct ConfirmationDialogModifier<Actions: View, Message: View>: ViewModifier, M
 }
 
 extension ConfirmationDialogModifier {
-    // Creates a stateful rule that produces the confirmation dialog preference mutation.
+    // _makeView collects actions and message content into platform item lists.
     static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs,
                           body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
         guard let graph = AttributeGraph.current else {
             fatalError("ConfirmationDialogModifier._makeView called outside AG context")
         }
-        func makePlatformItemList<C: View>(view: _GraphValue<C>, inputs: _ViewInputs) -> Attribute<PlatformItemList> {
-            var itemInputs = inputs
-            var keys = itemInputs.preferences.keys
-            keys.insert(PlatformItemList.Key.self)
-            itemInputs.preferences = PreferencesInputs(keys: keys,
-                                                       hostKeys: itemInputs.preferences.hostKeys)
-            let outputs = C._makeView(view: view, inputs: itemInputs)
-            let nodes = outputs.preferences.values(for: PlatformItemList.Key.self)
-            return graph.makeRule {
-                var combined = PlatformItemList.Key.defaultValue
-                for nodeID in nodes {
-                    let value = Attribute<PlatformItemList>(nodeID).value
-                    PlatformItemList.Key.reduce(value: &combined) { value }
-                }
-                return combined
-            }
-        }
 
-        let actionsItemList = makePlatformItemList(view: modifier[\.actions], inputs: inputs)
-        let messageItemList = makePlatformItemList(view: modifier[\.message], inputs: inputs)
+        var outputs = body(_Graph(), inputs)
 
-        // Pass position/size/transform from _ViewInputs for future popover anchor support.
-        // TODO: size should become Attribute<CGSize> when that attribute path is available.
+        // Use PlatformItemListGenerator for both actions and message content.
+        let actionsGenerator = PlatformItemListGenerator<AllPlatformItemListFlags, Actions>(
+            content: modifier[\.actions]._attribute,
+            inputs: inputs,
+            inputsIncludeGeometry: true
+        )
+        let actionsListAttr: Attribute<PlatformItemList> = graph.makeStatefulRule(actionsGenerator)
+
+        let messageGenerator = PlatformItemListGenerator<TextPlatformItemListFlags, Message>(
+            flags: TextPlatformItemListFlags.self,
+            content: modifier[\.message]._attribute,
+            inputs: inputs,
+            inputsIncludeGeometry: true
+        )
+        let messageListAttr: Attribute<PlatformItemList> = graph.makeStatefulRule(messageGenerator)
+
+        let sizeAttr: Attribute<CGSize> = graph.makeRule { inputs.size.value.value }
         let storageRule = MakeConfirmationDialog<Actions, Message>(
             environment: inputs.base.cachedEnvironment.value.environment,
             modifier: modifier._attribute,
-            actionsItemList: actionsItemList.asWeak(),
-            messageItemList: messageItemList.asWeak(),
+            actionsItemList: actionsListAttr.asWeak(),
+            messageItemList: messageListAttr.asWeak(),
             phase: inputs.base.phase,
             position: inputs.position,
-            size: inputs.transform,      // TODO: placeholder until a CGSize attribute path is available.
+            size: sizeAttr,
             transform: inputs.transform,
             identityTracker: ViewIdentity.Tracker()
         )
@@ -161,7 +166,6 @@ extension ConfirmationDialogModifier {
             storageAttr.value(&dict)
             return dict
         }
-        var outputs = body(_Graph(), inputs)
         outputs.preferences.append(ConfirmationDialog.PreferenceKey.self,
                                    node: prefAttr.identifier)
         return outputs
@@ -212,9 +216,9 @@ struct ConfirmationDialogOverlayView: View {
     @ViewBuilder
     private var actions: some View {
         if let list = preference.actionsItemList, !list.buttonItems.isEmpty {
-            // Show only the first three action items.
-            // 2 buttons use HStack with cancel on the left and default on the right.
-            // 3 buttons use VStack sorted by role priority.
+            // Use at most three items.
+            // 2 buttons -> HStack (cancel left / default right)
+            // 3 buttons -> VStack sorted by role priority
             let items = Array(orderedItems(list.buttonItems).prefix(3))
             if items.count == 2 {
                 HStack(spacing: 8) {
@@ -233,8 +237,8 @@ struct ConfirmationDialogOverlayView: View {
         }
     }
 
-    // Button display order: default/custom, destructive, then cancel.
-    // 2-button horizontal layout places cancel on the left and default on the right.
+    // Button display order: default/custom -> destructive -> cancel.
+    // 2-button horizontal: cancel left, default right.
     private func orderedItems(_ items: [PlatformItemList.Item]) -> [PlatformItemList.Item] {
         let cancel = items.filter { $0.role == .cancel }
         let destructive = items.filter { $0.role == .destructive }
@@ -243,7 +247,7 @@ struct ConfirmationDialogOverlayView: View {
             // HStack: cancel goes left (index 0), default goes right (index 1)
             return cancel + other + destructive
         }
-        // VStack: default/custom top, destructive middle, cancel bottom
+        // VStack: default/custom top, destructive middle, cancel bottom.
         return other + destructive + cancel
     }
 
@@ -283,7 +287,7 @@ extension View {
                                             isPresented: Binding<Bool>,
                                             titleVisibility: Visibility = .automatic,
                                             @ViewBuilder actions: () -> A) -> some View {
-        // Collect action items directly through the platform item list button style.
+        // Wrap actions directly with the platform item-list button style.
         modifier(ConfirmationDialogModifier(
             presentedValue: isPresented.wrappedValue,
             title: title,

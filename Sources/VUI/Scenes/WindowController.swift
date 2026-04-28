@@ -1126,6 +1126,9 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
 
     /// Called from ViewGraph side-effect rule when SheetPreference.Key changes.
     func updateSheetPresentation(_ value: SheetPreference.Value) {
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(#function) must be called from within an AG context (side-effect rule).")
+        }
         let incoming: [SheetPreference]
         switch value {
         case .single(let pref): incoming = [pref]
@@ -1154,7 +1157,6 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         }
 
         // Update existing sessions and enqueue new ones.
-        guard let graph = AttributeGraph.current else { return }
         let transaction = Transaction._current?.transaction ?? Transaction()
         for pref in incoming {
             let existingContentAttr: Attribute<AnyView>? = modalChildren.withLock { entries in
@@ -1185,6 +1187,9 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
 
     /// Called from ViewGraph side-effect rule when ConfirmationDialogStorage.PreferenceKey changes.
     func updateConfirmationDialogPresentation(_ dialogs: [ConfirmationDialogPreference]) {
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(#function) must be called from within an AG context (side-effect rule).")
+        }
         func sid(_ p: ConfirmationDialogPreference) -> ObjectIdentifier {
             ObjectIdentifier(p.isPresented.location)
         }
@@ -1200,7 +1205,6 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                 removeModalChild(ctrl, reason: .dismissed)
             }
         }
-        guard let graph = AttributeGraph.current else { return }
         for pref in dialogs {
             guard !existingIDs.contains(sid(pref)) else { continue }
             let content = ConfirmationDialogOverlayView(preference: pref)
@@ -1213,6 +1217,9 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
 
     /// Called from ViewGraph side-effect rule when AlertStorage.PreferenceKey changes.
     func updateAlertPresentation(_ alerts: [AlertPreference]) {
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(#function) must be called from within an AG context (side-effect rule).")
+        }
         func sid(_ p: AlertPreference) -> ObjectIdentifier {
             ObjectIdentifier(p.isPresented.location)
         }
@@ -1233,7 +1240,6 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         }
 
         // Enqueue new alerts as overlay controllers.
-        guard let graph = AttributeGraph.current else { return }
         for pref in alerts {
             guard !existingIDs.contains(sid(pref)) else { continue }
 

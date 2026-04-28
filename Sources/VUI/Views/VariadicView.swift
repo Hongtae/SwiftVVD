@@ -8,62 +8,60 @@
 import Foundation
 
 public protocol _VariadicView_Root {
+    static var _viewListOptions: Int { get }
+}
+
+extension _VariadicView_Root {
+    public static var _viewListOptions: Int { 0 }
+
+    public static func _viewListCount(
+        inputs: _ViewListCountInputs,
+        body: (_ViewListCountInputs) -> Int?
+    ) -> Int? {
+        body(inputs)
+    }
 }
 
 public struct _VariadicView_Children: View {
     public typealias Body = Never
 
-    /// Returns a staticList of all element generators as merged outputs.
+    /// AG rule that exposes children as a ForEach over child elements.
+    private struct Child: Rule {
+        typealias Value = ForEach<_VariadicView_Children, AnyHashable, Element>
+        var attribute: Attribute<_VariadicView_Children>
+
+        func updateValue() -> Value {
+            let children = attribute.value
+            return ForEach(children, id: \.id) { $0 }
+        }
+    }
+
+    /// Returns a staticList of all elements as merged outputs.
     /// Called when _VariadicView_Children itself appears in a view list
     /// (e.g. inside a _VariadicView_MultiViewRoot body).
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        let children = view._attribute.value
-        let generators = children.elements.map(\.generator)
-        let merged = generators.map { gen in
-            _ViewListOutputs(views: .staticList(.unary(gen)), nextImplicitID: 1, staticCount: 1)
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(self)._makeViewList called outside an active AttributeGraph context.")
         }
-        return _ViewListOutputs(
-            views: .staticList(.merged(merged)),
-            nextImplicitID: generators.count,
-            staticCount: generators.count
+        let childAttr: Attribute<ForEach<Self, AnyHashable, Element>> = graph.makeRule(
+            Child(attribute: view._attribute)
+        )
+        return ForEach<Self, AnyHashable, Element>._makeViewList(
+            view: _GraphValue(_attribute: childAttr),
+            inputs: inputs
         )
     }
 
-    let elements: [Element]
+    var list: any ViewList
+    var contentSubgraph: AGSubgraph?
 
-    /// Build Elements from a _ViewListOutputs produced during the body wiring pass.
-    /// staticList: extract generators from ViewListElements.
-    /// dynamicList: read current generators from the ViewList attribute (registers AG dependency).
-    fileprivate static func makeElements(from outputs: _ViewListOutputs) -> [Element] {
+    /// Build children storage from a `_ViewListOutputs` produced during the body wiring pass.
+    fileprivate static func makeChildren(from outputs: _ViewListOutputs) -> Self {
         switch outputs.views {
         case .staticList(let elements):
-            return extractGenerators(from: elements).enumerated().map { i, gen in
-                Element(generator: gen, traits: gen.traitListAttr.attribute?.value ?? ViewTraitCollection(), viewID: AnyHashable(i))
-            }
+            return Self(list: BaseViewList(elements: elements), contentSubgraph: nil)
         case .dynamicList(let viewListAttr, _):
-            return viewListAttr.value.generators.enumerated().map { i, gen in
-                Element(generator: gen, traits: gen.traitListAttr.attribute?.value ?? ViewTraitCollection(), viewID: AnyHashable(i))
-            }
-        }
-    }
-
-    static func extractGenerators(from elements: ViewListElements) -> [TypedUnaryViewGenerator] {
-        switch elements {
-        case .unary(let gen):
-            return [gen]
-        case .merged(let outputs):
-            return outputs.flatMap { output -> [TypedUnaryViewGenerator] in
-                switch output.views {
-                case .staticList(let els):
-                    return extractGenerators(from: els)
-                case .dynamicList(let viewListAttr, _):
-                    // _TraitWritingModifier produces single-element dynamicLists.
-                    // Reading .value registers an AG dependency when called inside a rule.
-                    return viewListAttr.value.generators
-                }
-            }
-        case .modified(let base, _):
-            return extractGenerators(from: base)
+            return Self(list: viewListAttr.value, contentSubgraph: nil)
         }
     }
 
@@ -78,16 +76,18 @@ public struct _VariadicView_Children: View {
 
     private static func containsDynamicList(_ elements: ViewListElements) -> Bool {
         switch elements {
-        case .unary: return false
+        case .unaryElements: return false
         case .merged(let outputs): return outputs.contains { containsDynamicList($0) }
-        case .modified(let base, _): return containsDynamicList(base)
+        case .modified(let mod):
+            guard let base = mod.base as? ViewListElements else { return false }
+            return containsDynamicList(base)
         }
     }
 }
 
 extension _VariadicView_Children: RandomAccessCollection {
     public struct Element: View, Identifiable {
-        public var id: AnyHashable { viewID }
+        public var id: AnyHashable { AnyHashable(view.index) }
 
         public func id<ID>(as _: ID.Type = ID.self) -> ID? where ID: Hashable {
             return nil
@@ -98,28 +98,56 @@ extension _VariadicView_Children: RandomAccessCollection {
             set { traits[key] = newValue }
         }
 
-        /// Delegate to the original view's _makeView via the stored generator.
+        /// Builds this child element through the underlying view-list view.
         public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-            view._attribute.value.generator.makeView(inputs: inputs) ?? _ViewOutputs()
+            _ViewList_View._makeView(view: view[\.view], inputs: inputs)
         }
 
-        /// Returns a single-element static list for this element's generator.
+        /// Returns a single-element static list for this element.
         public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-            let gen = view._attribute.value.generator
-            return _ViewListOutputs(views: .staticList(.unary(gen)), nextImplicitID: 1, staticCount: 1)
+            let elements = UnaryElements(
+                body: { viewInputs in
+                    _ViewList_View._makeView(view: view[\.view], inputs: viewInputs)
+                },
+                baseInputs: inputs.base
+            )
+            return _ViewListOutputs(
+                views: .staticList(.unaryElements(elements)),
+                nextImplicitID: 1,
+                staticCount: 1
+            )
         }
 
         public typealias ID = AnyHashable
         public typealias Body = Never
 
-        var generator: TypedUnaryViewGenerator
+        var view: _ViewList_View
         var traits: ViewTraitCollection
-        var viewID: AnyHashable
     }
 
-    public var startIndex: Int { elements.startIndex }
-    public var endIndex: Int { elements.endIndex }
+    public var startIndex: Int { 0 }
+    public var endIndex: Int { elements.count }
     public subscript(index: Int) -> Element { elements[index] }
+
+    private var elements: [Element] {
+        var built: [Element] = []
+        _ = _forEachSublist(in: list) { sublist in
+            let sharedElements = _ViewList_SubgraphElements(base: sublist.elements)
+            let traitsCollection = sublist.traits
+            for offset in 0..<sublist.count {
+                let view = _ViewList_View(
+                    elements: sharedElements,
+                    id: sublist.id,
+                    index: offset,
+                    count: sublist.count,
+                    contentSubgraph: contentSubgraph
+                )
+                built.append(Element(view: view, traits: traitsCollection))
+            }
+            return true
+        }
+        return built
+    }
 
     public typealias Index = Int
     public typealias Iterator = IndexingIterator<_VariadicView_Children>
@@ -139,6 +167,7 @@ public protocol _VariadicView_ViewRoot: _VariadicView_Root {
 
     static func _makeView(root: _GraphValue<Self>, inputs: _ViewInputs, body: (_Graph, _ViewInputs) -> _ViewListOutputs) -> _ViewOutputs
     static func _makeViewList(root: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs
+    static func _viewListCount(inputs: _ViewListCountInputs, body: (_ViewListCountInputs) -> Int?) -> Int?
 }
 
 extension _VariadicView_ViewRoot where Body == Never {
@@ -147,10 +176,22 @@ extension _VariadicView_ViewRoot where Body == Never {
     }
 }
 
+extension _VariadicView_ViewRoot {
+    public static func _viewListCount(inputs: _ViewListCountInputs) -> Int? {
+        _viewListCount(inputs: inputs, body: { _ in nil })
+    }
+}
+
 public protocol _VariadicView_UnaryViewRoot: _VariadicView_ViewRoot {
 }
 
 public protocol _VariadicView_MultiViewRoot: _VariadicView_ViewRoot {
+}
+
+/// UnaryViewRoot-specific body generator.
+struct BodyUnaryViewGenerator {
+    var body: (_ViewInputs) -> _ViewOutputs
+    var viewType: Any.Type
 }
 
 extension _VariadicView_ViewRoot {
@@ -172,9 +213,9 @@ extension _VariadicView_ViewRoot {
         }
 
         // Body != Never: create children AG input node + body(children:) rule.
-        let initialElements = _VariadicView_Children.makeElements(from: childListOutputs)
+        let initialChildren = _VariadicView_Children.makeChildren(from: childListOutputs)
         let childrenAttr: Attribute<_VariadicView_Children> = graph.makeInput(
-            value: _VariadicView_Children(elements: initialElements)
+            value: initialChildren
         )
 
         // Register a reactive rule to keep childrenAttr in sync whenever any nested
@@ -183,8 +224,8 @@ extension _VariadicView_ViewRoot {
             let _ = graph.makeRule {
                 // makeElements re-reads all nested viewListAttr.value (registering AG dependencies)
                 // so this rule re-fires whenever any child's ViewList changes.
-                let elements = _VariadicView_Children.makeElements(from: childListOutputs)
-                childrenAttr.setValue(_VariadicView_Children(elements: elements))
+                let children = _VariadicView_Children.makeChildren(from: childListOutputs)
+                childrenAttr.setValue(children)
             }
         }
 
@@ -210,15 +251,15 @@ extension _VariadicView_ViewRoot {
         }
 
         // Body != Never: build children + body rule, then wrap in dynamicList.
-        let initialElements = _VariadicView_Children.makeElements(from: childListOutputs)
+        let initialChildren = _VariadicView_Children.makeChildren(from: childListOutputs)
         let childrenAttr: Attribute<_VariadicView_Children> = graph.makeInput(
-            value: _VariadicView_Children(elements: initialElements)
+            value: initialChildren
         )
 
         if _VariadicView_Children.containsDynamicList(childListOutputs) {
             let _ = graph.makeRule {
-                let elements = _VariadicView_Children.makeElements(from: childListOutputs)
-                childrenAttr.setValue(_VariadicView_Children(elements: elements))
+                let children = _VariadicView_Children.makeChildren(from: childListOutputs)
+                childrenAttr.setValue(children)
             }
         }
 
@@ -233,10 +274,9 @@ extension _VariadicView_ViewRoot {
         switch bodyListOutputs.views {
         case .staticList(let elements):
             // Wrap static elements into a ViewList AG rule so the dynamicList contract is satisfied.
-            let generators = _VariadicView_Children.extractGenerators(from: elements)
-            let viewListAttr: Attribute<ViewList> = graph.makeRule {
+            let viewListAttr: Attribute<any ViewList> = graph.makeRule {
                 let _ = bodyAttr.value   // re-evaluate when body changes
-                return ViewList(generators: generators)
+                return BaseViewList(elements: elements)
             }
             return _ViewListOutputs(views: .dynamicList(viewListAttr, nil), nextImplicitID: 0, staticCount: nil)
         case .dynamicList(let innerViewListAttr, let modifier):
@@ -245,56 +285,25 @@ extension _VariadicView_ViewRoot {
     }
 }
 
-// File-scope helper: captures the body closure so _UnaryViewRootWrapper can call
-// Root._makeView(root:inputs:body:) at layout time.
-private final class _UnaryViewBodyClosure<Root: _VariadicView_UnaryViewRoot> {
-    let root: _GraphValue<Root>
-    let body: (_Graph, _ViewListInputs) -> _ViewListOutputs
-
-    init(root: _GraphValue<Root>,
-         body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) {
-        self.root = root
-        self.body = body
-    }
-}
-
-// Synthetic leaf view that wraps a UnaryViewRoot + body closure.
-// Stored as an AG input node so a ViewProxy can be created for it.
-// When the parent Layout calls proxy.makeView, _makeView below fires
-// and delegates to Root._makeView(root:inputs:body:).
-private struct _UnaryViewRootWrapper<Root: _VariadicView_UnaryViewRoot>: View, _PrimitiveView {
-    typealias Body = Never
-
-    let closure: _UnaryViewBodyClosure<Root>
-
-    static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        let cls = view._attribute.value.closure
-        return Root._makeView(root: cls.root, inputs: inputs) { _, viewInputs in
-            cls.body(_Graph(), viewInputs.listInputs)
-        }
-    }
-}
-
 extension _VariadicView_UnaryViewRoot {
-    public static func _makeViewList(root: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeViewList called outside an active AttributeGraph context.")
-        }
+    public static func _viewListCount(inputs: _ViewListCountInputs, body: (_ViewListCountInputs) -> Int?) -> Int? {
+        nil
+    }
 
-        let closure = _UnaryViewBodyClosure(root: root, body: body)
-        let wrapperAttr: Attribute<_UnaryViewRootWrapper<Self>> = graph.makeInput(
-            value: _UnaryViewRootWrapper(closure: closure)
-        )
-        let wrapperGraph = _GraphValue<_UnaryViewRootWrapper<Self>>(_attribute: wrapperAttr)
-        return _ViewListOutputs(
-            views: .staticList(.unary(TypedUnaryViewGenerator(wrapperGraph, inputs: inputs))),
-            nextImplicitID: 1,
-            staticCount: 1
-        )
+    public static func _makeViewList(root: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
+        _ViewListOutputs.unaryViewList(viewType: Self.self, inputs: inputs) { viewInputs in
+            Self._makeView(root: root, inputs: viewInputs) { _, childInputs in
+                body(_Graph(), childInputs.listInputs)
+            }
+        }
     }
 }
 
 extension _VariadicView_MultiViewRoot {
+    public static func _viewListCount(inputs: _ViewListCountInputs, body: (_ViewListCountInputs) -> Int?) -> Int? {
+        body(inputs)
+    }
+
     public static func _makeView(root: _GraphValue<Self>, inputs: _ViewInputs, body: (_Graph, _ViewInputs) -> _ViewListOutputs) -> _ViewOutputs {
         // Delegate to the generic ViewRoot _makeView which handles both Body==Never and Body!=Never.
         // For Body == Never: falls back to VStackLayout (like _VariadicView_ViewRoot default).
@@ -314,16 +323,16 @@ extension _VariadicView_MultiViewRoot {
                                                body: { _, _ in childListOutputs })
         }
 
-        // dynamic MultiViewGenerator with Proxy — same as _VariadicView_ViewRoot._makeView Body!=Never.
-        let initialElements = _VariadicView_Children.makeElements(from: childListOutputs)
+        // Dynamic MultiViewGenerator with proxy children.
+        let initialChildren = _VariadicView_Children.makeChildren(from: childListOutputs)
         let childrenAttr: Attribute<_VariadicView_Children> = graph.makeInput(
-            value: _VariadicView_Children(elements: initialElements)
+            value: initialChildren
         )
 
         if _VariadicView_Children.containsDynamicList(childListOutputs) {
             let _ = graph.makeRule {
-                let elements = _VariadicView_Children.makeElements(from: childListOutputs)
-                childrenAttr.setValue(_VariadicView_Children(elements: elements))
+                let children = _VariadicView_Children.makeChildren(from: childListOutputs)
+                childrenAttr.setValue(children)
             }
         }
 

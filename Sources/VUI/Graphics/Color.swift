@@ -163,9 +163,99 @@ extension Color {
     public static let secondary = Color(red: 0, green: 0, blue: 0, opacity: 0.498039)
 }
 
+extension Color {
+    public init(_ resolved: Color.Resolved) {
+        self.init(.sRGBLinear,
+                  red: Double(resolved.linearRed),
+                  green: Double(resolved.linearGreen),
+                  blue: Double(resolved.linearBlue),
+                  opacity: Double(resolved.opacity))
+    }
+}
+
 extension Color: ShapeStyle {
+    public func resolve(in environment: EnvironmentValues) -> Resolved {
+        let dk = provider.dkColor
+        return Resolved(colorSpace: .sRGBLinear,
+                        red: Float(dk.r),
+                        green: Float(dk.g),
+                        blue: Float(dk.b),
+                        opacity: Float(dk.a))
+    }
+    
     public func _apply(to shape: inout _ShapeStyle_Shape) {
         shape.shading = .color(self)
+    }
+    
+    // Stored in linear light (linearRed/Green/Blue); red/green/blue are sRGB computed properties.
+    public struct Resolved: Hashable, Animatable, ShapeStyle, CustomStringConvertible, Codable {
+        public var linearRed:   Float
+        public var linearGreen: Float
+        public var linearBlue:  Float
+        public var opacity:     Float
+        
+        public init(colorSpace: Color.RGBColorSpace = .sRGB,
+                    red: Float, green: Float, blue: Float, opacity: Float = 1) {
+            switch colorSpace {
+            case .sRGBLinear:
+                self.linearRed   = red
+                self.linearGreen = green
+                self.linearBlue  = blue
+            default:  // .sRGB, .displayP3, approximate with sRGB gamma
+                self.linearRed   = Self.sRGBToLinear(red)
+                self.linearGreen = Self.sRGBToLinear(green)
+                self.linearBlue  = Self.sRGBToLinear(blue)
+            }
+            self.opacity = opacity
+        }
+        
+        // sRGB (gamma-encoded) ↔ linear light conversion
+        private static func sRGBToLinear(_ c: Float) -> Float {
+            c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
+        }
+        private static func linearToSRGB(_ c: Float) -> Float {
+            c <= 0.0031308 ? c * 12.92 : 1.055 * pow(c, 1.0 / 2.4) - 0.055
+        }
+        
+        // Computed sRGB accessors.
+        public var red: Float {
+            get { Self.linearToSRGB(linearRed) }
+            set { linearRed = Self.sRGBToLinear(newValue) }
+        }
+        public var green: Float {
+            get { Self.linearToSRGB(linearGreen) }
+            set { linearGreen = Self.sRGBToLinear(newValue) }
+        }
+        public var blue: Float {
+            get { Self.linearToSRGB(linearBlue) }
+            set { linearBlue = Self.sRGBToLinear(newValue) }
+        }
+        
+        public typealias AnimatableData = AnimatablePair<Float, AnimatablePair<Float, AnimatablePair<Float, Float>>>
+        public var animatableData: AnimatableData {
+            get { .init(linearRed, .init(linearGreen, .init(linearBlue, opacity))) }
+            set {
+                linearRed   = newValue.first
+                linearGreen = newValue.second.first
+                linearBlue  = newValue.second.second.first
+                opacity     = newValue.second.second.second
+            }
+        }
+        
+        public var description: String {
+            "Color.Resolved(red: \(red), green: \(green), blue: \(blue), opacity: \(opacity))"
+        }
+        
+        public typealias Resolved = Never
+        
+        public func _apply(to shape: inout _ShapeStyle_Shape) {
+            shape.shading = .color(.sRGB,
+                                   red: Double(red),
+                                   green: Double(green),
+                                   blue: Double(blue),
+                                   opacity: Double(opacity))
+        }
+        public static func _apply(to type: inout _ShapeStyle_ShapeType) {}
     }
 }
 
@@ -182,9 +272,6 @@ extension Color: _PrimitiveView {
             LayoutComputer(
                 sizeThatFits: { proposal in
                     CGSize(width: proposal.width ?? 0, height: proposal.height ?? 0)
-                },
-                dimensions: { proposal in
-                    ViewDimensions(width: proposal.width ?? 0, height: proposal.height ?? 0)
                 }
             )
         }

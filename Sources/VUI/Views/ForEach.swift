@@ -28,24 +28,16 @@ extension ForEach: View where Content: View {
         }
     }
 
-    // ForEach always returns .dynamicList(Attribute<ViewList>, nil).
-    // Per-element state class — holds content-Attribute generator and AGSubgraph for each ID.
-    // Each item's AG nodes are owned by its AGSubgraph; invalidating it on removal
-    // batch-removes all nodes so the graph doesn't accumulate zombie entries.
-    private final class _ItemState {
-        var generators: [AnyHashable: TypedUnaryViewGenerator] = [:]
-        var subgraphs:  [AnyHashable: AGSubgraph] = [:]
-        var order: [AnyHashable] = []
-    }
-
+    // ForEach returns .dynamicList(Attribute<any ViewList>, nil) wrapping a ForEachList.
+    // ForEachList.applyNodes calls `to` once per data item (per-item sublist).
     public static func _makeViewList(view: _GraphValue<ForEach<Data, ID, Content>>, inputs: _ViewListInputs) -> _ViewListOutputs {
         guard let graph = AttributeGraph.current else {
             fatalError("\(self)._makeViewList called outside an active AttributeGraph context.")
         }
 
-        let state = _ItemState()
+        let state = ForEachState<Data, ID, Content>(inputs: inputs)
 
-        let viewListAttr: Attribute<ViewList> = graph.makeRule {
+        let viewListAttr: Attribute<any ViewList> = graph.makeRule {
             guard let graph = AttributeGraph.current else {
                 fatalError("ForEach viewList rule evaluated outside an active AttributeGraph context.")
             }
@@ -66,10 +58,8 @@ extension ForEach: View where Content: View {
             // Drop entries that are no longer present.
             // Invalidating the item's AGSubgraph removes all its AG nodes at once.
             for id in state.order where !newIDs.contains(id) {
-                state.subgraphs[id]?.invalidate()
-                state.subgraphs[id]?.removeFromParent()
-                state.subgraphs.removeValue(forKey: id)
-                state.generators.removeValue(forKey: id)
+                state.items[id]?.invalidate()
+                state.items.removeValue(forKey: id)
             }
 
             // Create content Attributes for newly seen IDs.
@@ -80,7 +70,7 @@ extension ForEach: View where Content: View {
                 let element = forEach.data[dataIdx]
                 dataIdx = forEach.data.index(after: dataIdx)
 
-                if state.generators[id] == nil {
+                if state.items[id] == nil {
                     let subgraph = AGSubgraph()
                     let contentAttr: Attribute<Content> = AGSubgraph.$current.withValue(subgraph) {
                         graph.makeRule {
@@ -96,16 +86,23 @@ extension ForEach: View where Content: View {
                             return forEach.content(element)  // stale fallback if ID removed
                         }
                     }
-                    state.subgraphs[id] = subgraph
-                    state.generators[id] = TypedUnaryViewGenerator(
+                    let generator = TypedUnaryViewGenerator(
                         _GraphValue(_attribute: contentAttr),
                         inputs: inputs
+                    )
+                    var elements = _ViewList_SubgraphElements(base: UnaryElements(generator: generator))
+                    elements.wrap(subgraph: _ViewList_Subgraph(subgraph: subgraph))
+                    state.items[id] = ForEachState<Data, ID, Content>.Item(
+                        elements: elements,
+                        subgraph: subgraph,
+                        traitListAttr: generator.traitListAttr
                     )
                 }
             }
 
             state.order = newOrder
-            return ViewList(generators: newOrder.compactMap { state.generators[$0] })
+            state.seed &+= 1
+            return ForEachList(state: state, seed: state.seed)
         }
 
         return _ViewListOutputs(
@@ -113,6 +110,77 @@ extension ForEach: View where Content: View {
             nextImplicitID: 0,
             staticCount: nil
         )
+    }
+}
+
+// MARK: - ForEachState
+
+/// Per-ForEach state class. Holds per-item subgraph elements.
+final class ForEachState<Data, ID, Content>
+    where Data: RandomAccessCollection, ID: Hashable, Content: View {
+
+    struct Item {
+        var elements: _ViewList_SubgraphElements
+        var subgraph: AGSubgraph
+        var traitListAttr: OptionalAttribute<ViewTraitCollection>
+
+        var traits: ViewTraitCollection {
+            traitListAttr.attribute?.value ?? ViewTraitCollection()
+        }
+
+        func invalidate() {
+            subgraph.invalidate()
+            subgraph.removeFromParent()
+        }
+    }
+
+    var inputs: _ViewListInputs
+    var items: [AnyHashable: Item] = [:]
+    var order: [AnyHashable] = []
+    var seed: UInt32 = 0
+
+    init(inputs: _ViewListInputs) {
+        self.inputs = inputs
+    }
+}
+
+// MARK: - ForEachList
+
+/// ViewList produced by ForEach._makeViewList.
+/// applyNodes iterates data items in order and calls `to` callback once per item with
+/// _ViewList_Sublist { count=1, elements=_ViewList_SubgraphElements { base=UnaryElements } }.
+struct ForEachList<Data, ID, Content>: ViewList
+    where Data: RandomAccessCollection, ID: Hashable, Content: View {
+
+    var state: ForEachState<Data, ID, Content>
+    var seed: UInt32
+
+    func count(style: _ViewList_IteratorStyle) -> Int { state.order.count }
+    func estimatedCount(style: _ViewList_IteratorStyle) -> Int { state.order.count }
+
+    func applyNodes(
+        from: inout Int,
+        style: _ViewList_IteratorStyle,
+        list: Attribute<any ViewList>?,
+        transform: _ViewList_TemporarySublistTransform,
+        to: (inout Int, _ViewList_IteratorStyle, _ViewList_Node, _ViewList_TemporarySublistTransform) -> Bool
+    ) -> Bool {
+        for (offset, id) in state.order.enumerated() {
+            guard let item = state.items[id] else { continue }
+            if from > 0 { from -= 1; continue }
+            let sublist = _ViewList_Sublist(
+                start: offset,
+                count: 1,
+                id: _ViewList_ID(implicitID: 0),
+                elements: item.elements,
+                traits: item.traits,
+                list: list
+            )
+            let cont = to(&from, style, .sublist(sublist), transform)
+            from = 0
+            if !cont { return false }
+        }
+        return true
     }
 }
 
@@ -186,4 +254,3 @@ private extension ForEach where Content: View {
     }
     var _accessor: _Accessor { .init(forEach: self) }
 }
-

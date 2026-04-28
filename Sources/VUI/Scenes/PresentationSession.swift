@@ -87,12 +87,18 @@ public enum Visibility: Hashable, CaseIterable, Sendable {
     case hidden
 }
 
+// MARK: - DialogSuppressionConfiguration
+
+// Configuration placeholder for optional "Don't ask again" dialog suppression UI.
+// Suppression UI is not implemented yet.
+public struct DialogSuppressionConfiguration: Hashable, Sendable {}
+
 // MARK: - DialogSeverity
 
 // Severity used by alert and confirmation dialog presentations.
 public struct DialogSeverity: Equatable, Sendable {
     let rawValue: Int
-    private init(_ rawValue: Int) { self.rawValue = rawValue }
+    init(_ rawValue: Int) { self.rawValue = rawValue }
 
     public static let automatic = DialogSeverity(0)
     public static let critical  = DialogSeverity(1)

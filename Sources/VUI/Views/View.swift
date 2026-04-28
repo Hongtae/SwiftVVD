@@ -14,6 +14,13 @@ public protocol View {
 
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs
     static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs
+    // Returns a static view count when known, otherwise nil.
+    static func _viewListCount(inputs: _ViewListCountInputs) -> Int?
+}
+
+extension View {
+    // Default: unknown count. Primitive views and most containers return nil.
+    public static func _viewListCount(inputs: _ViewListCountInputs) -> Int? { nil }
 }
 
 extension View {
@@ -42,38 +49,18 @@ extension View {
         }
 
         // Build DynamicProperty buffer (e.g. @Environment resolve closures).
-        var dpBuffer = _DynamicPropertyBuffer()
+        // The current body path uses withObservationTracking for @Observable support.
         var graphInputs = inputs.base
-        _forEachField(of: Self.self) { _, offset, fieldType in
-            if let propType = fieldType as? any DynamicProperty.Type {
-                func make<T: DynamicProperty>(_ t: T.Type) {
-                    T._makeProperty(in: &dpBuffer, container: view, fieldOffset: offset, inputs: &graphInputs)
-                }
-                make(propType)
-            }
-            return true
-        }
+        let dpFields = DynamicPropertyCache.fields(of: Self.self)
+        let dpBuffer = _DynamicPropertyBuffer(fields: dpFields, container: view, inputs: &graphInputs)
 
         // Body rule: reactive to environment changes and @Observable mutations.
         let inbox  = graph.inbox
         let handle = MutableBox<AGAttribute?>(nil)
 
         let bodyAttr: Attribute<Body> = graph.makeRule {
-            // Get a mutable copy of the view struct (fields are still .keyPath at this point).
             var viewCopy = view._attribute.value
-
-            // Apply DynamicProperty resolutions: each write closure reads the live
-            // environment (registering AG dependencies) and mutates the copy in place
-            // before calling body.
-            if !dpBuffer.properties.isEmpty {
-                withUnsafeMutableBytes(of: &viewCopy) { bytes in
-                    for prop in dpBuffer.properties {
-                        if let write = dpBuffer.contexts[prop.offset] as? (UnsafeMutableRawPointer) -> Void {
-                            write(bytes.baseAddress!.advanced(by: prop.offset))
-                        }
-                    }
-                }
-            }
+            dpBuffer.applyContexts(to: &viewCopy)
 
             var result: Body!
             withObservationTracking {
@@ -99,11 +86,7 @@ extension View {
     /// can call `_makeView` via the proxy.
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
         if self is any _PrimitiveView.Type {
-            return _ViewListOutputs(
-                views: .staticList(.unary(TypedUnaryViewGenerator(view, inputs: inputs))),
-                nextImplicitID: 1,
-                staticCount: 1
-            )
+            return _ViewListOutputs.unaryViewList(view: view, inputs: inputs)
         }
         if Body.self is Never.Type {
             fatalError("\(Self.self) may not have Body == Never")
@@ -113,34 +96,16 @@ extension View {
             fatalError("\(self)._makeViewList called outside an active AttributeGraph context.")
         }
 
-        // Build DynamicProperty buffer — mirrors _makeView.
-        var dpBuffer = _DynamicPropertyBuffer()
         var graphInputs = inputs.base
-        _forEachField(of: Self.self) { _, offset, fieldType in
-            if let propType = fieldType as? any DynamicProperty.Type {
-                func make<T: DynamicProperty>(_ t: T.Type) {
-                    T._makeProperty(in: &dpBuffer, container: view, fieldOffset: offset, inputs: &graphInputs)
-                }
-                make(propType)
-            }
-            return true
-        }
+        let dpFields = DynamicPropertyCache.fields(of: Self.self)
+        let dpBuffer = _DynamicPropertyBuffer(fields: dpFields, container: view, inputs: &graphInputs)
 
         let inbox  = graph.inbox
         let handle = MutableBox<AGAttribute?>(nil)
 
         let bodyAttr: Attribute<Body> = graph.makeRule {
             var viewCopy = view._attribute.value
-
-            if !dpBuffer.properties.isEmpty {
-                withUnsafeMutableBytes(of: &viewCopy) { bytes in
-                    for prop in dpBuffer.properties {
-                        if let write = dpBuffer.contexts[prop.offset] as? (UnsafeMutableRawPointer) -> Void {
-                            write(bytes.baseAddress!.advanced(by: prop.offset))
-                        }
-                    }
-                }
-            }
+            dpBuffer.applyContexts(to: &viewCopy)
 
             var result: Body!
             withObservationTracking {
@@ -173,7 +138,7 @@ extension _PrimitiveView {
 extension Never: View {
 }
 
-// File-scope state class — cannot be nested inside a generic function in Swift.
+// File-scope state class. It cannot be nested inside a generic function in Swift.
 private final class _OptionalViewState {
     var hasValue: Bool? = nil
     var subgraph: AGSubgraph? = nil
@@ -185,8 +150,8 @@ extension Optional: View where Wrapped: View {
 
     /// Dynamic-subgraph implementation for optional views.
     ///
-    /// When `.none` → `.some`, creates a AGSubgraph and wires `Wrapped._makeView` into it.
-    /// When `.some` → `.none`, invalidates the subgraph; master rule returns `.fixed(.zero)`.
+    /// When `.none` becomes `.some`, creates a AGSubgraph and wires `Wrapped._makeView` into it.
+    /// When `.some` becomes `.none`, invalidates the subgraph; master rule returns `.fixed(.zero)`.
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         guard let graph = AttributeGraph.current else {
             fatalError("\(self)._makeView called outside an active AttributeGraph context.")
@@ -230,11 +195,7 @@ extension Optional: View where Wrapped: View {
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        _ViewListOutputs(
-            views: .staticList(.unary(TypedUnaryViewGenerator(view, inputs: inputs))),
-            nextImplicitID: 1,
-            staticCount: 1
-        )
+        _ViewListOutputs.unaryViewList(view: view, inputs: inputs)
     }
 }
 
@@ -281,6 +242,12 @@ struct TypedUnaryViewGenerator {
     /// `nil` (empty OptionalAttribute) when no `_TraitWritingModifier` was applied.
     /// Set by `_TraitWritingModifier._makeViewList` to a derived `Attribute<ViewTraitCollection>`.
     var traitListAttr: OptionalAttribute<ViewTraitCollection> = OptionalAttribute()
+    /// Per-child reactive environment override.
+    /// `nil` = use baseInputs.cachedEnvironment as-is (common case).
+    /// When set, makeView replaces cachedEnvironment with this attribute so the child
+    /// re-evaluates reactively when the attribute changes (e.g. preferredColorScheme).
+    /// Set by _PreferenceWritingModifier<PreferredColorSchemeKey>._makeViewList.
+    var envAttr: OptionalAttribute<EnvironmentValues> = OptionalAttribute()
 }
 
 extension TypedUnaryViewGenerator {
@@ -288,7 +255,7 @@ extension TypedUnaryViewGenerator {
         guard AttributeGraph.current != nil else {
             fatalError("TypedUnaryViewGenerator init called outside an active AttributeGraph context.")
         }
-        self.view = graphValue._attribute.asWeak()
+        self.view = graphValue._attribute.asWeak().raw
         self.viewType = V.self
         self.baseInputs = baseInputs
     }
@@ -297,7 +264,7 @@ extension TypedUnaryViewGenerator {
         guard AttributeGraph.current != nil else {
             fatalError("TypedUnaryViewGenerator init called outside an active AttributeGraph context.")
         }
-        self.view = graphValue._attribute.asWeak()
+        self.view = graphValue._attribute.asWeak().raw
         self.viewType = V.self
         self.baseInputs = inputs.base
         self.traitListAttr = inputs._traits
@@ -309,6 +276,14 @@ extension TypedUnaryViewGenerator {
         }
         guard view.isValid(in: graph) else { return nil }
         let attrID = view.toStrong()
+        var inputs = inputs
+        if let env = envAttr.attribute {
+            // Replace cachedEnvironment with per-child reactive env attribute.
+            // New MutableBox so child's env changes are isolated from siblings.
+            var newCached = inputs.base.cachedEnvironment.value
+            newCached.environment = env
+            inputs.base.cachedEnvironment = MutableBox(newCached)
+        }
         func call<V: View>(_ t: V.Type) -> _ViewOutputs {
             let graphValue = _GraphValue<V>(_attribute: Attribute<V>(attrID))
             return V._makeView(view: graphValue, inputs: inputs)
@@ -383,9 +358,27 @@ public struct _ViewInputs {
         get { customInputs.value(forKey: key) }
         set { customInputs.setValue(newValue, forKey: key) }
     }
+
+    /// Copies per-subtree caches (e.g. CachedEnvironment box) before constructing a child
+    /// in a retained subgraph, so each child has an independent cache copy.
+    mutating func copyCaches() {
+        base.cachedEnvironment = MutableBox(base.cachedEnvironment.value)
+    }
+
+    /// Creates placeholder outputs that can later be attached to concrete child outputs.
+    func makeIndirectOutputs() -> _ViewOutputs {
+        guard let graph = AttributeGraph.current else {
+            fatalError("_ViewInputs.makeIndirectOutputs called outside AG context.")
+        }
+        let layoutComputer = graph.makeIndirectAttribute(defaultValue: LayoutComputer.defaultValue)
+        return _ViewOutputs(
+            preferences: preferences.makeIndirectOutputs(),
+            layoutComputer: OptionalAttribute(layoutComputer)
+        )
+    }
 }
 
-/// The bundle of AG context Attributes passed from parent → child during `_makeViewList`.
+/// The bundle of AG context Attributes passed from parent to child during `_makeViewList`.
 ///
 /// Unlike `_ViewInputs`, this struct does NOT carry layout Attributes (`position`, `size`,
 /// `transform`, etc.).  Those are created fresh by the parent Layout when it later calls
@@ -465,6 +458,40 @@ public struct _ViewOutputs {
         self.preferences = preferences
         self._layoutComputer = layoutComputer
     }
+
+    /// Points each placeholder output slot at the corresponding concrete child output.
+    func attachIndirectOutputs(to placeholders: _ViewOutputs) {
+        guard let graph = AttributeGraph.current else {
+            fatalError("_ViewOutputs.attachIndirectOutputs called outside AG context.")
+        }
+        preferences.attachIndirectOutputs(to: placeholders.preferences)
+        if let placeholder = placeholders._layoutComputer.attribute {
+            graph.setIndirectTarget(placeholder, to: _layoutComputer.attribute)
+        }
+    }
+
+    /// Registers a permanent AG dependency on `attr` for all placeholder output slots.
+    func setIndirectDependency(_ attr: AGAttribute?) {
+        guard let dep = attr else { return }
+        guard let graph = AttributeGraph.current else {
+            fatalError("_ViewOutputs.setIndirectDependency called outside AG context.")
+        }
+        if let placeholder = _layoutComputer.attribute {
+            graph.setIndirectDependency(placeholder.identifier, dependsOn: dep)
+        }
+        preferences.setIndirectDependency(dep)
+    }
+
+    /// Detaches all placeholder output slots, pointing them to nil/default values.
+    func detachIndirectOutputs() {
+        guard let graph = AttributeGraph.current else {
+            fatalError("_ViewOutputs.detachIndirectOutputs called outside AG context.")
+        }
+        if let placeholder = _layoutComputer.attribute {
+            graph.setIndirectTarget(placeholder.identifier, to: nil)
+        }
+        preferences.detachIndirectOutputs()
+    }
 }
 
 /// The AG nodes produced by a view's `_makeViewList` call.
@@ -489,5 +516,30 @@ public struct _ViewListOutputs {
         self.views = views
         self.nextImplicitID = nextImplicitID
         self.staticCount = staticCount
+    }
+}
+
+extension _ViewListOutputs {
+    static func unaryViewList<V: View>(view: _GraphValue<V>, inputs: _ViewListInputs) -> _ViewListOutputs {
+        let generator = TypedUnaryViewGenerator(view, inputs: inputs)
+        return _ViewListOutputs(
+            views: .staticList(.unaryElements(UnaryElements(generator: generator))),
+            nextImplicitID: 1,
+            staticCount: 1
+        )
+    }
+
+    /// FIXME: Route through BodyUnaryViewGenerator when generic layout wiring is ready.
+    static func unaryViewList(
+        viewType: Any.Type,
+        inputs: _ViewListInputs,
+        body: @escaping (_ViewInputs) -> _ViewOutputs
+    ) -> _ViewListOutputs {
+        let _ = BodyUnaryViewGenerator(body: body, viewType: viewType)
+        return _ViewListOutputs(
+            views: .staticList(.unaryElements(UnaryElements(body: body, baseInputs: inputs.base))),
+            nextImplicitID: 1,
+            staticCount: 1
+        )
     }
 }

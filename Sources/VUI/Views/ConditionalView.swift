@@ -33,9 +33,35 @@ extension _ConditionalContent: View where TrueContent: View, FalseContent: View 
         let state = _ConditionalBranchState()
         state.activeSubgraph = AGSubgraph()
 
+        // Evaluate the initial branch outside any rule to avoid a cycle.
+        // If we call _makeView inside the lcAttr rule and then immediately read
+        // state.activeLCAttr?.value, the newly created LayoutComputer attribute
+        // has no cached value yet, triggering "cycle detected with no cached value".
+        do {
+            let initialIsTrue: Bool
+            if case .trueContent = view._attribute.value.storage { initialIsTrue = true }
+            else { initialIsTrue = false }
+            state.isTrue = initialIsTrue
+
+            let outputs: _ViewOutputs
+            if initialIsTrue {
+                outputs = AGSubgraph.$current.withValue(state.activeSubgraph) {
+                    TrueContent._makeView(view: view[\.._trueContent], inputs: inputs)
+                }
+            } else {
+                outputs = AGSubgraph.$current.withValue(state.activeSubgraph) {
+                    FalseContent._makeView(view: view[\._falseContent], inputs: inputs)
+                }
+            }
+            state.activeLCAttr = outputs._layoutComputer.attribute
+            state.activeOutputs = outputs.preferences
+        }
+
         // Master branch rule: detects branch changes and replaces the active subgraph.
         // All relay rules depend on this node, ensuring state.activeOutputs is
         // updated before any relay rule evaluates.
+        // On first evaluation state.isTrue == nowTrue, so no _makeView is called here
+        // and state.activeLCAttr is already set, so there is no cycle.
         let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
             guard AttributeGraph.current != nil else {
                 fatalError("_ConditionalContent rule evaluated outside an active AttributeGraph context.")
@@ -60,7 +86,6 @@ extension _ConditionalContent: View where TrueContent: View, FalseContent: View 
                     }
                 }
                 state.activeLCAttr = outputs._layoutComputer.attribute
-                // Store the full branch preferences so relay rules can read from it.
                 state.activeOutputs = outputs.preferences
             }
 
@@ -77,11 +102,16 @@ extension _ConditionalContent: View where TrueContent: View, FalseContent: View 
         for key in inputs.preferences.keys.keys {
             func addRelay<K: PreferenceKey>(_ k: K.Type) {
                 let relayAttr: Attribute<K.Value> = graph.makeRule {
-                    // Depend on lcAttr to guarantee state.activeOutputs is up-to-date.
-                    _ = lcAttr.value
+                    // Depend on view._attribute directly instead of lcAttr.
+                    // Using lcAttr here creates a mutual cycle:
+                    //   lcAttr -> activeLCAttr.value -> (layout chain) -> storageAttr
+                    //   -> toolbarNodes (which includes relayAttr) -> relayAttr -> lcAttr
+                    // Depending on view._attribute breaks this cycle: relayAttr re-evaluates
+                    // on branch switch, and state.activeOutputs will have been updated
+                    // by lcAttr (which also depends on view._attribute) before relayAttr
+                    // reads it on the next AG evaluation pass.
+                    _ = view._attribute.value
                     guard let prefs = state.activeOutputs else { return K.defaultValue }
-                    // Reduce all nodes for K from the branch outputs directly inside
-                    // this rule — no extra AG node needed for the intermediate reduce.
                     var combined = K.defaultValue
                     for kv in prefs.preferences {
                         guard ObjectIdentifier(kv.key) == ObjectIdentifier(k) else { continue }
@@ -100,11 +130,7 @@ extension _ConditionalContent: View where TrueContent: View, FalseContent: View 
 
     /// Returns a single-item static list containing a proxy for this view.
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        _ViewListOutputs(
-            views: .staticList(.unary(TypedUnaryViewGenerator(view, inputs: inputs))),
-            nextImplicitID: 1,
-            staticCount: 1
-        )
+        _ViewListOutputs.unaryViewList(view: view, inputs: inputs)
     }
 
     var _trueContent: TrueContent {

@@ -8,14 +8,69 @@
 import Foundation
 import Synchronization
 
+// MARK: - BoundInputsView
+
+// Placeholder for alert accessory inputs such as text fields.
+// TextField-in-alert support is not implemented yet.
+struct BoundInputsView {}
+
+// MARK: - PlatformItemListFlags
+
+// Controls which platform item types PlatformItemListGenerator collects from the content view.
+protocol PlatformItemListFlags {}
+// Used for alert actions: collects all item types (buttons + text fields).
+struct AllPlatformItemListFlags: PlatformItemListFlags {}
+// Used for alert message: collects text items only.
+struct TextPlatformItemListFlags: PlatformItemListFlags {}
+
+// MARK: - PlatformItemListGenerator
+
+// Creates a subgraph for Content._makeView and collects PlatformItemList.Key preferences.
+struct PlatformItemListGenerator<Flags: PlatformItemListFlags, Content: View>: StatefulRule {
+    typealias Value = PlatformItemList
+
+    // PlatformItemList.Key preference attribute IDs from Content._makeView subgraph.
+    let preferenceNodes: [AGAttribute]
+    // Cached item list from the most recent update.
+    var itemList: Optional<PlatformItemList>
+
+    init(content: Attribute<Content>, inputs: _ViewInputs, inputsIncludeGeometry: Bool) {
+        var itemInputs = inputs
+        var keys = itemInputs.preferences.keys
+        keys.insert(PlatformItemList.Key.self)
+        itemInputs.preferences = PreferencesInputs(keys: keys,
+                                                   hostKeys: itemInputs.preferences.hostKeys)
+        let view = _GraphValue<Content>(_attribute: content)
+        let outputs = Content._makeView(view: view, inputs: itemInputs)
+        self.preferenceNodes = outputs.preferences.values(for: PlatformItemList.Key.self)
+        self.itemList = nil
+    }
+
+    // Explicit flags variant (used for TextPlatformItemListFlags message path).
+    init(flags: Flags.Type, content: Attribute<Content>, inputs: _ViewInputs,
+         inputsIncludeGeometry: Bool) {
+        self.init(content: content, inputs: inputs, inputsIncludeGeometry: inputsIncludeGeometry)
+    }
+
+    mutating func updateValue() {
+        var combined = PlatformItemList()
+        for nodeID in preferenceNodes {
+            combined.merge(Attribute<PlatformItemList>(nodeID).value)
+        }
+        itemList = combined
+        AttributeGraph.setStatefulOutput(combined)
+    }
+}
+
 // MARK: - ViewIdentity
-// Stable per-modifier-instance identity used as a dictionary key.
+
+// Stable per-modifier-instance identity used as a preference dictionary key.
 struct ViewIdentity: Hashable {
     private static let counter = Atomic<UInt64>(0)
     let id: UInt64
     init() { id = ViewIdentity.counter.wrappingAdd(1, ordering: .relaxed).newValue }
 
-    // Tracker owns a stable identity for one modifier instance.
+    // Tracks identity across phase changes.
     struct Tracker {
         private var current: ViewIdentity?
 
@@ -30,25 +85,13 @@ struct ViewIdentity: Hashable {
     }
 }
 
-// MARK: - AlertPreference
-// Runtime data needed to render an alert overlay.
-struct AlertPreference: @unchecked Sendable {
-    let title: Text
-    let makeActions: () -> AnyView
-    let actionsItemList: PlatformItemList?
-    let makeMessage: (() -> AnyView)?
-    let messageItemList: PlatformItemList?
-    let isPresented: Binding<Bool>
-    let onDismiss: (() -> Void)?
-    let severity: DialogSeverity
-}
-
 // MARK: - AlertStorage
-// Stores the alert preference written into host preferences.
+
+// Stores the data needed by the overlay renderer.
 struct AlertStorage: @unchecked Sendable {
     let preference: AlertPreference
 
-    // Merges alert storage by identity. The next value wins on collision.
+    // Merge by ViewIdentity. nextValue wins on collision.
     struct PreferenceKey: HostPreferenceKey {
         typealias Value = [ViewIdentity: AlertStorage]
         static var defaultValue: Value { [:] }
@@ -58,17 +101,45 @@ struct AlertStorage: @unchecked Sendable {
     }
 }
 
+// MARK: - AlertPreference
+
+// Alert presentation payload rendered directly by the overlay.
+struct AlertPreference: @unchecked Sendable {
+    let title: Text
+    let makeActions: () -> AnyView
+    let actionsItemList: PlatformItemList?
+    let makeMessage: (() -> AnyView)?
+    let messageItemList: PlatformItemList?
+    let isPresented: Binding<Bool>
+    let severity: DialogSeverity
+    // onDismiss support is not wired yet.
+    let onDismiss: (() -> Void)?
+}
+
 // MARK: - MakeAlertStorage
-// StatefulRule that produces the preference mutation closure.
+
+// Builds the preference mutation for active alerts.
 struct MakeAlertStorage<Actions: View, Message: View>: StatefulRule {
     typealias Value = (inout [ViewIdentity: AlertStorage]) -> Void
 
-    let environment: Attribute<EnvironmentValues>
-    let modifier: Attribute<AlertModifier<Actions, Message>>
-    let actionsItemList: AGWeakAttribute
-    let messageItemList: AGWeakAttribute
-    let phase: Attribute<Phase>
+    // Core inputs used to build the alert preference.
+    let environment:     Attribute<EnvironmentValues>
+    let modifier:        Attribute<AlertModifier<Actions, Message>>
+    let actionsItemList: WeakAttribute<PlatformItemList>
+    let messageItemList: WeakAttribute<PlatformItemList>
+    let phase:           Attribute<Phase>
     var identityTracker: ViewIdentity.Tracker
+
+    // Reserved change-detection cache for future platform alert updates.
+    // The current overlay renderer does not use these fields.
+    var lastTitle:                    Optional<String>
+    var lastColorScheme:              Optional<ColorScheme>
+    var lastIcon:                     Optional<Image>
+    var lastTintColor:                Optional<Color.Resolved>
+    var lastSeverity:                 DialogSeverity
+    var lastSuppressionConfiguration: Optional<DialogSuppressionConfiguration>
+    var lastAccessibilityTitle:       Optional<NSAttributedString>
+    var lastDialogPreventsTermination: Optional<Bool>
 
     mutating func updateValue() {
         guard let graph = AttributeGraph.current else {
@@ -78,10 +149,10 @@ struct MakeAlertStorage<Actions: View, Message: View>: StatefulRule {
         var actionsList: PlatformItemList?
         var messageList: PlatformItemList?
         if actionsItemList.isValid(in: graph) {
-            actionsList = Attribute<PlatformItemList>(actionsItemList.toStrong()).value
+            actionsList = actionsItemList.toStrong().value
         }
         if messageItemList.isValid(in: graph) {
-            messageList = Attribute<PlatformItemList>(messageItemList.toStrong()).value
+            messageList = messageItemList.toStrong().value
         }
         let m = modifier.value
         let identity = identityTracker.update(for: phase.value)
@@ -96,11 +167,11 @@ struct MakeAlertStorage<Actions: View, Message: View>: StatefulRule {
             title: m.title,
             makeActions: { AnyView(m.actions) },
             actionsItemList: actionsList,
-            makeMessage: (m.message is EmptyView) ? nil : { AnyView(m.message) },
+            makeMessage: { AnyView(m.message) },
             messageItemList: messageList,
             isPresented: m.isPresented,
-            onDismiss: nil,
-            severity: m.severity
+            severity: m.severity,
+            onDismiss: nil
         )
         let storage = AlertStorage(preference: pref)
         let id = identity
@@ -112,7 +183,7 @@ struct MakeAlertStorage<Actions: View, Message: View>: StatefulRule {
 
 // MARK: - PlatformItemList
 
-// Collects button and text-field descriptors before MakeAlertStorage consumes them.
+// PlatformItemList for alert and confirmation-dialog actions.
 struct PlatformItemList {
     struct Item: Identifiable {
         var id: AnyHashable
@@ -197,81 +268,95 @@ private struct PlatformItemListButtonBody: View {
 }
 
 // MARK: - ActionsModifier
-// Pass-through modifier for alert actions rendered directly in the overlay.
+
+// Applies the button style that emits PlatformItemList entries.
+// TextFieldStyleModifier is not implemented yet.
 struct ActionsModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .modifier(PrimitiveButtonStyleContainerModifier(style: PlatformItemListButtonStyle()))
-        // TextFieldStyleModifier<PlatformItemListTextFieldStyle> is still pending:
-        // TextField/TextFieldStyle infrastructure is not implemented yet.
     }
 }
 
 // MARK: - AlertModifier
-// ViewModifier for presenting an alert when isPresented is true.
-struct AlertModifier<Actions: View, Message: View>: ViewModifier {
+
+// Modifier that records alert presentation state.
+struct AlertModifier<Actions: View, Message: View>: ViewModifier, MultiViewModifier {
     typealias Body = Never
 
+    let presentedValue: Bool
+    let isPresented: Binding<Bool>
     let title: Text
     let actions: Actions
     let message: Message
-    let isPresented: Binding<Bool>
+    let auxiliaryContent: Optional<BoundInputsView>
+    let representsError: Bool
+    // Presentation severity for overlay rendering.
     let severity: DialogSeverity
 }
 
 extension AlertModifier {
-    // Creates a stateful rule that produces the alert preference mutation.
+    // Collect content outputs, build item lists, and register an alert preference.
     static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs,
                           body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
         guard let graph = AttributeGraph.current else {
             fatalError("AlertModifier._makeView called outside AG context")
         }
-        func makePlatformItemList<C: View>(view: _GraphValue<C>, inputs: _ViewInputs) -> Attribute<PlatformItemList> {
-            var itemInputs = inputs
-            var keys = itemInputs.preferences.keys
-            keys.insert(PlatformItemList.Key.self)
-            itemInputs.preferences = PreferencesInputs(keys: keys,
-                                                       hostKeys: itemInputs.preferences.hostKeys)
-            let outputs = C._makeView(view: view, inputs: itemInputs)
-            let nodes = outputs.preferences.values(for: PlatformItemList.Key.self)
-            return graph.makeRule {
-                var combined = PlatformItemList.Key.defaultValue
-                for nodeID in nodes {
-                    let value = Attribute<PlatformItemList>(nodeID).value
-                    PlatformItemList.Key.reduce(value: &combined) { value }
-                }
-                return combined
-            }
-        }
 
-        let actionsItemList = makePlatformItemList(view: modifier[\.actions], inputs: inputs)
-        let messageItemList = makePlatformItemList(view: modifier[\.message], inputs: inputs)
+        // Step 1: content view outputs.
+        var outputs = body(_Graph(), inputs)
+
+        // Step 2: actions PlatformItemListGenerator.
+        let actionsGenerator = PlatformItemListGenerator<AllPlatformItemListFlags, Actions>(
+            content: modifier[\.actions]._attribute,
+            inputs: inputs,
+            inputsIncludeGeometry: true
+        )
+        let actionsListAttr: Attribute<PlatformItemList> = graph.makeStatefulRule(actionsGenerator)
+
+        // Step 3: message PlatformItemListGenerator.
+        let messageGenerator = PlatformItemListGenerator<TextPlatformItemListFlags, Message>(
+            flags: TextPlatformItemListFlags.self,
+            content: modifier[\.message]._attribute,
+            inputs: inputs,
+            inputsIncludeGeometry: true
+        )
+        let messageListAttr: Attribute<PlatformItemList> = graph.makeStatefulRule(messageGenerator)
+
+        // Step 4: WeakAttribute<PlatformItemList> conversion.
+        let actionsWeakAttr = actionsListAttr.asWeak()
+        let messageWeakAttr = messageListAttr.asWeak()
+
+        // Step 5: MakeAlertStorage AG node.
         let storageRule = MakeAlertStorage<Actions, Message>(
             environment: inputs.base.cachedEnvironment.value.environment,
             modifier: modifier._attribute,
-            actionsItemList: actionsItemList.asWeak(),
-            messageItemList: messageItemList.asWeak(),
+            actionsItemList: actionsWeakAttr,
+            messageItemList: messageWeakAttr,
             phase: inputs.base.phase,
-            identityTracker: ViewIdentity.Tracker()
+            identityTracker: ViewIdentity.Tracker(),
+            lastTitle:                    Optional<String>.none,
+            lastColorScheme:              Optional<ColorScheme>.none,
+            lastIcon:                     Optional<Image>.none,
+            lastTintColor:                Optional<Color.Resolved>.none,
+            lastSeverity:                 .standard,
+            lastSuppressionConfiguration: Optional<DialogSuppressionConfiguration>.none,
+            lastAccessibilityTitle:       Optional<NSAttributedString>.none,
+            lastDialogPreventsTermination: Optional<Bool>.none
         )
         let storageAttr: Attribute<MakeAlertStorage<Actions, Message>.Value> =
             graph.makeStatefulRule(storageRule)
 
-        // Build AlertStorage.PreferenceKey preference from the mutation closure.
+        // Step 6: AlertStorage.PreferenceKey output.
+        // makeRule applies the mutation closure to get the final dictionary.
         let prefAttr: Attribute<AlertStorage.PreferenceKey.Value> = graph.makeRule {
             var dict = AlertStorage.PreferenceKey.defaultValue
             storageAttr.value(&dict)
             return dict
         }
-        var outputs = body(_Graph(), inputs)
         outputs.preferences.append(AlertStorage.PreferenceKey.self,
                                    node: prefAttr.identifier)
         return outputs
-    }
-
-    public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs,
-                                     body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        body(_Graph(), inputs)
     }
 }
 
@@ -280,14 +365,13 @@ extension AlertModifier {
 //
 // Button layout rules:
 //   - Only first 3 items are materialized.
-//   - 2 items use HStack with cancel on the left and default on the right.
-//   - 3 items use VStack with default/custom top, destructive middle, cancel bottom.
+//   - 2 items -> HStack: cancel on left, default on right.
+//   - 3 items -> VStack: default/custom top, destructive middle, cancel bottom.
 //
 // Keyboard shortcuts:
-//   - ButtonRole.cancel uses Escape (.cancelAction).
-//   - Default (nil role or .defaultAction) uses Return (.defaultAction).
-//   - Overlay keyboard shortcut handling is not wired to the render pipeline yet.
-//     These are annotated on the buttons but require keyboard event routing to take effect.
+//   - ButtonRole.cancel -> Escape (.cancelAction)
+//   - Default (nil role or .defaultAction) -> Return (.defaultAction)
+//   - FIXME: Overlay keyboard shortcut handling is not yet wired to the render pipeline.
 struct AlertOverlayView: View {
     let preference: AlertPreference
 
@@ -325,10 +409,8 @@ struct AlertOverlayView: View {
     @ViewBuilder
     private var actions: some View {
         if let list = preference.actionsItemList, !list.buttonItems.isEmpty {
-            // Show only the first three action items in role order.
             let items = Array(orderedItems(list.buttonItems).prefix(3))
             if items.count == 2 {
-                // 2 buttons: horizontal, cancel left / default right.
                 HStack(spacing: 8) {
                     actionButton(items[0])
                     actionButton(items[1])
@@ -362,7 +444,6 @@ struct AlertOverlayView: View {
             guard item.isEnabled else { return }
             item.action?()
             preference.isPresented.wrappedValue = false
-            preference.onDismiss?()
         }) {
             item.label
                 .frame(maxWidth: .infinity)
@@ -389,10 +470,13 @@ extension View {
     public func alert<A: View>(_ title: Text,
                                 isPresented: Binding<Bool>,
                                 @ViewBuilder actions: () -> A) -> some View {
-        modifier(AlertModifier(title: title,
+        modifier(AlertModifier(presentedValue: isPresented.wrappedValue,
+                               isPresented: isPresented,
+                               title: title,
                                actions: actions().modifier(ActionsModifier()),
                                message: EmptyView(),
-                               isPresented: isPresented,
+                               auxiliaryContent: nil,
+                               representsError: false,
                                severity: .automatic))
     }
 }
@@ -416,10 +500,13 @@ extension View {
                                          isPresented: Binding<Bool>,
                                          @ViewBuilder actions: () -> A,
                                          @ViewBuilder message: () -> M) -> some View {
-        modifier(AlertModifier(title: title,
+        modifier(AlertModifier(presentedValue: isPresented.wrappedValue,
+                               isPresented: isPresented,
+                               title: title,
                                actions: actions().modifier(ActionsModifier()),
                                message: message(),
-                               isPresented: isPresented,
+                               auxiliaryContent: nil,
+                               representsError: false,
                                severity: .automatic))
     }
 }
@@ -436,20 +523,25 @@ extension View {
                                    isPresented: Binding<Bool>,
                                    presenting data: T?,
                                    @ViewBuilder actions: (T) -> A) -> some View {
-        // Gate isPresented on data != nil: alert only shows when both are true.
         let gated = Binding<Bool>(get: { data != nil && isPresented.wrappedValue },
                                   set: { isPresented.wrappedValue = $0 })
         if let data {
-            return AnyView(modifier(AlertModifier(title: title,
+            return AnyView(modifier(AlertModifier(presentedValue: gated.wrappedValue,
+                                                  isPresented: gated,
+                                                  title: title,
                                                   actions: actions(data).modifier(ActionsModifier()),
                                                   message: EmptyView(),
-                                                  isPresented: gated,
+                                                  auxiliaryContent: nil,
+                                                  representsError: false,
                                                   severity: .automatic)))
         }
-        return AnyView(modifier(AlertModifier(title: title,
+        return AnyView(modifier(AlertModifier(presentedValue: gated.wrappedValue,
+                                              isPresented: gated,
+                                              title: title,
                                               actions: EmptyView().modifier(ActionsModifier()),
                                               message: EmptyView(),
-                                              isPresented: gated,
+                                              auxiliaryContent: nil,
+                                              representsError: false,
                                               severity: .automatic)))
     }
 }
@@ -472,16 +564,22 @@ extension View {
         let gated = Binding<Bool>(get: { data != nil && isPresented.wrappedValue },
                                   set: { isPresented.wrappedValue = $0 })
         if let data {
-            return AnyView(modifier(AlertModifier(title: title,
+            return AnyView(modifier(AlertModifier(presentedValue: gated.wrappedValue,
+                                                  isPresented: gated,
+                                                  title: title,
                                                   actions: actions(data).modifier(ActionsModifier()),
                                                   message: message(data),
-                                                  isPresented: gated,
+                                                  auxiliaryContent: nil,
+                                                  representsError: false,
                                                   severity: .automatic)))
         }
-        return AnyView(modifier(AlertModifier(title: title,
+        return AnyView(modifier(AlertModifier(presentedValue: gated.wrappedValue,
+                                              isPresented: gated,
+                                              title: title,
                                               actions: EmptyView().modifier(ActionsModifier()),
                                               message: EmptyView(),
-                                              isPresented: gated,
+                                              auxiliaryContent: nil,
+                                              representsError: false,
                                               severity: .automatic)))
     }
 }
@@ -492,10 +590,13 @@ extension View {
         error: E?,
         @ViewBuilder actions: () -> A) -> some View {
         let title = error.map { Text($0.errorDescription ?? $0.localizedDescription) } ?? Text("")
-        return modifier(AlertModifier(title: title,
+        return modifier(AlertModifier(presentedValue: isPresented.wrappedValue,
+                                      isPresented: isPresented,
+                                      title: title,
                                       actions: actions().modifier(ActionsModifier()),
                                       message: EmptyView(),
-                                      isPresented: isPresented,
+                                      auxiliaryContent: nil,
+                                      representsError: true,
                                       severity: .automatic))
     }
 
@@ -508,16 +609,22 @@ extension View {
         let gated = Binding<Bool>(get: { error != nil && isPresented.wrappedValue },
                                   set: { isPresented.wrappedValue = $0 })
         if let error {
-            return AnyView(modifier(AlertModifier(title: title,
+            return AnyView(modifier(AlertModifier(presentedValue: gated.wrappedValue,
+                                                  isPresented: gated,
+                                                  title: title,
                                                   actions: actions(error).modifier(ActionsModifier()),
                                                   message: message(error),
-                                                  isPresented: gated,
+                                                  auxiliaryContent: nil,
+                                                  representsError: true,
                                                   severity: .automatic)))
         }
-        return AnyView(modifier(AlertModifier(title: title,
+        return AnyView(modifier(AlertModifier(presentedValue: gated.wrappedValue,
+                                              isPresented: gated,
+                                              title: title,
                                               actions: EmptyView().modifier(ActionsModifier()),
                                               message: EmptyView(),
-                                              isPresented: gated,
+                                              auxiliaryContent: nil,
+                                              representsError: true,
                                               severity: .automatic)))
     }
 }

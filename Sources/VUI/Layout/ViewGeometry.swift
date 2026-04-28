@@ -7,6 +7,25 @@
 
 import Foundation
 
+// MARK: - ViewGeometry
+
+/// Per-child geometry computed by the layout engine during the layout pass.
+/// Used as the output type of LayoutEngineBox.childGeometries and LayoutChildGeometry rule.
+struct ViewGeometry: Equatable {
+    /// Position in parent-local coordinates (top-left corner after anchor resolution).
+    var origin: CGPoint
+
+    /// Layout dimensions for alignment guide queries and size access.
+    var dimensions: ViewDimensions
+
+    init(origin: CGPoint, dimensions: ViewDimensions) {
+        self.origin = origin
+        self.dimensions = dimensions
+    }
+}
+
+// MARK: - ViewSize
+
 /// The concrete size of a view as resolved by the layout pass.
 /// { value: CGSize (16 bytes), proposal: ProposedViewSize (16 bytes) }, total 32 bytes.
 /// `width`/`height` are computed accessors into `value`.

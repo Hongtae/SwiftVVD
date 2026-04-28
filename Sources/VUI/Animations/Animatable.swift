@@ -33,6 +33,7 @@ extension Animatable where Self.AnimatableData == EmptyAnimatableData {
 }
 
 extension Animatable {
+    // Animation graph support is not implemented yet.
     public static func _makeAnimatable(value: inout _GraphValue<Self>, inputs: _GraphInputs) {
     }
 }

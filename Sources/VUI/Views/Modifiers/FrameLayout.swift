@@ -41,17 +41,6 @@ extension _FrameLayout: UnaryLayout {
                 )
             },
             spacing: lc.spacing,
-            dimensions: { proposal in
-                let childProposal = ProposedViewSize(
-                    width:  w != nil ? w : proposal.width,
-                    height: h != nil ? h : proposal.height
-                )
-                let childSize = lc.sizeThatFits(childProposal)
-                return ViewDimensions(
-                    width:  w ?? childSize.width,
-                    height: h ?? childSize.height
-                )
-            },
             place: { position, anchor, proposal in
                 let childProposal = ProposedViewSize(
                     width:  w != nil ? w : proposal.width,
@@ -83,7 +72,8 @@ extension _FrameLayout: UnaryLayout {
                 lc.place(at: CGPoint(x: cx, y: cy),
                          anchor: UnitPoint(x: ax, y: ay),
                          proposal: childProposal)
-            }
+            },
+            explicitAlignment: { lc.explicitAlignment($0, at: $1) }
         )
     }
 }
@@ -170,13 +160,10 @@ extension _FlexFrameLayout: UnaryLayout {
                 computeSize(proposal: proposal)
             },
             spacing: lc.spacing,
-            dimensions: { proposal in
-                let size = computeSize(proposal: proposal)
-                return ViewDimensions(width: size.width, height: size.height)
-            },
             place: { position, anchor, proposal in
                 lc.place(at: position, anchor: anchor, proposal: proposal)
-            }
+            },
+            explicitAlignment: { lc.explicitAlignment($0, at: $1) }
         )
     }
 }

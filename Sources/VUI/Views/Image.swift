@@ -288,11 +288,7 @@ extension Image: View {
             let resolved = resolvedImageAttr.value
 
             return LayoutComputer(
-                sizeThatFits: { _ in resolved?.size ?? .zero },
-                dimensions: { _ in
-                    let size = resolved?.size ?? .zero
-                    return ViewDimensions(width: size.width, height: size.height)
-                }
+                sizeThatFits: { _ in resolved?.size ?? .zero }
             )
         }
 

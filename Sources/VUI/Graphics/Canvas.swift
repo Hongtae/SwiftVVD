@@ -57,9 +57,6 @@ extension Canvas {
             LayoutComputer(
                 sizeThatFits: { proposal in
                     CGSize(width: proposal.width ?? 0, height: proposal.height ?? 0)
-                },
-                dimensions: { proposal in
-                    ViewDimensions(width: proposal.width ?? 0, height: proposal.height ?? 0)
                 }
             )
         }

@@ -26,47 +26,53 @@ extension EnvironmentKey where Self.Value: Equatable {
     }
 }
 
+// Wraps every EnvironmentKey as a PropertyKey so it can be stored in PropertyList.
+struct EnvironmentPropertyKey<K: EnvironmentKey>: PropertyKey {
+    typealias Value = K.Value
+    static var defaultValue: K.Value { K.defaultValue }
+    static func valuesEqual(_ a: K.Value, _ b: K.Value) -> Bool { K._valuesEqual(a, b) }
+}
+
+// Stores Observable objects in the environment by concrete type.
+struct ObservableObjectKey<T: AnyObject & Observable>: PropertyKey {
+    typealias Value = T?
+    static var defaultValue: T? { nil }
+    static func valuesEqual(_ a: T?, _ b: T?) -> Bool { a === b }
+}
+
 public struct EnvironmentValues: CustomStringConvertible {
-    var values: [ObjectIdentifier: Any]
+    var _plist: PropertyList
+    var tracker: _PropertyListTracker?
 
     public init() {
-        self.values = [:]
+        self._plist = PropertyList()
+        self.tracker = nil
     }
 
     public subscript<K>(key: K.Type) -> K.Value where K: EnvironmentKey {
-        get {
-            if let value = values[ObjectIdentifier(key)] as? K.Value {
-                return value
-            }
-            return K.defaultValue
-        }
-        set {
-            values[ObjectIdentifier(key)] = newValue
-        }
+        get { _plist[EnvironmentPropertyKey<K>.self] }
+        set { _plist[EnvironmentPropertyKey<K>.self] = newValue }
     }
 
-    public var description: String { String(describing: values) }
+    public var description: String { _plist.description }
 }
 
 extension EnvironmentValues {
     public subscript<T: AnyObject & Observable>(objectType type: T.Type) -> T? {
-        get { values[ObjectIdentifier(type)] as? T }
-        set { values[ObjectIdentifier(type)] = newValue }
+        get { _plist[ObservableObjectKey<T>.self] }
+        set { _plist[ObservableObjectKey<T>.self] = newValue }
     }
 
     // Internal subscripts for keypath literal use.
-    // (T.Type is not Hashable, so ObjectIdentifier is used as the subscript index.)
 
-    // Optional — keypath stored in Environment<T?>.init and _EnvironmentKeyWritingModifier<T?>.
     subscript<T: AnyObject & Observable>(_obs id: ObjectIdentifier) -> T? {
-        get { values[id] as? T }
-        set { values[id] = newValue }
+        get { _plist[ObservableObjectKey<T>.self] }
+        set { _plist[ObservableObjectKey<T>.self] = newValue }
     }
 
-    // Non-optional — keypath stored in Environment<T>.init. Crashes if not injected.
     subscript<T: AnyObject & Observable>(_crashingObs id: ObjectIdentifier) -> T {
         get {
-            guard let obj = values[id] as? T else {
+            guard let obj = _plist[ObservableObjectKey<T>.self] else {
                 fatalError("No observable object of type \(T.self) found in the environment. Inject it with .environment(_ object:).")
             }
             return obj
@@ -160,7 +166,7 @@ extension Environment: DynamicProperty {
     /// The closure is called inside the body rule (see `View._makeView`) with a pointer
     /// to the corresponding field in a mutable copy of the view struct.  It reads the
     /// current `.keyPath` value from the copy, resolves it against the live
-    /// `EnvironmentValues` AG node, and writes the resulting `.value` back — exactly
+    /// `EnvironmentValues` AG node, and writes the resulting `.value` back. This is
     /// mirroring the mutation that occurs before `body` is called.
     public static func _makeProperty<V>(in buffer: inout _DynamicPropertyBuffer,
                                         container: _GraphValue<V>,

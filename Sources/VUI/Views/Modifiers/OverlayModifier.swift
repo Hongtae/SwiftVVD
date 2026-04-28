@@ -54,7 +54,6 @@ public struct _OverlayModifier<Overlay>: ViewModifier where Overlay: View {
             return LayoutComputer(
                 sizeThatFits: { proposal in mainLC.sizeThatFits(proposal) },
                 spacing: mainLC.spacing,
-                dimensions: { proposal in mainLC.dimensions(in: proposal) },
                 place: { position, anchor, proposal in
                     mainLC.place(at: position, anchor: anchor, proposal: proposal)
                     let mainSize = mainLC.sizeThatFits(proposal)
@@ -104,7 +103,8 @@ public struct _OverlayModifier<Overlay>: ViewModifier where Overlay: View {
                     ovPosAttr.setValue(CGPoint(x: ovOriginX, y: ovOriginY))
                     ovSizeAttr.setValue(ViewSize(ovSize))
                     ovLC.place(at: ovPosition, anchor: ovAnchor, proposal: ovProposal)
-                }
+                },
+                explicitAlignment: { mainLC.explicitAlignment($0, at: $1) }
             )
         }
         let mergedPreferences = PreferencesOutputs.merge([mainOutputs.preferences, ovOutputs.preferences], in: graph)
