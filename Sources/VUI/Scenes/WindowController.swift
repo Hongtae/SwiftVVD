@@ -28,12 +28,14 @@ protocol WindowInputEventHandler {
 // Overlay-mode aux/modal controllers never call makeWindow(), so windowContext stays nil.
 //
 // Conforms to ViewRendererHost and ViewGraphRootValueUpdater.
+// Phase 4: AG ownership moved from WindowController to ViewGraph.
 class WindowController: WindowInputEventHandler, WindowDelegate,
                         ViewRendererHost, ViewGraphRootValueUpdater,
                         ViewGraphRenderDelegate,
                         @unchecked Sendable {
 
     typealias AttachWindow = @MainActor (any PlatformWindow) -> Void
+    typealias AttachWindowResolver = (AttachWindow?) -> Void
 
     var windowContext: WindowContext?
 
@@ -63,7 +65,8 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         _nextEventSerial.wrappingAdd(1, ordering: .relaxed).oldValue
     }
 
-    // viewGraph owns the view-tree AttributeGraph and gesture routing.
+    // viewGraph owns the view-tree AttributeGraph (GraphHost.data) and gesture routing.
+    // Phase 4: moved from `let graph: AttributeGraph` + scattered input/output attrs.
     // IUO because gestureGraph must be created and wired before ViewGraph.init runs _makeView.
     var viewGraph: ViewGraph { _viewGraph }
     private var _viewGraph: ViewGraph!
@@ -102,7 +105,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
 
     // ViewRendererHost / ViewGraphOwner stored state.
     // WindowController tracks its own owner-side state separately from ViewGraph's internal state,
-    // so host state and graph state can evolve independently.
+    // matching the pattern where NSHostingView also conforms to ViewGraphOwner independently.
     var currentTimestamp: Time = Time(seconds: 0)
     var valuesNeedingUpdate: ViewGraphRootValues = []
     var renderingPhase: ViewRenderingPhase = ViewRenderingPhase()
@@ -134,13 +137,14 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         }
         self.date = .now
 
-        // Create GestureGraph first because ViewGraph wiring may create GestureResponders.
+        // Create GestureGraph first. It owns an independent AG, separate from ViewGraph's AG.
         self.gestureGraph = GestureGraph()
         // Wire rendererHost back-reference before ViewGraph.init. GestureResponder.init
         // reads viewGraph.rendererHost?.gestureGraph during _makeView.
         self.gestureGraph!.rendererHost = self
 
-        // Create ViewGraph. This performs full AG wiring including _makeView.
+        // Create ViewGraph. This performs full AG wiring including _makeView,
+        // which may create GestureResponders.
         // rendererHost: self must be set on GestureGraph before this call.
         self._viewGraph = ViewGraph(rootViewType: Content.self, content: contentValue, rendererHost: self)
         
@@ -152,13 +156,14 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         //   updateSize() / updateEnvironment() etc. called inline in updateView for now.
         //   Full invalidateProperties(_:mayDeferUpdate:) wiring is a future step.
         self.viewGraph.updateDelegate = self
-        // delegate (ViewGraphHostDelegate): not set yet.
+        // delegate (ViewGraphHostDelegate) is not set yet.
+        // TODO: wire updateGraphInputs(_:inout _GraphInputs) once the call site is implemented.
         // self.viewGraph.delegate = self
     }
 
     // Sheet-specific init: content comes from a reactive attribute in a parent AG.
     // The ViewGraph creates a crossGraphRef to mirror the parent's attribute, so that
-    // when parent @State changes, parent contentAttr re-evaluates and the child graph updates.
+    // when parent @State changes, parent contentAttr re-evaluates and child graph updates.
     // contentAttr must already have a non-nil cached value in sourceGraph before this is called.
     init(crossGraphContent contentAttr: Attribute<AnyView>,
          sourceGraph: AttributeGraph,
@@ -778,31 +783,33 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     }
 
     // MARK: - ViewGraphRenderDelegate
-    //
-    // viewGraph.renderDelegate = self is set at the end of init.
+
+    // WindowController is the rendering host.
+    // viewGraph.renderDelegate = self is set at end of init.
     // updateRenderContext is called once per frame in updateFrame (before updateView).
 
-    // The root object being rendered.
+    // renderingRootView: the root platform object being rendered.
+    // WindowController is the rendering host, so return self.
     var renderingRootView: AnyObject { self }
 
-    // Fills in per-frame render parameters.
+    // updateRenderContext: fills in per-frame render parameters.
     // contentsScale: from sceneResources (updated by WindowContext on window events).
     // opaqueBackground: true if config background has no transparency.
     func updateRenderContext(_ context: inout ViewGraphRenderContext) {
         context.contentsScale = sceneResources.contentScaleFactor
-        // backgroundColor opacity is 0.0...1.0. Treat >= 1.0 as fully opaque.
-        // backgroundColor is VVD.Color, and .a is the alpha Scalar.
+        // backgroundColor.opacity is 0.0-1.0; treat >= 1.0 as fully opaque.
+        // backgroundColor is VVD.Color; .a is the alpha Scalar (0.0-1.0).
         context.opaqueBackground = (config.backgroundColor.a >= 1.0)
     }
 
-    // Ensures body runs on the main render thread.
+    // withMainThreadRender: ensures body runs on the main render thread.
     // The VVD render loop already runs on the appropriate thread, so call body() directly.
     func withMainThreadRender(wasAsync: Bool, _ body: () -> Time) -> Time {
         return body()
     }
 
-    // How long until the next frame should be rendered.
-    // VVD controls frame pacing. Returning 0.0 means render at the VVD frame rate.
+    // renderIntervalForDisplayLink: how long until the next frame should be rendered.
+    // VVD controls frame pacing; returning 0.0 means "render at VVD frame rate".
     func renderIntervalForDisplayLink(timestamp: Time) -> Double {
         return 0.0
     }
@@ -836,7 +843,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     weak var parentWindow: WindowController?
 
     private struct AuxChildEntry: @unchecked Sendable {
-        let controller: WindowController   // strong owner for aux children
+        let controller: WindowController   // strong, WindowController owns its aux children
         var isOverlay: Bool = true
         var initiated: Bool = false
         var frame: CGRect? = nil           // overlay hit-test / draw offset (independent of isOverlay)
@@ -855,19 +862,19 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     //   In dismissAllModalWindows, position (first vs rest) determines reason:
     //   first = was active, so .byParent; rest = queued and never shown, so .cancelled.
     private struct ModalChildEntry: @unchecked Sendable {
-        let controller: WindowController   // strong owner for modal children
-        var isOverlay: Bool = false   // set to true only when overlay mode is selected; false = platform window
+        let controller: WindowController   // strong, WindowController owns its modal children
+        var isOverlay: Bool = false   // set to true only when overlay is confirmed; false = platform window
         var initiated: Bool = false   // true once activation completes; updateView/drawFrame gate on this
         var session: PresentationSession = .legacy
         var contentAttr: Attribute<AnyView>? = nil
-        var attachWindow: ((AttachWindow?) -> Void)? = nil
+        var attachWindow: AttachWindowResolver? = nil
     }
     private let modalChildren = Mutex<[ModalChildEntry]>([])
 
     // MARK: Aux child management
 
     func addAuxChild(_ child: WindowController,
-                     attachWindow: ((AttachWindow?) -> Void)? = nil) {
+                     attachWindow: AttachWindowResolver? = nil) {
         child.parentWindow = self
         let asOverlay = (self.window == nil)
         var entry = AuxChildEntry(controller: child)
@@ -886,9 +893,12 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                     }
                 }
             }
-            // Fallback: if attach was not called (caller chose overlay), correct and mark initiated.
+            // attachWindow is allowed to hand off to the MainActor before calling the
+            // AttachWindow callback. Enqueue the fallback on the same actor so a real
+            // attach gets the first chance to mark this child as initiated.
             Task { @MainActor [weak self, weak child] in
                 self?.auxChildWindows.withLock { entries in
+                    // initiated == false means AttachWindow did not run.
                     if let i = entries.firstIndex(where: { $0.controller === child }),
                        !entries[i].initiated {
                         entries[i].isOverlay = true
@@ -939,7 +949,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     func addModalChild(_ child: WindowController,
                        session: PresentationSession = .legacy,
                        contentAttr: Attribute<AnyView>? = nil,
-                       attachWindow: ((AttachWindow?) -> Void)? = nil) {
+                       attachWindow: AttachWindowResolver? = nil) {
         child.parentWindow = self
         var entry = ModalChildEntry(controller: child, session: session)
         entry.contentAttr = contentAttr
@@ -971,7 +981,8 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         }
 
         if !asOverlay, let attachWindow = entry.attachWindow {
-            // Race guard. _activateModal runs on the main thread.
+            // Race guard: a preference-driven session can be dismissed before
+            // attachWindow creates the platform window.
             if let presented = modalChildren.withLock({ $0.first?.session.isPresented }),
                !presented.wrappedValue {
                 removeModalChild(child, reason: .cancelled)
@@ -990,31 +1001,51 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                     }
                 ) ?? false
                 if ok {
-                    self.modalChildren.withLock { entries in
-                        if let i = entries.firstIndex(where: { $0.controller === child }) {
-                            entries[i].isOverlay = false
-                            entries[i].initiated = true
+                    let didInitiate = self.modalChildren.withLock { entries in
+                        guard let child,
+                              let i = entries.firstIndex(where: { $0.controller === child }) else {
+                            return false
                         }
+                        entries[i].isOverlay = false
+                        entries[i].initiated = true
+                        return true
                     }
-                    child?.onModalSessionInitiated()
+                    if didInitiate {
+                        child?.onModalSessionInitiated()
+                    }
                 } else {
                     Log.error("WindowController: presentModalWindow failed")
-                    if let child { self.removeModalChild(child, reason: .cancelled) }
-                }
-            }
-            // Fallback: if attach was not called (caller chose overlay), mark as overlay and initiate.
-            Task { @MainActor [weak self, weak child] in
-                guard let self, let child else { return }
-                self.modalChildren.withLock { entries in
-                    if let i = entries.firstIndex(where: { $0.controller === child }),
-                       !entries[i].initiated {
-                        entries[i].isOverlay = true
-                        entries[i].initiated = true
+                    if let child {
+                        self.removeModalChild(child, reason: .cancelled)
                     }
                 }
-                child.onModalSessionInitiated()
-                self.resetGestureHandlers()
-                self.handleMouseHover(at: .zero, deviceID: 0, isTopMost: false)
+            }
+
+            // attachWindow is expected to create/attach the platform window through the
+            // MainActor AttachWindow callback. Enqueue this fallback after that handoff;
+            // if attach never marks the entry as initiated, default to overlay mode.
+            Task { @MainActor [weak self, weak child] in
+                guard let self, let child else { return }
+                let result = self.modalChildren.withLock { entries -> (initiated: Bool, fallback: Bool) in
+                    guard let i = entries.firstIndex(where: { $0.controller === child }) else {
+                        return (false, false)
+                    }
+                    if entries[i].initiated {
+                        return (true, false)
+                    } else {
+                        // initiated == false means AttachWindow did not run.
+                        entries[i].isOverlay = true
+                        entries[i].initiated = true
+                        return (true, true)
+                    }
+                }
+                if result.fallback {
+                    child.onModalSessionInitiated()
+                }
+                if result.initiated {
+                    self.resetGestureHandlers()
+                    self.handleMouseHover(at: .zero, deviceID: 0, isTopMost: false)
+                }
             }
         } else {
             // Overlay forced or no attachWindow: notify with nil, then mark initiated.
@@ -1040,8 +1071,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
             removeModalChild(child, reason: .cancelled)
             return
         }
-        // entry.initiated is false here because it was newly dequeued.
-        // _activateModal will set it after init.
+        // entry.initiated is false here (newly dequeued). _activateModal will set it after init.
         _activateModal(entry: entry)
     }
 
@@ -1122,7 +1152,8 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     }
 
     // MARK: - Preference-driven presentation (sheet / alert)
-    // Sheets and alerts go through the unified modalChildren queue.
+
+    // Sheet and alert presentations go through the unified modalChildren queue.
 
     /// Called from ViewGraph side-effect rule when SheetPreference.Key changes.
     func updateSheetPresentation(_ value: SheetPreference.Value) {
@@ -1177,10 +1208,25 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
             let contentAttr: Attribute<AnyView> = graph.makeInput(value: pref.content)
 
             let sheetKey = WindowKey(namespace: scene.namespace, sceneID: scene.sceneID)
+            // FIXME: This temporary child skips the modal-specific subclass responsibilities
+            // (initial content fitting, overlay drawing/animation, input blocking, and
+            // modal lifecycle forwarding). Clarify the ModalWindowController role before
+            // replacing this with a sheet/modal child.
             let ctrl = WindowController(crossGraphContent: contentAttr,
                                         sourceGraph: graph,
                                         scene: sheetKey)
-            addModalChild(ctrl, session: .sheet(pref), contentAttr: contentAttr)
+            addModalChild(ctrl, session: .sheet(pref), contentAttr: contentAttr) { [weak ctrl] attach in
+                Task { @MainActor [weak ctrl] in
+                    guard let attach, let ctrl else { return }
+                    guard let childWindow = ctrl.makeWindow() else {
+                        Log.error("WindowController: failed to create sheet platform window")
+                        return
+                    }
+                    childWindow.contentSize = CGSize(width: 10, height: 10)
+                    childWindow.origin = .zero
+                    attach(childWindow)
+                }
+            }
 
         }
     }

@@ -173,7 +173,12 @@ extension ConfirmationDialogModifier {
 
     public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs,
                                      body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        body(_Graph(), inputs)
+        guard AttributeGraph.current != nil else {
+            fatalError("\(Self.self)._makeViewList called outside an active AttributeGraph context.")
+        }
+        var outputs = body(_Graph(), inputs)
+        outputs.multiModifier(modifier, inputs: inputs)
+        return outputs
     }
 }
 
