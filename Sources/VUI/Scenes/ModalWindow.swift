@@ -19,20 +19,23 @@ import VVD
 //
 // ModalWindowSceneContext.present() is the OLD path:
 //   -> AppWindowsController.presentModalWindow (now removed)
-//   -> ModalWindowController (private subclass)
+//   -> LegacyModalWindowController<Content> (private subclass)
 // Both AppWindowsController involvement and the ModalWindowScene scene-builder
-// API are removed from the production path. This file is kept because:
+// API are removed from the production path. The controller pieces in this file
+// are kept because:
 //
-//   1. ModalWindowController.drawFrame contains overlay animation logic
+//   1. ModalWindowController owns modal-specific child-window policy such as
+//      auto-resizing to the fitted content size.
+//
+//   2. LegacyModalWindowController.drawFrame contains overlay animation logic
 //      (scale / alpha TransitionAnimation) that MUST be referenced when
 //      implementing overlay animation for the new path (TO-DO).
 //
-//   2. ModalWindowSceneContext contains the platform-window vs overlay
+//   3. ModalWindowSceneContext contains the platform-window vs overlay
 //      selection logic (environment.modalSessionUsingPlatformWindow branch)
 //      that is also needed as a reference for the TO-DO overlay mode work.
 //
 // Do NOT use ModalWindowScene or ModalWindowSceneContext in new code.
-// Remove this file once overlay animation is ported to WindowController.
 
 enum ModalResponse {
     case dismissed   // dismiss() was called programmatically
@@ -142,7 +145,7 @@ class ModalWindowSceneContext<Content>: @unchecked Sendable where Content: View 
     }
 
     private struct _ModalContext: @unchecked Sendable {
-        let window: ModalWindowController<Content>
+        let window: LegacyModalWindowController<Content>
         weak var parentController: WindowController?
         weak var modalWindow: (any PlatformWindow)?
         var windowOffset: CGPoint
@@ -154,7 +157,7 @@ class ModalWindowSceneContext<Content>: @unchecked Sendable where Content: View 
     }
     private var modalContext: _ModalContext? = nil
 
-    private var window: ModalWindowController<Content>? {
+    private var window: LegacyModalWindowController<Content>? {
         self.modalContext?.window
     }
 
@@ -278,7 +281,7 @@ class ModalWindowSceneContext<Content>: @unchecked Sendable where Content: View 
         let usePlatformModal = environment.modalSessionUsingPlatformWindow
 
         let windowKey = WindowKey(namespace: .app, sceneID: SceneID(Content.self, index: 0))
-        let window = ModalWindowController<Content>(
+        let window = LegacyModalWindowController<Content>(
             content: contentGraph,
             sceneContext: self,
             windowKey: windowKey)
@@ -410,7 +413,7 @@ class ModalWindowSceneContext<Content>: @unchecked Sendable where Content: View 
 
     var isAnimating: Bool { modalContext?.transition != nil }
 
-    // MARK: - Drawing (called by ModalWindowController.drawFrame in overlay mode)
+    // MARK: - Drawing (called by LegacyModalWindowController.drawFrame in overlay mode)
 
     func drawModalBackground(offset: CGPoint, with context: GraphicsContext) {
         guard let ctx = modalContext, let frame = modalWindowFrame() else { return }
@@ -500,9 +503,157 @@ class ModalWindowSceneContext<Content>: @unchecked Sendable where Content: View 
     }
 }
 
-// WindowController subclass for modal windows.
-private class ModalWindowController<Content: View>: WindowController, @unchecked Sendable {
+// Minimal presentation state for the preference-driven modal path.
+//
+// This replaces the sizing portion of the old ModalWindowSceneContext for
+// .sheet/.alert/.confirmationDialog, while keeping the legacy scene context
+// available for scene-based modal windows.
+private final class ModalPresentationContext: @unchecked Sendable {
+    private let padding: CGFloat = 4
+
+    private weak var parentController: WindowController?
+    private var windowSize: CGSize = .zero
+    private var windowOffset: CGPoint = .zero
+
+    var isAnimating: Bool { false }
+
+    init(parentController: WindowController) {
+        self.parentController = parentController
+    }
+
+    func onViewLoaded() {
+    }
+
+    func onViewLayoutChanged(controller: WindowController) {
+        guard let layoutComputer = controller.viewGraph.rootLayoutComputer else {
+            fatalError("ModalWindowController: rootLayoutComputer not set. AG wiring incomplete!")
+        }
+
+        var fittedSize = controller.cachedRootFittedSize
+            ?? layoutComputer.value.sizeThatFits(.unspecified)
+        fittedSize.width = max(fittedSize.width, 1) + padding * 2
+        fittedSize.height = max(fittedSize.height, 1) + padding * 2
+
+        let sizeChanged = fittedSize != windowSize
+        windowSize = fittedSize
+
+        if let platformWindow = controller.window {
+            let shouldAutoResize = controller.style.contains(.autoResize)
+            if sizeChanged && shouldAutoResize {
+                Task { @MainActor in
+                    platformWindow.contentSize = fittedSize
+                }
+            }
+        } else {
+            controller.sharedContext.contentBounds.size = fittedSize
+
+            let center = CGPoint(x: fittedSize.width * 0.5,
+                                 y: fittedSize.height * 0.5)
+            layoutComputer.value.place(at: center,
+                                       anchor: .center,
+                                       proposal: ProposedViewSize(fittedSize))
+
+            if let parentSize = parentController?.cachedContentSize {
+                windowOffset = CGPoint(
+                    x: (parentSize.width - fittedSize.width) * 0.5,
+                    y: (parentSize.height - fittedSize.height) * 0.5)
+            }
+        }
+    }
+
+    func drawOffset(for controller: WindowController, parentOffset: CGPoint) -> CGPoint {
+        // Platform sheets draw in their own window. Overlay children are drawn
+        // by the parent controller and need the fitted modal offset restored.
+        guard controller.window == nil else { return parentOffset }
+        return windowOffset + parentOffset
+    }
+
+    func onWindowClosed() {
+    }
+
+    func onModalSessionInitiated() {
+    }
+
+    func onModalSessionDismissedByUser() {
+    }
+
+    func onModalSessionDismissedByParent() {
+    }
+
+    func onModalSessionCancelled() {
+    }
+}
+
+// WindowController subclass for preference-driven modal windows.
+//
+// The preference layer currently stores `AnyView`, so this controller is
+// intentionally non-generic. `AnyView.storage.view` keeps the wrapped `any View`,
+// so a later pass can reopen the concrete type and restore a typed root graph.
+// Do not spell this as `ModalWindowController<AnyView>`: that suggests a concrete
+// Content path was restored. Replace the erased bridge when typed modal content
+// storage and type-change lifecycle are wired.
+final class ModalWindowController: WindowController, @unchecked Sendable {
     override var style: PlatformWindowStyle { [.autoResize] }
+    override var observesRootFittedSizeForLayoutUpdates: Bool { true }
+
+    private let presentationContext: ModalPresentationContext
+
+    init(crossGraphContent contentAttr: Attribute<AnyView>,
+         sourceGraph: AttributeGraph,
+         scene: WindowKey,
+         parentController: WindowController) {
+        self.presentationContext = ModalPresentationContext(parentController: parentController)
+        super.init(crossGraphContent: contentAttr,
+                   sourceGraph: sourceGraph,
+                   scene: scene)
+    }
+
+    override func onViewLoaded() {
+        presentationContext.onViewLoaded()
+    }
+
+    override func onViewLayoutUpdated() {
+        presentationContext.onViewLayoutChanged(controller: self)
+    }
+
+    override func onWindowClosing(_: any PlatformWindow) {
+        presentationContext.onWindowClosed()
+    }
+
+    override func drawFrame(offset: CGPoint, _ context: GraphicsContext) {
+        let offset = presentationContext.drawOffset(for: self,
+                                                    parentOffset: offset)
+        // FIXME: Preference-driven overlay animation/background has not
+        // been ported yet. For now this restores fitted placement only.
+        super.drawFrame(offset: offset, context)
+    }
+
+    override func handleMouseEvent(event: MouseEvent) -> Bool {
+        if presentationContext.isAnimating { return true }
+        return super.handleMouseEvent(event: event)
+    }
+
+    override func onModalSessionInitiated() {
+        presentationContext.onModalSessionInitiated()
+    }
+
+    override func onModalSessionDismissedByUser() {
+        presentationContext.onModalSessionDismissedByUser()
+    }
+
+    override func onModalSessionDismissedByParent() {
+        presentationContext.onModalSessionDismissedByParent()
+    }
+
+    override func onModalSessionCancelled() {
+        presentationContext.onModalSessionCancelled()
+    }
+}
+
+// Typed legacy controller used only by ModalWindowSceneContext.
+private final class LegacyModalWindowController<Content: View>: WindowController, @unchecked Sendable {
+    override var style: PlatformWindowStyle { [.autoResize] }
+    override var observesRootFittedSizeForLayoutUpdates: Bool { true }
 
     private weak var sceneContext: ModalWindowSceneContext<Content>?
 
@@ -513,9 +664,17 @@ private class ModalWindowController<Content: View>: WindowController, @unchecked
         self.sceneContext = sceneContext
     }
 
-    override func onViewLoaded()        { sceneContext?.onViewLoaded() }
-    override func onViewLayoutUpdated() { sceneContext?.onViewLayoutChanged() }
-    override func onWindowClosing(_: any PlatformWindow) { sceneContext?.onWindowClosed() }
+    override func onViewLoaded() {
+        sceneContext?.onViewLoaded()
+    }
+
+    override func onViewLayoutUpdated() {
+        sceneContext?.onViewLayoutChanged()
+    }
+
+    override func onWindowClosing(_: any PlatformWindow) {
+        sceneContext?.onWindowClosed()
+    }
 
     // Overlay mode: apply animation transform then draw content.
     override func drawFrame(offset: CGPoint, _ context: GraphicsContext) {
@@ -532,7 +691,7 @@ private class ModalWindowController<Content: View>: WindowController, @unchecked
 
     // Input is blocked during animation.
     override func handleMouseEvent(event: MouseEvent) -> Bool {
-        guard sceneContext?.isAnimating == false else { return true }
+        if sceneContext?.isAnimating == true { return true }
         return super.handleMouseEvent(event: event)
     }
 
@@ -540,9 +699,15 @@ private class ModalWindowController<Content: View>: WindowController, @unchecked
     override func onModalSessionInitiated() {
         sceneContext?.onModalSessionInitiated()
     }
-    override func onModalSessionDismissedByUser()   { sceneContext?.onModalSessionDismissedByUser() }
-    override func onModalSessionDismissedByParent() { sceneContext?.onModalSessionDismissedByParent() }
-    override func onModalSessionCancelled()         { sceneContext?.onModalSessionCancelled() }
+    override func onModalSessionDismissedByUser() {
+        sceneContext?.onModalSessionDismissedByUser()
+    }
+    override func onModalSessionDismissedByParent() {
+        sceneContext?.onModalSessionDismissedByParent()
+    }
+    override func onModalSessionCancelled() {
+        sceneContext?.onModalSessionCancelled()
+    }
 }
 
 

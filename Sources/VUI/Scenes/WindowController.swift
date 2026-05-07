@@ -233,7 +233,11 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     }
 
     private var viewChangedWhileDrawing: Bool = false
+    private var hasDeliveredViewLayoutUpdate = false
+    private(set) var cachedRootFittedSize: CGSize?
     private(set) var cachedContentSize: CGSize = .zero
+
+    var observesRootFittedSizeForLayoutUpdates: Bool { false }
 
     func updateFrame(tick: UInt64, delta: Double, date: Date,
                      contentSize: CGSize, shouldDrawFrame: Bool,
@@ -327,6 +331,26 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                 let center = CGPoint(x: cachedContentSize.width / 2,
                                      y: cachedContentSize.height / 2)
                 lc.place(at: center, anchor: .center, proposal: proposal)
+
+                let previousRootFittedSize = cachedRootFittedSize
+                let rootFittedSize = observesRootFittedSizeForLayoutUpdates
+                    ? viewGraph.rootFittedSize?.value
+                    : nil
+                if let rootFittedSize {
+                    cachedRootFittedSize = rootFittedSize
+                }
+                let rootFittedSizeChanged = rootFittedSize.map { $0 != previousRootFittedSize } ?? false
+
+                if !hasDeliveredViewLayoutUpdate || sizeChanged || rootFittedSizeChanged {
+                    hasDeliveredViewLayoutUpdate = true
+                    // Modal/aux controllers use this hook to fit their platform
+                    // window after AG layout values are available. The hook is
+                    // driven by the root fitted-size rule rather than the host
+                    // window's proposed sizeAttr, because resource/content
+                    // changes can alter natural modal size without changing the
+                    // platform content size first.
+                    onViewLayoutUpdated()
+                }
             }
         }
         redraw = !changeSet.ids.isEmpty || self.viewChangedWhileDrawing
@@ -1202,13 +1226,17 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
             let contentAttr: Attribute<AnyView> = graph.makeInput(value: pref.content)
 
             let sheetKey = WindowKey(namespace: scene.namespace, sceneID: scene.sceneID)
-            // FIXME: This temporary child skips the modal-specific subclass responsibilities
-            // (initial content fitting, overlay drawing/animation, input blocking, and
-            // modal lifecycle forwarding). Clarify the ModalWindowController role before
-            // replacing this with a sheet/modal child.
-            let ctrl = WindowController(crossGraphContent: contentAttr,
-                                        sourceGraph: graph,
-                                        scene: sheetKey)
+            // ModalWindowController restores the modal-specific child policy
+            // that the old ModalWindowSceneContext owned: fit content after
+            // layout, auto-resize the platform child, and keep modal lifecycle
+            // hooks separate from the base window controller.
+            //
+            // FIXME: finalize the sheet bridge and overlay animation path
+            // before this becomes the final architecture.
+            let ctrl = ModalWindowController(crossGraphContent: contentAttr,
+                                             sourceGraph: graph,
+                                             scene: sheetKey,
+                                             parentController: self)
             addModalChild(ctrl, session: .sheet(pref), contentAttr: contentAttr) { [weak ctrl] attach in
                 Task { @MainActor [weak ctrl] in
                     guard let attach, let ctrl else { return }
@@ -1250,7 +1278,10 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
             let content = ConfirmationDialogOverlayView(preference: pref)
             let attr: Attribute<AnyView> = graph.makeInput(value: AnyView(content))
             let key = WindowKey(namespace: scene.namespace, sceneID: scene.sceneID)
-            let ctrl = WindowController(crossGraphContent: attr, sourceGraph: graph, scene: key)
+            let ctrl = ModalWindowController(crossGraphContent: attr,
+                                             sourceGraph: graph,
+                                             scene: key,
+                                             parentController: self)
             addModalChild(ctrl, session: .confirmationDialog(pref)) { [weak ctrl] attach in
                 Task { @MainActor [weak ctrl] in
                     guard let attach, let ctrl else { return }
@@ -1297,9 +1328,10 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
             let alertContent = AlertOverlayView(preference: pref)
             let alertAttr: Attribute<AnyView> = graph.makeInput(value: AnyView(alertContent))
             let alertKey = WindowKey(namespace: scene.namespace, sceneID: scene.sceneID)
-            let ctrl = WindowController(crossGraphContent: alertAttr,
-                                        sourceGraph: graph,
-                                        scene: alertKey)
+            let ctrl = ModalWindowController(crossGraphContent: alertAttr,
+                                             sourceGraph: graph,
+                                             scene: alertKey,
+                                             parentController: self)
             addModalChild(ctrl, session: .alert(pref)) { [weak ctrl] attach in
                 Task { @MainActor [weak ctrl] in
                     guard let attach, let ctrl else { return }

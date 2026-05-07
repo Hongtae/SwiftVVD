@@ -309,6 +309,7 @@ class AuxiliaryWindowSceneContext<Content>: @unchecked Sendable where Content: V
 // WindowController subclass for auxiliary popup windows.
 private class AuxiliaryWindowController<Content: View>: WindowController, @unchecked Sendable {
     override var style: PlatformWindowStyle { [.auxiliaryWindow, .autoResize] }
+    override var observesRootFittedSizeForLayoutUpdates: Bool { true }
 
     private weak var sceneContext: AuxiliaryWindowSceneContext<Content>?
 

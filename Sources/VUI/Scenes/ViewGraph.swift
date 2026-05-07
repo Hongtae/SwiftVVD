@@ -172,6 +172,7 @@ class ViewGraph: ViewGraphHost {
 
     // AG output attributes collected after V._makeView.
     private(set) var rootLayoutComputer: Attribute<LayoutComputer>?
+    private(set) var rootFittedSize: Attribute<CGSize>?
     private(set) var rootDisplayList: Attribute<DisplayList>?
     private(set) var rootResourceList: Attribute<ResourceList>?
 
@@ -240,6 +241,7 @@ class ViewGraph: ViewGraphHost {
         var timeAttrResult:  Attribute<Time>?              = nil
         var phaseAttrResult: Attribute<Phase>?             = nil
         var rootLCResult:    Attribute<LayoutComputer>?    = nil
+        var rootSizeResult:  Attribute<CGSize>?            = nil
         var rootDLResult:    Attribute<DisplayList>?       = nil
         var rootRLResult:    Attribute<ResourceList>?      = nil
 
@@ -378,11 +380,21 @@ class ViewGraph: ViewGraphHost {
                 }
             }
 
+            if let rootLC = outputs._layoutComputer.attribute {
+                rootLCResult = rootLC
+                // Modal/aux platform windows need the root view's natural
+                // size, not the host window's proposed sizeAttr. This rule
+                // registers dependencies through LayoutComputer.sizeThatFits
+                // and is only read by child controllers that auto-fit.
+                rootSizeResult = g.makeRule {
+                    rootLC.value.sizeThatFits(.unspecified)
+                }
+            }
+
             sizeAttrResult  = sizeAttr
             envAttrResult   = envAttr
             timeAttrResult  = timeAttr
             phaseAttrResult = phaseAttr
-            rootLCResult    = outputs._layoutComputer.attribute
         }
 
         self.sizeAttr           = sizeAttrResult
@@ -390,6 +402,7 @@ class ViewGraph: ViewGraphHost {
         self.timeAttr           = timeAttrResult
         self.phaseAttr          = phaseAttrResult
         self.rootLayoutComputer = rootLCResult
+        self.rootFittedSize     = rootSizeResult
         self.rootDisplayList    = rootDLResult
         self.rootResourceList   = rootRLResult
     }
