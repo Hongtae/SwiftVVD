@@ -30,6 +30,10 @@ import VVD
 //   2. LegacyModalWindowController.drawFrame contains overlay animation logic
 //      (scale / alpha TransitionAnimation) that MUST be referenced when
 //      implementing overlay animation for the new path (TO-DO).
+//      Keep this legacy path until the new overlay animation handles the
+//      initiated-to-animation-completion gap; presentation is initiated before
+//      the roughly 0.2s transition finishes, so input/display gating must stay
+//      explicit during that interval.
 //
 //   3. ModalWindowSceneContext contains the platform-window vs overlay
 //      selection logic (environment.modalSessionUsingPlatformWindow branch)
@@ -529,13 +533,14 @@ private final class ModalPresentationContext: @unchecked Sendable {
             fatalError("ModalWindowController: rootLayoutComputer not set. AG wiring incomplete!")
         }
 
-        var fittedSize = controller.cachedRootFittedSize
-            ?? layoutComputer.value.sizeThatFits(.unspecified)
-        fittedSize.width = max(fittedSize.width, 1) + padding * 2
-        fittedSize.height = max(fittedSize.height, 1) + padding * 2
+        let fittedSize = fittedContentSize(controller: controller,
+                                           layoutComputer: layoutComputer)
 
         let sizeChanged = fittedSize != windowSize
         windowSize = fittedSize
+        placeRoot(controller: controller,
+                  layoutComputer: layoutComputer,
+                  fittedSize: fittedSize)
 
         if let platformWindow = controller.window {
             let shouldAutoResize = controller.style.contains(.autoResize)
@@ -545,19 +550,53 @@ private final class ModalPresentationContext: @unchecked Sendable {
                 }
             }
         } else {
-            controller.sharedContext.contentBounds.size = fittedSize
-
-            let center = CGPoint(x: fittedSize.width * 0.5,
-                                 y: fittedSize.height * 0.5)
-            layoutComputer.value.place(at: center,
-                                       anchor: .center,
-                                       proposal: ProposedViewSize(fittedSize))
-
             if let parentSize = parentController?.cachedContentSize {
                 windowOffset = CGPoint(
                     x: (parentSize.width - fittedSize.width) * 0.5,
                     y: (parentSize.height - fittedSize.height) * 0.5)
             }
+        }
+    }
+
+    func prepareForInput(controller: WindowController) {
+        guard let layoutComputer = controller.viewGraph.rootLayoutComputer else { return }
+        if windowSize == .zero {
+            windowSize = fittedContentSize(controller: controller,
+                                           layoutComputer: layoutComputer)
+        }
+        placeRoot(controller: controller,
+                  layoutComputer: layoutComputer,
+                  fittedSize: windowSize)
+    }
+
+    func layoutContentSize(controller: WindowController,
+                           platformContentSize: CGSize) -> CGSize {
+        guard controller.window != nil, windowSize != .zero else {
+            return platformContentSize
+        }
+        return windowSize
+    }
+
+    private func fittedContentSize(controller: WindowController,
+                                   layoutComputer: Attribute<LayoutComputer>) -> CGSize {
+        var fittedSize = controller.cachedRootFittedSize
+            ?? layoutComputer.value.sizeThatFits(.unspecified)
+        fittedSize.width = max(fittedSize.width, 1) + padding * 2
+        fittedSize.height = max(fittedSize.height, 1) + padding * 2
+        return fittedSize
+    }
+
+    private func placeRoot(controller: WindowController,
+                           layoutComputer: Attribute<LayoutComputer>,
+                           fittedSize: CGSize) {
+        controller.viewGraph.data.withCurrent {
+            controller.sharedContext.contentBounds.size = fittedSize
+            controller.viewGraph.sizeAttr?.setValue(ViewSize(fittedSize))
+            let center = CGPoint(x: fittedSize.width * 0.5,
+                                 y: fittedSize.height * 0.5)
+            layoutComputer.value.place(at: center,
+                                       anchor: .center,
+                                       proposal: ProposedViewSize(fittedSize))
         }
     }
 
@@ -616,6 +655,11 @@ final class ModalWindowController: WindowController, @unchecked Sendable {
         presentationContext.onViewLayoutChanged(controller: self)
     }
 
+    override func layoutContentSize(from contentSize: CGSize) -> CGSize {
+        presentationContext.layoutContentSize(controller: self,
+                                              platformContentSize: contentSize)
+    }
+
     override func onWindowClosing(_: any PlatformWindow) {
         presentationContext.onWindowClosed()
     }
@@ -629,6 +673,7 @@ final class ModalWindowController: WindowController, @unchecked Sendable {
     }
 
     override func handleMouseEvent(event: MouseEvent) -> Bool {
+        presentationContext.prepareForInput(controller: self)
         if presentationContext.isAnimating { return true }
         return super.handleMouseEvent(event: event)
     }

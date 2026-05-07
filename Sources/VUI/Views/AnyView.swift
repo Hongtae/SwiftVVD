@@ -7,17 +7,61 @@
 
 import Foundation
 
-// File-scope state class. It cannot be nested inside a generic function in Swift.
-private final class _AnyViewBranchState {
-    var typeID: ObjectIdentifier? = nil
-    var subgraph: AGSubgraph? = nil
-    var lcAttr: Attribute<LayoutComputer>? = nil
-}
-
 class AnyViewBox {
     let view: any View
     init(_ view: any View) {
         self.view = view
+    }
+}
+
+private struct AnyViewContainer: StatefulRule {
+    typealias Value = _ViewOutputs
+
+    var view: Attribute<AnyView>
+    var inputs: _ViewInputs
+    var placeholders: _ViewOutputs
+    var typeID: ObjectIdentifier?
+    var subgraph: AGSubgraph?
+
+    mutating func updateValue() {
+        guard let graph = AttributeGraph.current else {
+            fatalError("AnyViewContainer.updateValue evaluated outside an active AttributeGraph context.")
+        }
+
+        let currentView = view.value._view
+        let currentTypeID = ObjectIdentifier(type(of: currentView))
+
+        if typeID != currentTypeID {
+            eraseCurrentSubgraph()
+            typeID = currentTypeID
+
+            let subgraph = AGSubgraph()
+            self.subgraph = subgraph
+            let viewAttr = view
+            let childInputs = inputs
+
+            func makeConcreteView<V: View>(_: V) -> _ViewOutputs {
+                AGSubgraph.$current.withValue(subgraph) {
+                    let concreteAttr: Attribute<V> = graph.makeRule {
+                        viewAttr.value._view as! V
+                    }
+                    return makeView(view: _GraphValue(_attribute: concreteAttr), inputs: childInputs)
+                }
+            }
+
+            let concrete = makeConcreteView(currentView)
+            concrete.attachIndirectOutputs(to: placeholders)
+        }
+
+        AttributeGraph.setStatefulOutput(placeholders)
+    }
+
+    private mutating func eraseCurrentSubgraph() {
+        guard let subgraph else { return }
+        placeholders.detachIndirectOutputs()
+        subgraph.invalidate()
+        subgraph.removeFromParent()
+        self.subgraph = nil
     }
 }
 
@@ -49,58 +93,25 @@ public struct AnyView: View {
 
     /// Dynamic-subgraph implementation with type-erased dispatch.
     ///
-    /// A master LayoutComputer rule watches the wrapped view's concrete type.
-    /// When the type changes (e.g. an `if/else` that switches between `AnyView`s
-    /// wrapping different concrete types):
-    ///   1. The old AGSubgraph is invalidated.
-    ///   2. A fresh AGSubgraph is created.
-    ///   3. The new type's `_makeView` is dispatched via a generic helper that
-    ///      opens the `any View` existential (SE-0352, Swift 5.7+).
-    ///
-    /// When only the wrapped *value* changes but the type is the same, the master
-    /// rule delegates to the existing subgraph's LC, which re-evaluates naturally
-    /// via its own dependency on the type-extraction rule node.
+    /// AnyView must return placeholder `_ViewOutputs`, not just a layout slot,
+    /// so DisplayList and other requested preference keys relay through type
+    /// erasure. The concrete child outputs are attached when the stateful rule
+    /// opens the wrapped existential.
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         guard let graph = AttributeGraph.current else {
             fatalError("\(self)._makeView called outside an active AttributeGraph context.")
         }
 
-        let state = _AnyViewBranchState()
-        state.subgraph = AGSubgraph() // Created while parent AGSubgraph is active
-
-        let masterLC: Attribute<LayoutComputer> = graph.makeRule {
-            // Retrieve the active graph from TaskLocal to avoid a retain cycle
-            guard let graph = AttributeGraph.current else {
-                fatalError("AnyView rule evaluated outside an active AttributeGraph context.")
-            }
-
-            // Reading ._view registers a dependency on view._attribute.
-            let currentView = view._attribute.value._view
-            let typeID = ObjectIdentifier(type(of: currentView))
-
-            if state.typeID != typeID {
-                // --- Wrapped view type changed ---
-                // Invalidate clears old nodes/children but keeps this subgraph attached to its parent
-                state.subgraph?.invalidate()
-                state.typeID = typeID
-
-                func _makeView<V: View>(_: V) -> _ViewOutputs {
-                    AGSubgraph.$current.withValue(state.subgraph) {
-                        let vAttr: Attribute<V> = graph.makeRule {
-                            view._attribute.value._view as! V
-                        }
-                        return makeView(view: _GraphValue(_attribute: vAttr), inputs: inputs)
-                    }
-                }
-                let outputs = _makeView(currentView)
-                state.lcAttr = outputs._layoutComputer.attribute
-            }
-
-            return state.lcAttr?.value ?? LayoutComputer.fixed(.zero)
+        let placeholders = inputs.makeIndirectOutputs()
+        let containerAttr: Attribute<AnyViewContainer.Value> = graph.makeStatefulRule(
+            AnyViewContainer(view: view._attribute, inputs: inputs, placeholders: placeholders)
+        )
+        placeholders.setIndirectDependency(containerAttr.identifier)
+        _ = graph.makeSideEffectRule {
+            _ = containerAttr.value
+            return ()
         }
-
-        return _ViewOutputs(preferences: PreferencesOutputs(),
-                            layoutComputer: OptionalAttribute(masterLC))
+        return placeholders
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {

@@ -409,7 +409,8 @@ class GestureGraph: GraphHost, EventGraphHost, @unchecked Sendable {
         rootNode: ResponderNode,
         at time: Time
     ) -> GesturePhase<Void> {
-        data.withCurrent {
+        refreshResponderGeometrySnapshots()
+        return data.withCurrent {
             // Drain cross-graph invalidations enqueued by ViewGraph since the last sendEvents.
             // Cross-graph ref nodes (e.g. transform, size mirrors) are marked dirty here so
             // that gesture coordinate nodes re-evaluate with the latest ViewGraph geometry.
@@ -465,6 +466,29 @@ class GestureGraph: GraphHost, EventGraphHost, @unchecked Sendable {
             let phase = aggregatePhase(for: events)
             phaseAttr?.setValue(phase)
             return phaseAttr?.value ?? phase
+        }
+    }
+
+    private func refreshResponderGeometrySnapshots() {
+        guard let viewGraph = rendererHost?.viewGraph,
+              let rootResponder else { return }
+        viewGraph.data.withCurrent {
+            func refresh(_ responder: any ViewResponder) {
+                if let gesture = responder as? any AnyGestureResponder,
+                   let transformAttr = gesture.transformAttr,
+                   let sizeAttr = gesture.sizeAttr {
+                    gesture.snapshotTransform = transformAttr.value
+                    gesture.snapshotSize = sizeAttr.value
+                }
+                if let multi = responder as? MultiViewResponder {
+                    for child in multi.responders {
+                        refresh(child)
+                    }
+                }
+            }
+            for responder in rootResponder.responders {
+                refresh(responder)
+            }
         }
     }
 

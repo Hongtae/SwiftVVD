@@ -409,9 +409,10 @@ private struct DynamicContainerInfo: StatefulRule {
                 let sizeAttr = graph.makeInput(value: ViewSize(.zero))
                 let childTransform: Attribute<ViewTransform> = graph.makeRule {
                     var t = parentTransform.value
-                    var pts = [posAttr.value]
-                    t.convertGlobal(from: .local, points: &pts)
-                    t.appendPosition(pts[0])
+                    // The renderer placement bridge writes absolute root/window origins
+                    // into posAttr. Keep parent transform items, but do not translate the
+                    // already-absolute origin through the parent position again.
+                    t.appendPosition(posAttr.value)
                     return t
                 }
 
@@ -610,9 +611,10 @@ extension Layout {
                 let parentTransformAttr = inputs.transform
                 let childTransformAttr: Attribute<ViewTransform> = graph.makeRule {
                     var t = parentTransformAttr.value
-                    var pts = [posAttr.value]
-                    t.convertGlobal(from: .local, points: &pts)
-                    t.appendPosition(pts[0])
+                    // The renderer placement bridge writes absolute root/window origins
+                    // into posAttr. Keep parent transform items, but do not translate the
+                    // already-absolute origin through the parent position again.
+                    t.appendPosition(posAttr.value)
                     return t
                 }
 

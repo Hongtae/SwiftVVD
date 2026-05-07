@@ -239,6 +239,10 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
 
     var observesRootFittedSizeForLayoutUpdates: Bool { false }
 
+    func layoutContentSize(from contentSize: CGSize) -> CGSize {
+        contentSize
+    }
+
     func updateFrame(tick: UInt64, delta: Double, date: Date,
                      contentSize: CGSize, shouldDrawFrame: Bool,
                      _ withGC: WindowContext.WithGraphicsContext) {
@@ -269,12 +273,13 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         guard let rootLayoutComputer = viewGraph.rootLayoutComputer else { return }
 
         let time = Time(seconds: date.timeIntervalSince(self.date))
+        let layoutContentSize = layoutContentSize(from: contentSize)
 
         // Detect size change and mark the dirty bit.
-        let sizeChanged = (contentSize != cachedContentSize)
+        let sizeChanged = (layoutContentSize != cachedContentSize)
         if sizeChanged {
-            cachedContentSize = contentSize
-            valuesNeedingUpdate.insert(.size)
+            cachedContentSize = layoutContentSize
+            viewGraph.valuesNeedingUpdate.insert(.size)
         }
 
         let changeSet = AttributeGraph.ChangeSet()
@@ -885,6 +890,12 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     // session: .legacy = ModalWindowScene-based; .sheet/.alert/.confirmationDialog = preference-driven.
     //   In dismissAllModalWindows, position (first vs rest) determines reason:
     //   first = was active, so .byParent; rest = queued and never shown, so .cancelled.
+    //
+    // TODO: When preference-driven overlay animation is ported, add an explicit
+    // input gate to ModalChildEntry (for example isInputEnabled/isAnimating).
+    // During the short scale/opacity transition, the child still renders normally
+    // because GraphicsContext carries the scale/filter state, but the parent must
+    // drop input events until animation completion flips the gate open.
     private struct ModalChildEntry: @unchecked Sendable {
         let controller: WindowController   // strong, WindowController owns its modal children
         var isOverlay: Bool = false   // set to true only when overlay is confirmed; false = platform window
