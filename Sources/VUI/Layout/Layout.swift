@@ -592,37 +592,33 @@ extension Layout {
             // Step 1: makeElements traversal creates per-child indirect posAttr/sizeAttr,
             //   call makeView, collect child LCs + prefs. Indirect attrs resolve the chicken-and-egg:
             //   makeView needs posAttr/sizeAttr handles, and those are wired to concrete attrs later.
-            // Step 2: create StaticLayoutComputer -> LayoutChildGeometries.
-            // Step 3: per-child LayoutChildGeometry + subscriptNode -> setIndirectTarget.
-            //   subscriptNode projects position and size after LayoutChildGeometry is created.
-            var posIndirectAttrs:  [Attribute<CGPoint>]  = []
-            var sizeIndirectAttrs: [Attribute<ViewSize>] = []
             var childProxyAttrs: [LayoutProxyAttributes] = []
             var allPreferences: [PreferencesOutputs] = []
-            var elementCount = 0
 
             var from = 0
             elements.makeElements(from: &from, inputs: inputs, indirectMap: nil) { elementInputs, makeView in
-                elementCount += 1
-
-                // Indirect placeholder attrs are wired to concrete geometry projections in Step 3.
-                let posIndirect  = graph.makeIndirectAttribute(defaultValue: CGPoint.zero)
-                let sizeIndirect = graph.makeIndirectAttribute(defaultValue: ViewSize.zero)
-                posIndirectAttrs.append(posIndirect)
-                sizeIndirectAttrs.append(sizeIndirect)
+                // Renderer bridge: primitive display rules read the position/size
+                // attributes they received during makeView. StaticLayoutComputer's
+                // geometry projection is not enough unless the render backend pulls
+                // those projection attrs directly, so keep concrete placement attrs
+                // and update them from the LayoutComputer.place path.
+                // FIXME: replace this bridge once the renderer consumes
+                // LayoutChildGeometries projection directly.
+                let posAttr = graph.makeInput(value: CGPoint.zero)
+                let sizeAttr = graph.makeInput(value: ViewSize.zero)
 
                 let parentTransformAttr = inputs.transform
                 let childTransformAttr: Attribute<ViewTransform> = graph.makeRule {
                     var t = parentTransformAttr.value
-                    var pts = [posIndirect.value]
+                    var pts = [posAttr.value]
                     t.convertGlobal(from: .local, points: &pts)
                     t.appendPosition(pts[0])
                     return t
                 }
 
                 var childInputs = elementInputs
-                childInputs.position = posIndirect
-                childInputs.size = sizeIndirect
+                childInputs.position = posAttr
+                childInputs.size = sizeAttr
                 childInputs.transform = childTransformAttr
                 childInputs.containerPosition = inputs.position
                 childInputs.containerSize = OptionalAttribute(inputs.size)
@@ -630,10 +626,28 @@ extension Layout {
 
                 let childOutputs = makeView(childInputs)
                 if let lcAttr = childOutputs._layoutComputer.attribute {
+                    let wrapperLC: Attribute<LayoutComputer> = graph.makeRule {
+                        let inner = lcAttr.value
+                        return LayoutComputer(
+                            sizeThatFits: { inner.sizeThatFits($0) },
+                            spacing: inner.spacing,
+                            place: { position, anchor, proposal in
+                                let resolvedSize = inner.sizeThatFits(proposal)
+                                let origin = CGPoint(
+                                    x: position.x - resolvedSize.width * anchor.x,
+                                    y: position.y - resolvedSize.height * anchor.y
+                                )
+                                posAttr.setValue(origin)
+                                sizeAttr.setValue(ViewSize(resolvedSize))
+                                inner.place(at: position, anchor: anchor, proposal: proposal)
+                            },
+                            explicitAlignment: { inner.explicitAlignment($0, at: $1) }
+                        )
+                    }
                     // Trait-writing static bodies are promoted to dynamicList by
                     // _TraitWritingModifier._makeViewList, so the plain static path has no
                     // ViewList attribute for LayoutProxyAttributes.traitsList.
-                    childProxyAttrs.append(LayoutProxyAttributes(layoutComputer: lcAttr))
+                    childProxyAttrs.append(LayoutProxyAttributes(layoutComputer: wrapperLC))
                     allPreferences.append(childOutputs.preferences)
                 }
                 return (childOutputs, true)
@@ -646,26 +660,6 @@ extension Layout {
                     layoutDirection: .leftToRight
                 )
             )
-            let geometriesAttr: Attribute<[ViewGeometry]> = graph.makeRule(
-                LayoutChildGeometries(
-                    parentSize: inputs.size,
-                    parentPosition: inputs.position,
-                    layoutComputer: staticLCAttr
-                )
-            )
-
-            // Step 3: wire per-child indirect attrs to KeyPath projections of LayoutChildGeometry[i].
-            for i in 0..<elementCount {
-                let childGeomAttr: Attribute<ViewGeometry> = graph.makeRule(
-                    LayoutChildGeometry(geometriesAttr: geometriesAttr, index: i)
-                )
-                graph.setIndirectTarget(posIndirectAttrs[i],
-                                        to: graph.subscriptNode(parent: childGeomAttr,
-                                                                 keyPath: \ViewGeometry.origin))
-                graph.setIndirectTarget(sizeIndirectAttrs[i],
-                                        to: graph.subscriptNode(parent: childGeomAttr,
-                                                                 keyPath: \ViewGeometry.dimensions.size))
-            }
 
             layoutComputerAttr = staticLCAttr
             mergedPreferences = PreferencesOutputs.merge(allPreferences, in: graph)

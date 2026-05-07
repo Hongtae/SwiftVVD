@@ -245,9 +245,68 @@ struct PlatformItemListButtonStyle: PrimitiveButtonStyle {
     }
 }
 
+private struct PlatformItemSourceLabel: View {
+    typealias Body = Never
+
+    let source: AnySource
+    var body: Never { neverBody() }
+
+    static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        guard let graph = AttributeGraph.current else {
+            fatalError("PlatformItemSourceLabel._makeView called outside AG context")
+        }
+        let source = view._attribute.value.source
+        guard source.value.isValid(in: graph) else { return _ViewOutputs() }
+        let aliasAttr = graph.makeInput(value: PrimitiveButtonStyleConfiguration.Label())
+        return source.makeView(view: _GraphValue(_attribute: aliasAttr), inputs: inputs)
+    }
+
+    static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
+        _ViewListOutputs.unaryViewList(view: view, inputs: inputs)
+    }
+}
+
+private func platformItemFallbackLabel(role: ButtonRole?) -> Text {
+    switch role {
+    case .cancel:
+        return Text("Cancel")
+    case .destructive:
+        return Text("Delete")
+    default:
+        return Text("OK")
+    }
+}
+
 private struct PlatformItemListButtonBody: View {
     let configuration: PrimitiveButtonStyleConfiguration
     @Environment(\.isEnabled) private var isEnabled: Bool
+
+    static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        guard let graph = AttributeGraph.current else {
+            fatalError("PlatformItemListButtonBody._makeView called outside AG context")
+        }
+
+        let labelView = view[\.configuration][\.label]
+        var outputs = PrimitiveButtonStyleConfiguration.Label._makeView(view: labelView, inputs: inputs)
+        let configurationAttr = view[\.configuration]._attribute
+        let environmentAttr = inputs.base.cachedEnvironment.value.environment
+        let source = inputs.base.customInputs.value(forKey: SourceInput<PrimitiveButtonStyleConfiguration.Label>.self).top
+        let preferenceAttr: Attribute<PlatformItemList> = graph.makeRule {
+            let configuration = configurationAttr.value
+            let label = source.map { AnyView(PlatformItemSourceLabel(source: $0)) } ??
+                AnyView(platformItemFallbackLabel(role: configuration.role))
+            var list = PlatformItemList()
+            list.append(PlatformItemList.Item(
+                label: label,
+                action: { configuration.trigger() },
+                role: configuration.role,
+                isEnabled: environmentAttr.value.isEnabled
+            ))
+            return list
+        }
+        outputs.preferences.append(PlatformItemList.Key.self, node: preferenceAttr.identifier)
+        return outputs
+    }
 
     var body: some View {
         configuration.label
@@ -258,7 +317,7 @@ private struct PlatformItemListButtonBody: View {
     private var itemList: PlatformItemList {
         var list = PlatformItemList()
         list.append(PlatformItemList.Item(
-            label: AnyView(configuration.label),
+            label: AnyView(platformItemFallbackLabel(role: configuration.role)),
             action: { configuration.trigger() },
             role: configuration.role,
             isEnabled: isEnabled

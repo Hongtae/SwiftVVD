@@ -970,15 +970,9 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     private func _activateModal(entry: ModalChildEntry) {
         let child = entry.controller
 
-        // .alert and .confirmationDialog are always overlay when no platform alert bridge is available.
-        // .sheet and .legacy follow parent's window state.
-        let asOverlay: Bool
-        switch entry.session {
-        case .alert, .confirmationDialog:
-            asOverlay = true
-        case .sheet, .legacy:
-            asOverlay = (self.window == nil)
-        }
+        // Use overlay only when this controller has no platform window to parent from.
+        // Per-session overlay/platform selection will be restored after overlay support is complete.
+        let asOverlay = (self.window == nil)
 
         if !asOverlay, let attachWindow = entry.attachWindow {
             // Race guard: a preference-driven session can be dismissed before
@@ -1257,7 +1251,18 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
             let attr: Attribute<AnyView> = graph.makeInput(value: AnyView(content))
             let key = WindowKey(namespace: scene.namespace, sceneID: scene.sceneID)
             let ctrl = WindowController(crossGraphContent: attr, sourceGraph: graph, scene: key)
-            addModalChild(ctrl, session: .confirmationDialog(pref))
+            addModalChild(ctrl, session: .confirmationDialog(pref)) { [weak ctrl] attach in
+                Task { @MainActor [weak ctrl] in
+                    guard let attach, let ctrl else { return }
+                    guard let childWindow = ctrl.makeWindow() else {
+                        Log.error("WindowController: failed to create confirmation dialog platform window")
+                        return
+                    }
+                    childWindow.contentSize = CGSize(width: 10, height: 10)
+                    childWindow.origin = .zero
+                    attach(childWindow)
+                }
+            }
         }
     }
 
@@ -1295,7 +1300,18 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
             let ctrl = WindowController(crossGraphContent: alertAttr,
                                         sourceGraph: graph,
                                         scene: alertKey)
-            addModalChild(ctrl, session: .alert(pref))
+            addModalChild(ctrl, session: .alert(pref)) { [weak ctrl] attach in
+                Task { @MainActor [weak ctrl] in
+                    guard let attach, let ctrl else { return }
+                    guard let childWindow = ctrl.makeWindow() else {
+                        Log.error("WindowController: failed to create alert platform window")
+                        return
+                    }
+                    childWindow.contentSize = CGSize(width: 10, height: 10)
+                    childWindow.origin = .zero
+                    attach(childWindow)
+                }
+            }
         }
     }
 }

@@ -426,12 +426,19 @@ struct ModifiedElements: _ViewList_Elements {
             // Resolve modifier weak attr.
             guard capturedModifier.isValid(in: graph) else { return (nil, false) }
 
-            // Call M._makeView via type-erased project closure.
-            // makeView is non-escaping from the protocol; M._makeView calls body synchronously,
-            // so withoutActuallyEscaping is safe here.
+            // Pass a modifier-aware makeView closure to the outer materializer.
+            // The materializer (Layout/ViewThatFits/etc.) must first install its
+            // geometry/indirect attrs, then invoke this closure with the final
+            // child inputs. Applying the modifier here directly would bypass that
+            // wiring and drop child preferences.
             var result: (_ViewOutputs?, Bool) = (nil, true)
             withoutActuallyEscaping(makeView) { escapableMakeView in
-                result = (capturedProject(capturedModifier.toStrong(), mergedInputs, escapableMakeView), true)
+                let strongModifier = capturedModifier.toStrong()
+                result = body(mergedInputs) { childInputs in
+                    capturedProject(strongModifier, childInputs) { innerInputs in
+                        escapableMakeView(innerInputs)
+                    }
+                }
             }
             return result
         }

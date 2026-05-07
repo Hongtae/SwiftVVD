@@ -76,7 +76,9 @@ extension View {
         }
         handle.value = bodyAttr.identifier
 
-        return Body._makeView(view: _GraphValue(_attribute: bodyAttr), inputs: inputs)
+        var childInputs = inputs
+        childInputs.base = graphInputs
+        return Body._makeView(view: _GraphValue(_attribute: bodyAttr), inputs: childInputs)
     }
 
     /// Default implementation: produces a reactive body rule (same as `_makeView`)
@@ -121,7 +123,9 @@ extension View {
         }
         handle.value = bodyAttr.identifier
 
-        return Body._makeViewList(view: _GraphValue(_attribute: bodyAttr), inputs: inputs)
+        var childInputs = inputs
+        childInputs.base = graphInputs
+        return Body._makeViewList(view: _GraphValue(_attribute: bodyAttr), inputs: childInputs)
     }
 }
 
@@ -277,6 +281,9 @@ extension TypedUnaryViewGenerator {
         guard view.isValid(in: graph) else { return nil }
         let attrID = view.toStrong()
         var inputs = inputs
+        var mergedBase = baseInputs
+        mergedBase.merge(inputs.base, ignoringPhase: false)
+        inputs.base = mergedBase
         if let env = envAttr.attribute {
             // Replace cachedEnvironment with per-child reactive env attribute.
             // New MutableBox so child's env changes are isolated from siblings.
