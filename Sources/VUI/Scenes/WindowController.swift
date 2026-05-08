@@ -1189,6 +1189,10 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         guard let graph = AttributeGraph.current else {
             fatalError("\(#function) must be called from within an AG context (side-effect rule).")
         }
+        func platformRootContent(for pref: SheetPreference) -> AnyView {
+            // The platform hosting root wraps erased presentation content in SheetContent.
+            AnyView(SheetContent(content: pref.content))
+        }
         let incoming: [SheetPreference]
         switch value {
         case .single(let pref): incoming = [pref]
@@ -1230,11 +1234,11 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                 return entries[index].contentAttr
             }
             if let existingContentAttr {
-                existingContentAttr.setValue(pref.content, transaction: transaction)
+                existingContentAttr.setValue(platformRootContent(for: pref), transaction: transaction)
                 continue
             }
 
-            let contentAttr: Attribute<AnyView> = graph.makeInput(value: pref.content)
+            let contentAttr: Attribute<AnyView> = graph.makeInput(value: platformRootContent(for: pref))
 
             let sheetKey = WindowKey(namespace: scene.namespace, sceneID: scene.sceneID)
             // ModalWindowController restores the modal-specific child policy

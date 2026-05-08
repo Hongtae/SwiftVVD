@@ -78,11 +78,18 @@ struct ToolbarStorage {
         var id: ID
         var placement: ToolbarItemPlacement.Role
         var view: AnyView
+        // Keeps toolbar entry rendering on the original AG path so source aliases
+        // such as PrimitiveButtonStyleConfiguration.Label remain connected.
+        var generator: TypedUnaryViewGenerator?
 
-        init(id: ID, placement: ToolbarItemPlacement.Role, view: AnyView) {
+        init(id: ID,
+             placement: ToolbarItemPlacement.Role,
+             view: AnyView,
+             generator: TypedUnaryViewGenerator? = nil) {
             self.id = id
             self.placement = placement
             self.view = view
+            self.generator = generator
         }
     }
 
@@ -164,6 +171,8 @@ public struct ToolbarItem<ID: Hashable, Content: View>: View, ToolbarContent, Id
         guard let graph = AttributeGraph.current else {
             fatalError("ToolbarItem._makeView called outside AG context")
         }
+        let contentView = view[\.content]
+        let baseInputs = inputs.base
         let storageAttr: Attribute<ToolbarStorage> = graph.makeRule {
             let item = view._attribute.value
             guard !item.isEmpty else { return ToolbarStorage() }
@@ -171,7 +180,8 @@ public struct ToolbarItem<ID: Hashable, Content: View>: View, ToolbarContent, Id
             storage.items.append(ToolbarStorage.Item(
                 id: ToolbarStorage.ID(AnyHashable(item.identifier)),
                 placement: item.placement.role,
-                view: AnyView(item.content)
+                view: AnyView(item.content),
+                generator: TypedUnaryViewGenerator(contentView, baseInputs: baseInputs)
             ))
             return storage
         }
@@ -372,6 +382,8 @@ public struct ToolbarItemGroup<Content: View>: View, ToolbarContent {
         guard let graph = AttributeGraph.current else {
             fatalError("ToolbarItemGroup._makeView called outside AG context")
         }
+        let contentView = view[\.content]
+        let baseInputs = inputs.base
         let storageAttr: Attribute<ToolbarStorage> = graph.makeRule {
             let group = view._attribute.value
             guard !group.isEmpty else { return ToolbarStorage() }
@@ -381,7 +393,8 @@ public struct ToolbarItemGroup<Content: View>: View, ToolbarContent {
             storage.items.append(ToolbarStorage.Item(
                 id: id,
                 placement: group.placement.role,
-                view: AnyView(group.content)
+                view: AnyView(group.content),
+                generator: TypedUnaryViewGenerator(contentView, baseInputs: baseInputs)
             ))
             return storage
         }
@@ -421,7 +434,7 @@ extension EmptyToolbarContent: _PrimitiveView {}
 
 // Modifier that materializes toolbar content and merges ToolbarKey preferences.
 // TODO: Move this to a dedicated toolbar-output path.
-struct ToolbarModifier<CustomizationID, Content: ToolbarContent & View>: ViewModifier {
+struct ToolbarModifier<CustomizationID, Content: ToolbarContent & View>: ViewModifier, MultiViewModifier {
     typealias Body = Never
 
     var id: String?
@@ -460,7 +473,11 @@ struct ToolbarModifier<CustomizationID, Content: ToolbarContent & View>: ViewMod
         inputs: _ViewListInputs,
         body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs
     ) -> _ViewListOutputs {
-        body(_Graph(), inputs)
+        // Temporary bridge: until the ToolbarContent output pipeline is wired, keep
+        // .toolbar attached through list materialization so _makeView can emit ToolbarKey.
+        var outputs = body(_Graph(), inputs)
+        outputs.multiModifier(modifier, inputs: inputs)
+        return outputs
     }
 }
 
@@ -560,7 +577,7 @@ struct ToolbarReader<Edges, Content: View>: View {
 
         // Write new storage into primitiveReaderAttr only when item IDs change,
         // which guarantees convergence in at most two passes.
-        let _ = graph.makeRule {
+        graph.makeSideEffectRule {
             let newStorage = storageAttr.value
             let newIDs = newStorage.items.map { $0.id }
             let currentIDs = primitiveReaderAttr.value.storage.items.map { $0.id }
@@ -874,7 +891,7 @@ struct SheetToolbarModifier: ViewModifier {
         var body: some View {
             ToolbarReader(AllToolbarEdges.self) { reader in
                 _VariadicView.Tree(_LayoutRoot(SheetContentRoot(_VStackLayout()))) {
-                    content
+                    _UnaryViewAdaptor(content)
                     modalToolbar(reader.storage)
                 }
             }
@@ -912,7 +929,7 @@ struct SheetToolbarModifier: ViewModifier {
 
         var body: some View {
             _VariadicView.Tree(_LayoutRoot(SheetContentRoot(_VStackLayout()))) {
-                content
+                _UnaryViewAdaptor(content)
                 EmptyView()
             }
             .modifier(ToolbarFilterModifier(predicate: .keyPath(\ToolbarItemPlacement.Role.isModalAction)))
@@ -922,7 +939,7 @@ struct SheetToolbarModifier: ViewModifier {
     struct ModalButtonRow: View {
         var storage: ToolbarStorage
 
-        var confirmation: IDView<AnyView, ToolbarStorage.ID>? {
+        var confirmation: IDView<ToolbarStoredItemView, ToolbarStorage.ID>? {
             firstView(in: .confirmationAction)
         }
 
@@ -930,15 +947,15 @@ struct SheetToolbarModifier: ViewModifier {
             storage.toolbarItems(in: .destructiveAction)
         }
 
-        func firstView(in role: ToolbarItemPlacement.Role) -> IDView<AnyView, ToolbarStorage.ID>? {
+        func firstView(in role: ToolbarItemPlacement.Role) -> IDView<ToolbarStoredItemView, ToolbarStorage.ID>? {
             guard let item = storage.toolbarItems(in: role).first else { return nil }
-            return IDView(item.view, id: item.id)
+            return IDView(ToolbarStoredItemView(item: item), id: item.id)
         }
 
         var body: some View {
             _VariadicView.Tree(_LayoutRoot(DialogBottomButtonsHLayout())) {
                 ForEach(leadingItems) { item in
-                    item.view
+                    ToolbarStoredItemView(item: item)
                         .layoutValue(key: DialogBottomButtonsHLayout.ButtonPlacement.self, value: .leading)
                 }
                 firstView(in: .cancellationAction)?
@@ -951,3 +968,27 @@ struct SheetToolbarModifier: ViewModifier {
         }
     }
 }
+
+// Bridge for toolbar entries until ToolbarContent output wiring is ready:
+// prefer the original unary generator so Button's StaticSourceWriter label
+// source remains attached. Keep AnyView as a fallback for erased items.
+struct ToolbarStoredItemView: View {
+    var item: ToolbarStorage.Item
+
+    typealias Body = Never
+
+    static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        let item = view._attribute.value.item
+        if let generator = item.generator,
+           let outputs = generator.makeView(inputs: inputs) {
+            return outputs
+        }
+        return AnyView._makeView(view: view[\.item.view], inputs: inputs)
+    }
+
+    static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
+        _ViewListOutputs.unaryViewList(view: view, inputs: inputs)
+    }
+}
+
+extension ToolbarStoredItemView: _PrimitiveView {}

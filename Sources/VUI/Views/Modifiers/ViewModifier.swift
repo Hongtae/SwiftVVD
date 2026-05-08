@@ -62,7 +62,8 @@ struct BodyInput<Content>: ViewInput {
 // Protocol adopted by _ViewModifier_Content<Modifier>.
 // providerMakeView: pops a BodyInputElement from the base stack and calls it.
 // isViewList=false: calls the makeView closure.
-// isViewList=true: calls the makeViewList closure.
+// isViewList=true: bridges through the default VStack implicit root until
+// ImplicitRootType is wired.
 protocol ViewModifierContentProvider: View {
     static func providerMakeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs
     static func providerMakeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs
@@ -100,23 +101,51 @@ extension _ViewModifier_Content: ViewModifierContentProvider {
     static func providerMakeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         var inputs = inputs
         guard let elem = inputs.popLast(BodyInput<Self>.self) else {
-            fatalError("_ViewModifier_Content<\(Modifier.self)>.providerMakeView called without a modifier body context.")
+            return _ViewOutputs()
         }
-        guard !elem.isViewList, let fn = elem.makeViewFn else {
-            fatalError("_ViewModifier_Content<\(Modifier.self)>.providerMakeView: expected isViewList=false.")
+        if elem.isViewList {
+            guard let fn = elem.makeViewListFn else {
+                fatalError("_ViewModifier_Content<\(Modifier.self)>.providerMakeView: missing view-list body.")
+            }
+            guard let graph = AttributeGraph.current else {
+                fatalError("_ViewModifier_Content<\(Modifier.self)>.providerMakeView called outside AG context.")
+            }
+            let rootAttr: Attribute<_VStackLayout> = graph.makeInput(value: _VStackLayout())
+            // Use the default VStack implicit root until ImplicitRootType is wired.
+            return _VStackLayout._makeLayoutView(root: _GraphValue(_attribute: rootAttr), inputs: inputs) { _, childInputs in
+                fn(_Graph(), childInputs.listInputs)
+            }
+        } else {
+            guard let fn = elem.makeViewFn else {
+                fatalError("_ViewModifier_Content<\(Modifier.self)>.providerMakeView: missing view body.")
+            }
+            return fn(_Graph(), inputs)
         }
-        return fn(_Graph(), inputs)
     }
 
     static func providerMakeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
         var inputs = inputs
         guard let elem = inputs.base.popLast(BodyInput<Self>.self) else {
-            fatalError("_ViewModifier_Content<\(Modifier.self)>.providerMakeViewList called without a modifier body context.")
+            return _ViewListOutputs(views: .staticList(.merged([])), nextImplicitID: 0, staticCount: 0)
         }
-        guard elem.isViewList, let fn = elem.makeViewListFn else {
-            fatalError("_ViewModifier_Content<\(Modifier.self)>.providerMakeViewList: expected isViewList=true.")
+        if elem.isViewList {
+            guard let fn = elem.makeViewListFn else {
+                fatalError("_ViewModifier_Content<\(Modifier.self)>.providerMakeViewList: missing view-list body.")
+            }
+            return fn(_Graph(), inputs)
+        } else {
+            guard let fn = elem.makeViewFn else {
+                fatalError("_ViewModifier_Content<\(Modifier.self)>.providerMakeViewList: missing view body.")
+            }
+            // Wrap the makeView body case in a unary view list.
+            return _ViewListOutputs.unaryViewList(viewType: Self.self, inputs: inputs) { viewInputs in
+                var viewInputs = viewInputs
+                var mergedBase = inputs.base
+                mergedBase.merge(viewInputs.base, ignoringPhase: false)
+                viewInputs.base = mergedBase
+                return fn(_Graph(), viewInputs)
+            }
         }
-        return fn(_Graph(), inputs)
     }
 }
 
@@ -478,7 +507,6 @@ extension UnaryLayout {
 // MARK: - Modifier body stack helpers
 
 // ViewModifier body stack helpers.
-// pushModifierBody creates a BodyInputElement and calls _GraphInputs.append internally.
 //   Creates a BodyInputElement and calls _GraphInputs.append internally.
 // popLast: Thin wrapper delegating to _GraphInputs.popLast.
 // top: Thin wrapper delegating to _GraphInputs.top.

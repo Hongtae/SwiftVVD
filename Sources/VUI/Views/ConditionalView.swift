@@ -57,11 +57,31 @@ extension _ConditionalContent: View where TrueContent: View, FalseContent: View 
             state.activeOutputs = outputs.preferences
         }
 
+        func updateActiveBranchIfNeeded(nowTrue: Bool) {
+            guard AttributeGraph.current != nil else {
+                fatalError("_ConditionalContent branch update evaluated outside an active AttributeGraph context.")
+            }
+            guard state.isTrue != nowTrue else { return }
+            state.isTrue = nowTrue
+            state.activeSubgraph?.invalidate()
+
+            let outputs: _ViewOutputs
+            if nowTrue {
+                outputs = AGSubgraph.$current.withValue(state.activeSubgraph) {
+                    TrueContent._makeView(view: view[\.._trueContent], inputs: inputs)
+                }
+            } else {
+                outputs = AGSubgraph.$current.withValue(state.activeSubgraph) {
+                    FalseContent._makeView(view: view[\._falseContent], inputs: inputs)
+                }
+            }
+            state.activeLCAttr = outputs._layoutComputer.attribute
+            state.activeOutputs = outputs.preferences
+        }
+
         // Master branch rule: detects branch changes and replaces the active subgraph.
-        // All relay rules depend on this node, ensuring state.activeOutputs is
-        // updated before any relay rule evaluates.
         // On first evaluation state.isTrue == nowTrue, so no _makeView is called here
-        // and state.activeLCAttr is already set, so there is no cycle.
+        // and state.activeLCAttr is already set.
         let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
             guard AttributeGraph.current != nil else {
                 fatalError("_ConditionalContent rule evaluated outside an active AttributeGraph context.")
@@ -71,23 +91,7 @@ extension _ConditionalContent: View where TrueContent: View, FalseContent: View 
             if case .trueContent = view._attribute.value.storage { nowTrue = true }
             else { nowTrue = false }
 
-            if state.isTrue != nowTrue {
-                state.isTrue = nowTrue
-                state.activeSubgraph?.invalidate()
-
-                let outputs: _ViewOutputs
-                if nowTrue {
-                    outputs = AGSubgraph.$current.withValue(state.activeSubgraph) {
-                        TrueContent._makeView(view: view[\.._trueContent], inputs: inputs)
-                    }
-                } else {
-                    outputs = AGSubgraph.$current.withValue(state.activeSubgraph) {
-                        FalseContent._makeView(view: view[\._falseContent], inputs: inputs)
-                    }
-                }
-                state.activeLCAttr = outputs._layoutComputer.attribute
-                state.activeOutputs = outputs.preferences
-            }
+            updateActiveBranchIfNeeded(nowTrue: nowTrue)
 
             return state.activeLCAttr?.value ?? LayoutComputer.fixed(.zero)
         }
@@ -102,15 +106,10 @@ extension _ConditionalContent: View where TrueContent: View, FalseContent: View 
         for key in inputs.preferences.keys.keys {
             func addRelay<K: PreferenceKey>(_ k: K.Type) {
                 let relayAttr: Attribute<K.Value> = graph.makeRule {
-                    // Depend on view._attribute directly instead of lcAttr.
-                    // Using lcAttr here creates a mutual cycle:
-                    //   lcAttr -> activeLCAttr.value -> (layout chain) -> storageAttr
-                    //   -> toolbarNodes (which includes relayAttr) -> relayAttr -> lcAttr
-                    // Depending on view._attribute breaks this cycle: relayAttr re-evaluates
-                    // on branch switch, and state.activeOutputs will have been updated
-                    // by lcAttr (which also depends on view._attribute) before relayAttr
-                    // reads it on the next AG evaluation pass.
-                    _ = view._attribute.value
+                    let nowTrue: Bool
+                    if case .trueContent = view._attribute.value.storage { nowTrue = true }
+                    else { nowTrue = false }
+                    updateActiveBranchIfNeeded(nowTrue: nowTrue)
                     guard let prefs = state.activeOutputs else { return K.defaultValue }
                     var combined = K.defaultValue
                     for kv in prefs.preferences {

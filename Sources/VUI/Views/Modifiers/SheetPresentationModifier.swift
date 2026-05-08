@@ -265,6 +265,22 @@ struct SheetPresentationModifier<Content: View, AnchorProvider: SheetAnchorProvi
     }
 }
 
+extension SheetPresentationModifier where AnchorProvider == NullSheetAnchor<SheetPreference.Key> {
+    // Convenience initializer for the default NullSheetAnchor provider.
+    init(isPresented: Binding<Bool>,
+         onDismiss: (() -> Void)?,
+         sheetContent: @escaping () -> Content,
+         placement: SheetPreference.Placement,
+         drawsBackground: Bool) {
+        self.init(isPresented: isPresented,
+                  onDismiss: onDismiss,
+                  sheetContent: sheetContent,
+                  placement: placement,
+                  drawsBackground: drawsBackground,
+                  anchorProvider: NullSheetAnchor<SheetPreference.Key>())
+    }
+}
+
 // MARK: - ItemSheetPresentationModifier
 
 /// ViewModifier for presenting a sheet driven by an optional Identifiable item.
@@ -321,6 +337,22 @@ struct ItemSheetPresentationModifier<Item: Identifiable, Content: View, AnchorPr
     }
 }
 
+extension ItemSheetPresentationModifier where AnchorProvider == NullSheetAnchor<SheetPreference.Key> {
+    // Convenience initializer for the default NullSheetAnchor provider.
+    init(item: Binding<Item?>,
+         onDismiss: (() -> Void)?,
+         sheetContent: @escaping (Item) -> Content,
+         placement: SheetPreference.Placement,
+         drawsBackground: Bool) {
+        self.init(item: item,
+                  onDismiss: onDismiss,
+                  sheetContent: sheetContent,
+                  placement: placement,
+                  drawsBackground: drawsBackground,
+                  anchorProvider: NullSheetAnchor<SheetPreference.Key>())
+    }
+}
+
 // MARK: - View extensions
 
 extension View {
@@ -336,8 +368,7 @@ extension View {
                 onDismiss: onDismiss,
                 sheetContent: content,
                 placement: .automatic,
-                drawsBackground: true,
-                anchorProvider: NullSheetAnchor<SheetPreference.Key>()
+                drawsBackground: true
             )
         )
     }
@@ -354,8 +385,7 @@ extension View {
                 onDismiss: onDismiss,
                 sheetContent: content,
                 placement: .automatic,
-                drawsBackground: true,
-                anchorProvider: NullSheetAnchor<SheetPreference.Key>()
+                drawsBackground: true
             )
         )
     }

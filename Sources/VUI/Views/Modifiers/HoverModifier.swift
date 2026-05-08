@@ -15,7 +15,8 @@ public struct _HoverBackgroundModifier<Background>: ViewModifier where Backgroun
     }
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        fatalError("Implement with AG")
+        // TODO: Wire hover state to the platform-item hover path before rendering this background.
+        body(_Graph(), inputs)
     }
 }
 
@@ -35,7 +36,8 @@ public struct _HoverOverlayModifier<Overlay>: ViewModifier where Overlay: View {
     }
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        fatalError("Implement with AG")
+        // TODO: Wire hover state to the platform-item hover path before rendering this overlay.
+        body(_Graph(), inputs)
     }
 }
 
@@ -55,7 +57,8 @@ public struct _HoverRegionModifier: ViewModifier {
     }
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        fatalError("Implement with AG")
+        // TODO: Connect the platform hover item to pointer enter/exit events.
+        body(_Graph(), inputs)
     }
 }
 

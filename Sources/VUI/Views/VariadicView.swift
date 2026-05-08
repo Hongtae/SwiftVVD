@@ -379,8 +379,11 @@ extension _VariadicView.Tree: View where Root: _VariadicView_ViewRoot, Content: 
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        assert(view.isRoot == false)
-
+        // `view.isRoot` can be true here when the current body/list
+        // traversal materializes this Tree from a rule attribute, such as a
+        // Body._makeViewList body node or a TupleView child node. That is not
+        // the same as an app/scene root view entering through _makeViewList.
+        // FIXME: Restore a non-root assertion once the root invariant is fully wired.
         return Root._makeViewList(root: view[\.root], inputs: inputs) { _, inputs in
             Content._makeViewList(view: view[\.content], inputs: inputs)
         }

@@ -147,6 +147,7 @@ private final class _OptionalViewState {
     var hasValue: Bool? = nil
     var subgraph: AGSubgraph? = nil
     var lcAttr: Attribute<LayoutComputer>? = nil
+    var activeOutputs: PreferencesOutputs? = nil
 }
 
 extension Optional: View where Wrapped: View {
@@ -164,37 +165,64 @@ extension Optional: View where Wrapped: View {
         let state = _OptionalViewState()
         state.subgraph = AGSubgraph() // Created while parent AGSubgraph is active
 
-        let masterLC: Attribute<LayoutComputer> = graph.makeRule {
-            // Retrieve the active graph from TaskLocal to avoid a retain cycle
+        func updateActiveBranchIfNeeded() {
             guard let graph = AttributeGraph.current else {
+                fatalError("Optional<\(Wrapped.self)> branch update evaluated outside an active AttributeGraph context.")
+            }
+            let nowHas = view._attribute.value != nil
+            guard state.hasValue != nowHas else { return }
+            state.subgraph?.invalidate()
+            state.hasValue = nowHas
+
+            if nowHas {
+                // Force-unwrap is safe: node lives only while hasValue == true.
+                let wrappedAttr: Attribute<Wrapped> = AGSubgraph.$current.withValue(state.subgraph) {
+                    graph.makeRule { view._attribute.value! }
+                }
+                let outputs = AGSubgraph.$current.withValue(state.subgraph) {
+                    Wrapped._makeView(view: _GraphValue(_attribute: wrappedAttr), inputs: inputs)
+                }
+                state.lcAttr = outputs._layoutComputer.attribute
+                state.activeOutputs = outputs.preferences
+            } else {
+                state.lcAttr = nil
+                state.activeOutputs = nil
+            }
+        }
+
+        let masterLC: Attribute<LayoutComputer> = graph.makeRule {
+            guard AttributeGraph.current != nil else {
                 fatalError("Optional<\(Wrapped.self)> rule evaluated outside an active AttributeGraph context.")
             }
 
-            let nowHas = view._attribute.value != nil
-
-            if state.hasValue != nowHas {
-                // Invalidate clears old nodes/children but keeps this subgraph attached to its parent
-                state.subgraph?.invalidate()
-                state.hasValue = nowHas
-
-                if nowHas {
-                    // Force-unwrap is safe: node lives only while hasValue == true.
-                    let wrappedAttr: Attribute<Wrapped> = AGSubgraph.$current.withValue(state.subgraph) {
-                        graph.makeRule { view._attribute.value! }
-                    }
-                    let outputs = AGSubgraph.$current.withValue(state.subgraph) {
-                        Wrapped._makeView(view: _GraphValue(_attribute: wrappedAttr), inputs: inputs)
-                    }
-                    state.lcAttr = outputs._layoutComputer.attribute
-                } else {
-                    state.lcAttr = nil
-                }
-            }
+            updateActiveBranchIfNeeded()
 
             return state.lcAttr?.value ?? LayoutComputer.fixed(.zero)
         }
 
-        return _ViewOutputs(preferences: PreferencesOutputs(),
+        // Optional child views keep ResourceList/DisplayList and other requested
+        // preferences alive when they switch between nil and some.
+        // FIXME: Revisit this relay once Optional-specific preference handling is complete.
+        var outPrefs = PreferencesOutputs()
+        for key in inputs.preferences.keys.keys {
+            func addRelay<K: PreferenceKey>(_ k: K.Type) {
+                let relayAttr: Attribute<K.Value> = graph.makeRule {
+                    updateActiveBranchIfNeeded()
+                    guard let prefs = state.activeOutputs else { return K.defaultValue }
+                    var combined = K.defaultValue
+                    for kv in prefs.preferences {
+                        guard ObjectIdentifier(kv.key) == ObjectIdentifier(k) else { continue }
+                        let val = Attribute<K.Value>(kv.value).value
+                        K.reduce(value: &combined) { val }
+                    }
+                    return combined
+                }
+                outPrefs.append(k, node: relayAttr.identifier)
+            }
+            addRelay(key)
+        }
+
+        return _ViewOutputs(preferences: outPrefs,
                             layoutComputer: OptionalAttribute(masterLC))
     }
 
