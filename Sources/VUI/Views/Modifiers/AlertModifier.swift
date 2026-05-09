@@ -249,27 +249,6 @@ struct PlatformItemListButtonStyle: PrimitiveButtonStyle {
     }
 }
 
-private struct PlatformItemSourceLabel: View {
-    typealias Body = Never
-
-    let source: AnySource
-    var body: Never { neverBody() }
-
-    static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("PlatformItemSourceLabel._makeView called outside AG context")
-        }
-        let source = view._attribute.value.source
-        guard source.value.isValid(in: graph) else { return _ViewOutputs() }
-        let aliasAttr = graph.makeInput(value: PrimitiveButtonStyleConfiguration.Label())
-        return source.makeView(view: _GraphValue(_attribute: aliasAttr), inputs: inputs)
-    }
-
-    static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        _ViewListOutputs.unaryViewList(view: view, inputs: inputs)
-    }
-}
-
 private func platformItemFallbackLabel(role: ButtonRole?) -> Text {
     switch role {
     case .cancel:
@@ -297,7 +276,7 @@ private struct PlatformItemListButtonBody: View {
         let source = inputs.base.customInputs.value(forKey: SourceInput<PrimitiveButtonStyleConfiguration.Label>.self).top
         let preferenceAttr: Attribute<PlatformItemList> = graph.makeRule {
             let configuration = configurationAttr.value
-            let label = source.map { AnyView(PlatformItemSourceLabel(source: $0)) } ??
+            let label = source?.snapshot() ??
                 AnyView(platformItemFallbackLabel(role: configuration.role))
             var list = PlatformItemList()
             list.append(PlatformItemList.Item(
@@ -310,6 +289,10 @@ private struct PlatformItemListButtonBody: View {
         }
         outputs.preferences.append(PlatformItemList.Key.self, node: preferenceAttr.identifier)
         return outputs
+    }
+
+    static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
+        _ViewListOutputs.unaryViewList(view: view, inputs: inputs)
     }
 
     var body: some View {
@@ -429,7 +412,7 @@ extension AlertModifier {
 // Button layout rules:
 //   - Only first 3 items are materialized.
 //   - 2 items -> HStack: cancel on left, default on right.
-//   - 3 items -> VStack: default/custom top, destructive middle, cancel bottom.
+//   - 3 items -> VStack: destructive top, default/custom middle, cancel bottom.
 //
 // Keyboard shortcuts:
 //   - ButtonRole.cancel -> Escape (.cancelAction)
@@ -448,7 +431,7 @@ struct AlertOverlayView: View {
 
     private var alertPanel: some View {
         VStack(spacing: 0) {
-            VStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: 10) {
                 preference.title
                     .font(.headline)
                 if let makeMessage = preference.makeMessage {
@@ -457,13 +440,14 @@ struct AlertOverlayView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 16)
-
-            Divider()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 28)
+            .padding(.top, 24)
+            .padding(.bottom, 18)
 
             actions
-                .padding(8)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 20)
         }
         .frame(width: 280)
         //.background(Color(white: 0.97), in: RoundedRectangle(cornerRadius: 8))
@@ -473,16 +457,10 @@ struct AlertOverlayView: View {
     private var actions: some View {
         if let list = preference.actionsItemList, !list.buttonItems.isEmpty {
             let items = Array(orderedItems(list.buttonItems).prefix(3))
-            if items.count == 2 {
-                HStack(spacing: 8) {
-                    actionButton(items[0])
-                    actionButton(items[1])
-                }
-            } else {
-                VStack(spacing: 8) {
-                    ForEach(0..<items.count, id: \.self) { i in
-                        actionButton(items[i])
-                    }
+            let reverseHorizontal = items.count == 2 && items.last?.role == .cancel
+            AlertActionsLayout(reverseTwoButtonHorizontal: reverseHorizontal) {
+                ForEach(0..<items.count, id: \.self) { i in
+                    actionButton(items[i])
                 }
             }
         } else {
@@ -490,16 +468,15 @@ struct AlertOverlayView: View {
         }
     }
 
-    // 2-button HStack: cancel first (left), default second (right).
-    // 3-button VStack: other/default top, destructive middle, cancel bottom.
+    // Action ordering follows the platform alert layout.
+    // 2-button row: cancel first (left), default/destructive second (right).
+    // If measured labels do not fit the row, stack vertically with cancel last.
+    // 3-button VStack: destructive top, other/default middle, cancel bottom.
     private func orderedItems(_ items: [PlatformItemList.Item]) -> [PlatformItemList.Item] {
         let cancel      = items.filter { $0.role == .cancel }
         let destructive = items.filter { $0.role == .destructive }
         let other       = items.filter { $0.role != .cancel && $0.role != .destructive }
-        if items.count == 2 {
-            return cancel + other + destructive
-        }
-        return other + destructive + cancel
+        return destructive + other + cancel
     }
 
     private func actionButton(_ item: PlatformItemList.Item) -> some View {
@@ -509,9 +486,155 @@ struct AlertOverlayView: View {
             preference.isPresented.wrappedValue = false
         }) {
             item.label
-                .frame(maxWidth: .infinity)
         }
+        .buttonStyle(AlertOverlayButtonStyle(role: item.role))
         .environment(\.isEnabled, item.isEnabled)
+    }
+}
+
+// Alert action layout used by the overlay renderer.
+// Two short labels share one row, and long labels fall back to a vertical stack.
+private struct AlertActionsLayout: Layout {
+    typealias AnimatableData = EmptyAnimatableData
+    typealias Cache = Void
+
+    var reverseTwoButtonHorizontal: Bool
+
+    private let horizontalSpacing: CGFloat = 10
+    private let verticalSpacing: CGFloat = 8
+    private let minimumButtonWidth: CGFloat = 104
+
+    func sizeThatFits(proposal: ProposedViewSize,
+                      subviews: Subviews,
+                      cache: inout Cache) -> CGSize {
+        if usesHorizontalLayout(proposal: proposal, subviews: subviews) {
+            return horizontalSize(proposal: proposal, subviews: subviews)
+        }
+        return verticalSize(proposal: proposal, subviews: subviews)
+    }
+
+    func placeSubviews(in bounds: CGRect,
+                       proposal: ProposedViewSize,
+                       subviews: Subviews,
+                       cache: inout Cache) {
+        if usesHorizontalLayout(proposal: ProposedViewSize(width: bounds.width, height: bounds.height),
+                                subviews: subviews) {
+            placeHorizontalSubviews(in: bounds, subviews: subviews)
+        } else {
+            placeVerticalSubviews(in: bounds, subviews: subviews)
+        }
+    }
+
+    private func usesHorizontalLayout(proposal: ProposedViewSize, subviews: Subviews) -> Bool {
+        guard subviews.count == 2 else { return false }
+        guard let availableWidth = proposal.width, availableWidth.isFinite else { return true }
+        let idealWidths = subviews.map { subview in
+            max(minimumButtonWidth, subview.sizeThatFits(.unspecified).width)
+        }
+        return idealWidths.reduce(0, +) + horizontalSpacing <= availableWidth
+    }
+
+    private func horizontalSize(proposal: ProposedViewSize, subviews: Subviews) -> CGSize {
+        if let availableWidth = proposal.width, availableWidth.isFinite {
+            let buttonWidth = max(0, (availableWidth - horizontalSpacing) * 0.5)
+            let height = subviews.map {
+                $0.sizeThatFits(ProposedViewSize(width: buttonWidth, height: proposal.height)).height
+            }.reduce(0, max)
+            return CGSize(width: availableWidth, height: height)
+        }
+
+        let sizes = subviews.map { subview in
+            let size = subview.sizeThatFits(.unspecified)
+            return CGSize(width: max(minimumButtonWidth, size.width), height: size.height)
+        }
+        return CGSize(width: sizes.map(\.width).reduce(0, +) + horizontalSpacing,
+                      height: sizes.map(\.height).reduce(0, max))
+    }
+
+    private func verticalSize(proposal: ProposedViewSize, subviews: Subviews) -> CGSize {
+        let sizes = subviews.map {
+            $0.sizeThatFits(ProposedViewSize(width: proposal.width, height: nil))
+        }
+        let width = proposal.width ?? sizes.map(\.width).reduce(0, max)
+        let spacing = verticalSpacing * CGFloat(max(0, subviews.count - 1))
+        return CGSize(width: width, height: sizes.map(\.height).reduce(0, +) + spacing)
+    }
+
+    private func placeHorizontalSubviews(in bounds: CGRect, subviews: Subviews) {
+        let buttonWidth = max(0, (bounds.width - horizontalSpacing) * 0.5)
+        let order = reverseTwoButtonHorizontal ? [1, 0] : [0, 1]
+        var x = bounds.minX
+        for index in order {
+            guard subviews.indices.contains(index) else { continue }
+            subviews[index].place(
+                at: CGPoint(x: x, y: bounds.minY),
+                anchor: .topLeading,
+                proposal: ProposedViewSize(width: buttonWidth, height: bounds.height)
+            )
+            x += buttonWidth + horizontalSpacing
+        }
+    }
+
+    private func placeVerticalSubviews(in bounds: CGRect, subviews: Subviews) {
+        var y = bounds.minY
+        for index in subviews.indices {
+            let proposal = ProposedViewSize(width: bounds.width, height: nil)
+            let size = subviews[index].sizeThatFits(proposal)
+            subviews[index].place(
+                at: CGPoint(x: bounds.minX, y: y),
+                anchor: .topLeading,
+                proposal: ProposedViewSize(width: bounds.width, height: size.height)
+            )
+            y += size.height + verticalSpacing
+        }
+    }
+}
+
+private struct AlertOverlayButtonStyle: PrimitiveButtonStyle {
+    var role: ButtonRole?
+
+    func makeBody(configuration: Configuration) -> some View {
+        AlertOverlayButtonBody(configuration: configuration, role: role)
+    }
+}
+
+private struct AlertOverlayButtonBody: View {
+    let configuration: PrimitiveButtonStyleConfiguration
+    let role: ButtonRole?
+    @State private var isPressed = false
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Spacer(minLength: 0)
+            configuration.label
+            Spacer(minLength: 0)
+        }
+            .frame(minWidth: 88, maxWidth: .infinity, minHeight: 32)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .foregroundStyle(foreground)
+            .background {
+                RoundedRectangle(cornerRadius: 5).fill(background)
+                RoundedRectangle(cornerRadius: 5).strokeBorder(border, lineWidth: 1)
+            }
+            ._onButtonGesture(pressing: { isPressed = $0 }, perform: { configuration.trigger() })
+    }
+
+    private var foreground: Color {
+        role == .destructive ? Color(red: 1.0, green: 0.12, blue: 0.16) : .black
+    }
+
+    private var background: Color {
+        if role == .destructive {
+            return isPressed
+                ? Color(red: 1.0, green: 0.62, blue: 0.64)
+                : Color(red: 1.0, green: 0.76, blue: 0.78)
+        }
+        return Color(white: isPressed ? 0.82 : 0.92)
+    }
+
+    private var border: Color {
+        role == .destructive ? .clear : Color(white: 0.35)
     }
 }
 

@@ -28,6 +28,7 @@ protocol AnySourceFormula {
         view: _GraphValue<A>, source: AnySource, inputs: _ViewListInputs
     ) -> _ViewListOutputs
     static func viewListCount(source: AnySource, inputs: _ViewListCountInputs) -> Int?
+    static func snapshot(source: AnySource) -> AnyView?
 }
 
 // SourceFormula<T>: zero-size empty struct with no stored properties.
@@ -46,6 +47,12 @@ struct SourceFormula<T: View>: AnySourceFormula {
     }
     static func viewListCount(source: AnySource, inputs: _ViewListCountInputs) -> Int? {
         nil  // _viewListCount is not implemented yet. nil means dynamic/unknown count.
+    }
+    static func snapshot(source: AnySource) -> AnyView? {
+        guard let graph = AttributeGraph.current, source.value.isValid(in: graph) else {
+            return nil
+        }
+        return AnyView(Attribute<T>(source.value.toStrong()).value)
     }
 }
 
@@ -77,6 +84,11 @@ struct AnySource {
     ) -> Int? {
         F.viewListCount(source: source, inputs: inputs)
     }
+    private static func _dispatchSnapshot<F: AnySourceFormula>(
+        _ f: F.Type, source: AnySource
+    ) -> AnyView? {
+        F.snapshot(source: source)
+    }
 
     func makeView<A: ViewAlias>(view: _GraphValue<A>, inputs: _ViewInputs) -> _ViewOutputs {
         Self._dispatchMakeView(formula, view: view, source: self, inputs: inputs)
@@ -86,6 +98,9 @@ struct AnySource {
     }
     func viewListCount(inputs: _ViewListCountInputs) -> Int? {
         Self._dispatchViewListCount(formula, source: self, inputs: inputs)
+    }
+    func snapshot() -> AnyView? {
+        Self._dispatchSnapshot(formula, source: self)
     }
 }
 
