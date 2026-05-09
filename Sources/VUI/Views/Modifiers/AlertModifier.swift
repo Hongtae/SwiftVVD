@@ -466,7 +466,7 @@ struct AlertOverlayView: View {
                 .padding(8)
         }
         .frame(width: 280)
-        .background(Color(white: 0.97), in: RoundedRectangle(cornerRadius: 8))
+        //.background(Color(white: 0.97), in: RoundedRectangle(cornerRadius: 8))
     }
 
     @ViewBuilder
