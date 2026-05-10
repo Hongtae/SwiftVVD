@@ -51,13 +51,38 @@ extension Divider: _PrimitiveView {
         guard let graph = AttributeGraph.current else {
             fatalError("\(self)._makeView called outside an active AttributeGraph context.")
         }
+        let sizeAttr = inputs.size
+        let positionAttr = inputs.position
         let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
             LayoutComputer(
                 sizeThatFits: { proposal in
-                    CGSize(width: proposal.width ?? 0, height: 1)
+                    // Legacy VUI drew Divider as a 1px gray line. Until stack
+                    // orientation is threaded through _ViewInputs, infer the
+                    // axis from the shaped proposal used by HStack/VStack.
+                    if proposal.width == nil, let height = proposal.height {
+                        return CGSize(width: 1, height: height)
+                    }
+                    if proposal.width == 0, let height = proposal.height, height != 0 {
+                        return CGSize(width: 1, height: height)
+                    }
+                    return CGSize(width: proposal.width ?? 0, height: 1)
                 }
             )
         }
-        return _ViewOutputs(layoutComputer: OptionalAttribute(lcAttr))
+        let dlAttr: Attribute<DisplayList> = graph.makeRule {
+            let size = sizeAttr.value.value
+            let position = positionAttr.value
+            var list = DisplayList()
+            if size.width > 0 && size.height > 0 {
+                let path = Rectangle().path(in: CGRect(origin: position, size: size))
+                list.items.append { context in
+                    context.fill(path, with: .color(.gray))
+                }
+            }
+            return list
+        }
+        var outputs = _ViewOutputs(layoutComputer: OptionalAttribute(lcAttr))
+        outputs.preferences.append(DisplayList.Key.self, node: dlAttr.identifier)
+        return outputs
     }
 }

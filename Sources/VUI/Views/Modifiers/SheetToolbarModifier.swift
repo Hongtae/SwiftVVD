@@ -725,13 +725,15 @@ struct SheetContentRoot<L: Layout>: Layout {
         switch subviews.count {
         case 2:
             let content = subviews[0].sizeThatFits(proposal)
-            let toolbar = subviews[1].sizeThatFits(.zero)
+            let toolbar = subviews[1].sizeThatFits(
+                ProposedViewSize(width: proposal.width ?? content.width, height: nil))
             return CGSize(width: max(content.width, toolbar.width),
                           height: content.height + toolbar.height)
         case 3:
             let search = subviews[0].sizeThatFits(.zero)
             let content = subviews[1].sizeThatFits(proposal)
-            let toolbar = subviews[2].sizeThatFits(.zero)
+            let toolbar = subviews[2].sizeThatFits(
+                ProposedViewSize(width: proposal.width ?? max(search.width, content.width), height: nil))
             return CGSize(width: max(search.width, max(content.width, toolbar.width)),
                           height: search.height + content.height + toolbar.height)
         default:
@@ -740,7 +742,43 @@ struct SheetContentRoot<L: Layout>: Layout {
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout L.Cache) {
-        layout.placeSubviews(in: bounds, proposal: proposal, subviews: subviews, cache: &cache)
+        switch subviews.count {
+        case 2:
+            let toolbarProposal = ProposedViewSize(width: bounds.width, height: nil)
+            let toolbar = subviews[1].sizeThatFits(toolbarProposal)
+            let contentHeight = max(0, bounds.height - toolbar.height)
+            let contentProposal = ProposedViewSize(width: bounds.width, height: contentHeight)
+            let content = subviews[0].sizeThatFits(contentProposal)
+            let contentX = bounds.minX + (bounds.width - content.width) * 0.5
+
+            subviews[0].place(at: CGPoint(x: contentX, y: bounds.minY),
+                              anchor: .topLeading,
+                              proposal: contentProposal)
+            subviews[1].place(at: CGPoint(x: bounds.minX, y: bounds.maxY - toolbar.height),
+                              anchor: .topLeading,
+                              proposal: ProposedViewSize(width: bounds.width, height: toolbar.height))
+        case 3:
+            let search = subviews[0].sizeThatFits(.zero)
+            let toolbarProposal = ProposedViewSize(width: bounds.width, height: nil)
+            let toolbar = subviews[2].sizeThatFits(toolbarProposal)
+            let contentHeight = max(0, bounds.height - search.height - toolbar.height)
+            let contentProposal = ProposedViewSize(width: bounds.width, height: contentHeight)
+            let content = subviews[1].sizeThatFits(contentProposal)
+            let searchX = bounds.minX + (bounds.width - search.width) * 0.5
+            let contentX = bounds.minX + (bounds.width - content.width) * 0.5
+
+            subviews[0].place(at: CGPoint(x: searchX, y: bounds.minY),
+                              anchor: .topLeading,
+                              proposal: ProposedViewSize(search))
+            subviews[1].place(at: CGPoint(x: contentX, y: bounds.minY + search.height),
+                              anchor: .topLeading,
+                              proposal: contentProposal)
+            subviews[2].place(at: CGPoint(x: bounds.minX, y: bounds.maxY - toolbar.height),
+                              anchor: .topLeading,
+                              proposal: ProposedViewSize(width: bounds.width, height: toolbar.height))
+        default:
+            layout.placeSubviews(in: bounds, proposal: proposal, subviews: subviews, cache: &cache)
+        }
     }
 
     func explicitAlignment(of guide: HorizontalAlignment,
@@ -766,46 +804,58 @@ struct SheetContentRoot<L: Layout>: Layout {
 struct DialogBottomButtonsHLayout: Layout {
     typealias AnimatableData = EmptyAnimatableData
 
-    enum ButtonPlacement: UInt8, LayoutValueKey {
-        case leading = 0
-        case cancel = 1
-        case confirmation = 2
+    var leadingCount: Int
 
-        static var defaultValue: ButtonPlacement { .leading }
+    init(leadingCount: Int = 0) {
+        self.leadingCount = leadingCount
     }
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        var width: CGFloat = 0
-        var height: CGFloat = 0
-        for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
-            width += size.width
-            height = max(height, size.height)
+        let sizes = subviews.indices.map { subviews[$0].sizeThatFits(.unspecified) }
+        let height = sizes.map(\.height).reduce(0, max)
+
+        let leadingEnd = min(max(leadingCount, 0), subviews.count)
+        let leadingIndices = Array(subviews.indices.prefix(leadingEnd))
+        let actionIndices = Array(subviews.indices.dropFirst(leadingEnd))
+
+        func width(for indices: [Subviews.Index]) -> CGFloat {
+            let spacing = CGFloat(max(0, indices.count - 1)) * ViewSpacing.defaultSpacing
+            return indices.map { sizes[$0].width }.reduce(0, +) + spacing
         }
-        if subviews.count > 1 { width += CGFloat(subviews.count - 1) * ViewSpacing.defaultSpacing }
-        return CGSize(width: width, height: height)
+
+        let leadingWidth = width(for: leadingIndices)
+        let actionWidth = width(for: actionIndices)
+        let groupSpacing = leadingWidth > 0 && actionWidth > 0 ? ViewSpacing.defaultSpacing : 0
+        let intrinsicWidth = leadingWidth + groupSpacing + actionWidth
+
+        if let proposedWidth = proposal.width, proposedWidth.isFinite {
+            return CGSize(width: max(proposedWidth, intrinsicWidth), height: height)
+        }
+        return CGSize(width: intrinsicWidth, height: height)
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let sizes = subviews.indices.map { subviews[$0].sizeThatFits(.unspecified) }
         var leadingX = bounds.minX
         var trailingX = bounds.maxX
         let midY = bounds.midY
 
-        for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
-            switch subview[ButtonPlacement.self] {
-            case .leading:
-                subview.place(at: CGPoint(x: leadingX, y: midY),
-                              anchor: .leading,
-                              proposal: ProposedViewSize(size))
-                leadingX += size.width + ViewSpacing.defaultSpacing
-            case .cancel, .confirmation:
-                trailingX -= size.width
-                subview.place(at: CGPoint(x: trailingX, y: midY),
-                              anchor: .leading,
-                              proposal: ProposedViewSize(size))
-                trailingX -= ViewSpacing.defaultSpacing
-            }
+        let leadingEnd = min(max(leadingCount, 0), subviews.count)
+        for index in subviews.indices.prefix(leadingEnd) {
+            let size = sizes[index]
+            subviews[index].place(at: CGPoint(x: leadingX, y: midY),
+                                  anchor: .leading,
+                                  proposal: ProposedViewSize(size))
+            leadingX += size.width + ViewSpacing.defaultSpacing
+        }
+
+        for index in subviews.indices.dropFirst(leadingEnd).reversed() {
+            let size = sizes[index]
+            trailingX -= size.width
+            subviews[index].place(at: CGPoint(x: trailingX, y: midY),
+                                  anchor: .leading,
+                                  proposal: ProposedViewSize(size))
+            trailingX -= ViewSpacing.defaultSpacing
         }
     }
 }
@@ -909,8 +959,9 @@ struct SheetToolbarModifier: ViewModifier {
                 VStack(spacing: 0) {
                     Divider()
                     ModalButtonRow(storage: modalStorage)
+                        .padding(EdgeInsets(top: 12, leading: 20, bottom: 12, trailing: 20))
                 }
-                .fixedSize()
+                .frame(maxWidth: .infinity)
                 .platformGroupFocusSection()
             } else {
                 EmptyView()
@@ -953,19 +1004,83 @@ struct SheetToolbarModifier: ViewModifier {
         }
 
         var body: some View {
-            _VariadicView.Tree(_LayoutRoot(DialogBottomButtonsHLayout())) {
+            _VariadicView.Tree(_LayoutRoot(DialogBottomButtonsHLayout(leadingCount: leadingItems.count))) {
                 ForEach(leadingItems) { item in
                     ToolbarStoredItemView(item: item)
-                        .layoutValue(key: DialogBottomButtonsHLayout.ButtonPlacement.self, value: .leading)
+                        .buttonStyle(SheetToolbarButtonStyle(placement: item.placement))
                 }
                 firstView(in: .cancellationAction)?
+                    .buttonStyle(SheetToolbarButtonStyle(placement: .cancellationAction))
                     ._trait(KeyboardShortcutPickerOptionTraitKey.self, KeyboardShortcut.cancelAction)
-                    .layoutValue(key: DialogBottomButtonsHLayout.ButtonPlacement.self, value: .cancel)
                 confirmation?
+                    .buttonStyle(SheetToolbarButtonStyle(placement: .confirmationAction))
                     ._trait(KeyboardShortcutPickerOptionTraitKey.self, KeyboardShortcut.defaultAction)
-                    .layoutValue(key: DialogBottomButtonsHLayout.ButtonPlacement.self, value: .confirmation)
             }
         }
+    }
+}
+
+// Modal action button styling used by sheet toolbar rows.
+// Role-specific colors and borders are handled locally until a platform button bridge is available.
+private struct SheetToolbarButtonStyle: PrimitiveButtonStyle {
+    var placement: ToolbarItemPlacement.Role
+
+    func makeBody(configuration: Configuration) -> some View {
+        SheetToolbarButtonBody(configuration: configuration, placement: placement)
+    }
+}
+
+private struct SheetToolbarButtonBody: View {
+    let configuration: PrimitiveButtonStyleConfiguration
+    let placement: ToolbarItemPlacement.Role
+    @State private var isPressed = false
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Spacer(minLength: 0)
+            configuration.label
+            Spacer(minLength: 0)
+        }
+        .frame(minWidth: 76, minHeight: 32)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .foregroundStyle(foreground)
+        .background {
+            RoundedRectangle(cornerRadius: 6).fill(background)
+            RoundedRectangle(cornerRadius: 6).strokeBorder(border, lineWidth: borderWidth)
+        }
+        ._onButtonGesture(pressing: { isPressed = $0 }, perform: { configuration.trigger() })
+    }
+
+    private var foreground: Color {
+        if placement.isConfirmationAction { return .white }
+        if placement.isDestructiveAction { return Color(red: 1.0, green: 0.12, blue: 0.16) }
+        return .black
+    }
+
+    private var background: Color {
+        if placement.isConfirmationAction {
+            return isPressed
+                ? Color(red: 0.0, green: 0.36, blue: 0.86)
+                : Color(red: 0.0, green: 0.47, blue: 1.0)
+        }
+        if placement.isDestructiveAction {
+            return isPressed
+                ? Color(red: 1.0, green: 0.62, blue: 0.64)
+                : Color(red: 1.0, green: 0.76, blue: 0.78)
+        }
+        return Color(white: isPressed ? 0.86 : 0.96)
+    }
+
+    private var border: Color {
+        if placement.isConfirmationAction { return .clear }
+        if placement.isCancellationAction { return Color(red: 0.42, green: 0.62, blue: 0.95) }
+        if placement.isDestructiveAction { return .clear }
+        return Color(white: 0.64)
+    }
+
+    private var borderWidth: CGFloat {
+        placement.isCancellationAction ? 2 : 1
     }
 }
 

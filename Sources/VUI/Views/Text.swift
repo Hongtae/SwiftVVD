@@ -255,6 +255,45 @@ public struct Text: Equatable {
 }
 
 extension Text {
+    public func foregroundColor(_ color: Color?) -> Text {
+        var modifiers: [Modifier] = []
+        self.modifiers.forEach {
+            if case .foregroundColor(_) = $0 { } else {
+                modifiers.append($0)
+            }
+        }
+        if let color {
+            modifiers.append(.foregroundColor(color))
+        }
+        return Text(storage: self.storage, modifiers: modifiers)
+    }
+
+    var foregroundColor: Color? {
+        self.modifiers.compactMap {
+            if case let .foregroundColor(color) = $0 { return color }
+            return nil
+        }.first
+    }
+
+    func foregroundShading(in environment: EnvironmentValues) -> GraphicsContext.Shading {
+        if let foregroundColor {
+            return .color(foregroundColor)
+        }
+        if let styles = environment.foregroundStyleLevels {
+            var shape = _ShapeStyle_Shape()
+            shape.foregroundStyle = (
+                primary: styles.primary,
+                secondary: styles.secondary,
+                tertiary: styles.tertiary
+            )
+            styles.primary._apply(to: &shape)
+            if let shading = shape.shading {
+                return shading
+            }
+        }
+        return .foreground
+    }
+
     public func font(_ font: Font?) -> Text {
         var modifiers: [Modifier] = []
         self.modifiers.forEach {
@@ -399,11 +438,13 @@ extension Text: View {
         }
 
         let dlAttr: Attribute<DisplayList> = graph.makeRule {
-            let _ = view._attribute.value // Dependency: text modifiers/colors
+            let text = view._attribute.value // Dependency: text modifiers/colors
+            let environment = cachedEnvironmentAttr.value.environment.value
             let viewSize = sizeAttr.value.value
             let position = positionAttr.value
             let resolved = resolvedTextAttr.value
             let debugLayout = debugLayoutAttr.value
+            let foreground = text.foregroundShading(in: environment)
 
             var list = DisplayList()
 
@@ -423,9 +464,7 @@ extension Text: View {
 
                     // 3. Draw to the screen
                     if frame.width > 0 && frame.height > 0 {
-                        // TODO: Extract foregroundColor from text.modifiers or environment
-                        // and pass it to context.draw(..., shading:)
-                        context.draw(resolved, in: frame)
+                        context.draw(resolved, in: frame, shading: foreground)
                     }
                 }
             }
