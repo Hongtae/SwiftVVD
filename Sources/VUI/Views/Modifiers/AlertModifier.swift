@@ -243,6 +243,158 @@ struct PlatformItemList {
     }
 }
 
+// Overlay helper shared by alert and confirmationDialog.
+// Cancel is placed last, non-cancel actions keep source order, a leading nil-role
+// action is styled as the default action, and up to four actions are displayed.
+struct DialogOverlayAction {
+    let item: PlatformItemList.Item
+    let isDefaultAction: Bool
+}
+
+func orderedDialogOverlayActions(_ items: [PlatformItemList.Item],
+                                 maxVisibleCount: Int = 4) -> [DialogOverlayAction] {
+    guard maxVisibleCount > 0 else { return [] }
+    let ordered = items.enumerated().map { offset, item in
+        DialogOverlayAction(item: item,
+                            isDefaultAction: offset == 0 && item.role == nil)
+    }
+    let nonCancel = ordered.filter { $0.item.role != .cancel }
+    let cancel    = ordered.filter { $0.item.role == .cancel }
+    let orderedActions = nonCancel + cancel
+    guard orderedActions.count > maxVisibleCount else {
+        return orderedActions
+    }
+    if let firstCancel = cancel.first {
+        return Array(nonCancel.prefix(maxVisibleCount - 1)) + [firstCancel]
+    }
+    return Array(nonCancel.prefix(maxVisibleCount))
+}
+
+struct DialogOverlayActionButtonStyle: PrimitiveButtonStyle {
+    var role: ButtonRole?
+    var isDefaultAction: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        DialogOverlayActionButtonBody(configuration: configuration,
+                                      role: role,
+                                      isDefaultAction: isDefaultAction)
+    }
+}
+
+private struct DialogOverlayActionButtonBody: View {
+    let configuration: PrimitiveButtonStyleConfiguration
+    let role: ButtonRole?
+    let isDefaultAction: Bool
+    @State private var isPressed = false
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Spacer(minLength: 0)
+            configuration.label
+            Spacer(minLength: 0)
+        }
+            .frame(minWidth: 88, maxWidth: .infinity, minHeight: 32)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .foregroundStyle(foreground)
+            .background {
+                RoundedRectangle(cornerRadius: 5).fill(background)
+                RoundedRectangle(cornerRadius: 5).strokeBorder(border, lineWidth: 1)
+            }
+            ._onButtonGesture(pressing: { isPressed = $0 }, perform: { configuration.trigger() })
+    }
+
+    private var foreground: Color {
+        if isDefaultAction {
+            return .white
+        }
+        return role == .destructive ? Color(red: 1.0, green: 0.12, blue: 0.16) : .black
+    }
+
+    private var background: Color {
+        if isDefaultAction {
+            return isPressed
+                ? Color(red: 0.0, green: 0.36, blue: 0.78)
+                : Color(red: 0.0, green: 0.48, blue: 1.0)
+        }
+        if role == .destructive {
+            return isPressed
+                ? Color(red: 1.0, green: 0.62, blue: 0.64)
+                : Color(red: 1.0, green: 0.76, blue: 0.78)
+        }
+        return Color(white: isPressed ? 0.82 : 0.92)
+    }
+
+    private var border: Color {
+        if isDefaultAction {
+            return .clear
+        }
+        return role == .destructive ? .clear : Color(white: 0.35)
+    }
+}
+
+struct DialogOverlayPanel: View {
+    let title: Text?
+    let makeMessage: (() -> AnyView)?
+    let buttonItems: [PlatformItemList.Item]?
+    let makeActions: () -> AnyView
+    let isPresented: Binding<Bool>
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if let title {
+                VStack(alignment: .leading, spacing: 10) {
+                    title
+                        .font(.headline)
+                    if let makeMessage {
+                        makeMessage()
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 28)
+                .padding(.top, 24)
+                .padding(.bottom, 18)
+            }
+
+            actions
+                .padding(.horizontal, 20)
+                .padding(.bottom, 20)
+        }
+        .frame(width: 280)
+    }
+
+    @ViewBuilder
+    private var actions: some View {
+        if let buttonItems, !buttonItems.isEmpty {
+            let items = orderedDialogOverlayActions(buttonItems)
+            let reverseHorizontal = items.count == 2 && items.last?.item.role == .cancel
+            DialogOverlayActionsLayout(reverseTwoButtonHorizontal: reverseHorizontal) {
+                ForEach(0..<items.count, id: \.self) { i in
+                    actionButton(items[i])
+                }
+            }
+        } else {
+            makeActions()
+        }
+    }
+
+    private func actionButton(_ action: DialogOverlayAction) -> some View {
+        let item = action.item
+        return Button(role: item.role, action: {
+            guard item.isEnabled else { return }
+            item.action?()
+            isPresented.wrappedValue = false
+        }) {
+            item.label
+        }
+        .buttonStyle(DialogOverlayActionButtonStyle(role: item.role,
+                                                    isDefaultAction: action.isDefaultAction))
+        .environment(\.isEnabled, item.isEnabled)
+    }
+}
+
 struct PlatformItemListButtonStyle: PrimitiveButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         PlatformItemListButtonBody(configuration: configuration)
@@ -410,9 +562,10 @@ extension AlertModifier {
 // The view rendered inside the overlay WindowController for an alert.
 //
 // Button layout rules:
-//   - Only first 3 items are materialized.
-//   - 2 items -> HStack: cancel on left, default on right.
-//   - 3 items -> VStack: destructive top, default/custom middle, cancel bottom.
+//   - Up to four items are materialized.
+//   - cancel is placed last; non-cancel actions keep source order.
+//   - leading nil-role action is styled as the default action.
+//   - Two items use an HStack with cancel on the left and default on the right.
 //
 // Keyboard shortcuts:
 //   - ButtonRole.cancel -> Escape (.cancelAction)
@@ -425,84 +578,18 @@ struct AlertOverlayView: View {
         ZStack {
             Color.black.opacity(0.3)
                 .onTapGesture {}
-            alertPanel
+            DialogOverlayPanel(title: preference.title,
+                               makeMessage: preference.makeMessage,
+                               buttonItems: preference.actionsItemList?.buttonItems,
+                               makeActions: preference.makeActions,
+                               isPresented: preference.isPresented)
         }
-    }
-
-    private var alertPanel: some View {
-        VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 10) {
-                preference.title
-                    .font(.headline)
-                if let makeMessage = preference.makeMessage {
-                    makeMessage()
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 28)
-            .padding(.top, 24)
-            .padding(.bottom, 18)
-
-            actions
-                .padding(.horizontal, 20)
-                .padding(.bottom, 20)
-        }
-        .frame(width: 280)
-        //.background(Color(white: 0.97), in: RoundedRectangle(cornerRadius: 8))
-    }
-
-    @ViewBuilder
-    private var actions: some View {
-        if let list = preference.actionsItemList, !list.buttonItems.isEmpty {
-            let items = Array(orderedItems(list.buttonItems).prefix(3))
-            let reverseHorizontal = items.count == 2 && items.last?.item.role == .cancel
-            AlertActionsLayout(reverseTwoButtonHorizontal: reverseHorizontal) {
-                ForEach(0..<items.count, id: \.self) { i in
-                    actionButton(items[i])
-                }
-            }
-        } else {
-            preference.makeActions()
-        }
-    }
-
-    // Alert actions are ordered by role, with cancel placed last.
-    // The first nil-role action is styled as the default action; later nil-role actions are plain.
-    private struct OrderedAlertAction {
-        let item: PlatformItemList.Item
-        let isDefaultAction: Bool
-    }
-
-    private func orderedItems(_ items: [PlatformItemList.Item]) -> [OrderedAlertAction] {
-        let ordered = items.enumerated().map { offset, item in
-            OrderedAlertAction(item: item,
-                               isDefaultAction: offset == 0 && item.role == nil)
-        }
-        let nonCancel = ordered.filter { $0.item.role != .cancel }
-        let cancel    = ordered.filter { $0.item.role == .cancel }
-        return nonCancel + cancel
-    }
-
-    private func actionButton(_ action: OrderedAlertAction) -> some View {
-        let item = action.item
-        return Button(role: item.role, action: {
-            guard item.isEnabled else { return }
-            item.action?()
-            preference.isPresented.wrappedValue = false
-        }) {
-            item.label
-        }
-        .buttonStyle(AlertOverlayButtonStyle(role: item.role,
-                                             isDefaultAction: action.isDefaultAction))
-        .environment(\.isEnabled, item.isEnabled)
     }
 }
 
 // Alert action layout used by the overlay renderer.
 // Two short labels share one row, and long labels fall back to a vertical stack.
-private struct AlertActionsLayout: Layout {
+private struct DialogOverlayActionsLayout: Layout {
     typealias AnimatableData = EmptyAnimatableData
     typealias Cache = Void
 
@@ -595,69 +682,6 @@ private struct AlertActionsLayout: Layout {
             )
             y += size.height + verticalSpacing
         }
-    }
-}
-
-private struct AlertOverlayButtonStyle: PrimitiveButtonStyle {
-    var role: ButtonRole?
-    var isDefaultAction: Bool
-
-    func makeBody(configuration: Configuration) -> some View {
-        AlertOverlayButtonBody(configuration: configuration,
-                               role: role,
-                               isDefaultAction: isDefaultAction)
-    }
-}
-
-private struct AlertOverlayButtonBody: View {
-    let configuration: PrimitiveButtonStyleConfiguration
-    let role: ButtonRole?
-    let isDefaultAction: Bool
-    @State private var isPressed = false
-
-    var body: some View {
-        HStack(spacing: 0) {
-            Spacer(minLength: 0)
-            configuration.label
-            Spacer(minLength: 0)
-        }
-            .frame(minWidth: 88, maxWidth: .infinity, minHeight: 32)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .foregroundStyle(foreground)
-            .background {
-                RoundedRectangle(cornerRadius: 5).fill(background)
-                RoundedRectangle(cornerRadius: 5).strokeBorder(border, lineWidth: 1)
-            }
-            ._onButtonGesture(pressing: { isPressed = $0 }, perform: { configuration.trigger() })
-    }
-
-    private var foreground: Color {
-        if isDefaultAction {
-            return .white
-        }
-        return role == .destructive ? Color(red: 1.0, green: 0.12, blue: 0.16) : .black
-    }
-
-    private var background: Color {
-        if isDefaultAction {
-            return isPressed
-                ? Color(red: 0.0, green: 0.36, blue: 0.78)
-                : Color(red: 0.0, green: 0.48, blue: 1.0)
-        }
-        if role == .destructive {
-            return isPressed
-                ? Color(red: 1.0, green: 0.62, blue: 0.64)
-                : Color(red: 1.0, green: 0.76, blue: 0.78)
-        }
-        return Color(white: isPressed ? 0.82 : 0.92)
-    }
-
-    private var border: Color {
-        if isDefaultAction {
-            return .clear
-        }
-        return role == .destructive ? .clear : Color(white: 0.35)
     }
 }
 

@@ -195,81 +195,34 @@ struct ConfirmationDialogOverlayView: View {
         ZStack {
             Color.black.opacity(0.3)
                 .onTapGesture {}
-            alertPanel
+            DialogOverlayPanel(title: panelTitle,
+                               makeMessage: preference.makeMessage,
+                               buttonItems: panelButtonItems,
+                               makeActions: preference.makeActions,
+                               isPresented: preference.isPresented)
         }
     }
 
-    private var alertPanel: some View {
-        VStack(spacing: 0) {
-            if preference.titleVisibility != .hidden {
-                VStack(spacing: 6) {
-                    preference.title
-                        .font(.headline)
-                    if let makeMessage = preference.makeMessage {
-                        makeMessage()
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 16)
-                Divider()
-            }
-            actions
-                .padding(8)
-        }
-        .frame(width: 280)
-        .background(Color(white: 0.97), in: RoundedRectangle(cornerRadius: 8))
+    private var panelTitle: Text? {
+        preference.titleVisibility == .hidden ? nil : preference.title
     }
 
-    @ViewBuilder
-    private var actions: some View {
-        if let list = preference.actionsItemList, !list.buttonItems.isEmpty {
-            // Use at most three items.
-            // 2 buttons -> HStack (cancel left / default right)
-            // 3 buttons -> VStack sorted by role priority
-            let items = Array(orderedItems(list.buttonItems).prefix(3))
-            if items.count == 2 {
-                HStack(spacing: 8) {
-                    actionButton(items[0])
-                    actionButton(items[1])
-                }
-            } else {
-                VStack(spacing: 8) {
-                    ForEach(0..<items.count, id: \.self) { i in
-                        actionButton(items[i])
-                    }
-                }
-            }
-        } else {
-            preference.makeActions()
+    private var panelButtonItems: [PlatformItemList.Item]? {
+        guard let list = preference.actionsItemList else {
+            return nil
         }
+        return confirmationDialogItems(list.buttonItems)
     }
 
-    // Button display order: default/custom -> destructive -> cancel.
-    // 2-button horizontal: cancel left, default right.
-    private func orderedItems(_ items: [PlatformItemList.Item]) -> [PlatformItemList.Item] {
-        let cancel = items.filter { $0.role == .cancel }
-        let destructive = items.filter { $0.role == .destructive }
-        let other = items.filter { $0.role != .cancel && $0.role != .destructive }
-        if items.count == 2 {
-            // HStack: cancel goes left (index 0), default goes right (index 1)
-            return cancel + other + destructive
+    private func confirmationDialogItems(_ items: [PlatformItemList.Item]) -> [PlatformItemList.Item] {
+        guard !items.isEmpty && items.allSatisfy({ $0.role == nil }) else {
+            return items
         }
-        // VStack: default/custom top, destructive middle, cancel bottom.
-        return other + destructive + cancel
-    }
-
-    private func actionButton(_ item: PlatformItemList.Item) -> some View {
-        Button(role: item.role, action: {
-            guard item.isEnabled else { return }
-            item.action?()
-            preference.isPresented.wrappedValue = false
-        }) {
-            item.label
-                .frame(maxWidth: .infinity)
-        }
-        .environment(\.isEnabled, item.isEnabled)
+        var result = items
+        result.append(PlatformItemList.Item(label: AnyView(Text("Cancel")),
+                                            action: nil,
+                                            role: .cancel))
+        return result
     }
 }
 
