@@ -111,6 +111,13 @@ public struct BlendState: Hashable, Sendable {
         destinationAlphaBlendFactor: .oneMinusSourceAlpha,
         rgbBlendOperation: .add,
         alphaBlendOperation: .add)
+    public static let premultipliedAlphaBlend = BlendState(
+        sourceRGBBlendFactor: .one,
+        sourceAlphaBlendFactor: .one,
+        destinationRGBBlendFactor: .oneMinusSourceAlpha,
+        destinationAlphaBlendFactor: .oneMinusSourceAlpha,
+        rgbBlendOperation: .add,
+        alphaBlendOperation: .add)
     public static let multiply = BlendState(
         sourceRGBBlendFactor: .destinationColor,
         sourceAlphaBlendFactor: .destinationAlpha,

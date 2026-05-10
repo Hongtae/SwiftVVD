@@ -25,8 +25,27 @@ public class TextureFont: Font {
         var currentLineMaxHeight: Int
     }
 
+    private enum GlyphAtlasKind: Hashable {
+        case gray
+        case bgra
+
+        init(pixelMode: BitmapPixelMode) {
+            switch pixelMode {
+            case .gray: self = .gray
+            case .bgra: self = .bgra
+            }
+        }
+
+        var pixelFormat: PixelFormat {
+            switch self {
+            case .gray: .r8Unorm
+            case .bgra: .bgra8Unorm
+            }
+        }
+    }
+
     private var glyphMap: [UnicodeScalar: GlyphData] = [:]
-    private var textures: [GlyphTextureAtlas] = []
+    private var textures: [GlyphAtlasKind: [GlyphTextureAtlas]] = [:]
     private var numGlyphsLoaded: Int = 0
 
     public let deviceContext: GraphicsDeviceContext
@@ -111,6 +130,7 @@ public class TextureFont: Font {
                                                  height: bmp.rows,
                                                  data: data,
                                                  metrics: metrics,
+                                                 pixelMode: bmp.pixelMode,
                                                  frame: &frame)
             self.glyphMap[c] = GlyphData(texture: texture,
                                          offset: offset,
@@ -126,7 +146,12 @@ public class TextureFont: Font {
         return nil
     }
 
-    private func cacheGlyphTexture(width: UInt32, height: UInt32, data: UnsafePointer<UInt8>?, metrics: SizeMetrics, frame: inout CGRect) -> Texture? {
+    private func cacheGlyphTexture(width: UInt32,
+                                   height: UInt32,
+                                   data: UnsafePointer<UInt8>?,
+                                   metrics: SizeMetrics,
+                                   pixelMode: BitmapPixelMode,
+                                   frame: inout CGRect) -> Texture? {
         // keep padding between each glyphs.
         if width == 0 || height == 0 {
             frame = .zero
@@ -135,6 +160,9 @@ public class TextureFont: Font {
         let data = data!
         let width = Int(width)
         let height = Int(height)
+        let atlasKind = GlyphAtlasKind(pixelMode: pixelMode)
+        let pixelFormat = atlasKind.pixelFormat
+        let bytesPerPixel = pixelFormat.bytesPerPixel
 
         let device = deviceContext.device
         let queue = deviceContext.copyQueue()!
@@ -146,17 +174,18 @@ public class TextureFont: Font {
             let width = Int(rect.width.rounded())
             let height = Int(rect.height.rounded())
 
-            let bufferLength = width * height
+            let bufferLength = width * height * bytesPerPixel
 
             let device = queue.device
             if let stagingBuffer = device.makeBuffer(length: bufferLength, storageMode: .shared, cpuCacheMode: .writeCombined) {
                 let buff = stagingBuffer.contents()!
+                let rowBytes = width * bytesPerPixel
 
                 for i in 0..<height {
-                    let src = data.advanced(by: i * width)
-                    let dst = buff.advanced(by: i * width)
+                    let src = data.advanced(by: i * rowBytes)
+                    let dst = buff.advanced(by: i * rowBytes)
 
-                    dst.copyMemory(from: src, byteCount: width)
+                    dst.copyMemory(from: src, byteCount: rowBytes)
                 }
                 stagingBuffer.flush()
 
@@ -197,8 +226,11 @@ public class TextureFont: Font {
         let vPadding = topMargin + bottomMargin
 
         var createNewTexture = true
-        for i in 0..<self.textures.count {
-            var gta: GlyphTextureAtlas = self.textures[i]
+        var textures = self.textures[atlasKind] ?? []
+        defer { self.textures[atlasKind] = textures }
+
+        for i in 0..<textures.count {
+            var gta: GlyphTextureAtlas = textures[i]
             if haveEnoughSpace(gta, width + hPadding, height + vPadding) {
                 if (gta.currentLineWidth + width + leftMargin + rightMargin) > gta.texture.width {
                     // move to next line!
@@ -217,7 +249,7 @@ public class TextureFont: Font {
                 if (height + vPadding > gta.currentLineMaxHeight) {
                     gta.currentLineMaxHeight = height + vPadding
                 }
-                self.textures[i] = gta  // update
+                textures[i] = gta  // update
                 texture = gta.texture
                 createNewTexture = false
                 break
@@ -255,11 +287,11 @@ public class TextureFont: Font {
                     desiredHeight = desiredHeight << 1
                 } else { break }
             }
-            Log.info("Create new texture atlas with resolution: \(desiredWidth) x \(desiredHeight)")
+            Log.info("Create new \(pixelFormat) texture atlas with resolution: \(desiredWidth) x \(desiredHeight)")
 
             // create texture object..
             let desc = TextureDescriptor(textureType: .type2D,
-                                         pixelFormat: .r8Unorm,
+                                         pixelFormat: pixelFormat,
                                          width: desiredWidth,
                                          height: desiredHeight,
                                          depth: 1,
@@ -270,7 +302,7 @@ public class TextureFont: Font {
             texture = device.makeTexture(descriptor: desc)
 
             if let texture = texture {
-                Array<UInt8>(repeating: 0, count: desc.width * desc.height).withUnsafeBytes {
+                Array<UInt8>(repeating: 0, count: desc.width * desc.height * bytesPerPixel).withUnsafeBytes {
                     let ptr = $0.baseAddress!.assumingMemoryBound(to: UInt8.self)
                     updateTexture(queue,
                                   texture,

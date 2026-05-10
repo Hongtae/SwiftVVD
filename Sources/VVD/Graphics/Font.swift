@@ -472,6 +472,78 @@ public class Font {
                                  height: ft26d6ToFloat(face.pointee.glyph.pointee.advance.y))
             var bitmapInfo = BitmapInfo(left: 0, top: 0, width: 0, rows: 0, pixelMode: .gray)
             var bitmapData: [UInt8] = []
+            var bitmapLoaded = false
+
+            let copyBitmapRows = { (bitmap: FT_Bitmap, bytesPerPixel: Int) -> [UInt8]? in
+                let width = Int(bitmap.width)
+                let rows = Int(bitmap.rows)
+                if width == 0 || rows == 0 { return [] }
+                guard let buffer = bitmap.buffer else { return nil }
+
+                let rowBytes = width * bytesPerPixel
+                let pitch = Int(bitmap.pitch)
+                guard abs(pitch) >= rowBytes else { return nil }
+
+                var data = [UInt8](repeating: 0, count: rowBytes * rows)
+                var src = buffer
+                if pitch < 0 {
+                    src = src.advanced(by: -pitch * (rows - 1))
+                }
+                data.withUnsafeMutableBytes {
+                    guard let base = $0.baseAddress else { return }
+                    for row in 0..<rows {
+                        let dst = base.advanced(by: row * rowBytes)
+                        dst.copyMemory(from: src, byteCount: rowBytes)
+                        src = src.advanced(by: pitch)
+                    }
+                }
+                return data
+            }
+
+            let normalizeGrayLevels = { (data: inout [UInt8], numGrays: UInt32) in
+                let levels = Int(numGrays)
+                if levels > 1 && levels < 256 {
+                    for i in data.indices {
+                        data[i] = UInt8((Int(data[i]) * 255) / (levels - 1))
+                    }
+                }
+            }
+
+            let normalizedBitmap = { (bitmap: FT_Bitmap) -> (data: [UInt8], width: UInt32, rows: UInt32, pixelMode: BitmapPixelMode)? in
+                switch bitmap.pixel_mode {
+                case UInt8(FT_PIXEL_MODE_GRAY.rawValue):
+                    guard var data = copyBitmapRows(bitmap, 1) else { return nil }
+                    normalizeGrayLevels(&data, UInt32(bitmap.num_grays))
+                    return (data, bitmap.width, bitmap.rows, .gray)
+                case UInt8(FT_PIXEL_MODE_BGRA.rawValue):
+                    guard let data = copyBitmapRows(bitmap, 4) else { return nil }
+                    return (data, bitmap.width, bitmap.rows, .bgra)
+                default:
+                    var source = bitmap
+                    var converted = FT_Bitmap()
+                    FT_Bitmap_Init(&converted)
+                    defer { FT_Bitmap_Done(self.library.library, &converted) }
+
+                    if FT_Bitmap_Convert(self.library.library, &source, &converted, 1) != 0 {
+                        Log.err("Failed to convert glyph bitmap pixel mode: \(bitmap.pixel_mode)")
+                        return nil
+                    }
+                    guard var data = copyBitmapRows(converted, 1) else { return nil }
+                    normalizeGrayLevels(&data, UInt32(converted.num_grays))
+                    return (data, converted.width, converted.rows, .gray)
+                }
+            }
+
+            let setBitmap = { (bitmap: FT_Bitmap, left: Int, top: Int) -> Bool in
+                guard let normalized = normalizedBitmap(bitmap) else { return false }
+                bitmapInfo.left = left
+                bitmapInfo.top = top
+                bitmapInfo.width = normalized.width
+                bitmapInfo.rows = normalized.rows
+                bitmapInfo.pixelMode = normalized.pixelMode
+                bitmapData = normalized.data
+                return true
+            }
 
             let boldStrength = ft26d6(embolden)
 
@@ -525,13 +597,7 @@ public class Font {
                     FT_Outline_Translate(&ftOutline, -xShift, -yShift)
 
                     if FT_Outline_Get_Bitmap(library.library, &ftOutline, &ftBitmap) == 0 {
-                        bitmapInfo.left = left
-                        bitmapInfo.top = top
-                        bitmapInfo.width = ftBitmap.width
-                        bitmapInfo.rows = ftBitmap.rows
-                        bitmapInfo.pixelMode = .gray
-                        bitmapData = .init(UnsafeMutableBufferPointer(start: ftBitmap.buffer,
-                                                                      count: bufferSize))
+                        bitmapLoaded = setBitmap(ftBitmap, left, top)
                     }
 
                     ftBitmap.buffer.deallocate()
@@ -548,18 +614,9 @@ public class Font {
                             $0.baseAddress!.assumingMemoryBound(to: FT_BitmapGlyph.self).pointee
                         }
 
-                        bitmapInfo.left = Int(glyphBitmap.pointee.left)
-                        bitmapInfo.top = Int(glyphBitmap.pointee.top)
-                        bitmapInfo.width = glyphBitmap.pointee.bitmap.width
-                        bitmapInfo.rows = glyphBitmap.pointee.bitmap.rows
-                        bitmapInfo.pixelMode = .gray
-                        var bufferSize = Int(bitmapInfo.width) * Int(bitmapInfo.rows)
-                        if glyphBitmap.pointee.bitmap.pixel_mode == FT_PIXEL_MODE_BGRA.rawValue {
-                            bitmapInfo.pixelMode = .bgra
-                            bufferSize = bufferSize * 4
-                        }
-                        bitmapData = .init(UnsafeMutableBufferPointer(start: glyphBitmap.pointee.bitmap.buffer,
-                                                                      count: bufferSize))
+                        bitmapLoaded = setBitmap(glyphBitmap.pointee.bitmap,
+                                                 Int(glyphBitmap.pointee.left),
+                                                 Int(glyphBitmap.pointee.top))
                     }
                     FT_Done_Glyph(glyph)
                 }
@@ -590,34 +647,24 @@ public class Font {
                                 outer.buffer[ Int((y + offsetY) * outer.width + x + offsetX) ] = max(value1 - value2, 0)
                             }
                         }
-                        bitmapInfo.left = Int(face.pointee.glyph.pointee.bitmap_left) - Int(outline)
-                        bitmapInfo.top = Int(face.pointee.glyph.pointee.bitmap_top) - Int(outline)
-                        bitmapInfo.width = outer.width
-                        bitmapInfo.rows = outer.rows
-                        bitmapInfo.pixelMode = .gray
-                        let bufferSize = Int(bitmapInfo.width) * Int(bitmapInfo.rows)
-                        bitmapData = .init(UnsafeMutableBufferPointer(start: outer.buffer,
-                                                                      count: bufferSize))
+                        bitmapLoaded = setBitmap(outer,
+                                                 Int(face.pointee.glyph.pointee.bitmap_left) - Int(outline),
+                                                 Int(face.pointee.glyph.pointee.bitmap_top) - Int(outline))
 
                         FT_Bitmap_Done(library.library, &inner)
                         FT_Bitmap_Done(library.library, &outer)
 
                     } else {
                         FT_Bitmap_Embolden(library.library, &(face.pointee.glyph.pointee.bitmap), boldStrength, boldStrength)
-                        bitmapInfo.width = face.pointee.glyph.pointee.bitmap.width
-                        bitmapInfo.rows = face.pointee.glyph.pointee.bitmap.rows
-                        bitmapInfo.left = Int(face.pointee.glyph.pointee.bitmap_left)
-                        bitmapInfo.top = Int(face.pointee.glyph.pointee.bitmap_top)
-                        bitmapInfo.pixelMode = .gray
-                        var bufferSize = Int(bitmapInfo.width) * Int(bitmapInfo.rows)
-                        if face.pointee.glyph.pointee.bitmap.pixel_mode == FT_PIXEL_MODE_BGRA.rawValue {
-                            bitmapInfo.pixelMode = .bgra
-                            bufferSize = bufferSize * 4
-                        }
-                        bitmapData = .init(UnsafeMutableBufferPointer(start: face.pointee.glyph.pointee.bitmap.buffer,
-                                                                      count: bufferSize))
+                        bitmapLoaded = setBitmap(face.pointee.glyph.pointee.bitmap,
+                                                 Int(face.pointee.glyph.pointee.bitmap_left),
+                                                 Int(face.pointee.glyph.pointee.bitmap_top))
                     }
                 }
+            }
+            guard bitmapLoaded else {
+                Log.warn("Failed to load bitmap for char=\(c)(0x\(String(format: "%x", c.value)))")
+                return false
             }
 
             let metrics = baseMetrics(for: face)

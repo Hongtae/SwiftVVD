@@ -486,12 +486,18 @@ extension GraphicsContext {
                                        lineGlyphs: lineGlyphs,
                                        transform: transform,
                                        color: .white,
-                                       blendState: .opaque)
+                                       colorGlyphs: false)
             // applies shading to the RGB channels of the RenderTarget
             self.encodeShadingBoxCommand(renderPass: renderPass,
                                          shading: shading,
                                          stencil: .ignore,
                                          blendState: .multiply)
+            // color glyphs already carry premultiplied RGB values and should not be tinted by text shading.
+            self.encodeDrawTextCommand(renderPass: renderPass,
+                                       lineGlyphs: lineGlyphs,
+                                       transform: transform,
+                                       color: .white,
+                                       colorGlyphs: true)
             // draw attachments (scalar = 0)
             forEachGlyph(in: lineGlyphs) { glyph, baseline in
                 if glyph.scalar == UnicodeScalar(0), let texture = glyph.texture {
@@ -564,7 +570,7 @@ extension GraphicsContext {
                                lineGlyphs: [ResolvedText.LineGlyphs],
                                transform: CGAffineTransform,
                                color: VVD.Color,
-                               blendState: BlendState) {
+                               colorGlyphs: Bool) {
         if lineGlyphs.isEmpty { return }
 
         struct GlyphVertex {
@@ -582,6 +588,18 @@ extension GraphicsContext {
 
         forEachGlyph(in: lineGlyphs) { glyph, baseline in
             if glyph.scalar != UnicodeScalar(0), let texture = glyph.texture {
+                let isColorGlyph: Bool
+                switch texture.pixelFormat {
+                case .r8Unorm:
+                    isColorGlyph = false
+                case .bgra8Unorm, .bgra8Unorm_srgb:
+                    isColorGlyph = true
+                default:
+                    assertionFailure("Unsupported glyph texture format: \(texture.pixelFormat)")
+                    return
+                }
+                if isColorGlyph != colorGlyphs { return }
+
                 let invW = 1.0 / Float(texture.width)
                 let invH = 1.0 / Float(texture.height)
 
@@ -622,12 +640,14 @@ extension GraphicsContext {
         var vertices: [_Vertex] = []
         let draw = {
             if vertices.isEmpty == false {
+                let shader: _Shader = colorGlyphs ? .image : .rcImage
+                let blendState: BlendState = colorGlyphs ? .premultipliedAlphaBlend : .alphaBlend
                 self.encodeDrawCommand(renderPass: renderPass,
-                                       shader: .rcImage,
+                                       shader: shader,
                                        stencil: .ignore,
                                        vertices: vertices,
                                        texture: texture,
-                                       blendState: .alphaBlend)
+                                       blendState: blendState)
                 vertices.removeAll(keepingCapacity: true)
             }
         }
