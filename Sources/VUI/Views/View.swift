@@ -388,7 +388,11 @@ public struct _ViewInputs {
     /// `nil` when the parent has not yet been sized (e.g., during bootstrapping).
     var containerSize: OptionalAttribute<ViewSize>
 
-    // View-channel subscript. Stores in _ViewInputs.customInputs (ViewInput keys).
+    /// The nearest stack layout orientation seen by primitive children.
+    /// Used by primitives such as Divider to resolve their axis.
+    var stackOrientation: Axis?
+
+    // View-channel subscript for _ViewInputs.customInputs (ViewInput keys).
     subscript<T: ViewInput>(_ key: T.Type) -> T.Value {
         get { customInputs.value(forKey: key) }
         set { customInputs.setValue(newValue, forKey: key) }

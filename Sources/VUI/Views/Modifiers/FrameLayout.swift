@@ -120,7 +120,7 @@ extension _FlexFrameLayout: UnaryLayout {
         let minW = minWidth,  idealW = idealWidth,  maxW = maxWidth
         let minH = minHeight, idealH = idealHeight, maxH = maxHeight
 
-        func computeSize(proposal: ProposedViewSize) -> CGSize {
+        func childProposal(for proposal: ProposedViewSize) -> ProposedViewSize {
             // Propose to child: use ideal if provided, else expand to fill when max==∞
             let childW: CGFloat?
             if let ideal = idealW {
@@ -139,7 +139,11 @@ extension _FlexFrameLayout: UnaryLayout {
                 childH = proposal.height
             }
 
-            let childSize = lc.sizeThatFits(ProposedViewSize(width: childW, height: childH))
+            return ProposedViewSize(width: childW, height: childH)
+        }
+
+        func computeSize(proposal: ProposedViewSize) -> CGSize {
+            let childSize = lc.sizeThatFits(childProposal(for: proposal))
 
             // Clamp result to [min, max]; fill when max==∞
             var w = childSize.width
@@ -161,7 +165,50 @@ extension _FlexFrameLayout: UnaryLayout {
             },
             spacing: lc.spacing,
             place: { position, anchor, proposal in
-                lc.place(at: position, anchor: anchor, proposal: proposal)
+                let frameSize = computeSize(proposal: proposal)
+                let frameOrigin = CGPoint(
+                    x: position.x - frameSize.width * anchor.x,
+                    y: position.y - frameSize.height * anchor.y
+                )
+                let placementProposal = ProposedViewSize(frameSize)
+
+                let x: CGFloat
+                let childAnchorX: CGFloat
+                switch alignment.horizontal {
+                case .leading:
+                    x = frameOrigin.x
+                    childAnchorX = 0
+                case .center:
+                    x = frameOrigin.x + frameSize.width * 0.5
+                    childAnchorX = 0.5
+                case .trailing:
+                    x = frameOrigin.x + frameSize.width
+                    childAnchorX = 1
+                default:
+                    x = frameOrigin.x + frameSize.width * 0.5
+                    childAnchorX = 0.5
+                }
+
+                let y: CGFloat
+                let childAnchorY: CGFloat
+                switch alignment.vertical {
+                case .top:
+                    y = frameOrigin.y
+                    childAnchorY = 0
+                case .center:
+                    y = frameOrigin.y + frameSize.height * 0.5
+                    childAnchorY = 0.5
+                case .bottom:
+                    y = frameOrigin.y + frameSize.height
+                    childAnchorY = 1
+                default:
+                    y = frameOrigin.y + frameSize.height * 0.5
+                    childAnchorY = 0.5
+                }
+
+                lc.place(at: CGPoint(x: x, y: y),
+                         anchor: UnitPoint(x: childAnchorX, y: childAnchorY),
+                         proposal: placementProposal)
             },
             explicitAlignment: { lc.explicitAlignment($0, at: $1) }
         )
@@ -206,4 +253,3 @@ extension View {
                 alignment: alignment))
     }
 }
-

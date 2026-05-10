@@ -211,9 +211,6 @@ public struct HStackLayout: Layout {
         }
     }
 
-    public static var layoutProperties: LayoutProperties {
-        LayoutProperties(stackOrientation: .horizontal)
-    }
 }
 
 public typealias _HStackLayout = HStackLayout
@@ -221,4 +218,10 @@ extension _HStackLayout: _VariadicView_UnaryViewRoot {}
 extension _HStackLayout: _VariadicView_ViewRoot {}
 extension _HStackLayout: Sendable {}
 
+extension _HStackLayout: HVStack {
+    typealias MinorAxisAlignment = VerticalAlignment
 
+    static var majorAxis: Axis {
+        .horizontal
+    }
+}

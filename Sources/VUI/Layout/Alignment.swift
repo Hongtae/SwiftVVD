@@ -53,6 +53,12 @@ public struct VerticalAlignment: Equatable {
     public static let lastTextBaseline = VerticalAlignment(alignmentKey: 17)
 }
 
+/// Marker used by stack layouts for their minor-axis alignment type.
+protocol AlignmentGuide {}
+
+extension HorizontalAlignment: AlignmentGuide {}
+extension VerticalAlignment: AlignmentGuide {}
+
 public struct Alignment: Equatable {
     public var horizontal: HorizontalAlignment
     public var vertical: VerticalAlignment

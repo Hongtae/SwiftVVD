@@ -35,7 +35,8 @@ public struct _BackgroundModifier<Background>: ViewModifier where Background: Vi
             containerPosition: inputs.position,
             size: bgSizeAttr,
             safeAreaInsets: inputs.safeAreaInsets,
-            containerSize: inputs.containerSize
+            containerSize: inputs.containerSize,
+            stackOrientation: inputs.stackOrientation
         )
         let zStackAttr: Attribute<ZStackLayout> = graph.makeRule {
             ZStackLayout(alignment: modifier._attribute.value.alignment)
@@ -308,4 +309,3 @@ extension _BackgroundModifier: _BackgroundModifierWithAlignment {
 
 extension _BackgroundStyleModifier: _BackgroundModifierWithIgnoresSafeAreaEdges {
 }
-

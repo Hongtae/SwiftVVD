@@ -200,17 +200,14 @@ extension _VariadicView_ViewRoot {
             fatalError("\(self)._makeView called outside an active AttributeGraph context.")
         }
 
-        let childListOutputs = body(_Graph(), inputs)
-
         if Body.self is Never.Type {
-            // Body == Never: no proxy required. Wire children directly.
-            // Layout root (e.g. _LayoutRoot) overrides this to call _makeLayoutView.
-            // For non-Layout roots with Body == Never we fall back to VStackLayout.
-            let layoutAttr: Attribute<VStackLayout> = graph.makeInput(value: VStackLayout())
-            return VStackLayout._makeLayoutView(root: _GraphValue(_attribute: layoutAttr),
-                                               inputs: inputs,
-                                               body: { _, _ in childListOutputs })
+            // Body == Never roots must provide their own construction path.
+            // The generic ViewRoot body path must not silently replace the root
+            // with VStackLayout.
+            neverBody("\(Self.self)._makeView used the generic ViewRoot path with Body == Never.")
         }
+
+        let childListOutputs = body(_Graph(), inputs)
 
         // Body != Never: create children AG input node + body(children:) rule.
         let initialChildren = _VariadicView_Children.makeChildren(from: childListOutputs)

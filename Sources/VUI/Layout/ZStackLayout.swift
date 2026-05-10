@@ -10,6 +10,7 @@ import Foundation
 public struct ZStackLayout: Layout {
     public var alignment: Alignment
 
+    public typealias Body = Never
     public typealias AnimatableData = EmptyAnimatableData
     public typealias Cache = Void
 
@@ -69,10 +70,15 @@ public struct ZStackLayout: Layout {
             view.place(at: offset, anchor: anchor, proposal: boundsProposal)
         }
     }
+
+    // Route ZStack roots through the standard layout-view generation path.
+    public static func _makeView(root: _GraphValue<Self>,
+                                 inputs: _ViewInputs,
+                                 body: (_Graph, _ViewInputs) -> _ViewListOutputs) -> _ViewOutputs {
+        Self._makeLayoutView(root: root, inputs: inputs, body: body)
+    }
 }
 
 public typealias _ZStackLayout = ZStackLayout
 extension _ZStackLayout: _VariadicView_UnaryViewRoot {}
 extension _ZStackLayout: Sendable {}
-
-

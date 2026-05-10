@@ -287,7 +287,8 @@ extension _ViewInputsModifier {
             containerPosition: stubPoint,
             size: stubSize,
             safeAreaInsets: OptionalAttribute(),
-            containerSize: OptionalAttribute()
+            containerSize: OptionalAttribute(),
+            stackOrientation: nil
         )
         Self._makeViewInputs(modifier: modifier, inputs: &viewInputs)
         inputs.base = viewInputs.base

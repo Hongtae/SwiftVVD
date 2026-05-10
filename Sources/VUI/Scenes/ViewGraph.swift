@@ -287,7 +287,8 @@ class ViewGraph: ViewGraphHost {
                 containerPosition: containerPosAttr,
                 size: sizeAttr,
                 safeAreaInsets: OptionalAttribute(),
-                containerSize: OptionalAttribute()
+                containerSize: OptionalAttribute(),
+                stackOrientation: nil
             )
 
             // GestureResponder.init reads gestureGraph from ViewGraph.

@@ -426,6 +426,7 @@ private struct DynamicContainerInfo: StatefulRule {
                     childInputs.size = sizeAttr
                     childInputs.safeAreaInsets = capturedInputs.safeAreaInsets
                     childInputs.containerSize = OptionalAttribute(capturedInputs.size)
+                    childInputs.stackOrientation = capturedInputs.stackOrientation
                     return makeView(childInputs)
                 }
 
@@ -565,6 +566,7 @@ extension Layout {
         }
 
         let childListOutputs = body(_Graph(), inputs)
+        let stackOrientation = Self.layoutProperties.stackOrientation
 
         // Debug overlay for the layout container itself.
         // Reads the container's pos/size from LayoutChildGeometries-driven posAttr/sizeAttr
@@ -625,6 +627,7 @@ extension Layout {
                 childInputs.containerPosition = inputs.position
                 childInputs.containerSize = OptionalAttribute(inputs.size)
                 childInputs.safeAreaInsets = inputs.safeAreaInsets
+                childInputs.stackOrientation = stackOrientation
 
                 let childOutputs = makeView(childInputs)
                 if let lcAttr = childOutputs._layoutComputer.attribute {
@@ -668,10 +671,12 @@ extension Layout {
 
         case .dynamicList(let viewListAttr, _):
             // DynamicContainerInfo manages item lifecycle; DynamicLayoutComputer consumes its Info.
+            var dynamicInputs = inputs
+            dynamicInputs.stackOrientation = stackOrientation
             let containerInfoAttr: Attribute<DynamicContainer.Info> = graph.makeStatefulRule(
                 DynamicContainerInfo(
                     viewListAttr: viewListAttr,
-                    inputs: inputs
+                    inputs: dynamicInputs
                 )
             )
 

@@ -35,7 +35,8 @@ public struct _OverlayModifier<Overlay>: ViewModifier where Overlay: View {
             containerPosition: inputs.position,
             size: ovSizeAttr,
             safeAreaInsets: inputs.safeAreaInsets,
-            containerSize: inputs.containerSize
+            containerSize: inputs.containerSize,
+            stackOrientation: inputs.stackOrientation
         )
         let zStackAttr: Attribute<ZStackLayout> = graph.makeRule {
             ZStackLayout(alignment: modifier._attribute.value.alignment)
@@ -248,4 +249,3 @@ extension _OverlayModifier: _OverlayModifierWithAlignment {
 
 extension _OverlayStyleModifier: _OverlayModifierWithIgnoresSafeAreaEdges {
 }
-

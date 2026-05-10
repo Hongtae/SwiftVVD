@@ -53,19 +53,19 @@ extension Divider: _PrimitiveView {
         }
         let sizeAttr = inputs.size
         let positionAttr = inputs.position
+        let stackOrientation = inputs.stackOrientation
         let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
             LayoutComputer(
                 sizeThatFits: { proposal in
-                    // Legacy VUI drew Divider as a 1px gray line. Until stack
-                    // orientation is threaded through _ViewInputs, infer the
-                    // axis from the shaped proposal used by HStack/VStack.
-                    if proposal.width == nil, let height = proposal.height {
-                        return CGSize(width: 1, height: height)
+                    // Resolve divider thickness from the nearest stack orientation.
+                    switch stackOrientation {
+                    case .horizontal:
+                        return CGSize(width: 1, height: proposal.height ?? 10)
+                    case .vertical:
+                        return CGSize(width: proposal.width ?? 10, height: 1)
+                    case nil:
+                        return CGSize(width: proposal.width ?? 10, height: 1)
                     }
-                    if proposal.width == 0, let height = proposal.height, height != 0 {
-                        return CGSize(width: 1, height: height)
-                    }
-                    return CGSize(width: proposal.width ?? 0, height: 1)
                 }
             )
         }
