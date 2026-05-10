@@ -358,7 +358,9 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                 }
             }
         }
-        redraw = !changeSet.ids.isEmpty || self.viewChangedWhileDrawing
+        // Preserve redraw requests raised earlier in this frame, including
+        // child modal input handled during the parent event pass.
+        redraw = redraw || !changeSet.ids.isEmpty || self.viewChangedWhileDrawing
         self.viewChangedWhileDrawing = false
 
         // Overlay aux children: update after self.

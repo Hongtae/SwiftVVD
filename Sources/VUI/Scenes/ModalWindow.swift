@@ -67,6 +67,7 @@ private final class ModalPresentationContext: @unchecked Sendable {
     private weak var parentController: WindowController?
     private var windowSize: CGSize = .zero
     private var windowOffset: CGPoint = .zero
+    private var needsInputPlacement = true
     private var transition: TransitionAnimation? = nil
     private let shadowFilter = GraphicsContext.Filter.shadow(radius: 8.0, x: 0, y: 0)
 
@@ -135,6 +136,7 @@ private final class ModalPresentationContext: @unchecked Sendable {
         placeRoot(controller: controller,
                   layoutComputer: layoutComputer,
                   fittedSize: fittedSize)
+        needsInputPlacement = false
 
         if let platformWindow = controller.window {
             let shouldAutoResize = controller.style.contains(.autoResize)
@@ -153,6 +155,7 @@ private final class ModalPresentationContext: @unchecked Sendable {
     }
 
     func prepareForInput(controller: WindowController) {
+        guard needsInputPlacement || windowSize == .zero else { return }
         guard let layoutComputer = controller.viewGraph.rootLayoutComputer else { return }
         if windowSize == .zero {
             windowSize = fittedContentSize(controller: controller,
@@ -161,6 +164,7 @@ private final class ModalPresentationContext: @unchecked Sendable {
         placeRoot(controller: controller,
                   layoutComputer: layoutComputer,
                   fittedSize: windowSize)
+        needsInputPlacement = false
     }
 
     func layoutContentSize(controller: WindowController,
