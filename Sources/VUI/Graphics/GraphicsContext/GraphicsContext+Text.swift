@@ -56,15 +56,16 @@ extension GraphicsContext {
             return .zero
         }
         public func lastBaseline(in size: CGSize) -> CGFloat {
-            let width = max(size.width, 0)
-            let height = max(size.height, 0)
+            let width = max(size.width, 0) * self.scaleFactor
+            let height = max(size.height, 0) * self.scaleFactor
             let maxWidth: Int = (width > CGFloat(Int.max)) ? .max : Int(width)
             let maxHeight: Int = (height > CGFloat(Int.max)) ? .max : Int(height)
 
             let scale = 1.0 / self.scaleFactor
             let glyphs = makeGlyphs(maxWidth: maxWidth, maxHeight: maxHeight)
-            let lastDescender = glyphs.last?.descender ?? 0
-            return glyphs.reduce(.zero) { $0 + $1.height * scale } - lastDescender
+            guard let last = glyphs.last else { return .zero }
+            let baseline = glyphs.dropLast().reduce(CGFloat.zero) { $0 + $1.height } + last.ascender
+            return baseline * scale
         }
 
         struct Glyph {  // glyph that baseline aligned. (baseline is 0)

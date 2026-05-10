@@ -158,6 +158,7 @@ public class TextureFont: Font {
 
                     dst.copyMemory(from: src, byteCount: width)
                 }
+                stagingBuffer.flush()
 
                 let cb = queue.makeCommandBuffer()!
                 let encoder = cb.makeCopyCommandEncoder()!
@@ -269,10 +270,13 @@ public class TextureFont: Font {
             texture = device.makeTexture(descriptor: desc)
 
             if let texture = texture {
-                // Array<UInt8>(repeating: 0, count: desc.width * desc.height).withUnsafeBytes {
-                //     let ptr = $0.baseAddress!.assumingMemoryBound(to: UInt8.self)
-                //     updateTexture(queue, texture, CGRect(x: 0, y: 0, width: desc.width, height: desc.height),ptr)
-                // }
+                Array<UInt8>(repeating: 0, count: desc.width * desc.height).withUnsafeBytes {
+                    let ptr = $0.baseAddress!.assumingMemoryBound(to: UInt8.self)
+                    updateTexture(queue,
+                                  texture,
+                                  CGRect(x: 0, y: 0, width: desc.width, height: desc.height),
+                                  ptr)
+                }
 
                 frame = CGRect(x: CGFloat(leftMargin),
                                y: CGFloat(topMargin),
