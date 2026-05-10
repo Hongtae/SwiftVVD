@@ -457,7 +457,7 @@ struct AlertOverlayView: View {
     private var actions: some View {
         if let list = preference.actionsItemList, !list.buttonItems.isEmpty {
             let items = Array(orderedItems(list.buttonItems).prefix(3))
-            let reverseHorizontal = items.count == 2 && items.last?.role == .cancel
+            let reverseHorizontal = items.count == 2 && items.last?.item.role == .cancel
             AlertActionsLayout(reverseTwoButtonHorizontal: reverseHorizontal) {
                 ForEach(0..<items.count, id: \.self) { i in
                     actionButton(items[i])
@@ -468,26 +468,34 @@ struct AlertOverlayView: View {
         }
     }
 
-    // Action ordering follows the platform alert layout.
-    // 2-button row: cancel first (left), default/destructive second (right).
-    // If measured labels do not fit the row, stack vertically with cancel last.
-    // 3-button VStack: destructive top, other/default middle, cancel bottom.
-    private func orderedItems(_ items: [PlatformItemList.Item]) -> [PlatformItemList.Item] {
-        let cancel      = items.filter { $0.role == .cancel }
-        let destructive = items.filter { $0.role == .destructive }
-        let other       = items.filter { $0.role != .cancel && $0.role != .destructive }
-        return destructive + other + cancel
+    // Alert actions are ordered by role, with cancel placed last.
+    // The first nil-role action is styled as the default action; later nil-role actions are plain.
+    private struct OrderedAlertAction {
+        let item: PlatformItemList.Item
+        let isDefaultAction: Bool
     }
 
-    private func actionButton(_ item: PlatformItemList.Item) -> some View {
-        Button(role: item.role, action: {
+    private func orderedItems(_ items: [PlatformItemList.Item]) -> [OrderedAlertAction] {
+        let ordered = items.enumerated().map { offset, item in
+            OrderedAlertAction(item: item,
+                               isDefaultAction: offset == 0 && item.role == nil)
+        }
+        let nonCancel = ordered.filter { $0.item.role != .cancel }
+        let cancel    = ordered.filter { $0.item.role == .cancel }
+        return nonCancel + cancel
+    }
+
+    private func actionButton(_ action: OrderedAlertAction) -> some View {
+        let item = action.item
+        return Button(role: item.role, action: {
             guard item.isEnabled else { return }
             item.action?()
             preference.isPresented.wrappedValue = false
         }) {
             item.label
         }
-        .buttonStyle(AlertOverlayButtonStyle(role: item.role))
+        .buttonStyle(AlertOverlayButtonStyle(role: item.role,
+                                             isDefaultAction: action.isDefaultAction))
         .environment(\.isEnabled, item.isEnabled)
     }
 }
@@ -592,15 +600,19 @@ private struct AlertActionsLayout: Layout {
 
 private struct AlertOverlayButtonStyle: PrimitiveButtonStyle {
     var role: ButtonRole?
+    var isDefaultAction: Bool
 
     func makeBody(configuration: Configuration) -> some View {
-        AlertOverlayButtonBody(configuration: configuration, role: role)
+        AlertOverlayButtonBody(configuration: configuration,
+                               role: role,
+                               isDefaultAction: isDefaultAction)
     }
 }
 
 private struct AlertOverlayButtonBody: View {
     let configuration: PrimitiveButtonStyleConfiguration
     let role: ButtonRole?
+    let isDefaultAction: Bool
     @State private var isPressed = false
 
     var body: some View {
@@ -621,10 +633,18 @@ private struct AlertOverlayButtonBody: View {
     }
 
     private var foreground: Color {
-        role == .destructive ? Color(red: 1.0, green: 0.12, blue: 0.16) : .black
+        if isDefaultAction {
+            return .white
+        }
+        return role == .destructive ? Color(red: 1.0, green: 0.12, blue: 0.16) : .black
     }
 
     private var background: Color {
+        if isDefaultAction {
+            return isPressed
+                ? Color(red: 0.0, green: 0.36, blue: 0.78)
+                : Color(red: 0.0, green: 0.48, blue: 1.0)
+        }
         if role == .destructive {
             return isPressed
                 ? Color(red: 1.0, green: 0.62, blue: 0.64)
@@ -634,7 +654,10 @@ private struct AlertOverlayButtonBody: View {
     }
 
     private var border: Color {
-        role == .destructive ? .clear : Color(white: 0.35)
+        if isDefaultAction {
+            return .clear
+        }
+        return role == .destructive ? .clear : Color(white: 0.35)
     }
 }
 
