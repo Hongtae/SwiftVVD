@@ -409,20 +409,24 @@ extension Text: View {
             func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
                 guard let r = resolved else { return .zero } // Return zero size before loading completes
                 if proposal == .zero {
-                    let lineGlyphs = r.makeGlyphs(maxWidth: 0, maxHeight: 0)
-                    if let glyph = lineGlyphs.first?.glyphs.first {
-                        return glyph.advance / r.scaleFactor
-                    }
                     return .zero
-                } else if proposal == .infinity {
-                    return r.measure()
-                } else {
-                    return r.measure(maxWidth: proposal.width, maxHeight: proposal.height)
                 }
+                // Keep Text width at zero for zero-width proposals while still
+                // reporting measured height when height is non-zero or unspecified.
+                if proposal.width == 0 {
+                    let measured = r.measure(maxWidth: 0, maxHeight: proposal.height)
+                    return CGSize(width: 0, height: measured.height)
+                }
+                if proposal == .infinity {
+                    return r.measure()
+                }
+                return r.measure(maxWidth: proposal.width, maxHeight: proposal.height)
             }
 
             return LayoutComputer(
                 sizeThatFits: { sizeThatFits($0) },
+                // Text contributes text-specific spacing for adjacent text runs.
+                spacing: .text,
                 explicitAlignment: { key, size in
                     guard let r = resolved else { return nil }
                     let cgSize = CGSize(width: size.width, height: size.height)

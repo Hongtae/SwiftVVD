@@ -40,6 +40,8 @@ struct PlatformItemListGenerator<Flags: PlatformItemListFlags, Content: View>: S
         keys.insert(PlatformItemList.Key.self)
         itemInputs.preferences = PreferencesInputs(keys: keys,
                                                    hostKeys: itemInputs.preferences.hostKeys)
+        // Request divider entries as platform item-list system items.
+        itemInputs.requestedDividerRepresentation = PlatformItemListDividerRepresentable.self
         let view = _GraphValue<Content>(_attribute: content)
         let outputs = Content._makeView(view: view, inputs: itemInputs)
         self.preferenceNodes = outputs.preferences.values(for: PlatformItemList.Key.self)
@@ -190,46 +192,61 @@ struct MakeAlertStorage<Actions: View, Message: View>: StatefulRule {
 // PlatformItemList for alert and confirmation-dialog actions.
 struct PlatformItemList {
     struct Item: Identifiable {
+        enum SystemItem: Int, Sendable {
+            case divider = 3
+        }
+
         var id: AnyHashable
         var label: AnyView
         var action: (() -> Void)?
         var role: ButtonRole?
         var keyboardShortcut: KeyboardShortcut?
         var isEnabled: Bool
+        var systemItem: SystemItem?
 
         init(id: AnyHashable = UUID(),
              label: AnyView,
              action: (() -> Void)?,
              role: ButtonRole?,
              keyboardShortcut: KeyboardShortcut? = nil,
-             isEnabled: Bool = true) {
+             isEnabled: Bool = true,
+             systemItem: SystemItem? = nil) {
             self.id = id
             self.label = label
             self.action = action
             self.role = role
             self.keyboardShortcut = keyboardShortcut
             self.isEnabled = isEnabled
+            self.systemItem = systemItem
+        }
+
+        init(systemItem: SystemItem) {
+            self.init(label: AnyView(EmptyView()),
+                      action: nil,
+                      role: nil,
+                      systemItem: systemItem)
         }
     }
 
-    var buttonItems: [Item] = []
+    private var items: [Item] = []
     var textFieldItems: [AnyView] = []
 
-    var flattenedItems: [Item] { buttonItems }
-    var mergedContentItem: Item? { buttonItems.first }
+    var flattenedItems: [Item] { items }
+    var buttonItems: [Item] { items.filter { $0.systemItem == nil } }
+    var mergedContentItem: Item? { items.first }
 
     mutating func append(_ item: Item) {
-        buttonItems.append(item)
+        items.append(item)
     }
 
     mutating func merge(_ other: PlatformItemList) {
-        buttonItems.append(contentsOf: other.buttonItems)
+        items.append(contentsOf: other.items)
         textFieldItems.append(contentsOf: other.textFieldItems)
     }
 
     mutating func modify(_ transform: (inout Item) -> Void) {
-        for index in buttonItems.indices {
-            transform(&buttonItems[index])
+        for index in items.indices {
+            transform(&items[index])
         }
     }
 

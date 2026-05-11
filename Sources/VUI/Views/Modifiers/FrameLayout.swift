@@ -121,42 +121,74 @@ extension _FlexFrameLayout: UnaryLayout {
         let minH = minHeight, idealH = idealHeight, maxH = maxHeight
 
         func childProposal(for proposal: ProposedViewSize) -> ProposedViewSize {
-            // Propose to child: use ideal if provided, else expand to fill when max==∞
-            let childW: CGFloat?
-            if let ideal = idealW {
-                childW = ideal
-            } else if maxW == .infinity, let available = proposal.width {
-                childW = available
-            } else {
-                childW = proposal.width
-            }
-            let childH: CGFloat?
-            if let ideal = idealH {
-                childH = ideal
-            } else if maxH == .infinity, let available = proposal.height {
-                childH = available
-            } else {
-                childH = proposal.height
-            }
+            // Constrain each proposed axis before asking the child for size.
+            let childW = constrainedProposal(axisProposal: proposal.width,
+                                             min: minW,
+                                             ideal: idealW,
+                                             max: maxW)
+            let childH = constrainedProposal(axisProposal: proposal.height,
+                                             min: minH,
+                                             ideal: idealH,
+                                             max: maxH)
 
             return ProposedViewSize(width: childW, height: childH)
         }
 
         func computeSize(proposal: ProposedViewSize) -> CGSize {
-            let childSize = lc.sizeThatFits(childProposal(for: proposal))
+            let childProposal = childProposal(for: proposal)
+            let childSize = lc.sizeThatFits(childProposal)
 
-            // Clamp result to [min, max]; fill when max==∞
-            var w = childSize.width
-            if maxW == .infinity, let available = proposal.width { w = available }
-            else if let max = maxW { w = min(w, max) }
-            if let min = minW { w = Swift.max(w, min) }
-
-            var h = childSize.height
-            if maxH == .infinity, let available = proposal.height { h = available }
-            else if let max = maxH { h = min(h, max) }
-            if let min = minH { h = Swift.max(h, min) }
+            let w = resolvedDimension(axisProposal: proposal.width,
+                                      childActual: childSize.width,
+                                      min: minW,
+                                      ideal: idealW,
+                                      max: maxW)
+            let h = resolvedDimension(axisProposal: proposal.height,
+                                      childActual: childSize.height,
+                                      min: minH,
+                                      ideal: idealH,
+                                      max: maxH)
 
             return CGSize(width: w, height: h)
+        }
+
+        func constrainedProposal(axisProposal: CGFloat?,
+                                 min: CGFloat?,
+                                 ideal: CGFloat?,
+                                 max: CGFloat?) -> CGFloat? {
+            guard var value = axisProposal ?? ideal else {
+                return nil
+            }
+            if let min {
+                value = Swift.max(value, min)
+            }
+            if let max {
+                value = Swift.min(value, max)
+            }
+            return value
+        }
+
+        func resolvedDimension(axisProposal: CGFloat?,
+                               childActual: CGFloat,
+                               min: CGFloat?,
+                               ideal: CGFloat?,
+                               max: CGFloat?) -> CGFloat {
+            // Resolve the final frame dimension from the proposal and child size.
+            if let axisProposal {
+                if let max {
+                    return Swift.min(Swift.max(axisProposal, min ?? -.infinity), max)
+                }
+                return Swift.max(childActual, min ?? -.infinity)
+            }
+
+            var value = ideal ?? childActual
+            if let min {
+                value = Swift.max(value, min)
+            }
+            if let max {
+                value = Swift.min(value, max)
+            }
+            return value
         }
 
         return LayoutComputer(
@@ -166,11 +198,11 @@ extension _FlexFrameLayout: UnaryLayout {
             spacing: lc.spacing,
             place: { position, anchor, proposal in
                 let frameSize = computeSize(proposal: proposal)
+                let placementProposal = ProposedViewSize(frameSize)
                 let frameOrigin = CGPoint(
                     x: position.x - frameSize.width * anchor.x,
                     y: position.y - frameSize.height * anchor.y
                 )
-                let placementProposal = ProposedViewSize(frameSize)
 
                 let x: CGFloat
                 let childAnchorX: CGFloat

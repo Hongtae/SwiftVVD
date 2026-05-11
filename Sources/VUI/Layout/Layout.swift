@@ -565,8 +565,16 @@ extension Layout {
             fatalError("\(self)._makeLayoutView called outside an active AttributeGraph context.")
         }
 
-        let childListOutputs = body(_Graph(), inputs)
-        let stackOrientation = Self.layoutProperties.stackOrientation
+        // Layout body inputs use a dynamic stack-orientation value so primitives
+        // can follow the concrete layout instance.
+        let dynamicStackOrientationAttr: Attribute<Axis?> = graph.makeRule(
+            DynamicStackOrientationRule(layout: root._attribute)
+        )
+        var layoutInputs = inputs
+        layoutInputs.stackOrientation = nil
+        layoutInputs[DynamicStackOrientation.self] = OptionalAttribute(dynamicStackOrientationAttr)
+
+        let childListOutputs = body(_Graph(), layoutInputs)
 
         // Debug overlay for the layout container itself.
         // Reads the container's pos/size from LayoutChildGeometries-driven posAttr/sizeAttr
@@ -599,7 +607,7 @@ extension Layout {
             var allPreferences: [PreferencesOutputs] = []
 
             var from = 0
-            elements.makeElements(from: &from, inputs: inputs, indirectMap: nil) { elementInputs, makeView in
+            elements.makeElements(from: &from, inputs: layoutInputs, indirectMap: nil) { elementInputs, makeView in
                 // Renderer bridge: primitive display rules read the position/size
                 // attributes they received during makeView. StaticLayoutComputer's
                 // geometry projection is not enough unless the render backend pulls
@@ -627,7 +635,8 @@ extension Layout {
                 childInputs.containerPosition = inputs.position
                 childInputs.containerSize = OptionalAttribute(inputs.size)
                 childInputs.safeAreaInsets = inputs.safeAreaInsets
-                childInputs.stackOrientation = stackOrientation
+                childInputs.stackOrientation = layoutInputs.stackOrientation
+                childInputs[DynamicStackOrientation.self] = OptionalAttribute(dynamicStackOrientationAttr)
 
                 let childOutputs = makeView(childInputs)
                 if let lcAttr = childOutputs._layoutComputer.attribute {
@@ -671,8 +680,9 @@ extension Layout {
 
         case .dynamicList(let viewListAttr, _):
             // DynamicContainerInfo manages item lifecycle; DynamicLayoutComputer consumes its Info.
-            var dynamicInputs = inputs
-            dynamicInputs.stackOrientation = stackOrientation
+            var dynamicInputs = layoutInputs
+            dynamicInputs.stackOrientation = layoutInputs.stackOrientation
+            dynamicInputs[DynamicStackOrientation.self] = OptionalAttribute(dynamicStackOrientationAttr)
             let containerInfoAttr: Attribute<DynamicContainer.Info> = graph.makeStatefulRule(
                 DynamicContainerInfo(
                     viewListAttr: viewListAttr,
@@ -769,6 +779,33 @@ public struct LayoutProperties {
     public var stackOrientation: Axis?
     public init(stackOrientation: Axis? = nil) {
         self.stackOrientation = stackOrientation
+    }
+}
+
+struct DynamicStackOrientation: ViewInput {
+    static var defaultValue: OptionalAttribute<Axis?> {
+        OptionalAttribute()
+    }
+
+    static func valuesEqual(_ a: OptionalAttribute<Axis?>, _ b: OptionalAttribute<Axis?>) -> Bool {
+        a.base.identifier == b.base.identifier
+    }
+}
+
+private struct DynamicStackOrientationRule<L: Layout>: Rule {
+    var layout: Attribute<L>
+
+    func updateValue() -> Axis? {
+        layout.value._vuiDynamicLayoutProperties.stackOrientation
+    }
+}
+
+private extension Layout {
+    var _vuiDynamicLayoutProperties: LayoutProperties {
+        if let anyLayout = self as? AnyLayout {
+            return anyLayout.layout._vuiDynamicLayoutProperties
+        }
+        return Self.layoutProperties
     }
 }
 

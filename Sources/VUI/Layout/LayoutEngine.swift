@@ -205,8 +205,25 @@ final class ViewLayoutEngine<L: Layout>: LayoutEngine {
     }
 
     func explicitAlignment(_ key: AlignmentKey, at size: ViewSize) -> CGFloat? {
-        // FIXME: Map AlignmentKey to HorizontalAlignment/VerticalAlignment before implementing.
-        return nil
+        let subviews = makeSubviews()
+        var cache = layout.makeCache(subviews: subviews)
+        let bounds = CGRect(origin: .zero, size: size.value)
+
+        // Dispatch explicit alignment by the axis encoded in the alignment key.
+        switch key.axis {
+        case .horizontal:
+            return layout.explicitAlignment(of: HorizontalAlignment(alignmentKey: key.bits),
+                                            in: bounds,
+                                            proposal: size.proposal,
+                                            subviews: subviews,
+                                            cache: &cache)
+        case .vertical:
+            return layout.explicitAlignment(of: VerticalAlignment(alignmentKey: key.bits),
+                                            in: bounds,
+                                            proposal: size.proposal,
+                                            subviews: subviews,
+                                            cache: &cache)
+        }
     }
 
     func childGeometries(at size: ViewSize, origin: CGPoint) -> [ViewGeometry] {

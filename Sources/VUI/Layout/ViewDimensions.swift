@@ -25,29 +25,30 @@ public struct ViewDimensions: Equatable {
     // MARK: - Alignment guide subscripts
 
     public subscript(guide: HorizontalAlignment) -> CGFloat {
-        if let v = guideComputer.explicitAlignment(guide.key, at: size) { return v }
-        if guide == .leading  { return 0 }
-        if guide == .center   { return width * 0.5 }
-        if guide == .trailing { return width }
-        return width * 0.5
+        self[guide.key]
     }
 
     public subscript(guide: VerticalAlignment) -> CGFloat {
-        if let v = guideComputer.explicitAlignment(guide.key, at: size) { return v }
-        if guide == .top               { return 0 }
-        if guide == .center            { return height * 0.5 }
-        if guide == .bottom            { return height }
-        if guide == .firstTextBaseline { return height }
-        if guide == .lastTextBaseline  { return height }
-        return height * 0.5
+        self[guide.key]
     }
 
     public subscript(explicit guide: HorizontalAlignment) -> CGFloat? {
-        guideComputer.explicitAlignment(guide.key, at: size)
+        self[explicit: guide.key]
     }
 
     public subscript(explicit guide: VerticalAlignment) -> CGFloat? {
-        guideComputer.explicitAlignment(guide.key, at: size)
+        self[explicit: guide.key]
+    }
+
+    subscript(_ key: AlignmentKey) -> CGFloat {
+        if let explicit = self[explicit: key] {
+            return explicit
+        }
+        return key.defaultValue(in: self)
+    }
+
+    subscript(explicit key: AlignmentKey) -> CGFloat? {
+        guideComputer.explicitAlignment(key, at: size)
     }
 
     // MARK: - Initializers
