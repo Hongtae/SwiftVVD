@@ -147,30 +147,22 @@ final class MetalSwapChain: SwapChain, @unchecked Sendable {
     }
 
     func present(waitEvents: [GPUEvent]) -> Bool {
-        if waitEvents.isEmpty {
+        if let buffer = self.queue.queue.makeCommandBuffer() {
+            for event in waitEvents {
+                assert(event is MetalEvent)
+
+                if let event: MetalEvent = event as? MetalEvent {
+                    buffer.encodeWaitForEvent(event.event, value: event.nextWaitValue())
+                }
+            }
             if let drawable = drawable {
-                drawable.present()
+                buffer.present(drawable)
+                buffer.commit()
                 self.drawable = nil
                 return true
             }
         } else {
-            if let buffer = self.queue.queue.makeCommandBuffer() {
-                for event in waitEvents {
-                    assert(event is MetalEvent)
-
-                    if let event: MetalEvent = event as? MetalEvent {
-                        buffer.encodeWaitForEvent(event.event, value: event.nextWaitValue())
-                    }
-                }
-                if let drawable = drawable {
-                    buffer.present(drawable)
-                    buffer.commit()
-                    self.drawable = nil
-                    return true
-                }
-            } else {
-                Log.err("MTLCommandQueue.makeCommandBuffer failed!")
-            }
+            Log.err("MTLCommandQueue.makeCommandBuffer failed!")
         }
         return false
     }
