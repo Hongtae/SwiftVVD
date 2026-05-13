@@ -15,7 +15,7 @@ import VVD
 //   .contextMenu() / .popover() modifier
 //   -> preference key -> ViewGraph side-effect
 //   -> WindowController.updateContextMenuPresentation / updatePopoverPresentation
-//   -> WindowController.addAuxChild, where the parent decides overlay or platform mode
+//   -> WindowController.addAuxiliary(child:attachWindow:), where the parent decides overlay or platform mode
 //
 // Problems with the current AuxiliaryWindowSceneContext.activate() approach:
 //   1. Child (AuxiliaryWindowSceneContext) decides overlay vs platform window
@@ -211,9 +211,9 @@ class AuxiliaryWindowSceneContext<Content>: @unchecked Sendable where Content: V
             hostPlatformWindow.addEventObserver(self) { [weak self] (event: MouseEvent) in
                 if event.type == .buttonDown { self?.onParentWindowInactivated() }
             }
-            // DEPRECATED: addAuxChild called here in the old pattern.
-            // New path: parent decides overlay/platform and calls addAuxChild itself.
-            // parentController.addAuxChild(window)
+            // DEPRECATED: addAuxiliary(child:attachWindow:) called here in the old pattern.
+            // New path: parent decides overlay/platform and calls addAuxiliary itself.
+            // parentController.addAuxiliary(child: window)
             return true
         } else {
             // Overlay mode: render inside the parent window.
@@ -222,9 +222,9 @@ class AuxiliaryWindowSceneContext<Content>: @unchecked Sendable where Content: V
             let shadow = GraphicsContext.Filter.shadow(radius: 4.0, x: 0, y: 0)
             ctx.filter = shadow
             self.activationContext = ctx
-            // DEPRECATED: addAuxChild called here in the old pattern.
-            // New path: parent decides overlay/platform and calls addAuxChild itself.
-            // parentController.addAuxChild(window)
+            // DEPRECATED: addAuxiliary(child:attachWindow:) called here in the old pattern.
+            // New path: parent decides overlay/platform and calls addAuxiliary itself.
+            // parentController.addAuxiliary(child: window)
             return true
         }
     }
@@ -244,8 +244,8 @@ class AuxiliaryWindowSceneContext<Content>: @unchecked Sendable where Content: V
     func dismiss() {
         if let context = self.activationContext {
             self.activationContext = nil
-            // DEPRECATED: removeAuxChild called here in the old pattern.
-            // context.parentController?.removeAuxChild(context.window)
+            // DEPRECATED: removeAuxiliary(child:) called here in the old pattern.
+            // context.parentController?.removeAuxiliary(child: context.window)
 
             context.window.dismissAllModalWindows()
             context.window.dismissAllAuxiliaryWindows()

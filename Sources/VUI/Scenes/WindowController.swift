@@ -436,8 +436,8 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     // Called by the parent's _activateModal after attachWindow has been invoked.
     // At this point the entry is already initiated and the modal is visible.
     func onModalSessionInitiated() {}
-    func onModalSessionDismissalRequested(reason: ModalDismissReason,
-                                          completion: @escaping () -> Void) -> Bool {
+    func requestModalDismissal(reason: ModalDismissReason,
+                               completion: @escaping () -> Void) -> Bool {
         false
     }
     func onModalSessionDismissedByUser()   {}
@@ -902,8 +902,8 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
 
     // MARK: Aux child management
 
-    func addAuxChild(_ child: WindowController,
-                     attachWindow: AttachWindowResolver? = nil) {
+    func addAuxiliary(child: WindowController,
+                      attachWindow: AttachWindowResolver? = nil) {
         child.parentWindow = self
         let asOverlay = (self.window == nil)
         var entry = AuxChildEntry(controller: child)
@@ -946,12 +946,12 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         }
     }
 
-    func removeAuxChild(_ child: WindowController) {
+    func removeAuxiliary(child: WindowController) {
         child.parentWindow = nil
         self.auxChildWindows.withLock { $0.removeAll { $0.controller === child } }
     }
 
-    func updateAuxChildFrame(_ child: WindowController, frame: CGRect?) {
+    func updateAuxiliary(child: WindowController, frame: CGRect?) {
         self.auxChildWindows.withLock { entries in
             if let i = entries.firstIndex(where: { $0.controller === child }) {
                 entries[i].frame = frame
@@ -975,10 +975,10 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     // Called internally by preference-driven sheet/alert/dialog presentation.
     // isOverlay is not determined here. It is deferred to _activateModal when the entry
     // reaches the front of the queue and the parent's window state is known.
-    func addModalChild(_ child: WindowController,
-                       session: PresentationSession,
-                       contentAttr: Attribute<AnyView>? = nil,
-                       attachWindow: AttachWindowResolver? = nil) {
+    func addModal(child: WindowController,
+                  session: PresentationSession,
+                  contentAttr: Attribute<AnyView>? = nil,
+                  attachWindow: AttachWindowResolver? = nil) {
         child.parentWindow = self
         var entry = ModalChildEntry(controller: child, session: session)
         entry.contentAttr = contentAttr
@@ -1012,7 +1012,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
             // attachWindow creates the platform window.
             if let presented = modalChildren.withLock({ $0.first?.session.isPresented }),
                !presented.wrappedValue {
-                removeModalChild(child, reason: .cancelled)
+                removeModal(child: child, reason: .cancelled)
                 return
             }
 
@@ -1023,7 +1023,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                     completionHandler: { [weak self, weak child] in
                         Task { @MainActor [weak self, weak child] in
                             guard let self, let child else { return }
-                            self.removeModalChild(child, reason: .userAction)
+                            self.removeModal(child: child, reason: .userAction)
                         }
                     }
                 ) ?? false
@@ -1043,7 +1043,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                 } else {
                     Log.error("WindowController: presentModalWindow failed")
                     if let child {
-                        self.removeModalChild(child, reason: .cancelled)
+                        self.removeModal(child: child, reason: .cancelled)
                     }
                 }
             }
@@ -1095,35 +1095,34 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         let child = entry.controller
         // Race guard: skip if preference-driven session is already dismissed.
         if let presented = entry.session.isPresented, !presented.wrappedValue {
-            removeModalChild(child, reason: .cancelled)
+            removeModal(child: child, reason: .cancelled)
             return
         }
         // entry.initiated is false here (newly dequeued). _activateModal will set it after init.
         _activateModal(entry: entry)
     }
 
-    // Notify a modal child that its presentation state has become dismissed.
-    // The child owns the visible dismissal and calls the completion when it is
-    // actually ready to be removed from the parent's modal queue.
-    private func notifyModalChildDismissalRequested(_ child: WindowController,
-                                                    reason: ModalDismissReason) {
+    // Start modal dismissal. Active overlay children own the visible dismissal
+    // and call the completion when they are ready for final removal.
+    private func dismissModal(child: WindowController,
+                              reason: ModalDismissReason) {
         let shouldNotifyChild = modalChildren.withLock { entries -> Bool in
             guard let i = entries.firstIndex(where: { $0.controller === child }) else { return false }
             return i == 0 && entries[i].isOverlay && entries[i].initiated
         }
         if shouldNotifyChild,
-           child.onModalSessionDismissalRequested(reason: reason, completion: { [weak self, weak child] in
+           child.requestModalDismissal(reason: reason, completion: { [weak self, weak child] in
                guard let self, let child else { return }
-               self.removeModalChild(child, reason: reason)
+               self.removeModal(child: child, reason: reason)
            }) {
             return
         }
-        removeModalChild(child, reason: reason)
+        removeModal(child: child, reason: reason)
     }
 
-    // Actually remove a modal (active or queued) and clean up its session / callbacks.
-    func removeModalChild(_ child: WindowController,
-                          reason: ModalDismissReason = .byParent) {
+    // Immediately remove a modal (active or queued) and clean up its session / callbacks.
+    private func removeModal(child: WindowController,
+                             reason: ModalDismissReason) {
         var removedEntry: ModalChildEntry?
         var wasFirst = false
         modalChildren.withLock { entries in
@@ -1201,7 +1200,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         // Dismiss sessions that are no longer in incoming.
         for (id, ctrl) in existing {
             if !incomingIDs.contains(id) {
-                notifyModalChildDismissalRequested(ctrl, reason: .dismissed)
+                dismissModal(child: ctrl, reason: .dismissed)
             }
         }
 
@@ -1236,7 +1235,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                                              scene: sheetKey,
                                              parentController: self,
                                              usesPlatformWindow: pref.usesPlatformWindow)
-            addModalChild(ctrl, session: .sheet(pref), contentAttr: contentAttr) { [weak ctrl] attach in
+            addModal(child: ctrl, session: .sheet(pref), contentAttr: contentAttr) { [weak ctrl] attach in
                 ctrl?.resolveModalWindowAttachment(attach)
             }
 
@@ -1260,7 +1259,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         let existingIDs = Set(existing.map { $0.0 })
         for (id, ctrl) in existing {
             if !dialogs.contains(where: { sid($0) == id }) {
-                notifyModalChildDismissalRequested(ctrl, reason: .dismissed)
+                dismissModal(child: ctrl, reason: .dismissed)
             }
         }
         for pref in dialogs {
@@ -1273,7 +1272,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                                              scene: key,
                                              parentController: self,
                                              usesPlatformWindow: pref.usesPlatformWindow)
-            addModalChild(ctrl, session: .confirmationDialog(pref)) { [weak ctrl] attach in
+            addModal(child: ctrl, session: .confirmationDialog(pref)) { [weak ctrl] attach in
                 ctrl?.resolveModalWindowAttachment(attach)
             }
         }
@@ -1284,11 +1283,11 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         guard let graph = AttributeGraph.current else {
             fatalError("\(#function) must be called from within an AG context (side-effect rule).")
         }
-        func sid(_ p: AlertPreference) -> ObjectIdentifier {
-            ObjectIdentifier(p.isPresented.location)
+        func sid(_ p: AlertPreference) -> ViewIdentity {
+            p.identity
         }
 
-        let existing: [(ObjectIdentifier, WindowController)] = modalChildren.withLock {
+        let existing: [(ViewIdentity, WindowController)] = modalChildren.withLock {
             $0.compactMap { entry in
                 guard case .alert(let p) = entry.session else { return nil }
                 return (sid(p), entry.controller)
@@ -1299,7 +1298,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         // Dismiss removed alerts.
         for (id, ctrl) in existing {
             if !alerts.contains(where: { sid($0) == id }) {
-                notifyModalChildDismissalRequested(ctrl, reason: .dismissed)
+                dismissModal(child: ctrl, reason: .dismissed)
             }
         }
 
@@ -1315,7 +1314,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                                              scene: alertKey,
                                              parentController: self,
                                              usesPlatformWindow: pref.usesPlatformWindow)
-            addModalChild(ctrl, session: .alert(pref)) { [weak ctrl] attach in
+            addModal(child: ctrl, session: .alert(pref)) { [weak ctrl] attach in
                 ctrl?.resolveModalWindowAttachment(attach)
             }
         }

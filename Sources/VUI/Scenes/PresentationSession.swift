@@ -36,7 +36,7 @@ enum PresentationSession: @unchecked Sendable {
         }
     }
 
-    // Called by WindowController.removeModalChild when the modal is dismissed.
+    // Called by WindowController.removeModal(child:reason:) when the modal is dismissed.
     // reason drives isPresented reset and onDismiss call semantics.
     func cleanup(reason: ModalDismissReason) {
         if case .sheet(let p) = self {

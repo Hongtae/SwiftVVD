@@ -50,7 +50,13 @@ private final class ModalPresentationContext: @unchecked Sendable {
     typealias AnimationTrack = TransitionAnimationConfiguration<AnimationKey>.Track
     typealias AnimationConfiguration = TransitionAnimationConfiguration<AnimationKey>
 
+    private enum TransitionPhase {
+        case presenting
+        case dismissing
+    }
+
     private struct TransitionAnimation: @unchecked Sendable {
+        let phase: TransitionPhase
         let duration: Double
         let configuration: AnimationConfiguration
         var elapsed: Double = 0
@@ -69,6 +75,7 @@ private final class ModalPresentationContext: @unchecked Sendable {
     private var windowOffset: CGPoint = .zero
     private var needsInputPlacement = true
     private var transition: TransitionAnimation? = nil
+    private var pendingDismissalCompletion: (() -> Void)?
     private let shadowFilter = GraphicsContext.Filter.shadow(radius: 8.0, x: 0, y: 0)
 
     // Overlay modals need an engine-side transition when no platform window
@@ -250,9 +257,20 @@ private final class ModalPresentationContext: @unchecked Sendable {
 
     func beginPresentAnimation(controller: WindowController) {
         guard controller.window == nil else { return }
+        pendingDismissalCompletion = nil
         transition = TransitionAnimation(
+            phase: .presenting,
             duration: transitionDuration,
             configuration: transitionPresentAnimation
+        )
+    }
+
+    private func beginDismissAnimation(completion: @escaping () -> Void) {
+        transition = TransitionAnimation(
+            phase: .dismissing,
+            duration: transitionDuration,
+            configuration: transitionDismissAnimation,
+            completion: completion
         )
     }
 
@@ -261,16 +279,21 @@ private final class ModalPresentationContext: @unchecked Sendable {
                           completion: @escaping () -> Void) -> Bool {
         guard controller.window == nil else { return false }
         guard reason == .dismissed || reason == .userAction else { return false }
-        if let transition, transition.completion != nil {
-            return true
+        if let transition {
+            switch transition.phase {
+            case .presenting:
+                // Finish the presentation animation before starting dismissal.
+                // Reversing nonlinear scale/alpha tracks would require value-to-time
+                // inversion, so dismissal is queued instead.
+                if pendingDismissalCompletion == nil {
+                    pendingDismissalCompletion = completion
+                }
+                return true
+            case .dismissing:
+                return true
+            }
         }
-        let elapsed = transition?.elapsed ?? 0.0
-        self.transition = TransitionAnimation(
-            duration: transitionDuration,
-            configuration: transitionDismissAnimation,
-            elapsed: elapsed,
-            completion: completion
-        )
+        beginDismissAnimation(completion: completion)
         return true
     }
 
@@ -278,8 +301,18 @@ private final class ModalPresentationContext: @unchecked Sendable {
         guard var transition else { return false }
         transition.elapsed += delta
         if transition.isComplete {
-            self.transition = nil
-            transition.completion?()
+            switch transition.phase {
+            case .presenting:
+                if let completion = pendingDismissalCompletion {
+                    pendingDismissalCompletion = nil
+                    beginDismissAnimation(completion: completion)
+                } else {
+                    self.transition = nil
+                }
+            case .dismissing:
+                self.transition = nil
+                transition.completion?()
+            }
         } else {
             self.transition = transition
         }
@@ -409,8 +442,8 @@ final class ModalWindowController: WindowController, @unchecked Sendable {
                                       isTopMost: isTopMost)
     }
 
-    override func onModalSessionDismissalRequested(reason: ModalDismissReason,
-                                                   completion: @escaping () -> Void) -> Bool {
+    override func requestModalDismissal(reason: ModalDismissReason,
+                                        completion: @escaping () -> Void) -> Bool {
         presentationContext.requestDismissal(controller: self,
                                              reason: reason,
                                              completion: completion)

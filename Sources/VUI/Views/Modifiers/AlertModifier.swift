@@ -65,24 +65,33 @@ struct PlatformItemListGenerator<Flags: PlatformItemListFlags, Content: View>: S
 }
 
 // MARK: - ViewIdentity
-
-// Stable per-modifier-instance identity used as a preference dictionary key.
+// Stable no-argument identity used as a dictionary key for alert preferences.
 struct ViewIdentity: Hashable {
-    private static let counter = Atomic<UInt64>(0)
-    let id: UInt64
-    init() { id = ViewIdentity.counter.wrappingAdd(1, ordering: .relaxed).newValue }
+    private static let counter = Atomic<UInt32>(0)
+    let rawValue: UInt32
 
-    // Tracks identity across phase changes.
+    init() {
+        rawValue = ViewIdentity.counter.wrappingAdd(1, ordering: .relaxed).newValue
+    }
+
+    private init(rawValue: UInt32) {
+        self.rawValue = rawValue
+    }
+
+    // Tracks identity across phase changes using a zero-initialized state.
     struct Tracker {
-        private var current: ViewIdentity?
+        private var current = ViewIdentity(rawValue: 0)
+        private var lastResetSeed: UInt32 = 0
 
         init() {}
 
         mutating func update(for phase: Phase) -> ViewIdentity {
-            if current == nil || phase.isInserted {
+            let resetSeed = phase.resetSeed
+            if current.rawValue == 0 || lastResetSeed != resetSeed {
                 current = ViewIdentity()
+                lastResetSeed = resetSeed
             }
-            return current!
+            return current
         }
     }
 }
@@ -107,6 +116,7 @@ struct AlertStorage: @unchecked Sendable {
 
 // Alert presentation payload rendered directly by the overlay.
 struct AlertPreference: @unchecked Sendable {
+    let identity: ViewIdentity
     let title: Text
     let makeActions: () -> AnyView
     let actionsItemList: PlatformItemList?
@@ -169,6 +179,7 @@ struct MakeAlertStorage<Actions: View, Message: View>: StatefulRule {
             return
         }
         let pref = AlertPreference(
+            identity: identity,
             title: m.title,
             makeActions: { AnyView(m.actions) },
             actionsItemList: actionsList,
@@ -777,24 +788,10 @@ extension View {
                                    @ViewBuilder actions: (T) -> A) -> some View {
         let gated = Binding<Bool>(get: { data != nil && isPresented.wrappedValue },
                                   set: { isPresented.wrappedValue = $0 })
-        if let data {
-            return AnyView(modifier(AlertModifier(presentedValue: gated.wrappedValue,
-                                                  isPresented: gated,
-                                                  title: title,
-                                                  actions: actions(data).modifier(ActionsModifier()),
-                                                  message: EmptyView(),
-                                                  auxiliaryContent: nil,
-                                                  representsError: false,
-                                                  severity: .automatic)))
-        }
-        return AnyView(modifier(AlertModifier(presentedValue: gated.wrappedValue,
-                                              isPresented: gated,
-                                              title: title,
-                                              actions: EmptyView().modifier(ActionsModifier()),
-                                              message: EmptyView(),
-                                              auxiliaryContent: nil,
-                                              representsError: false,
-                                              severity: .automatic)))
+        // Keep the outer AlertModifier shape stable with optional action views.
+        return alert(title, isPresented: gated, actions: {
+            data.map { actions($0) }
+        })
     }
 }
 
@@ -815,24 +812,12 @@ extension View {
                                             @ViewBuilder message: (T) -> M) -> some View {
         let gated = Binding<Bool>(get: { data != nil && isPresented.wrappedValue },
                                   set: { isPresented.wrappedValue = $0 })
-        if let data {
-            return AnyView(modifier(AlertModifier(presentedValue: gated.wrappedValue,
-                                                  isPresented: gated,
-                                                  title: title,
-                                                  actions: actions(data).modifier(ActionsModifier()),
-                                                  message: message(data),
-                                                  auxiliaryContent: nil,
-                                                  representsError: false,
-                                                  severity: .automatic)))
-        }
-        return AnyView(modifier(AlertModifier(presentedValue: gated.wrappedValue,
-                                              isPresented: gated,
-                                              title: title,
-                                              actions: EmptyView().modifier(ActionsModifier()),
-                                              message: EmptyView(),
-                                              auxiliaryContent: nil,
-                                              representsError: false,
-                                              severity: .automatic)))
+        // Keep the outer AlertModifier shape stable with optional action and message views.
+        return alert(title, isPresented: gated, actions: {
+            data.map { actions($0) }
+        }, message: {
+            data.map { message($0) }
+        })
     }
 }
 
