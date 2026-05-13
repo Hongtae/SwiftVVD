@@ -216,11 +216,23 @@ extension PreferencesInputs {
                 return reduced.identifier
             },
             _attachIndirect: { concrete, graph in
-                // Point the indirect attr at the matching concrete attr for key K.
-                if let concreteKV = concrete.preferences.first(where: { $0.key == K.self }) {
-                    graph.setIndirectTarget(indirectAttr.identifier, to: concreteKV.value)
-                } else {
+                let matches = concrete.preferences.filter { $0.key == K.self }
+                switch matches.count {
+                case 0:
                     graph.setIndirectTarget(indirectAttr.identifier, to: nil)
+                case 1:
+                    let concreteKV = matches[0]
+                    graph.setIndirectTarget(indirectAttr.identifier, to: concreteKV.value)
+                default:
+                    let reduced: Attribute<K.Value> = graph.makeRule {
+                        var combined = K.defaultValue
+                        for concreteKV in matches {
+                            let val = Attribute<K.Value>(concreteKV.value).value
+                            K.reduce(value: &combined) { val }
+                        }
+                        return combined
+                    }
+                    graph.setIndirectTarget(indirectAttr.identifier, to: reduced.identifier)
                 }
             },
             _detachIndirect: { graph in

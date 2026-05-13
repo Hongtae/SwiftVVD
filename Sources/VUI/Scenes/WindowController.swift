@@ -282,7 +282,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
             viewGraph.valuesNeedingUpdate.insert(.size)
         }
 
-        let changeSet = AttributeGraph.ChangeSet()
+        let changeSet = AGChangeSet()
         AttributeGraph.$changeSet.withValue(changeSet) {
 
             // Drain platform input events before AG evaluation.
@@ -360,7 +360,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         }
         // Preserve redraw requests raised earlier in this frame, including
         // child modal input handled during the parent event pass.
-        redraw = redraw || !changeSet.ids.isEmpty || self.viewChangedWhileDrawing
+        redraw = redraw || !changeSet.isEmpty || self.viewChangedWhileDrawing
         self.viewChangedWhileDrawing = false
 
         // Overlay aux children: update after self.
@@ -384,7 +384,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         context.translateBy(x: offset.x, y: offset.y)
 
         viewGraph.data.withCurrent {
-            let changeSet = AttributeGraph.ChangeSet()
+            let changeSet = AGChangeSet()
             AttributeGraph.$changeSet.withValue(changeSet) {
                 let displayList = rootDisplayList.value
                 for item in displayList.items {
@@ -394,7 +394,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                     item(context)
                 }
             }
-            self.viewChangedWhileDrawing = !changeSet.ids.isEmpty
+            self.viewChangedWhileDrawing = !changeSet.isEmpty
         }
         // Overlay aux children: draw on top after self.
         for entry in self.auxChildWindows.withLock({ $0 }) {

@@ -50,7 +50,9 @@ private struct AnyViewContainer: StatefulRule {
             }
 
             let concrete = makeConcreteView(currentView)
-            concrete.attachIndirectOutputs(to: placeholders)
+            AGSubgraph.$current.withValue(subgraph) {
+                concrete.attachIndirectOutputs(to: placeholders)
+            }
         }
 
         AttributeGraph.setStatefulOutput(placeholders)

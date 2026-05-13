@@ -64,6 +64,52 @@ private class _StatefulBox<R: StatefulRule>: _AnyStatefulBox {
 /// The raw identifier for an AG node: an index into the graph's slot array.
 struct AGAttribute: Hashable, CustomDebugStringConvertible, Sendable {
     let rawValue: UInt32
+#if DEBUG
+    /// The ObjectIdentifier of the AttributeGraph that owns this attribute.
+    /// Set at creation time (makeInput/makeRule). Used to detect cross-graph access.
+    private let _owningGraphID: ObjectIdentifier
+    fileprivate func _debugValidate() {
+        guard let graph = AttributeGraph.current else {
+            fatalError("AGAttribute(\(rawValue)) accessed outside an active AttributeGraph context.")
+        }
+        if _owningGraphID != ObjectIdentifier(graph) {
+            fatalError(
+                "AGAttribute(\(rawValue)) accessed from a different AttributeGraph than the one it was created in " +
+                "(e.g. reading a ViewGraph attribute inside a GestureGraph rule). " +
+                "Use the owning graph's cachedValue(for:) for cross-graph reads."
+            )
+        }
+    }
+    init(rawValue: UInt32, owningGraph: ObjectIdentifier) {
+        self.rawValue = rawValue
+        self._owningGraphID = owningGraph
+    }
+
+    // AGAttribute.== is a same-graph comparison by contract. Cross-graph collections
+    // (e.g. AGChangeSet) partition by AttributeGraph so this operator never runs across
+    // graphs. The assert below is a tripwire if that invariant is ever broken.
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        assert(lhs._owningGraphID == rhs._owningGraphID,
+               "Comparing AGAttributes from different graphs.")
+        return lhs.rawValue == rhs.rawValue
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(rawValue)
+    }
+#else
+    fileprivate func _debugValidate() {}
+#endif
+
+    init(rawValue: UInt32) {
+        self.rawValue = rawValue
+        guard let graph = AttributeGraph.current else {
+            fatalError("AGAttribute(\(rawValue)) created outside an active AttributeGraph context.")
+        }
+#if DEBUG
+        self._owningGraphID = ObjectIdentifier(graph)
+#endif
+    }
 
     var debugDescription: String {
         if let graph = AttributeGraph.current {
@@ -80,25 +126,37 @@ struct AGWeakAttribute: Hashable, Sendable {
     let identifier: UInt32
     let seed: UInt32
 
+#if DEBUG
+    private let _owningGraphID: ObjectIdentifier
+    init(identifier: UInt32, seed: UInt32, owningGraph: ObjectIdentifier) {
+        self.identifier = identifier
+        self.seed = seed
+        self._owningGraphID = owningGraph
+    }
+#endif
+
     func isValid(in graph: AttributeGraph) -> Bool {
-        graph._isValid(index: identifier, seed: seed)
+        if graph._isValid(index: identifier, seed: seed) {
+#if DEBUG
+            guard _owningGraphID == ObjectIdentifier(graph) else {
+                fatalError(
+                    "AGWeakAttribute @\(identifier) with seed \(seed) is from a different AttributeGraph than the one it was validated against. " +
+                    "This is a usage error: AGWeakAttributes must only be compared or converted to strong references within the same graph they were created from."
+                )
+            }
+#endif
+            return true
+        }
+        return false
     }
 
     func toStrong() -> AGAttribute {
+#if DEBUG
+        AGAttribute(rawValue: identifier, owningGraph: _owningGraphID)
+#else
         AGAttribute(rawValue: identifier)
+#endif
     }
-}
-
-/// Typed weak reference to an AG attribute.
-/// The type parameter is used only for type-safe access via toStrong().
-struct WeakAttribute<T>: Hashable, Sendable {
-    let raw: AGWeakAttribute
-
-    init(_ raw: AGWeakAttribute) { self.raw = raw }
-
-    func isValid(in graph: AttributeGraph) -> Bool { raw.isValid(in: graph) }
-
-    func toStrong() -> Attribute<T> { Attribute<T>(raw.toStrong()) }
 }
 
 /// A typed wrapper around an AGAttribute.
@@ -106,35 +164,13 @@ struct WeakAttribute<T>: Hashable, Sendable {
 /// Value type parameter is used only in method signatures; no Value is retained here.
 struct Attribute<Value>: @unchecked Sendable {
     let identifier: AGAttribute
-#if DEBUG
-    /// The ObjectIdentifier of the AttributeGraph that owns this attribute.
-    /// Set at creation time (makeInput/makeRule). Used to detect cross-graph access.
-    private let _owningGraphID: ObjectIdentifier
+
     fileprivate func _debugValidate() {
-        guard let graph = AttributeGraph.current else {
-            fatalError("Attribute<\(Value.self)> accessed outside an active AttributeGraph context.")
-        }
-        if _owningGraphID != ObjectIdentifier(graph) {
-            fatalError(
-                "Attribute<\(Value.self)> @\(identifier.rawValue): " +
-                "accessed from a different AttributeGraph than the one it was created in " +
-                "(e.g. reading a ViewGraph attribute inside a GestureGraph rule). " +
-                "Use the owning graph's cachedValue(for:) for cross-graph reads."
-            )
-        }
+        identifier._debugValidate()
     }
-#else
-    fileprivate func _debugValidate() {}
-#endif
 
     init(_ id: AGAttribute) {
         self.identifier = id
-#if DEBUG
-        guard let graph = AttributeGraph.current else {
-            fatalError("Attribute<\(Value.self)> created outside an active AttributeGraph context.")
-        }
-        self._owningGraphID = ObjectIdentifier(graph)
-#endif
     }
 
     /// Pulls the latest value from the graph, triggering evaluation if needed,
@@ -164,8 +200,14 @@ struct Attribute<Value>: @unchecked Sendable {
         guard let graph = AttributeGraph.current else {
             fatalError("Attempted to read an Attribute outside of an active AttributeGraph context.")
         }
+#if DEBUG
+        return WeakAttribute(AGWeakAttribute(identifier: identifier.rawValue,
+                                             seed: graph._seed(at: identifier.rawValue),
+                                             owningGraph: ObjectIdentifier(graph)))
+#else
         return WeakAttribute(AGWeakAttribute(identifier: identifier.rawValue,
                                              seed: graph._seed(at: identifier.rawValue)))
+#endif
     }
 }
 
@@ -178,6 +220,19 @@ extension Attribute where Value: Equatable {
         graph.setValue(for: self, to: newValue, transaction: transaction)
     }
 }
+
+/// Typed weak reference to an AG attribute.
+/// The type parameter is used only for type-safe access via toStrong().
+struct WeakAttribute<T>: Hashable, Sendable {
+    let raw: AGWeakAttribute
+
+    init(_ raw: AGWeakAttribute) { self.raw = raw }
+
+    func isValid(in graph: AttributeGraph) -> Bool { raw.isValid(in: graph) }
+
+    func toStrong() -> Attribute<T> { Attribute<T>(raw.toStrong()) }
+}
+
 
 // MARK: - Optional Attribute
 
@@ -264,7 +319,10 @@ final class AGSubgraph: @unchecked Sendable {
         guard graph === self.graph else {
             fatalError("AGSubgraph.invalidate() called from a different AttributeGraph than the one that owns this subgraph.")
         }
-        children.forEach { $0.invalidate() }
+        children.forEach {
+            $0.invalidate() 
+            $0.parent = nil 
+        }
         children.removeAll()
         nodes.forEach { graph.removeNode($0) }
         nodes.removeAll()
@@ -307,6 +365,33 @@ struct AttributeGraphRef: @unchecked Sendable {
                 try body()
             }
         }
+    }
+}
+
+// MARK: - AGChangeSet
+
+/// Records attributes that were mutated during an `AttributeGraph.$changeSet.withValue(_:)`
+/// scope, partitioned by owning AttributeGraph instance.
+///
+/// Storage is keyed by `ObjectIdentifier(graph)` so attributes from different graphs
+/// never share a `Set<AGAttribute>` bucket. Without this partitioning, a hash collision
+/// between equal `rawValue`s in different graphs would invoke cross-graph `AGAttribute.==`
+/// (which is only a same-graph comparison by contract).
+final class AGChangeSet: @unchecked Sendable {
+    private var _byGraph: [ObjectIdentifier: Set<AGAttribute>] = [:]
+
+    var isEmpty: Bool { _byGraph.values.allSatisfy { $0.isEmpty } }
+
+    /// Attributes recorded for a specific graph during this AGChangeSet's lifetime.
+    func ids(for graph: AttributeGraph) -> Set<AGAttribute> {
+        _byGraph[ObjectIdentifier(graph)] ?? []
+    }
+
+    fileprivate func record(_ id: AGAttribute) {
+        guard let graph = AttributeGraph.current else {
+            fatalError("AGChangeSet.record called outside an active AttributeGraph context.")
+        }
+        _byGraph[ObjectIdentifier(graph), default: []].insert(id)
     }
 }
 
@@ -427,11 +512,7 @@ class AttributeGraph: @unchecked Sendable {
 
     // MARK: Task Locals
 
-    final class ChangeSet: @unchecked Sendable {
-        private var _ids: Set<AGAttribute> = []
-        var ids: Set<AGAttribute> { _ids }
-        fileprivate func record(_ id: AGAttribute) { _ids.insert(id) }
-    }
+    typealias ChangeSet = AGChangeSet
 
     @TaskLocal static var current: AttributeGraph?
     @TaskLocal static var changeSet: ChangeSet?

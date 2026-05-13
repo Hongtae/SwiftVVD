@@ -308,6 +308,8 @@ private struct DialogOverlayActionButtonBody: View {
         HStack(spacing: 0) {
             Spacer(minLength: 0)
             configuration.label
+                .fixedSize(horizontal: true, vertical: false)
+                .layoutPriority(1)
             Spacer(minLength: 0)
         }
             .frame(minWidth: 88, maxWidth: .infinity, minHeight: 32)

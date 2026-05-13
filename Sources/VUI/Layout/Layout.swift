@@ -655,6 +655,7 @@ extension Layout {
                                 sizeAttr.setValue(ViewSize(resolvedSize))
                                 inner.place(at: position, anchor: anchor, proposal: proposal)
                             },
+                            priority: inner.priority,
                             explicitAlignment: { inner.explicitAlignment($0, at: $1) }
                         )
                     }
