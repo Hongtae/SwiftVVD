@@ -17,11 +17,25 @@ struct BoundInputsView {}
 // MARK: - PlatformItemListFlags
 
 // Controls which platform item types PlatformItemListGenerator collects from the content view.
-protocol PlatformItemListFlags {}
+protocol PlatformItemListFlags {
+    static var installsPlatformItemButtonStyle: Bool { get }
+}
+
+extension PlatformItemListFlags {
+    static var installsPlatformItemButtonStyle: Bool { false }
+}
+
 // Used for alert actions: collects all item types (buttons + text fields).
-struct AllPlatformItemListFlags: PlatformItemListFlags {}
+struct AllPlatformItemListFlags: PlatformItemListFlags {
+    // Materialize Button values as platform items.
+    static var installsPlatformItemButtonStyle: Bool { true }
+}
 // Used for alert message: collects text items only.
 struct TextPlatformItemListFlags: PlatformItemListFlags {}
+// Used by PlatformItemListMenuStyle / View.platformItemChildren for nested Menu content.
+struct SelectionPlatformItemListFlags: PlatformItemListFlags {
+    static var installsPlatformItemButtonStyle: Bool { true }
+}
 
 // MARK: - PlatformItemListGenerator
 
@@ -35,6 +49,9 @@ struct PlatformItemListGenerator<Flags: PlatformItemListFlags, Content: View>: S
     var itemList: Optional<PlatformItemList>
 
     init(content: Attribute<Content>, inputs: _ViewInputs, inputsIncludeGeometry: Bool) {
+        guard let graph = AttributeGraph.current else {
+            fatalError("PlatformItemListGenerator.init called outside AG context")
+        }
         var itemInputs = inputs
         var keys = itemInputs.preferences.keys
         keys.insert(PlatformItemList.Key.self)
@@ -42,6 +59,18 @@ struct PlatformItemListGenerator<Flags: PlatformItemListFlags, Content: View>: S
                                                    hostKeys: itemInputs.preferences.hostKeys)
         // Request divider entries as platform item-list system items.
         itemInputs.requestedDividerRepresentation = PlatformItemListDividerRepresentable.self
+        if Flags.installsPlatformItemButtonStyle {
+            let styleAttr: Attribute<ButtonStyleModifier<PlatformItemListButtonStyle>> = graph.makeRule {
+                ButtonStyleModifier(style: PlatformItemListButtonStyle())
+            }
+            let style = AnyStyleModifier(value: styleAttr.identifier,
+                                         _type: StyleModifierType<ButtonStyleModifier<PlatformItemListButtonStyle>>.self)
+            var stack = itemInputs.base.customInputs.value(
+                forKey: StyleInput<PrimitiveButtonStyleConfiguration>.self)
+            stack = .node(style, stack)
+            itemInputs.base.customInputs.setValue(stack,
+                                                  forKey: StyleInput<PrimitiveButtonStyleConfiguration>.self)
+        }
         let view = _GraphValue<Content>(_attribute: content)
         let outputs = Content._makeView(view: view, inputs: itemInputs)
         self.preferenceNodes = outputs.preferences.values(for: PlatformItemList.Key.self)
@@ -214,6 +243,19 @@ struct PlatformItemList {
         var keyboardShortcut: KeyboardShortcut?
         var isEnabled: Bool
         var systemItem: SystemItem?
+        var children: [Item]
+        var selectionBehavior: SelectionBehavior?
+        var secondaryNavigationBehavior: SecondaryNavigationBehavior?
+
+        enum SelectionBehavior: Sendable {
+            case none
+            case toggle(Bool)
+        }
+
+        enum SecondaryNavigationBehavior: Sendable {
+            case none
+            case submenu
+        }
 
         init(id: AnyHashable = UUID(),
              label: AnyView,
@@ -221,7 +263,10 @@ struct PlatformItemList {
              role: ButtonRole?,
              keyboardShortcut: KeyboardShortcut? = nil,
              isEnabled: Bool = true,
-             systemItem: SystemItem? = nil) {
+             systemItem: SystemItem? = nil,
+             children: [Item] = [],
+             selectionBehavior: SelectionBehavior? = nil,
+             secondaryNavigationBehavior: SecondaryNavigationBehavior? = nil) {
             self.id = id
             self.label = label
             self.action = action
@@ -229,6 +274,9 @@ struct PlatformItemList {
             self.keyboardShortcut = keyboardShortcut
             self.isEnabled = isEnabled
             self.systemItem = systemItem
+            self.children = children
+            self.selectionBehavior = selectionBehavior
+            self.secondaryNavigationBehavior = secondaryNavigationBehavior
         }
 
         init(systemItem: SystemItem) {
@@ -244,6 +292,7 @@ struct PlatformItemList {
 
     var flattenedItems: [Item] { items }
     var buttonItems: [Item] { items.filter { $0.systemItem == nil } }
+    var menuItems: [Item] { items }
     var mergedContentItem: Item? { items.first }
 
     mutating func append(_ item: Item) {

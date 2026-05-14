@@ -49,6 +49,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
 
     // gestureGraph is owned directly by WindowController as the window-level gesture coordinator.
     var gestureGraph: GestureGraph?
+    private var contextMenuRecognizer = ContextMenuRecognizer()
 
     // Platform event to EventID routing table.
     // WindowController performs this mapping before forwarding to GestureGraph.
@@ -555,6 +556,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     func handleKeyboardEvent(event: KeyboardEvent) -> Bool {
         let handleEvent = { (event: KeyboardEvent) -> Bool in
             if let window = self.window, window !== event.window { return false }
+            self.contextMenuRecognizer.handleKeyboardEvent(event)
             Log.debug("WindowController.onKeyboardEvent: \(event)")
             if let _ = self.sharedContext.focusedViews[event.deviceID]?.value {
                 fatalError("Implement with AG")
@@ -593,7 +595,20 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
             if let window = self.window, window !== event.window { return false }
             if event.type == .wheel { return false }
             guard let gg = self.gestureGraph,
-                  let rootResponder = gg.rootResponder else { return false }
+                  let rootResponder = gg.rootResponder else {
+                return false
+            }
+            if self.contextMenuRecognizer.handleMouseEvent(
+                event,
+                viewGraph: self.viewGraph,
+                rootResponder: rootResponder,
+                open: { [weak self] responder, location in
+                    guard let self else { return }
+                    responder.present(from: self, at: location)
+                }
+            ) {
+                return true
+            }
 
             // Map deviceID to EventID, build the active event dictionary,
             // then forward to GestureGraph.
@@ -803,6 +818,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
 
     func resetGestureHandlers() {
         gestureGraph?.resetEvents()
+        contextMenuRecognizer.reset()
         _touchEventIDs.removeAll()
         _mouseEventID = nil
         _spatialEventIDs.removeAll()
@@ -912,6 +928,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
             entries.removeAll { $0.controller === child }
             entries.append(entry)
         }
+        viewChangedWhileDrawing = true
 
         if !asOverlay, let attachWindow {
             attachWindow { [weak self, weak child] _ in
@@ -949,6 +966,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     func removeAuxiliary(child: WindowController) {
         child.parentWindow = nil
         self.auxChildWindows.withLock { $0.removeAll { $0.controller === child } }
+        viewChangedWhileDrawing = true
     }
 
     func updateAuxiliary(child: WindowController, frame: CGRect?) {
@@ -957,6 +975,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                 entries[i].frame = frame
             }
         }
+        viewChangedWhileDrawing = true
     }
 
     func dismissAllAuxiliaryWindows() {
@@ -967,6 +986,9 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         children.forEach { child in
             child.parentWindow = nil
             child.onParentWindowClosed()
+        }
+        if !children.isEmpty {
+            viewChangedWhileDrawing = true
         }
     }
 

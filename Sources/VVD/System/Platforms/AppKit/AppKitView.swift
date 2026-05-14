@@ -170,10 +170,10 @@ private final class AppKitViewImpl: NSView, NSTextInputClient, NSWindowDelegate,
 
     override func scrollWheel(with event: NSEvent) {
         if event.phase != [] {
-            // Trackpad pan gesture — forward as GestureEvent.
+            // Trackpad pan gesture, forwarded as GestureEvent.
             self.postGestureEvent(event)
         } else {
-            // Traditional mouse wheel — existing path.
+            // Traditional mouse wheel, handled by the existing path.
             self.postMouseEvent(event)
         }
     }
@@ -221,11 +221,14 @@ private final class AppKitViewImpl: NSView, NSTextInputClient, NSWindowDelegate,
         case .changed:   phase = .changed
         case .ended:     phase = .ended
         case .cancelled: phase = .cancelled
-        default:         return  // .mayBegin, .stationary, etc. — ignored
+        default:         return  // .mayBegin, .stationary, etc. are ignored
         }
 
         let location = self.convert(event.locationInWindow, from: nil)
         let delta = CGPoint(x: event.scrollingDeltaX, y: event.scrollingDeltaY)
+
+        let magnification = event.type == .magnify ? CGFloat(event.magnification) : 0.0
+        let rotation = event.type == .rotate ? CGFloat(event.rotation) : 0.0
 
         window.postGestureEvent(GestureEvent(
             type: type,
@@ -233,8 +236,8 @@ private final class AppKitViewImpl: NSView, NSTextInputClient, NSWindowDelegate,
             phase: phase,
             location: location,
             delta: delta,
-            magnification: CGFloat(event.magnification),
-            rotation: CGFloat(event.rotation)
+            magnification: magnification,
+            rotation: rotation
         ))
     }
 

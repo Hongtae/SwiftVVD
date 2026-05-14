@@ -26,9 +26,12 @@ public struct MenuStyleConfiguration {
     public var content: MenuStyleConfiguration.Content { .init() }
 
     let _primaryAction: (() -> Void)?
+    let _onPresentationChanged: ((Bool) -> Void)?
 
-    init(primaryAction: (() -> Void)? = nil) {
+    init(primaryAction: (() -> Void)? = nil,
+         onPresentationChanged: ((Bool) -> Void)? = nil) {
         self._primaryAction = primaryAction
+        self._onPresentationChanged = onPresentationChanged
     }
 }
 
@@ -243,6 +246,80 @@ private struct _ButtonMenuStyleBody: View {
 
 extension MenuStyle where Self == ButtonMenuStyle {
     public static var button: ButtonMenuStyle { .init() }
+}
+
+struct PlatformItemListMenuStyle: MenuStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        PlatformItemListMenuBody(configuration: configuration)
+    }
+}
+
+private struct PlatformItemListMenuBody: View {
+    let configuration: MenuStyleConfiguration
+    @Environment(\.isEnabled) private var isEnabled: Bool
+
+    static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        guard let graph = AttributeGraph.current else {
+            fatalError("PlatformItemListMenuBody._makeView called outside AG context")
+        }
+
+        let configurationAttr = view[\.configuration]._attribute
+        let contentAttr = view[\.configuration][\.content]._attribute
+        let labelSource = inputs.base.customInputs
+            .value(forKey: SourceInput<MenuStyleConfiguration.Label>.self).top
+        let environmentAttr = inputs.base.cachedEnvironment.value.environment
+
+        // Collect nested content into PlatformItemList and append one submenu-capable item.
+        let childrenAttr: Attribute<PlatformItemList> = graph.makeStatefulRule(
+            PlatformItemListGenerator<SelectionPlatformItemListFlags, MenuStyleConfiguration.Content>(
+                content: contentAttr,
+                inputs: inputs,
+                inputsIncludeGeometry: true
+            )
+        )
+
+        let preferenceAttr: Attribute<PlatformItemList> = graph.makeRule {
+            let configuration = configurationAttr.value
+            let label = labelSource?.snapshot() ?? AnyView(EmptyView())
+            var list = PlatformItemList()
+            list.append(PlatformItemList.Item(
+                label: label,
+                action: configuration._primaryAction,
+                role: nil,
+                isEnabled: environmentAttr.value.isEnabled,
+                children: childrenAttr.value.menuItems,
+                secondaryNavigationBehavior: .submenu
+            ))
+            return list
+        }
+
+        var outputs = _ViewOutputs()
+        outputs.preferences.append(PlatformItemList.Key.self, node: preferenceAttr.identifier)
+        return outputs
+    }
+
+    static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
+        _ViewListOutputs.unaryViewList(view: view, inputs: inputs)
+    }
+
+    var body: some View {
+        // Fallback body path for non-AG inspection. The AG path above writes the
+        // platform item preference; standalone Menu presentation is implemented separately.
+        configuration.label
+            .preference(key: PlatformItemList.Key.self, value: itemList)
+    }
+
+    private var itemList: PlatformItemList {
+        var list = PlatformItemList()
+        list.append(PlatformItemList.Item(
+            label: AnyView(configuration.label),
+            action: configuration._primaryAction,
+            role: nil,
+            isEnabled: isEnabled,
+            secondaryNavigationBehavior: .submenu
+        ))
+        return list
+    }
 }
 
 struct _MenuItemMenuStyle: MenuStyle {

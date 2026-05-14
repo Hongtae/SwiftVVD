@@ -9,14 +9,26 @@ public struct Menu<Label, Content>: View where Label: View, Content: View {
     let label: Label
     let content: Content
     let primaryAction: (() -> Void)?
+    let onPresentationChanged: ((Bool) -> Void)?
 
     public var body: some View {
-        ResolvedMenuStyle(primaryAction: primaryAction)
+        ResolvedMenuStyle(primaryAction: primaryAction,
+                          onPresentationChanged: onPresentationChanged)
             .modifier(StaticSourceWriter<MenuStyleConfiguration.Label, Label>(source: self.label))
             .modifier(
                 StaticSourceWriter<MenuStyleConfiguration.Content, ModifiedContent<Content, StyleContextWriter<MenuStyleContext>>>(
                 source: self.content.modifier(StyleContextWriter<MenuStyleContext>())
                 ))
+            // Install the item-list menu style inside MenuStyleContext so nested
+            // Menu values become submenu platform items for context menus.
+            .modifier(
+                StaticIf<StyleContextAcceptsPredicate<MenuStyleContext>,
+                         MenuStyleModifier<PlatformItemListMenuStyle>,
+                         EmptyModifier>(
+                    trueBody: MenuStyleModifier(style: PlatformItemListMenuStyle()),
+                    falseBody: EmptyModifier()
+                )
+            )
     }
 }
 
@@ -25,18 +37,21 @@ extension Menu {
         self.label = label()
         self.content = content()
         self.primaryAction = nil
+        self.onPresentationChanged = nil
     }
 
     public init(_ titleKey: LocalizedStringKey, @ViewBuilder content: () -> Content) where Label == Text {
         self.label = Text(titleKey)
         self.content = content()
         self.primaryAction = nil
+        self.onPresentationChanged = nil
     }
 
     public init<S>(_ title: S, @ViewBuilder content: () -> Content) where Label == Text, S: StringProtocol {
         self.label = Text(title)
         self.content = content()
         self.primaryAction = nil
+        self.onPresentationChanged = nil
     }
 }
 
@@ -45,18 +60,21 @@ extension Menu {
         self.label = label()
         self.content = content()
         self.primaryAction = primaryAction
+        self.onPresentationChanged = nil
     }
 
     public init(_ titleKey: LocalizedStringKey, @ViewBuilder content: () -> Content, primaryAction: @escaping () -> Void) where Label == Text {
         self.label = Text(titleKey)
         self.content = content()
         self.primaryAction = primaryAction
+        self.onPresentationChanged = nil
     }
 
     public init<S>(_ title: S, @ViewBuilder content: () -> Content, primaryAction: @escaping () -> Void) where Label == Text, S: StringProtocol {
         self.label = Text(title)
         self.content = content()
         self.primaryAction = primaryAction
+        self.onPresentationChanged = nil
     }
 }
 
@@ -93,6 +111,7 @@ extension Menu where Label == MenuStyleConfiguration.Label, Content == MenuStyle
         self.label = configuration.label
         self.content = configuration.content
         self.primaryAction = configuration._primaryAction
+        self.onPresentationChanged = configuration._onPresentationChanged
     }
 }
 
@@ -102,9 +121,12 @@ struct ResolvedMenuStyle: View {
     var _style: any MenuStyle = DefaultMenuStyle.automatic
     var _configuration = MenuStyleConfiguration()
     var _primaryAction: (() -> Void)? = nil
+    var _onPresentationChanged: ((Bool) -> Void)? = nil
 
-    init(primaryAction: (() -> Void)? = nil) {
+    init(primaryAction: (() -> Void)? = nil,
+         onPresentationChanged: ((Bool) -> Void)? = nil) {
         self._primaryAction = primaryAction
+        self._onPresentationChanged = onPresentationChanged
     }
 
     var _body: any View {
@@ -122,7 +144,8 @@ struct ResolvedMenuStyle: View {
         func wireBody(_ style: some MenuStyle) -> _ViewOutputs {
             let bodyAttr = graph.makeRule {
                 let rs = view._attribute.value
-                let config = MenuStyleConfiguration(primaryAction: rs._primaryAction)
+                let config = MenuStyleConfiguration(primaryAction: rs._primaryAction,
+                                                    onPresentationChanged: rs._onPresentationChanged)
                 return style.makeBody(configuration: config)
             }
             return makeView(view: _GraphValue(_attribute: bodyAttr), inputs: inputs)
