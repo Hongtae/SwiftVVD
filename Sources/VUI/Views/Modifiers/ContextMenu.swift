@@ -215,12 +215,18 @@ final class ContextMenuWindowController: WindowController, @unchecked Sendable {
         let size = CGSize(width: max(1, fittedSize.width),
                           height: max(1, fittedSize.height))
         frameInParent = CGRect(origin: anchor, size: size)
+        sharedContext.contentBounds.size = size
+        viewGraph.sizeAttr?.setValue(ViewSize(size))
         let center = CGPoint(x: size.width * 0.5, y: size.height * 0.5)
         layoutComputer.value.place(at: center,
                                    anchor: .center,
                                    proposal: ProposedViewSize(width: size.width,
                                                               height: size.height))
         parentWindow?.updateAuxiliary(child: self, frame: frameInParent)
+    }
+
+    override func layoutContentSize(from contentSize: CGSize) -> CGSize {
+        frameInParent.size == .zero ? contentSize : frameInParent.size
     }
 
     override func drawFrame(offset: CGPoint, _ context: GraphicsContext) {
@@ -232,7 +238,7 @@ final class ContextMenuWindowController: WindowController, @unchecked Sendable {
     }
 
     override func onGestureInitiated(from initiator: AnyObject?, location: CGPoint) {
-        if initiator == nil {
+        if initiator !== self {
             parentWindow?.removeAuxiliary(child: self)
         }
     }
@@ -279,18 +285,21 @@ private struct ContextMenuPopupRow: View {
             HStack(spacing: 8) {
                 item.label
                     .environment(\.isEnabled, item.isEnabled)
-                Spacer()
                 if !item.children.isEmpty {
                     Text(">")
                 }
             }
-            .frame(minWidth: 160)
+            .frame(minWidth: 160, alignment: .leading)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .opacity(item.isEnabled ? 1.0 : 0.45)
             ._onButtonGesture(pressing: { _ in }, perform: {
                 guard item.isEnabled else { return }
-                item.action?()
+                guard let action = item.action else {
+                    // TODO: open child items as a sibling submenu panel.
+                    return
+                }
+                action()
                 dismiss()
             })
         }

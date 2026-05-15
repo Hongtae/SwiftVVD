@@ -265,6 +265,7 @@ private struct PlatformItemListMenuBody: View {
 
         let configurationAttr = view[\.configuration]._attribute
         let contentAttr = view[\.configuration][\.content]._attribute
+        let labelView = view[\.configuration][\.label]
         let labelSource = inputs.base.customInputs
             .value(forKey: SourceInput<MenuStyleConfiguration.Label>.self).top
         let environmentAttr = inputs.base.cachedEnvironment.value.environment
@@ -293,7 +294,8 @@ private struct PlatformItemListMenuBody: View {
             return list
         }
 
-        var outputs = _ViewOutputs()
+        var outputs = MenuStyleConfiguration.Label._makeView(view: labelView,
+                                                             inputs: inputs)
         outputs.preferences.append(PlatformItemList.Key.self, node: preferenceAttr.identifier)
         return outputs
     }

@@ -70,6 +70,10 @@ struct PlatformItemListGenerator<Flags: PlatformItemListFlags, Content: View>: S
             stack = .node(style, stack)
             itemInputs.base.customInputs.setValue(stack,
                                                   forKey: StyleInput<PrimitiveButtonStyleConfiguration>.self)
+            // Platform item generation materializes nested Menu values through
+            // PlatformItemListMenuStyle, preserving submenu children and primary action.
+            itemInputs.base.customInputs.setValue(PlatformItemListMenuStyle(),
+                                                  forKey: _MenuStyleKey.self)
         }
         let view = _GraphValue<Content>(_attribute: content)
         let outputs = Content._makeView(view: view, inputs: itemInputs)
