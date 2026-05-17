@@ -90,12 +90,8 @@ extension ContextMenuModifier {
 }
 
 extension ContextMenuModifier {
-    fileprivate var _gesture: ContextMenuGesture {
-        .init()
-    }
-
     fileprivate var _scene: some Scene {
-        AuxiliaryWindowScene(content: menuView)
+        _EmptyScene()
     }
 }
 
@@ -160,11 +156,15 @@ final class ContextMenuResponder: ViewResponder {
         // WindowController.init(crossGraphContent:) requires a cached source value
         // before the child ViewGraph installs its cross-graph reference.
         _ = contentAttr.value
+        let usesPlatformWindow = environment.value.auxiliaryWindowUsingPlatformWindow
         let ctrl = ContextMenuWindowController(crossGraphContent: contentAttr,
                                                sourceGraph: graph,
                                                scene: parent.scene,
-                                               anchor: location)
-        parent.addAuxiliary(child: ctrl)
+                                               anchor: location,
+                                               usesPlatformWindow: usesPlatformWindow)
+        parent.addAuxiliary(child: ctrl) { [weak ctrl] attach in
+            ctrl?.resolveAuxiliaryWindowAttachment(attach)
+        }
     }
 
     func resolvedTriggerPolicy(for device: MouseEventDevice) -> ContextMenuTriggerPolicy {
@@ -192,55 +192,33 @@ public extension EnvironmentValues {
     }
 }
 
-final class ContextMenuWindowController: WindowController, @unchecked Sendable {
-    override var observesRootFittedSizeForLayoutUpdates: Bool { true }
-
-    private let anchor: CGPoint
-    private var frameInParent: CGRect = .zero
-
+final class ContextMenuWindowController: AuxiliaryWindowController, @unchecked Sendable {
     init(crossGraphContent contentAttr: Attribute<AnyView>,
          sourceGraph: AttributeGraph,
          scene: WindowKey,
-         anchor: CGPoint) {
-        self.anchor = anchor
+         anchor: CGPoint,
+         usesPlatformWindow: Bool) {
+        let frame = CGRect(origin: anchor, size: .zero)
         super.init(crossGraphContent: contentAttr,
                    sourceGraph: sourceGraph,
-                   scene: scene)
-    }
-
-    override func onViewLayoutUpdated() {
-        guard let layoutComputer = viewGraph.rootLayoutComputer else { return }
-        let fittedSize = viewGraph.rootFittedSize?.value ??
-            layoutComputer.value.sizeThatFits(.unspecified)
-        let size = CGSize(width: max(1, fittedSize.width),
-                          height: max(1, fittedSize.height))
-        frameInParent = CGRect(origin: anchor, size: size)
-        sharedContext.contentBounds.size = size
-        viewGraph.sizeAttr?.setValue(ViewSize(size))
-        let center = CGPoint(x: size.width * 0.5, y: size.height * 0.5)
-        layoutComputer.value.place(at: center,
-                                   anchor: .center,
-                                   proposal: ProposedViewSize(width: size.width,
-                                                              height: size.height))
-        parentWindow?.updateAuxiliary(child: self, frame: frameInParent)
-    }
-
-    override func layoutContentSize(from contentSize: CGSize) -> CGSize {
-        frameInParent.size == .zero ? contentSize : frameInParent.size
-    }
-
-    override func drawFrame(offset: CGPoint, _ context: GraphicsContext) {
-        super.drawFrame(offset: offset + frameInParent.origin, context)
-    }
-
-    override func overlayHitTest(_ locationInParent: CGPoint) -> Bool {
-        CGRect(origin: .zero, size: frameInParent.size).contains(locationInParent)
+                   scene: scene,
+                   usesPlatformWindow: usesPlatformWindow,
+                   frameInParent: frame)
     }
 
     override func onGestureInitiated(from initiator: AnyObject?, location: CGPoint) {
         if initiator !== self {
             parentWindow?.removeAuxiliary(child: self)
         }
+    }
+
+    override func onParentWindowInactivated() {
+        guard window == nil else { return }
+        parentWindow?.removeAuxiliary(child: self)
+    }
+
+    override func onAuxiliaryWindowInactivated() {
+        parentWindow?.removeAuxiliary(child: self)
     }
 }
 
@@ -303,102 +281,5 @@ private struct ContextMenuPopupRow: View {
                 dismiss()
             })
         }
-    }
-}
-
-private struct ContextMenuGesture: Gesture {
-    static func _makeGesture(gesture: _GraphValue<ContextMenuGesture>, inputs: _GestureInputs) -> _GestureOutputs<Void> {
-        fatalError()
-    }
-    
-    typealias Body = Never
-    typealias Value = Void
-}
-
-private class ContextMenuGestureHandler: _GestureHandler {
-    var typeFilter: _PrimitiveGestureTypes = .all
-    let gesture: ContextMenuGesture
-    var openMenuOnButtonUp: Bool = false
-    var openMenuCallback: ((CGPoint) -> Void)? = nil
-    var modifierKeys: [VirtualKey] = []
-    var buttonID: Int = 1
-    var location: CGPoint = .zero
-
-    override var type: _PrimitiveGestureTypes { .all }
-
-    override var isValid: Bool {
-        typeFilter.contains(self.type)
-    }
-
-    override func setTypeFilter(_ f: _PrimitiveGestureTypes) -> _PrimitiveGestureTypes {
-        self.typeFilter = f
-        return f.subtracting(.tap)
-    }
-
-    init(graph: _GraphValue<ContextMenuGesture>, target: Any?, gesture: ContextMenuGesture) {
-        self.gesture = gesture
-        super.init(graph: graph, target: target)
-    }
-
-    deinit {
-        //Log.debug("ContextMenuGestureHandler: deinit")
-    }
-
-    override func began(deviceID: Int, buttonID: Int, location: CGPoint) {
-        if deviceID == 0 {
-            if buttonID == 0 {
-                // check 'control' key is pressing.
-                let controlKeyPressed = modifierKeys.contains(.leftControl) || modifierKeys.contains(.rightControl)
-                if controlKeyPressed {
-                    self.state = .processing
-                }
-            } else if buttonID == 1 {
-                // right mouse button
-                self.state = .processing
-            }
-        }
-        if self.state == .processing {
-            self.buttonID = buttonID
-            self.location = self.locationInView(location)
-            if self.openMenuOnButtonUp == false {
-                self.openMenuCallback?(location)
-            }
-            return
-        }
-        self.state = .failed
-    }
-
-    override func moved(deviceID: Int, buttonID: Int, location: CGPoint) {
-        if deviceID == 0 && buttonID == self.buttonID {
-            self.location = self.locationInView(location)
-        }
-    }
-
-    override func ended(deviceID: Int, buttonID: Int) {
-        if deviceID == 0 && buttonID == self.buttonID {
-            if buttonID == 0 {
-                let controlKeyPressed = modifierKeys.contains(.leftControl) || modifierKeys.contains(.rightControl)
-                if controlKeyPressed == false {
-                    self.state = .failed
-                }
-            }
-            if self.state == .processing {
-                self.state = .done
-                if self.openMenuOnButtonUp {
-                    self.openMenuCallback?(self.location)
-                }
-            }
-        }
-    }
-
-    override func cancelled(deviceID: Int, buttonID: Int) {
-        if deviceID == 0 && buttonID == self.buttonID {
-            self.state = .cancelled
-        }
-    }
-
-    override func reset() {
-        self.state = .ready
-        Log.debug("ContextMenuGestureHandler: reset")
     }
 }

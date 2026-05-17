@@ -169,87 +169,19 @@ struct MenuDropdownModifier<MenuContent>: ViewModifier where MenuContent: View {
 }
 
 extension MenuDropdownModifier {
-    fileprivate var _gesture: MenuDropdownGesture { .init() }
-    fileprivate var _scene: some Scene { AuxiliaryWindowScene(content: content) }
+    fileprivate var _scene: some Scene { _EmptyScene() }
 }
 
 extension MenuDropdownModifier {
     static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        // TODO: Requires Gesture system + AuxiliaryWindow after WindowContext is implemented.
+        // TODO: Requires standalone menu presentation on the auxiliary/menu path.
         // MenuDropdownModifier wraps the label view and, on press, opens an
-        // AuxiliaryWindowScene containing the menu content.
+        // auxiliary presentation containing the menu content.
         // For now, pass content through unchanged so the label is still rendered.
         body(_Graph(), inputs)
     }
 
     public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
         body(_Graph(), inputs)
-    }
-}
-
-private struct MenuDropdownGesture: Gesture {
-    typealias Body = Never
-    typealias Value = Void
-    static func _makeGesture(gesture: _GraphValue<Self>, inputs: _GestureInputs) -> _GestureOutputs<Value> {
-        fatalError()
-    }
-}
-
-private class MenuDropdownGestureHandler: _GestureHandler {
-    var typeFilter: _PrimitiveGestureTypes = .all
-    let gesture: MenuDropdownGesture
-    var openMenuCallback: ((CGPoint) -> Void)? = nil
-    var pressingCallback: ((Bool) -> Void)? = nil
-    var location: CGPoint = .zero
-
-    override var type: _PrimitiveGestureTypes { .button }
-
-    override var isValid: Bool {
-        typeFilter.contains(self.type)
-    }
-
-    override func setTypeFilter(_ f: _PrimitiveGestureTypes) -> _PrimitiveGestureTypes {
-        self.typeFilter = f
-        return f.subtracting([.button, .tap, .longPress])
-    }
-
-    init(graph: _GraphValue<MenuDropdownGesture>, target: Any?, gesture: MenuDropdownGesture) {
-        self.gesture = gesture
-        super.init(graph: graph, target: target)
-    }
-
-    override func began(deviceID: Int, buttonID: Int, location: CGPoint) {
-        if deviceID == 0, buttonID == 0 {
-            self.location = self.locationInView(location)
-            self.state = .processing
-            self.pressingCallback?(true)
-        } else {
-            self.state = .failed
-        }
-    }
-
-    override func moved(deviceID: Int, buttonID: Int, location: CGPoint) {
-        if deviceID == 0, buttonID == 0 {
-            self.location = self.locationInView(location)
-        }
-    }
-
-    override func ended(deviceID: Int, buttonID: Int) {
-        if deviceID == 0, buttonID == 0, self.state == .processing {
-            self.pressingCallback?(false)
-            self.state = .done
-            self.openMenuCallback?(self.location)
-        }
-    }
-
-    override func cancelled(deviceID: Int, buttonID: Int) {
-        if deviceID == 0, buttonID == 0 {
-            self.pressingCallback?(false)
-            self.state = .cancelled
-        }
-    }
-
-    override func reset() {
-        self.state = .ready
     }
 }

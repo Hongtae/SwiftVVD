@@ -195,7 +195,6 @@ private final class ModalPresentationContext: @unchecked Sendable {
                            layoutComputer: Attribute<LayoutComputer>,
                            fittedSize: CGSize) {
         controller.viewGraph.data.withCurrent {
-            controller.sharedContext.contentBounds.size = fittedSize
             controller.viewGraph.sizeAttr?.setValue(ViewSize(fittedSize))
             let center = CGPoint(x: fittedSize.width * 0.5,
                                  y: fittedSize.height * 0.5)
@@ -343,7 +342,7 @@ private final class ModalPresentationContext: @unchecked Sendable {
 final class ModalWindowController: WindowController, @unchecked Sendable {
     override var style: PlatformWindowStyle { [.autoResize] }
     override var observesRootFittedSizeForLayoutUpdates: Bool { true }
-    override var modalSessionPrefersPlatformWindow: Bool { usesPlatformWindow }
+    var modalSessionPrefersPlatformWindow: Bool { usesPlatformWindow }
 
     private let presentationContext: ModalPresentationContext
     private let usesPlatformWindow: Bool
@@ -442,26 +441,26 @@ final class ModalWindowController: WindowController, @unchecked Sendable {
                                       isTopMost: isTopMost)
     }
 
-    override func requestModalDismissal(reason: ModalDismissReason,
-                                        completion: @escaping () -> Void) -> Bool {
+    func requestModalDismissal(reason: ModalDismissReason,
+                               completion: @escaping () -> Void) -> Bool {
         presentationContext.requestDismissal(controller: self,
                                              reason: reason,
                                              completion: completion)
     }
 
-    override func onModalSessionInitiated() {
+    func onModalSessionInitiated() {
         presentationContext.beginPresentAnimation(controller: self)
     }
 
-    override func onModalSessionDismissedByUser() {
+    func onModalSessionDismissedByUser() {
         presentationContext.onModalSessionDismissedByUser()
     }
 
-    override func onModalSessionDismissedByParent() {
+    func onModalSessionDismissedByParent() {
         presentationContext.onModalSessionDismissedByParent()
     }
 
-    override func onModalSessionCancelled() {
+    func onModalSessionCancelled() {
         presentationContext.onModalSessionCancelled()
     }
 }

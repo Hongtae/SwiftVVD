@@ -8,8 +8,16 @@
 import Foundation
 
 // AppWindowsController manages statically declared scene WindowControllers for the app.
-// Dynamic presentation children, such as popovers, modals, and sheets, are owned
-// directly by their parent WindowController.
+//
+// Stored controllers:
+//   - mainWindowControllers: WindowGroup controllers by window key.
+//   - singleWindowControllers: single Window scene controller by window key.
+//   - auxiliaryWindowControllers: reserved for statically declared auxiliary scenes.
+//   - settingsWindowController: optional Settings scene controller.
+//
+// Dynamic presentation windows such as sheets, popovers, context menus, and modal
+// children are owned directly by the parent WindowController. They are tracked by
+// child entries on that parent controller and do not pass through AppWindowsController.
 class AppWindowsController: @unchecked Sendable {
 
     // WindowGroup: array because openWindow() can open multiple instances per key.
@@ -18,7 +26,7 @@ class AppWindowsController: @unchecked Sendable {
     // Window scene: single instance per key.
     var singleWindowControllers: [WindowKey: WindowController] = [:]
 
-    // AuxiliaryWindowScene controllers are statically declared in the scene builder only.
+    // Reserved for statically declared auxiliary scenes.
     var auxiliaryWindowControllers: [WindowKey: WindowController] = [:]
 
     // Settings scene, at most one app-wide.
