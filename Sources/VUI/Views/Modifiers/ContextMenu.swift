@@ -203,8 +203,13 @@ final class ContextMenuWindowController: AuxiliaryWindowController, @unchecked S
                    sourceGraph: sourceGraph,
                    scene: scene,
                    usesPlatformWindow: usesPlatformWindow,
+                   isPopupWindow: true,
                    dismissOnDeactivated: true,
                    frameInParent: frame)
+    }
+
+    override func onParentWindowMoved() {
+        dismiss()
     }
 
     override func onAuxiliaryWindowInactivated() {

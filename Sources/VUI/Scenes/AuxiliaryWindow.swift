@@ -8,17 +8,25 @@
 import Foundation
 import VVD
 
-// Non-generic base controller for preference-driven auxiliary windows.
+// Base controller for preference-driven auxiliary windows.
 //
-// This mirrors the new ModalWindowController shape: content is supplied through a
-// cross-graph AnyView attribute, while subclasses provide only aux-specific
-// anchoring and interaction behavior.
+// Auxiliary windows are non-modal: they do not block input to the parent window.
+// They are normally nonactivating, but may become key/active when a workflow such
+// as text input requires keyboard focus.
 class AuxiliaryWindowController: WindowController, @unchecked Sendable {
-    override var style: PlatformWindowStyle { [.auxiliaryWindow, .autoResize] }
+    override var style: PlatformWindowStyle {
+        [isPopupWindow ? .popupWindow : .auxiliaryWindow, .autoResize]
+    }
     override var observesRootFittedSizeForLayoutUpdates: Bool { true }
     var auxiliaryPrefersPlatformWindow: Bool { usesPlatformWindow }
 
     private let usesPlatformWindow: Bool
+    // Selects the transient popup presentation style. Keyboard focus/text-input
+    // behavior is a separate policy and can apply to either popup or regular aux
+    // windows.
+    let isPopupWindow: Bool
+    // Cross-platform fallback dismissal for parent-window lifecycle changes.
+    // This intentionally does not decide what aux-window own activation means.
     let dismissOnDeactivated: Bool
     private var frameInParent: CGRect
     private var didTearDown = false
@@ -27,9 +35,11 @@ class AuxiliaryWindowController: WindowController, @unchecked Sendable {
          sourceGraph: AttributeGraph,
          scene: WindowKey,
          usesPlatformWindow: Bool,
+         isPopupWindow: Bool = false,
          dismissOnDeactivated: Bool = false,
          frameInParent: CGRect = .zero) {
         self.usesPlatformWindow = usesPlatformWindow
+        self.isPopupWindow = isPopupWindow
         self.dismissOnDeactivated = dismissOnDeactivated
         self.frameInParent = frameInParent
         super.init(crossGraphContent: contentAttr,
@@ -45,9 +55,10 @@ class AuxiliaryWindowController: WindowController, @unchecked Sendable {
         Task { @MainActor [weak self] in
             guard let attach, let self else { return }
             guard self.usesPlatformWindow else { return }
-            guard Platform.factory.supportedWindowStyles([.auxiliaryWindow])
-                .contains(.auxiliaryWindow) else {
-                Log.error("AuxiliaryWindowController: auxiliaryWindow style not supported on this platform")
+            let requiredStyle: PlatformWindowStyle = self.isPopupWindow ? .popupWindow : .auxiliaryWindow
+            guard Platform.factory.supportedWindowStyles(requiredStyle)
+                .contains(requiredStyle) else {
+                Log.error("AuxiliaryWindowController: \(self.isPopupWindow ? "popupWindow" : "auxiliaryWindow") style not supported on this platform")
                 return
             }
             guard let childWindow = self.makeWindow() else {
@@ -140,6 +151,8 @@ class AuxiliaryWindowController: WindowController, @unchecked Sendable {
         super.handleWindowEvent(event: event)
     }
 
+    // Parent-window lifecycle fallback. A click outside the parent can only be
+    // observed portably when it deactivates the parent window.
     override func onParentWindowInactivated() {
         super.onParentWindowInactivated()
         if dismissOnDeactivated {
@@ -154,6 +167,10 @@ class AuxiliaryWindowController: WindowController, @unchecked Sendable {
         }
     }
 
+    // Logical aux activation hooks. For platform aux windows these can reflect
+    // the aux window's own key/active state; for overlay children the parent
+    // input router also uses the inactive hook when another target receives the
+    // pointer down. Leave dismissal/text-input policy to subclasses.
     func onAuxiliaryWindowActivated() {}
     func onAuxiliaryWindowInactivated() {}
     func onAuxiliaryWindowMoved() {}

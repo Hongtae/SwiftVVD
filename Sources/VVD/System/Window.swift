@@ -141,6 +141,7 @@ public struct WindowStyle: OptionSet, Sendable {
     public static let acceptFileDrop    = WindowStyle(rawValue: 1 << 8) // enables file drag & drop
     
     public static let auxiliaryWindow   = WindowStyle(rawValue: 1 << 9)
+    public static let popupWindow       = WindowStyle(rawValue: 1 << 10)
 }
 
 public protocol WindowEventObserver {

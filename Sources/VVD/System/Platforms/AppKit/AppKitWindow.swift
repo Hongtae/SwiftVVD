@@ -153,7 +153,12 @@ final class AppKitWindow: Window {
         
         var windowType: NSWindow.Type = NSWindow.self
         
-        if style.contains(.auxiliaryWindow) {
+        let isPopupWindow = style.contains(.popupWindow)
+        if isPopupWindow {
+            styleMask.insert(.borderless)
+            styleMask.insert(.nonactivatingPanel)
+            windowType = NSPanel.self
+        } else if style.contains(.auxiliaryWindow) {
             styleMask.insert(.utilityWindow)
             windowType = NSPanel.self
         }
@@ -175,11 +180,19 @@ final class AppKitWindow: Window {
         window.allowsConcurrentViewDrawing = true
         window.title = name
         window.hasShadow = true
+        if isPopupWindow, let panel = window as? NSPanel {
+            panel.isFloatingPanel = true
+            panel.hidesOnDeactivate = false
+            panel.becomesKeyOnlyIfNeeded = true
+            panel.worksWhenModal = true
+        }
         
         if style.contains(.acceptFileDrop) {
             (view as! NSView).registerForDraggedTypes([.fileURL])
         }
-        if style.contains(.auxiliaryWindow) {
+        if isPopupWindow {
+            window.level = .init(rawValue: Int(CGWindowLevelForKey(.popUpMenuWindow)))
+        } else if style.contains(.auxiliaryWindow) {
             window.level = .init(rawValue: Int(CGWindowLevelForKey(.utilityWindow)))
         }
         
@@ -193,7 +206,11 @@ final class AppKitWindow: Window {
 
     func show() {
         if let window = nsView?.window {
-            window.orderFront(nil)
+            if window.styleMask.contains(.nonactivatingPanel) {
+                window.orderFrontRegardless()
+            } else {
+                window.orderFront(nil)
+            }
 
             self.postWindowEvent(type: .shown)
         }
@@ -210,7 +227,9 @@ final class AppKitWindow: Window {
 
     func activate() {
         if let window = nsView?.window {
-            if window.canBecomeKey {
+            if window.styleMask.contains(.nonactivatingPanel) {
+                window.orderFrontRegardless()
+            } else if window.canBecomeKey {
                 window.makeKeyAndOrderFront(nil)
             } else {
                 window.orderFront(nil)
