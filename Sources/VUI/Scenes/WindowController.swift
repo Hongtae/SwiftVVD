@@ -34,8 +34,12 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                         ViewGraphRenderDelegate,
                         @unchecked Sendable {
 
+    // MARK: - Types
+
     typealias AttachWindow = @MainActor (any PlatformWindow) -> Void
     typealias AttachWindowResolver = (AttachWindow?) -> Void
+
+    // MARK: - Core State
 
     var windowContext: WindowContext?
 
@@ -50,8 +54,11 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     var gestureGraph: GestureGraph?
     private var contextMenuRecognizer = ContextMenuRecognizer()
 
+    // MARK: - Platform Event Routing
+
     // Platform event to EventID routing table.
-    // WindowController performs this mapping before forwarding to GestureGraph.
+    // WindowController maps platform pointer identities to EventID values before
+    // forwarding events to GestureGraph.
     private let _nextEventSerial: Atomic<Int> = Atomic(1)
     private var _touchEventIDs: [Int: EventID] = [:]    // deviceID to EventID (touch/stylus)
     private var _mouseEventID: EventID?                   // single mouse pointer EventID
@@ -65,7 +72,9 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         _nextEventSerial.wrappingAdd(1, ordering: .relaxed).oldValue
     }
 
-    // viewGraph owns the view-tree AttributeGraph (GraphHost.data) and gesture routing.
+    // MARK: - View Graph State
+
+    // viewGraph owns the view-tree AttributeGraph and gesture routing.
     // Phase 4: moved from `let graph: AttributeGraph` + scattered input/output attrs.
     // IUO because gestureGraph must be created and wired before ViewGraph.init runs _makeView.
     var viewGraph: ViewGraph { _viewGraph }
@@ -79,6 +88,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     var sceneConfiguration: SceneConfiguration = SceneConfiguration()
     var filterGestureTypes: Bool = true
     var allowedGestureTypes: _PrimitiveGestureTypes = .all
+    var endSessionOnWindowClosed: Bool { true }
 
     var isValid: Bool { viewGraph.isValid }
 
@@ -94,6 +104,8 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
             windowContext?.config = newValue
         }
     }
+
+    // MARK: - Input Queue
 
     enum InputEvent: @unchecked Sendable {
         case keyboard(KeyboardEvent)
@@ -119,6 +131,8 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
 
     // ViewRendererHost
     var responderNode: ResponderNode? { gestureGraph?.rootResponder }
+
+    // MARK: - Initialization
 
     init<Content: View>(content: _GraphValue<Content>,
                         title: _GraphValue<Text>? = nil,
@@ -161,9 +175,13 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         //   updateSize() / updateEnvironment() etc. called inline in updateView for now.
         //   Full invalidateProperties(_:mayDeferUpdate:) wiring is a future step.
         self.viewGraph.updateDelegate = self
-        // delegate (ViewGraphHostDelegate) is not set yet.
-        // TODO: wire updateGraphInputs(_:inout _GraphInputs) once the call site is implemented.
+        // delegate (ViewGraphHostDelegate): not wired yet.
+        //   Decide when updateGraphInputs(_:inout _GraphInputs) should be called.
         // self.viewGraph.delegate = self
+    }
+
+    deinit {
+        endPresentationSession()
     }
 
     // Sheet-specific init: content comes from a reactive attribute in a parent AG.
@@ -193,6 +211,8 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         self.viewGraph.updateDelegate = self
     }
 
+    // MARK: - Platform Window Lifecycle
+
     @MainActor
     func makeWindow() -> (any PlatformWindow)? {
         let isNew = windowContext?.window == nil
@@ -203,6 +223,10 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                 self?.updateFrame(tick: tick, delta: delta, date: date,
                                   contentSize: size, shouldDrawFrame: drawFrame,
                                   withGC)
+            }
+            ctx.onFinalize = { [weak self] in
+                guard let self, self.endSessionOnWindowClosed else { return }
+                self.endPresentationSession()
             }
             self.windowContext = ctx
         }
@@ -238,6 +262,8 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     private(set) var cachedContentSize: CGSize = .zero
 
     var observesRootFittedSizeForLayoutUpdates: Bool { false }
+
+    // MARK: - Frame Update and Rendering
 
     func layoutContentSize(from contentSize: CGSize) -> CGSize {
         contentSize
@@ -410,6 +436,8 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
 
     func layoutBounds(_ bounds: CGRect) -> CGRect { bounds }
 
+    // MARK: - WindowDelegate
+
     func shouldClose(window: any PlatformWindow) -> Bool {
         modalChildren.withLock { $0.isEmpty }
     }
@@ -418,7 +446,8 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
 
     var appWindowsController: AppWindowsController? { appContext?.appWindowsController }
 
-    // MARK: - Aux child parent-event propagation
+    // MARK: - Presentation Session Lifecycle
+
     func onParentWindowActivated() {
         forEachAuxiliaryChild { $0.onParentWindowActivated() }
     }
@@ -429,32 +458,45 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         forEachAuxiliaryChild { $0.onParentWindowMoved() }
     }
     func onParentWindowClosed() {
+        if endSessionOnWindowClosed {
+            endPresentationSession()
+        }
+    }
+
+    private var didEndPresentationSession = false
+    func endPresentationSession() {
+        guard !didEndPresentationSession else { return }
+        didEndPresentationSession = true
         dismissAllAuxiliaryWindows()
         dismissAllModalWindows()
+        if let window {
+            Task { @MainActor [weak window] in
+                window?.close()
+            }
+        }
     }
-    func onGestureInitiated(from initiator: AnyObject?, location: CGPoint) {}
 
     func forEachAuxiliaryChild(_ body: (AuxiliaryWindowController) -> Void) {
         self.auxChildWindows.withLock { $0.map(\.controller) }
             .forEach(body)
     }
 
-    func onWindowClosing(_: any PlatformWindow) {
-        forEachAuxiliaryChild { $0.onParentWindowClosed() }
-    }
-
     func onViewLoaded() {}
     func onViewLayoutUpdated() {}
-    
+
+    // MARK: - Platform Window Events
+
     @MainActor
     func handleWindowEvent(event: WindowEvent) {
         switch event.type {
         case .closed:
+            if endSessionOnWindowClosed {
+                enqueueInputAction { [weak self] in
+                    self?.endPresentationSession()
+                }
+            }
             DispatchQueue.main.async {
                 appContext?.checkWindowActivities()
-            }
-            enqueueInputAction { [weak self] in
-                self?.forEachAuxiliaryChild { $0.onParentWindowClosed() }
             }
         case .hidden:
             viewGraph.data.graph.inbox.enqueue { [weak self] in
@@ -483,6 +525,8 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
             break
         }
     }
+
+    // MARK: - Input Dispatch
 
     func onKeyboardEvent(event: KeyboardEvent) {
         // Only route to overlay modal if fully initiated (async Task may still be pending).
@@ -526,6 +570,8 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
             }
         }
     }
+
+    // MARK: - Input Handling
 
     private var _lastKeyboardEventHandler: ObjectIdentifier? = nil
     private var _lastMouseEventHandler: ObjectIdentifier? = nil
@@ -674,8 +720,8 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         }
         handlers.append((target: self as AnyObject, action: handleEvent))
 
-        // Overlay aux windows share the mouse event stream, but each owns its
-        // own gesture state. Notify all aux children which surface initiated it.
+        // Parent mouse-down deactivates any aux window that was not the event target.
+        // Platform aux windows do not participate in the overlay hit-test path.
         let auxChildren = event.type == .buttonDown
             ? self.auxChildWindows.withLock { $0.map(\.controller) }
             : []
@@ -690,12 +736,20 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         for handler in handlers {
             if handler.action(event) {
                 _lastMouseEventHandler = ObjectIdentifier(handler.target)
-                auxChildren.forEach { $0.onGestureInitiated(from: handler.target, location: event.location) }
+                auxChildren.forEach {
+                    if $0 === handler.target {
+                        $0.onAuxiliaryWindowActivated()
+                    } else {
+                        $0.onAuxiliaryWindowInactivated()
+                    }
+                }
                 return true
             }
         }
         _lastMouseEventHandler = nil
-        auxChildren.forEach { $0.onGestureInitiated(from: nil, location: event.location) }
+        auxChildren.forEach {
+            $0.onAuxiliaryWindowInactivated()
+        }
         return false
     }
 
@@ -896,7 +950,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     }
     private let modalChildren = Mutex<[ModalChildEntry]>([])
 
-    // MARK: Aux child management
+    // MARK: - Aux Child Management
 
     func addAuxiliary(child: AuxiliaryWindowController,
                       attachWindow: AttachWindowResolver? = nil) {
@@ -972,7 +1026,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         }
         guard let removed else { return }
         removed.parentWindow = nil
-        removed.onAuxiliarySessionRemoved()
+        removed.endPresentationSession()
         viewChangedWhileDrawing = true
     }
 
@@ -992,15 +1046,14 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         }
         children.forEach { child in
             child.parentWindow = nil
-            child.onParentWindowClosed()
-            child.onAuxiliarySessionRemoved()
+            child.endPresentationSession()
         }
         if !children.isEmpty {
             viewChangedWhileDrawing = true
         }
     }
 
-    // MARK: Modal child management
+    // MARK: - Modal Child Management
 
     // Called internally by preference-driven sheet/alert/dialog presentation.
     // isOverlay is not determined here. It is deferred to _activateModal when the entry
@@ -1161,20 +1214,22 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                 removedEntry = entries.remove(at: i)
             }
         }
-        child.parentWindow = nil
+        guard let e = removedEntry else { return }
 
-        if let e = removedEntry {
-            // Preference-driven: clean up binding + onDismiss.
-            e.session.cleanup(reason: reason)
-            // Close the platform window if one was created.
-            let ctrl = child
-            Task { @MainActor [weak self, ctrl] in
-                if let w = ctrl.window {
-                    self?.window?.dismissModalWindow(w)
-                    w.close()
-                }
+        // Ask the platform parent to detach the sheet window. Keep presentation session
+        // cleanup on this path instead of moving AG-adjacent work onto MainActor.
+        let ctrl = child
+        Task { @MainActor [weak self, ctrl] in
+            if let w = ctrl.window {
+                self?.window?.dismissModalWindow(w)
             }
         }
+
+        child.parentWindow = nil
+        child.endPresentationSession()
+
+        // Preference-driven: clean up binding + onDismiss.
+        e.session.cleanup(reason: reason)
 
         if wasFirst { _showNextInQueue() }
     }
@@ -1187,7 +1242,17 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         }
         for (i, entry) in entries.enumerated() {
             let child = entry.controller
+            // Ask the platform parent to detach the sheet window. Keep presentation session
+            // cleanup on this path instead of moving AG-adjacent work onto MainActor.
+            let ctrl = child
+            Task { @MainActor [weak self, ctrl] in
+                if let w = ctrl.window {
+                    self?.window?.dismissModalWindow(w)
+                }
+            }
+
             child.parentWindow = nil
+            child.endPresentationSession()
             // first (index 0) was active, so byParent; rest were queued and never shown, so cancelled.
             let reason: ModalDismissReason = (i == 0) ? .byParent : .cancelled
             entry.session.cleanup(reason: reason)

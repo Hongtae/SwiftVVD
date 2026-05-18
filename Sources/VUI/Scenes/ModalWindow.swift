@@ -318,9 +318,6 @@ private final class ModalPresentationContext: @unchecked Sendable {
         return true
     }
 
-    func onWindowClosed() {
-    }
-
     func onModalSessionDismissedByUser() {
     }
 
@@ -384,10 +381,6 @@ final class ModalWindowController: WindowController, @unchecked Sendable {
     override func layoutContentSize(from contentSize: CGSize) -> CGSize {
         presentationContext.layoutContentSize(controller: self,
                                               platformContentSize: contentSize)
-    }
-
-    override func onWindowClosing(_: any PlatformWindow) {
-        presentationContext.onWindowClosed()
     }
 
     override func drawFrame(offset: CGPoint, _ context: GraphicsContext) {

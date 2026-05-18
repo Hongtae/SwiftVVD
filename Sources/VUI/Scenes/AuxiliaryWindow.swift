@@ -19,6 +19,7 @@ class AuxiliaryWindowController: WindowController, @unchecked Sendable {
     var auxiliaryPrefersPlatformWindow: Bool { usesPlatformWindow }
 
     private let usesPlatformWindow: Bool
+    let dismissOnDeactivated: Bool
     private var frameInParent: CGRect
     private var didTearDown = false
 
@@ -26,8 +27,10 @@ class AuxiliaryWindowController: WindowController, @unchecked Sendable {
          sourceGraph: AttributeGraph,
          scene: WindowKey,
          usesPlatformWindow: Bool,
+         dismissOnDeactivated: Bool = false,
          frameInParent: CGRect = .zero) {
         self.usesPlatformWindow = usesPlatformWindow
+        self.dismissOnDeactivated = dismissOnDeactivated
         self.frameInParent = frameInParent
         super.init(crossGraphContent: contentAttr,
                    sourceGraph: sourceGraph,
@@ -108,10 +111,6 @@ class AuxiliaryWindowController: WindowController, @unchecked Sendable {
 
     func onAuxiliarySessionInitiated() {}
 
-    func onAuxiliarySessionRemoved() {
-        tearDownAuxiliaryWindow()
-    }
-
     func overlayHitTest(_ locationInParent: CGPoint) -> Bool {
         CGRect(origin: .zero, size: frameInParent.size).contains(locationInParent)
     }
@@ -141,23 +140,18 @@ class AuxiliaryWindowController: WindowController, @unchecked Sendable {
         super.handleWindowEvent(event: event)
     }
 
-    override func onParentWindowActivated() {
-        guard window == nil else { return }
-        super.onParentWindowActivated()
-    }
-
     override func onParentWindowInactivated() {
-        guard window == nil else { return }
         super.onParentWindowInactivated()
+        if dismissOnDeactivated {
+            dismiss()
+        }
     }
 
     override func onParentWindowMoved() {
-        guard window == nil else { return }
         super.onParentWindowMoved()
-    }
-
-    override func onParentWindowClosed() {
-        tearDownAuxiliaryWindow()
+        if dismissOnDeactivated {
+            dismiss()
+        }
     }
 
     func onAuxiliaryWindowActivated() {}
@@ -165,23 +159,25 @@ class AuxiliaryWindowController: WindowController, @unchecked Sendable {
     func onAuxiliaryWindowMoved() {}
 
     func onAuxiliaryWindowClosed() {
+        dismiss()
+    }
+
+    func dismiss() {
         if let parentWindow {
             parentWindow.removeAuxiliary(child: self)
         } else {
-            tearDownAuxiliaryWindow()
+            endPresentationSession()
         }
     }
 
-    private func tearDownAuxiliaryWindow() {
+    override func endPresentationSession() {
+        super.endPresentationSession()
+        tearDownAuxiliarySession()
+    }
+
+    private func tearDownAuxiliarySession() {
         guard !didTearDown else { return }
         didTearDown = true
-        dismissAllModalWindows()
-        dismissAllAuxiliaryWindows()
-        if let window {
-            Task { @MainActor [weak window] in
-                window?.close()
-            }
-        }
     }
 }
 

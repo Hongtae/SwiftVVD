@@ -58,6 +58,12 @@ class WindowContext: @unchecked Sendable {
     var updateFrame: ((UInt64, Double, Date,    // tick, delta, date
                        CGSize, Bool,            // contentSize, shouldDrawFrame
                        WithGraphicsContext) -> Void)?
+    // Called while the render task is waiting for the next frame. The hook owns
+    // its own yield/wait policy; when nil, the render loop yields directly.
+    var onIdle: (() async -> Void)?
+    // Called once when the render task exits, using the latest hook observed
+    // while the WindowContext was still retained by the loop.
+    var onFinalize: (() -> Void)?
 
     init(sceneResources: SceneResources) {
         self.sceneResources = sceneResources
@@ -117,6 +123,11 @@ class WindowContext: @unchecked Sendable {
 
     private func runUpdateTask() -> Task<Void, Never> {
         Task.detached(priority: .userInitiated) { @Sendable [weak self] in
+            var onFinalize = self?.onFinalize
+            defer {
+                onFinalize?()
+                Log.info("WindowContext update task is finished.")
+            }
             Log.info("WindowContext update task is started.")
 
             var timestamp = DispatchTime.now()
@@ -144,6 +155,7 @@ class WindowContext: @unchecked Sendable {
             mainLoop: while true {
                 guard let self = self else { break }
                 if Task.isCancelled { break }
+                onFinalize = self.onFinalize
 
                 let (state, config) = self.stateConfig.withLock {
                     ($0.state, $0.config)
@@ -313,7 +325,11 @@ class WindowContext: @unchecked Sendable {
 
                 repeat {
                     if Task.isCancelled { break mainLoop }
-                    await Task.yield()
+                    if let onIdle = self.onIdle {
+                        await onIdle()
+                    } else {
+                        await Task.yield()
+                    }
                 } while elapsed() < frameInterval - timeForBusyWait
 
                 // busy waiting, remaining time is too short to yield.
@@ -322,7 +338,6 @@ class WindowContext: @unchecked Sendable {
                     Platform.threadYield()
                 }
             }
-            Log.info("WindowContext update task is finished.")
         }
     }
 

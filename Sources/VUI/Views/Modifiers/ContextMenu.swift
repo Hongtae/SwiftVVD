@@ -203,22 +203,12 @@ final class ContextMenuWindowController: AuxiliaryWindowController, @unchecked S
                    sourceGraph: sourceGraph,
                    scene: scene,
                    usesPlatformWindow: usesPlatformWindow,
+                   dismissOnDeactivated: true,
                    frameInParent: frame)
     }
 
-    override func onGestureInitiated(from initiator: AnyObject?, location: CGPoint) {
-        if initiator !== self {
-            parentWindow?.removeAuxiliary(child: self)
-        }
-    }
-
-    override func onParentWindowInactivated() {
-        guard window == nil else { return }
-        parentWindow?.removeAuxiliary(child: self)
-    }
-
     override func onAuxiliaryWindowInactivated() {
-        parentWindow?.removeAuxiliary(child: self)
+        dismiss()
     }
 }
 
