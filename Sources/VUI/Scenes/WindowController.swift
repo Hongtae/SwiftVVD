@@ -67,6 +67,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     private var _panEventID: EventID?                     // trackpad pan gesture EventID
     private var _panTranslation: CGPoint = .zero
     private var _activeEvents: [EventID: any EventType] = [:]  // current live event dict
+    private var _activeHoverResponders: [Int: [any AnyHoverResponder]] = [:]
 
     private func nextEventSerial() -> Int {
         _nextEventSerial.wrappingAdd(1, ordering: .relaxed).oldValue
@@ -425,12 +426,17 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         // Overlay aux children: draw on top after self.
         for entry in self.auxChildWindows.withLock({ $0 }) {
             guard entry.isOverlay, entry.initiated else { continue }
-            entry.controller.drawFrame(offset: offset, context)
+            // The graphics context is already translated into this controller's
+            // coordinate space, so nested overlay children only apply their own
+            // frame origin.
+            entry.controller.drawFrame(offset: .zero, context)
         }
         // Overlay modal child (at most one): draw on top of everything.
         if let entry = self.modalChildren.withLock({ $0.first }),
            entry.isOverlay, entry.initiated {
-            entry.controller.drawFrame(offset: offset, context)
+            // Keep nested overlay modal positioning relative to the already
+            // translated parent context.
+            entry.controller.drawFrame(offset: .zero, context)
         }
     }
 
@@ -851,10 +857,76 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                 topMost = false
             }
         }
+        if updateHoverResponders(at: location, deviceID: deviceID, isTopMost: topMost) {
+            topMost = false
+        }
         return isTopMost != topMost
     }
 
+    private func hoverResponderID(_ responder: any AnyHoverResponder) -> ObjectIdentifier {
+        ObjectIdentifier(responder as AnyObject)
+    }
+
+    @discardableResult
+    private func updateHoverResponders(at location: CGPoint,
+                                       deviceID: Int,
+                                       isTopMost: Bool) -> Bool {
+        let newResponders = isTopMost
+            ? (gestureGraph?.rootResponder?.hoverResponders(containing: location) ?? [])
+            : []
+        let oldResponders = _activeHoverResponders[deviceID] ?? []
+        let oldIDs = Set(oldResponders.map(hoverResponderID))
+        let newIDs = Set(newResponders.map(hoverResponderID))
+
+        var actions: [() -> Void] = []
+        for responder in oldResponders where !newIDs.contains(hoverResponderID(responder)) {
+            if let action = responder.updateHover(isActive: false, point: nil) {
+                actions.append(action)
+            }
+        }
+        for responder in newResponders where !oldIDs.contains(hoverResponderID(responder)) {
+            if let action = responder.updateHover(isActive: true, point: location) {
+                actions.append(action)
+            }
+        }
+
+        if newResponders.isEmpty {
+            _activeHoverResponders.removeValue(forKey: deviceID)
+        } else {
+            _activeHoverResponders[deviceID] = newResponders
+        }
+
+        actions.forEach { action in
+            if let gestureGraph {
+                gestureGraph.enqueueAction(action)
+            } else {
+                action()
+            }
+        }
+        return !newResponders.isEmpty
+    }
+
+    private func endAllHoverResponders() {
+        var actions: [() -> Void] = []
+        for responders in _activeHoverResponders.values {
+            for responder in responders {
+                if let action = responder.updateHover(isActive: false, point: nil) {
+                    actions.append(action)
+                }
+            }
+        }
+        _activeHoverResponders.removeAll()
+        actions.forEach { action in
+            if let gestureGraph {
+                gestureGraph.enqueueAction(action)
+            } else {
+                action()
+            }
+        }
+    }
+
     func resetGestureHandlers() {
+        endAllHoverResponders()
         gestureGraph?.resetEvents()
         contextMenuRecognizer.reset()
         _touchEventIDs.removeAll()

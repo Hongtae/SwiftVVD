@@ -135,9 +135,6 @@ private struct _DefaultButtonStyleBody: View {
             }
             .foregroundStyle(Color.black)
             ._onButtonGesture(pressing: { isPressed = $0 }, perform: { configuration.trigger() })
-            .hoverBackground {
-                RoundedRectangle(cornerRadius: 4).inset(by: -2).fill(.blue.opacity(0.7))
-            }
     }
 }
 

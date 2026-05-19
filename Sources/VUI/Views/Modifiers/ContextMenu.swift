@@ -148,10 +148,11 @@ final class ContextMenuResponder: ViewResponder {
             fatalError("ContextMenuResponder.present called outside AG context")
         }
         parent.dismissAllAuxiliaryWindows()
-        let contentAttr: Attribute<AnyView> = graph.makeRule { [weak parent] in
-            AnyView(ContextMenuPopupView(items: self.itemList.value.menuItems) {
-                parent?.dismissAllAuxiliaryWindows()
-            })
+        let session = ContextMenuPresentationSession()
+        let actions = ContextMenuPopupActions()
+        let contentAttr: Attribute<AnyView> = graph.makeRule {
+            AnyView(ContextMenuPopupView(items: self.itemList.value.menuItems,
+                                         actions: actions))
         }
         // WindowController.init(crossGraphContent:) requires a cached source value
         // before the child ViewGraph installs its cross-graph reference.
@@ -161,7 +162,18 @@ final class ContextMenuResponder: ViewResponder {
                                                sourceGraph: graph,
                                                scene: parent.scene,
                                                anchor: location,
-                                               usesPlatformWindow: usesPlatformWindow)
+                                               usesPlatformWindow: usesPlatformWindow,
+                                               session: session)
+        session.root = ctrl
+        actions.openSubmenu = { [weak ctrl] item, origin in
+            ctrl?.openSubmenu(item, at: origin)
+        }
+        actions.closeSubmenus = { [weak ctrl] in
+            ctrl?.closeSubmenus()
+        }
+        actions.dismiss = { [weak session] in
+            session?.dismissAll()
+        }
         parent.addAuxiliary(child: ctrl) { [weak ctrl] attach in
             ctrl?.resolveAuxiliaryWindowAttachment(attach)
         }
@@ -192,12 +204,33 @@ public extension EnvironmentValues {
     }
 }
 
+private final class ContextMenuPresentationSession {
+    weak var root: ContextMenuWindowController?
+
+    func dismissAll() {
+        root?.dismiss()
+    }
+}
+
+private final class ContextMenuPopupActions {
+    var openSubmenu: ((PlatformItemList.Item, CGPoint) -> Void)?
+    var closeSubmenus: (() -> Void)?
+    var dismiss: (() -> Void)?
+}
+
 final class ContextMenuWindowController: AuxiliaryWindowController, @unchecked Sendable {
-    init(crossGraphContent contentAttr: Attribute<AnyView>,
-         sourceGraph: AttributeGraph,
-         scene: WindowKey,
-         anchor: CGPoint,
-         usesPlatformWindow: Bool) {
+    private let usesPlatformWindowForSubmenus: Bool
+    private let menuSession: ContextMenuPresentationSession
+    private var openedSubmenuID: AnyHashable?
+
+    fileprivate init(crossGraphContent contentAttr: Attribute<AnyView>,
+                     sourceGraph: AttributeGraph,
+                     scene: WindowKey,
+                     anchor: CGPoint,
+                     usesPlatformWindow: Bool,
+                     session: ContextMenuPresentationSession) {
+        self.usesPlatformWindowForSubmenus = usesPlatformWindow
+        self.menuSession = session
         let frame = CGRect(origin: anchor, size: .zero)
         super.init(crossGraphContent: contentAttr,
                    sourceGraph: sourceGraph,
@@ -206,6 +239,47 @@ final class ContextMenuWindowController: AuxiliaryWindowController, @unchecked S
                    isPopupWindow: true,
                    dismissOnDeactivated: true,
                    frameInParent: frame)
+    }
+
+    func openSubmenu(_ item: PlatformItemList.Item, at origin: CGPoint) {
+        guard item.isEnabled, !item.children.isEmpty else { return }
+        guard openedSubmenuID != item.id else { return }
+        openedSubmenuID = item.id
+        dismissAllAuxiliaryWindows()
+
+        let actions = ContextMenuPopupActions()
+        let contentAttr: Attribute<AnyView> = viewGraph.data.withCurrent {
+            let graph = viewGraph.data.graph
+            let attr: Attribute<AnyView> = graph.makeInput(
+                value: AnyView(ContextMenuPopupView(items: item.children,
+                                                    actions: actions))
+            )
+            _ = attr.value
+            return attr
+        }
+        let child = ContextMenuWindowController(crossGraphContent: contentAttr,
+                                                sourceGraph: viewGraph.data.graph,
+                                                scene: scene,
+                                                anchor: origin,
+                                                usesPlatformWindow: usesPlatformWindowForSubmenus,
+                                                session: menuSession)
+        actions.openSubmenu = { [weak child] item, origin in
+            child?.openSubmenu(item, at: origin)
+        }
+        actions.closeSubmenus = { [weak child] in
+            child?.closeSubmenus()
+        }
+        actions.dismiss = { [weak menuSession] in
+            menuSession?.dismissAll()
+        }
+        addAuxiliary(child: child) { [weak child] attach in
+            child?.resolveAuxiliaryWindowAttachment(attach)
+        }
+    }
+
+    func closeSubmenus() {
+        openedSubmenuID = nil
+        dismissAllAuxiliaryWindows()
     }
 
     override func onParentWindowMoved() {
@@ -228,17 +302,78 @@ extension EnvironmentValues {
     }
 }
 
+private let contextMenuPopupPanelPadding: CGFloat = 4
+private let contextMenuPopupRowMinWidth: CGFloat = 180
+private let contextMenuPopupRowHeight: CGFloat = 28
+private let contextMenuPopupDividerHeight: CGFloat = 7
+private let contextMenuPopupSubmenuOverlap: CGFloat = 2
+
 private struct ContextMenuPopupView: View {
     let items: [PlatformItemList.Item]
+    let actions: ContextMenuPopupActions
+    @State private var activeSubmenuID: AnyHashable?
+
+    var body: some View {
+        ContextMenuPopupPanel(
+            items: items,
+            activeItemID: activeSubmenuID,
+            dismiss: {
+                actions.dismiss?()
+            },
+            openSubmenu: { item, origin in
+                guard item.isEnabled, !item.children.isEmpty else { return }
+                guard activeSubmenuID != item.id else { return }
+                activeSubmenuID = item.id
+                actions.openSubmenu?(item, origin)
+            },
+            clearSubmenus: {
+                if activeSubmenuID != nil {
+                    activeSubmenuID = nil
+                }
+                actions.closeSubmenus?()
+            }
+        )
+        .fixedSize()
+    }
+}
+
+private struct ContextMenuPopupPanel: View {
+    let items: [PlatformItemList.Item]
+    let activeItemID: AnyHashable?
     let dismiss: () -> Void
+    let openSubmenu: (PlatformItemList.Item, CGPoint) -> Void
+    let clearSubmenus: () -> Void
+
+    private func rowTopOffset(for id: AnyHashable) -> CGFloat {
+        var offset = contextMenuPopupPanelPadding
+        for item in items {
+            if item.id == id { return offset }
+            offset += item.systemItem == nil
+                ? contextMenuPopupRowHeight
+                : contextMenuPopupDividerHeight
+        }
+        return contextMenuPopupPanelPadding
+    }
+
+    private func submenuOrigin(for item: PlatformItemList.Item) -> CGPoint {
+        CGPoint(x: contextMenuPopupRowMinWidth +
+                    contextMenuPopupPanelPadding * 2 -
+                    contextMenuPopupSubmenuOverlap,
+                y: rowTopOffset(for: item.id))
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(items) { item in
-                ContextMenuPopupRow(item: item, dismiss: dismiss)
+                ContextMenuPopupRow(item: item,
+                                    isSubmenuOpen: activeItemID == item.id,
+                                    submenuOrigin: submenuOrigin(for: item),
+                                    dismiss: dismiss,
+                                    openSubmenu: openSubmenu,
+                                    clearSubmenus: clearSubmenus)
             }
         }
-        .padding(4)
+        .padding(contextMenuPopupPanelPadding)
         .background(Color(white: 0.98), in: RoundedRectangle(cornerRadius: 6))
         .border(Color(white: 0.55), width: 1)
         .fixedSize()
@@ -247,34 +382,87 @@ private struct ContextMenuPopupView: View {
 
 private struct ContextMenuPopupRow: View {
     let item: PlatformItemList.Item
+    let isSubmenuOpen: Bool
+    let submenuOrigin: CGPoint
     let dismiss: () -> Void
+    let openSubmenu: (PlatformItemList.Item, CGPoint) -> Void
+    let clearSubmenus: () -> Void
+    @State private var isPressed = false
+    @State private var isHovered = false
+
+    private var hasSubmenu: Bool {
+        !item.children.isEmpty
+    }
+
+    private var rowBackground: Color {
+        guard item.systemItem == nil else { return .clear }
+        if isSubmenuOpen || isHovered || isPressed {
+            return .blue
+        }
+        return .clear
+    }
+
+    private var rowForeground: Color {
+        if isSubmenuOpen || isHovered || isPressed {
+            return .white
+        }
+        return .primary
+    }
 
     var body: some View {
         if item.systemItem != nil {
             Divider()
-                .frame(minWidth: 160)
+                .frame(height: 1)
+                .frame(minWidth: contextMenuPopupRowMinWidth)
                 .padding(.vertical, 3)
         } else {
             HStack(spacing: 8) {
                 item.label
-                    .environment(\.isEnabled, item.isEnabled)
-                if !item.children.isEmpty {
+                    .fixedSize(horizontal: true, vertical: false)
+                Spacer(minLength: 12)
+                if hasSubmenu {
                     Text(">")
+                        .fixedSize(horizontal: true, vertical: false)
                 }
             }
-            .frame(minWidth: 160, alignment: .leading)
             .padding(.horizontal, 8)
-            .padding(.vertical, 4)
+            .frame(minWidth: contextMenuPopupRowMinWidth,
+                   minHeight: contextMenuPopupRowHeight,
+                   alignment: .leading)
+            .foregroundStyle(rowForeground)
+            .background(rowBackground, in: RoundedRectangle(cornerRadius: 4))
             .opacity(item.isEnabled ? 1.0 : 0.45)
-            ._onButtonGesture(pressing: { _ in }, perform: {
+            ._onButtonGesture(pressing: { pressing in
+                isPressed = pressing
+                if pressing, item.isEnabled, hasSubmenu {
+                    openSubmenu(item, submenuOrigin)
+                }
+            }, perform: {
                 guard item.isEnabled else { return }
-                guard let action = item.action else {
-                    // TODO: open child items as a sibling submenu panel.
+                if hasSubmenu {
+                    openSubmenu(item, submenuOrigin)
+                    // TODO: wire submenu primary-action split.
                     return
                 }
+                clearSubmenus()
+                guard let action = item.action else { return }
                 action()
                 dismiss()
             })
+            .onHover { hovering in
+                guard item.isEnabled else {
+                    isHovered = false
+                    return
+                }
+                isHovered = hovering
+                guard hovering else { return }
+                if hasSubmenu {
+                    openSubmenu(item, submenuOrigin)
+                } else {
+                    clearSubmenus()
+                }
+            }
+            .environment(\.isEnabled, item.isEnabled)
         }
     }
 }

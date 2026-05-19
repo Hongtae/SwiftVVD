@@ -6,81 +6,148 @@
 //
 
 import Foundation
+import Synchronization
 
-public struct _HoverBackgroundModifier<Background>: ViewModifier where Background: View {
-    public var background: Background
+protocol AnyHoverResponder: ViewResponder {
+    func updateHover(isActive: Bool, point: CGPoint?) -> (() -> Void)?
+}
 
-    @inlinable public init(background: Background) {
-        self.background = background
+private let _hoverResponderNextKey = Mutex<UInt32>(0xA0000000)
+
+final class HoverResponder: AnyHoverResponder {
+    let hitTestKey: UInt32
+    weak var nextResponder: ResponderNode?
+    var gestureContainer: AnyObject? { nil }
+
+    var callback: (Bool) -> Void
+    var snapshotTransform: ViewTransform
+    var snapshotSize: ViewSize
+    var snapshotIsEnabled: Bool
+    var innerResponders: [any ViewResponder]
+    private var isActive = false
+
+    init(callback: @escaping (Bool) -> Void,
+         transform: ViewTransform,
+         size: ViewSize,
+         isEnabled: Bool,
+         innerResponders: [any ViewResponder]) {
+        self.hitTestKey = _hoverResponderNextKey.withLock { key in
+            defer { key &+= 1 }
+            return key
+        }
+        self.callback = callback
+        self.snapshotTransform = transform
+        self.snapshotSize = size
+        self.snapshotIsEnabled = isEnabled
+        self.innerResponders = innerResponders
+    }
+
+    func hitTestPolicy(options: ContainsPointsOptions) -> HitTestPolicy {
+        .include
+    }
+
+    func containsGlobalPoints(_ points: [CGPoint],
+                              cacheKey: UInt32?,
+                              options: ContainsPointsOptions) -> ContainsPointsResult {
+        guard snapshotIsEnabled else { return .stop }
+
+        var localPts = Array(points.prefix(64))
+        snapshotTransform.convertGlobal(to: .local, points: &localPts)
+        let bounds = CGRect(origin: .zero, size: snapshotSize.value)
+
+        var mask: UInt64 = 0
+        for (i, point) in localPts.enumerated() {
+            if bounds.contains(point) { mask |= (1 << i) }
+        }
+
+        guard mask != 0 else { return .stop }
+        return ContainsPointsResult(mask: mask, priority: 16.0, children: innerResponders)
+    }
+
+    func updateHover(isActive newValue: Bool, point: CGPoint?) -> (() -> Void)? {
+        let active = snapshotIsEnabled && newValue
+        guard isActive != active else { return nil }
+        isActive = active
+        let callback = callback
+        return { callback(active) }
+    }
+}
+
+extension MultiViewResponder {
+    func hoverResponders(containing point: CGPoint) -> [any AnyHoverResponder] {
+        respondersContaining(point: point).compactMap { $0 as? any AnyHoverResponder }
+    }
+}
+
+public struct _HoverRegionModifier: ViewModifier, MultiViewModifier {
+    public let callback: (Bool) -> Void
+
+    @inlinable public init(_ callback: @escaping (Bool) -> Void) {
+        self.callback = callback
     }
 
     public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        // TODO: Wire hover state to the platform-item hover path before rendering this background.
-        body(_Graph(), inputs)
-    }
-}
+        guard let graph = AttributeGraph.current else {
+            fatalError("_HoverRegionModifier._makeView called outside AG context")
+        }
 
-extension _HoverBackgroundModifier {
-    public typealias Body = Never
+        var outputs = body(_Graph(), inputs)
 
-    public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        body(_Graph(), inputs)
-    }
-}
+        guard inputs.preferences.keys.contains(ViewRespondersKey.self) else {
+            return outputs
+        }
 
-public struct _HoverOverlayModifier<Overlay>: ViewModifier where Overlay: View {
-    public var overlay: Overlay
+        let innerResponderNodes = outputs.preferences.preferences
+            .filter { $0.key == ViewRespondersKey.self }
+            .map { $0.value }
 
-    @inlinable public init(overlay: Overlay) {
-        self.overlay = overlay
-    }
+        let innerRespondersAttr: Attribute<[any ViewResponder]>
+        if innerResponderNodes.isEmpty {
+            innerRespondersAttr = graph.makeInput(value: [])
+        } else if innerResponderNodes.count == 1 {
+            innerRespondersAttr = Attribute<[any ViewResponder]>(innerResponderNodes[0])
+        } else {
+            innerRespondersAttr = graph.makeRule {
+                var combined = ViewRespondersKey.defaultValue
+                for nodeID in innerResponderNodes {
+                    let val = Attribute<[any ViewResponder]>(nodeID).value
+                    ViewRespondersKey.reduce(value: &combined) { val }
+                }
+                return combined
+            }
+        }
 
-    public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        // TODO: Wire hover state to the platform-item hover path before rendering this overlay.
-        body(_Graph(), inputs)
-    }
-}
+        let environmentAttr = inputs.base.cachedEnvironment.value.environment
+        let responder = HoverResponder(
+            callback: modifier._attribute.value.callback,
+            transform: inputs.transform.value,
+            size: inputs.size.value,
+            isEnabled: environmentAttr.value.isEnabled,
+            innerResponders: innerRespondersAttr.value
+        )
+        graph.makeSideEffectRule { [weak responder] in
+            guard let responder else { return }
+            responder.callback = modifier._attribute.value.callback
+            responder.snapshotTransform = inputs.transform.value
+            responder.snapshotSize = inputs.size.value
+            responder.snapshotIsEnabled = environmentAttr.value.isEnabled
+            responder.innerResponders = innerRespondersAttr.value
+        }
 
-extension _HoverOverlayModifier {
-    public typealias Body = Never
-
-    public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        body(_Graph(), inputs)
-    }
-}
-
-public struct _HoverRegionModifier: ViewModifier {
-    public var action: (Bool) -> Void
-
-    @inlinable public init(_ action: @escaping (Bool) -> Void) {
-        self.action = action
-    }
-
-    public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        // TODO: Connect the platform hover item to pointer enter/exit events.
-        body(_Graph(), inputs)
+        // Install the responder preference surface and dispatch enter/exit from
+        // WindowController.
+        outputs.preferences.preferences.removeAll { $0.key == ViewRespondersKey.self }
+        let respondersAttr: Attribute<[any ViewResponder]> = graph.makeInput(value: [responder])
+        outputs.preferences.append(ViewRespondersKey.self, node: respondersAttr.identifier)
+        return outputs
     }
 }
 
 extension _HoverRegionModifier {
     public typealias Body = Never
-
-    public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        body(_Graph(), inputs)
-    }
 }
 
 extension View {
-    @inlinable
-    public func hoverBackground<V>(@ViewBuilder content: () -> V) -> some View where V: View {
-        modifier(_HoverBackgroundModifier(background: content()))
-    }
-
-    @inlinable
-    public func hoverOverlay<V>(@ViewBuilder content: () -> V) -> some View where V: View {
-        modifier(_HoverOverlayModifier(overlay: content()))
-    }
-
     @inlinable
     public func onHover(perform action: @escaping (Bool) -> Void) -> some View {
         modifier(_HoverRegionModifier(action))
