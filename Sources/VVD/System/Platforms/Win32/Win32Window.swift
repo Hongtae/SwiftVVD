@@ -112,6 +112,8 @@ final class Win32Window: Window {
     var eventObservers = WindowEventObserverContainer()
 
     private(set) var resizing: Bool = false
+    private var resizeEventActive: Bool = false
+    private var geometryInvalidatedInMoveSizeLoop: Bool = false
     private(set) var activated: Bool = false
     private(set) var visible: Bool = false
     private(set) var minimized: Bool = false
@@ -128,6 +130,31 @@ final class Win32Window: Window {
     private var _lastGestureAngle: Double = 0.0
 
     private var dropTarget: UnsafeMutablePointer<Win32DropTarget>?
+
+    private func beginResizeEventIfNeeded() {
+        guard self.resizing && self.resizeEventActive == false else { return }
+        self.resizeEventActive = true
+        self.postWindowEvent(type: .resizeBegan)
+    }
+
+    private func invalidateMoveGeometryIfNeeded() {
+        guard self.resizing &&
+              self.resizeEventActive == false &&
+              self.geometryInvalidatedInMoveSizeLoop == false else {
+            return
+        }
+        self.geometryInvalidatedInMoveSizeLoop = true
+        self.postWindowEvent(type: .geometryInvalidated)
+    }
+
+    private func endMoveSizeLoop() {
+        if self.resizeEventActive {
+            self.postWindowEvent(type: .resizeEnded)
+        }
+        self.resizing = false
+        self.resizeEventActive = false
+        self.geometryInvalidatedInMoveSizeLoop = false
+    }
 
     private struct ModalEntry: @unchecked Sendable {
         let window: Win32Window
@@ -889,9 +916,10 @@ final class Win32Window: Window {
                 return LRESULT(MA_ACTIVATE)
             case UINT(WM_ENTERSIZEMOVE):
                 window.resizing = true
+                window.resizeEventActive = false
+                window.geometryInvalidatedInMoveSizeLoop = false
                 return 0
             case UINT(WM_EXITSIZEMOVE):
-                window.resizing = false
                 var rcClient = RECT(), rcWindow = RECT()
                 GetClientRect(hWnd, &rcClient)
                 GetWindowRect(hWnd, &rcWindow)
@@ -916,13 +944,21 @@ final class Win32Window: Window {
                                                   width: CGFloat(rcClient.right - rcClient.left) * invScale,
                                                   height: CGFloat(rcClient.bottom - rcClient.top) * invScale)
                     if resized {
+                        window.beginResizeEventIfNeeded()
                         window.postWindowEvent(type: .resized)
                     }
                     if moved {
+                        if window.resizeEventActive == false {
+                            window.invalidateMoveGeometryIfNeeded()
+                        }
                         window.postWindowEvent(type: .moved)
                     }
                 }
+                window.endMoveSizeLoop()
                 return 0
+            case UINT(WM_SIZING):
+                window.beginResizeEventIfNeeded()
+                return 1
             case UINT(WM_SIZE):
                 if wParam == SIZE_MAXHIDE {
                     if window.visible {
@@ -943,6 +979,7 @@ final class Win32Window: Window {
                         let w = Int(LOWORD(lParam))
                         let h = Int(HIWORD(lParam))
                         let size = CGSize(width: w, height: h)  // pixel size
+                        window.beginResizeEventIfNeeded()
                         window.contentBounds.size = size * (1.0 / window.contentScaleFactor) // DPI scaled
 
                         var rc = RECT()
@@ -955,6 +992,9 @@ final class Win32Window: Window {
                     }
                 }
                 return 0
+            case UINT(WM_MOVING):
+                window.invalidateMoveGeometryIfNeeded()
+                return 1
             case UINT(WM_MOVE):
                 if window.resizing == false {
                     let x = Int(Int16(bitPattern: LOWORD(lParam)))

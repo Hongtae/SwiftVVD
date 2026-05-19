@@ -516,6 +516,12 @@ private final class AppKitViewImpl: NSView, NSTextInputClient, NSWindowDelegate,
         return frameSize
     }
 
+    func windowWillStartLiveResize(_ notification: Notification) {
+        if notification.object as? NSWindow === self.window {
+            self.postWindowEvent(type: .resizeBegan)
+        }
+    }
+
     func windowDidResize(_ notification: Notification) {
         //    NSRect rc = [[notification object] frame];
         //    NSRect rc = [self bounds];
@@ -524,6 +530,12 @@ private final class AppKitViewImpl: NSView, NSTextInputClient, NSWindowDelegate,
             self.postWindowEvent(type: .resized)
         }
      }
+
+    func windowDidEndLiveResize(_ notification: Notification) {
+        if notification.object as? NSWindow === self.window {
+            self.postWindowEvent(type: .resizeEnded)
+        }
+    }
 
     func windowWillMiniaturize(_ notification: Notification) {
         if notification.object as? NSWindow === self.window {
@@ -563,6 +575,12 @@ private final class AppKitViewImpl: NSView, NSTextInputClient, NSWindowDelegate,
             }
             self.activated = false
             self.postWindowEvent(type: .inactivated)
+        }
+    }
+
+    func windowWillMove(_ notification: Notification) {
+        if notification.object as? NSWindow === self.window {
+            self.postWindowEvent(type: .geometryInvalidated)
         }
     }
 

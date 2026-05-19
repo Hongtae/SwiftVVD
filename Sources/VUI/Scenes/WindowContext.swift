@@ -396,6 +396,10 @@ class WindowContext: @unchecked Sendable {
                     $0.state.surfaceRevision += 1
                 }
             }
+        case .geometryInvalidated:
+            break
+        case .resizeBegan, .resizeEnded:
+            break
         case .update:
             break
         }

@@ -141,7 +141,7 @@ class AuxiliaryWindowController: WindowController, @unchecked Sendable {
             enqueueInputAction { [weak self] in
                 self?.onAuxiliaryWindowInactivated()
             }
-        case .moved, .resized:
+        case .geometryInvalidated, .resizeBegan, .moved, .resized:
             enqueueInputAction { [weak self] in
                 self?.onAuxiliaryWindowMoved()
             }

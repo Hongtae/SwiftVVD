@@ -25,6 +25,12 @@ var xdgSurfaceListener = xdg_surface_listener(
                 window.contentSize = newSize
             }
         }
+        if window.pendingResizeEnded {
+            window.pendingResizeEnded = false
+            MainActor.assumeIsolated {
+                window.postWindowEvent(type: .resizeEnded)
+            }
+        }
     }
 )
 
@@ -35,10 +41,10 @@ var xdgToplevelListener = xdg_toplevel_listener(
 
         // convert states pointer to Array for convenience.
         let states: [UInt32] = {
-            let count = states?.pointee.size ?? 0
+            let count = Int(states?.pointee.size ?? 0) / MemoryLayout<UInt32>.stride
             if count > 0 {
                 let ptr = states?.pointee.data.assumingMemoryBound(to: UInt32.self)
-                return Array(UnsafeBufferPointer(start: ptr, count: Int(count)))
+                return Array(UnsafeBufferPointer(start: ptr, count: count))
             }
             return []
         }()
@@ -50,10 +56,23 @@ var xdgToplevelListener = xdg_toplevel_listener(
         
         // Check if window is activated from the states array
         var isActivated = false
+        var isResizing = false
         for state in states {
             if state == XDG_TOPLEVEL_STATE_ACTIVATED.rawValue {
                 isActivated = true
-                break
+            } else if state == XDG_TOPLEVEL_STATE_RESIZING.rawValue {
+                isResizing = true
+            }
+        }
+
+        if window.resizing != isResizing {
+            window.resizing = isResizing
+            if isResizing {
+                MainActor.assumeIsolated {
+                    window.postWindowEvent(type: .resizeBegan)
+                }
+            } else {
+                window.pendingResizeEnded = true
             }
         }
         
@@ -211,6 +230,8 @@ final class WaylandWindow: Window {
     }
 
     nonisolated(unsafe) fileprivate var pendingSurfaceResize: CGSize? = nil
+    nonisolated(unsafe) fileprivate var pendingResizeEnded: Bool = false
+    nonisolated(unsafe) fileprivate var resizing: Bool = false
 
     required init?(name: String, style: WindowStyle, delegate: WindowDelegate?, data: [String: Any]) {
         guard let app = WaylandApplication.shared else {

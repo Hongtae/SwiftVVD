@@ -517,6 +517,10 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
             viewGraph.data.graph.inbox.enqueue { [weak self] in
                 self?.gestureGraph!.resetEvents()
             }
+        case .geometryInvalidated, .resizeBegan:
+            enqueueInputAction { [weak self] in
+                self?.forEachAuxiliaryChild { $0.onParentWindowMoved() }
+            }
         case .moved, .resized:
             enqueueInputAction { [weak self] in
                 self?.forEachAuxiliaryChild { $0.onParentWindowMoved() }

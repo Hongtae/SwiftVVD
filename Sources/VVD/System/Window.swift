@@ -95,8 +95,11 @@ public enum WindowEventType {
     case activated
     case inactivated
     case minimized
+    case geometryInvalidated
     case moved
+    case resizeBegan
     case resized
+    case resizeEnded
     case update
 }
 
