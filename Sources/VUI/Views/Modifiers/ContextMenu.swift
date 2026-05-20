@@ -63,13 +63,16 @@ extension ContextMenuModifier {
         )
         let responder = ContextMenuResponder(
             itemList: itemListAttr,
+            isPresented: modifier[\.isPresented]._attribute.value,
             environment: inputs.base.cachedEnvironment.value.environment,
             transform: inputs.transform,
             size: inputs.size
         )
+        let isPresentedAttr = modifier[\.isPresented]._attribute
         graph.makeSideEffectRule { [weak responder] in
             responder?.snapshotTransform = inputs.transform.value
             responder?.snapshotSize = inputs.size.value
+            responder?.updatePresentation(isPresentedAttr.value)
         }
 
         let respondersAttr: Attribute<[any ViewResponder]> = graph.makeInput(value: [responder])
@@ -103,6 +106,8 @@ final class ContextMenuResponder: ViewResponder {
     var gestureContainer: AnyObject? { nil }
 
     let itemList: Attribute<PlatformItemList>
+    private var isPresented: Binding<Bool>?
+    private var activeSession: ContextMenuPresentationSession?
     let environment: Attribute<EnvironmentValues>
     let transform: Attribute<ViewTransform>
     let size: Attribute<ViewSize>
@@ -111,6 +116,7 @@ final class ContextMenuResponder: ViewResponder {
     var snapshotSize: ViewSize = ViewSize(.zero)
 
     init(itemList: Attribute<PlatformItemList>,
+         isPresented: Binding<Bool>?,
          environment: Attribute<EnvironmentValues>,
          transform: Attribute<ViewTransform>,
          size: Attribute<ViewSize>) {
@@ -119,6 +125,7 @@ final class ContextMenuResponder: ViewResponder {
             return key
         }
         self.itemList = itemList
+        self.isPresented = isPresented
         self.environment = environment
         self.transform = transform
         self.size = size
@@ -143,20 +150,47 @@ final class ContextMenuResponder: ViewResponder {
         return ContainsPointsResult(mask: mask, priority: 16.0, children: [])
     }
 
+    func updatePresentation(_ isPresented: Binding<Bool>?) {
+        self.isPresented = isPresented
+        activeSession?.updatePresentation(isPresented)
+        if let isPresented, !isPresented.wrappedValue {
+            activeSession?.dismissAll()
+        }
+    }
+
     func present(from parent: WindowController, at location: CGPoint) {
         guard let graph = AttributeGraph.current else {
             fatalError("ContextMenuResponder.present called outside AG context")
         }
+        graph.inbox.drain()
+        graph.drainActions()
         parent.dismissAllAuxiliaryWindows()
         let session = ContextMenuPresentationSession()
         let actions = ContextMenuPopupActions()
-        let contentAttr: Attribute<AnyView> = graph.makeRule {
-            AnyView(ContextMenuPopupView(items: self.itemList.value.menuItems,
-                                         actions: actions))
+        let liveContentSubgraph = AGSubgraph()
+        let contentAttr: Attribute<AnyView> = AGSubgraph.$current.withValue(liveContentSubgraph) {
+            let initialContent = contextMenuPopupContent(items: self.itemList.value.menuItems,
+                                                         actions: actions)
+            let attr: Attribute<AnyView> = graph.makeInput(value: initialContent)
+            // Refresh the already-open popup root content when the collected
+            // item-list source invalidates.
+            graph.makeSideEffectRule {
+                attr.setValue(contextMenuPopupContent(items: self.itemList.value.menuItems,
+                                                       actions: actions))
+            }
+            return attr
         }
         // WindowController.init(crossGraphContent:) requires a cached source value
         // before the child ViewGraph installs its cross-graph reference.
         _ = contentAttr.value
+        session.installLiveContent(sourceGraph: graph, subgraph: liveContentSubgraph)
+        session.updatePresentation(isPresented)
+        session.markPresented()
+        session.onFinish = { [weak self, weak session] in
+            guard self?.activeSession === session else { return }
+            self?.activeSession = nil
+        }
+        activeSession = session
         let usesPlatformWindow = environment.value.auxiliaryWindowUsingPlatformWindow
         let ctrl = ContextMenuWindowController(crossGraphContent: contentAttr,
                                                sourceGraph: graph,
@@ -206,9 +240,52 @@ public extension EnvironmentValues {
 
 private final class ContextMenuPresentationSession {
     weak var root: ContextMenuWindowController?
+    var onFinish: (() -> Void)?
+    private weak var sourceGraph: AttributeGraph?
+    private var liveContentSubgraph: AGSubgraph?
+    private var isPresented: Binding<Bool>?
+    private var didFinish = false
+
+    func installLiveContent(sourceGraph: AttributeGraph, subgraph: AGSubgraph) {
+        self.sourceGraph = sourceGraph
+        self.liveContentSubgraph = subgraph
+    }
+
+    func updatePresentation(_ isPresented: Binding<Bool>?) {
+        self.isPresented = isPresented
+    }
+
+    func markPresented() {
+        isPresented?.wrappedValue = true
+    }
 
     func dismissAll() {
-        root?.dismiss()
+        if let root {
+            root.dismiss()
+        } else {
+            finish()
+        }
+    }
+
+    func finish() {
+        guard !didFinish else { return }
+        didFinish = true
+        isPresented?.wrappedValue = false
+        tearDownLiveContent()
+        onFinish?()
+        onFinish = nil
+        root = nil
+    }
+
+    private func tearDownLiveContent() {
+        guard let subgraph = liveContentSubgraph else { return }
+        liveContentSubgraph = nil
+        if let sourceGraph {
+            AttributeGraph.$current.withValue(sourceGraph) {
+                subgraph.invalidate()
+            }
+        }
+        subgraph.removeFromParent()
     }
 }
 
@@ -282,6 +359,13 @@ final class ContextMenuWindowController: AuxiliaryWindowController, @unchecked S
         dismissAllAuxiliaryWindows()
     }
 
+    override func endPresentationSession() {
+        super.endPresentationSession()
+        if menuSession.root === self {
+            menuSession.finish()
+        }
+    }
+
     override func onParentWindowMoved() {
         dismiss()
     }
@@ -303,10 +387,69 @@ extension EnvironmentValues {
 }
 
 private let contextMenuPopupPanelPadding: CGFloat = 4
-private let contextMenuPopupRowMinWidth: CGFloat = 180
+private let contextMenuPopupRowMinWidth: CGFloat = 210
 private let contextMenuPopupRowHeight: CGFloat = 28
 private let contextMenuPopupDividerHeight: CGFloat = 7
 private let contextMenuPopupSubmenuOverlap: CGFloat = 2
+// AppKit-backed menu items expose separate state/image/shortcut/submenu slots.
+private let contextMenuPopupRowHorizontalPadding: CGFloat = 6
+private let contextMenuPopupAccessorySpacing: CGFloat = 2
+private let contextMenuPopupAccessoryTitleSpacing: CGFloat = 5
+private let contextMenuPopupCheckmarkWidth: CGFloat = 12
+private let contextMenuPopupImageWidth: CGFloat = 16
+private let contextMenuPopupShortcutMinWidth: CGFloat = 34
+
+// FIXME: Refine these columns with dedicated context-menu metrics.
+// Current values only avoid reserving absent accessory columns.
+private struct ContextMenuPopupLayout {
+    var showsStateColumn: Bool
+    var showsImageColumn: Bool
+
+    static func make(for items: [PlatformItemList.Item]) -> ContextMenuPopupLayout {
+        var showsStateColumn = false
+        var showsImageColumn = false
+        for item in items where item.systemItem == nil {
+            if item.image != nil {
+                showsImageColumn = true
+            }
+            // Toggle rows reserve the state column even when the current state is off.
+            if item.selectionBehavior != nil {
+                showsStateColumn = true
+            }
+        }
+        return ContextMenuPopupLayout(showsStateColumn: showsStateColumn,
+                                      showsImageColumn: showsImageColumn)
+    }
+}
+
+private struct ContextMenuCheckmarkShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX + rect.width * 0.12,
+                              y: rect.minY + rect.height * 0.58))
+        path.addLine(to: CGPoint(x: rect.minX + rect.width * 0.42,
+                                 y: rect.minY + rect.height * 0.86))
+        path.addLine(to: CGPoint(x: rect.minX + rect.width * 0.90,
+                                 y: rect.minY + rect.height * 0.18))
+        return path
+    }
+}
+
+private struct ContextMenuSubmenuIndicatorShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
+        path.closeSubpath()
+        return path
+    }
+}
+
+private func contextMenuPopupContent(items: [PlatformItemList.Item],
+                                     actions: ContextMenuPopupActions) -> AnyView {
+    AnyView(ContextMenuPopupView(items: items, actions: actions))
+}
 
 private struct ContextMenuPopupView: View {
     let items: [PlatformItemList.Item]
@@ -343,6 +486,9 @@ private struct ContextMenuPopupPanel: View {
     let dismiss: () -> Void
     let openSubmenu: (PlatformItemList.Item, CGPoint) -> Void
     let clearSubmenus: () -> Void
+    private var layout: ContextMenuPopupLayout {
+        ContextMenuPopupLayout.make(for: items)
+    }
 
     private func rowTopOffset(for id: AnyHashable) -> CGFloat {
         var offset = contextMenuPopupPanelPadding
@@ -366,6 +512,7 @@ private struct ContextMenuPopupPanel: View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(items) { item in
                 ContextMenuPopupRow(item: item,
+                                    layout: layout,
                                     isSubmenuOpen: activeItemID == item.id,
                                     submenuOrigin: submenuOrigin(for: item),
                                     dismiss: dismiss,
@@ -382,6 +529,7 @@ private struct ContextMenuPopupPanel: View {
 
 private struct ContextMenuPopupRow: View {
     let item: PlatformItemList.Item
+    let layout: ContextMenuPopupLayout
     let isSubmenuOpen: Bool
     let submenuOrigin: CGPoint
     let dismiss: () -> Void
@@ -389,9 +537,24 @@ private struct ContextMenuPopupRow: View {
     let clearSubmenus: () -> Void
     @State private var isPressed = false
     @State private var isHovered = false
+    @State private var localToggleValue: Bool?
 
     private var hasSubmenu: Bool {
-        !item.children.isEmpty
+        item.secondaryNavigationBehavior == .submenu && !item.children.isEmpty
+    }
+
+    private var isToggleOn: Bool {
+        if case let .toggle(value)? = item.selectionBehavior {
+            return localToggleValue ?? value
+        }
+        return false
+    }
+
+    private var shortcutLabel: String? {
+        guard let keyboardShortcut = item.keyboardShortcut else {
+            return nil
+        }
+        return keyboardShortcut.displayLabel
     }
 
     private var rowBackground: Color {
@@ -416,16 +579,61 @@ private struct ContextMenuPopupRow: View {
                 .frame(minWidth: contextMenuPopupRowMinWidth)
                 .padding(.vertical, 3)
         } else {
-            HStack(spacing: 8) {
+            HStack(spacing: 0) {
+                if layout.showsStateColumn || layout.showsImageColumn {
+                    HStack(spacing: contextMenuPopupAccessorySpacing) {
+                        if layout.showsStateColumn {
+                            Group {
+                                if isToggleOn {
+                                    ContextMenuCheckmarkShape()
+                                        .stroke(rowForeground,
+                                                style: StrokeStyle(lineWidth: 1.6,
+                                                                   lineCap: .round,
+                                                                   lineJoin: .round))
+                                } else {
+                                    Color.clear
+                                }
+                            }
+                            .frame(width: contextMenuPopupCheckmarkWidth,
+                                   height: contextMenuPopupCheckmarkWidth,
+                                   alignment: .center)
+                        }
+                        if layout.showsImageColumn {
+                            if let image = item.image {
+                                image
+                                    .frame(width: contextMenuPopupImageWidth,
+                                           height: contextMenuPopupImageWidth,
+                                           alignment: .center)
+                            } else {
+                                Color.clear
+                                    .frame(width: contextMenuPopupImageWidth,
+                                           height: contextMenuPopupImageWidth)
+                            }
+                        }
+                    }
+                    .padding(.trailing, contextMenuPopupAccessoryTitleSpacing)
+                }
                 item.label
                     .fixedSize(horizontal: true, vertical: false)
                 Spacer(minLength: 12)
-                if hasSubmenu {
-                    Text(">")
+                if let shortcutLabel {
+                    Text(shortcutLabel)
+                        .frame(minWidth: contextMenuPopupShortcutMinWidth,
+                               alignment: .trailing)
+                        .foregroundStyle(rowForeground)
+                        .opacity(0.8)
                         .fixedSize(horizontal: true, vertical: false)
                 }
+                if hasSubmenu {
+                    ContextMenuSubmenuIndicatorShape()
+                        .fill(rowForeground)
+                        .frame(width: 5, height: 8)
+                } else {
+                    Color.clear
+                        .frame(width: 8, height: 1)
+                }
             }
-            .padding(.horizontal, 8)
+            .padding(.horizontal, contextMenuPopupRowHorizontalPadding)
             .frame(minWidth: contextMenuPopupRowMinWidth,
                    minHeight: contextMenuPopupRowHeight,
                    alignment: .leading)
@@ -446,6 +654,9 @@ private struct ContextMenuPopupRow: View {
                 }
                 clearSubmenus()
                 guard let action = item.action else { return }
+                if case .toggle? = item.selectionBehavior {
+                    localToggleValue = !isToggleOn
+                }
                 action()
                 dismiss()
             })

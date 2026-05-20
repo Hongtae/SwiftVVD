@@ -269,6 +269,7 @@ private struct PlatformItemListMenuBody: View {
         let labelSource = inputs.base.customInputs
             .value(forKey: SourceInput<MenuStyleConfiguration.Label>.self).top
         let environmentAttr = inputs.base.cachedEnvironment.value.environment
+        let itemID = PlatformItemList.stableID(configurationAttr.identifier)
 
         // Collect nested content into PlatformItemList and append one submenu-capable item.
         let childrenAttr: Attribute<PlatformItemList> = graph.makeStatefulRule(
@@ -284,6 +285,7 @@ private struct PlatformItemListMenuBody: View {
             let label = labelSource?.snapshot() ?? AnyView(EmptyView())
             var list = PlatformItemList()
             list.append(PlatformItemList.Item(
+                id: itemID,
                 label: label,
                 action: configuration._primaryAction,
                 role: nil,
@@ -294,8 +296,10 @@ private struct PlatformItemListMenuBody: View {
             return list
         }
 
-        var outputs = MenuStyleConfiguration.Label._makeView(view: labelView,
-                                                             inputs: inputs)
+        var outputs = MenuStyleConfiguration.Label._makeView(
+            view: labelView,
+            inputs: platformItemListRenderOnlyInputs(inputs)
+        )
         outputs.preferences.append(PlatformItemList.Key.self, node: preferenceAttr.identifier)
         return outputs
     }

@@ -132,8 +132,8 @@ struct EnvironmentalBodyAccessor<E: EnvironmentalModifier>: BodyAccessor {
 
 // MARK: - ViewBodyAccessor
 // BodyAccessor conformance for View.body.
-// The main View._makeView path currently uses withObservationTracking.
-// This accessor is reserved for a future body evaluation path.
+// View._makeView currently uses withObservationTracking directly.
+// ViewBodyAccessor is reserved for a future body-access path.
 struct ViewBodyAccessor<V: View>: BodyAccessor {
     typealias Container = V
     typealias Body = V.Body

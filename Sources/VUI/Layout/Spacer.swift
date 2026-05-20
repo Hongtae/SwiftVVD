@@ -201,9 +201,17 @@ struct PlatformItemListDividerRepresentable: PlatformDividerRepresentable {
         }
 
         // Emit divider as a platform item-list system item.
+        let identityAttr: Attribute<Void> = graph.makeRule { () }
+        let itemID = PlatformItemList.stableID(identityAttr.identifier)
         let preferenceAttr: Attribute<PlatformItemList> = graph.makeRule {
             var list = PlatformItemList()
-            list.append(PlatformItemList.Item(systemItem: .divider))
+            list.append(PlatformItemList.Item(
+                id: itemID,
+                label: AnyView(EmptyView()),
+                action: nil,
+                role: nil,
+                systemItem: .divider
+            ))
             return list
         }
         outputs.preferences.append(PlatformItemList.Key.self, node: preferenceAttr.identifier)

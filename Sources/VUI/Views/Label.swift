@@ -64,13 +64,60 @@ struct ResolvedLabelStyle: View {
             return makeView(view: _GraphValue(_attribute: bodyAttr), inputs: inputs)
         }
 
+        func appendPlatformItem(to outputs: inout _ViewOutputs) {
+            guard platformItemListShouldCollectStaticItemContributors(inputs) else {
+                return
+            }
+            let titleSource = inputs.base.customInputs
+                .value(forKey: SourceInput<LabelStyleConfiguration.Title>.self).top
+            let iconSource = inputs.base.customInputs
+                .value(forKey: SourceInput<LabelStyleConfiguration.Icon>.self).top
+            let itemID = PlatformItemList.stableID(view._attribute.identifier)
+            let preferenceAttr: Attribute<PlatformItemList> = graph.makeRule {
+                // Static Label rows are disabled menu items, with the icon preserved
+                // as a separate image slot rather than folded into the title.
+                var list = PlatformItemList()
+                list.append(PlatformItemList.Item(
+                    id: itemID,
+                    label: titleSource?.snapshot() ?? AnyView(EmptyView()),
+                    image: iconSource?.snapshot(),
+                    action: nil,
+                    role: nil,
+                    isEnabled: false
+                ))
+                return list
+            }
+            outputs.preferences.append(PlatformItemList.Key.self, node: preferenceAttr.identifier)
+        }
+
+        if platformItemListShouldCollectStaticItemContributors(inputs) {
+            var outputs = _ViewOutputs(layoutComputer: OptionalAttribute(graph.makeRule {
+                LayoutComputer.fixed(.zero)
+            }))
+            appendPlatformItem(to: &outputs)
+            return outputs
+        }
+
+        let bodyInputs = platformItemListShouldCollectStaticItemContributors(inputs)
+            ? platformItemListRenderOnlyInputs(inputs)
+            : inputs
+        var outputs: _ViewOutputs
         if let head = stack.pop() {
             var poppedInputs = inputs
             poppedInputs.base.customInputs.setValue(stack, forKey: StyleInput<LabelStyleConfiguration>.self)
             let style = head.labelStyle ?? DefaultLabelStyle.automatic
-            return wireBody(style, inputs: poppedInputs)
+            if platformItemListShouldCollectStaticItemContributors(inputs) {
+                var bodyPoppedInputs = bodyInputs
+                bodyPoppedInputs.base.customInputs.setValue(stack, forKey: StyleInput<LabelStyleConfiguration>.self)
+                outputs = wireBody(style, inputs: bodyPoppedInputs)
+            } else {
+                outputs = wireBody(style, inputs: poppedInputs)
+            }
+        } else {
+            outputs = wireBody(DefaultLabelStyle.automatic, inputs: bodyInputs)
         }
-        return wireBody(DefaultLabelStyle.automatic, inputs: inputs)
+        appendPlatformItem(to: &outputs)
+        return outputs
     }
 
     static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
@@ -86,4 +133,3 @@ extension ResolvedLabelStyle: StyleableView {
         LabelStyleModifier(style: DefaultLabelStyle())
     }
 }
-

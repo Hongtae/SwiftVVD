@@ -279,6 +279,10 @@ private final class AppKitViewImpl: NSView, NSTextInputClient, NSWindowDelegate,
         updateKey(.init(rawValue: LEFT_SHIFT_BIT), .leftShift)
         // r-shift
         updateKey(.init(rawValue: RIGHT_SHIFT_BIT), .rightShift)
+        // l-control
+        updateKey(.init(rawValue: LEFT_CONTROL_BIT), .leftControl)
+        // r-control
+        updateKey(.init(rawValue: RIGHT_CONTROL_BIT), .rightControl)
         // l-option
         updateKey(.init(rawValue: LEFT_ALTERNATE_BIT), .leftOption)
         // r-option

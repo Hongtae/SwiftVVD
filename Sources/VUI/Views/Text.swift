@@ -485,6 +485,23 @@ extension Text: View {
         // 5. Propagate ResourceList and DisplayList upwards via the Preference channel!
         outputs.preferences.append(ResourceList.Key.self, node: resourceAttr.identifier)
         outputs.preferences.append(DisplayList.Key.self, node: dlAttr.identifier)
+        if platformItemListShouldCollectStaticItemContributors(inputs) {
+            // Plain Text under MenuStyleContext contributes a disabled platform item.
+            let textAttr = view._attribute
+            let itemID = PlatformItemList.stableID(textAttr.identifier)
+            let preferenceAttr: Attribute<PlatformItemList> = graph.makeRule {
+                var list = PlatformItemList()
+                list.append(PlatformItemList.Item(
+                    id: itemID,
+                    label: AnyView(textAttr.value),
+                    action: nil,
+                    role: nil,
+                    isEnabled: false
+                ))
+                return list
+            }
+            outputs.preferences.append(PlatformItemList.Key.self, node: preferenceAttr.identifier)
+        }
 
         return outputs
     }

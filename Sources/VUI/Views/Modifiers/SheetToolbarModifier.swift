@@ -47,25 +47,6 @@ public struct ToolbarItemPlacement: Equatable, Hashable, Sendable {
     public static let keyboard           = ToolbarItemPlacement(role: .keyboard)
 }
 
-// Minimal KeyboardShortcut representation used by the sheet modal button row trait.
-struct KeyboardShortcut: Equatable, Hashable {
-    enum Special: Equatable, Hashable {
-        case cancelAction
-        case defaultAction
-    }
-
-    var key: String?
-    var special: Special?
-
-    static let cancelAction = KeyboardShortcut(key: nil, special: .cancelAction)
-    static let defaultAction = KeyboardShortcut(key: nil, special: .defaultAction)
-}
-
-struct KeyboardShortcutPickerOptionTraitKey: _ViewTraitKey {
-    typealias Value = KeyboardShortcut?
-    static var defaultValue: KeyboardShortcut? { nil }
-}
-
 // Toolbar storage for items rendered by the sheet toolbar path.
 // It keeps identity, role placement, and a view payload for ModalButtonRow rendering.
 struct ToolbarStorage {

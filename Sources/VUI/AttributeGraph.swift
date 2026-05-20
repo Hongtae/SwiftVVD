@@ -835,6 +835,7 @@ class AttributeGraph: @unchecked Sendable {
         slots[index].node!.value = newValue
         let outputs = slots[index].node!.outputs
         for outputIndex in outputs { markNeedsEvaluation(AGAttribute(rawValue: outputIndex)) }
+        notifyCrossGraphObservers(for: attribute.identifier.rawValue)
         AttributeGraph.changeSet?.record(attribute.identifier)
     }
 
@@ -847,6 +848,7 @@ class AttributeGraph: @unchecked Sendable {
         slots[index].node!.value = newValue
         let outputs = slots[index].node!.outputs
         for outputIndex in outputs { markNeedsEvaluation(AGAttribute(rawValue: outputIndex)) }
+        notifyCrossGraphObservers(for: attribute.identifier.rawValue)
         AttributeGraph.changeSet?.record(attribute.identifier)
     }
 
