@@ -232,8 +232,8 @@ final class Win32Window: Window {
         if style.contains(.minimizeButton)  { dwStyle |= DWORD(WS_MINIMIZEBOX) }
         if style.contains(.maximizeButton)  { dwStyle |= DWORD(WS_MAXIMIZEBOX) }
         if style.contains(.resizableBorder) { dwStyle |= DWORD(WS_THICKFRAME) }
-        let isAuxiliaryOrPopup = style.contains(.auxiliaryWindow) || style.contains(.popupWindow)
-        if isAuxiliaryOrPopup {
+        let isUtilityOrPopup = style.contains(.utilityWindow) || style.contains(.popupWindow)
+        if isUtilityOrPopup {
             dwStyle |= DWORD(WS_POPUP) 
             dwStyleEx |= DWORD(WS_EX_NOACTIVATE)
             dwStyleEx |= DWORD(WS_EX_TOOLWINDOW)
@@ -371,7 +371,7 @@ final class Win32Window: Window {
                 let x = Int32(value.x)
                 let y = Int32(value.y)
                 var flags = UINT(SWP_NOSIZE | SWP_NOOWNERZORDER | SWP_NOACTIVATE)
-                if style.contains(.auxiliaryWindow) || style.contains(.popupWindow) {
+                if style.contains(.utilityWindow) || style.contains(.popupWindow) {
                     flags |= UINT(SWP_NOZORDER)
                 }
                 SetWindowPos(hWnd, HWND_TOP, x, y, 0, 0, flags)
@@ -407,7 +407,7 @@ final class Win32Window: Window {
                     w = rc.right - rc.left
                     h = rc.bottom - rc.top
                     var flags = UINT(SWP_NOMOVE | SWP_NOOWNERZORDER | SWP_NOACTIVATE)
-                    if self.style.contains(.auxiliaryWindow) || self.style.contains(.popupWindow) {
+                    if self.style.contains(.utilityWindow) || self.style.contains(.popupWindow) {
                         flags |= UINT(SWP_NOZORDER)
                     }
                     SetWindowPos(hWnd, HWND_TOP, 0, 0, w, h, flags)

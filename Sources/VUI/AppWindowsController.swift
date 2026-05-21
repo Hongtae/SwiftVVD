@@ -15,9 +15,9 @@ import Foundation
 //   - auxiliaryWindowControllers: reserved for statically declared auxiliary scenes.
 //   - settingsWindowController: optional Settings scene controller.
 //
-// Dynamic presentation windows such as sheets, popovers, context menus, and modal
-// children are owned directly by the parent WindowController. They are tracked by
-// child entries on that parent controller and do not pass through AppWindowsController.
+// Dynamic children such as popovers, modals, and sheets are owned by the parent
+// WindowController directly through PresentationChildEntry and ModalChildEntry.
+// AppWindowsController is not involved in those presentation lifecycles.
 class AppWindowsController: @unchecked Sendable {
 
     // WindowGroup: array because openWindow() can open multiple instances per key.

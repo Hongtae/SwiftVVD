@@ -143,7 +143,7 @@ public struct WindowStyle: OptionSet, Sendable {
     public static let genericWindow     = WindowStyle(rawValue: 0xff)   // includes all but StyleAcceptFileDrop
     public static let acceptFileDrop    = WindowStyle(rawValue: 1 << 8) // enables file drag & drop
     
-    public static let auxiliaryWindow   = WindowStyle(rawValue: 1 << 9)
+    public static let utilityWindow     = WindowStyle(rawValue: 1 << 9)
     public static let popupWindow       = WindowStyle(rawValue: 1 << 10)
 }
 

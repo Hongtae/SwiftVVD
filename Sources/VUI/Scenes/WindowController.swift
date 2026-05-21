@@ -25,7 +25,7 @@ protocol WindowInputEventHandler {
 // WindowController: owns ViewGraph and drives rendering + event dispatch.
 // Non-generic: the Content type is used only at init for AG wiring, then discarded.
 // Optionally owns a WindowContext, created lazily on the first makeWindow() call.
-// Overlay-mode aux/modal controllers never call makeWindow(), so windowContext stays nil.
+// Overlay-mode presentation-child/modal controllers never call makeWindow(), so windowContext stays nil.
 //
 // Conforms to ViewRendererHost and ViewGraphRootValueUpdater.
 // Phase 4: AG ownership moved from WindowController to ViewGraph.
@@ -375,7 +375,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
 
                 if !hasDeliveredViewLayoutUpdate || sizeChanged || rootFittedSizeChanged {
                     hasDeliveredViewLayoutUpdate = true
-                    // Modal/aux controllers use this hook to fit their platform
+                    // Modal/presentation-child controllers use this hook to fit their platform
                     // window after AG layout values are available. The hook is
                     // driven by the root fitted-size rule rather than the host
                     // window's proposed sizeAttr, because resource/content
@@ -390,8 +390,8 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         redraw = redraw || !changeSet.isEmpty || self.viewChangedWhileDrawing
         self.viewChangedWhileDrawing = false
 
-        // Overlay aux children: update after self.
-        for entry in self.auxChildWindows.withLock({ $0 }) {
+        // Overlay presentation children: update after self.
+        for entry in self.presentationChildren.withLock({ $0 }) {
             guard entry.isOverlay, entry.initiated else { continue }
             entry.controller.updateView(tick: tick, delta: delta, date: date,
                                         contentSize: contentSize, redraw: &redraw, withGC)
@@ -423,8 +423,8 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
             }
             self.viewChangedWhileDrawing = !changeSet.isEmpty
         }
-        // Overlay aux children: draw on top after self.
-        for entry in self.auxChildWindows.withLock({ $0 }) {
+        // Overlay presentation children: draw on top after self.
+        for entry in self.presentationChildren.withLock({ $0 }) {
             guard entry.isOverlay, entry.initiated else { continue }
             // The graphics context is already translated into this controller's
             // coordinate space, so nested overlay children only apply their own
@@ -455,13 +455,13 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     // MARK: - Presentation Session Lifecycle
 
     func onParentWindowActivated() {
-        forEachAuxiliaryChild { $0.onParentWindowActivated() }
+        forEachPresentationChild { $0.onParentWindowActivated() }
     }
     func onParentWindowInactivated() {
-        forEachAuxiliaryChild { $0.onParentWindowInactivated() }
+        forEachPresentationChild { $0.onParentWindowInactivated() }
     }
     func onParentWindowMoved() {
-        forEachAuxiliaryChild { $0.onParentWindowMoved() }
+        forEachPresentationChild { $0.onParentWindowMoved() }
     }
     func onParentWindowClosed() {
         if endSessionOnWindowClosed {
@@ -473,7 +473,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     func endPresentationSession() {
         guard !didEndPresentationSession else { return }
         didEndPresentationSession = true
-        dismissAllAuxiliaryWindows()
+        dismissAllPresentationChildren()
         dismissAllModalWindows()
         if let window {
             Task { @MainActor [weak window] in
@@ -482,8 +482,8 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         }
     }
 
-    func forEachAuxiliaryChild(_ body: (AuxiliaryWindowController) -> Void) {
-        self.auxChildWindows.withLock { $0.map(\.controller) }
+    func forEachPresentationChild(_ body: (PresentationChildWindowController) -> Void) {
+        self.presentationChildren.withLock { $0.map(\.controller) }
             .forEach(body)
     }
 
@@ -510,14 +510,14 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
             }
         case .activated:
             enqueueInputAction { [weak self] in
-                self?.forEachAuxiliaryChild { $0.onParentWindowActivated() }
+                self?.forEachPresentationChild { $0.onParentWindowActivated() }
             }
         case .inactivated:
             viewGraph.data.graph.inbox.enqueue { [weak self] in
                 self?.gestureGraph!.resetEvents()
             }
             enqueueInputAction { [weak self] in
-                self?.forEachAuxiliaryChild { $0.onParentWindowInactivated() }
+                self?.forEachPresentationChild { $0.onParentWindowInactivated() }
             }
         case .minimized:
             viewGraph.data.graph.inbox.enqueue { [weak self] in
@@ -525,11 +525,11 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
             }
         case .geometryInvalidated, .resizeBegan:
             enqueueInputAction { [weak self] in
-                self?.forEachAuxiliaryChild { $0.onParentWindowMoved() }
+                self?.forEachPresentationChild { $0.onParentWindowMoved() }
             }
         case .moved, .resized:
             enqueueInputAction { [weak self] in
-                self?.forEachAuxiliaryChild { $0.onParentWindowMoved() }
+                self?.forEachPresentationChild { $0.onParentWindowMoved() }
             }
         default:
             break
@@ -595,7 +595,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
             return false
         }
 
-        var handlers = self.auxChildWindows.withLock {
+        var handlers = self.presentationChildren.withLock {
             $0.reversed().compactMap { entry -> (id: ObjectIdentifier, action: (KeyboardEvent) -> Bool)? in
                 guard entry.isOverlay, entry.initiated else { return nil }
                 let child = entry.controller
@@ -711,8 +711,8 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
             }
         }
 
-        // Build handler list: aux children (reversed = top-first) then self.
-        var handlers = self.auxChildWindows.withLock {
+        // Build handler list: presentation children (reversed = top-first) then self.
+        var handlers = self.presentationChildren.withLock {
             $0.reversed().compactMap { entry -> (target: AnyObject, action: (MouseEvent) -> Bool)? in
                 guard entry.isOverlay, entry.initiated else { return nil }
                 guard let frame = entry.frame else { return nil }
@@ -730,10 +730,10 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         }
         handlers.append((target: self as AnyObject, action: handleEvent))
 
-        // Parent mouse-down deactivates any aux window that was not the event target.
-        // Platform aux windows do not participate in the overlay hit-test path.
-        let auxChildren = event.type == .buttonDown
-            ? self.auxChildWindows.withLock { $0.map(\.controller) }
+        // Parent mouse-down deactivates any presentation child that was not the event target.
+        // Platform child windows do not participate in the overlay hit-test path.
+        let presentationChildren = event.type == .buttonDown
+            ? self.presentationChildren.withLock { $0.map(\.controller) }
             : []
 
         if let _lastMouseEventHandler,
@@ -746,26 +746,26 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         for handler in handlers {
             if handler.action(event) {
                 _lastMouseEventHandler = ObjectIdentifier(handler.target)
-                auxChildren.forEach {
+                presentationChildren.forEach {
                     if $0 === handler.target {
-                        $0.onAuxiliaryWindowActivated()
+                        $0.onPresentationChildWindowActivated()
                     } else {
-                        $0.onAuxiliaryWindowInactivated()
+                        $0.onPresentationChildWindowInactivated()
                     }
                 }
                 return true
             }
         }
         _lastMouseEventHandler = nil
-        auxChildren.forEach {
-            $0.onAuxiliaryWindowInactivated()
+        presentationChildren.forEach {
+            $0.onPresentationChildWindowInactivated()
         }
         return false
     }
 
     @discardableResult
     func handleMouseWheel(at location: CGPoint, delta: CGPoint) -> Bool {
-        for entry in self.auxChildWindows.withLock({ $0.reversed() }) {
+        for entry in self.presentationChildren.withLock({ $0.reversed() }) {
             guard entry.isOverlay, entry.initiated else { continue }
             guard let frame = entry.frame else { continue }
             let child = entry.controller
@@ -844,7 +844,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     @discardableResult
     func handleMouseHover(at location: CGPoint, deviceID: Int, isTopMost: Bool) -> Bool {
         var topMost = isTopMost
-        self.auxChildWindows.withLock({ $0.reversed() }).forEach { entry in
+        self.presentationChildren.withLock({ $0.reversed() }).forEach { entry in
             guard entry.isOverlay, entry.initiated else { return }
             let child = entry.controller
             if let offset = entry.frame?.origin {
@@ -991,20 +991,20 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     func updateFocusedValues()     {}
     func updateAccessibilityEnvironment() {}
 
-    // MARK: - Aux/Modal window management (nested structure)
+    // MARK: - Presentation Child / Modal Management (nested structure)
     // WindowController owns its dynamic children directly (strong refs).
-    // AppWindowsController is not involved in dynamic aux/modal lifetime.
+    // AppWindowsController is not involved in dynamic presentation-child/modal lifetime.
 
     // Parent that opened this window (nil = root window).
     weak var parentWindow: WindowController?
 
-    private struct AuxChildEntry: @unchecked Sendable {
-        let controller: AuxiliaryWindowController   // strong, WindowController owns its aux children
+    private struct PresentationChildEntry: @unchecked Sendable {
+        let controller: PresentationChildWindowController   // strong, WindowController owns its presentation children
         var isOverlay: Bool = true
         var initiated: Bool = false
         var frame: CGRect? = nil           // overlay hit-test / draw offset (independent of isOverlay)
     }
-    private let auxChildWindows = Mutex<[AuxChildEntry]>([])
+    private let presentationChildren = Mutex<[PresentationChildEntry]>([])
 
     // Unified modal queue: first entry = active, rest = pending.
     // Uses the same active-plus-pending shape as window sheet queues.
@@ -1026,18 +1026,23 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     }
     private let modalChildren = Mutex<[ModalChildEntry]>([])
 
-    // MARK: - Aux Child Management
+    // MARK: - Presentation Child Management
+    //
+    // UtilityWindowController and PopupWindowController use this one ownership
+    // path for overlay fallback, platform-window attach, event forwarding, and
+    // teardown. Keep popup children on this path unless a separate lifecycle is
+    // introduced.
 
-    func addAuxiliary(child: AuxiliaryWindowController,
-                      attachWindow: AttachWindowResolver? = nil) {
+    func addPresentationChild(child: PresentationChildWindowController,
+                              attachWindow: AttachWindowResolver? = nil) {
         child.parentWindow = self
-        let canUsePlatformWindow = child.auxiliaryPrefersPlatformWindow &&
+        let canUsePlatformWindow = child.prefersPlatformWindowPresentation &&
             attachWindow != nil &&
             runOnMainQueueSync { self.window != nil }
         let asOverlay = !canUsePlatformWindow
-        var entry = AuxChildEntry(controller: child)
+        var entry = PresentationChildEntry(controller: child)
         entry.isOverlay = false
-        self.auxChildWindows.withLock { entries in
+        self.presentationChildren.withLock { entries in
             entries.removeAll { $0.controller === child }
             entries.append(entry)
         }
@@ -1046,7 +1051,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         if !asOverlay, let attachWindow {
             attachWindow { [weak self, weak child] _ in
                 guard let self else { return }
-                let didInitiate = self.auxChildWindows.withLock { entries in
+                let didInitiate = self.presentationChildren.withLock { entries in
                     if let i = entries.firstIndex(where: { $0.controller === child }) {
                         entries[i].isOverlay = false
                         entries[i].initiated = true
@@ -1055,7 +1060,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                     return false
                 }
                 if didInitiate {
-                    child?.onAuxiliarySessionInitiated()
+                    child?.onPresentationChildSessionInitiated()
                 }
             }
             // attachWindow is allowed to hand off to the MainActor before calling the
@@ -1063,7 +1068,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
             // attach gets the first chance to mark this child as initiated.
             Task { @MainActor [weak self, weak child] in
                 guard let self, let child else { return }
-                let didInitiate = self.auxChildWindows.withLock { entries in
+                let didInitiate = self.presentationChildren.withLock { entries in
                     // initiated == false means AttachWindow did not run.
                     if let i = entries.firstIndex(where: { $0.controller === child }),
                        !entries[i].initiated {
@@ -1074,12 +1079,12 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                     return false
                 }
                 if didInitiate {
-                    child.onAuxiliarySessionInitiated()
+                    child.onPresentationChildSessionInitiated()
                 }
             }
         } else {
             attachWindow?(nil)
-            let didInitiate = self.auxChildWindows.withLock { entries in
+            let didInitiate = self.presentationChildren.withLock { entries in
                 if let i = entries.firstIndex(where: { $0.controller === child }) {
                     entries[i].isOverlay = true
                     entries[i].initiated = true
@@ -1088,13 +1093,13 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                 return false
             }
             if didInitiate {
-                child.onAuxiliarySessionInitiated()
+                child.onPresentationChildSessionInitiated()
             }
         }
     }
 
-    func removeAuxiliary(child: AuxiliaryWindowController) {
-        let removed = self.auxChildWindows.withLock { entries -> AuxiliaryWindowController? in
+    func removePresentationChild(child: PresentationChildWindowController) {
+        let removed = self.presentationChildren.withLock { entries -> PresentationChildWindowController? in
             guard let i = entries.firstIndex(where: { $0.controller === child }) else {
                 return nil
             }
@@ -1106,8 +1111,8 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         viewChangedWhileDrawing = true
     }
 
-    func updateAuxiliary(child: AuxiliaryWindowController, frame: CGRect?) {
-        self.auxChildWindows.withLock { entries in
+    func updatePresentationChild(child: PresentationChildWindowController, frame: CGRect?) {
+        self.presentationChildren.withLock { entries in
             if let i = entries.firstIndex(where: { $0.controller === child }) {
                 entries[i].frame = frame
             }
@@ -1115,8 +1120,8 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         viewChangedWhileDrawing = true
     }
 
-    func dismissAllAuxiliaryWindows() {
-        let children = self.auxChildWindows.withLock { entries in
+    func dismissAllPresentationChildren() {
+        let children = self.presentationChildren.withLock { entries in
             defer { entries.removeAll() }
             return entries.map(\.controller)
         }

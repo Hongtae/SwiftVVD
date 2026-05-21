@@ -158,7 +158,7 @@ final class AppKitWindow: Window {
             styleMask.insert(.borderless)
             styleMask.insert(.nonactivatingPanel)
             windowType = NSPanel.self
-        } else if style.contains(.auxiliaryWindow) {
+        } else if style.contains(.utilityWindow) {
             styleMask.insert(.utilityWindow)
             windowType = NSPanel.self
         }
@@ -192,7 +192,7 @@ final class AppKitWindow: Window {
         }
         if isPopupWindow {
             window.level = .init(rawValue: Int(CGWindowLevelForKey(.popUpMenuWindow)))
-        } else if style.contains(.auxiliaryWindow) {
+        } else if style.contains(.utilityWindow) {
             window.level = .init(rawValue: Int(CGWindowLevelForKey(.utilityWindow)))
         }
         

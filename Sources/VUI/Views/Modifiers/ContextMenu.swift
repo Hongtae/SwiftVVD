@@ -164,7 +164,7 @@ final class ContextMenuResponder: ViewResponder {
         }
         graph.inbox.drain()
         graph.drainActions()
-        parent.dismissAllAuxiliaryWindows()
+        parent.dismissAllPresentationChildren()
         let session = ContextMenuPresentationSession()
         let actions = ContextMenuPopupActions()
         let liveContentSubgraph = AGSubgraph()
@@ -191,7 +191,7 @@ final class ContextMenuResponder: ViewResponder {
             self?.activeSession = nil
         }
         activeSession = session
-        let usesPlatformWindow = environment.value.auxiliaryWindowUsingPlatformWindow
+        let usesPlatformWindow = environment.value.presentationChildUsingPlatformWindow
         let ctrl = ContextMenuWindowController(crossGraphContent: contentAttr,
                                                sourceGraph: graph,
                                                scene: parent.scene,
@@ -208,8 +208,8 @@ final class ContextMenuResponder: ViewResponder {
         actions.dismiss = { [weak session] in
             session?.dismissAll()
         }
-        parent.addAuxiliary(child: ctrl) { [weak ctrl] attach in
-            ctrl?.resolveAuxiliaryWindowAttachment(attach)
+        parent.addPresentationChild(child: ctrl) { [weak ctrl] attach in
+            ctrl?.resolvePresentationWindowAttachment(attach)
         }
     }
 
@@ -295,7 +295,11 @@ private final class ContextMenuPopupActions {
     var dismiss: (() -> Void)?
 }
 
-final class ContextMenuWindowController: AuxiliaryWindowController, @unchecked Sendable {
+// Context menus are popup presentation children, not a separate window family.
+// PopupWindowController supplies the .popupWindow style plus parent
+// deactivate/move dismissal policy; this subclass only owns menu-session state,
+// submenu fan-out, and context-menu-specific teardown.
+final class ContextMenuWindowController: PopupWindowController, @unchecked Sendable {
     private let usesPlatformWindowForSubmenus: Bool
     private let menuSession: ContextMenuPresentationSession
     private var openedSubmenuID: AnyHashable?
@@ -313,8 +317,6 @@ final class ContextMenuWindowController: AuxiliaryWindowController, @unchecked S
                    sourceGraph: sourceGraph,
                    scene: scene,
                    usesPlatformWindow: usesPlatformWindow,
-                   isPopupWindow: true,
-                   dismissOnDeactivated: true,
                    frameInParent: frame)
     }
 
@@ -322,7 +324,7 @@ final class ContextMenuWindowController: AuxiliaryWindowController, @unchecked S
         guard item.isEnabled, !item.children.isEmpty else { return }
         guard openedSubmenuID != item.id else { return }
         openedSubmenuID = item.id
-        dismissAllAuxiliaryWindows()
+        dismissAllPresentationChildren()
 
         let actions = ContextMenuPopupActions()
         let contentAttr: Attribute<AnyView> = viewGraph.data.withCurrent {
@@ -349,14 +351,14 @@ final class ContextMenuWindowController: AuxiliaryWindowController, @unchecked S
         actions.dismiss = { [weak menuSession] in
             menuSession?.dismissAll()
         }
-        addAuxiliary(child: child) { [weak child] attach in
-            child?.resolveAuxiliaryWindowAttachment(attach)
+        addPresentationChild(child: child) { [weak child] attach in
+            child?.resolvePresentationWindowAttachment(attach)
         }
     }
 
     func closeSubmenus() {
         openedSubmenuID = nil
-        dismissAllAuxiliaryWindows()
+        dismissAllPresentationChildren()
     }
 
     override func endPresentationSession() {
@@ -366,11 +368,7 @@ final class ContextMenuWindowController: AuxiliaryWindowController, @unchecked S
         }
     }
 
-    override func onParentWindowMoved() {
-        dismiss()
-    }
-
-    override func onAuxiliaryWindowInactivated() {
+    override func onPresentationChildWindowInactivated() {
         dismiss()
     }
 }

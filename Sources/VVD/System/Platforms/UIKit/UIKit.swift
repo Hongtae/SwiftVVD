@@ -24,7 +24,7 @@ public struct PlatformFactoryUIKit: PlatformFactory {
     }
 
     public func supportedWindowStyles(_ style: WindowStyle) -> WindowStyle {
-        let supported: WindowStyle = [.autoResize, .auxiliaryWindow]
+        let supported: WindowStyle = [.autoResize, .utilityWindow]
         return style.intersection(supported)
     }
 }
