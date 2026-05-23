@@ -154,6 +154,7 @@ struct PlatformItemList {
         var children: [Item]
         var selectionBehavior: SelectionBehavior?
         var secondaryNavigationBehavior: SecondaryNavigationBehavior?
+        var presentationRole: PresentationRole?
 
         enum SelectionBehavior: Sendable {
             case none
@@ -163,6 +164,11 @@ struct PlatformItemList {
         enum SecondaryNavigationBehavior: Sendable {
             case none
             case submenu
+        }
+
+        // Titled Section materializes a header-like nil-action row between separators.
+        enum PresentationRole: Sendable {
+            case sectionHeader
         }
 
         init(id: AnyHashable = UUID(),
@@ -175,7 +181,8 @@ struct PlatformItemList {
              systemItem: SystemItem? = nil,
              children: [Item] = [],
              selectionBehavior: SelectionBehavior? = nil,
-             secondaryNavigationBehavior: SecondaryNavigationBehavior? = nil) {
+             secondaryNavigationBehavior: SecondaryNavigationBehavior? = nil,
+             presentationRole: PresentationRole? = nil) {
             self.id = id
             self.label = label
             self.image = image
@@ -187,6 +194,7 @@ struct PlatformItemList {
             self.children = children
             self.selectionBehavior = selectionBehavior
             self.secondaryNavigationBehavior = secondaryNavigationBehavior
+            self.presentationRole = presentationRole
         }
 
         init(systemItem: SystemItem) {

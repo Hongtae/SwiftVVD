@@ -8,6 +8,75 @@
 import Foundation
 import VVD
 
+enum PresentationAvailableFrameSpace {
+    // Overlay presentations are clipped by the render surface that owns them.
+    case parentSurface
+
+    // Platform popup/menu presentations should eventually use the current
+    // display work-area from VVD. This currently falls back to parentSurface
+    // until that backend display-geometry interface is designed.
+    case platformVisibleScreen
+}
+
+extension WindowController {
+    func availableFrameForPresentation(_ space: PresentationAvailableFrameSpace) -> CGRect? {
+        runOnMainQueueSync {
+            presentationAvailableFrame(for: self, in: space)
+        }
+    }
+}
+
+@MainActor
+private func presentationAvailableFrame(for controller: WindowController,
+                                        in space: PresentationAvailableFrameSpace) -> CGRect? {
+    switch space {
+    case .parentSurface:
+        return presentationHostSurfaceFrame(for: controller)
+
+    case .platformVisibleScreen:
+        // TODO: Replace this with the current display/work-area rect after the
+        // cross-platform window-display geometry API is settled.
+        // This is the handoff point for platform popup edge placement.
+        return presentationHostSurfaceFrame(for: controller)
+    }
+}
+
+@MainActor
+private func presentationHostSurfaceFrame(for controller: WindowController) -> CGRect? {
+    if let child = controller as? PresentationChildWindowController {
+        if let platformWindow = child.window {
+            return presentationContentSurfaceFrame(for: platformWindow,
+                                                   preferredSize: child.cachedContentSize)
+        }
+        if let parent = child.parentWindow {
+            return presentationHostSurfaceFrame(for: parent)
+        }
+        return nil
+    }
+    guard let platformWindow = controller.window else { return nil }
+    return presentationContentSurfaceFrame(for: platformWindow,
+                                           preferredSize: controller.cachedContentSize)
+}
+
+@MainActor
+private func presentationContentSurfaceFrame(for window: any PlatformWindow,
+                                             preferredSize: CGSize) -> CGRect {
+    let size: CGSize
+    if preferredSize.width > 0 && preferredSize.height > 0 {
+        size = preferredSize
+    } else if window.contentSize.width > 0 && window.contentSize.height > 0 {
+        size = window.contentSize
+    } else {
+        size = window.contentBounds.standardized.size
+    }
+    let p0 = window.convertPointToScreen(.zero)
+    let p1 = window.convertPointToScreen(CGPoint(x: size.width, y: size.height))
+    return CGRect(x: min(p0.x, p1.x),
+                  y: min(p0.y, p1.y),
+                  width: abs(p1.x - p0.x),
+                  height: abs(p1.y - p0.y))
+}
+
 // Shared base for parent-owned presentation child windows.
 //
 // This is the common path for transient children that are owned by another
@@ -87,6 +156,31 @@ class PresentationChildWindowController: WindowController, @unchecked Sendable {
     private func platformOrigin(for origin: CGPoint) -> CGPoint {
         guard let parentWindow = parentWindow?.window else { return origin }
         return parentWindow.convertPointToScreen(origin)
+    }
+
+    func screenPoint(forLocalPoint point: CGPoint) -> CGPoint {
+        runOnMainQueueSync {
+            if let platformWindow = window {
+                return platformWindow.convertPointToScreen(point)
+            }
+            let pointInParent = point + frameInParent.origin
+            if let parentChild = parentWindow as? PresentationChildWindowController {
+                return parentChild.screenPoint(forLocalPoint: pointInParent)
+            }
+            if let parentWindow = parentWindow?.window {
+                return parentWindow.convertPointToScreen(pointInParent)
+            }
+            return pointInParent
+        }
+    }
+
+    func screenRect(forLocalRect rect: CGRect) -> CGRect {
+        let p0 = screenPoint(forLocalPoint: rect.origin)
+        let p1 = screenPoint(forLocalPoint: CGPoint(x: rect.maxX, y: rect.maxY))
+        return CGRect(x: min(p0.x, p1.x),
+                      y: min(p0.y, p1.y),
+                      width: abs(p1.x - p0.x),
+                      height: abs(p1.y - p0.y))
     }
 
     override func onViewLayoutUpdated() {

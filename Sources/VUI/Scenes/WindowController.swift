@@ -634,6 +634,10 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                 event,
                 viewGraph: self.viewGraph,
                 rootResponder: rootResponder,
+                scheduleLongPress: { [weak self] sessionID, delay in
+                    self?.scheduleContextMenuLongPress(sessionID: sessionID,
+                                                       delay: delay)
+                },
                 open: { [weak self] responder, location in
                     guard let self else { return }
                     responder.present(from: self, at: location)
@@ -761,6 +765,35 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
             $0.onPresentationChildWindowInactivated()
         }
         return false
+    }
+
+    private func scheduleContextMenuLongPress(sessionID: UInt64,
+                                              delay: TimeInterval) {
+        let nanoseconds = UInt64(max(0, delay) * 1_000_000_000)
+        Log.debug("[ContextMenuRecognizer] schedule longPress id=\(sessionID) delay=\(delay)")
+        Task.detached(priority: .userInitiated) { [weak self] in
+            try? await Task.sleep(nanoseconds: nanoseconds)
+            Log.debug("[ContextMenuRecognizer] timer fired id=\(sessionID)")
+            self?.enqueueInputAction { [weak self] in
+                Log.debug("[ContextMenuRecognizer] timer action draining id=\(sessionID)")
+                guard let self,
+                      let gg = self.gestureGraph,
+                      let rootResponder = gg.rootResponder else {
+                    Log.debug("[ContextMenuRecognizer] timer action missing graph/responder id=\(sessionID)")
+                    return
+                }
+                let opened = self.contextMenuRecognizer.fireLongPress(
+                    sessionID: sessionID,
+                    viewGraph: self.viewGraph,
+                    rootResponder: rootResponder,
+                    open: { [weak self] responder, location in
+                        guard let self else { return }
+                        responder.present(from: self, at: location)
+                    }
+                )
+                Log.debug("[ContextMenuRecognizer] timer action result id=\(sessionID) opened=\(opened)")
+            }
+        }
     }
 
     @discardableResult
@@ -926,6 +959,11 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     }
 
     func resetGestureHandlers() {
+        resetGestureHandlers(reason: "unspecified")
+    }
+
+    private func resetGestureHandlers(reason: String) {
+        Log.debug("[ContextMenuRecognizer] resetGestureHandlers reason=\(reason)")
         endAllHoverResponders()
         gestureGraph?.resetEvents()
         contextMenuRecognizer.reset()
@@ -1234,7 +1272,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                     child.onModalSessionInitiated()
                 }
                 if result.initiated {
-                    self.resetGestureHandlers()
+                    self.resetGestureHandlers(reason: "modal session initiated")
                     self.handleMouseHover(at: .zero, deviceID: 0, isTopMost: false)
                 }
             }
@@ -1248,7 +1286,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                 }
             }
             child.onModalSessionInitiated()
-            self.resetGestureHandlers()
+            self.resetGestureHandlers(reason: "modal overlay initiated")
             self.handleMouseHover(at: .zero, deviceID: 0, isTopMost: false)
         }
     }

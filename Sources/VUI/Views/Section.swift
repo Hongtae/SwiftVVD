@@ -68,7 +68,8 @@ extension Section: View where Parent: View, Content: View, Footer: View {
                     label: AnyView(headerAttr.value),
                     action: nil,
                     role: nil,
-                    isEnabled: true
+                    isEnabled: true,
+                    presentationRole: .sectionHeader
                 ))
             }
             list.merge(contentListAttr.value)
