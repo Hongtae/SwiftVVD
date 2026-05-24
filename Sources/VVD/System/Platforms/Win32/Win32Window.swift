@@ -695,6 +695,14 @@ final class Win32Window: Window {
         return CGPoint(x: Int(pt.x), y: Int(pt.y)) * (1.0 / self.contentScaleFactor)
     }
 
+    var screen: (any Screen)? {
+        if let hWnd {
+            let monitor = MonitorFromWindow(hWnd, DWORD(MONITOR_DEFAULTTONULL))
+            return Win32Screen(monitor)
+        }
+        return nil
+    }
+
     var canPresentModalWindow: Bool {
         hWnd != nil
     }

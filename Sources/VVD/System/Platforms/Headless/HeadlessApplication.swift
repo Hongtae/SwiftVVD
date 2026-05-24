@@ -47,4 +47,7 @@ final class HeadlessApplication: Application, @unchecked Sendable {
 
     private init() {
     }
+
+    var screens: [any Screen] { [] }
+    var mainScreen: (any Screen)? { nil }
 }

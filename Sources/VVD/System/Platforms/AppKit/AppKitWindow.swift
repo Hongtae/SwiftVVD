@@ -423,6 +423,13 @@ final class AppKitWindow: Window {
         Log.err("Window.dismissModalWindow failed: invalid window.")
         return false
     }
+
+    var screen: (any Screen)? {
+        if let screen = window?.screen {
+            return AppKitScreen(screen)
+        }
+        return nil
+    }
 }
 
 #endif //if ENABLE_APPKIT

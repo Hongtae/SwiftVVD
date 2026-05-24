@@ -126,6 +126,14 @@ final class UIKitApplication: Application, @unchecked Sendable {
         self.shared = nil
         return 0
     }
+
+    var screens: [any Screen] {
+        UIScreen.screens.map { UIKitScreen($0) }
+    }
+
+    var mainScreen: (any Screen)? {
+        UIKitScreen(UIScreen.main)
+    }
 }
 
 #endif //if ENABLE_UIKIT

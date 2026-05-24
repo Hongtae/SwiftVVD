@@ -81,6 +81,15 @@ final class Win32Application: Application, @unchecked Sendable {
         Self.isActive
     }
 
+    var screens: [any Screen] {
+        Win32Screen.allScreens()
+    }
+
+    var mainScreen: (any Screen)? {
+        let screens = Win32Screen.allScreens()
+        return screens.first { $0.isPrimary } ?? screens.first
+    }
+
     static func run(delegate: ApplicationDelegate?) -> Int{
         precondition(Thread.isMainThread, "\(#function) must be called on the main thread.")
 

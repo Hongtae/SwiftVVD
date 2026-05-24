@@ -2,7 +2,7 @@
 //  File: Application.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 public protocol Application: AnyObject {
@@ -10,6 +10,9 @@ public protocol Application: AnyObject {
     var isActive: Bool { get }
     func terminate(exitCode: Int)
     @MainActor static func run(delegate: ApplicationDelegate?) -> Int
+
+    var screens: [any Screen] { get }
+    var mainScreen: (any Screen)? { get }
 }
 
 public protocol ApplicationDelegate: AnyObject {

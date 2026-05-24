@@ -471,6 +471,13 @@ final class WaylandWindow: Window {
         let offset = self.windowFrame.origin + self.contentBounds.origin
         return point - offset
     }
+
+    var screen: (any Screen)? {
+        // Wayland does not expose toplevel window positions, so the current
+        // output cannot be matched exactly. Use the best output metadata known
+        // to the application for fullscreen sizing and scale-dependent layout.
+        WaylandApplication.shared?.screen(matchingScaleFactor: self.contentScaleFactor)
+    }
 }
 
 #endif //if ENABLE_WAYLAND

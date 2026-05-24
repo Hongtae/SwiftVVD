@@ -64,6 +64,16 @@ final class UIKitWindow: Window {
         set { uiView?.window?.rootViewController?.title = newValue }
     }
 
+    var screen: (any Screen)? {
+        if let screen = window?.windowScene?.screen {
+            return UIKitScreen(screen)
+        }
+        if let screen = window?.screen {
+            return UIKitScreen(screen)
+        }
+        return nil
+    }
+
     var delegate: WindowDelegate?
     
     var platformHandle: OpaquePointer? {

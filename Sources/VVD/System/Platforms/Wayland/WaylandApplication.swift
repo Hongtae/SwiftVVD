@@ -21,6 +21,34 @@ private let BTN_BACK		= 0x116
 private let BTN_TASK		= 0x117
 
 nonisolated(unsafe)
+private var outputListener = wl_output_listener(
+    geometry: { data, output, x, y, _, _, _, _, _, _ in
+        let app = unsafeBitCast(data, to: AnyObject.self) as! WaylandApplication
+        app.outputGeometry(output, x: x, y: y)
+    },
+    mode: { data, output, flags, width, height, _ in
+        let app = unsafeBitCast(data, to: AnyObject.self) as! WaylandApplication
+        app.outputMode(output, flags: flags, width: width, height: height)
+    },
+    done: { data, output in
+        let app = unsafeBitCast(data, to: AnyObject.self) as! WaylandApplication
+        app.outputDone(output)
+    },
+    scale: { data, output, factor in
+        let app = unsafeBitCast(data, to: AnyObject.self) as! WaylandApplication
+        app.outputScale(output, factor: factor)
+    },
+    name: { data, output, name in
+        let app = unsafeBitCast(data, to: AnyObject.self) as! WaylandApplication
+        app.outputName(output, name: name)
+    },
+    description: { data, output, description in
+        let app = unsafeBitCast(data, to: AnyObject.self) as! WaylandApplication
+        app.outputDescription(output, description: description)
+    }
+)
+
+nonisolated(unsafe)
 private var registryListener = wl_registry_listener(
     global: { data, registry, name, interface, version in
         let app = unsafeBitCast(data, to: AnyObject.self) as! WaylandApplication
@@ -54,8 +82,17 @@ private var registryListener = wl_registry_listener(
             app.seat = .init(seat)
             wl_seat_add_listener(app.seat, &seatListener, data)
         }
+        else if strcmp(interface!, wl_output_interface.name) == 0 {
+            let output = wl_registry_bind(registry, name, wl_output_interface_ptr, min(version, 4))
+            app.bindOutput(name: name, output: .init(output))
+            if let output = app.output(forName: name) {
+                wl_output_add_listener(output, &outputListener, data)
+            }
+        }
     },
     global_remove: { (data, registry, name) in
+        let app = unsafeBitCast(data, to: AnyObject.self) as! WaylandApplication
+        app.removeOutput(name: name)
         Log.debug("wl_registry_listener.global_remove (name: \(String(describing: name)))")
     }
 )
@@ -185,6 +222,8 @@ private var keyboardListener = wl_keyboard_listener(
 
 final class WaylandApplication: Application, @unchecked Sendable {
 
+    private let outputModeCurrentFlag: UInt32 = 0x1
+
     var activationPolicy: ActivationPolicy = .regular
     var isActive: Bool {
         activeWindow != nil
@@ -255,6 +294,122 @@ final class WaylandApplication: Application, @unchecked Sendable {
 
     typealias WeakWindow = WeakObject<WaylandWindow>
     private var windowSurfaceMap: [OpaquePointer: WeakWindow] = [:]
+
+    private struct OutputInfo {
+        let registryName: UInt32
+        var output: OpaquePointer?
+        var origin: CGPoint = .zero
+        var scaleFactor: CGFloat = 1
+        var displayModeResolution: CGSize = .zero
+        var name: String?
+        var description: String?
+
+        var screen: WaylandScreen? {
+            guard displayModeResolution.width > 0,
+                  displayModeResolution.height > 0 else {
+                return nil
+            }
+
+            let scale = max(scaleFactor, 1)
+            let frame = CGRect(x: origin.x,
+                               y: origin.y,
+                               width: displayModeResolution.width / scale,
+                               height: displayModeResolution.height / scale)
+            return WaylandScreen(id: ScreenID(rawValue: UInt64(registryName)),
+                                 frame: frame,
+                                 scaleFactor: scale,
+                                 displayModeResolution: displayModeResolution)
+        }
+    }
+
+    private var outputMap: [UInt32: OutputInfo] = [:]
+    private var outputNameMap: [OpaquePointer: UInt32] = [:]
+
+    var screens: [any Screen] {
+        screenSnapshots()
+    }
+
+    var mainScreen: (any Screen)? {
+        screenSnapshots().first
+    }
+
+    private func screenSnapshots() -> [WaylandScreen] {
+        outputMap.values
+            .sorted { $0.registryName < $1.registryName }
+            .compactMap(\.screen)
+    }
+
+    func screen(matchingScaleFactor scaleFactor: CGFloat) -> WaylandScreen? {
+        let screens = screenSnapshots()
+        return screens.first { abs($0.scaleFactor - scaleFactor) < CGFloat.ulpOfOne } ?? screens.first
+    }
+
+    func bindOutput(name: UInt32, output: OpaquePointer?) {
+        guard let output else { return }
+        outputMap[name] = OutputInfo(registryName: name, output: output)
+        outputNameMap[output] = name
+    }
+
+    func output(forName name: UInt32) -> OpaquePointer? {
+        outputMap[name]?.output
+    }
+
+    func removeOutput(name: UInt32) {
+        guard let info = outputMap.removeValue(forKey: name) else {
+            return
+        }
+        if let output = info.output {
+            outputNameMap[output] = nil
+            wl_output_destroy(output)
+        }
+    }
+
+    private func updateOutput(_ output: OpaquePointer?, _ update: (inout OutputInfo) -> Void) {
+        guard let output,
+              let name = outputNameMap[output],
+              var info = outputMap[name] else {
+            return
+        }
+        update(&info)
+        outputMap[name] = info
+    }
+
+    func outputGeometry(_ output: OpaquePointer?, x: Int32, y: Int32) {
+        updateOutput(output) {
+            // Wayland does not expose toplevel window positions. Output geometry
+            // is only an approximate global frame for fullscreen/screen metadata.
+            $0.origin = CGPoint(x: Int(x), y: Int(y))
+        }
+    }
+
+    func outputMode(_ output: OpaquePointer?, flags: UInt32, width: Int32, height: Int32) {
+        updateOutput(output) {
+            if flags & outputModeCurrentFlag != 0 || $0.displayModeResolution == .zero {
+                $0.displayModeResolution = CGSize(width: Int(width), height: Int(height))
+            }
+        }
+    }
+
+    func outputDone(_ output: OpaquePointer?) {
+    }
+
+    func outputScale(_ output: OpaquePointer?, factor: Int32) {
+        updateOutput(output) {
+            $0.scaleFactor = CGFloat(max(factor, 1))
+        }
+    }
+
+    func outputName(_ output: OpaquePointer?, name: UnsafePointer<CChar>?) {
+        updateOutput(output) {
+            $0.name = name.map { String(cString: $0) }
+        }
+    }
+
+    func outputDescription(_ output: OpaquePointer?, description: UnsafePointer<CChar>?) {
+        updateOutput(output) {
+            $0.description = description.map { String(cString: $0) }
+        }
+    }
 
     func bindSurface(_ surface: OpaquePointer?, with window: WaylandWindow) {
         if let surface = surface {
@@ -329,6 +484,11 @@ final class WaylandApplication: Application, @unchecked Sendable {
         if activationManager != nil { xdg_activation_v1_destroy(activationManager) }
         if fractionalScaleManager != nil { wp_fractional_scale_manager_v1_destroy(fractionalScaleManager) }
         if decorationManager != nil { zxdg_decoration_manager_v1_destroy(decorationManager) }
+        outputMap.values.forEach {
+            if let output = $0.output {
+                wl_output_destroy(output)
+            }
+        }
         if shell != nil { xdg_wm_base_destroy(shell) }
 
         if compositor != nil { wl_compositor_destroy(compositor) }

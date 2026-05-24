@@ -2,7 +2,7 @@
 //  File: AppKitApplication.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_APPKIT
@@ -105,6 +105,17 @@ final class AppKitApplication: Application, @unchecked Sendable {
 
         self.shared = nil
         return app.exitCode
+    }
+
+    var screens: [any Screen] {
+        NSScreen.screens.map { AppKitScreen($0) }
+    }
+
+    var mainScreen: (any Screen)? {
+        if let screen = NSScreen.main {
+            return AppKitScreen(screen)
+        }
+        return nil
     }
 }
 

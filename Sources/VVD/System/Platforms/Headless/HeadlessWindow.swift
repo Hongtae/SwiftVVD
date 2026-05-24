@@ -23,6 +23,8 @@ final class HeadlessWindow: Window {
     
     var title: String
 
+    var screen: (any Screen)? { nil }
+
     weak var delegate: WindowDelegate?
 
     var platformHandle: OpaquePointer? { nil }

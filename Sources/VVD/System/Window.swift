@@ -197,6 +197,11 @@ public protocol Window: AnyObject {
     func convertPointToScreen(_: CGPoint) -> CGPoint
     func convertPointFromScreen(_: CGPoint) -> CGPoint
 
+    // The screen containing most of the window.
+    // Returns nil if the window is completely offscreen,
+    // or if no platform window/screen is available.
+    var screen: (any Screen)? { get }
+
     var canPresentModalWindow: Bool { get }
     var modalWindows: [any Window] { get }
     @discardableResult
