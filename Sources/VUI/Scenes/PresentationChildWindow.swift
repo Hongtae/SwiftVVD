@@ -12,9 +12,8 @@ enum PresentationAvailableFrameSpace {
     // Overlay presentations are clipped by the render surface that owns them.
     case parentSurface
 
-    // Platform popup/menu presentations should eventually use the current
-    // display work-area from VVD. This currently falls back to parentSurface
-    // until that backend display-geometry interface is designed.
+    // Platform popup/menu presentations use the current display's visible
+    // frame so reserved system UI such as taskbars is avoided.
     case platformVisibleScreen
 }
 
@@ -34,11 +33,24 @@ private func presentationAvailableFrame(for controller: WindowController,
         return presentationHostSurfaceFrame(for: controller)
 
     case .platformVisibleScreen:
-        // TODO: Replace this with the current display/work-area rect after the
-        // cross-platform window-display geometry API is settled.
-        // This is the handoff point for platform popup edge placement.
-        return presentationHostSurfaceFrame(for: controller)
+        return presentationHostVisibleFrame(for: controller) ??
+            presentationHostSurfaceFrame(for: controller)
     }
+}
+
+@MainActor
+private func presentationHostVisibleFrame(for controller: WindowController) -> CGRect? {
+    if let child = controller as? PresentationChildWindowController {
+        if let platformWindow = child.window {
+            return platformWindow.screen?.visibleFrame
+        }
+        if let parent = child.parentWindow {
+            return presentationHostVisibleFrame(for: parent)
+        }
+        return nil
+    }
+    guard let platformWindow = controller.window else { return nil }
+    return platformWindow.screen?.visibleFrame
 }
 
 @MainActor
