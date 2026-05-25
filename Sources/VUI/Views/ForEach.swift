@@ -165,13 +165,13 @@ struct ForEachList<Data, ID, Content>: ViewList
         transform: _ViewList_TemporarySublistTransform,
         to: (inout Int, _ViewList_IteratorStyle, _ViewList_Node, _ViewList_TemporarySublistTransform) -> Bool
     ) -> Bool {
-        for (offset, id) in state.order.enumerated() {
+        for id in state.order {
             guard let item = state.items[id] else { continue }
             if from > 0 { from -= 1; continue }
             let sublist = _ViewList_Sublist(
-                start: offset,
+                start: 0,
                 count: 1,
-                id: _ViewList_ID(implicitID: 0),
+                id: _ViewList_ID(explicitID: id),
                 elements: item.elements,
                 traits: item.traits,
                 list: list

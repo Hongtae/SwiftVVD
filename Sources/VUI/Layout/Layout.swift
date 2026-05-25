@@ -324,14 +324,19 @@ private struct DynamicContainerInfo: StatefulRule {
                 let reusableItem = info.item(for: id).flatMap { existing in
                     existing.viewCount == viewCount ? existing : nil
                 }
-                let item = reusableItem ?? makeItem(
-                    uniqueId: id,
-                    viewCount: viewCount,
-                    sublist: sublist,
-                    offset: offset,
-                    capturedInputs: capturedInputs,
-                    graph: graph
-                )
+                let item: DynamicContainer.ItemInfo?
+                if let reusableItem {
+                    item = reusableItem
+                } else {
+                    item = makeItem(
+                        uniqueId: id,
+                        viewCount: viewCount,
+                        sublist: sublist,
+                        offset: offset,
+                        capturedInputs: capturedInputs,
+                        graph: graph
+                    )
+                }
                 if let item {
                     // Item depth is driven by view-level zIndex. displayMap stores
                     // UInt32 item indexes sorted by that depth.
@@ -514,14 +519,14 @@ private struct DynamicLayoutComputer<L: Layout>: StatefulRule {
 /// so `Attribute<K.Value>` is correctly typed at call time.
 private func _makeDynReduceAttr<K: PreferenceKey>(
     _ keyType: K.Type,
-    nodeListAttr: Attribute<[AGAttribute]>,
+    nodeListAttr: Attribute<[AGWeakAttribute]>,
     in graph: AttributeGraph
 ) -> AGAttribute {
     let attr: Attribute<K.Value> = graph.makeRule {
         let nodes = nodeListAttr.value          // registers dep on the ID list
         var combined = K.defaultValue
-        for nodeID in nodes {
-            let val = Attribute<K.Value>(nodeID).value  // registers dep on each child
+        for weakNode in nodes where weakNode.isValid(in: graph) {
+            let val = Attribute<K.Value>(weakNode.toStrong()).value  // registers dep on each child
             K.reduce(value: &combined) { val }
         }
         return combined
@@ -703,11 +708,13 @@ extension Layout {
             // then collects the ordered per-child preference node IDs.
             var dynMergedPreferences = PreferencesOutputs()
             for keyType in inputs.preferences.keys.keys {
-                let nodeListAttr: Attribute<[AGAttribute]> = graph.makeRule {
+                let nodeListAttr: Attribute<[AGWeakAttribute]> = graph.makeRule {
                     let info = containerInfoAttr.value
                     return info.activeItems.flatMap { item in
                         item.preferenceOutputs.flatMap { preferences in
-                            preferences.values(for: keyType)
+                            preferences.values(for: keyType).compactMap {
+                                graph.weakAttributeIfValid(for: $0)
+                            }
                         }
                     }
                 }

@@ -5,6 +5,7 @@
 //  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
+import Foundation
 import Synchronization
 
 // Single-threaded design: no internal synchronization.
@@ -68,6 +69,10 @@ struct AGAttribute: Hashable, CustomDebugStringConvertible, Sendable {
     /// The ObjectIdentifier of the AttributeGraph that owns this attribute.
     /// Set at creation time (makeInput/makeRule). Used to detect cross-graph access.
     private let _owningGraphID: ObjectIdentifier
+    /// The generation seed of the slot when this strong handle was created.
+    /// This catches stale strong handles when a removed slot is reused for a new node.
+    private let _seedAtCreation: UInt32
+    fileprivate var _debugSeedAtCreation: UInt32 { _seedAtCreation }
     fileprivate func _debugValidate() {
         guard let graph = AttributeGraph.current else {
             fatalError("AGAttribute(\(rawValue)) accessed outside an active AttributeGraph context.")
@@ -79,10 +84,18 @@ struct AGAttribute: Hashable, CustomDebugStringConvertible, Sendable {
                 "Use the owning graph's cachedValue(for:) for cross-graph reads."
             )
         }
+        guard graph._isValid(index: rawValue, seed: _seedAtCreation) else {
+            let state = graph._debugSlotStateDescription(at: rawValue)
+            fatalError(
+                "AGAttribute(\(rawValue)) is stale or invalid in its owning AttributeGraph " +
+                "(createdSeed=\(_seedAtCreation), \(state))."
+            )
+        }
     }
-    init(rawValue: UInt32, owningGraph: ObjectIdentifier) {
+    init(rawValue: UInt32, owningGraph: ObjectIdentifier, seed: UInt32) {
         self.rawValue = rawValue
         self._owningGraphID = owningGraph
+        self._seedAtCreation = seed
     }
 
     // AGAttribute.== is a same-graph comparison by contract. Cross-graph collections
@@ -108,6 +121,10 @@ struct AGAttribute: Hashable, CustomDebugStringConvertible, Sendable {
         }
 #if DEBUG
         self._owningGraphID = ObjectIdentifier(graph)
+        guard let seed = graph._seedIfPresent(at: rawValue) else {
+            fatalError("AGAttribute(\(rawValue)) created for a slot outside the current AttributeGraph.")
+        }
+        self._seedAtCreation = seed
 #endif
     }
 
@@ -152,7 +169,7 @@ struct AGWeakAttribute: Hashable, Sendable {
 
     func toStrong() -> AGAttribute {
 #if DEBUG
-        AGAttribute(rawValue: identifier, owningGraph: _owningGraphID)
+        AGAttribute(rawValue: identifier, owningGraph: _owningGraphID, seed: seed)
 #else
         AGAttribute(rawValue: identifier)
 #endif
@@ -319,12 +336,16 @@ final class AGSubgraph: @unchecked Sendable {
         guard graph === self.graph else {
             fatalError("AGSubgraph.invalidate() called from a different AttributeGraph than the one that owns this subgraph.")
         }
+
         children.forEach {
-            $0.invalidate() 
-            $0.parent = nil 
+            $0.invalidate()
+            $0.parent = nil
         }
         children.removeAll()
-        nodes.forEach { graph.removeNode($0) }
+
+        nodes.forEach {
+            graph.removeNode($0)
+        }
         nodes.removeAll()
     }
 
@@ -489,6 +510,11 @@ class AttributeGraph: @unchecked Sendable {
     private var freeList: [UInt32] = []
     // Cache for KeyPath-derived child nodes
     private var pathIDs: [RelativePath: UInt32] = [:]
+#if DEBUG
+    private var removedNodeTombstones: [UInt32: RemovedNodeTombstone] = [:]
+    private var removedNodeTombstoneOrder: [UInt32] = []
+    private let removedNodeTombstoneLimit = 4096
+#endif
 
     // MARK: Stored Properties
 
@@ -526,15 +552,49 @@ class AttributeGraph: @unchecked Sendable {
         slots[Int(index)].seed
     }
 
+    fileprivate func _seedIfPresent(at index: UInt32) -> UInt32? {
+        let i = Int(index)
+        guard i < slots.count else { return nil }
+        return slots[i].seed
+    }
+
     fileprivate func _isValid(index: UInt32, seed: UInt32) -> Bool {
         let i = Int(index)
         guard i < slots.count else { return false }
         return slots[i].seed == seed && slots[i].node != nil
     }
 
+    func weakAttributeIfValid(for id: AGAttribute) -> AGWeakAttribute? {
+        let index = Int(id.rawValue)
+        guard index < slots.count else { return nil }
+#if DEBUG
+        guard _isValid(index: id.rawValue, seed: id._debugSeedAtCreation) else { return nil }
+        return AGWeakAttribute(identifier: id.rawValue,
+                               seed: id._debugSeedAtCreation,
+                               owningGraph: ObjectIdentifier(self))
+#else
+        guard slots[index].node != nil else { return nil }
+        return AGWeakAttribute(identifier: id.rawValue, seed: slots[index].seed)
+#endif
+    }
+
+#if DEBUG
+    fileprivate func _debugSlotStateDescription(at index: UInt32) -> String {
+        let i = Int(index)
+        guard i < slots.count else { return "slot=missing, slots.count=\(slots.count)" }
+        return "currentSeed=\(slots[i].seed), nodeExists=\(slots[i].node != nil), inFreeList=\(freeList.contains(index))"
+    }
+#endif
+
     private func allocateSlot() -> UInt32 {
         if let index = freeList.popLast() {
             // Reuse freed slot (seed was already incremented on removal)
+#if DEBUG
+            if _attributeGraphRecordRemovalTombstones {
+                removedNodeTombstones.removeValue(forKey: index)
+                removedNodeTombstoneOrder.removeAll { $0 == index }
+            }
+#endif
             return index
         }
         let index = UInt32(slots.count)
@@ -699,9 +759,9 @@ class AttributeGraph: @unchecked Sendable {
                 hasDeadEntries = true
                 continue
             }
-            let targetID = AGAttribute(rawValue: entry.targetNodeID)
+            let targetNodeID = entry.targetNodeID
             targetGraph.inbox.enqueue { [weak targetGraph] in
-                targetGraph?.markNeedsEvaluation(targetID)
+                targetGraph?.markNeedsEvaluation(AGAttribute(rawValue: targetNodeID))
             }
         }
         if hasDeadEntries {
@@ -748,9 +808,12 @@ class AttributeGraph: @unchecked Sendable {
     func removeNode(_ id: AGAttribute) {
         assert(AttributeGraph.current === self)
         let index = Int(id.rawValue)
-        guard slots[index].node != nil else {
+        guard let removingNode = slots[index].node else {
             fatalError("removeNode called on @\(id.rawValue) which does not exist. double-remove is a usage error.")
         }
+#if DEBUG
+        recordRemovedNodeTombstone(id: id, node: removingNode)
+#endif
 
         // 1. Break input connections (removes this node from its inputs' output sets)
         clearInputs(for: id, includingStatic: true)
@@ -806,7 +869,6 @@ class AttributeGraph: @unchecked Sendable {
             guard node.value != nil else {
                 fatalError("AttributeGraph: cycle detected at @\(id.rawValue) with no cached value. Call setValue(_:) on this attribute before it is first read to provide a fallback.")
             }
-            print("AttributeGraph: cycle detected at @\(id.rawValue), returning stale cached value.")
         }
 
         let shouldEvaluate = node.needsEvaluation && !node.isEvaluating
@@ -939,17 +1001,28 @@ class AttributeGraph: @unchecked Sendable {
         // so that cascading setValue calls (from inside the side-effect rule) create their
         // own BFS + evaluation chain without interfering with the current traversal.
         var queue: [UInt32] = [startID.rawValue]
+        var visited: Set<UInt32> = []
         var sideEffects: [UInt32] = []
+        var sideEffectSet: Set<UInt32> = []
         var i = 0
         while i < queue.count {
-            let index = Int(queue[i]); i += 1
+            let rawID = queue[i]; i += 1
+            guard visited.insert(rawID).inserted else { continue }
+            let index = Int(rawID)
             guard var node = slots[index].node else { continue }  // freed slot, skip
-            guard !node.needsEvaluation else { continue }          // already marked, stop propagation
-            node.needsEvaluation = true
-            slots[index].node = node
-            if node.kind.isSideEffect {
-                sideEffects.append(UInt32(index))
+            if !node.needsEvaluation {
+                node.needsEvaluation = true
+                slots[index].node = node
             }
+            if node.kind.isSideEffect {
+                if sideEffectSet.insert(UInt32(index)).inserted {
+                    sideEffects.append(UInt32(index))
+                }
+            }
+            // Even when a node is already dirty, keep walking its outputs.
+            // Structural updates can leave intermediate preference/layout nodes
+            // dirty; later source changes still need to reach side-effect refresh
+            // rules that may have been evaluated and cleared in the meantime.
             queue.append(contentsOf: node.outputs)
             // Propagate to cross-graph mirror nodes watching this node.
             notifyCrossGraphObservers(for: UInt32(index))
@@ -1175,3 +1248,109 @@ func AGMakeUniqueID() -> Int {
     let (old, _) = _agUniqueIDCounter.add(1, ordering: .relaxed)
     return old
 }
+
+#if DEBUG
+// MARK: - Removal Tombstone Debugging
+
+// Opt-in diagnostics for bugs where an AGAttribute outlives its node removal
+// or a removed slot is reused before a stale strong handle is read. The usual
+// symptom is an "AGAttribute(...) is stale or invalid" / "Invalid AGAttribute"
+// fatal near a structural update such as conditional rows, ForEach removal, or
+// preference-node invalidation.
+//
+// Run with VUI_AG_RECORD_REMOVAL_TOMBSTONES=1 to retain recently removed node
+// metadata: old/new seed, node kind, cached value type, dependency edges, and
+// currentlyEvaluating at removal time. This does not print logs; inspect it
+// from the debugger. Add VUI_AG_RECORD_REMOVAL_STACKS=1 only when the removal
+// stack is needed. Thread.callStackSymbols is expensive enough to add visible
+// latency when many nodes are removed in one structural update; it caused the
+// context-menu live-refresh count-6 stall after the "Removed Live" row dropped.
+// If a similar stall appears only with stack collection enabled, suspect this
+// instrumentation first. Keep stack capture off by default.
+//
+private let _attributeGraphRecordRemovalTombstones =
+    ProcessInfo.processInfo.environment["VUI_AG_RECORD_REMOVAL_TOMBSTONES"] == "1"
+private let _attributeGraphRecordRemovalStacks =
+    _attributeGraphRecordRemovalTombstones &&
+    ProcessInfo.processInfo.environment["VUI_AG_RECORD_REMOVAL_STACKS"] == "1"
+
+extension AttributeGraph {
+    struct RemovedNodeTombstone: Sendable {
+        let seedBeforeRemoval: UInt32
+        let seedAfterRemoval: UInt32
+        let kindDescription: String
+        let valueTypeDescription: String
+        let inputs: Set<UInt32>
+        let outputs: Set<UInt32>
+        let staticInputs: Set<UInt32>
+        let currentlyEvaluating: UInt32?
+        let stack: [String]?
+    }
+
+    var debugRecordsRemovedNodeTombstones: Bool {
+        _attributeGraphRecordRemovalTombstones
+    }
+
+    func debugRemovedNodeTombstone(for id: AGAttribute) -> RemovedNodeTombstone? {
+        debugRemovedNodeTombstone(forRawValue: id.rawValue)
+    }
+
+    func debugRemovedNodeTombstone(forRawValue rawValue: UInt32) -> RemovedNodeTombstone? {
+        removedNodeTombstones[rawValue]
+    }
+
+    func debugRemovedNodeTombstonesSnapshot() -> [UInt32: RemovedNodeTombstone] {
+        removedNodeTombstones
+    }
+
+    private func recordRemovedNodeTombstone(id: AGAttribute, node: Node) {
+        guard _attributeGraphRecordRemovalTombstones else { return }
+        let seedBeforeRemoval = slots[Int(id.rawValue)].seed
+        let tombstone = RemovedNodeTombstone(
+            seedBeforeRemoval: seedBeforeRemoval,
+            seedAfterRemoval: seedBeforeRemoval &+ 1,
+            kindDescription: debugDescription(for: node.kind),
+            valueTypeDescription: debugValueTypeDescription(for: node.value),
+            inputs: node.inputs,
+            outputs: node.outputs,
+            staticInputs: node.staticInputs,
+            currentlyEvaluating: AttributeGraph.currentlyEvaluatingNode?.rawValue,
+            stack: _attributeGraphRecordRemovalStacks ? Thread.callStackSymbols : nil
+        )
+        removedNodeTombstones[id.rawValue] = tombstone
+        removedNodeTombstoneOrder.removeAll { $0 == id.rawValue }
+        removedNodeTombstoneOrder.append(id.rawValue)
+        while removedNodeTombstoneOrder.count > removedNodeTombstoneLimit {
+            let expiredID = removedNodeTombstoneOrder.removeFirst()
+            removedNodeTombstones.removeValue(forKey: expiredID)
+        }
+    }
+
+    private func debugDescription(for kind: NodeKind) -> String {
+        switch kind {
+        case .input:
+            return "input"
+        case .rule(_, let isSideEffect):
+            return isSideEffect ? "sideEffectRule" : "rule"
+        case .stateful(let box):
+            return "stateful(\(String(describing: type(of: box))))"
+        case .keyPath(let parent, let keyPath):
+            return "keyPath(parent: @\(parent.rawValue), keyPath: \(keyPath))"
+        case .crossGraphRef(let sourceAttr, let sourceGraphRef):
+            return "crossGraphRef(source: @\(sourceAttr.rawValue), sourceGraphAlive: \(sourceGraphRef.value != nil))"
+        case .indirect(let target):
+            return "indirect(target: \(debugAttributeDescription(target)))"
+        }
+    }
+
+    private func debugValueTypeDescription(for value: Any?) -> String {
+        guard let value else { return "nil" }
+        return String(describing: type(of: value))
+    }
+
+    private func debugAttributeDescription(_ id: AGAttribute?) -> String {
+        if let id { return "@\(id.rawValue)" }
+        return "nil"
+    }
+}
+#endif

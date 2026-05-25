@@ -246,7 +246,7 @@ public extension EnvironmentValues {
     }
 }
 
-private final class ContextMenuPresentationSession {
+final class ContextMenuPresentationSession {
     weak var root: ContextMenuWindowController?
     var onFinish: (() -> Void)?
     private weak var sourceGraph: AttributeGraph?
@@ -297,14 +297,14 @@ private final class ContextMenuPresentationSession {
     }
 }
 
-private final class ContextMenuPopupActions {
+final class ContextMenuPopupActions {
     var openSubmenu: ((PlatformItemList.Item, CGPoint) -> Void)?
     var closeSubmenus: (() -> Void)?
     var dismiss: (() -> Void)?
 }
 
-private struct ContextMenuSubmenuPlacement {
-    var rightOrigin: CGPoint
+struct ContextMenuSubmenuPlacement {
+    var fallbackRightOrigin: CGPoint
 }
 
 // Context menus are popup presentation children, not a separate window family.
@@ -315,25 +315,23 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
     private let contentAttr: Attribute<AnyView>
     private weak var contentSourceGraph: AttributeGraph?
     private let popupActions: ContextMenuPopupActions
-    private let usesPlatformWindowForSubmenus: Bool
     private let menuSession: ContextMenuPresentationSession
     private let submenuPlacement: ContextMenuSubmenuPlacement?
     private var menuItems: [PlatformItemList.Item]
     private var openedSubmenuID: AnyHashable?
     private weak var openedSubmenu: ContextMenuWindowController?
 
-    fileprivate init(crossGraphContent contentAttr: Attribute<AnyView>,
-                     sourceGraph: AttributeGraph,
-                     scene: WindowKey,
-                     anchor: CGPoint,
-                     items: [PlatformItemList.Item],
-                     actions: ContextMenuPopupActions,
-                     usesPlatformWindow: Bool,
-                     session: ContextMenuPresentationSession,
-                     submenuPlacement: ContextMenuSubmenuPlacement? = nil) {
+    init(crossGraphContent contentAttr: Attribute<AnyView>,
+         sourceGraph: AttributeGraph,
+         scene: WindowKey,
+         anchor: CGPoint,
+         items: [PlatformItemList.Item],
+         actions: ContextMenuPopupActions,
+         usesPlatformWindow: Bool,
+         session: ContextMenuPresentationSession,
+         submenuPlacement: ContextMenuSubmenuPlacement? = nil) {
         self.contentAttr = contentAttr
         self.popupActions = actions
-        self.usesPlatformWindowForSubmenus = usesPlatformWindow
         self.menuSession = session
         self.submenuPlacement = submenuPlacement
         self.menuItems = items
@@ -369,9 +367,9 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
                                                 anchor: origin,
                                                 items: item.children,
                                                 actions: actions,
-                                                usesPlatformWindow: usesPlatformWindowForSubmenus,
+                                                usesPlatformWindow: prefersPlatformWindowPresentation,
                                                 session: menuSession,
-                                                submenuPlacement: ContextMenuSubmenuPlacement(rightOrigin: origin))
+                                                submenuPlacement: ContextMenuSubmenuPlacement(fallbackRightOrigin: origin))
         openedSubmenu = child
         actions.openSubmenu = { [weak child] item, origin in
             child?.openSubmenu(item, at: origin)
@@ -391,23 +389,52 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
         guard let submenuPlacement else {
             return super.presentationFrame(forContentSize: size)
         }
-        let rightFrame = CGRect(origin: submenuPlacement.rightOrigin, size: size)
+        let rightOrigin = rightSubmenuOrigin(for: submenuPlacement)
+        let rightFrame = CGRect(origin: rightOrigin, size: size)
         let leftFrame = CGRect(origin: CGPoint(x: contextMenuPopupSubmenuOverlap - size.width,
-                                               y: submenuPlacement.rightOrigin.y),
+                                               y: rightOrigin.y),
                                size: size)
-        guard let available = availableScreenFrameForParent(),
-              let rightScreenFrame = screenRectInParentCoordinates(rightFrame),
-              let leftScreenFrame = screenRectInParentCoordinates(leftFrame) else {
+        guard let available = availableFrameForPresentationPlacement(),
+              let rightComparisonFrame = comparisonFrameForPresentationPlacement(rightFrame),
+              let leftComparisonFrame = comparisonFrameForPresentationPlacement(leftFrame) else {
             return rightFrame
         }
-        let rightOverflow = max(0, rightScreenFrame.maxX - available.maxX)
-        let leftOverflow = max(0, available.minX - leftScreenFrame.minX)
-        // Flip a right-edge submenu to the left while keeping a small overlap
-        // between root and submenu popup windows.
-        if rightOverflow > 0 && leftOverflow <= rightOverflow {
-            return leftFrame
+        let rightOverflow = max(0, rightComparisonFrame.maxX - available.maxX)
+        let leftOverflow = max(0, available.minX - leftComparisonFrame.minX)
+        let fittedFrame: CGRect
+        let fittedComparisonFrame: CGRect
+        // Keep the right side preferred, flip only when the left side has enough
+        // room, and otherwise choose the side with more available horizontal room.
+        // Increase overlap only by the missing amount.
+        if rightOverflow == 0 {
+            fittedFrame = rightFrame
+            fittedComparisonFrame = rightComparisonFrame
+        } else if leftOverflow == 0 {
+            fittedFrame = leftFrame
+            fittedComparisonFrame = leftComparisonFrame
+        } else if rightOverflow <= leftOverflow {
+            fittedFrame = rightFrame.offsetBy(dx: -rightOverflow, dy: 0)
+            fittedComparisonFrame = rightComparisonFrame.offsetBy(dx: -rightOverflow, dy: 0)
+        } else {
+            fittedFrame = leftFrame.offsetBy(dx: leftOverflow, dy: 0)
+            fittedComparisonFrame = leftComparisonFrame.offsetBy(dx: leftOverflow, dy: 0)
         }
-        return rightFrame
+        return frameByFittingPresentationFrame(fittedFrame,
+                                               comparisonFrame: fittedComparisonFrame,
+                                               availableFrame: available,
+                                               axes: .vertical)
+    }
+
+    private func rightSubmenuOrigin(for placement: ContextMenuSubmenuPlacement) -> CGPoint {
+        let fallback = placement.fallbackRightOrigin
+        guard let parentWidth = parentWindow?.cachedContentSize.width,
+              parentWidth > 0 else {
+            return fallback
+        }
+        // Use the laid-out parent popup width because shortcut/title columns
+        // resolve after the row callback's provisional origin is built.
+        return CGPoint(x: parentWidth - contextMenuPopupSubmenuOverlap,
+                       y: fallback.y)
     }
 
     // Keep already-open child popups in step with the in-place root item-list
@@ -443,31 +470,6 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
         openedSubmenu?.replaceMenuItems(item.children)
     }
 
-    private func screenRectInParentCoordinates(_ rect: CGRect) -> CGRect? {
-        runOnMainQueueSync {
-            if let parentChild = parentWindow as? PresentationChildWindowController {
-                return parentChild.screenRect(forLocalRect: rect)
-            }
-            guard let parentWindow = parentWindow?.window else {
-                return nil
-            }
-            let p0 = parentWindow.convertPointToScreen(rect.origin)
-            let p1 = parentWindow.convertPointToScreen(CGPoint(x: rect.maxX, y: rect.maxY))
-            return CGRect(x: min(p0.x, p1.x),
-                          y: min(p0.y, p1.y),
-                          width: abs(p1.x - p0.x),
-                          height: abs(p1.y - p0.y))
-        }
-    }
-
-    private func availableScreenFrameForParent() -> CGRect? {
-        runOnMainQueueSync {
-            let space: PresentationAvailableFrameSpace = usesPlatformWindowForSubmenus
-                ? .platformVisibleScreen
-                : .parentSurface
-            return parentWindow?.availableFrameForPresentation(space)
-        }
-    }
 
     override func endPresentationSession() {
         super.endPresentationSession()
@@ -493,14 +495,21 @@ extension EnvironmentValues {
 }
 
 private let contextMenuPopupPanelPadding: CGFloat = 5
-private let contextMenuPopupRowMinWidth: CGFloat = 210
+// TODO: replace this stale fixed minimum with title-driven row sizing.
+private let contextMenuPopupRowMinWidth: CGFloat = 81
 private let contextMenuPopupRowHeight: CGFloat = 24
+// Separator rows allocate space separately from the visible hairline.
 private let contextMenuPopupDividerHeight: CGFloat = 11
+private let contextMenuPopupDividerLineHeight: CGFloat = 0.5
+private let contextMenuPopupDividerHorizontalInset: CGFloat = 16
 private let contextMenuPopupSubmenuOverlap: CGFloat = 5
 // AppKit-backed menu items expose separate state/image/shortcut/submenu slots.
 private let contextMenuPopupRowHorizontalPadding: CGFloat = 6
 private let contextMenuPopupAccessorySpacing: CGFloat = 2
-private let contextMenuPopupAccessoryTitleSpacing: CGFloat = 5
+// State-only groups reserve only the checkmark column plus a small title gap,
+// while an image column reserves a wider native slot than the glyph itself.
+private let contextMenuPopupStateTitleSpacing: CGFloat = 4
+private let contextMenuPopupImageTitleSpacing: CGFloat = 24
 private let contextMenuPopupCheckmarkWidth: CGFloat = 12
 private let contextMenuPopupImageWidth: CGFloat = 16
 private let contextMenuPopupShortcutMinWidth: CGFloat = 34
@@ -574,6 +583,67 @@ private struct ContextMenuCheckmarkShape: Shape {
     }
 }
 
+private struct ContextMenuDividerShape: Shape {
+    func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
+        let size = proposal.replacingUnspecifiedDimensions(
+            by: CGSize(width: 10, height: contextMenuPopupDividerHeight)
+        )
+        return CGSize(width: max(0, size.width),
+                      height: max(0, size.height))
+    }
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let lineHeight = min(contextMenuPopupDividerLineHeight, rect.height)
+        let y = rect.midY - lineHeight * 0.5
+        let lineRect = CGRect(
+            x: rect.minX + contextMenuPopupDividerHorizontalInset,
+            y: y,
+            width: max(0, rect.width - contextMenuPopupDividerHorizontalInset * 2),
+            height: lineHeight
+        )
+        path.addRect(lineRect)
+        return path
+    }
+}
+
+// Separator items share the popup's resolved menu width even when their own
+// content is only a hairline.
+private struct ContextMenuPopupColumnLayout: Layout {
+    typealias AnimatableData = EmptyAnimatableData
+
+    func sizeThatFits(proposal: ProposedViewSize,
+                      subviews: Subviews,
+                      cache: inout ()) -> CGSize {
+        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
+        let intrinsicWidth = sizes.map(\.width).reduce(0, max)
+        let width: CGFloat
+        if let proposedWidth = proposal.width, proposedWidth.isFinite {
+            width = max(proposedWidth, intrinsicWidth)
+        } else {
+            width = intrinsicWidth
+        }
+        return CGSize(width: width,
+                      height: sizes.map(\.height).reduce(0, +))
+    }
+
+    func placeSubviews(in bounds: CGRect,
+                       proposal: ProposedViewSize,
+                       subviews: Subviews,
+                       cache: inout ()) {
+        var y = bounds.minY
+        for subview in subviews {
+            let rowProposal = ProposedViewSize(width: bounds.width, height: nil)
+            let size = subview.sizeThatFits(rowProposal)
+            subview.place(at: CGPoint(x: bounds.minX, y: y),
+                          anchor: .topLeading,
+                          proposal: ProposedViewSize(width: bounds.width,
+                                                     height: size.height))
+            y += size.height
+        }
+    }
+}
+
 private struct ContextMenuSubmenuIndicatorShape: Shape {
     func path(in rect: CGRect) -> Path {
         var path = Path()
@@ -585,8 +655,8 @@ private struct ContextMenuSubmenuIndicatorShape: Shape {
     }
 }
 
-private func contextMenuPopupContent(items: [PlatformItemList.Item],
-                                     actions: ContextMenuPopupActions) -> AnyView {
+func contextMenuPopupContent(items: [PlatformItemList.Item],
+                             actions: ContextMenuPopupActions) -> AnyView {
     AnyView(ContextMenuPopupView(items: items, actions: actions))
 }
 
@@ -676,7 +746,7 @@ private struct ContextMenuPopupPanel: View {
     var body: some View {
         let renderedItems = self.renderedItems
         let rowLayouts = self.rowLayouts
-        VStack(alignment: .leading, spacing: 0) {
+        ContextMenuPopupColumnLayout {
             ForEach(renderedItems) { item in
                 ContextMenuPopupRow(item: item,
                                     layout: rowLayouts[item.id] ?? .empty,
@@ -704,7 +774,6 @@ private struct ContextMenuPopupRow: View {
     let clearSubmenus: () -> Void
     @State private var isPressed = false
     @State private var isHovered = false
-    @State private var localToggleValue: Bool?
 
     private var hasSubmenu: Bool {
         item.secondaryNavigationBehavior == .submenu && !item.children.isEmpty
@@ -716,9 +785,15 @@ private struct ContextMenuPopupRow: View {
 
     private var isToggleOn: Bool {
         if case let .toggle(value)? = item.selectionBehavior {
-            return localToggleValue ?? value
+            return value
         }
         return false
+    }
+
+    private var accessoryTitleSpacing: CGFloat {
+        layout.showsImageColumn
+            ? contextMenuPopupImageTitleSpacing
+            : contextMenuPopupStateTitleSpacing
     }
 
     private var shortcutLabel: String? {
@@ -736,11 +811,13 @@ private struct ContextMenuPopupRow: View {
     }
 
     private var rowForeground: Color {
-        if isSectionHeader {
-            return .secondary
-        }
         if isHighlighted {
             return .white
+        }
+        if isSectionHeader || !item.isEnabled {
+            // Static Text/Label menu rows are disabled platform items and render
+            // with disabled foreground, not a normal actionable-row foreground.
+            return .secondary
         }
         return .primary
     }
@@ -754,26 +831,20 @@ private struct ContextMenuPopupRow: View {
 
     var body: some View {
         if item.systemItem != nil {
-            Divider()
-                .frame(height: 1)
+            ContextMenuDividerShape()
+                .fill(Color(.sRGB, white: 0, opacity: 0.13))
+                .frame(height: contextMenuPopupDividerHeight)
                 .frame(minWidth: contextMenuPopupRowMinWidth)
-                .padding(.vertical, 5)
         } else {
             HStack(spacing: 0) {
                 if layout.showsStateColumn || layout.showsImageColumn {
                     HStack(spacing: contextMenuPopupAccessorySpacing) {
                         if layout.showsStateColumn {
-                            Group {
-                                if isToggleOn {
-                                    ContextMenuCheckmarkShape()
-                                        .stroke(rowForeground,
-                                                style: StrokeStyle(lineWidth: 1.6,
-                                                                   lineCap: .round,
-                                                                   lineJoin: .round))
-                                } else {
-                                    Color.clear
-                                }
-                            }
+                            ContextMenuCheckmarkShape()
+                                .stroke(isToggleOn ? rowForeground : .clear,
+                                        style: StrokeStyle(lineWidth: 1.6,
+                                                           lineCap: .round,
+                                                           lineJoin: .round))
                             .frame(width: contextMenuPopupCheckmarkWidth,
                                    height: contextMenuPopupCheckmarkWidth,
                                    alignment: .center)
@@ -791,7 +862,7 @@ private struct ContextMenuPopupRow: View {
                             }
                         }
                     }
-                    .padding(.trailing, contextMenuPopupAccessoryTitleSpacing)
+                    .padding(.trailing, accessoryTitleSpacing)
                 }
                 item.label
                     .fixedSize(horizontal: true, vertical: false)
@@ -819,7 +890,6 @@ private struct ContextMenuPopupRow: View {
                    alignment: .leading)
             .foregroundStyle(rowForeground)
             .background(rowBackground, in: RoundedRectangle(cornerRadius: 4))
-            .opacity(item.isEnabled ? 1.0 : 0.45)
             ._onButtonGesture(pressing: { pressing in
                 guard !isSectionHeader else {
                     isPressed = false
@@ -838,9 +908,6 @@ private struct ContextMenuPopupRow: View {
                 }
                 clearSubmenus()
                 guard let action = item.action else { return }
-                if case .toggle? = item.selectionBehavior {
-                    localToggleValue = !isToggleOn
-                }
                 action()
                 dismiss()
             })

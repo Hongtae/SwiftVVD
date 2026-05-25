@@ -84,8 +84,8 @@ extension GestureState where Value: ExpressibleByNilLiteral {
 
 extension GestureState: @unchecked Sendable where Value: Sendable {}
 
-// _makeProperty — wires GestureState into the AG graph.
-// Mirrors State._makeProperty: creates an AG input node backed by a FunctionalLocation,
+// _makeProperty wires GestureState into the AG graph.
+// Creates an AG input node backed by a FunctionalLocation,
 // then patches the GestureState struct inside the DynamicProperty buffer so that
 // wrappedValue reads/writes go through the AG node.
 extension GestureState {
@@ -135,7 +135,9 @@ extension GestureState {
                 set: { newValue, _ in
                     cache.value = newValue
                     let box = MutableBox(newValue)
-                    inbox.enqueue { attr.setValue(box.value) }
+                    inbox.enqueue {
+                        attr.setValue(box.value)
+                    }
                 }
             ))
             mountedLocation.value = location
@@ -227,7 +229,7 @@ public struct GestureStateGesture<Base, State>: Gesture where Base: Gesture {
                 location?.setValue(resetValue, transaction: tx)
 
             case .possible:
-                // Not yet active — nothing to do.
+                // Not yet active, nothing to do.
                 break
             }
         }

@@ -69,8 +69,11 @@ func platformItemListRenderOnlyInputs(_ inputs: _ViewInputs) -> _ViewInputs {
 struct PlatformItemListGenerator<Flags: PlatformItemListFlags, Content: View>: StatefulRule {
     typealias Value = PlatformItemList
 
-    // PlatformItemList.Key preference attribute IDs from Content._makeView subgraph.
-    let preferenceNodes: [AGAttribute]
+    // PlatformItemList.Key preference attributes from Content._makeView subgraph.
+    // Dynamic menu content can remove branch subgraphs while an open menu is
+    // refreshing. Keep weak AG references so removed branch preference nodes are
+    // ignored instead of being read after their slots are freed.
+    let preferenceNodes: [WeakAttribute<PlatformItemList>]
     // Cached item list from the most recent update.
     var itemList: Optional<PlatformItemList>
 
@@ -107,7 +110,9 @@ struct PlatformItemListGenerator<Flags: PlatformItemListFlags, Content: View>: S
         }
         let view = _GraphValue<Content>(_attribute: content)
         let outputs = Content._makeView(view: view, inputs: itemInputs)
-        self.preferenceNodes = outputs.preferences.values(for: PlatformItemList.Key.self)
+        self.preferenceNodes = outputs.preferences
+            .values(for: PlatformItemList.Key.self)
+            .map { Attribute<PlatformItemList>($0).asWeak() }
         self.itemList = nil
     }
 
@@ -118,9 +123,12 @@ struct PlatformItemListGenerator<Flags: PlatformItemListFlags, Content: View>: S
     }
 
     mutating func updateValue() {
+        guard let graph = AttributeGraph.current else {
+            fatalError("PlatformItemListGenerator.updateValue called outside AG context")
+        }
         var combined = PlatformItemList()
-        for nodeID in preferenceNodes {
-            combined.merge(Attribute<PlatformItemList>(nodeID).value)
+        for node in preferenceNodes where node.isValid(in: graph) {
+            combined.merge(node.toStrong().value)
         }
         itemList = combined
         AttributeGraph.setStatefulOutput(combined)

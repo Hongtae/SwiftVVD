@@ -10,13 +10,6 @@ import VVD
 
 private let contextMenuLongPressDelay: TimeInterval = 0.5
 private let contextMenuLongPressMovementTolerance: CGFloat = 10
-private let contextMenuRecognizerDebugLog = true
-
-private func logContextMenuRecognizer(_ message: @autoclosure () -> String) {
-    if contextMenuRecognizerDebugLog {
-        Log.debug("[ContextMenuRecognizer] \(message())")
-    }
-}
 
 struct ContextMenuRecognizer {
     private struct PendingSession {
@@ -35,9 +28,6 @@ struct ContextMenuRecognizer {
     private var modifierKeys: [VirtualKey] = []
 
     mutating func reset() {
-        if let pending {
-            logContextMenuRecognizer("reset clears pending id=\(pending.id) policy=\(pending.policy) didOpen=\(pending.didOpen)")
-        }
         pending = nil
     }
 
@@ -80,13 +70,10 @@ struct ContextMenuRecognizer {
         viewGraph.data.withCurrent {
             guard let responder = hitResponder(at: event.location,
                                                rootResponder: rootResponder) else {
-                logContextMenuRecognizer("buttonDown no responder location=\(event.location) button=\(event.buttonID) device=\(event.device)")
                 return
             }
             let policy = responder.resolvedTriggerPolicy(for: event.device)
-            logContextMenuRecognizer("buttonDown responder=\(responder.hitTestKey) policy=\(policy) location=\(event.location) button=\(event.buttonID) device=\(event.device)")
             guard canStartContextMenuSession(event, policy: policy) else {
-                logContextMenuRecognizer("buttonDown rejected policy=\(policy) button=\(event.buttonID) control=\(isControlPressed)")
                 return
             }
             switch policy {
@@ -106,7 +93,6 @@ struct ContextMenuRecognizer {
                                          currentLocation: event.location,
                                          responder: responder,
                                          policy: policy)
-                logContextMenuRecognizer("pending start id=\(sessionID) policy=\(policy) location=\(event.location)")
                 if policy == .longPress {
                     scheduleLongPress(sessionID, contextMenuLongPressDelay)
                 }
@@ -125,7 +111,6 @@ struct ContextMenuRecognizer {
               session.id == sessionID,
               session.policy == .longPress,
               !session.didOpen else {
-            logContextMenuRecognizer("fire ignored id=\(sessionID) pending=\(pending?.id.description ?? "nil")")
             return false
         }
 
@@ -133,11 +118,9 @@ struct ContextMenuRecognizer {
         viewGraph.data.withCurrent {
             guard hitResponder(at: session.currentLocation,
                                rootResponder: rootResponder) === session.responder else {
-                logContextMenuRecognizer("fire cancelled id=\(sessionID) hit-test changed location=\(session.currentLocation)")
                 pending = nil
                 return
             }
-            logContextMenuRecognizer("fire open id=\(sessionID) location=\(session.currentLocation)")
             open(session.responder, session.currentLocation)
             session.didOpen = true
             pending = session
@@ -159,13 +142,9 @@ struct ContextMenuRecognizer {
         switch event.type {
         case .move, .pointing:
             session.currentLocation = event.location
-            if event.type == .pointing {
-                logContextMenuRecognizer("pending pointing id=\(session.id) pressure=\(event.pressure) location=\(event.location)")
-            }
             if session.policy == .longPress,
                movedBeyondLongPressTolerance(from: session.startLocation,
                                              to: event.location) {
-                logContextMenuRecognizer("pending cancel moved id=\(session.id) start=\(session.startLocation) current=\(event.location)")
                 pending = nil
                 return true
             }
@@ -174,7 +153,6 @@ struct ContextMenuRecognizer {
 
         case .buttonUp:
             defer { pending = nil }
-            logContextMenuRecognizer("pending buttonUp id=\(session.id) didOpen=\(session.didOpen) policy=\(session.policy)")
             guard !session.didOpen else { return true }
             guard session.policy == .secondaryUpInside else {
                 return true
@@ -191,7 +169,6 @@ struct ContextMenuRecognizer {
             return shouldOpen
 
         default:
-            logContextMenuRecognizer("pending cancel event id=\(session.id) type=\(event.type) button=\(event.buttonID) device=\(event.device)")
             pending = nil
             return false
         }

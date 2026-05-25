@@ -131,10 +131,12 @@ struct _ViewList_IteratorStyle: Equatable {
 struct _ViewList_ID {
     struct Canonical: Hashable {
         var value: Int32
+        var explicitID: AnyHashable?
     }
 
     struct Explicit: Hashable {
         // TODO: define explicit ID storage when explicit IDs are wired.
+        var id: AnyHashable
     }
 
     var _index: Int32
@@ -148,6 +150,12 @@ struct _ViewList_ID {
         self.implicitID = Int32(implicitID)
     }
 
+    init(explicitID: AnyHashable, implicitID: Int = 0) {
+        self._index = Int32(implicitID)
+        self.implicitID = Int32(implicitID)
+        self.explicitIDs = [Explicit(id: explicitID)]
+    }
+
     func elementID(at index: Int) -> _ViewList_ID {
         // TODO: replace placeholder hash formula when explicit IDs are wired.
         var id = self
@@ -156,7 +164,10 @@ struct _ViewList_ID {
     }
 
     var canonicalID: Canonical {
-        Canonical(value: _index)
+        if let explicitID = explicitIDs.last?.id {
+            return Canonical(value: _index, explicitID: explicitID)
+        }
+        return Canonical(value: _index, explicitID: nil)
     }
 }
 

@@ -74,13 +74,23 @@ struct ResolvedLabelStyle: View {
                 .value(forKey: SourceInput<LabelStyleConfiguration.Icon>.self).top
             let itemID = PlatformItemList.stableID(view._attribute.identifier)
             let preferenceAttr: Attribute<PlatformItemList> = graph.makeRule {
-                // Static Label rows are disabled menu items, with the icon preserved
-                // as a separate image slot rather than folded into the title.
+                // Static Label rows are disabled menu items. Image icons are
+                // preserved as image slots, but Text icons become the item title.
+                let iconIsText = iconSource?.isSource(Text.self) == true
+                let label: AnyView
+                let image: AnyView?
+                if iconIsText {
+                    label = iconSource?.snapshot() ?? titleSource?.snapshot() ?? AnyView(EmptyView())
+                    image = nil
+                } else {
+                    label = titleSource?.snapshot() ?? AnyView(EmptyView())
+                    image = iconSource?.snapshot()
+                }
                 var list = PlatformItemList()
                 list.append(PlatformItemList.Item(
                     id: itemID,
-                    label: titleSource?.snapshot() ?? AnyView(EmptyView()),
-                    image: iconSource?.snapshot(),
+                    label: label,
+                    image: image,
                     action: nil,
                     role: nil,
                     isEnabled: false

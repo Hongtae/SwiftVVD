@@ -137,10 +137,11 @@ struct PreferencesOutputs {
             key: keyType,
             value: node,
             _makeReduceRule: { nodes, graph in
+                let weakNodes = nodes.compactMap { graph.weakAttributeIfValid(for: $0) }
                 let attr: Attribute<K.Value> = graph.makeRule {
                     var combined = K.defaultValue
-                    for nodeID in nodes {
-                        let val = Attribute<K.Value>(nodeID).value
+                    for weakNode in weakNodes where weakNode.isValid(in: graph) {
+                        let val = Attribute<K.Value>(weakNode.toStrong()).value
                         K.reduce(value: &combined) { val }
                     }
                     return combined
@@ -205,10 +206,11 @@ extension PreferencesInputs {
             key: K.self,
             value: indirectAttr.identifier,
             _makeReduceRule: { nodes, graph in
+                let weakNodes = nodes.compactMap { graph.weakAttributeIfValid(for: $0) }
                 let reduced: Attribute<K.Value> = graph.makeRule {
                     var combined = K.defaultValue
-                    for nodeID in nodes {
-                        let val = Attribute<K.Value>(nodeID).value
+                    for weakNode in weakNodes where weakNode.isValid(in: graph) {
+                        let val = Attribute<K.Value>(weakNode.toStrong()).value
                         K.reduce(value: &combined) { val }
                     }
                     return combined
@@ -224,10 +226,11 @@ extension PreferencesInputs {
                     let concreteKV = matches[0]
                     graph.setIndirectTarget(indirectAttr.identifier, to: concreteKV.value)
                 default:
+                    let weakMatches = matches.compactMap { graph.weakAttributeIfValid(for: $0.value) }
                     let reduced: Attribute<K.Value> = graph.makeRule {
                         var combined = K.defaultValue
-                        for concreteKV in matches {
-                            let val = Attribute<K.Value>(concreteKV.value).value
+                        for weakNode in weakMatches where weakNode.isValid(in: graph) {
+                            let val = Attribute<K.Value>(weakNode.toStrong()).value
                             K.reduce(value: &combined) { val }
                         }
                         return combined
@@ -291,12 +294,13 @@ extension PreferencesOutputs {
     ) {
         // Collect existing nodes for K from child outputs.
         let existingNodes = values(for: K.self)
+        let weakNodes = existingNodes.compactMap { graph.weakAttributeIfValid(for: $0) }
 
         // Create a new AG rule: reduce existing children, then apply transform.
         let transformedAttr: Attribute<K.Value> = graph.makeRule {
             var value = K.defaultValue
-            for nodeID in existingNodes {
-                let val = Attribute<K.Value>(nodeID).value
+            for weakNode in weakNodes where weakNode.isValid(in: graph) {
+                let val = Attribute<K.Value>(weakNode.toStrong()).value
                 K.reduce(value: &value) { val }
             }
             let transaction = transactionAttr.value

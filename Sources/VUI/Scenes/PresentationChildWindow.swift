@@ -9,12 +9,23 @@ import Foundation
 import VVD
 
 enum PresentationAvailableFrameSpace {
-    // Overlay presentations are clipped by the render surface that owns them.
-    case parentSurface
+    // Overlay presentations are clipped by the render surface that hosts them.
+    // The returned frame is in that host surface's content coordinate space.
+    case hostSurface
 
     // Platform popup/menu presentations use the current display's visible
-    // frame so reserved system UI such as taskbars is avoided.
+    // frame from VVD.Window.screen so reserved system UI such as taskbars is
+    // avoided. The returned frame is in screen-space coordinates. A nil screen
+    // falls back to the host window's content rect in screen coordinates.
     case platformVisibleScreen
+}
+
+struct PresentationFrameFitAxes: OptionSet {
+    let rawValue: UInt8
+
+    static let horizontal = PresentationFrameFitAxes(rawValue: 1 << 0)
+    static let vertical = PresentationFrameFitAxes(rawValue: 1 << 1)
+    static let all: PresentationFrameFitAxes = [.horizontal, .vertical]
 }
 
 extension WindowController {
@@ -29,28 +40,32 @@ extension WindowController {
 private func presentationAvailableFrame(for controller: WindowController,
                                         in space: PresentationAvailableFrameSpace) -> CGRect? {
     switch space {
-    case .parentSurface:
+    case .hostSurface:
         return presentationHostSurfaceFrame(for: controller)
 
     case .platformVisibleScreen:
         return presentationHostVisibleFrame(for: controller) ??
-            presentationHostSurfaceFrame(for: controller)
+            presentationHostScreenFrame(for: controller)
     }
 }
 
 @MainActor
 private func presentationHostVisibleFrame(for controller: WindowController) -> CGRect? {
+    presentationHostWindow(for: controller)?.screen?.visibleFrame
+}
+
+@MainActor
+private func presentationHostWindow(for controller: WindowController) -> (any PlatformWindow)? {
     if let child = controller as? PresentationChildWindowController {
         if let platformWindow = child.window {
-            return platformWindow.screen?.visibleFrame
+            return platformWindow
         }
         if let parent = child.parentWindow {
-            return presentationHostVisibleFrame(for: parent)
+            return presentationHostWindow(for: parent)
         }
         return nil
     }
-    guard let platformWindow = controller.window else { return nil }
-    return platformWindow.screen?.visibleFrame
+    return controller.window
 }
 
 @MainActor
@@ -71,8 +86,25 @@ private func presentationHostSurfaceFrame(for controller: WindowController) -> C
 }
 
 @MainActor
-private func presentationContentSurfaceFrame(for window: any PlatformWindow,
-                                             preferredSize: CGSize) -> CGRect {
+private func presentationHostScreenFrame(for controller: WindowController) -> CGRect? {
+    if let child = controller as? PresentationChildWindowController {
+        if let platformWindow = child.window {
+            return presentationContentScreenFrame(for: platformWindow,
+                                                  preferredSize: child.cachedContentSize)
+        }
+        if let parent = child.parentWindow {
+            return presentationHostScreenFrame(for: parent)
+        }
+        return nil
+    }
+    guard let platformWindow = controller.window else { return nil }
+    return presentationContentScreenFrame(for: platformWindow,
+                                          preferredSize: controller.cachedContentSize)
+}
+
+@MainActor
+private func presentationContentSize(for window: any PlatformWindow,
+                                     preferredSize: CGSize) -> CGSize {
     let size: CGSize
     if preferredSize.width > 0 && preferredSize.height > 0 {
         size = preferredSize
@@ -81,6 +113,22 @@ private func presentationContentSurfaceFrame(for window: any PlatformWindow,
     } else {
         size = window.contentBounds.standardized.size
     }
+    return size
+}
+
+@MainActor
+private func presentationContentSurfaceFrame(for window: any PlatformWindow,
+                                             preferredSize: CGSize) -> CGRect {
+    let size = presentationContentSize(for: window,
+                                       preferredSize: preferredSize)
+    return CGRect(origin: .zero, size: size)
+}
+
+@MainActor
+private func presentationContentScreenFrame(for window: any PlatformWindow,
+                                            preferredSize: CGSize) -> CGRect {
+    let size = presentationContentSize(for: window,
+                                       preferredSize: preferredSize)
     let p0 = window.convertPointToScreen(.zero)
     let p1 = window.convertPointToScreen(CGPoint(x: size.width, y: size.height))
     return CGRect(x: min(p0.x, p1.x),
@@ -115,6 +163,7 @@ class PresentationChildWindowController: WindowController, @unchecked Sendable {
     // while popup-like leaves can opt in without duplicating lifecycle code.
     var dismissesOnParentDeactivation: Bool { false }
     var dismissesOnParentMove: Bool { false }
+    var presentationFrameFitAxes: PresentationFrameFitAxes { [] }
 
     private let usesPlatformWindow: Bool
     private var frameInParent: CGRect
@@ -133,7 +182,98 @@ class PresentationChildWindowController: WindowController, @unchecked Sendable {
     }
 
     func presentationFrame(forContentSize size: CGSize) -> CGRect {
-        CGRect(origin: frameInParent.origin, size: size)
+        let frame = CGRect(origin: frameInParent.origin, size: size)
+        return frameByFittingPresentationFrame(frame,
+                                               axes: presentationFrameFitAxes)
+    }
+
+    var presentationAvailableFrameSpace: PresentationAvailableFrameSpace {
+        usesPlatformWindow ? .platformVisibleScreen : .hostSurface
+    }
+
+    func availableFrameForPresentationPlacement(in space: PresentationAvailableFrameSpace? = nil) -> CGRect? {
+        runOnMainQueueSync {
+            parentWindow?.availableFrameForPresentation(space ?? presentationAvailableFrameSpace)
+        }
+    }
+
+    func comparisonFrameForPresentationPlacement(_ rect: CGRect,
+                                                 in space: PresentationAvailableFrameSpace? = nil) -> CGRect? {
+        switch space ?? presentationAvailableFrameSpace {
+        case .hostSurface:
+            return hostSurfaceRectInParentCoordinates(rect)
+
+        case .platformVisibleScreen:
+            return screenRectInParentCoordinates(rect)
+        }
+    }
+
+    func frameByFittingPresentationFrame(_ frame: CGRect,
+                                         axes: PresentationFrameFitAxes) -> CGRect {
+        guard !axes.isEmpty,
+              let available = availableFrameForPresentationPlacement(),
+              let comparisonFrame = comparisonFrameForPresentationPlacement(frame) else {
+            return frame
+        }
+        return frameByFittingPresentationFrame(frame,
+                                               comparisonFrame: comparisonFrame,
+                                               availableFrame: available,
+                                               axes: axes)
+    }
+
+    func frameByFittingPresentationFrame(_ frame: CGRect,
+                                         comparisonFrame: CGRect,
+                                         availableFrame: CGRect,
+                                         axes: PresentationFrameFitAxes) -> CGRect {
+        guard !axes.isEmpty else { return frame }
+        var dx: CGFloat = 0
+        var dy: CGFloat = 0
+        if axes.contains(.horizontal) {
+            if comparisonFrame.maxX > availableFrame.maxX {
+                dx = availableFrame.maxX - comparisonFrame.maxX
+            }
+            if comparisonFrame.minX + dx < availableFrame.minX {
+                dx += availableFrame.minX - (comparisonFrame.minX + dx)
+            }
+        }
+        if axes.contains(.vertical) {
+            if comparisonFrame.maxY > availableFrame.maxY {
+                dy = availableFrame.maxY - comparisonFrame.maxY
+            }
+            if comparisonFrame.minY + dy < availableFrame.minY {
+                dy += availableFrame.minY - (comparisonFrame.minY + dy)
+            }
+        }
+        return frame.offsetBy(dx: dx, dy: dy)
+    }
+
+    private func hostSurfaceRectInParentCoordinates(_ rect: CGRect) -> CGRect? {
+        runOnMainQueueSync {
+            if let parentChild = parentWindow as? PresentationChildWindowController {
+                return parentChild.hostSurfaceRect(forLocalRect: rect)
+            }
+            guard parentWindow?.window != nil else {
+                return nil
+            }
+            return rect
+        }
+    }
+
+    private func screenRectInParentCoordinates(_ rect: CGRect) -> CGRect? {
+        runOnMainQueueSync {
+            if let parentChild = parentWindow as? PresentationChildWindowController {
+                return parentChild.screenRect(forLocalRect: rect)
+            }
+            guard let parentWindow = parentWindow?.window else {
+                return nil
+            }
+            let p0 = parentWindow.convertPointToScreen(rect.origin)
+            let p1 = parentWindow.convertPointToScreen(CGPoint(x: rect.maxX, y: rect.maxY))
+            return CGRect(x: min(p0.x, p1.x),
+                          y: min(p0.y, p1.y),
+                          width: abs(p1.x - p0.x),
+                          height: abs(p1.y - p0.y))
+        }
     }
 
     // Creates an actual platform child window when requested. If platform-window
@@ -189,6 +329,28 @@ class PresentationChildWindowController: WindowController, @unchecked Sendable {
     func screenRect(forLocalRect rect: CGRect) -> CGRect {
         let p0 = screenPoint(forLocalPoint: rect.origin)
         let p1 = screenPoint(forLocalPoint: CGPoint(x: rect.maxX, y: rect.maxY))
+        return CGRect(x: min(p0.x, p1.x),
+                      y: min(p0.y, p1.y),
+                      width: abs(p1.x - p0.x),
+                      height: abs(p1.y - p0.y))
+    }
+
+    func hostSurfacePoint(forLocalPoint point: CGPoint) -> CGPoint {
+        runOnMainQueueSync {
+            if window != nil {
+                return point
+            }
+            let pointInParent = point + frameInParent.origin
+            if let parentChild = parentWindow as? PresentationChildWindowController {
+                return parentChild.hostSurfacePoint(forLocalPoint: pointInParent)
+            }
+            return pointInParent
+        }
+    }
+
+    func hostSurfaceRect(forLocalRect rect: CGRect) -> CGRect {
+        let p0 = hostSurfacePoint(forLocalPoint: rect.origin)
+        let p1 = hostSurfacePoint(forLocalPoint: CGPoint(x: rect.maxX, y: rect.maxY))
         return CGRect(x: min(p0.x, p1.x),
                       y: min(p0.y, p1.y),
                       width: abs(p1.x - p0.x),
@@ -348,6 +510,9 @@ class PopupWindowController: PresentationChildWindowController, @unchecked Senda
     override var requiredPlatformWindowStyle: PlatformWindowStyle? { .popupWindow }
     override var dismissesOnParentDeactivation: Bool { true }
     override var dismissesOnParentMove: Bool { true }
+    // Menu-like popup windows stay inside the available host/screen frame
+    // before nested submenu edge placement is resolved.
+    override var presentationFrameFitAxes: PresentationFrameFitAxes { .all }
 }
 
 private struct PresentationChildUsingPlatformWindow: EnvironmentKey {

@@ -109,7 +109,7 @@ extension State {
             }
             // Capture the owning graph so the getter can detect cross-graph calls.
             // When a button action fires inside GestureGraph's AG context, the current
-            // AttributeGraph is GestureGraph — not the ViewGraph that owns this attr.
+            // AttributeGraph can differ from the graph that owns this attr.
             // Accessing attr.value from the wrong graph causes an index-out-of-range
             // because each AttributeGraph has its own independent nodes array.
             let owningGraph = graph
@@ -130,7 +130,9 @@ extension State {
                 set: { newValue, _ in
                     cache.value = newValue
                     let box = MutableBox(newValue)   // @unchecked Sendable for capture
-                    inbox.enqueue { attr.setValue(box.value) }
+                    inbox.enqueue {
+                        attr.setValue(box.value)
+                    }
                 }
             ))
             mountedLocation.value = location
@@ -140,4 +142,3 @@ extension State {
         }
     }
 }
-

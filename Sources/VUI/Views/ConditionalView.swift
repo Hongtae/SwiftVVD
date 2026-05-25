@@ -8,6 +8,7 @@
 // File-scope state class
 private final class _ConditionalBranchState {
     var isTrue: Bool? = nil
+    var isUpdating = false
     var activeSubgraph: AGSubgraph? = nil
     var activeLCAttr: Attribute<LayoutComputer>? = nil
     /// Full preferences output of the currently active branch's _makeView result.
@@ -62,7 +63,10 @@ extension _ConditionalContent: View where TrueContent: View, FalseContent: View 
                 fatalError("_ConditionalContent branch update evaluated outside an active AttributeGraph context.")
             }
             guard state.isTrue != nowTrue else { return }
-            state.isTrue = nowTrue
+            guard !state.isUpdating else { return }
+            state.isUpdating = true
+            state.activeLCAttr = nil
+            state.activeOutputs = nil
             state.activeSubgraph?.invalidate()
 
             let outputs: _ViewOutputs
@@ -77,6 +81,8 @@ extension _ConditionalContent: View where TrueContent: View, FalseContent: View 
             }
             state.activeLCAttr = outputs._layoutComputer.attribute
             state.activeOutputs = outputs.preferences
+            state.isTrue = nowTrue
+            state.isUpdating = false
         }
 
         // Master branch rule: detects branch changes and replaces the active subgraph.
@@ -114,7 +120,9 @@ extension _ConditionalContent: View where TrueContent: View, FalseContent: View 
                     var combined = K.defaultValue
                     for kv in prefs.preferences {
                         guard ObjectIdentifier(kv.key) == ObjectIdentifier(k) else { continue }
-                        let val = Attribute<K.Value>(kv.value).value
+                        guard let weakNode = graph.weakAttributeIfValid(for: kv.value),
+                              weakNode.isValid(in: graph) else { continue }
+                        let val = Attribute<K.Value>(weakNode.toStrong()).value
                         K.reduce(value: &combined) { val }
                     }
                     return combined

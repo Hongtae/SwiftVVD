@@ -102,6 +102,9 @@ struct AnySource {
     func snapshot() -> AnyView? {
         Self._dispatchSnapshot(formula, source: self)
     }
+    func isSource<T: View>(_ type: T.Type) -> Bool {
+        ObjectIdentifier(formula as Any.Type) == ObjectIdentifier(SourceFormula<T>.self)
+    }
 }
 
 // SourceInput<Source>: PropertyKey whose value is Stack<AnySource>.

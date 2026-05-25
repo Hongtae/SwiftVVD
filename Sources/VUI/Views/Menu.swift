@@ -5,6 +5,9 @@
 //  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
+import Foundation
+import Synchronization
+
 public struct Menu<Label, Content>: View where Label: View, Content: View {
     let label: Label
     let content: Content
@@ -160,12 +163,13 @@ struct ResolvedMenuStyle: View {
 
 extension ResolvedMenuStyle: _PrimitiveView {}
 
-struct MenuDropdownModifier<MenuContent>: ViewModifier where MenuContent: View {
+struct MenuDropdownModifier<MenuContent>: ViewModifier, MultiViewModifier where MenuContent: View {
     typealias Body = Never
     let content: MenuContent
     var onHoverChanged: ((Bool) -> Void)? = nil
     var onMenuOpenChanged: ((Bool) -> Void)? = nil
     var onPressingChanged: ((Bool) -> Void)? = nil
+    var onPresentationChanged: ((Bool) -> Void)? = nil
 }
 
 extension MenuDropdownModifier {
@@ -174,14 +178,255 @@ extension MenuDropdownModifier {
 
 extension MenuDropdownModifier {
     static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        // TODO: Requires standalone menu presentation on the auxiliary/menu path.
-        // MenuDropdownModifier wraps the label view and, on press, opens an
-        // auxiliary presentation containing the menu content.
-        // For now, pass content through unchanged so the label is still rendered.
-        body(_Graph(), inputs)
+        guard let graph = AttributeGraph.current else {
+            fatalError("MenuDropdownModifier._makeView called outside AG context")
+        }
+
+        var outputs = body(_Graph(), inputs)
+        guard inputs.preferences.keys.contains(ViewRespondersKey.self) else {
+            return outputs
+        }
+
+        let innerResponderNodes = outputs.preferences.preferences
+            .filter { $0.key == ViewRespondersKey.self }
+            .map { $0.value }
+
+        let innerRespondersAttr: Attribute<[any ViewResponder]>
+        if innerResponderNodes.isEmpty {
+            innerRespondersAttr = graph.makeInput(value: [])
+        } else if innerResponderNodes.count == 1 {
+            innerRespondersAttr = Attribute<[any ViewResponder]>(innerResponderNodes[0])
+        } else {
+            innerRespondersAttr = graph.makeRule {
+                var combined = ViewRespondersKey.defaultValue
+                for nodeID in innerResponderNodes {
+                    let value = Attribute<[any ViewResponder]>(nodeID).value
+                    ViewRespondersKey.reduce(value: &combined) { value }
+                }
+                return combined
+            }
+        }
+
+        let itemListAttr: Attribute<PlatformItemList> = graph.makeStatefulRule(
+            PlatformItemListGenerator<AllPlatformItemListFlags, MenuContent>(
+                content: modifier[\.content]._attribute,
+                inputs: inputs,
+                inputsIncludeGeometry: true
+            )
+        )
+        let environmentAttr = inputs.base.cachedEnvironment.value.environment
+        let value = modifier._attribute.value
+        let responder = MenuDropdownResponder(
+            itemList: itemListAttr,
+            environment: environmentAttr,
+            transform: inputs.transform,
+            size: inputs.size,
+            onHoverChanged: value.onHoverChanged,
+            onMenuOpenChanged: value.onMenuOpenChanged,
+            onPressingChanged: value.onPressingChanged,
+            onPresentationChanged: value.onPresentationChanged,
+            innerResponders: innerRespondersAttr.value
+        )
+        graph.makeSideEffectRule { [weak responder] in
+            guard let responder else { return }
+            let value = modifier._attribute.value
+            responder.snapshotTransform = inputs.transform.value
+            responder.snapshotSize = inputs.size.value
+            responder.snapshotIsEnabled = environmentAttr.value.isEnabled
+            responder.onHoverChanged = value.onHoverChanged
+            responder.onMenuOpenChanged = value.onMenuOpenChanged
+            responder.onPressingChanged = value.onPressingChanged
+            responder.onPresentationChanged = value.onPresentationChanged
+            responder.innerResponders = innerRespondersAttr.value
+        }
+
+        // Standalone menus install a responder trigger, while nested menus under
+        // MenuStyleContext remain PlatformItemListMenuStyle collection.
+        outputs.preferences.preferences.removeAll { $0.key == ViewRespondersKey.self }
+        let respondersAttr: Attribute<[any ViewResponder]> = graph.makeInput(value: [responder])
+        outputs.preferences.append(ViewRespondersKey.self, node: respondersAttr.identifier)
+        return outputs
     }
 
     public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        body(_Graph(), inputs)
+        guard AttributeGraph.current != nil else {
+            fatalError("MenuDropdownModifier._makeViewList called outside AG context")
+        }
+        // Keep the dropdown modifier attached when a Menu trigger is materialized
+        // as a list child, such as the arrow segment inside a primary-action HStack.
+        var outputs = body(_Graph(), inputs)
+        outputs.multiModifier(modifier, inputs: inputs)
+        return outputs
+    }
+}
+
+private let _menuDropdownResponderNextKey = Mutex<UInt32>(0x91000000)
+
+final class MenuDropdownResponder: AnyHoverResponder {
+    let hitTestKey: UInt32
+    weak var nextResponder: ResponderNode?
+    var gestureContainer: AnyObject? { nil }
+
+    let itemList: Attribute<PlatformItemList>
+    let environment: Attribute<EnvironmentValues>
+    let transform: Attribute<ViewTransform>
+    let size: Attribute<ViewSize>
+
+    var snapshotTransform: ViewTransform = .identity
+    var snapshotSize: ViewSize = .zero
+    var snapshotIsEnabled: Bool = true
+    var onHoverChanged: ((Bool) -> Void)?
+    var onMenuOpenChanged: ((Bool) -> Void)?
+    var onPressingChanged: ((Bool) -> Void)?
+    var onPresentationChanged: ((Bool) -> Void)?
+    var innerResponders: [any ViewResponder]
+
+    private var isHovered = false
+    private var isMenuOpen = false
+    private var activeSession: ContextMenuPresentationSession?
+
+    init(itemList: Attribute<PlatformItemList>,
+         environment: Attribute<EnvironmentValues>,
+         transform: Attribute<ViewTransform>,
+         size: Attribute<ViewSize>,
+         onHoverChanged: ((Bool) -> Void)?,
+         onMenuOpenChanged: ((Bool) -> Void)?,
+         onPressingChanged: ((Bool) -> Void)?,
+         onPresentationChanged: ((Bool) -> Void)?,
+         innerResponders: [any ViewResponder]) {
+        self.hitTestKey = _menuDropdownResponderNextKey.withLock { key in
+            defer { key &+= 1 }
+            return key
+        }
+        self.itemList = itemList
+        self.environment = environment
+        self.transform = transform
+        self.size = size
+        self.snapshotTransform = transform.value
+        self.snapshotSize = size.value
+        self.snapshotIsEnabled = environment.value.isEnabled
+        self.onHoverChanged = onHoverChanged
+        self.onMenuOpenChanged = onMenuOpenChanged
+        self.onPressingChanged = onPressingChanged
+        self.onPresentationChanged = onPresentationChanged
+        self.innerResponders = innerResponders
+    }
+
+    func hitTestPolicy(options: ContainsPointsOptions) -> HitTestPolicy {
+        .include
+    }
+
+    func containsGlobalPoints(_ points: [CGPoint],
+                              cacheKey: UInt32?,
+                              options: ContainsPointsOptions) -> ContainsPointsResult {
+        guard snapshotIsEnabled else { return .stop }
+        var localPts = Array(points.prefix(64))
+        snapshotTransform.convertGlobal(to: .local, points: &localPts)
+        let bounds = CGRect(origin: .zero, size: snapshotSize.value)
+        var mask: UInt64 = 0
+        for (index, point) in localPts.enumerated() {
+            if bounds.contains(point) { mask |= (1 << index) }
+        }
+        guard mask != 0 else { return .stop }
+        return ContainsPointsResult(mask: mask,
+                                    priority: 16.0,
+                                    children: innerResponders)
+    }
+
+    func updateHover(isActive newValue: Bool, point: CGPoint?) -> (() -> Void)? {
+        let active = snapshotIsEnabled && newValue
+        guard isHovered != active else { return nil }
+        isHovered = active
+        let callback = onHoverChanged
+        return { callback?(active) }
+    }
+
+    var menuIsOpen: Bool {
+        isMenuOpen
+    }
+
+    func dismissMenu() {
+        guard isMenuOpen else { return }
+        if let activeSession {
+            activeSession.dismissAll()
+        } else {
+            setMenuOpen(false)
+        }
+    }
+
+    func present(from parent: WindowController) {
+        guard snapshotIsEnabled else { return }
+        guard let graph = AttributeGraph.current else {
+            fatalError("MenuDropdownResponder.present called outside AG context")
+        }
+
+        graph.inbox.drain()
+        graph.drainActions()
+        parent.dismissAllPresentationChildren()
+
+        let session = ContextMenuPresentationSession()
+        let actions = ContextMenuPopupActions()
+        let initialItems = itemList.value.menuItems
+        let liveContentSubgraph = AGSubgraph()
+        let contentAttr: Attribute<AnyView> = AGSubgraph.$current.withValue(liveContentSubgraph) {
+            let initialContent = contextMenuPopupContent(items: initialItems,
+                                                         actions: actions)
+            let attr: Attribute<AnyView> = graph.makeInput(value: initialContent)
+            graph.makeSideEffectRule { [weak session] in
+                let items = self.itemList.value.menuItems
+                if let root = session?.root {
+                    root.replaceMenuItems(items)
+                } else {
+                    attr.setValue(contextMenuPopupContent(items: items,
+                                                           actions: actions))
+                }
+            }
+            return attr
+        }
+        _ = contentAttr.value
+        session.installLiveContent(sourceGraph: graph, subgraph: liveContentSubgraph)
+        session.onFinish = { [weak self, weak session] in
+            guard let self, self.activeSession === session else { return }
+            self.activeSession = nil
+            self.setMenuOpen(false)
+        }
+        activeSession = session
+        setMenuOpen(true)
+
+        let ctrl = ContextMenuWindowController(crossGraphContent: contentAttr,
+                                               sourceGraph: graph,
+                                               scene: parent.scene,
+                                               anchor: presentationAnchor(),
+                                               items: initialItems,
+                                               actions: actions,
+                                               usesPlatformWindow: environment.value.presentationChildUsingPlatformWindow,
+                                               session: session)
+        session.root = ctrl
+        actions.openSubmenu = { [weak ctrl] item, origin in
+            ctrl?.openSubmenu(item, at: origin)
+        }
+        actions.closeSubmenus = { [weak ctrl] in
+            ctrl?.closeSubmenus()
+        }
+        actions.dismiss = { [weak session] in
+            session?.dismissAll()
+        }
+        parent.addPresentationChild(child: ctrl) { [weak ctrl] attach in
+            ctrl?.resolvePresentationWindowAttachment(attach)
+        }
+    }
+
+    private func presentationAnchor() -> CGPoint {
+        var points = [CGPoint(x: 0, y: snapshotSize.value.height)]
+        snapshotTransform.convertGlobal(from: .local, points: &points)
+        return points[0]
+    }
+
+    private func setMenuOpen(_ open: Bool) {
+        guard isMenuOpen != open else { return }
+        isMenuOpen = open
+        onMenuOpenChanged?(open)
+        onPressingChanged?(open)
+        onPresentationChanged?(open)
     }
 }

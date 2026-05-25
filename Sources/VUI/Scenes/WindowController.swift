@@ -53,6 +53,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     // gestureGraph is owned directly by WindowController as the window-level gesture coordinator.
     var gestureGraph: GestureGraph?
     private var contextMenuRecognizer = ContextMenuRecognizer()
+    private var menuPresentationTrigger = MenuPresentationTrigger()
 
     // MARK: - Platform Event Routing
 
@@ -80,6 +81,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     // IUO because gestureGraph must be created and wired before ViewGraph.init runs _makeView.
     var viewGraph: ViewGraph { _viewGraph }
     private var _viewGraph: ViewGraph!
+    private weak var crossGraphSourceGraph: AttributeGraph?
 
     var date: Date  // render loop timing reference (animation)
 
@@ -167,6 +169,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         // which may create GestureResponders.
         // rendererHost: self must be set on GestureGraph before this call.
         self._viewGraph = ViewGraph(rootViewType: Content.self, content: contentValue, rendererHost: self)
+        self.crossGraphSourceGraph = nil
         
         // Wire ViewGraph delegate slots.
         // renderDelegate: WindowController provides contentsScale, opaqueBackground, and
@@ -208,6 +211,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
             sourceGraph: sourceGraph,
             rendererHost: self
         )
+        self.crossGraphSourceGraph = sourceGraph
         self.viewGraph.renderDelegate = self
         self.viewGraph.updateDelegate = self
     }
@@ -294,6 +298,14 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         }
     }
 
+    private func flushCrossGraphSourceIfNeeded() {
+        guard let sourceGraph = crossGraphSourceGraph else { return }
+        AttributeGraph.$current.withValue(sourceGraph) {
+            sourceGraph.inbox.drain()
+            sourceGraph.drainActions()
+        }
+    }
+
     func updateView(tick: UInt64, delta: Double, date: Date,
                     contentSize: CGSize, redraw: inout Bool,
                     _ withGC: WindowContext.WithGraphicsContext) {
@@ -339,6 +351,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
 
             // updateOutputs: flush dirty bits, @State/@Observable changes, then evaluate AG.
             // Internally: data.withCurrent, inbox.drain, updateDelegate, then timeAttr.setValue.
+            flushCrossGraphSourceIfNeeded()
             viewGraph.updateOutputs(at: time)
 
             // Resource loading: requires GraphicsContext, handled separately after updateOutputs.
@@ -630,7 +643,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                   let rootResponder = gg.rootResponder else {
                 return false
             }
-            if self.contextMenuRecognizer.handleMouseEvent(
+            let contextMenuConsumed = self.contextMenuRecognizer.handleMouseEvent(
                 event,
                 viewGraph: self.viewGraph,
                 rootResponder: rootResponder,
@@ -642,7 +655,20 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                     guard let self else { return }
                     responder.present(from: self, at: location)
                 }
-            ) {
+            )
+            if contextMenuConsumed {
+                return true
+            }
+            let menuPresentationConsumed = self.menuPresentationTrigger.handleMouseEvent(
+                event,
+                viewGraph: self.viewGraph,
+                rootResponder: rootResponder,
+                open: { [weak self] responder in
+                    guard let self else { return }
+                    responder.present(from: self)
+                }
+            )
+            if menuPresentationConsumed {
                 return true
             }
 
@@ -770,19 +796,15 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     private func scheduleContextMenuLongPress(sessionID: UInt64,
                                               delay: TimeInterval) {
         let nanoseconds = UInt64(max(0, delay) * 1_000_000_000)
-        Log.debug("[ContextMenuRecognizer] schedule longPress id=\(sessionID) delay=\(delay)")
         Task.detached(priority: .userInitiated) { [weak self] in
             try? await Task.sleep(nanoseconds: nanoseconds)
-            Log.debug("[ContextMenuRecognizer] timer fired id=\(sessionID)")
             self?.enqueueInputAction { [weak self] in
-                Log.debug("[ContextMenuRecognizer] timer action draining id=\(sessionID)")
                 guard let self,
                       let gg = self.gestureGraph,
                       let rootResponder = gg.rootResponder else {
-                    Log.debug("[ContextMenuRecognizer] timer action missing graph/responder id=\(sessionID)")
                     return
                 }
-                let opened = self.contextMenuRecognizer.fireLongPress(
+                _ = self.contextMenuRecognizer.fireLongPress(
                     sessionID: sessionID,
                     viewGraph: self.viewGraph,
                     rootResponder: rootResponder,
@@ -791,7 +813,6 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                         responder.present(from: self, at: location)
                     }
                 )
-                Log.debug("[ContextMenuRecognizer] timer action result id=\(sessionID) opened=\(opened)")
             }
         }
     }
@@ -963,10 +984,10 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     }
 
     private func resetGestureHandlers(reason: String) {
-        Log.debug("[ContextMenuRecognizer] resetGestureHandlers reason=\(reason)")
         endAllHoverResponders()
         gestureGraph?.resetEvents()
         contextMenuRecognizer.reset()
+        menuPresentationTrigger.reset()
         _touchEventIDs.removeAll()
         _mouseEventID = nil
         _spatialEventIDs.removeAll()
