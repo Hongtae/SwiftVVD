@@ -127,7 +127,7 @@ public struct KeyboardShortcut: Sendable, Hashable {
         case nil:
             var parts: [String] = []
             if modifiers.contains(.control) { parts.append("Ctrl") }
-            if modifiers.contains(.option) { parts.append("Opt") }
+            if modifiers.contains(.option) { parts.append("Alt") }
             if modifiers.contains(.shift) { parts.append("Shift") }
             if modifiers.contains(.command) { parts.append("Cmd") }
             parts.append(String(key.character).uppercased())

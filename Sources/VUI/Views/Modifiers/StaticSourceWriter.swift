@@ -102,6 +102,14 @@ struct AnySource {
     func snapshot() -> AnyView? {
         Self._dispatchSnapshot(formula, source: self)
     }
+    func snapshotValue<T: View>(as type: T.Type) -> T? {
+        guard isSource(type),
+              let graph = AttributeGraph.current,
+              value.isValid(in: graph) else {
+            return nil
+        }
+        return Attribute<T>(value.toStrong()).value
+    }
     func isSource<T: View>(_ type: T.Type) -> Bool {
         ObjectIdentifier(formula as Any.Type) == ObjectIdentifier(SourceFormula<T>.self)
     }

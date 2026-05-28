@@ -495,24 +495,42 @@ extension EnvironmentValues {
 }
 
 private let contextMenuPopupPanelPadding: CGFloat = 5
-// TODO: replace this stale fixed minimum with title-driven row sizing.
-private let contextMenuPopupRowMinWidth: CGFloat = 81
 private let contextMenuPopupRowHeight: CGFloat = 24
 // Separator rows allocate space separately from the visible hairline.
 private let contextMenuPopupDividerHeight: CGFloat = 11
-private let contextMenuPopupDividerLineHeight: CGFloat = 0.5
+private let contextMenuPopupDividerLineHeight: CGFloat = 1
 private let contextMenuPopupDividerHorizontalInset: CGFloat = 16
 private let contextMenuPopupSubmenuOverlap: CGFloat = 5
-// AppKit-backed menu items expose separate state/image/shortcut/submenu slots.
-private let contextMenuPopupRowHorizontalPadding: CGFloat = 6
-private let contextMenuPopupAccessorySpacing: CGFloat = 2
-// State-only groups reserve only the checkmark column plus a small title gap,
-// while an image column reserves a wider native slot than the glyph itself.
-private let contextMenuPopupStateTitleSpacing: CGFloat = 4
-private let contextMenuPopupImageTitleSpacing: CGFloat = 24
+// The row layout is content-driven. Coordinates below are popup-edge based and
+// are converted into row-local positions by subtracting the panel padding.
+private let contextMenuPopupEmptyTitleWidth: CGFloat = 16
+private let contextMenuPopupPlainTitleOrigin: CGFloat = 17
+private let contextMenuPopupStateTitleOrigin: CGFloat = 25
+private let contextMenuPopupImageTitleOrigin: CGFloat = 37
+private let contextMenuPopupStateImageTitleOrigin: CGFloat = 45
+private let contextMenuPopupPlainTrailingPadding: CGFloat = 17
+private let contextMenuPopupTrailingGap: CGFloat = 25.5
+private let contextMenuPopupTrailingPadding: CGFloat = 15
+private let contextMenuPopupStateSlotOrigin: CGFloat = 8
+private let contextMenuPopupImageSlotOrigin: CGFloat = 15
+private let contextMenuPopupStateImageSlotOrigin: CGFloat = 23
+private let contextMenuPopupSectionHeaderFontSize: CGFloat = 12
+private let contextMenuPopupSectionHeaderYOffset: CGFloat = 2.5
 private let contextMenuPopupCheckmarkWidth: CGFloat = 12
 private let contextMenuPopupImageWidth: CGFloat = 16
-private let contextMenuPopupShortcutMinWidth: CGFloat = 34
+private let contextMenuPopupTrailingAccessorySpacing: CGFloat = 8
+private let contextMenuPopupSubmenuIndicatorWidth: CGFloat = 5.5
+private let contextMenuPopupSubmenuIndicatorHeight: CGFloat = 9.5
+private let contextMenuPopupActionForeground = Color(.sRGB, white: 60.0 / 255.0)
+private let contextMenuPopupDisabledForeground = Color(.sRGB, white: 135.0 / 255.0)
+private let contextMenuPopupHighlightedForeground = Color(.sRGB, white: 252.0 / 255.0)
+private let contextMenuPopupHighlightBackground = Color(.sRGB,
+                                                        red: 63.0 / 255.0,
+                                                        green: 146.0 / 255.0,
+                                                        blue: 252.0 / 255.0)
+private let contextMenuPopupSeparatorColor = Color(.sRGB, white: 156.0 / 255.0)
+private let contextMenuPopupChromeFill = Color(.sRGB, white: 0.96)
+private let contextMenuPopupChromeStroke = Color(.sRGB, white: 0.62, opacity: 0.45)
 
 // The state/check column is menu-wide, while the image column resets across
 // separator-delimited groups.
@@ -644,6 +662,158 @@ private struct ContextMenuPopupColumnLayout: Layout {
     }
 }
 
+// Rows report an intrinsic content-driven width; the parent column layout then
+// proposes the resolved menu width back so trailing glyphs share one right edge.
+private struct ContextMenuPopupRowLayout: Layout {
+    typealias AnimatableData = EmptyAnimatableData
+
+    var layout: ContextMenuPopupLayout
+    var hasShortcut: Bool
+    var hasSubmenu: Bool
+    var isSectionHeader: Bool
+
+    private let stateIndex = 0
+    private let imageIndex = 1
+    private let titleIndex = 2
+    private let shortcutIndex = 3
+    private let submenuIndex = 4
+
+    private var titleOrigin: CGFloat {
+        let popupOrigin: CGFloat
+        switch (layout.showsStateColumn, layout.showsImageColumn) {
+        case (true, true):
+            popupOrigin = contextMenuPopupStateImageTitleOrigin
+        case (true, false):
+            popupOrigin = contextMenuPopupStateTitleOrigin
+        case (false, true):
+            popupOrigin = contextMenuPopupImageTitleOrigin
+        case (false, false):
+            popupOrigin = contextMenuPopupPlainTitleOrigin
+        }
+        return popupOrigin - contextMenuPopupPanelPadding
+    }
+
+    private var stateSlotOrigin: CGFloat {
+        contextMenuPopupStateSlotOrigin - contextMenuPopupPanelPadding
+    }
+
+    private var imageSlotOrigin: CGFloat {
+        let popupOrigin = layout.showsStateColumn
+            ? contextMenuPopupStateImageSlotOrigin
+            : contextMenuPopupImageSlotOrigin
+        return popupOrigin - contextMenuPopupPanelPadding
+    }
+
+    private var plainTrailingPadding: CGFloat {
+        contextMenuPopupPlainTrailingPadding - contextMenuPopupPanelPadding
+    }
+
+    private var trailingPadding: CGFloat {
+        contextMenuPopupTrailingPadding - contextMenuPopupPanelPadding
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize,
+                      subviews: Subviews,
+                      cache: inout ()) -> CGSize {
+        let intrinsic = intrinsicSize(subviews: subviews)
+        let width = proposal.width.map { proposed in
+            proposed.isFinite ? max(proposed, intrinsic.width) : intrinsic.width
+        } ?? intrinsic.width
+        return CGSize(width: width, height: contextMenuPopupRowHeight)
+    }
+
+    func placeSubviews(in bounds: CGRect,
+                       proposal: ProposedViewSize,
+                       subviews: Subviews,
+                       cache: inout ()) {
+        let midY = bounds.midY
+        if layout.showsStateColumn, subviews.indices.contains(stateIndex) {
+            subviews[stateIndex].place(
+                at: CGPoint(x: bounds.minX + stateSlotOrigin, y: midY),
+                anchor: .leading,
+                proposal: ProposedViewSize(width: contextMenuPopupCheckmarkWidth,
+                                           height: contextMenuPopupCheckmarkWidth)
+            )
+        }
+        if layout.showsImageColumn, subviews.indices.contains(imageIndex) {
+            subviews[imageIndex].place(
+                at: CGPoint(x: bounds.minX + imageSlotOrigin, y: midY),
+                anchor: .leading,
+                proposal: ProposedViewSize(width: contextMenuPopupImageWidth,
+                                           height: contextMenuPopupImageWidth)
+            )
+        }
+        if subviews.indices.contains(titleIndex) {
+            subviews[titleIndex].place(
+                at: CGPoint(x: bounds.minX + titleOrigin,
+                            y: midY + (isSectionHeader ? contextMenuPopupSectionHeaderYOffset : 0)),
+                anchor: .leading,
+                proposal: .unspecified
+            )
+        }
+
+        let trailingRight = bounds.maxX - trailingPadding
+        if hasSubmenu, subviews.indices.contains(submenuIndex) {
+            let size = subviews[submenuIndex].sizeThatFits(.unspecified)
+            subviews[submenuIndex].place(
+                at: CGPoint(x: trailingRight, y: midY),
+                anchor: .trailing,
+                proposal: ProposedViewSize(size)
+            )
+        }
+        if hasShortcut, subviews.indices.contains(shortcutIndex) {
+            let size = subviews[shortcutIndex].sizeThatFits(.unspecified)
+            let submenuWidth = hasSubmenu && subviews.indices.contains(submenuIndex)
+                ? subviews[submenuIndex].sizeThatFits(.unspecified).width
+                : 0
+            let right = trailingRight -
+                (submenuWidth > 0 ? submenuWidth + contextMenuPopupTrailingAccessorySpacing : 0)
+            subviews[shortcutIndex].place(
+                at: CGPoint(x: right, y: midY),
+                anchor: .trailing,
+                proposal: ProposedViewSize(size)
+            )
+        }
+    }
+
+    private func intrinsicSize(subviews: Subviews) -> CGSize {
+        guard subviews.indices.contains(titleIndex) else {
+            return CGSize(width: 0, height: contextMenuPopupRowHeight)
+        }
+        let titleWidth = subviews[titleIndex].sizeThatFits(.unspecified).width
+        let trailingWidth = self.trailingWidth(subviews: subviews)
+        let rowWidth: CGFloat
+        if titleWidth <= 0,
+           trailingWidth <= 0,
+           !layout.showsStateColumn,
+           !layout.showsImageColumn {
+            rowWidth = contextMenuPopupEmptyTitleWidth - contextMenuPopupPanelPadding * 2
+        } else {
+            let titleRight = titleOrigin + titleWidth
+            if trailingWidth > 0 {
+                rowWidth = titleRight + contextMenuPopupTrailingGap + trailingWidth + trailingPadding
+            } else {
+                rowWidth = titleRight + plainTrailingPadding
+            }
+        }
+        return CGSize(width: max(0, rowWidth), height: contextMenuPopupRowHeight)
+    }
+
+    private func trailingWidth(subviews: Subviews) -> CGFloat {
+        var width: CGFloat = 0
+        if hasShortcut, subviews.indices.contains(shortcutIndex) {
+            width += subviews[shortcutIndex].sizeThatFits(.unspecified).width
+        }
+        if hasSubmenu, subviews.indices.contains(submenuIndex) {
+            if width > 0 {
+                width += contextMenuPopupTrailingAccessorySpacing
+            }
+            width += subviews[submenuIndex].sizeThatFits(.unspecified).width
+        }
+        return width
+    }
+}
+
 private struct ContextMenuSubmenuIndicatorShape: Shape {
     func path(in rect: CGRect) -> Path {
         var path = Path()
@@ -737,10 +907,12 @@ private struct ContextMenuPopupPanel: View {
     }
 
     private func submenuOrigin(for item: PlatformItemList.Item) -> CGPoint {
-        CGPoint(x: contextMenuPopupRowMinWidth +
-                    contextMenuPopupPanelPadding * 2 -
-                    contextMenuPopupSubmenuOverlap,
-                y: rowTopOffset(for: item.id))
+        let provisionalPopupWidth = contextMenuPopupPlainTitleOrigin +
+            contextMenuPopupTrailingGap +
+            contextMenuPopupSubmenuIndicatorWidth +
+            contextMenuPopupTrailingPadding
+        return CGPoint(x: provisionalPopupWidth - contextMenuPopupSubmenuOverlap,
+                       y: rowTopOffset(for: item.id))
     }
 
     var body: some View {
@@ -758,8 +930,11 @@ private struct ContextMenuPopupPanel: View {
             }
         }
         .padding(contextMenuPopupPanelPadding)
-        .background(Color(white: 0.98), in: RoundedRectangle(cornerRadius: 6))
-        .border(Color(white: 0.55), width: 1)
+        .background(contextMenuPopupChromeFill, in: RoundedRectangle(cornerRadius: 6))
+        .overlay {
+            RoundedRectangle(cornerRadius: 6)
+                .strokeBorder(contextMenuPopupChromeStroke, lineWidth: 1)
+        }
         .fixedSize()
     }
 }
@@ -790,12 +965,6 @@ private struct ContextMenuPopupRow: View {
         return false
     }
 
-    private var accessoryTitleSpacing: CGFloat {
-        layout.showsImageColumn
-            ? contextMenuPopupImageTitleSpacing
-            : contextMenuPopupStateTitleSpacing
-    }
-
     private var shortcutLabel: String? {
         guard let keyboardShortcut = item.keyboardShortcut else {
             return nil
@@ -805,21 +974,21 @@ private struct ContextMenuPopupRow: View {
 
     private var rowBackground: Color {
         if isHighlighted {
-            return .blue
+            return contextMenuPopupHighlightBackground
         }
         return .clear
     }
 
     private var rowForeground: Color {
         if isHighlighted {
-            return .white
+            return contextMenuPopupHighlightedForeground
         }
         if isSectionHeader || !item.isEnabled {
             // Static Text/Label menu rows are disabled platform items and render
             // with disabled foreground, not a normal actionable-row foreground.
-            return .secondary
+            return contextMenuPopupDisabledForeground
         }
-        return .primary
+        return contextMenuPopupActionForeground
     }
 
     private var isHighlighted: Bool {
@@ -832,62 +1001,61 @@ private struct ContextMenuPopupRow: View {
     var body: some View {
         if item.systemItem != nil {
             ContextMenuDividerShape()
-                .fill(Color(.sRGB, white: 0, opacity: 0.13))
+                .fill(contextMenuPopupSeparatorColor)
                 .frame(height: contextMenuPopupDividerHeight)
-                .frame(minWidth: contextMenuPopupRowMinWidth)
         } else {
-            HStack(spacing: 0) {
-                if layout.showsStateColumn || layout.showsImageColumn {
-                    HStack(spacing: contextMenuPopupAccessorySpacing) {
-                        if layout.showsStateColumn {
-                            ContextMenuCheckmarkShape()
-                                .stroke(isToggleOn ? rowForeground : .clear,
-                                        style: StrokeStyle(lineWidth: 1.6,
-                                                           lineCap: .round,
-                                                           lineJoin: .round))
-                            .frame(width: contextMenuPopupCheckmarkWidth,
-                                   height: contextMenuPopupCheckmarkWidth,
+            ContextMenuPopupRowLayout(layout: layout,
+                                      hasShortcut: shortcutLabel != nil,
+                                      hasSubmenu: hasSubmenu,
+                                      isSectionHeader: isSectionHeader) {
+                if layout.showsStateColumn {
+                    ContextMenuCheckmarkShape()
+                        .stroke(isToggleOn ? rowForeground : .clear,
+                                style: StrokeStyle(lineWidth: 1.6,
+                                                   lineCap: .round,
+                                                   lineJoin: .round))
+                        .frame(width: contextMenuPopupCheckmarkWidth,
+                               height: contextMenuPopupCheckmarkWidth,
+                               alignment: .center)
+                } else {
+                    Color.clear
+                        .frame(width: 0, height: 0)
+                }
+                if layout.showsImageColumn {
+                    if let image = item.image {
+                        image
+                            .frame(width: contextMenuPopupImageWidth,
+                                   height: contextMenuPopupImageWidth,
                                    alignment: .center)
-                        }
-                        if layout.showsImageColumn {
-                            if let image = item.image {
-                                image
-                                    .frame(width: contextMenuPopupImageWidth,
-                                           height: contextMenuPopupImageWidth,
-                                           alignment: .center)
-                            } else {
-                                Color.clear
-                                    .frame(width: contextMenuPopupImageWidth,
-                                           height: contextMenuPopupImageWidth)
-                            }
-                        }
+                    } else {
+                        Color.clear
+                            .frame(width: contextMenuPopupImageWidth,
+                                   height: contextMenuPopupImageWidth)
                     }
-                    .padding(.trailing, accessoryTitleSpacing)
+                } else {
+                    Color.clear
+                        .frame(width: 0, height: 0)
                 }
                 item.label
+                    .font(isSectionHeader ? .system(size: contextMenuPopupSectionHeaderFontSize) : nil)
                     .fixedSize(horizontal: true, vertical: false)
-                Spacer(minLength: 12)
                 if let shortcutLabel {
                     Text(shortcutLabel)
-                        .frame(minWidth: contextMenuPopupShortcutMinWidth,
-                               alignment: .trailing)
-                        .foregroundStyle(rowForeground)
-                        .opacity(0.8)
                         .fixedSize(horizontal: true, vertical: false)
+                } else {
+                    Color.clear
+                        .frame(width: 0, height: 0)
                 }
                 if hasSubmenu {
                     ContextMenuSubmenuIndicatorShape()
                         .fill(rowForeground)
-                        .frame(width: 5, height: 8)
+                        .frame(width: contextMenuPopupSubmenuIndicatorWidth,
+                               height: contextMenuPopupSubmenuIndicatorHeight)
                 } else {
                     Color.clear
-                        .frame(width: 8, height: 1)
+                        .frame(width: 0, height: 0)
                 }
             }
-            .padding(.horizontal, contextMenuPopupRowHorizontalPadding)
-            .frame(minWidth: contextMenuPopupRowMinWidth,
-                   minHeight: contextMenuPopupRowHeight,
-                   alignment: .leading)
             .foregroundStyle(rowForeground)
             .background(rowBackground, in: RoundedRectangle(cornerRadius: 4))
             ._onButtonGesture(pressing: { pressing in

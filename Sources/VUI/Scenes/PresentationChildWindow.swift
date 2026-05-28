@@ -165,6 +165,9 @@ class PresentationChildWindowController: WindowController, @unchecked Sendable {
     var dismissesOnParentMove: Bool { false }
     var presentationFrameFitAxes: PresentationFrameFitAxes { [] }
 
+    func drawOverlayPresentationChrome(in frame: CGRect,
+                                       context: GraphicsContext) {}
+
     private let usesPlatformWindow: Bool
     private var frameInParent: CGRect
     private var didTearDown = false
@@ -390,7 +393,12 @@ class PresentationChildWindowController: WindowController, @unchecked Sendable {
 
     override func drawFrame(offset: CGPoint, _ context: GraphicsContext) {
         if window == nil {
-            super.drawFrame(offset: offset + frameInParent.origin, context)
+            let contentOffset = offset + frameInParent.origin
+            if frameInParent.width > .zero && frameInParent.height > .zero {
+                let frame = CGRect(origin: contentOffset, size: frameInParent.size)
+                drawOverlayPresentationChrome(in: frame, context: context)
+            }
+            super.drawFrame(offset: contentOffset, context)
         } else {
             super.drawFrame(offset: offset, context)
         }
@@ -510,9 +518,23 @@ class PopupWindowController: PresentationChildWindowController, @unchecked Senda
     override var requiredPlatformWindowStyle: PlatformWindowStyle? { .popupWindow }
     override var dismissesOnParentDeactivation: Bool { true }
     override var dismissesOnParentMove: Bool { true }
+    private let overlayShadowFilter = GraphicsContext.Filter.shadow(
+        color: Color(.sRGBLinear, white: 0, opacity: 0.24),
+        radius: 10,
+        x: 0,
+        y: 2)
+
     // Menu-like popup windows stay inside the available host/screen frame
     // before nested submenu edge placement is resolved.
     override var presentationFrameFitAxes: PresentationFrameFitAxes { .all }
+
+    override func drawOverlayPresentationChrome(in frame: CGRect,
+                                                context: GraphicsContext) {
+        let path = RoundedRectangle(cornerRadius: 6).path(in: frame)
+        var shadowContext = context
+        shadowContext.addFilter(overlayShadowFilter)
+        shadowContext.fill(path, with: .color(.white))
+    }
 }
 
 private struct PresentationChildUsingPlatformWindow: EnvironmentKey {

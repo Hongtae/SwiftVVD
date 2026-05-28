@@ -321,6 +321,23 @@ private func platformItemFallbackLabel(role: ButtonRole?) -> Text {
     }
 }
 
+private func platformItemButtonLabelSurface(
+    source: AnySource?,
+    fallback: Text
+) -> (label: AnyView, image: AnyView?) {
+    // Button labels that are Label values flatten into the platform menu item
+    // surface. Text icons become the final title; Image icons stay in the image
+    // slot. Do not store the whole Label as the row label, because menu row
+    // rendering should consume the platform item surface directly.
+    if let label = source?.snapshotValue(as: Label<Text, Image>.self) {
+        return (AnyView(label.title), AnyView(label.icon))
+    }
+    if let label = source?.snapshotValue(as: Label<Text, Text>.self) {
+        return (AnyView(label.icon), nil)
+    }
+    return (source?.snapshot() ?? AnyView(fallback), nil)
+}
+
 private struct PlatformItemListButtonBody: View {
     let configuration: PrimitiveButtonStyleConfiguration
     @Environment(\.isEnabled) private var isEnabled: Bool
@@ -330,23 +347,21 @@ private struct PlatformItemListButtonBody: View {
             fatalError("PlatformItemListButtonBody._makeView called outside AG context")
         }
 
-        let labelView = view[\.configuration][\.label]
-        var outputs = PrimitiveButtonStyleConfiguration.Label._makeView(
-            view: labelView,
-            inputs: platformItemListRenderOnlyInputs(inputs)
-        )
         let configurationAttr = view[\.configuration]._attribute
         let environmentAttr = inputs.base.cachedEnvironment.value.environment
         let source = inputs.base.customInputs.value(forKey: SourceInput<PrimitiveButtonStyleConfiguration.Label>.self).top
         let itemID = PlatformItemList.stableID(configurationAttr.identifier)
         let preferenceAttr: Attribute<PlatformItemList> = graph.makeRule {
             let configuration = configurationAttr.value
-            let label = source?.snapshot() ??
-                AnyView(platformItemFallbackLabel(role: configuration.role))
+            let surface = platformItemButtonLabelSurface(
+                source: source,
+                fallback: platformItemFallbackLabel(role: configuration.role)
+            )
             var list = PlatformItemList()
             list.append(PlatformItemList.Item(
                 id: itemID,
-                label: label,
+                label: surface.label,
+                image: surface.image,
                 action: { configuration.trigger() },
                 role: configuration.role,
                 keyboardShortcut: environmentAttr.value.keyboardShortcut,
@@ -354,6 +369,9 @@ private struct PlatformItemListButtonBody: View {
             ))
             return list
         }
+        var outputs = _ViewOutputs(layoutComputer: OptionalAttribute(graph.makeRule {
+            LayoutComputer.fixed(.zero)
+        }))
         outputs.preferences.append(PlatformItemList.Key.self, node: preferenceAttr.identifier)
         return outputs
     }
