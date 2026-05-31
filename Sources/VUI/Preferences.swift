@@ -12,6 +12,22 @@ public protocol PreferenceKey {
     associatedtype Value
     static var defaultValue: Value { get }
     static func reduce(value: inout Value, nextValue: () -> Value)
+    // Whether removed views' preference values are retained during the update.
+    static var _includesRemovedValues: Bool { get }
+    // Whether the host (WindowController) can read this preference via preferenceValue(_:).
+    static var _isReadableByHost: Bool { get }
+}
+
+extension PreferenceKey {
+    public static var _includesRemovedValues: Bool { false }
+    public static var _isReadableByHost: Bool { false }
+}
+
+/// Sub-protocol of PreferenceKey whose _isReadableByHost is always true.
+public protocol HostPreferenceKey: PreferenceKey {}
+
+extension HostPreferenceKey {
+    public static var _isReadableByHost: Bool { true }
 }
 
 /// A type-erased container for a set of `PreferenceKey` metatypes.
@@ -47,7 +63,7 @@ public enum _ViewDebug {
         case displayList    = 8
     }
 
-    /// A bitmask of `Property` values — tracks which debug properties are active.
+    /// A bitmask of `Property` values that tracks which debug properties are active.
     public struct Properties: OptionSet, Sendable {
         public let rawValue: UInt32
         public init(rawValue: UInt32) { self.rawValue = rawValue }
@@ -68,7 +84,7 @@ public enum _ViewDebug {
                                                         .layoutComputer, .displayList]
     }
 
-    /// Opaque container for collected debug data — placeholder.
+    /// Opaque container for collected debug data.
     public struct Data {}
 }
 
@@ -148,6 +164,36 @@ struct PreferencesOutputs {
 }
 
 extension PreferencesOutputs {
+    /// Registers a preference transform for Key.
+    /// Creates a new AG rule that reads existing K outputs, applies transform, and replaces entry.
+    /// If K._isReadableByHost == true, also participates in the HostPreferencesCombiner pipeline
+    /// handled in ViewGraph.init via side-effect rule.
+    mutating func makePreferenceTransformer<K: PreferenceKey>(
+        key: K.Type,
+        transformAttr: Attribute<(inout K.Value) -> Void>,
+        graph: AttributeGraph
+    ) {
+        // Collect existing nodes for K from child outputs.
+        let existingNodes = values(for: K.self)
+
+        // Create a new AG rule: reduce existing children, then apply transform.
+        let transformedAttr: Attribute<K.Value> = graph.makeRule {
+            var value = K.defaultValue
+            for nodeID in existingNodes {
+                let val = Attribute<K.Value>(nodeID).value
+                K.reduce(value: &value) { val }
+            }
+            transformAttr.value(&value)
+            return value
+        }
+
+        // Replace old K entries with the single transformed node.
+        preferences.removeAll(where: {
+            ObjectIdentifier($0.key) == ObjectIdentifier(K.self)
+        })
+        append(K.self, node: transformedAttr.identifier)
+    }
+
     func values(for key: any PreferenceKey.Type) -> [AGAttribute] {
         let id = ObjectIdentifier(key)
         var result: [AGAttribute] = []

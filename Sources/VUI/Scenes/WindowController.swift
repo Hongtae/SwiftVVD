@@ -376,6 +376,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     func onWindowClosing(_: any PlatformWindow) {
         self.auxChildWindows.withLock { $0.compactMap(\.controller) }
             .forEach { $0.onParentWindowClosed() }
+        _onSheetWindowClosed?()
     }
 
     func onViewLoaded() {}
@@ -957,6 +958,131 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
             }
         }
     }
+
+    // MARK: - Sheet presentation queue
+    // Independent of modalChildWindows (which is for scene-based overlay modals).
+    // Overlay and platform-window sheets are both queued here, one at a time,
+    // shown in arrival order.
+
+    private struct SheetEntry: @unchecked Sendable {
+        var session: SheetPreference.Session
+        var controller: WindowController?
+    }
+
+    // Active sheet being shown right now.
+    private var _activeSheet: SheetEntry?
+    // Sessions waiting to be shown (FIFO).
+    // Not Mutex because access is single-threaded (AG side-effect rule / user dismiss callback).
+    private var _pendingSheetSessions: [SheetPreference.Session] = []
+
+    /// Called from ViewGraph side-effect rule. `value.sessions` = all currently-active
+    /// sheet sessions from the entire view tree, collected via preference merge.
+    func updateSheetPresentation(_ value: SheetPreference.Value) {
+        let incoming = value.sessions
+
+        // Compute stable IDs using the Binding's base-pointer identity.
+        func id(of session: SheetPreference.Session) -> ObjectIdentifier {
+            ObjectIdentifier(session.isPresented as AnyObject)
+        }
+
+        let activeID   = _activeSheet.map { id(of: $0.session) }
+        let pendingIDs = _pendingSheetSessions.map { id(of: $0) }
+
+        // Enqueue newly-arrived sessions that aren't already active or pending.
+        for session in incoming {
+            let sid = id(of: session)
+            guard sid != activeID, !pendingIDs.contains(sid) else { continue }
+            _pendingSheetSessions.append(session)
+        }
+
+        // Dismiss the active sheet if its session is no longer in incoming.
+        if let active = _activeSheet {
+            if !incoming.contains(where: { id(of: $0) == id(of: active.session) }) {
+                _tearDownActiveSheet(reason: .dismissed)
+            }
+        }
+
+        // Start the next sheet if nothing is showing.
+        if _activeSheet == nil {
+            _showNextSheet()
+        }
+    }
+
+    private enum SheetDismissReason {
+        case userAction   // user closed window, reset binding + onDismiss
+        case dismissed    // programmatic (binding=false already), onDismiss only
+        case byParent     // parent closed, reset binding + onDismiss
+        case cancelled    // queued but never shown, reset binding and no onDismiss
+    }
+
+    private func _showNextSheet() {
+        guard _activeSheet == nil else { return }
+        guard !_pendingSheetSessions.isEmpty else { return }
+        let session = _pendingSheetSessions.removeFirst()
+        guard let graph = AttributeGraph.current else {
+            // Called outside AG context (e.g. after user dismiss).
+            // Re-enqueue at front. The side-effect rule will fire again.
+            _pendingSheetSessions.insert(session, at: 0)
+            return
+        }
+
+        let contentAttr = graph.makeInput(value: session.makeContent())
+        let contentGV   = _GraphValue<AnyView>(_attribute: contentAttr)
+        let sheetKey    = WindowKey(namespace: scene.namespace, sceneID: scene.sceneID)
+        let controller  = WindowController(content: contentGV, scene: sheetKey)
+
+        _activeSheet = SheetEntry(session: session, controller: controller)
+
+        // .userAction: user closes the sheet window.
+        controller._onSheetWindowClosed = { [weak self] in
+            guard let self else { return }
+            self._tearDownActiveSheet(reason: .userAction)
+            self._showNextSheet()
+        }
+
+        Task { @MainActor [weak self, weak controller] in
+            guard let self, let controller else { return }
+            guard let parentWindow = self.window,
+                  let sheetWindow  = controller.makeWindow() else { return }
+            if !parentWindow.presentModalWindow(sheetWindow) {
+                Log.error("WindowController: sheet window presentation failed")
+                self._activeSheet = nil
+                self._showNextSheet()
+            }
+        }
+    }
+
+    private func _tearDownActiveSheet(reason: SheetDismissReason) {
+        guard let entry = _activeSheet else { return }
+        _activeSheet = nil
+        entry.controller?._onSheetWindowClosed = nil  // prevent re-entrancy
+
+        switch reason {
+        case .userAction:
+            entry.session.isPresented.wrappedValue = false
+            entry.session.onDismiss?()
+        case .dismissed:
+            entry.session.onDismiss?()
+        case .byParent:
+            entry.session.isPresented.wrappedValue = false
+            entry.session.onDismiss?()
+        case .cancelled:
+            entry.session.isPresented.wrappedValue = false
+            // onDismiss is not called because the sheet was never shown.
+        }
+
+        let sheetController = entry.controller
+        Task { @MainActor [weak self, weak sheetController] in
+            if let w = sheetController?.window {
+                self?.window?.dismissModalWindow(w)
+                w.close()
+            }
+        }
+    }
+
+    /// Set by the parent when this WindowController is acting as a sheet window.
+    /// Fires on user-driven close only.
+    fileprivate var _onSheetWindowClosed: (() -> Void)?
 }
 
 public struct _WindowContextDebugDraw: EnvironmentKey {

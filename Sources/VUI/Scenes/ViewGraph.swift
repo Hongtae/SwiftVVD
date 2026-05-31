@@ -258,6 +258,7 @@ class ViewGraph: ViewGraphHost {
             prefKeys.insert(DisplayList.Key.self)
             prefKeys.insert(ResourceList.Key.self)
             prefKeys.insert(ViewRespondersKey.self)
+            prefKeys.insert(SheetPreference.Key.self)
 
             let hostKeysAttr = g.makeInput(value: prefKeys)
             let prefsInputs  = PreferencesInputs(keys: prefKeys, hostKeys: hostKeysAttr)
@@ -323,6 +324,24 @@ class ViewGraph: ViewGraphHost {
                 }
                 g.makeSideEffectRule { [weak self] in
                     self?.rendererHost?.gestureGraph?.updateResponders(rootRespondersAttr.value)
+                }
+            }
+
+            // Wire SheetPreference.Key -> rendererHost.updateSheetPresentation.
+            // Same side-effect rule pattern as ViewRespondersKey above.
+            let sheetNodes = outputs.preferences.values(for: SheetPreference.Key.self)
+            if !sheetNodes.isEmpty {
+                let sheetAttr: Attribute<SheetPreference.Value> = g.makeRule {
+                    var combined = SheetPreference.Key.defaultValue
+                    for nodeID in sheetNodes {
+                        let val = Attribute<SheetPreference.Value>(nodeID).value
+                        SheetPreference.Key.reduce(value: &combined) { val }
+                    }
+                    return combined
+                }
+                g.makeSideEffectRule { [weak self] in
+                    guard let host = self?.rendererHost as? WindowController else { return }
+                    host.updateSheetPresentation(sheetAttr.value)
                 }
             }
 
