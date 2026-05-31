@@ -2,7 +2,7 @@
 //  File: TransitionTrait.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -28,5 +28,6 @@ struct CanTransitionTraitKey: _ViewTraitKey {
 extension View {
     @inlinable public func transition(_ t: AnyTransition) -> some View {
         return _trait(TransitionTraitKey.self, t)
+            ._trait(CanTransitionTraitKey.self, true)
     }
 }

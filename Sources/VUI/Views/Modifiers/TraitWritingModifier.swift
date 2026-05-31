@@ -41,8 +41,8 @@ public struct _TraitWritingModifier<Trait>: ViewModifier where Trait: _ViewTrait
         // receives an Attribute<ViewList> as _traitsList for each child.
         if case .staticList(let elements) = bodyOut.views {
             let viewListAttr: Attribute<any ViewList> = graph.makeRule {
-                let _ = newTraitAttr.value   // re-evaluate when trait value changes
-                return BaseViewList(elements: elements)
+                let traits = newTraitAttr.value   // re-evaluate when trait value changes
+                return BaseViewList(elements: elements, traits: traits)
             }
             return _ViewListOutputs(views: .dynamicList(viewListAttr, nil),
                                     nextImplicitID: 0, staticCount: nil)
