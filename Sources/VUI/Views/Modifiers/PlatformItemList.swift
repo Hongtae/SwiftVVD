@@ -22,7 +22,8 @@ extension PlatformItemListFlags {
 
 // Used for alert/context-menu actions: collects all item types.
 struct AllPlatformItemListFlags: PlatformItemListFlags {
-    // Materialize Button values as platform items.
+    // ContextMenuModifierCore uses PlatformItemListGenerator<AllPlatformItemListFlags>
+    // and materializes Button values as platform items.
     static var installsPlatformItemButtonStyle: Bool { true }
     static var collectsStaticItemContributors: Bool { true }
 }
@@ -74,7 +75,6 @@ struct PlatformItemListGenerator<Flags: PlatformItemListFlags, Content: View>: S
     // refreshing. Keep weak AG references so removed branch preference nodes are
     // ignored instead of being read after their slots are freed.
     let preferenceNodes: [WeakAttribute<PlatformItemList>]
-    // Cached item list from the most recent update.
     var itemList: Optional<PlatformItemList>
 
     init(content: Attribute<Content>, inputs: _ViewInputs, inputsIncludeGeometry: Bool) {
@@ -90,7 +90,6 @@ struct PlatformItemListGenerator<Flags: PlatformItemListFlags, Content: View>: S
             PlatformItemListCollectionOptions.Value(
                 collectsStaticItemContributors: Flags.collectsStaticItemContributors
             )
-        // Request divider entries as platform item-list system items.
         itemInputs.requestedDividerRepresentation = PlatformItemListDividerRepresentable.self
         if Flags.installsPlatformItemButtonStyle {
             let styleAttr: Attribute<ButtonStyleModifier<PlatformItemListButtonStyle>> = graph.makeRule {

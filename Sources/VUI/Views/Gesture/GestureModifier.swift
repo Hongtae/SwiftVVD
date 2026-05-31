@@ -9,7 +9,7 @@ import Foundation
 
 // GestureModifier
 
-/// Protocol for modifier gestures — gestures that wrap another gesture and transform
+/// Protocol for modifier gestures: gestures that wrap another gesture and transform
 /// its inputs or output. Inherits Gesture so conformers have associated Value/Body.
 ///
 /// `ModifierGesture._makeGesture` dispatches to `Modifier.makeGesture(modifier:inputs:body:)`,
@@ -25,7 +25,7 @@ protocol GestureModifier: Gesture {
 
 extension GestureModifier {
     public static func _makeGesture(gesture: _GraphValue<Self>, inputs: _GestureInputs) -> _GestureOutputs<Value> {
-        fatalError("\(Self.self) is a GestureModifier — use it as Modifier inside ModifierGesture, not standalone")
+        fatalError("\(Self.self) is a GestureModifier - use it as Modifier inside ModifierGesture, not standalone")
     }
 }
 
@@ -34,6 +34,7 @@ extension GestureModifier {
 /// Applies a GestureModifier to a Gesture, producing a combined gesture whose Value
 /// is the modifier's output type.
 ///
+/// Stores the modifier and wrapped body.
 /// _makeGesture dispatches to Modifier.makeGesture(modifier:inputs:body:), passing a
 /// closure that calls Body._makeGesture for the inner gesture.
 struct ModifierGesture<Modifier: GestureModifier, Body: Gesture>: Gesture
@@ -55,5 +56,17 @@ struct ModifierGesture<Modifier: GestureModifier, Body: Gesture>: Gesture
                 Body._makeGesture(gesture: gesture[\.body], inputs: modifiedInputs)
             }
         )
+    }
+}
+
+extension ModifierGesture: GestureEventTypeAccepting {
+    static func acceptsEventType(_ eventType: Any.Type) -> Bool {
+        gestureTypeAcceptsEvent(Body.self, eventType: eventType)
+    }
+}
+
+extension ModifierGesture: DynamicGestureEventTypeAccepting {
+    func acceptsEventType(_ eventType: Any.Type) -> Bool {
+        gestureValueAcceptsEvent(body, eventType: eventType)
     }
 }

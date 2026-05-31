@@ -7,7 +7,7 @@
 
 // Caches DynamicProperty field offsets per type so _makeView/_makeViewList
 // avoids repeated _forEachField scans for the same modifier type.
-// The cache is used from the rendering path, so no locking is needed.
+// The current cache is single-threaded.
 
 struct DynamicPropertyCache {
     struct Fields {

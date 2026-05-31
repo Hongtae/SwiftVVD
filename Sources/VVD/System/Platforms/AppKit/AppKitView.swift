@@ -77,7 +77,6 @@ private final class AppKitViewImpl: NSView, NSTextInputClient, NSWindowDelegate,
             let y = screen.frame.height - frame.maxY
             return CGRect(x: frame.minX, y: y, width: frame.width, height: frame.height)
         }
-        //let rect = self.window?.frame ?? self.frame
         let rect = self.frame
         return CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: rect.height)
     }
@@ -88,11 +87,11 @@ private final class AppKitViewImpl: NSView, NSTextInputClient, NSWindowDelegate,
 
     var mousePosition: CGPoint {
         get {
-            // get mouse pos with screen-space
+            // Mouse location starts in screen space.
             let ptScreen = NSEvent.mouseLocation
-            // convert pos to window-space
+            // Convert to window space.
             let ptWindow = self.window?.convertPoint(fromScreen: ptScreen) ?? ptScreen
-            // convert pos to view-space
+            // Convert to view space.
             return self.convert(ptWindow, from: nil)
         }
         set(pt) {
@@ -144,9 +143,6 @@ private final class AppKitViewImpl: NSView, NSTextInputClient, NSWindowDelegate,
     }
 
     override func draw(_ dirtyRect: NSRect) {
-//        NSColor(red: 1, green: 1, blue: 1, alpha: 1).setFill()
-//        dirtyRect.fill()
-
         self.postWindowEvent(type: .update)
     }
 
@@ -170,16 +166,13 @@ private final class AppKitViewImpl: NSView, NSTextInputClient, NSWindowDelegate,
 
     override func scrollWheel(with event: NSEvent) {
         if event.phase != [] {
-            // Trackpad pan gesture, forwarded as GestureEvent.
+            // Trackpad pan gesture. Forward as GestureEvent.
             self.postGestureEvent(event)
         } else {
-            // Traditional mouse wheel, handled by the existing path.
+            // Traditional mouse wheel uses the mouse event path.
             self.postMouseEvent(event)
         }
     }
-
-//    override func mouseEntered(with event: NSEvent) {}
-//    override func mouseExited(with event: NSEvent) {}
 
     func handleMouseDown(event: NSEvent) {
         if self.textInput { self.unmarkText() }
@@ -273,25 +266,25 @@ private final class AppKitViewImpl: NSView, NSTextInputClient, NSWindowDelegate,
                 }
             }
         }
-        // capsLock
+        // Caps Lock
         updateKey(.capsLock, .capslock)
-        // l-shift
+        // Left Shift
         updateKey(.init(rawValue: LEFT_SHIFT_BIT), .leftShift)
-        // r-shift
+        // Right Shift
         updateKey(.init(rawValue: RIGHT_SHIFT_BIT), .rightShift)
-        // l-control
+        // Left Control
         updateKey(.init(rawValue: LEFT_CONTROL_BIT), .leftControl)
-        // r-control
+        // Right Control
         updateKey(.init(rawValue: RIGHT_CONTROL_BIT), .rightControl)
-        // l-option
+        // Left Option
         updateKey(.init(rawValue: LEFT_ALTERNATE_BIT), .leftOption)
-        // r-option
+        // Right Option
         updateKey(.init(rawValue: RIGHT_ALTERNATE_BIT), .rightOption)
-        // l-command
+        // Left Command
         updateKey(.init(rawValue: LEFT_COMMAND_BIT), .leftCommand)
-        // r-command
+        // Right Command
         updateKey(.init(rawValue: RIGHT_COMMAND_BIT), .rightCommand)
-        // fn
+        // Function
         updateKey(.function, .fn)
 
         self.modifierKeyFlags = flags
@@ -527,9 +520,6 @@ private final class AppKitViewImpl: NSView, NSTextInputClient, NSWindowDelegate,
     }
 
     func windowDidResize(_ notification: Notification) {
-        //    NSRect rc = [[notification object] frame];
-        //    NSRect rc = [self bounds];
-
         if notification.object as? NSWindow === self.window {
             self.postWindowEvent(type: .resized)
         }

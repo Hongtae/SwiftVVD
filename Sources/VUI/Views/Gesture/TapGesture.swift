@@ -12,7 +12,7 @@ import Foundation
 /// Internal gesture type used by TapGesture.
 /// Implements single/multi-tap recognition via an AG modifier chain.
 ///
-/// Body chain, from inner to outer:
+/// body chain (inner to outer):
 ///   EventListener<E>
 ///   -> CategoryGesture<E>         (GestureCategory.select)
 ///   -> RepeatGesture<E>           (requires count taps)
@@ -47,9 +47,15 @@ struct SingleTapGesture<E: TappableEventType>: Gesture, PubliclyPrimitiveGesture
     }
 }
 
+extension SingleTapGesture: GestureEventTypeAccepting {
+    static func acceptsEventType(_ eventType: Any.Type) -> Bool {
+        eventType == E.self
+    }
+}
+
 // MARK: - TapGesture
 
-// _makeGesture -> SingleTapGesture<TappableEvent> -> map TappableEvent to Void.
+// TapGesture builds SingleTapGesture<TappableEvent> and maps TappableEvent to Void.
 
 public struct TapGesture: Gesture {
     public var count: Int
@@ -79,6 +85,12 @@ public struct TapGesture: Gesture {
             rawOutputs.phase.value.map { _ in () }
         }
         return rawOutputs.withPhase(mappedPhase)
+    }
+}
+
+extension TapGesture: GestureEventTypeAccepting {
+    static func acceptsEventType(_ eventType: Any.Type) -> Bool {
+        eventType == TappableEvent.self
     }
 }
 

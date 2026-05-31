@@ -5,7 +5,8 @@
 //  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-/// Adaptor that forces `Content` to occupy one view-list slot.
+/// Forces `Content` to occupy one unary view-list slot while forwarding direct
+/// `_makeView` construction to `Content`.
 public struct _UnaryViewAdaptor<Content>: View where Content: View {
     public var content: Content
 

@@ -71,7 +71,7 @@ enum ModalDismissReason: Equatable {
 
 // MARK: - Visibility
 
-// Used by confirmationDialog titleVisibility parameter.
+// Confirmation-dialog title visibility.
 public enum Visibility: Hashable, CaseIterable, Sendable {
     case automatic
     case visible
@@ -80,13 +80,12 @@ public enum Visibility: Hashable, CaseIterable, Sendable {
 
 // MARK: - DialogSuppressionConfiguration
 
-// Configuration placeholder for optional "Don't ask again" dialog suppression UI.
-// Suppression UI is not implemented yet.
+// Suppression configuration surface. Suppression UI is not implemented yet.
 public struct DialogSuppressionConfiguration: Hashable, Sendable {}
 
 // MARK: - DialogSeverity
 
-// Severity used by alert and confirmation dialog presentations.
+// Dialog severity values used by alert/dialog presentation.
 public struct DialogSeverity: Equatable, Sendable {
     let rawValue: Int
     init(_ rawValue: Int) { self.rawValue = rawValue }

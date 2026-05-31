@@ -59,8 +59,8 @@ private final class SizeFittingState {
     let inputs: _ViewInputs
     var children: [_ViewList_ID.Canonical: Child] = [:]
 
-    // FIXME: SizeFittingState may need to retain placeholder _ViewOutputs once
-    // PlatformViewThatFitsRepresentable is added.
+    // Placeholder outputs are created separately inside _SizeFittingRoot._makeView.
+    // Revisit this initializer shape if size-fitting needs to retain placeholders.
     init(root: Attribute<_SizeFittingRoot>, list: Attribute<any ViewList>, inputs: _ViewInputs) {
         self.root = root
         self.list = list
@@ -86,7 +86,8 @@ private final class SizeFittingState {
         }
     }
 
-    // FIXME: Revisit the callback shape when Engine callbacks are wired.
+    // applyChildren currently passes child outputs by value.
+    // Revisit the callback shape before wiring engine-level size-fitting callbacks.
     func applyChildren(selectLast: Bool, to body: (_ViewOutputs, Bool) -> Bool) {
         let children = materializedChildren()
         guard !children.isEmpty else { return }

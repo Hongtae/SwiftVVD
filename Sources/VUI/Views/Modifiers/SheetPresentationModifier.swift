@@ -18,29 +18,30 @@ struct SheetPreference {
     let drawsBackground: Bool
     let placement: Placement
     let activeInspector: Bool?
-    // Backend policy captured from the presentation modifier's environment.
-    // Default is overlay; editors can opt into platform modal windows.
+    // Presentation backend policy captured from the presentation modifier's environment.
+    // Default is overlay. Editors can opt into platform modal windows.
     let usesPlatformWindow: Bool
 
     enum Placement: Equatable {
         case automatic
+        // Additional placement cases belong to the presentation subsystem.
     }
 
-    /// Preference value merged through the view tree.
+    /// Preference value for collected sheet presentation state.
     ///
-    /// Merge behavior:
-    ///   .keyed + .keyed: keyed values are merged.
-    ///   .keyed + .single: next single value wins.
-    ///   .keyed + .none: none clears the value.
-    ///   .single + _: existing single value is kept.
-    ///   .none + next: next value is used.
+    /// Merge rules:
+    ///   .keyed + .keyed  -> .keyed(merged)
+    ///   .keyed + .single -> .single (nextValue wins)
+    ///   .keyed + .none   -> .none
+    ///   .single + _      -> .single (first wins)
+    ///   .none   + next   -> next
     enum Value {
         case keyed([Namespace.ID: Transaction])
         case single(SheetPreference)
         case none
     }
 
-    /// Host-readable preference key for sheet presentations.
+    /// Host-readable preference key for sheet presentation state.
     struct Key: HostPreferenceKey {
         typealias Value = SheetPreference.Value
         static var defaultValue: Value { .none }
@@ -54,7 +55,7 @@ struct SheetPreference {
                     value = next
                 }
             case .single:
-                break  // first wins, existing single presentation is kept
+                break  // first wins, so the existing single presentation is kept
             case .none:
                 value = nextValue()
             }
@@ -65,6 +66,7 @@ struct SheetPreference {
 // MARK: - SheetAnchorProvider
 
 /// Protocol producing a ViewModifier that writes into SheetPreference.Value.
+/// The modifier receives both the accumulated preference value and the current transaction.
 protocol SheetAnchorProvider {
     associatedtype Modifier: ViewModifier
     func preferenceTransformModifier(
@@ -74,7 +76,7 @@ protocol SheetAnchorProvider {
 
 // MARK: - NullSheetAnchor
 
-/// Default anchor with no geometry.
+/// Default anchor: no geometry, standard preference transform.
 struct NullSheetAnchor<Key: PreferenceKey>: SheetAnchorProvider {
     typealias Modifier = _PreferenceTransformModifier<SheetPreference.Key>
 
@@ -90,10 +92,13 @@ struct NullSheetAnchor<Key: PreferenceKey>: SheetAnchorProvider {
 // MARK: - CoreSheetPresentationModifier
 
 /// EnvironmentalModifier that writes SheetPreference.Value into the view tree.
+/// resolve(in:) creates a preference transform closure and asks the anchor
+/// provider to install it. The namespace field is read during resolve so the
+/// sheet preference payload carries a stable namespace ID.
 struct CoreSheetPresentationModifier<AnchorProvider: SheetAnchorProvider>: EnvironmentalModifier {
     typealias ResolvedModifier = AnchorProvider.Modifier
 
-    // Namespace used to generate stable presentation identity.
+    // Namespace used to key sheet preference transactions.
     var _namespace: Namespace
     let content: AnyView?
     let onDismiss: (() -> Void)?
@@ -148,11 +153,11 @@ struct CoreSheetPresentationModifier<AnchorProvider: SheetAnchorProvider>: Envir
     }
 }
 
-// MARK: - InteractiveResizeDisabledKey is declared in SheetToolbarModifier.swift
-
 // MARK: - SheetContent
 
-/// Wrapper view that decorates the sheet body content.
+/// Wrapper view that applies the full sheet decoration chain to Content.
+/// The generic wrapper stores the content view and applies the sheet
+/// environment/style/toolbar reset chain in order.
 struct SheetContent<Content: View>: View {
     var content: Content
 
@@ -225,16 +230,18 @@ struct SheetPresentationModifier<Content: View, AnchorProvider: SheetAnchorProvi
         >
     >
 
-    // Backing binding for the presentation state.
+    // Property-wrapper storage keeps the binding backing field, wrapped value,
+    // and projected value available to the modifier body.
     @Binding var isPresented: Bool
     let onDismiss: (() -> Void)?
     let sheetContent: () -> Content
     let placement: SheetPreference.Placement
     let drawsBackground: Bool
     let anchorProvider: AnchorProvider
-    // Reserved for inspector-specific presentation state.
+    // Stored field reserved for inspector presentations. Public initializers default it to nil.
     let activeInspector: Bool?
 
+    // activeInspector is stored but not an initializer parameter.
     init(isPresented: Binding<Bool>,
          onDismiss: (() -> Void)?,
          sheetContent: @escaping () -> Content,
@@ -256,7 +263,8 @@ struct SheetPresentationModifier<Content: View, AnchorProvider: SheetAnchorProvi
             onDismiss?()
         }
         let coreModifier = CoreSheetPresentationModifier<AnchorProvider>(
-            // DynamicProperty processing assigns this namespace a stable ID.
+            // The core modifier owns the namespace. A fresh Namespace gets a
+            // persistent ID through DynamicProperty processing.
             _namespace: Namespace(),
             content: isPresented ? AnyView(sheetContent()) : nil,
             onDismiss: dismiss,
@@ -271,7 +279,7 @@ struct SheetPresentationModifier<Content: View, AnchorProvider: SheetAnchorProvi
 }
 
 extension SheetPresentationModifier where AnchorProvider == NullSheetAnchor<SheetPreference.Key> {
-    // Convenience initializer for the default NullSheetAnchor provider.
+    // Convenience initializer for the default sheet anchor.
     init(isPresented: Binding<Bool>,
          onDismiss: (() -> Void)?,
          sheetContent: @escaping () -> Content,
@@ -306,6 +314,7 @@ struct ItemSheetPresentationModifier<Item: Identifiable, Content: View, AnchorPr
 
     var isPresented: Bool { _item.wrappedValue != nil }
 
+    // Stores the item binding and content builder used to create the active sheet.
     init(item: Binding<Item?>,
          onDismiss: (() -> Void)?,
          sheetContent: @escaping (Item) -> Content,
@@ -343,7 +352,7 @@ struct ItemSheetPresentationModifier<Item: Identifiable, Content: View, AnchorPr
 }
 
 extension ItemSheetPresentationModifier where AnchorProvider == NullSheetAnchor<SheetPreference.Key> {
-    // Convenience initializer for the default NullSheetAnchor provider.
+    // Convenience initializer for the default sheet anchor.
     init(item: Binding<Item?>,
          onDismiss: (() -> Void)?,
          sheetContent: @escaping (Item) -> Content,

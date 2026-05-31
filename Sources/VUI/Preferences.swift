@@ -28,6 +28,7 @@ extension PreferenceKey where Self.Value: ExpressibleByNilLiteral {
 }
 
 /// Sub-protocol of PreferenceKey whose _isReadableByHost is always true.
+/// Used for preference keys that the host can register, read, and remove.
 public protocol HostPreferenceKey: PreferenceKey {}
 
 extension HostPreferenceKey {
@@ -40,6 +41,7 @@ extension HostPreferenceKey {
 ///
 /// `keys` stores the actual metatypes (not just ObjectIdentifiers) so that
 /// callers can open the existential and recover the concrete `K` via SE-0352.
+/// This matches the reference framework's `Array<PreferenceKey.Type>` layout.
 struct PreferenceKeys {
     var keys: [any PreferenceKey.Type] = []
 
@@ -67,7 +69,7 @@ public enum _ViewDebug {
         case displayList    = 8
     }
 
-    /// A bitmask of `Property` values that tracks which debug properties are active.
+    /// A bitmask of `Property` values tracking which debug properties are active.
     public struct Properties: OptionSet, Sendable {
         public let rawValue: UInt32
         public init(rawValue: UInt32) { self.rawValue = rawValue }
@@ -96,8 +98,8 @@ public enum _ViewDebug {
 ///
 /// - `keys`: the static set of preference keys requested by the host at
 ///   `_makeViewList` time (compile-time known).
-/// - `hostKeys`: an AG node tracking dynamically-registered keys;
-///   when this node's value changes, affected rules re-evaluate.
+/// - `hostKeys`: an AG node tracking dynamically-registered keys.
+///   When this node's value changes, affected rules re-evaluate.
 struct PreferencesInputs {
     var keys: PreferenceKeys
     var hostKeys: Attribute<PreferenceKeys>
@@ -185,6 +187,7 @@ struct PreferencesOutputs {
 
 extension PreferencesInputs {
     /// Creates placeholder preference outputs for the requested keys.
+    /// Each placeholder is backed by an indirect AG attribute for the key.
     func makeIndirectOutputs() -> PreferencesOutputs {
         guard let graph = AttributeGraph.current else {
             fatalError("PreferencesInputs.makeIndirectOutputs called outside AG context.")
@@ -284,8 +287,7 @@ extension PreferencesOutputs {
 extension PreferencesOutputs {
     /// Registers a preference transform for Key.
     /// Creates a new AG rule that reads existing K outputs, applies transform, and replaces entry.
-    /// If K._isReadableByHost == true, also participates in the HostPreferencesCombiner pipeline
-    /// handled in ViewGraph.init via side-effect rule.
+    /// Host-readable keys also feed the host preference combiner through ViewGraph side effects.
     mutating func makePreferenceTransformer<K: PreferenceKey>(
         key: K.Type,
         transformAttr: Attribute<(inout K.Value) -> Void>,
@@ -330,7 +332,7 @@ extension PreferencesOutputs {
 
     /// Reduces all entries for `key` into a single AG node using the stored
     /// `_makeReduceRule`. Returns nil if no entry exists for the key.
-    /// For "last wins" reduce semantics this is equivalent to replace;
+    /// For "last wins" reduce semantics this is equivalent to replace.
     /// for union semantics (e.g. OptionSet) all entries are merged correctly.
     func reducedValue<K: PreferenceKey>(for key: K.Type,
                                         in graph: AttributeGraph) -> Attribute<K.Value>? {

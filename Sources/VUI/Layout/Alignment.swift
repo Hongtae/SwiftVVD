@@ -93,7 +93,6 @@ private enum AlignmentKeyTypeCache {
             indexes[key] = index
         }
 
-        // Encode custom alignment identity and axis in one integer.
         return ((index << 1) + 2) | UInt(axis.rawValue)
     }
 
@@ -205,7 +204,7 @@ public struct VerticalAlignment: Equatable {
     }
 }
 
-/// Marker used by stack layouts for their minor-axis alignment type.
+/// Marker used by HVStack for its minor-axis alignment type.
 protocol AlignmentGuide {}
 
 extension HorizontalAlignment: AlignmentGuide {}

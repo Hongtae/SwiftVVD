@@ -108,23 +108,22 @@ extension State {
                 graph.makeInput(value: initialValue)
             }
             // Capture the owning graph so the getter can detect cross-graph calls.
-            // When a button action fires inside GestureGraph's AG context, the current
-            // AttributeGraph can differ from the graph that owns this attr.
-            // Accessing attr.value from the wrong graph causes an index-out-of-range
-            // because each AttributeGraph has its own independent nodes array.
+            // AttributeGraph.current can differ from the graph that owns this attr.
+            // Accessing attr.value from the wrong graph would read against that graph's
+            // independent slot table.
             let owningGraph = graph
             let location = LocationBox(location: FunctionalLocation<Value>(
                 get: {
                     // Read the AG node only when executing inside the same graph that
-                    // owns this attribute. Any other context (no AG, or a different
-                    // graph such as GestureGraph) must fall back to the cache.
+                    // owns this attribute. Any other context (no AG or a different
+                    // graph) must fall back to the cache.
                     if AttributeGraph.current === owningGraph {
                         let v = attr.value
                         cache.value = v
                         return v
                     }
-                    // Outside AG context, or different graph (e.g. GestureGraph firing
-                    // a button action): return cached value without accessing the node.
+                    // Outside AG context, or in a different graph, return cached value
+                    // without accessing the node.
                     return cache.value
                 },
                 set: { newValue, _ in

@@ -11,7 +11,6 @@ import Foundation
 
 /// Internal protocol for dynamic view lists.
 protocol ViewList: CustomDebugStringConvertible {
-    // Protocol requirements.
     func count(style: _ViewList_IteratorStyle) -> Int
     func estimatedCount(style: _ViewList_IteratorStyle) -> Int
     var traitKeys: ViewTraitKeys? { get }
@@ -112,13 +111,14 @@ struct EmptyViewList: ViewList {
         transform: _ViewList_TemporarySublistTransform,
         to: (inout Int, _ViewList_IteratorStyle, _ViewList_Node, _ViewList_TemporarySublistTransform) -> Bool
     ) -> Bool {
-        true  // no elements, traversal completes immediately
+        true  // No elements. Traversal completes immediately.
     }
 }
 
 // MARK: - _ViewList_IteratorStyle
 
 /// Controls granularity when traversing a ViewList.
+/// The current modeled storage is a single UInt value.
 struct _ViewList_IteratorStyle: Equatable {
     var value: UInt
     init() { value = 0 }
@@ -128,14 +128,17 @@ struct _ViewList_IteratorStyle: Equatable {
 // MARK: - _ViewList_ID / _ViewList_Edit
 
 /// A stable identity for a specific view in a ViewList.
+/// Current storage keeps the known index, implicit ID, and explicit ID list.
+/// Canonical, reuse identifier, and explicit binding behavior remain partial.
 struct _ViewList_ID {
     struct Canonical: Hashable {
+        // Canonical form does not yet track requiresImplicitID.
         var value: Int32
         var explicitID: AnyHashable?
     }
 
     struct Explicit: Hashable {
-        // TODO: define explicit ID storage when explicit IDs are wired.
+        // Explicit ID storage is simplified.
         var id: AnyHashable
     }
 
@@ -157,7 +160,7 @@ struct _ViewList_ID {
     }
 
     func elementID(at index: Int) -> _ViewList_ID {
-        // TODO: replace placeholder hash formula when explicit IDs are wired.
+        // This hash formula is provisional.
         var id = self
         id._index = Int32(Int(self._index) &* 31 &+ index)
         return id
@@ -190,6 +193,7 @@ struct HeterogeneousViewIDsAccumulator {}
 // MARK: - _ViewList_TemporarySublistTransform
 
 /// Context passed during ViewList sublist traversal.
+/// Carries list modifiers that are pushed while dynamic lists are traversed.
 struct _ViewList_TemporarySublistTransform {
     fileprivate var storage: _TemporarySublistTransformStorage?
     fileprivate var flag: Bool
@@ -241,6 +245,7 @@ protocol _ViewList_Elements {
 
 extension _ViewList_Elements {
     /// Creates a single element at `index`.
+    /// The exact helper body and conformer override behavior are still partial.
     func makeOneElement(
         at index: Int,
         inputs: _ViewInputs,
@@ -270,12 +275,13 @@ extension _ViewList_Elements {
 // MARK: - UnaryElements
 
 /// Single-view _ViewList_Elements.
-/// makeElements skips while `from != 0`; otherwise it calls body(inputs, makeViewClosure).
+/// makeElements skips one element when from != 0.
+/// When from == 0, it calls body(inputs, makeViewClosure).
 ///
-/// FIXME: Route TypedUnaryViewGenerator and BodyUnaryViewGenerator through separate
-/// generic paths when that wiring is ready.
+/// This collapses separate generator specializations into one closure path.
 struct UnaryElements: _ViewList_Elements {
-    /// Retained when A = TypedUnaryViewGenerator; nil when A = BodyUnaryViewGenerator.
+    /// Retained for typed generator construction.
+    /// nil for body-generator construction.
     var typedGenerator: TypedUnaryViewGenerator?
     var makeViewClosure: (_ViewInputs) -> _ViewOutputs
     var baseInputs: _GraphInputs
@@ -287,7 +293,7 @@ struct UnaryElements: _ViewList_Elements {
     }
 
     /// BodyUnaryViewGenerator path.
-    /// FIXME: Use a dedicated BodyUnaryViewGenerator element path when layout wiring is ready.
+    /// Exact layout wiring remains simplified.
     init(body: @escaping (_ViewInputs) -> _ViewOutputs, baseInputs: _GraphInputs) {
         self.typedGenerator = nil
         self.makeViewClosure = body
@@ -303,7 +309,10 @@ struct UnaryElements: _ViewList_Elements {
         indirectMap: IndirectAttributeMap?,
         body: (_ViewInputs, (_ViewInputs) -> _ViewOutputs) -> (_ViewOutputs?, Bool)
     ) -> (_ViewOutputs?, Bool) {
-        if from != 0 { from -= 1; return (nil, true) }
+        if from != 0 {
+            from -= 1
+            return (nil, true)
+        }
         let closure = makeViewClosure
         return body(inputs, { i in closure(i) })
     }
@@ -364,11 +373,12 @@ struct MergedElements: _ViewList_Elements {
 // MARK: - ModifiedElements
 
 /// Wraps a base _ViewList_Elements with a ViewModifier applied per-element.
+/// Stores a type-erased projection closure for concrete modifier dispatch.
 struct ModifiedElements: _ViewList_Elements {
     var base: any _ViewList_Elements
     var modifier: AGWeakAttribute
     var baseInputs: _GraphInputs
-    // Type-erased closure for concrete modifier dispatch.
+    // Type-erased closure for concrete M._makeView dispatch.
     // Calls M._makeView(modifier:inputs:body:) with the captured concrete M.
     var project: (AGAttribute, _ViewInputs, @escaping (_ViewInputs) -> _ViewOutputs) -> _ViewOutputs
 
@@ -380,7 +390,9 @@ struct ModifiedElements: _ViewList_Elements {
         at otherIndex: Int,
         indirectMap: IndirectAttributeMap,
         testOnly: Bool
-    ) -> Bool { false }  // TODO: implement reuse
+    ) -> Bool {
+        false
+    }
 
     /// Creates a ModifiedElements wrapping `base` with modifier `M`.
     /// This is the primary factory used by multiModifier and PreferenceModifiers.
@@ -410,7 +422,7 @@ struct ModifiedElements: _ViewList_Elements {
     ///   2. wrappedBody (called per-element by base):
     ///      a. Merge baseInputs (modifier's, higher priority) + elementInputs.base (element's)
     ///      b. Resolve modifier weak attr and return nil if expired.
-    ///      c. Call project(modAttr, mergedInputs, makeView) -> _ViewOutputs.
+    ///      c. Call project(modAttr, mergedInputs, makeView).
     @discardableResult
     func makeElements(
         from: inout Int,
@@ -428,7 +440,7 @@ struct ModifiedElements: _ViewList_Elements {
                 fatalError("ModifiedElements.makeElements wrappedBody called outside AG context.")
             }
 
-            // Merge: baseInputs (modifier's, higher priority) + elementInputs.base (element's).
+            // Merge modifier baseInputs at higher priority than elementInputs.base.
             var mergedBase = capturedBaseInputs
             mergedBase.merge(elementInputs.base, ignoringPhase: false)
             var mergedInputs = elementInputs
@@ -461,7 +473,7 @@ struct ModifiedElements: _ViewList_Elements {
 // MARK: - _ViewList_SubgraphElements
 
 /// Refcounted subgraph holder used by retained ViewList slices.
-/// init(subgraph:) sets refcount = 1.
+/// Stores an AGSubgraph object plus a manual retain count for list slices.
 final class _ViewList_Subgraph {
     var subgraph: AGSubgraph
     var refcount: UInt32 = 1
@@ -471,7 +483,7 @@ final class _ViewList_Subgraph {
     }
 
     func invalidate() {
-        // FIXME: Add an invalidation observer hook before tearing down the subgraph.
+        // Pre-invalidation observer hooks are not wired.
         subgraph.invalidate()
         subgraph.removeFromParent()
     }
@@ -486,13 +498,16 @@ final class _ViewList_SublistSubgraphStorage {
 
     func retain() -> _ViewList_SubgraphRelease? {
         // Walk backwards: skip dead (refcount==0) and invalid subgraphs, retain live ones.
-        // TODO: skip invalid AGSubgraph instances when validity tracking is available.
+        // AGSubgraph validity filtering is not modeled.
         var liveItems: [_ViewList_Subgraph] = []
-        for i in stride(from: subgraphs.count - 1, through: 0, by: -1) {
+        var i = subgraphs.count - 1
+        while i >= 0 {
             let item = subgraphs[i]
-            guard item.refcount > 0 else { continue }
-            item.refcount += 1
-            liveItems.append(item)
+            if item.refcount > 0 {
+                item.refcount += 1
+                liveItems.append(item)
+            }
+            i -= 1
         }
         guard !liveItems.isEmpty else { return nil }
         return _ViewList_SubgraphRelease(owner: self, subgraphs: liveItems.reversed())
@@ -500,7 +515,8 @@ final class _ViewList_SublistSubgraphStorage {
 }
 
 /// Release token for a retained subgraph slice. Decrements refcounts on dealloc.
-/// deinit walks the slice, decrements refcount per item; invalidates when refcount reaches 0.
+/// deinit walks the slice and decrements refcount per item.
+/// It invalidates when refcount reaches 0. The retained slice is stored as an Array copy.
 final class _ViewList_SubgraphRelease {
     private let owner: _ViewList_SublistSubgraphStorage
     private let subgraphs: [_ViewList_Subgraph]
@@ -521,7 +537,7 @@ final class _ViewList_SubgraphRelease {
 }
 
 /// Wraps a base _ViewList_Elements with per-item subgraph lifecycle management.
-/// Used by per-item sublists. Each item's _ViewList_Sublist.elements is this type.
+/// Used by per-item sublists so each item can retain its own element lifetime.
 struct _ViewList_SubgraphElements: _ViewList_Elements {
     var base: any _ViewList_Elements
     var subgraphs: _ViewList_SublistSubgraphStorage? = nil
@@ -534,7 +550,7 @@ struct _ViewList_SubgraphElements: _ViewList_Elements {
     }
 
     /// Attaches a subgraph to this elements wrapper for lifecycle tracking.
-    /// FIXME: Link this path into per-item construction when subgraph reuse is wired.
+    /// Item-subgraph link behavior is not fully wired.
     mutating func wrap(subgraph: _ViewList_Subgraph) {
         if subgraphs == nil { subgraphs = _ViewList_SublistSubgraphStorage() }
         subgraphs?.subgraphs.append(subgraph)
@@ -615,8 +631,9 @@ struct _ViewList_View {
     var count: Int
     var contentSubgraph: AGSubgraph?
 
-    /// Creates placeholder outputs, then uses PlaceholderInfo to attach concrete
-    /// child outputs through indirect output attributes.
+    /// _VariadicView_Children.Element._makeView delegates here.
+    /// This creates placeholder outputs, then uses `PlaceholderInfo` to attach
+    /// concrete child outputs through indirect output attributes.
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         guard let graph = AttributeGraph.current else {
             fatalError("_ViewList_View._makeView called outside an active AttributeGraph context.")
@@ -702,6 +719,7 @@ private struct PlaceholderInfo: StatefulRule {
 // MARK: - TransactionID
 
 /// A monotonically increasing ID representing an AttributeGraph transaction.
+/// Graph/context initializer value semantics are not modeled.
 struct TransactionID: Comparable, Hashable {
     var value: UInt = 0
     init() {}
@@ -719,7 +737,7 @@ struct SExpPrinter {}
 indirect enum ViewListElements {
     case unaryElements(UnaryElements)
     case merged([_ViewListOutputs])
-    // Static-list modifier path.
+    // staticList modifier path.
     case modified(ModifiedElements)
 }
 
@@ -772,7 +790,10 @@ struct ViewTraitCollection {
         }
         set {
             for i in 0..<storage.count {
-                if storage[i] is AnyTrait<K> { storage[i] = AnyTrait<K>(value: newValue); return }
+                if storage[i] is AnyTrait<K> {
+                    storage[i] = AnyTrait<K>(value: newValue)
+                    return
+                }
             }
             storage.append(AnyTrait<K>(value: newValue))
         }
@@ -780,6 +801,7 @@ struct ViewTraitCollection {
 }
 
 /// The set of trait keys a view list is tracking.
+/// Data-dependency propagation is surface-modeled only.
 struct ViewTraitKeys {
     var types: Set<ObjectIdentifier> = []
     var isDataDependent: Bool = false
@@ -795,7 +817,9 @@ struct ViewTraitKeys {
         isDataDependent = isDataDependent || other.isDataDependent
     }
     func withDataDependency() -> ViewTraitKeys {
-        var copy = self; copy.isDataDependent = true; return copy
+        var copy = self
+        copy.isDataDependent = true
+        return copy
     }
 }
 
@@ -805,12 +829,13 @@ struct ViewContentOffset {}
 // MARK: - ListModifier
 
 /// Abstract base for `_ViewListOutputs.Views.dynamicList` modifier chain.
+/// Stores a type-erased projection closure for concrete modifier dispatch.
 class ListModifier {
     var pred: ListModifier?
     let modifierType: any ViewModifier.Type
     let modifier: AGWeakAttribute
     let baseInputs: _GraphInputs
-    // Type-erased closure for concrete modifier dispatch.
+    // Type-erased closure for concrete M._makeView dispatch.
     let project: (AGAttribute, _ViewInputs, @escaping (_ViewInputs) -> _ViewOutputs) -> _ViewOutputs
 
     init<M: ViewModifier>(pred: ListModifier?,
@@ -846,7 +871,8 @@ class ListModifier {
 }
 
 extension _ViewList_TemporarySublistTransform {
-    /// Pushes ListModifier into the transform so it can be applied when sublists materialize.
+    /// Pushes a ListModifier during ModifiedViewList.applyNodes, then applies
+    /// the stack when sublists are materialized.
     fileprivate func withPushedItem(_ item: ListModifier) -> Self {
         let storage = self.storage ?? _TemporarySublistTransformStorage()
         storage.listModifiers.append(item)
@@ -948,6 +974,7 @@ func _applySublists(
 // MARK: - ApplyModifiers
 
 /// AG Rule that wraps a source ViewList with a ListModifier chain.
+/// Reads the source list, applies the modifier chain, and returns the wrapped list.
 struct ApplyModifiers: Rule {
     typealias Value = any ViewList
     var source: Attribute<any ViewList>

@@ -7,7 +7,7 @@
 
 import Foundation
 
-// Environment value used to expand button hit testing.
+// Effective hit-test expansion read by primitive button gestures.
 struct ButtonOutsetKey: EnvironmentKey {
     static let defaultValue: CGFloat? = nil
 }
@@ -21,17 +21,18 @@ extension EnvironmentValues {
 
 // MARK: - ButtonPressPhase
 
-// Button press lifecycle used by the button gesture callbacks.
+// Press phase passed to ButtonPressingAction. `.pressing` maps to true.
 enum ButtonPressPhase: UInt8, Equatable {
     case idle      = 0  // inactive
     case outside   = 1  // active but pointer/touch outside bounds
     case pressing  = 2  // within bounds (or inset bounds)
-    case triggered = 3  // released in bounds, action will fire
+    case triggered = 3  // released in bounds. action will fire
 }
 
 // MARK: - LocationInBounds
 
 // Encodes the result of the outset-based hit test on PrimitiveButtonGestureCore.Value.
+// 3 cases: inBounds(0)/inset(1)/outOfBounds(2)
 enum LocationInBounds: UInt8, Equatable, Hashable {
     case inBounds    = 0  // strictly within CGRect(origin:.zero, size:viewSize)
     case inset       = 1  // within outset-expanded rect (outset > 0)
@@ -40,29 +41,32 @@ enum LocationInBounds: UInt8, Equatable, Hashable {
 
 // MARK: - HoverCallback / ButtonPressingAction
 
-// HoverCallback wraps the main action and ignores its optional location.
-// ButtonPressingAction wraps the optional pressing callback.
+// HoverCallback wraps the main action. It ignores the optional point.
+// ButtonPressingAction wraps pressingAction and maps `.pressing` to true.
 typealias HoverCallback        = (CGPoint?) -> ()
 typealias ButtonPressingAction = (ButtonPressPhase) -> ()
 
 // MARK: - PrimitiveButtonGestureCore
 
-// Primitive button gesture core.
-// Body chain, from inner to outer:
+// PrimitiveButtonGestureCore performs button hit testing.
+// Body chain (inner to outer):
 //   EventListener<SpatialEvent>
-//   -> DelayedGesture<SpatialEvent>, duration 0 for immediate button handling
-//   -> MapGesture<SpatialEvent, Value>, mapping events to hit-test values
-//   -> SizeGesture<...>, providing CGSize for bounds checks
+//   -> DelayedGesture<SpatialEvent>   (duration=0 for buttons, so immediate)
+//   -> MapGesture<SpatialEvent, Value> (event to locationInBounds hit test)
+//   -> SizeGesture<...>               (provides CGSize for bounds check)
 struct PrimitiveButtonGestureCore: Gesture {
+    // reserved1 is omitted until its role is confirmed.
     var outset: CGFloat       // effectiveOutset for hit-test expansion
     var alwaysActive: Bool    // if true, gesture stays active even outside view
 
+    // Hit-test value produced from the current event and view size.
     struct Value: Equatable {
-        var location: CGPoint
-        var timestamp: Double
+        var location: CGPoint          // pointer/touch location
+        var timestamp: Double          // event timestamp
         var locationInBounds: LocationInBounds
     }
 
+    // Body chain type for event listening, immediate delay, hit-test mapping, and size input.
     typealias Body = SizeGesture<
         ModifierGesture<
             MapGesture<SpatialEvent, Value>,
@@ -74,7 +78,7 @@ struct PrimitiveButtonGestureCore: Gesture {
     >
 
     var body: Body {
-        // Outset is captured; SizeGesture provides current CGSize reactively.
+        // Map SpatialEvent to Value using the current size and captured outset.
         let capturedOutset = outset
         return SizeGesture { size in
             let transform: (SpatialEvent) -> Value = { event in
@@ -102,9 +106,17 @@ struct PrimitiveButtonGestureCore: Gesture {
     }
 }
 
+extension PrimitiveButtonGestureCore: GestureEventTypeAccepting {
+    static func acceptsEventType(_ eventType: Any.Type) -> Bool {
+        eventType == SpatialEvent.self
+    }
+}
+
 // MARK: - PrimitiveButtonGestureCallbacks
 
 // GestureCallbacks conformer for PrimitiveButtonGesture.
+// hoverCallback wraps the action.
+// buttonPressingAction wraps pressing changes.
 struct PrimitiveButtonGestureCallbacks: GestureCallbacks {
     typealias Value = PrimitiveButtonGestureCore.Value
     typealias StateType = ButtonPressPhase
@@ -114,7 +126,7 @@ struct PrimitiveButtonGestureCallbacks: GestureCallbacks {
 
     static var initialState: ButtonPressPhase { .idle }
 
-    // Converts a gesture phase into the button press phase.
+    // Converts the core gesture phase to a button press phase.
     func pressPhase(_ phase: GesturePhase<Value>) -> ButtonPressPhase {
         switch phase {
         case .possible, .failed: return .idle
@@ -131,8 +143,8 @@ struct PrimitiveButtonGestureCallbacks: GestureCallbacks {
         }
     }
 
-    // Tap order: pressing=true, pressing=false, then action().
-    // Cancel does not call action().
+    // Triggered tap order: pressing(true), pressing(false), then action().
+    // Cancel cleanup must not call action().
     func dispatch(
         phase: GesturePhase<Value>,
         state: inout ButtonPressPhase
@@ -145,6 +157,7 @@ struct PrimitiveButtonGestureCallbacks: GestureCallbacks {
 
         switch phase {
         case .active:
+            // State changes notify the pressing callback.
             state = newPhase
             guard hasHover else { return nil }
             let bpa = buttonPressingAction
@@ -152,6 +165,7 @@ struct PrimitiveButtonGestureCallbacks: GestureCallbacks {
             return { bpa?(newPh) }
 
         case .ended(_) where newPhase == .triggered && (old == .pressing || old == .outside):
+            // Triggered: pressing cleanup first, then action.
             state = .idle
             let bpa = buttonPressingAction
             let hc  = hoverCallback
@@ -161,13 +175,13 @@ struct PrimitiveButtonGestureCallbacks: GestureCallbacks {
             }
 
         case .ended:
-            // Ended outside bounds: notify press ended without firing the action.
+            // Ended outside bounds: notify press ended, no action.
             state = .idle
             let bpa = buttonPressingAction
             return bpa.map { bpa in { bpa(.idle) } }
 
         case .failed:
-            // Cancel fires pressingAction(false) when needed, but never fires action().
+            // Cancel cleanup: pressing(false) only. action must not fire.
             if hasHover && (old == .pressing || old == .outside) {
                 state = .idle
                 let bpa = buttonPressingAction
@@ -181,7 +195,7 @@ struct PrimitiveButtonGestureCallbacks: GestureCallbacks {
         }
     }
 
-    // Mirrors the cancelled dispatch branch.
+    // Same cleanup branch used by cancellation.
     func cancel(state: ButtonPressPhase) -> (() -> ())? {
         if hoverCallback != nil && (state == .pressing || state == .outside) {
             let bpa = buttonPressingAction
@@ -193,11 +207,14 @@ struct PrimitiveButtonGestureCallbacks: GestureCallbacks {
 
 // MARK: - PrimitiveButtonGesture
 
-// Primitive button gesture that builds the core gesture and callbacks reactively.
+// Internal primitive used by the public button gesture.
+// It reads the effective button outset, builds the core hit-test gesture,
+// attaches the button callbacks, and maps the resulting phase value to Void.
 struct PrimitiveButtonGesture: Gesture {
+    // Closure wrappers produced by the public button gesture.
     var hoverCallback: HoverCallback?
     var buttonPressingAction: ButtonPressingAction?
-    var outset: CGFloat = 0.0     // passed to PrimitiveButtonGestureCore
+    var outset: CGFloat = 0.0     // fallback hit-test expansion
     var alwaysActive: Bool = false
 
     typealias Value = ()
@@ -205,7 +222,7 @@ struct PrimitiveButtonGesture: Gesture {
 
     public var body: Never { fatalError("PrimitiveButtonGesture.body must not be called") }
 
-    // Builds the reactive gesture chain and converts its phase to Void output.
+    // Builds a reactive callback/core gesture chain and converts the core value phase to Void.
     static func _makeGesture(
         gesture: _GraphValue<Self>,
         inputs: _GestureInputs
@@ -216,8 +233,8 @@ struct PrimitiveButtonGesture: Gesture {
 
         let gestureAttr = gesture._attribute
 
-        // GestureGraph has a separate AG from ViewGraph, so inputs.environment cannot be read
-        // directly inside a GestureGraph rule. Use cachedValue on the ViewGraph's AG instead.
+        // GestureGraph has a separate AG from ViewGraph, so use the view graph's cached
+        // environment value instead of reading inputs.environment inside a gesture rule.
         let envAttr = inputs.environment
         let viewGraphAG: AttributeGraph? = (AttributeGraphRef.current?.context as? GestureGraph)?
             .rendererHost?.viewGraph.data.graph
@@ -230,7 +247,7 @@ struct PrimitiveButtonGesture: Gesture {
             return gestureAttr.value.outset
         }
 
-        // Build reactive ModifierGesture<CallbacksGesture<PBGC>, PBGCore>.
+        // Build the reactive callback/core gesture chain from the current primitive fields.
         let coreGestureAttr: Attribute<
             ModifierGesture<
                 CallbacksGesture<PrimitiveButtonGestureCallbacks>,
@@ -251,7 +268,7 @@ struct PrimitiveButtonGesture: Gesture {
             )
         }
 
-        // Call _makeGesture on the full chain.
+        // Delegate evaluation to the composed callback/core gesture chain.
         typealias ChainType = ModifierGesture<
             CallbacksGesture<PrimitiveButtonGestureCallbacks>,
             PrimitiveButtonGestureCore
@@ -259,6 +276,7 @@ struct PrimitiveButtonGesture: Gesture {
         let chainGV = _GraphValue<ChainType>(_attribute: coreGestureAttr)
         let outputs = ChainType._makeGesture(gesture: chainGV, inputs: inputs)
 
+        // Drop the core hit-test value while preserving the phase shape.
         let phaseAttr: Attribute<GesturePhase<()>> = graph.makeRule {
             outputs.phase.value.withValue(())
         }
@@ -266,9 +284,18 @@ struct PrimitiveButtonGesture: Gesture {
     }
 }
 
+extension PrimitiveButtonGesture: GestureEventTypeAccepting {
+    static func acceptsEventType(_ eventType: Any.Type) -> Bool {
+        eventType == SpatialEvent.self
+    }
+}
+
 // MARK: - _ButtonGesture
 
-// Public button gesture wrapper. _makeGesture builds a PrimitiveButtonGesture directly.
+// Public button gesture entry point.
+// Gesture construction is routed directly through PrimitiveButtonGesture for now.
+// _makeGesture converts the public closures to primitive callback wrappers:
+// pressingAction receives true only for the pressing phase, and action ignores the point.
 public struct _ButtonGesture: Gesture, PubliclyPrimitiveGesture {
     public var action: () -> Void
     public var pressingAction: ((Bool) -> Void)?
@@ -278,13 +305,13 @@ public struct _ButtonGesture: Gesture, PubliclyPrimitiveGesture {
         self.pressingAction = pressing
     }
 
+    // Body is intentionally unavailable. Gesture construction goes through _makeGesture.
     public typealias Body = Never
     public typealias Value = Void
 
     public var body: Never { fatalError("_ButtonGesture.body must not be called") }
 
-    // Builds HoverCallback(action) and ButtonPressingAction(pressingAction), then
-    // delegates to PrimitiveButtonGesture._makeGesture.
+    // Converts stored closures to primitive callback wrappers, then delegates to the primitive.
     public static func _makeGesture(
         gesture: _GraphValue<Self>,
         inputs: _GestureInputs
@@ -292,7 +319,7 @@ public struct _ButtonGesture: Gesture, PubliclyPrimitiveGesture {
         guard let graph = AttributeGraph.current else {
             fatalError("_ButtonGesture._makeGesture requires AG context")
         }
-        // Reactive: rebuild PBG when _ButtonGesture fields change
+        // Rebuild the primitive when the public gesture fields change.
         let pbgAttr: Attribute<PrimitiveButtonGesture> = graph.makeRule {
             let s = gesture._attribute.value
             let bpa2: ButtonPressingAction? = s.pressingAction.map { pc in
@@ -310,6 +337,12 @@ public struct _ButtonGesture: Gesture, PubliclyPrimitiveGesture {
             gesture: _GraphValue(_attribute: pbgAttr),
             inputs: inputs
         )
+    }
+}
+
+extension _ButtonGesture: GestureEventTypeAccepting {
+    static func acceptsEventType(_ eventType: Any.Type) -> Bool {
+        eventType == SpatialEvent.self
     }
 }
 

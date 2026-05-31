@@ -5,7 +5,7 @@
 //  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-// ViewAlias: marker protocol for "source alias" view types whose backing content
+// ViewAlias: marker protocol for source-alias view types whose backing content
 // is provided at render time via SourceInput<Self>.
 // Conforming types: PrimitiveButtonStyleConfiguration.Label,
 //   ButtonStyleConfiguration.Label, LabelStyleConfiguration.Title/Icon,
@@ -18,8 +18,8 @@ public struct _ViewListCountInputs {}
 
 // AnySourceFormula: protocol for type-erased view dispatch.
 // SourceFormula<T> conforms via its metatype stored in AnySource.formula.
-// The `view` parameter carries the alias view's _GraphValue (e.g. Label's node);
-// the `source` parameter carries the full AnySource (formula + backing AG node).
+// The `view` parameter carries the alias view's _GraphValue (e.g. Label's node).
+// The `source` parameter carries the full AnySource (formula + backing AG node).
 protocol AnySourceFormula {
     static func makeView<A: ViewAlias>(
         view: _GraphValue<A>, source: AnySource, inputs: _ViewInputs
@@ -33,7 +33,7 @@ protocol AnySourceFormula {
 
 // SourceFormula<T>: zero-size empty struct with no stored properties.
 // Carries the backing view type T via its type parameter.
-// The alias view's _GraphValue (view:) is ignored; dispatch goes through source.value.
+// The alias view's _GraphValue (view:) is ignored. Dispatch goes through source.value.
 struct SourceFormula<T: View>: AnySourceFormula {
     static func makeView<A: ViewAlias>(
         view: _GraphValue<A>, source: AnySource, inputs: _ViewInputs
@@ -46,7 +46,7 @@ struct SourceFormula<T: View>: AnySourceFormula {
         T._makeViewList(view: _GraphValue(_attribute: Attribute<T>(source.value.toStrong())), inputs: inputs)
     }
     static func viewListCount(source: AnySource, inputs: _ViewListCountInputs) -> Int? {
-        nil  // _viewListCount is not implemented yet. nil means dynamic/unknown count.
+        nil  // Dynamic/unknown count.
     }
     static func snapshot(source: AnySource) -> AnyView? {
         guard let graph = AttributeGraph.current, source.value.isValid(in: graph) else {
@@ -57,6 +57,9 @@ struct SourceFormula<T: View>: AnySourceFormula {
 }
 
 // AnySource: type-erased source descriptor stored in SourceInput<Source>.
+//   formula:    type-erased source formula metatype
+//   value:      weak AG node ref for the backing source view
+//   valueIsNil: AG attribute for nil-tracking of optional sources
 struct AnySource {
     let formula: any AnySourceFormula.Type
     let value: AGWeakAttribute
@@ -116,7 +119,7 @@ struct AnySource {
 }
 
 // SourceInput<Source>: PropertyKey whose value is Stack<AnySource>.
-// Written by StaticSourceWriter; read by Source._makeView implementations.
+// Written by StaticSourceWriter. Read by Source._makeView implementations.
 struct SourceInput<Source>: GraphInput {
     typealias Value = Stack<AnySource>
     static var defaultValue: Stack<AnySource> { .empty }
@@ -125,7 +128,7 @@ struct SourceInput<Source>: GraphInput {
 }
 
 // StaticSourceWriter<Source, Type>: ViewModifier that writes a SourceInput entry
-// for Source into customInputs, enabling Source._makeView to later render Type.
+// for Source into customInputs so that Source._makeView can render Type.
 struct StaticSourceWriter<Source, Type> {
     public typealias Body = Never
     let source: Type

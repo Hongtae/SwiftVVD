@@ -25,7 +25,7 @@ extension _VariadicView_Root {
 public struct _VariadicView_Children: View {
     public typealias Body = Never
 
-    /// AG rule that exposes children as a ForEach over child elements.
+    /// Child AG rule that materializes `ForEach<_VariadicView_Children, AnyHashable, Element>`.
     private struct Child: Rule {
         typealias Value = ForEach<_VariadicView_Children, AnyHashable, Element>
         var attribute: Attribute<_VariadicView_Children>
@@ -98,12 +98,14 @@ extension _VariadicView_Children: RandomAccessCollection {
             set { traits[key] = newValue }
         }
 
-        /// Builds this child element through the underlying view-list view.
+        /// Element rendering routes through _ViewList_View._makeView.
         public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
             _ViewList_View._makeView(view: view[\.view], inputs: inputs)
         }
 
         /// Returns a single-element static list for this element.
+        /// Rendering routes through `_ViewList_View._makeView`.
+        /// It does not extract TypedUnaryViewGenerator values from the element.
         public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
             let elements = UnaryElements(
                 body: { viewInputs in
@@ -188,7 +190,7 @@ public protocol _VariadicView_UnaryViewRoot: _VariadicView_ViewRoot {
 public protocol _VariadicView_MultiViewRoot: _VariadicView_ViewRoot {
 }
 
-/// UnaryViewRoot-specific body generator.
+/// UnaryViewRoot-specific generator for unary variadic roots.
 struct BodyUnaryViewGenerator {
     var body: (_ViewInputs) -> _ViewOutputs
     var viewType: Any.Type
@@ -201,7 +203,7 @@ extension _VariadicView_ViewRoot {
         }
 
         if Body.self is Never.Type {
-            // Body == Never roots must provide their own construction path.
+            // Body = Never roots must provide a concrete layout/root entry path.
             // The generic ViewRoot body path must not silently replace the root
             // with VStackLayout.
             neverBody("\(Self.self)._makeView used the generic ViewRoot path with Body == Never.")
@@ -239,7 +241,7 @@ extension _VariadicView_ViewRoot {
         let childListOutputs = body(_Graph(), inputs)
 
         if Body.self is Never.Type {
-            // Body == Never: forward the body outputs directly.
+            // Body = Never. Forward the body outputs directly.
             return childListOutputs
         }
 
@@ -302,9 +304,9 @@ extension _VariadicView_MultiViewRoot {
     }
 
     public static func _makeView(root: _GraphValue<Self>, inputs: _ViewInputs, body: (_Graph, _ViewInputs) -> _ViewListOutputs) -> _ViewOutputs {
-        // Delegate to the generic ViewRoot _makeView which handles both Body==Never and Body!=Never.
-        // For Body == Never: falls back to VStackLayout (like _VariadicView_ViewRoot default).
-        // For Body != Never: children AG input + body(children:) rule + Body._makeView.
+        // Delegate to the generic ViewRoot _makeView which handles both Body = Never and Body != Never.
+        // For Body = Never, fall back to VStackLayout.
+        // For Body != Never, build children AG input, body(children:) rule, and Body._makeView.
         guard let graph = AttributeGraph.current else {
             fatalError("\(self)._makeView called outside an active AttributeGraph context.")
         }
@@ -320,7 +322,7 @@ extension _VariadicView_MultiViewRoot {
                                                body: { _, _ in childListOutputs })
         }
 
-        // Dynamic MultiViewGenerator with proxy children.
+        // Dynamic MultiViewGenerator with Proxy, same routing as the Body != Never ViewRoot path.
         let initialChildren = _VariadicView_Children.makeChildren(from: childListOutputs)
         let childrenAttr: Attribute<_VariadicView_Children> = graph.makeInput(
             value: initialChildren
@@ -376,11 +378,11 @@ extension _VariadicView.Tree: View where Root: _VariadicView_ViewRoot, Content: 
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        // `view.isRoot` can be true here when the current body/list
-        // traversal materializes this Tree from a rule attribute, such as a
-        // Body._makeViewList body node or a TupleView child node. That is not
-        // the same as an app/scene root view entering through _makeViewList.
-        // FIXME: Restore a non-root assertion once the root invariant is fully wired.
+        // `view.isRoot` can be true when body/list traversal materializes this
+        // Tree from a rule attribute, such as a Body._makeViewList body node or
+        // a TupleView child node. That is distinct from an app/scene root view
+        // entering through _makeViewList. Restore the non-root assertion only
+        // after the Tree._makeViewList root invariant is fully modeled.
         return Root._makeViewList(root: view[\.root], inputs: inputs) { _, inputs in
             Content._makeViewList(view: view[\.content], inputs: inputs)
         }

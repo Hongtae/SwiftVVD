@@ -10,23 +10,28 @@ import Foundation
 // MARK: - _Placement
 
 /// The resolved placement for a child view.
+/// Stores the child's anchor, parent-local anchor position, proposed size, and
+/// reserved storage kept for the mirrored placement surface.
 public struct _Placement: Equatable {
     /// The unit point anchor within the child's bounds.
     public var anchor: UnitPoint
     /// The anchor point in parent-local coordinates.
     public var anchorPosition: CGPoint
-    /// Proposed width (as raw CGFloat; +Inf = unspecified).
+    /// Proposed width as raw CGFloat. +Inf means unspecified.
     var _proposedWidth: CGFloat
-    /// Proposed height (as raw CGFloat; +Inf = unspecified).
+    /// Proposed height as raw CGFloat. +Inf means unspecified.
     var _proposedHeight: CGFloat
-    // Reserved storage for future placement state.
+    // Reserved internal storage. The runtime role is not modeled yet.
     var _reserved0: CGFloat
     var _reserved1: CGFloat
 
     /// The proposed size as a CGSize (computed from raw fields).
     public var proposedSize: CGSize {
         get { CGSize(width: _proposedWidth, height: _proposedHeight) }
-        set { _proposedWidth = newValue.width; _proposedHeight = newValue.height }
+        set {
+            _proposedWidth = newValue.width
+            _proposedHeight = newValue.height
+        }
     }
 
     public init(proposedSize: CGSize,
@@ -51,7 +56,7 @@ public struct _Placement: Equatable {
 // MARK: - _PositionAwarePlacementContext
 
 /// Context passed to the position-aware child-placement vtable method.
-/// Defined as opaque storage until position-aware placement needs concrete fields.
+/// The internal fields are intentionally opaque until behavior requires modeling.
 struct _PositionAwarePlacementContext {
     var _storage: (UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32)
 
@@ -61,8 +66,9 @@ struct _PositionAwarePlacementContext {
 // MARK: - LayoutEngine protocol
 
 /// Protocol for a layout engine stored inside a LayoutEngineBox.
-/// Dispatch is handled through LayoutEngineBox.
-/// place(at:anchor:proposal:) commits final placement to the renderer.
+/// Methods cover sizing, spacing, child geometry generation, explicit alignment,
+/// and child placement. `place(at:anchor:proposal:)` is the backend hook for
+/// committing final placement to the renderer.
 /// Internal because it uses internal types (ViewSize, ViewGeometry, AlignmentKey).
 protocol LayoutEngine {
     func layoutPriority() -> Double
@@ -106,7 +112,7 @@ extension LayoutEngine {
 
 /// Class-bound dispatch protocol for LayoutEngineBox.
 /// Using a class-bound protocol lets LayoutComputer.box store a single 8-byte pointer.
-/// Swift class-constrained existentials use a single reference word with no inline witness table.
+/// Class-constrained existentials use a single reference word with no inline witness table.
 protocol _AnyLayoutEngineBoxDispatch: AnyObject {
     var currentAttribute: AGAttribute { get set }
     var isNilAttribute: Bool { get set }
@@ -165,7 +171,8 @@ final class LayoutEngineBox<E: LayoutEngine>: _AnyLayoutEngineBoxDispatch {
 
 // MARK: - ViewLayoutEngine<L: Layout>
 
-/// Bridges Layout protocol methods to the LayoutEngine vtable expected by LayoutEngineBox.
+/// Concrete LayoutEngine for Layout-backed containers.
+/// Bridges Layout protocol methods to the LayoutEngine dispatch surface.
 /// childGeometries creates PlacementData, exposes it through the thread layout data slot,
 /// and lets LayoutSubview.place write child geometries into that buffer.
 final class ViewLayoutEngine<L: Layout>: LayoutEngine {
@@ -209,7 +216,6 @@ final class ViewLayoutEngine<L: Layout>: LayoutEngine {
         var cache = layout.makeCache(subviews: subviews)
         let bounds = CGRect(origin: .zero, size: size.value)
 
-        // Dispatch explicit alignment by the axis encoded in the alignment key.
         switch key.axis {
         case .horizontal:
             return layout.explicitAlignment(of: HorizontalAlignment(alignmentKey: key.bits),
@@ -268,7 +274,7 @@ final class ViewLayoutEngine<L: Layout>: LayoutEngine {
 
 // MARK: - ClosureLayoutEngine
 
-/// Closure-based LayoutEngine that bridges the closure-based LayoutComputer API
+/// Closure-based LayoutEngine bridging the closure-based LayoutComputer API
 /// to the LayoutEngine protocol required by LayoutEngineBox.
 final class ClosureLayoutEngine: LayoutEngine {
     var _sizeThatFits: (ProposedViewSize) -> CGSize

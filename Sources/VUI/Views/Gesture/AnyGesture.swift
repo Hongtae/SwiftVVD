@@ -29,6 +29,18 @@ struct _MapGesture<Content: Gesture, Value>: Gesture {
     typealias Value = Value
 }
 
+extension _MapGesture: GestureEventTypeAccepting {
+    static func acceptsEventType(_ eventType: Any.Type) -> Bool {
+        gestureTypeAcceptsEvent(Content.self, eventType: eventType)
+    }
+}
+
+extension _MapGesture: DynamicGestureEventTypeAccepting {
+    func acceptsEventType(_ eventType: Any.Type) -> Bool {
+        gestureValueAcceptsEvent(content, eventType: eventType)
+    }
+}
+
 // AnyGesture
 
 public struct AnyGesture<Value>: Gesture {
@@ -46,6 +58,12 @@ public struct AnyGesture<Value>: Gesture {
     public typealias Body = Never
 }
 
+extension AnyGesture: DynamicGestureEventTypeAccepting {
+    func acceptsEventType(_ eventType: Any.Type) -> Bool {
+        storage.acceptsEventType(eventType)
+    }
+}
+
 @usableFromInline
 class AnyGestureStorageBase<Value> {
     init<T>(_ gesture: T) where Value == T.Value, T: Gesture {}
@@ -55,6 +73,10 @@ class AnyGestureStorageBase<Value> {
         inputs: _GestureInputs
     ) -> _GestureOutputs<Value> {
         fatalError("AnyGestureStorageBase.makeGestureImpl: must override in AnyGestureBox")
+    }
+
+    func acceptsEventType(_ eventType: Any.Type) -> Bool {
+        true
     }
 }
 
@@ -79,5 +101,9 @@ class AnyGestureBox<T: Gesture>: AnyGestureStorageBase<T.Value> {
         }
         return T._makeGesture(
             gesture: _GraphValue<T>(_attribute: innerAttr), inputs: inputs)
+    }
+
+    override func acceptsEventType(_ eventType: Any.Type) -> Bool {
+        gestureValueAcceptsEvent(gesture, eventType: eventType)
     }
 }

@@ -5,16 +5,18 @@
 //  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-// MARK: - Thread flag types
-// The current renderer uses MainThreadFlags for body evaluation.
+// Thread flag marker types.
+// DynamicProperty field flags distinguish main-thread and async body paths.
+// The current body evaluation path uses MainThreadFlags.
 struct MainThreadFlags {}
 struct AsyncThreadFlags {}
 
-// MARK: - BodyAccessor
+// BodyAccessor
 // Protocol adopted by ModifierBodyAccessor, ViewBodyAccessor, EnvironmentalBodyAccessor.
 // Creates the body AG rule (DynamicBody or StaticBody) during _makeView setup,
 // and drives body re-evaluation when the container value changes.
-// updateBody returns Body so DynamicBody/StaticBody can publish it through AttributeGraph.
+//
+// Body values are published through DynamicBody/StaticBody.
 protocol BodyAccessor {
     associatedtype Container
     associatedtype Body
@@ -28,11 +30,11 @@ protocol BodyAccessor {
         fields: DynamicPropertyCache.Fields
     ) -> (_GraphValue<Body>, Optional<_DynamicPropertyBuffer>)
 
-    // Returns the body value published by the StatefulRule.
+    // Return value is published via AttributeGraph.setStatefulOutput in StatefulRule.
     mutating func updateBody(of container: Container, changed: Bool) -> Body
 }
 
-// MARK: - DynamicBody
+// DynamicBody
 // StatefulRule that computes Body when the container has DynamicProperties.
 // updateValue(): reads container (dep), applies DynamicProperty field updates, calls body.
 struct DynamicBody<Accessor: BodyAccessor, Flags>: StatefulRule {
@@ -48,7 +50,7 @@ struct DynamicBody<Accessor: BodyAccessor, Flags>: StatefulRule {
     }
 }
 
-// MARK: - StaticBody
+// StaticBody
 // StatefulRule for body when there are no DynamicProperties.
 struct StaticBody<Accessor: BodyAccessor, Flags>: StatefulRule {
     typealias Value = Accessor.Body
@@ -61,7 +63,7 @@ struct StaticBody<Accessor: BodyAccessor, Flags>: StatefulRule {
     }
 }
 
-// MARK: - ModifierBodyAccessor
+// ModifierBodyAccessor
 // BodyAccessor conformance for ViewModifier.body(content:).
 struct ModifierBodyAccessor<M: ViewModifier>: BodyAccessor {
     typealias Container = M
@@ -93,7 +95,7 @@ struct ModifierBodyAccessor<M: ViewModifier>: BodyAccessor {
     }
 }
 
-// MARK: - EnvironmentalBodyAccessor
+// EnvironmentalBodyAccessor
 // BodyAccessor conformance for EnvironmentalModifier.resolve(in:).
 // Unlike ModifierBodyAccessor, stores environmentAttr to read current EnvironmentValues
 // during updateBody, which calls modifier.resolve(in: environment).
@@ -130,10 +132,10 @@ struct EnvironmentalBodyAccessor<E: EnvironmentalModifier>: BodyAccessor {
     }
 }
 
-// MARK: - ViewBodyAccessor
+// ViewBodyAccessor
 // BodyAccessor conformance for View.body.
 // View._makeView currently uses withObservationTracking directly.
-// ViewBodyAccessor is reserved for a future body-access path.
+// ViewBodyAccessor is kept for the alternate body access path.
 struct ViewBodyAccessor<V: View>: BodyAccessor {
     typealias Container = V
     typealias Body = V.Body

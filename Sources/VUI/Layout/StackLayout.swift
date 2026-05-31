@@ -121,8 +121,7 @@ enum _StackLayoutImplementation {
 
         let crossRange = alignmentRange(axis: axis, dimensions: dimensions, cache: cache)
         // Normalize extra cross-axis alignment bounds inside the stack-local frame.
-        // Larger outer frames move the whole stack instead of recentering
-        // children inside StackLayout.
+        // Larger outer frames move the whole stack instead of recentering children.
         let guidePosition = minCross(bounds, axis: axis) - crossRange.min
 
         var majorOffset = minMajor(bounds, axis: axis)
@@ -150,8 +149,9 @@ enum _StackLayoutImplementation {
                                   cache: inout _StackLayoutCache) -> CGFloat? {
         guard !subviews.isEmpty else { return nil }
 
-        // Non-baseline built-in stack guides do not propagate as explicit values.
-        // Custom guides and text baselines do propagate.
+        // Tested non-baseline built-in stack guides do not propagate as explicit
+        // values even when direct children write them. Custom guides and text
+        // baselines do propagate.
         guard !guide.suppressesStackExplicitPropagation else {
             return nil
         }
@@ -197,7 +197,6 @@ enum _StackLayoutImplementation {
         return guide.combineExplicit(explicitValues)
     }
 
-    // Compute major-axis lengths under the current proposal.
     private static func majorLengths(axis: Axis,
                                      proposal: ProposedViewSize,
                                      subviews: LayoutSubviews,
@@ -341,7 +340,6 @@ enum _StackLayoutImplementation {
         }
     }
 
-    // Build the proposal used when placing stack children.
     private static func proposalWhenPlacing(axis: Axis,
                                             proposal: ProposedViewSize,
                                             bounds: CGRect) -> ProposedViewSize {

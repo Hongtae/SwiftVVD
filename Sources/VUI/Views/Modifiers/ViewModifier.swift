@@ -8,9 +8,8 @@
 import Foundation
 
 // MARK: - BodyInputElement
-
 // One entry on the BodyInput<Content> stack.
-// Stores either a makeView closure or a makeViewList closure.
+// Stores Swift closures for make-view and make-view-list body paths.
 struct BodyInputElement: @unchecked Sendable {
     let isViewList: Bool
     // Valid when isViewList == false:
@@ -32,7 +31,8 @@ struct BodyInputElement: @unchecked Sendable {
 }
 
 extension BodyInputElement: Equatable {
-    // Closures are not comparable, so only the tag mismatch can be rejected directly.
+    // Different body kinds are not equal. Matching kinds are also conservatively
+    // false because stored Swift closures cannot be compared directly.
     static func == (lhs: Self, rhs: Self) -> Bool {
         guard lhs.isViewList == rhs.isViewList else { return false }
         return false
@@ -44,8 +44,7 @@ extension BodyInputElement: GraphReusable {
     mutating func tryToReuse(by other: Self, indirectMap: IndirectAttributeMap, testOnly: Bool) -> Bool { true }
 }
 
-// MARK: - BodyInput
-
+// MARK: - BodyInput<Content>
 // PropertyKey for the ViewModifier body closure stack.
 // Value = Stack<BodyInputElement>. defaultValue = .empty.
 // Conforms to both ViewInput and GraphInput. Stored via _GraphInputs.append (base channel).
@@ -53,23 +52,22 @@ struct BodyInput<Content>: ViewInput {
     typealias Value = Stack<BodyInputElement>
     static var defaultValue: Stack<BodyInputElement> { .empty }
     static func valuesEqual(_ a: Value, _ b: Value) -> Bool { false }
-    // BodyInputElement is trivially reusable, so the stack key is too.
+    // BodyInputElement is trivially reusable, so the stack key is reusable too.
     static var isTriviallyReusable: Bool { true }
 }
 
 // MARK: - ViewModifierContentProvider
-
 // Protocol adopted by _ViewModifier_Content<Modifier>.
 // providerMakeView: pops a BodyInputElement from the base stack and calls it.
-// isViewList=false: calls the makeView closure.
-// isViewList=true: bridges through the default VStack implicit root until
-// ImplicitRootType is wired.
+// isViewList=false: calls the make-view closure directly.
+// isViewList=true: routes through the implicit-root bridge.
+// The bridge uses the default VStack implicit root for this body path.
 protocol ViewModifierContentProvider: View {
     static func providerMakeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs
     static func providerMakeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs
 }
 
-// MARK: - _ViewModifier_Content
+// MARK: - _ViewModifier_Content<Modifier>
 
 public struct _ViewModifier_Content<Modifier> where Modifier: ViewModifier {
     public typealias Body = Never
@@ -86,11 +84,12 @@ extension _ViewModifier_Content: View {
         Self.providerMakeViewList(view: view, inputs: inputs)
     }
 
-    // BodyCountInput is not implemented yet, so use the body fallback.
+    // Count resolution falls back to body(inputs), which may return a dynamic/unknown count.
     public static func _viewListCount(inputs: _ViewListCountInputs, body: (_ViewListCountInputs) -> Int?) -> Int? {
         body(inputs)
     }
 
+    // Always-emitted client wrapper.
     @_alwaysEmitIntoClient
     public static func _viewListCount(inputs: _ViewListCountInputs) -> Int? {
         _viewListCount(inputs: inputs) { _ in nil }
@@ -98,6 +97,7 @@ extension _ViewModifier_Content: View {
 }
 
 extension _ViewModifier_Content: ViewModifierContentProvider {
+    // Consumes the latest BodyInputElement and calls the stored closure.
     static func providerMakeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         var inputs = inputs
         guard let elem = inputs.popLast(BodyInput<Self>.self) else {
@@ -111,7 +111,7 @@ extension _ViewModifier_Content: ViewModifierContentProvider {
                 fatalError("_ViewModifier_Content<\(Modifier.self)>.providerMakeView called outside AG context.")
             }
             let rootAttr: Attribute<_VStackLayout> = graph.makeInput(value: _VStackLayout())
-            // Use the default VStack implicit root until ImplicitRootType is wired.
+            // View-list body closures use the default VStack implicit root in this path.
             return _VStackLayout._makeLayoutView(root: _GraphValue(_attribute: rootAttr), inputs: inputs) { _, childInputs in
                 fn(_Graph(), childInputs.listInputs)
             }
@@ -123,6 +123,7 @@ extension _ViewModifier_Content: ViewModifierContentProvider {
         }
     }
 
+    // providerMakeViewList consumes directly from the base graph inputs.
     static func providerMakeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
         var inputs = inputs
         guard let elem = inputs.base.popLast(BodyInput<Self>.self) else {
@@ -137,7 +138,7 @@ extension _ViewModifier_Content: ViewModifierContentProvider {
             guard let fn = elem.makeViewFn else {
                 fatalError("_ViewModifier_Content<\(Modifier.self)>.providerMakeViewList: missing view body.")
             }
-            // Wrap the makeView body case in a unary view list.
+            // makeView body closures are exposed as a unary view-list element.
             return _ViewListOutputs.unaryViewList(viewType: Self.self, inputs: inputs) { viewInputs in
                 var viewInputs = viewInputs
                 var mergedBase = inputs.base
@@ -158,6 +159,7 @@ public protocol ViewModifier {
 
     static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs
     static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs
+    // Returns static view count, or nil when the count is dynamic or unknown.
     static func _viewListCount(inputs: _ViewListCountInputs, body: (_ViewListCountInputs) -> Int?) -> Int?
 }
 
@@ -177,12 +179,13 @@ extension ViewModifier {
         body(content: _ViewModifier_Content())
     }
 
-    // Default _viewListCount delegates to the inner content count.
+    // Default count handling delegates to the modified content.
     public static func _viewListCount(inputs: _ViewListCountInputs, body: (_ViewListCountInputs) -> Int?) -> Int? {
         body(inputs)
     }
 
-    // Build the modifier body after dynamic-property processing.
+    // Modifier bodies must be value types. Build the modifier body through
+    // ModifierBodyAccessor so DynamicProperty fields receive the current graph inputs.
     static func makeBody(
         modifier: _GraphValue<Self>,
         inputs: inout _GraphInputs,
@@ -208,12 +211,14 @@ extension ViewModifier {
             fatalError("\(Self.self)._makeView called outside an active AttributeGraph context.")
         }
 
+        // Build the modifier body through the dynamic-property body accessor path.
         var graphInputs = inputs.base
         let dpFields = DynamicPropertyCache.fields(of: Self.self)
         let (bodyGV, _) = Self.makeBody(modifier: modifier, inputs: &graphInputs, fields: dpFields)
 
         var inputs = inputs
         inputs.base = graphInputs
+        // Default path appends directly to graph inputs instead of using pushModifierBody.
         inputs.base.append(BodyInputElement(makeView: body), forKey: BodyInput<Content>.self)
         return Body._makeView(view: bodyGV, inputs: inputs)
     }
@@ -253,7 +258,7 @@ public protocol _GraphInputsModifier {
 // _ViewInputsModifier is a type of modifier that modifies _ViewInputs.
 // Conformers implement _makeViewInputs which operates on the full _ViewInputs.
 //
-// During _makeViewList, _makeViewInputs is called via a stub _ViewInputs bridge
+// During _makeViewList, _makeViewInputs is called through a synthetic _ViewInputs bridge
 // so that the modified inputs.base (e.g. cachedEnvironment) is captured in the
 // inner view's TypedUnaryViewGenerator.baseInputs. This ensures env effects such
 // as foregroundStyle are applied correctly when the layout phase calls makeView.
@@ -266,10 +271,10 @@ extension _ViewInputsModifier {
         fatalError()
     }
 
-    // Bridge for the list phase: applies _makeViewInputs using a stub _ViewInputs wrapper
+    // Bridge for the list phase: applies _makeViewInputs using a synthetic _ViewInputs wrapper
     // so that the modified base (cachedEnvironment etc.) can be extracted without requiring
-    // real layout Attributes.  Conformers that only modify inputs.base can use this directly;
-    // conformers with additional layout-Attribute side-effects should override _makeViewList.
+    // real layout Attributes. Conformers that only modify inputs.base can use this directly.
+    // Conformers with additional layout-Attribute side effects should override _makeViewList.
     static func _applyToListInputs(modifier: _GraphValue<Self>, inputs: inout _ViewListInputs) {
         guard let graph = AttributeGraph.current else {
             fatalError("\(Self.self)._applyToListInputs called outside an active AttributeGraph context.")
@@ -315,10 +320,9 @@ extension ViewModifier where Self: _GraphInputsModifier, Self.Body == Never {
     }
 }
 
-// Animatable modifiers substitute the modifier GraphValue with an animated attribute
-// before pushing BodyInput and building the modifier body.
-// UnaryLayout types are not affected because their _makeView implementation is more
-// specific and takes priority.
+// Animatable modifiers let _makeAnimatable replace the modifier graph value
+// before pushing BodyInput and evaluating the modifier body. UnaryLayout keeps a
+// more specific _makeView implementation and does not route through this path.
 extension ViewModifier where Self: Animatable {
     public static func _makeView(
         modifier: _GraphValue<Self>,
@@ -349,7 +353,7 @@ extension ViewModifier where Self: Animatable {
         inputs.base.append(BodyInputElement(makeViewList: body), forKey: BodyInput<Content>.self)
         return Body._makeViewList(view: modifier[\._content], inputs: inputs)
     }
-    // _viewListCount: NOT in this extension (inherits from default extension ViewModifier).
+    // This extension inherits _viewListCount from the default ViewModifier extension.
 }
 
 extension ViewModifier {
@@ -370,15 +374,15 @@ extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
     }
 
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        // Dispatch: Modifier._makeViewList handles all cases via protocol witness table.
+        // Dispatch: Modifier._makeViewList owns all modifier-specific list behavior.
         //
         // MultiViewModifier (AlertModifier, GestureViewModifier, _BackgroundModifier, etc.):
         //   Inherits MultiViewModifier._makeViewList default, calls body, then wraps with
         //   ModifiedElements. Element materialization then calls Modifier._makeView per child
         //   or layout methods for unary layout modifiers.
         //
-        // MultiViewModifier WITH _makeViewList override (ToolbarFilterModifier):
-        //   Override is selected by the protocol witness table, preserving body pass-through.
+        // MultiViewModifier with _makeViewList override (ToolbarFilterModifier):
+        //   Override is selected and body pass-through is preserved.
         //
         // Non-MultiViewModifier with Body == Never and explicit _makeViewList override
         //   (_PreferenceTransformModifier): override runs (body pass-through).
@@ -390,7 +394,8 @@ extension ModifiedContent: View where Content: View, Modifier: ViewModifier {
         }
     }
 
-    // Delegate to Modifier._viewListCount with Content._viewListCount as the body closure.
+    // ModifiedContent delegates count handling to the modifier, with content
+    // count supplied as the body closure.
     public static func _viewListCount(inputs: _ViewListCountInputs) -> Int? {
         Modifier._viewListCount(inputs: inputs) { inputs in
             Content._viewListCount(inputs: inputs)
@@ -431,12 +436,11 @@ extension View {
 ///
 /// Conformers: layout modifiers (`UnaryLayout`) and rendering modifiers such as
 /// background, overlay, gesture, and alert.
-/// No `Body == Never` constraint.
+/// No `Body == Never` constraint. This is a pure marker.
 protocol PrimitiveViewModifier: ViewModifier {}
 
 /// Sub-protocol of `PrimitiveViewModifier`. Provides the default `_makeViewList` that calls the
 /// inner body and wraps the result with `ModifiedElements` via `multiModifier`.
-///
 /// Behavior: calls body(_Graph(), inputs), wraps inner elements with ModifiedElements.
 /// Element materialization processes the resulting .modified case.
 protocol MultiViewModifier: PrimitiveViewModifier {}
@@ -458,8 +462,8 @@ extension MultiViewModifier {
 }
 
 /// Layout-specific sub-protocol of `MultiViewModifier`. Geometry-only modifiers
-/// such as frame, padding, and fixedSize
-/// conform to this protocol. Conforming types implement `modifyLayoutComputer(_:)` and receive a
+/// such as frame, padding, and fixedSize conform to this protocol.
+/// Conforming types implement `modifyLayoutComputer(_:)` and receive a
 /// correct `_makeView` implementation for free. `_makeViewList` is inherited from `MultiViewModifier`.
 protocol UnaryLayout: MultiViewModifier, Animatable {
     func modifyLayoutComputer(_ layoutComputer: LayoutComputer) -> LayoutComputer
@@ -505,10 +509,10 @@ extension UnaryLayout {
     }
 }
 
-// MARK: - Modifier body stack helpers
-
+// MARK: - _ViewInputs + pushModifierBody / popLast / top
 // ViewModifier body stack helpers.
-//   Creates a BodyInputElement and calls _GraphInputs.append internally.
+// pushModifierBody creates a BodyInputElement and appends it to graph inputs.
+// The default ViewModifier._makeView path appends directly instead of using this helper.
 // popLast: Thin wrapper delegating to _GraphInputs.popLast.
 // top: Thin wrapper delegating to _GraphInputs.top.
 

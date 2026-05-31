@@ -7,11 +7,10 @@
 
 import Foundation
 
-// GraphHost — root AG-owning base class.
-//
-// data: AttributeGraphRef — wraps the shared AG::Graph core with a per-host context pointer.
-// Multiple GraphHost instances (e.g. ViewGraph + GestureGraph) may share the same
-// underlying AttributeGraph while each holding its own AttributeGraphRef.
+// GraphHost is the root AttributeGraph-owning base class.
+// `data` wraps the shared graph core with a per-host context pointer.
+// Multiple hosts can share one underlying AttributeGraph while each holds its
+// own AttributeGraphRef.
 class GraphHost {
     var data: AttributeGraphRef
 
@@ -30,7 +29,7 @@ class GraphHost {
     }
 }
 
-// GraphDelegate — AG transaction / graph change callbacks.
+// GraphDelegate provides transaction/update/change callbacks for graph hosts.
 protocol GraphDelegate: AnyObject {
     func beginTransaction()
     func updateGraph<T>(body: (GraphHost) -> T) -> T

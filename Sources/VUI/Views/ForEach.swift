@@ -116,6 +116,7 @@ extension ForEach: View where Content: View {
 // MARK: - ForEachState
 
 /// Per-ForEach state class. Holds per-item subgraph elements.
+/// Stores the per-item elements, subgraph, and trait attribute.
 final class ForEachState<Data, ID, Content>
     where Data: RandomAccessCollection, ID: Hashable, Content: View {
 
@@ -167,7 +168,10 @@ struct ForEachList<Data, ID, Content>: ViewList
     ) -> Bool {
         for id in state.order {
             guard let item = state.items[id] else { continue }
-            if from > 0 { from -= 1; continue }
+            if from > 0 {
+                from -= 1
+                continue
+            }
             let sublist = _ViewList_Sublist(
                 start: 0,
                 count: 1,
@@ -222,7 +226,7 @@ extension ForEach where Content: View {
 }
 
 extension ForEach where Data == Range<Int>, ID == Int, Content: View {
-    // requires_constant_range
+    // Range-based initializer.
     public init(_ data: Range<Int>, @ViewBuilder content: @escaping (Int) -> Content) {
         self.init(data, id: \.self, content: content)
     }

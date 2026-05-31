@@ -11,7 +11,7 @@ import VVD
 // _EventDirections
 //
 // OptionSet controlling which drag directions are recognized.
-// Default rawValue=0x0F (all 4 directions).
+// Stored as UInt8. default rawValue=0x0F means all four directions.
 struct _EventDirections: OptionSet {
     let rawValue: UInt8
     static let up         = _EventDirections(rawValue: 1 << 0)
@@ -25,7 +25,7 @@ struct _EventDirections: OptionSet {
 
 // DragGesture
 //
-// _makeGesture -> SpatialDragGesture -> wrapped with Gesture.category(.drag).
+// _makeGesture copies fields into SpatialDragGesture, then wraps it with Gesture.category(.drag).
 
 public struct DragGesture: Gesture {
     public struct Value: Equatable {
@@ -62,6 +62,7 @@ public struct DragGesture: Gesture {
 
     public var minimumDistance: CGFloat
     public var coordinateSpace: CoordinateSpace
+    // Hidden direction filter. Defaults to all four directions.
     var allowedDirections: _EventDirections
 
     public init(minimumDistance: CGFloat = 10, coordinateSpace: some CoordinateSpaceProtocol = .local) {
@@ -87,7 +88,9 @@ public struct DragGesture: Gesture {
             coordinateSpace: self_.coordinateSpace,
             allowedDirections: self_.allowedDirections
         )
-        // CategoryGesture is pass-through until GestureCategory.Key preference injection is implemented.
+        // CategoryGesture is pass-through until GestureCategory.Key preference
+        // injection is implemented. Keep the wrapper so category injection can be
+        // added without refactoring.
         let categorized = spatial.category(.drag, includeChildren: false)
         typealias Chain = ModifierGesture<CategoryGesture<DragGesture.Value>, SpatialDragGesture>
         let attr: Attribute<Chain> = graph.makeInput(value: categorized)
@@ -97,15 +100,21 @@ public struct DragGesture: Gesture {
 
 extension DragGesture.Value: Sendable {}
 
+extension DragGesture: GestureEventTypeAccepting {
+    static func acceptsEventType(_ eventType: Any.Type) -> Bool {
+        eventType == TappableEvent.self
+    }
+}
+
 // MARK: - SpatialDragGesture
 
 /// Internal gesture type used by DragGesture.
 /// Implements drag recognition via an AG modifier chain.
 ///
-/// GestureGraph converts platform mouse events to TappableEvent,
-/// so EventListener<TappableEvent> is used here.
+/// GestureGraph currently converts platform mouse input into TappableEvent,
+/// so this local chain uses EventListener<TappableEvent>.
 ///
-/// Body chain, from inner to outer:
+/// body chain (inner -> outer):
 ///   EventListener<TappableEvent>
 ///   -> EventFilter<TappableEvent>       (event.button == .primary)
 ///   -> CoordinateSpaceGesture<TappableEvent>
@@ -160,6 +169,7 @@ struct SpatialDragGesture: Gesture, PubliclyPrimitiveGesture {
     }
 
     /// StateContainerGesture.transform closure.
+    /// Applies minimum distance and allowed-direction checks while building the drag phase.
     static func applyPhase(
         minimumDistance: CGFloat,
         allowedDirections: _EventDirections,
@@ -219,5 +229,11 @@ struct SpatialDragGesture: Gesture, PubliclyPrimitiveGesture {
             state.isDragging = false
             return .failed
         }
+    }
+}
+
+extension SpatialDragGesture: GestureEventTypeAccepting {
+    static func acceptsEventType(_ eventType: Any.Type) -> Bool {
+        eventType == TappableEvent.self
     }
 }

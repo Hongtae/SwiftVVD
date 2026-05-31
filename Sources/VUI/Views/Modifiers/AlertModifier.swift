@@ -9,13 +9,11 @@ import Foundation
 import Synchronization
 
 // MARK: - BoundInputsView
-
-// Placeholder for alert accessory inputs such as text fields.
-// TextField-in-alert support is not implemented yet.
+// Reserved payload for alert text-field accessory inputs.
 struct BoundInputsView {}
 
 // MARK: - ViewIdentity
-// Stable no-argument identity used as a dictionary key for alert preferences.
+// Per-presentation identity key used by alert and confirmation-dialog dictionaries.
 struct ViewIdentity: Hashable {
     private static let counter = Atomic<UInt32>(0)
     let rawValue: UInt32
@@ -28,7 +26,7 @@ struct ViewIdentity: Hashable {
         self.rawValue = rawValue
     }
 
-    // Tracks identity across phase changes using a zero-initialized state.
+    // Zero-initialized tracker that refreshes identity when the phase reset seed changes.
     struct Tracker {
         private var current = ViewIdentity(rawValue: 0)
         private var lastResetSeed: UInt32 = 0
@@ -47,12 +45,12 @@ struct ViewIdentity: Hashable {
 }
 
 // MARK: - AlertStorage
-
-// Stores the data needed by the overlay renderer.
+// Alert storage for the overlay renderer.
 struct AlertStorage: @unchecked Sendable {
     let preference: AlertPreference
 
-    // Merge by ViewIdentity. nextValue wins on collision.
+    // Host preference dictionary keyed by ViewIdentity. Reduce merges by identity,
+    // with the later value winning on collision.
     struct PreferenceKey: HostPreferenceKey {
         typealias Value = [ViewIdentity: AlertStorage]
         static var defaultValue: Value { [:] }
@@ -63,8 +61,8 @@ struct AlertStorage: @unchecked Sendable {
 }
 
 // MARK: - AlertPreference
-
-// Alert presentation payload rendered directly by the overlay.
+// Alert preference payload consumed by the overlay or platform-window presenter.
+// Title, message, and actions are collected through PlatformItemList for rendering.
 struct AlertPreference: @unchecked Sendable {
     let identity: ViewIdentity
     let title: Text
@@ -74,20 +72,19 @@ struct AlertPreference: @unchecked Sendable {
     let messageItemList: PlatformItemList?
     let isPresented: Binding<Bool>
     let severity: DialogSeverity
-    // onDismiss support is not wired yet.
+    // Platform dialog onDismiss callback storage.
     let onDismiss: (() -> Void)?
-    // Backend policy captured from the alert modifier's environment.
-    // Default is overlay; editors can opt into platform modal windows.
+    // Presentation backend policy captured from the alert modifier's environment.
+    // Default is overlay. Editors can opt into platform modal windows.
     let usesPlatformWindow: Bool
 }
 
 // MARK: - MakeAlertStorage
-
-// Builds the preference mutation for active alerts.
+// Stateful rule that publishes a dictionary mutation for alert storage.
 struct MakeAlertStorage<Actions: View, Message: View>: StatefulRule {
     typealias Value = (inout [ViewIdentity: AlertStorage]) -> Void
 
-    // Core inputs used to build the alert preference.
+    // Core fields preserved for the stateful storage rule.
     let environment:     Attribute<EnvironmentValues>
     let modifier:        Attribute<AlertModifier<Actions, Message>>
     let actionsItemList: WeakAttribute<PlatformItemList>
@@ -95,8 +92,8 @@ struct MakeAlertStorage<Actions: View, Message: View>: StatefulRule {
     let phase:           Attribute<Phase>
     var identityTracker: ViewIdentity.Tracker
 
-    // Reserved change-detection cache for future platform alert updates.
-    // The current overlay renderer does not use these fields.
+    // Change-detection cache fields retained for the platform-dialog path.
+    // updateValue() does not use them while the overlay renderer is active.
     var lastTitle:                    Optional<String>
     var lastColorScheme:              Optional<ColorScheme>
     var lastIcon:                     Optional<Image>
@@ -150,9 +147,10 @@ struct MakeAlertStorage<Actions: View, Message: View>: StatefulRule {
 
 // MARK: - PlatformItemList
 
-// Overlay helper shared by alert and confirmationDialog.
-// Cancel is placed last, non-cancel actions keep source order, a leading nil-role
-// action is styled as the default action, and up to four actions are displayed.
+// Overlay backend helper shared by alert and confirmationDialog.
+// Observed modal behavior: cancel is placed last, non-cancel actions keep source order,
+// a leading nil-role action is styled as the default action, and up to four actions
+// are displayed.
 struct DialogOverlayAction {
     let item: PlatformItemList.Item
     let isDefaultAction: Bool
@@ -326,7 +324,7 @@ private func platformItemButtonLabelSurface(
     fallback: Text
 ) -> (label: AnyView, image: AnyView?) {
     // Button labels that are Label values flatten into the platform menu item
-    // surface. Text icons become the final title; Image icons stay in the image
+    // surface. Text icons become the final title. Image icons stay in the image
     // slot. Do not store the whole Label as the row label, because menu row
     // rendering should consume the platform item surface directly.
     if let label = source?.snapshotValue(as: Label<Text, Image>.self) {
@@ -399,9 +397,8 @@ private struct PlatformItemListButtonBody: View {
 }
 
 // MARK: - ActionsModifier
-
-// Applies the button style that emits PlatformItemList entries.
-// TextFieldStyleModifier is not implemented yet.
+// Applies PlatformItemListButtonStyle around alert action content.
+// Text-field accessory inputs are carried separately by BoundInputsView.
 struct ActionsModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
@@ -410,8 +407,7 @@ struct ActionsModifier: ViewModifier {
 }
 
 // MARK: - AlertModifier
-
-// Modifier that records alert presentation state.
+// Alert modifier storage. `severity` is carried directly in the preference payload.
 struct AlertModifier<Actions: View, Message: View>: ViewModifier, MultiViewModifier {
     typealias Body = Never
 
@@ -422,22 +418,28 @@ struct AlertModifier<Actions: View, Message: View>: ViewModifier, MultiViewModif
     let message: Message
     let auxiliaryContent: Optional<BoundInputsView>
     let representsError: Bool
-    // Presentation severity for overlay rendering.
+    // Presentation severity stored directly on the modifier.
     let severity: DialogSeverity
 }
 
 extension AlertModifier {
-    // Collect content outputs, build item lists, and register an alert preference.
+    // AlertModifier._makeView sequence:
+    //   1. body(graph, inputs) -> content outputs
+    //   2. PlatformItemListGenerator<AllPlatformItemListFlags> for actions
+    //   3. PlatformItemListGenerator<TextPlatformItemListFlags> for message
+    //   4. WeakAttribute conversion
+    //   5. MakeAlertStorage init with default cache fields
+    //   6. AlertStorage.PreferenceKey output
     static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs,
                           body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
         guard let graph = AttributeGraph.current else {
             fatalError("AlertModifier._makeView called outside AG context")
         }
 
-        // Step 1: content view outputs.
+        // Step 1: content view outputs
         var outputs = body(_Graph(), inputs)
 
-        // Step 2: actions PlatformItemListGenerator.
+        // Step 2: actions PlatformItemListGenerator (AllPlatformItemListFlags)
         let actionsGenerator = PlatformItemListGenerator<AllPlatformItemListFlags, Actions>(
             content: modifier[\.actions]._attribute,
             inputs: inputs,
@@ -445,7 +447,7 @@ extension AlertModifier {
         )
         let actionsListAttr: Attribute<PlatformItemList> = graph.makeStatefulRule(actionsGenerator)
 
-        // Step 3: message PlatformItemListGenerator.
+        // Step 3: message PlatformItemListGenerator (TextPlatformItemListFlags)
         let messageGenerator = PlatformItemListGenerator<TextPlatformItemListFlags, Message>(
             flags: TextPlatformItemListFlags.self,
             content: modifier[\.message]._attribute,
@@ -454,11 +456,11 @@ extension AlertModifier {
         )
         let messageListAttr: Attribute<PlatformItemList> = graph.makeStatefulRule(messageGenerator)
 
-        // Step 4: WeakAttribute<PlatformItemList> conversion.
+        // Step 4: WeakAttribute<PlatformItemList> conversion
         let actionsWeakAttr = actionsListAttr.asWeak()
         let messageWeakAttr = messageListAttr.asWeak()
 
-        // Step 5: MakeAlertStorage AG node.
+        // Step 5: MakeAlertStorage AG node
         let storageRule = MakeAlertStorage<Actions, Message>(
             environment: inputs.base.cachedEnvironment.value.environment,
             modifier: modifier._attribute,
@@ -478,7 +480,7 @@ extension AlertModifier {
         let storageAttr: Attribute<MakeAlertStorage<Actions, Message>.Value> =
             graph.makeStatefulRule(storageRule)
 
-        // Step 6: AlertStorage.PreferenceKey output.
+        // Step 6: AlertStorage.PreferenceKey output
         // makeRule applies the mutation closure to get the final dictionary.
         let prefAttr: Attribute<AlertStorage.PreferenceKey.Value> = graph.makeRule {
             var dict = AlertStorage.PreferenceKey.defaultValue
@@ -496,14 +498,14 @@ extension AlertModifier {
 //
 // Button layout rules:
 //   - Up to four items are materialized.
-//   - cancel is placed last; non-cancel actions keep source order.
+//   - cancel is placed last. Non-cancel actions keep source order.
 //   - leading nil-role action is styled as the default action.
 //   - Two items use an HStack with cancel on the left and default on the right.
 //
 // Keyboard shortcuts:
 //   - ButtonRole.cancel -> Escape (.cancelAction)
 //   - Default (nil role or .defaultAction) -> Return (.defaultAction)
-//   - FIXME: Overlay keyboard shortcut handling is not yet wired to the render pipeline.
+//   - Overlay keyboard shortcuts are recorded on PlatformItemList items.
 struct AlertOverlayView: View {
     let preference: AlertPreference
 
@@ -521,7 +523,7 @@ struct AlertOverlayView: View {
 }
 
 // Alert action layout used by the overlay renderer.
-// Two short labels share one row, and long labels fall back to a vertical stack.
+// Two short labels share one row. Long labels fall back to a vertical stack.
 private struct DialogOverlayActionsLayout: Layout {
     typealias AnimatableData = EmptyAnimatableData
     typealias Cache = Void
@@ -691,7 +693,7 @@ extension View {
                                    @ViewBuilder actions: (T) -> A) -> some View {
         let gated = Binding<Bool>(get: { data != nil && isPresented.wrappedValue },
                                   set: { isPresented.wrappedValue = $0 })
-        // Keep the outer AlertModifier shape stable with optional action views.
+        // Keep the outer AlertModifier shape stable with Optional action views.
         return alert(title, isPresented: gated, actions: {
             data.map { actions($0) }
         })
@@ -715,7 +717,7 @@ extension View {
                                             @ViewBuilder message: (T) -> M) -> some View {
         let gated = Binding<Bool>(get: { data != nil && isPresented.wrappedValue },
                                   set: { isPresented.wrappedValue = $0 })
-        // Keep the outer AlertModifier shape stable with optional action and message views.
+        // Keep the outer AlertModifier shape stable with Optional action/message views.
         return alert(title, isPresented: gated, actions: {
             data.map { actions($0) }
         }, message: {

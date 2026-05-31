@@ -5,12 +5,12 @@
 //  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-// Marker protocol for style context types.
-// Context behavior is implemented directly on AnyStyleContextType using
-// ObjectIdentifier-based tracking.
+// StyleContext: marker protocol for style context types.
+// Context operations are implemented directly on AnyStyleContextType using
+// ObjectIdentifier membership.
 protocol StyleContext: Sendable {}
 
-// Marker types with no stored properties.
+// Marker types: empty structs with no stored properties.
 struct NoStyleContext: StyleContext {}
 struct PlainListStyleContext: StyleContext {}
 struct GroupedFormStyleContext: StyleContext {}
@@ -27,23 +27,24 @@ struct SwipeActionsStyleContext: StyleContext {}
 struct AccessibilityQuickActionStyleContext: StyleContext {}
 struct AccessibilityRepresentableStyleContext: StyleContext {}
 
-// Menu-related contexts (used by Menu; will be superseded when Menu is rewritten).
+// Menu-related contexts retained until Menu is rewritten.
 struct MenuStyleContext: StyleContext {}
 
 // SheetStyleContext: StyleContext + ViewInputFlag.
-// styleContext(.sheet) pushes SheetStyleContext into customInputs via StyleContextWriter<SheetStyleContext>.
-// input(SheetStyleContext.self) writes the Bool flag via ViewInputFlagModifier<SheetStyleContext>.
-// StyleContextAcceptsPredicate<SheetStyleContext> is used by NavigationSplitView in sheet context.
+// styleContext(.sheet) pushes SheetStyleContext into customInputs via
+// StyleContextWriter<SheetStyleContext>. input(SheetStyleContext.self) writes
+// the Bool flag via ViewInputFlagModifier<SheetStyleContext>.
 struct SheetStyleContext: StyleContext, ViewInputFlag {
     typealias Value = Bool
     static var defaultValue: Bool { false }
     var description: String { "SheetStyleContext" }
 }
 
-// Value type representing the current style context stack.
-// Uses a Set<ObjectIdentifier> to track accepted context types:
+// AnyStyleContextType: value type representing the current style context stack.
+// Uses a Set<ObjectIdentifier> for context membership:
 //   - pushing(T) adds T's ObjectIdentifier to the set (union)
 //   - acceptsTop(T) checks if T's ObjectIdentifier is in the set
+// This gives the OR-logic behavior needed by style predicates.
 struct AnyStyleContextType: Equatable {
     private var contextIDs: Set<ObjectIdentifier>
 
@@ -74,7 +75,7 @@ struct AnyStyleContextType: Equatable {
     }
 }
 
-// PropertyKey storing the current AnyStyleContextType
+// StyleContextInput: PropertyKey storing the current AnyStyleContextType
 // in _GraphInputs.customInputs.
 struct StyleContextInput: PropertyKey {
     typealias Value = AnyStyleContextType
@@ -109,6 +110,7 @@ extension View {
     }
 
     // input(_:) marks T as active in customInputs via ViewInputFlagModifier<T>(value: true).
+    // The concrete return type is ModifiedContent<Self, ViewInputFlagModifier<T>>.
     func input<T: ViewInputFlag>(_ type: T.Type) -> some View {
         modifier(ViewInputFlagModifier<T>(value: true))
     }

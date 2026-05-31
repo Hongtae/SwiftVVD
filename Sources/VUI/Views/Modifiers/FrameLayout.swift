@@ -121,7 +121,8 @@ extension _FlexFrameLayout: UnaryLayout {
         let minH = minHeight, idealH = idealHeight, maxH = maxHeight
 
         func childProposal(for proposal: ProposedViewSize) -> ProposedViewSize {
-            // Constrain each proposed axis before asking the child for size.
+            // Clamp the proposed child dimension between min and max, using
+            // the ideal value only when the parent left that axis unspecified.
             let childW = constrainedProposal(axisProposal: proposal.width,
                                              min: minW,
                                              ideal: idealW,
@@ -173,7 +174,8 @@ extension _FlexFrameLayout: UnaryLayout {
                                min: CGFloat?,
                                ideal: CGFloat?,
                                max: CGFloat?) -> CGFloat {
-            // Resolve the final frame dimension from the proposal and child size.
+            // When the parent proposes an axis, that proposal is clamped to the
+            // frame limits; otherwise resolve from ideal or the measured child.
             if let axisProposal {
                 if let max {
                     return Swift.min(Swift.max(axisProposal, min ?? -.infinity), max)

@@ -37,8 +37,8 @@ public struct _TraitWritingModifier<Trait>: ViewModifier where Trait: _ViewTrait
         modifiedInputs._traits = OptionalAttribute(newTraitAttr)
         let bodyOut = body(_Graph(), modifiedInputs)
 
-        // Convert the static body output to a dynamicList so the parent Layout
-        // receives an Attribute<ViewList> as _traitsList for each child.
+        // Convert the static body output to a dynamicList so the parent
+        // Layout receives an Attribute<ViewList> as _traitsList for each child.
         if case .staticList(let elements) = bodyOut.views {
             let viewListAttr: Attribute<any ViewList> = graph.makeRule {
                 let traits = newTraitAttr.value   // re-evaluate when trait value changes

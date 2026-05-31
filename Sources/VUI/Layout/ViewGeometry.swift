@@ -27,9 +27,8 @@ struct ViewGeometry: Equatable {
 // MARK: - ViewSize
 
 /// The concrete size of a view as resolved by the layout pass.
-/// { value: CGSize (16 bytes), proposal: ProposedViewSize (16 bytes) }, total 32 bytes.
 /// `width`/`height` are computed accessors into `value`.
-/// `proposal` stores the proposal that was used to compute this size, which is needed by the
+/// `proposal` stores the proposal that was used to compute this size; needed by the
 /// animation system to interpolate between layout frames.
 struct ViewSize: Equatable, Sendable {
     var value: CGSize
@@ -78,21 +77,21 @@ public struct ScrollGeometry: Equatable, Sendable {
 ///
 /// Internally stores two independent layers:
 ///
-/// 1. **`_transformItems`**: ordered sequence of non-translation transforms
+/// 1. **`_transformItems`** - ordered sequence of non-translation transforms
 ///    (affine rotations/scales, projection transforms, scroll offsets, etc.)
 ///    in local-to-global application order.
 ///    Appended by `appendAffineTransform`, `appendProjectionTransform`, etc.
 ///
-/// 2. **`_globalPosition`**: the view's accumulated global translation,
+/// 2. **`_globalPosition`** - the view's accumulated global translation,
 ///    set (and replaced) by `appendPosition`.  This is always the final step
-///    when converting local -> global.
+///    when converting local to global.
 ///
-/// Converting **global -> local** (`convertGlobal(to: .local, ...)`) is the
+/// Converting **global to local** (`convertGlobal(to: .local, ...)`) is the
 /// canonical hit-test path:
 ///   1. Subtract `_globalPosition`.
 ///   2. Apply the inverse of each `_transformItem` in **reverse** order.
 ///
-/// Converting **local -> global** (`convertGlobal(from: .local, ...)`) is used
+/// Converting **local to global** (`convertGlobal(from: .local, ...)`) is used
 /// to compute a child view's global position from its parent-local offset:
 ///   1. Apply each `_transformItem` in **forward** order.
 ///   2. Add `_globalPosition`.
@@ -141,7 +140,7 @@ struct ViewTransform: Equatable, Sendable {
     /// Non-translation transform items, in local-to-global order.
     private var _transformItems: [Item] = []
 
-    /// Accumulated global position (the final translation in local-to-global).
+    /// Accumulated global position (the final translation in local-to-global order).
     private var _globalPosition: CGPoint = .zero
 
     // Init
@@ -255,6 +254,8 @@ struct ViewTransform: Equatable, Sendable {
         }
     }
 
+    // Item iteration.
+
     /// Iterates all transform items in forward or reverse order.
     /// Forward order: `[_transformItems..., .position(_globalPosition)]`
     /// Reverse order: `[.position(_globalPosition), ..._transformItems.reversed()]`
@@ -291,7 +292,7 @@ struct ViewTransform: Equatable, Sendable {
     ) where A.Element == CGPoint {
         switch item {
         case .affineTransform(let t, let isStoredInverse):
-            // When inverted==true (global-to-local) and !isStoredInverse: use t.inverted()
+            // When inverted==true (global to local) and !isStoredInverse: use t.inverted()
             // When inverted==true  and  isStoredInverse: use t (already inverted stored)
             // When inverted==false and !isStoredInverse: use t
             // When inverted==false and  isStoredInverse: use t.inverted()
@@ -321,7 +322,7 @@ struct ViewTransform: Equatable, Sendable {
             }
 
         case .scrollGeometry(let sg, _):
-            // The content is shifted by contentOffset; to go global-to-local, subtract it.
+            // The content is shifted by contentOffset; to go global to local, subtract it.
             let dx = sg.contentOffset.x
             let dy = sg.contentOffset.y
             if inverted {

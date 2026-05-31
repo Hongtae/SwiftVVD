@@ -42,9 +42,10 @@ struct LayoutProxyAttributes {
 // MARK: - LayoutProxy
 
 /// Proxy for a child view in a Layout.
-/// Dependency tracking uses @TaskLocal; context is stored as the layoutComputer rawValue.
+/// Dependency tracking uses @TaskLocal reads; context is kept as a local rule identity
+/// derived from the layoutComputer attribute.
 struct LayoutProxy {
-    /// AG rule context.
+    /// Local AG rule context identity derived from layoutComputer.rawValue.
     var context: UInt32
     var attributes: LayoutProxyAttributes
 
@@ -62,11 +63,11 @@ struct LayoutProxy {
     }
 
     /// The child's ViewTraitCollection if a traitsList attribute is present.
-    /// Reads traitsList attr and returns ViewList.traits.
+    /// Reading the traitsList attribute registers a layout dependency.
     /// Returns nil if no traitsList attribute is set.
     var traits: ViewTraitCollection? {
         guard let viewList = attributes.traitsList.attribute?.value else { return nil }
-        return viewList.traits  // ViewList protocol method WT[7]
+        return viewList.traits
     }
 
     /// Returns the trait value for key K.
@@ -78,7 +79,8 @@ struct LayoutProxy {
 // MARK: - PlacementData
 
 /// Local placement buffer used by ViewLayoutEngine.childGeometries(at:origin:).
-/// LayoutSubview.place writes into it via setGeometry(_:at:layoutDirection:).
+/// ThreadLayoutData exposes this during layout so LayoutSubview.place can write child
+/// geometries into the active placement pass.
 struct PlacementData {
     var isLocked: Bool
     var geometries: [ViewGeometry]
@@ -172,12 +174,13 @@ enum ThreadLayoutData {
 // MARK: - LayoutSubview
 
 /// A proxy for a single child view in a Layout.
+/// Stores the child proxy, placement index, and layout direction used by the
+/// placement buffer.
 public struct LayoutSubview: Equatable {
 
     var proxy: LayoutProxy
 
-    /// Index used by PlacementData.setGeometry(at:).
-    /// Currently unused for final placement.
+    /// Index used by PlacementData.setGeometry(at:) during placement.
     var placementIndex: Int32
 
     /// Per-subview layout direction.

@@ -10,12 +10,13 @@ import Foundation
 // ExclusiveState<A>: Rule
 //
 // AG Rule node injected into Second's _GestureInputs.inheritedPhase.
-// Computes the InheritedPhase that Second sees, based on:
-//   - parentInheritedPhaseAttr: the phase passed from this gesture's parent
-//   - firstPhaseAttr: First gesture's current output phase
+// Combines the parent inherited phase with the first gesture's current phase:
+//   - clear the failed bit while First has not failed
+//   - set the active bit while First is active
 private struct ExclusiveState<A>: Rule {
     typealias Value = _GestureInputs.InheritedPhase
 
+    // Separate inputs for the parent phase and First gesture phase.
     let parentInheritedPhaseAttr: Attribute<_GestureInputs.InheritedPhase>
     let firstPhaseAttr: Attribute<GesturePhase<A>>
 
@@ -24,12 +25,11 @@ private struct ExclusiveState<A>: Rule {
         var result = parentIP.rawValue
 
         let firstPhase = firstPhaseAttr.value
-        // bit0 (.failed): if First has not failed, clear parentIP's .failed bit.
-        // This means Second may proceed only after First fails.
+        // bit0 (.failed): clear while First has not failed, so Second waits.
         if !firstPhase.isFailed {
             result &= ~1
         }
-        // bit1 (.active): if First is active, set the .active bit so Second must wait.
+        // bit1 (.active): set while First is active, so Second waits.
         if firstPhase.isActive {
             result |= 2
         }
@@ -56,17 +56,9 @@ public struct ExclusiveGesture<First, Second>: Gesture where First: Gesture, Sec
     //
     // Decision tree:
     //   f.active -> .active(.first(v))
-    //   f.ended -> .ended(.first(v))
-    //   f.failed -> delegate to second:
-    //     s.active -> .active(.second(v))
-    //     s.ended -> .ended(.second(v))
-    //     s.failed -> .failed
-    //     s.possible -> .possible(nil)
-    //   f.possible -> delegate to second:
-    //     s.active -> .active(.second(v))
-    //     s.ended -> .ended(.second(v))
-    //     s.failed -> .possible(nil)   // remains possible, not failed
-    //     s.possible -> .possible(nil)
+    //   f.ended  -> .ended(.first(v))
+    //   f.failed -> delegate to second
+    //   f.possible -> delegate to second, but s.failed remains .possible(nil)
     private struct ExclusivePhase: Rule {
         typealias Value = GesturePhase<ExclusiveGesture.Value>
         let firstPhase: Attribute<GesturePhase<First.Value>>
@@ -89,7 +81,7 @@ public struct ExclusiveGesture<First, Second>: Gesture where First: Gesture, Sec
                 switch s {
                 case .ended(let v):  return .ended(.second(v))
                 case .active(let v): return .active(.second(v))
-                case .failed:        return .possible(nil)  // .possible, NOT .failed
+                case .failed:        return .possible(nil)
                 case .possible:      return .possible(nil)
                 }
             }
@@ -104,7 +96,7 @@ public struct ExclusiveGesture<First, Second>: Gesture where First: Gesture, Sec
         // Step 1: First gesture with original inputs.
         let firstOutputs = First._makeGesture(gesture: gesture[\.first], inputs: inputs)
 
-        // Step 2: ExclusiveState AG Rule — reads firstOutputs.phase + parent inheritedPhase,
+        // Step 2: ExclusiveState AG rule reads firstOutputs.phase + parent inheritedPhase,
         // emits the InheritedPhase Second should see.
         let exclusiveStateAttr: Attribute<_GestureInputs.InheritedPhase> =
             graph.makeRule(ExclusiveState(
@@ -116,7 +108,7 @@ public struct ExclusiveGesture<First, Second>: Gesture where First: Gesture, Sec
         secondInputs._inheritedPhase = exclusiveStateAttr
         let secondOutputs = Second._makeGesture(gesture: gesture[\.second], inputs: secondInputs)
 
-        // Step 4: ExclusivePhase AG Rule — combines both outputs into the final phase.
+        // Step 4: ExclusivePhase AG rule combines both outputs into the final phase.
         let combinedPhaseAttr: Attribute<GesturePhase<Value>> =
             graph.makeRule(ExclusivePhase(
                 firstPhase: firstOutputs.phase,
@@ -133,6 +125,20 @@ public struct ExclusiveGesture<First, Second>: Gesture where First: Gesture, Sec
 
 extension ExclusiveGesture.Value: Equatable where First.Value: Equatable, Second.Value: Equatable {}
 extension ExclusiveGesture.Value: Sendable where First.Value: Sendable, Second.Value: Sendable {}
+
+extension ExclusiveGesture: GestureEventTypeAccepting {
+    static func acceptsEventType(_ eventType: Any.Type) -> Bool {
+        gestureTypeAcceptsEvent(First.self, eventType: eventType) ||
+            gestureTypeAcceptsEvent(Second.self, eventType: eventType)
+    }
+}
+
+extension ExclusiveGesture: DynamicGestureEventTypeAccepting {
+    func acceptsEventType(_ eventType: Any.Type) -> Bool {
+        gestureValueAcceptsEvent(first, eventType: eventType) ||
+            gestureValueAcceptsEvent(second, eventType: eventType)
+    }
+}
 
 extension Gesture {
     @inlinable public func exclusively<Other>(before other: Other) -> ExclusiveGesture<Self, Other> where Other: Gesture {

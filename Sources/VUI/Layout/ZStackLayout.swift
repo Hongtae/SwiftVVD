@@ -71,7 +71,7 @@ public struct ZStackLayout: Layout {
         }
     }
 
-    // Route ZStack roots through the standard layout-view generation path.
+    // ZStackLayout participates directly in layout view generation.
     public static func _makeView(root: _GraphValue<Self>,
                                  inputs: _ViewInputs,
                                  body: (_Graph, _ViewInputs) -> _ViewListOutputs) -> _ViewOutputs {

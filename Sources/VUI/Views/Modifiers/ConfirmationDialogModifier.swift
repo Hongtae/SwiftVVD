@@ -12,12 +12,16 @@ import Synchronization
 // the outer protocol name. Use a private typealias to keep the conformance unambiguous.
 private typealias _PreferenceKeyProto = PreferenceKey
 
-// Confirmation dialogs are emitted through preferences and rendered by the modal overlay path.
-// Actions are collected directly into PlatformItemListButtonStyle-backed items.
+// Key differences from AlertModifier:
+//   - ConfirmationDialogModifier is a MultiViewModifier.
+//   - No `auxiliaryContent` or `representsError` fields
+//   - Actions are wrapped directly with PrimitiveButtonStyleContainerModifier.
+//   - ConfirmationDialog.PreferenceKey is a regular PreferenceKey.
+//   - MakeConfirmationDialog stores position, size, and transform attributes.
 
 // MARK: - ConfirmationDialogPreference
 
-// Presentation preference used by the modal queue.
+// Presentation preference used by the modal queue and overlay renderer.
 struct ConfirmationDialogPreference: @unchecked Sendable {
     let title: Text
     let titleVisibility: Visibility
@@ -26,20 +30,19 @@ struct ConfirmationDialogPreference: @unchecked Sendable {
     let makeMessage: (() -> AnyView)?
     let messageItemList: PlatformItemList?
     let isPresented: Binding<Bool>
-    // Used by the modal queue when the presentation is dismissed.
+    // Used by the modal queue onDismiss path.
     let onDismiss: (() -> Void)?
-    // Backend policy captured from the dialog modifier's environment.
-    // Default is overlay; editors can opt into platform modal windows.
+    // Presentation backend policy captured from the dialog modifier's environment.
+    // Default is overlay. Editors can opt into platform modal windows.
     let usesPlatformWindow: Bool
 }
 
 // MARK: - ConfirmationDialog
-
-// Storage value emitted through preferences.
 // Dictionary<ViewIdentity, ConfirmationDialog> is the preference value.
 struct ConfirmationDialog: @unchecked Sendable {
     let preference: ConfirmationDialogPreference
 
+    // Regular PreferenceKey, not HostPreferenceKey.
     struct PreferenceKey: _PreferenceKeyProto {
         typealias Value = [ViewIdentity: ConfirmationDialog]
         static var defaultValue: Value { [:] }
@@ -50,10 +53,14 @@ struct ConfirmationDialog: @unchecked Sendable {
 }
 
 // MARK: - MakeConfirmationDialog
-
-// Builds the preference mutation for active confirmation dialogs.
-// Position, size, and transform are retained for popover-style anchor positioning.
-// The current modal overlay path does not use those fields yet.
+// Stateful rule that publishes a dictionary mutation for confirmation-dialog storage.
+//
+// MakeConfirmationDialog.init extra fields vs MakeAlertStorage:
+//   position: Attribute<CGPoint>
+//   size:     Attribute<CGSize>      (extracted from Attribute<ViewSize>.value)
+//   transform: Attribute<ViewTransform>
+// These are retained for popover-style anchor positioning.
+// The current modal presentation path does not consume them.
 struct MakeConfirmationDialog<Actions: View, Message: View>: StatefulRule {
     typealias Value = (inout [ViewIdentity: ConfirmationDialog]) -> Void
 
@@ -62,9 +69,9 @@ struct MakeConfirmationDialog<Actions: View, Message: View>: StatefulRule {
     let actionsItemList: WeakAttribute<PlatformItemList>
     let messageItemList: WeakAttribute<PlatformItemList>
     let phase: Attribute<Phase>
-    // Passed through from _ViewInputs for future popover anchor support.
+    // Pass-through attributes from _ViewInputs for anchor-aware presentation.
     let position: Attribute<CGPoint>
-    // Extracted from Attribute<ViewSize>.value.
+    // Extracted from Attribute<ViewSize>.value (ViewSize.value = CGSize).
     let size: Attribute<CGSize>
     let transform: Attribute<ViewTransform>
     var identityTracker: ViewIdentity.Tracker
@@ -111,8 +118,8 @@ struct MakeConfirmationDialog<Actions: View, Message: View>: StatefulRule {
 }
 
 // MARK: - ConfirmationDialogModifier
-
-// MultiViewModifier that records confirmation-dialog presentation state.
+// Confirmation-dialog modifier storage. Unlike AlertModifier, this has no
+// auxiliary content or error-representation field.
 struct ConfirmationDialogModifier<Actions: View, Message: View>: ViewModifier, MultiViewModifier {
     typealias Body = Never
 
@@ -249,7 +256,7 @@ extension View {
                                             isPresented: Binding<Bool>,
                                             titleVisibility: Visibility = .automatic,
                                             @ViewBuilder actions: () -> A) -> some View {
-        // Wrap actions directly with the platform item-list button style.
+        // Actions are wrapped directly with the platform item-list button style.
         modifier(ConfirmationDialogModifier(
             presentedValue: isPresented.wrappedValue,
             title: title,

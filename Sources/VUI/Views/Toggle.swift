@@ -55,7 +55,8 @@ public struct Toggle<Label>: View where Label: View {
     }
 
     public var body: some View {
-        // The static branch selects CheckmarkToggleStyle for menu item collection.
+        // ResolvedToggleStyle + StaticSourceWriter + Static selects
+        // CheckmarkToggleStyle for the menu branch.
         ResolvedToggleStyle(configuration: ToggleStyleConfiguration(
             isOn: _toggleState.boolBinding,
             toggleState: _toggleState
@@ -266,8 +267,8 @@ private struct CheckmarkToggleBody: View {
             fatalError("\(self)._makeView called outside an active AttributeGraph context.")
         }
 
-        // Build the collected item surface directly so the
-        // ToggleStyleConfiguration.Label source alias remains renderable.
+        // Build an action-capable collected item and write ToggleState onto the
+        // item model so the ToggleStyleConfiguration.Label source alias remains renderable.
         let labelView = view[\.configuration][\.label]
         var outputs = ToggleStyleConfiguration.Label._makeView(
             view: labelView,

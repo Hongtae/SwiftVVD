@@ -412,7 +412,7 @@ extension Text: View {
                     return .zero
                 }
                 // Keep Text width at zero for zero-width proposals while still
-                // reporting measured height when height is non-zero or unspecified.
+                // reporting the measured height when height is non-zero or unspecified.
                 if proposal.width == 0 {
                     let measured = r.measure(maxWidth: 0, maxHeight: proposal.height)
                     return CGSize(width: 0, height: measured.height)
@@ -425,7 +425,6 @@ extension Text: View {
 
             return LayoutComputer(
                 sizeThatFits: { sizeThatFits($0) },
-                // Text contributes text-specific spacing for adjacent text runs.
                 spacing: .text,
                 explicitAlignment: { key, size in
                     guard let r = resolved else { return nil }

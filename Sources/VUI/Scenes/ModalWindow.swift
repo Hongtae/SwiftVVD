@@ -78,9 +78,8 @@ private final class ModalPresentationContext: @unchecked Sendable {
     private var pendingDismissalCompletion: (() -> Void)?
     private let shadowFilter = GraphicsContext.Filter.shadow(radius: 8.0, x: 0, y: 0)
 
-    // Overlay modals need an engine-side transition when no platform window
-    // or alert animation owns presentation.
-    // These values are ported from the old overlay path.
+    // Overlay modals need an engine-side transition when no platform window or
+    // alert animation owns presentation.
     private var transitionDuration: Double { 0.25 }
     private var transitionPresentAnimation: AnimationConfiguration {
         AnimationConfiguration(
@@ -132,7 +131,7 @@ private final class ModalPresentationContext: @unchecked Sendable {
 
     func onViewLayoutChanged(controller: WindowController) {
         guard let layoutComputer = controller.viewGraph.rootLayoutComputer else {
-            fatalError("ModalWindowController: rootLayoutComputer not set. AG wiring incomplete!")
+            fatalError("ModalWindowController: rootLayoutComputer not set: AG wiring incomplete!")
         }
 
         let fittedSize = fittedContentSize(controller: controller,
@@ -283,7 +282,7 @@ private final class ModalPresentationContext: @unchecked Sendable {
             case .presenting:
                 // Finish the presentation animation before starting dismissal.
                 // Reversing nonlinear scale/alpha tracks would require value-to-time
-                // inversion, so dismissal is queued instead.
+                // inversion and is not part of a confirmed modal contract.
                 if pendingDismissalCompletion == nil {
                     pendingDismissalCompletion = completion
                 }
@@ -334,8 +333,8 @@ private final class ModalPresentationContext: @unchecked Sendable {
 // intentionally non-generic. `AnyView.storage.view` keeps the wrapped `any View`,
 // so a later pass can reopen the concrete type and restore a typed root graph.
 // Do not spell this as `ModalWindowController<AnyView>`: that suggests a concrete
-// Content path was restored. Replace the erased bridge when typed modal content
-// storage and type-change lifecycle are wired.
+// Content path was restored. The erased bridge should be replaced after the
+// sheet storage and type-change lifecycle are reconstructed.
 final class ModalWindowController: WindowController, @unchecked Sendable {
     override var style: PlatformWindowStyle { [.autoResize] }
     override var observesRootFittedSizeForLayoutUpdates: Bool { true }

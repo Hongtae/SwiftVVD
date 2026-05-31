@@ -20,8 +20,7 @@ import Synchronization
 
 /// Base protocol for all AG computed node bodies.
 ///
-/// Runtime memory management is handled by Swift ARC, node updates are dispatched
-/// through AttributeGraph.evaluateNode, and value comparison uses Equatable where needed.
+/// Marker protocol used to group computed node body types.
 protocol _AttributeBody {}
 
 /// A pure computed AG node: derives a single value from dependencies each evaluation.
@@ -37,7 +36,7 @@ protocol Rule: _AttributeBody {
 /// An AG computed node that maintains mutable state between re-evaluations.
 ///
 /// Unlike a plain `makeRule` closure, the conforming struct is stored inside the AG node
-/// and reused on each evaluation. This enables lazy initialization and conditional output updates.
+/// and reused on each evaluation, enabling lazy initialization and conditional output updates.
 ///
 /// Implement `updateValue()` to recompute the output. Call `AttributeGraph.setStatefulOutput(_:)`
 /// inside `updateValue()` to publish a new value. If `setStatefulOutput` is not called, the
@@ -178,7 +177,7 @@ struct AGWeakAttribute: Hashable, Sendable {
 
 /// A typed wrapper around an AGAttribute.
 /// Marked @unchecked Sendable: stores only AGAttribute (a Sendable raw index).
-/// Value type parameter is used only in method signatures; no Value is retained here.
+/// Value type parameter is used only in method signatures. No Value is retained here.
 struct Attribute<Value>: @unchecked Sendable {
     let identifier: AGAttribute
 
@@ -282,6 +281,8 @@ struct OptionalAttribute<Value> {
 
 /// A group of AG nodes that are created and destroyed together.
 ///
+/// Subgraph lifecycle handle for groups of AG nodes.
+///
 /// Must be created while an AttributeGraph context is active (`AttributeGraph.current != nil`).
 /// The owning AttributeGraph is captured at creation time and validated on `invalidate()`.
 ///
@@ -293,7 +294,7 @@ struct OptionalAttribute<Value> {
 /// automatically becomes its child. `invalidate()` cascades depth-first,
 /// so invalidating a parent also destroys all descendant subgraphs.
 ///
-/// Typical use for ForEach item lifecycle:
+/// Typical use: ForEach item lifecycle:
 /// ```swift
 /// let subgraph = AGSubgraph()
 /// AGSubgraph.$current.withValue(subgraph) {
@@ -356,8 +357,9 @@ final class AGSubgraph: @unchecked Sendable {
 }
 
 // MARK: - AttributeGraphRef
+// Reference wrapper used to bind an AttributeGraph to a host context.
 //
-// Multiple AttributeGraphRef instances can share the same underlying AttributeGraph.
+// Multiple AttributeGraphRef instances can share the same underlying AttributeGraph core.
 // Each GraphHost subclass (ViewGraph, GestureGraph) owns one AttributeGraphRef and registers
 // itself as the `context`, enabling `GestureGraph.current` / `ViewGraph.current` resolution
 // via the AG evaluation context.
@@ -366,8 +368,8 @@ final class AGSubgraph: @unchecked Sendable {
 //   let ref = AttributeGraphRef(graph: sharedCore)
 //   ref.context = self   // register this GraphHost as the context
 struct AttributeGraphRef: @unchecked Sendable {
-    let graph: AttributeGraph       // shared AttributeGraph instance
-    weak var context: AnyObject?    // the GraphHost that owns this ref (ViewGraph, GestureGraph, etc.)
+    let graph: AttributeGraph       // shared graph core (one per window)
+    weak var context: AnyObject?    // the GraphHost that owns this ref (ViewGraph, GestureGraph, ...)
 
     /// The currently active AttributeGraphRef for the running AG evaluation pass.
     /// Set by withCurrent(_:). Reading context gives the owning GraphHost subclass.
@@ -398,6 +400,7 @@ struct AttributeGraphRef: @unchecked Sendable {
 /// never share a `Set<AGAttribute>` bucket. Without this partitioning, a hash collision
 /// between equal `rawValue`s in different graphs would invoke cross-graph `AGAttribute.==`
 /// (which is only a same-graph comparison by contract).
+///
 final class AGChangeSet: @unchecked Sendable {
     private var _byGraph: [ObjectIdentifier: Set<AGAttribute>] = [:]
 
@@ -429,10 +432,10 @@ class AttributeGraph: @unchecked Sendable {
         case input
 
         // Computed node with a plain closure rule.
-        // isSideEffect = true: re-evaluated eagerly inside markNeedsEvaluation
+        // isSideEffect = true -> re-evaluated eagerly inside markNeedsEvaluation
         //   (i.e. synchronously when any input changes via setValue).
         //   Used for gesture callbacks and other fire-and-forget side effects.
-        // isSideEffect = false: pull-based, evaluated lazily on first .value read.
+        // isSideEffect = false -> pull-based, evaluated lazily on first .value read.
         //
         // Cascade example (gesture callbacks):
         //   eventsAttr.setValue(events)
@@ -442,7 +445,7 @@ class AttributeGraph: @unchecked Sendable {
         //         -> phaseAttr.setValue(.ended)
         //           -> markNeedsEvaluation(callbackRule) [isSideEffect]
         //             -> evaluateNode(callbackRule)       immediately
-        //               -> endedCallback()                fires here, inside setValue call stack
+        //               -> endedCallback() fires here, inside setValue call stack
         case rule(() -> Any, isSideEffect: Bool)
 
         // StatefulRule node. The box owns the rule struct and is reused across evaluations.
@@ -450,19 +453,19 @@ class AttributeGraph: @unchecked Sendable {
         // If setStatefulOutput is not called during a given evaluation, the previous value is kept.
         case stateful(any _AnyStatefulBox)
 
-        // KeyPath-derived node: value is projected from a parent node via a key path.
+        // KeyPath-derived node. Value is projected from a parent node via a key path.
         // The dependency on parent is fixed at creation time and never changes.
         case keyPath(parent: AGAttribute, kp: AnyKeyPath)
 
-        // Cross-graph mirror node: reads its cached value from a node in another AttributeGraph.
+        // Cross-graph mirror node. It reads its cached value from a node in another AttributeGraph.
         // Evaluated lazily via cachedValue(for:) on the source graph (no context switch needed).
         // Invalidated reactively: when the source node changes, the source graph enqueues a
         // markNeedsEvaluation call into this graph's inbox. This graph drains the inbox at
         // the start of each withCurrent block (e.g. GestureGraph.sendEvents).
         case crossGraphRef(sourceAttr: AGAttribute, sourceGraph: WeakObject<AttributeGraph>)
 
-        // Indirect node: forwards reads to `target` when set and returns the stored
-        // default value when target is nil.
+        // Indirect (pointer) node. It forwards reads to `target` when set and returns
+        // the stored default value when target is nil.
         // Used for placeholder view outputs (_ViewOutputs), preference placeholders, and
         // per-child posAttr/sizeAttr in the static layout path.
         case indirect(target: AGAttribute?)
@@ -482,12 +485,12 @@ class AttributeGraph: @unchecked Sendable {
         // Dependency graph edges (stored as raw slot indices)
         var inputs: Set<UInt32> = []        // nodes this node depends on
         var outputs: Set<UInt32> = []       // nodes that depend on this node
-        // Permanent deps registered via setIndirectDependency are never cleared on re-evaluation.
+        // Permanent deps registered via setIndirectDependency. They are never cleared on re-evaluation.
         var staticInputs: Set<UInt32> = []
     }
 
     private struct NodeSlot {
-        var seed: UInt32    // generation counter, incremented on each removal
+        var seed: UInt32    // generation counter incremented on each removal
         var node: Node?     // nil = free slot
     }
 
@@ -504,7 +507,7 @@ class AttributeGraph: @unchecked Sendable {
         }
     }
 
-    // Contiguous slot array. index == AGAttribute.rawValue.
+    // Contiguous slot array: index == AGAttribute.rawValue
     private var slots: ContiguousArray<NodeSlot> = []
     // Freed slot indices available for reuse
     private var freeList: [UInt32] = []
@@ -532,8 +535,8 @@ class AttributeGraph: @unchecked Sendable {
     }
     private var crossGraphObservers: [UInt32: [CrossGraphObserver]] = [:]
 
-    // Deferred action outbox for closures executed outside the AG evaluation context.
-    // Enqueue from within AG evaluation; WindowController drains after all AG work is done.
+    // Deferred action outbox: closures to be executed OUTSIDE AG evaluation context.
+    // Enqueue from within AG evaluation. WindowController drains after all AG work is done.
     var actionOutbox: [() -> Void] = []
 
     // MARK: Task Locals
@@ -609,7 +612,7 @@ class AttributeGraph: @unchecked Sendable {
     /// Returns nil if no output has been set yet (first evaluation).
     ///
     /// Must be called from within StatefulRule.updateValue(). Used by ResettableGestureRule
-    /// to implement phaseValue.getter. It reads the previous phase without redundant storage.
+    /// to implement phaseValue.getter. This reads the previous phase without redundant storage.
     static func currentStatefulOutput<V>(_ type: V.Type = V.self) -> V? {
         guard let graph = AttributeGraph.current,
               let nodeID = AttributeGraph.currentlyEvaluatingNode else { return nil }
@@ -678,7 +681,7 @@ class AttributeGraph: @unchecked Sendable {
     ///
     /// The rule is evaluated once immediately upon creation to register its AG dependencies.
     /// After that it is re-evaluated synchronously inside `markNeedsEvaluation` whenever an
-    /// input changes. This happens within the same `setValue` call stack, not deferred to the next
+    /// input changes, i.e. within the same `setValue` call stack, not deferred to the next
     /// layout pass.
     ///
     /// The node is registered in the current AGSubgraph and removed when the AGSubgraph is
@@ -699,7 +702,7 @@ class AttributeGraph: @unchecked Sendable {
 
     // MARK: - Cross-Graph Reference
     // Allows a node in one AttributeGraph to reactively mirror a node from another.
-    // Used by GestureGraph <- ViewGraph geometry nodes (GestureResponder hit-test),
+    // Used by GestureGraph <- ViewGraph geometry nodes (GestureResponder hit-test)
     // and sheet WindowController <- parent ViewGraph content rule (makeContent reactivity).
     //
     // Flow: makeCrossGraphRef (target graph) -> addCrossGraphObserver (source graph)
@@ -709,7 +712,7 @@ class AttributeGraph: @unchecked Sendable {
     /// Returns the cached value of a node without requiring this graph to be current.
     ///
     /// Used exclusively by crossGraphRef node evaluation: a node in graph B reads a cached
-    /// value from graph A while graph B is current. No evaluation is triggered; the source
+    /// value from graph A while graph B is current. No evaluation is triggered. The source
     /// graph must have already evaluated and cached the value. fatalError if the node has
     /// never been evaluated (no cached value available yet).
     func cachedValue(for id: AGAttribute) -> Any? {
@@ -718,7 +721,7 @@ class AttributeGraph: @unchecked Sendable {
             fatalError("cachedValue: node @\(id.rawValue) does not exist in source graph.")
         }
         guard let cached = node.value else {
-            fatalError("cachedValue: node @\(id.rawValue) has no cached value. source graph must evaluate first.")
+            fatalError("cachedValue: node @\(id.rawValue) has no cached value; source graph must evaluate first.")
         }
         return cached
     }
@@ -809,7 +812,7 @@ class AttributeGraph: @unchecked Sendable {
         assert(AttributeGraph.current === self)
         let index = Int(id.rawValue)
         guard let removingNode = slots[index].node else {
-            fatalError("removeNode called on @\(id.rawValue) which does not exist. double-remove is a usage error.")
+            fatalError("removeNode called on @\(id.rawValue) which does not exist; double-remove is a usage error.")
         }
 #if DEBUG
         recordRemovedNodeTombstone(id: id, node: removingNode)
@@ -845,7 +848,7 @@ class AttributeGraph: @unchecked Sendable {
         freeList.append(id.rawValue)
 
         // 5. Mark former dependents as needing re-evaluation.
-        // evaluateSideEffects:false because the node is gone; side-effect rules that depended
+        // evaluateSideEffects:false because the node is gone. Side-effect rules that depended
         // on it must NOT fire now (they would crash reading a freed attribute).
         // They are simply marked dirty and will be removed or re-evaluated later.
         for outputIndex in outputs {
@@ -924,13 +927,13 @@ class AttributeGraph: @unchecked Sendable {
 
         switch node.kind {
         case .input:
-            fatalError("evaluateNode called on an input node @\(id.rawValue). input nodes must never be marked needsEvaluation.")
+            fatalError("evaluateNode called on an input node @\(id.rawValue); input nodes must never be marked needsEvaluation.")
 
         case .stateful(let box):
             // StatefulRule node: re-evaluate the stored rule struct.
             // Dependency tracking works via currentlyEvaluatingNode (same as .rule).
-            // Output is written only when updateValue() calls setStatefulOutput(_:);
-            // if it doesn't, the previous cached value is retained unchanged.
+            // Output is written only when updateValue() calls setStatefulOutput(_:).
+            // If it doesn't, the previous cached value is retained unchanged.
             clearInputs(for: id)
             AttributeGraph.$currentlyEvaluatingNode.withValue(id) {
                 box.callUpdate()
@@ -940,7 +943,7 @@ class AttributeGraph: @unchecked Sendable {
 
         case .keyPath(let parent, let kp):
             // KeyPath node: project value from parent via the stored key path.
-            // clearInputs is intentionally omitted because the dependency on parent is fixed
+            // clearInputs is intentionally omitted. The dependency on parent is fixed
             // at creation time in subscriptNode() and never changes.
             // Note: value(for: parent) runs while currentlyEvaluatingNode is still set to
             // the outer caller, so the caller also acquires a direct dependency on parent
@@ -958,7 +961,7 @@ class AttributeGraph: @unchecked Sendable {
             if let sourceGraph = sourceGraphRef.value {
                 slots[index].node!.value = sourceGraph.cachedValue(for: sourceAttr)
             }
-            // else: source graph gone, keep last cached value silently
+            // else: source graph gone, keep last cached value silently.
             slots[index].node!.needsEvaluation = false
             slots[index].node!.isEvaluating = false
 
@@ -973,7 +976,7 @@ class AttributeGraph: @unchecked Sendable {
             slots[index].node!.isEvaluating = false
 
         case .indirect(let target):
-            // Indirect node clears old dynamic dep (preserves static deps), then re-reads target.
+            // Indirect node: clears old dynamic dep (preserves static deps), then re-reads target.
             // When target is nil, the stored default value is retained unchanged.
             clearInputs(for: id)
             if let target {
@@ -1021,14 +1024,14 @@ class AttributeGraph: @unchecked Sendable {
             }
             // Even when a node is already dirty, keep walking its outputs.
             // Structural updates can leave intermediate preference/layout nodes
-            // dirty; later source changes still need to reach side-effect refresh
+            // dirty. Later source changes still need to reach side-effect refresh
             // rules that may have been evaluated and cleared in the meantime.
             queue.append(contentsOf: node.outputs)
             // Propagate to cross-graph mirror nodes watching this node.
             notifyCrossGraphObservers(for: UInt32(index))
         }
         // Eagerly evaluate side-effect nodes in dependency order (parents before children).
-        // Skipped when called from removeNode because inputs may already be freed.
+        // Skipped when called from removeNode. Inputs may already be freed.
         guard evaluateSideEffects else { return }
         for id in sideEffects {
             let index = Int(id)
@@ -1083,13 +1086,15 @@ class AttributeGraph: @unchecked Sendable {
     }
 
     // MARK: Indirect Attributes
+    // Indirect attributes provide placeholder output slots that can later point
+    // at concrete attributes and retain permanent dependency edges.
 
     /// Creates an indirect (pointer) node whose initial value is `defaultValue`.
     /// Use `setIndirectTarget` to wire it to a concrete attribute later.
     func makeIndirectAttribute<V>(defaultValue: V) -> Attribute<V> {
         assert(AttributeGraph.current === self)
         let index = allocateSlot()
-        // needsEvaluation: false because the default value is already stored; evaluation is triggered
+        // needsEvaluation: false because default value is already stored. Evaluation is triggered
         // only after setIndirectTarget is called (which calls markNeedsEvaluation).
         slots[Int(index)].node = Node(value: defaultValue, kind: .indirect(target: nil),
                                       needsEvaluation: false)
@@ -1176,7 +1181,7 @@ class AttributeGraph: @unchecked Sendable {
 
     // Executes only the actions that are queued at the moment of the call, then returns.
     // Any actions enqueued during execution are deferred to the next drainActions() call.
-    // Use this variant for a single, bounded flush, such as at the start of a frame update.
+    // Use this variant for a single, bounded flush, e.g. at the start of a frame update.
     func drainActions() {
         assert(AttributeGraph.current === self)
         let actions = pendingActions
@@ -1240,8 +1245,9 @@ class AttributeGraph: @unchecked Sendable {
 
 // MARK: - AGMakeUniqueID
 
-// Global atomic counter that returns the previous value (fetch-and-add).
-// Starts at 1 so 0 is never returned for generated IDs.
+// Global unique ID counter used by Namespace and other AG-backed identities.
+// Atomic fetch-add returns the previous value. The counter starts at 1 so callers
+// never receive 0, which is reserved as the uninitialized namespace value.
 private let _agUniqueIDCounter: Atomic<Int> = Atomic(1)
 
 func AGMakeUniqueID() -> Int {
@@ -1260,14 +1266,17 @@ func AGMakeUniqueID() -> Int {
 //
 // Run with VUI_AG_RECORD_REMOVAL_TOMBSTONES=1 to retain recently removed node
 // metadata: old/new seed, node kind, cached value type, dependency edges, and
-// currentlyEvaluating at removal time. This does not print logs; inspect it
+// currentlyEvaluating at removal time. This does not print logs. Inspect it
 // from the debugger. Add VUI_AG_RECORD_REMOVAL_STACKS=1 only when the removal
 // stack is needed. Thread.callStackSymbols is expensive enough to add visible
-// latency when many nodes are removed in one structural update; it caused the
+// latency when many nodes are removed in one structural update. It caused the
 // context-menu live-refresh count-6 stall after the "Removed Live" row dropped.
 // If a similar stall appears only with stack collection enabled, suspect this
 // instrumentation first. Keep stack capture off by default.
 //
+// When debugging, evaluate:
+//   expr -l Swift -- graph.debugRemovedNodeTombstone(forRawValue: rawID)
+//   expr -l Swift -- graph.debugRemovedNodeTombstonesSnapshot()
 private let _attributeGraphRecordRemovalTombstones =
     ProcessInfo.processInfo.environment["VUI_AG_RECORD_REMOVAL_TOMBSTONES"] == "1"
 private let _attributeGraphRecordRemovalStacks =

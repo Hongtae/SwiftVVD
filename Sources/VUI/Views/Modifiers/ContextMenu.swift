@@ -2,7 +2,7 @@
 //  File: ContextMenu.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Synchronization
@@ -52,8 +52,8 @@ extension ContextMenuModifier {
             return outputs
         }
 
-        // Build context menu content into a platform item list and store a weak
-        // reference on the responder.
+        // Build a live platform item list for this menu. The responder keeps the
+        // item-list attribute so an already-open popup can refresh in place.
         let itemListAttr: Attribute<PlatformItemList> = graph.makeStatefulRule(
             PlatformItemListGenerator<AllPlatformItemListFlags, MenuContent>(
                 content: modifier[\.menuView]._attribute,
@@ -173,7 +173,7 @@ final class ContextMenuResponder: ViewResponder {
             let initialContent = contextMenuPopupContent(items: initialItems,
                                                          actions: actions)
             let attr: Attribute<AnyView> = graph.makeInput(value: initialContent)
-            // Refresh the already-open popup root content when the collected
+            // Update the already-open popup root content when the collected
             // item-list source invalidates.
             graph.makeSideEffectRule { [weak session] in
                 let items = self.itemList.value.menuItems
@@ -404,8 +404,8 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
         let fittedFrame: CGRect
         let fittedComparisonFrame: CGRect
         // Keep the right side preferred, flip only when the left side has enough
-        // room, and otherwise choose the side with more available horizontal room.
-        // Increase overlap only by the missing amount.
+        // room, and otherwise choose the side with more available horizontal
+        // room while increasing overlap only by the missing amount.
         if rightOverflow == 0 {
             fittedFrame = rightFrame
             fittedComparisonFrame = rightComparisonFrame
@@ -431,8 +431,9 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
               parentWidth > 0 else {
             return fallback
         }
-        // Use the laid-out parent popup width because shortcut/title columns
-        // resolve after the row callback's provisional origin is built.
+        // Submenu popup windows overlap their parent by only a few points. Use
+        // the laid-out parent popup width because shortcut/title columns resolve
+        // after the row callback's provisional origin is built.
         return CGPoint(x: parentWidth - contextMenuPopupSubmenuOverlap,
                        y: fallback.y)
     }
@@ -496,7 +497,7 @@ extension EnvironmentValues {
 
 private let contextMenuPopupPanelPadding: CGFloat = 5
 private let contextMenuPopupRowHeight: CGFloat = 24
-// Separator rows allocate space separately from the visible hairline.
+// Separators allocate a full row separately from the visible hairline.
 private let contextMenuPopupDividerHeight: CGFloat = 11
 private let contextMenuPopupDividerLineHeight: CGFloat = 1
 private let contextMenuPopupDividerHorizontalInset: CGFloat = 16
@@ -835,8 +836,9 @@ private func contextMenuPopupRenderedItems(_ items: [PlatformItemList.Item]) -> 
     var previousWasDivider = false
     for item in items {
         let isDivider = item.systemItem != nil
-        // Consecutive separators allocate the same visible height as a single
-        // separator, and edge separators do not allocate visible height.
+        // The collected item model can contain consecutive or edge separators.
+        // The popup renderer collapses consecutive separators to a single row
+        // and suppresses edge separators from visible height.
         if isDivider && (previousWasDivider || result.isEmpty) {
             continue
         }
@@ -1071,7 +1073,7 @@ private struct ContextMenuPopupRow: View {
                 guard !isSectionHeader, item.isEnabled else { return }
                 if hasSubmenu {
                     openSubmenu(item, submenuOrigin)
-                    // TODO: wire submenu primary-action split.
+                    // Submenu primary-action split is not wired yet.
                     return
                 }
                 clearSubmenus()

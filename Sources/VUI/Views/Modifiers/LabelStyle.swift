@@ -155,7 +155,7 @@ extension EnvironmentValues {
 }
 
 // Context-specific label styles used in DefaultLabelStyle.makeBody's dispatch chain.
-// Provides minimal functional implementations for context-specific label styles.
+// These context-specific helper styles currently use minimal functional implementations.
 
 // ListLabelStyle: used in PlainList, InsetList, BorderedList contexts.
 struct ListLabelStyle: LabelStyle {
@@ -227,13 +227,35 @@ struct AccessibilityLabelStyle: LabelStyle {
     }
 }
 
+// DefaultLabelStyle.makeBody: 17 StaticIf dispatch chain + unconditional FallbackLabelStyle.
+//   outermost modifier [16] is applied last, innermost [0] first.
+//   The outermost StyleContext predicate wins over inner ones when active.
+//
+// Chain (outermost -> innermost):
+//  [16] StyleContextAcceptsPredicate<(Plain, GroupedForm)>  -> GroupedFormLabelStyle
+//  [15] StyleContextAcceptsPredicate<(Table, GroupedForm)>  -> GroupedFormLabelStyle
+//  [14] StyleContextAcceptsPredicate<PlainList>              -> ListLabelStyle
+//  [13] StyleContextAcceptsPredicate<SidebarList>            -> SidebarLabelStyle
+//  [12] StyleContextAcceptsPredicate<InsetList>              -> ListLabelStyle
+//  [11] StyleContextAcceptsPredicate<GroupedForm>            -> GroupedFormLabelStyle
+//  [10] StyleContextAcceptsPredicate<BorderedList>           -> ListLabelStyle
+//  [9]  StyleContextAcceptsPredicate<SystemPrefSidebar>      -> SystemPreferencesSidebarLabelStyle
+//  [8]  StyleContextAcceptsPredicate<TextInputSuggestions>   -> TextInputSuggestionLabelStyle
+//  [7]  And<IsDefaultButtonLabel, AnyPredicate<Toolbar>>     -> TitleOnlyLabelStyle
+//  [6]  StyleContextAcceptsPredicate<Toolbar>                -> ToolbarItemLabelStyle
+//  [5]  StyleContextAcceptsPredicate<SectionHeader>          -> TitleOnlyLabelStyle
+//  [4]  StyleContextAcceptsPredicate<ListAccessoryBar>       -> IconOnlyLabelStyle
+//  [3]  StyleContextAcceptsPredicate<SwipeActions>           -> TitleAndIconLabelStyle
+//  [2]  StyleContextAcceptsPredicate<AccessibilityQuickAction> -> TitleAndIconLabelStyle
+//  [1]  StyleContextAcceptsPredicate<AccessibilityRepresentable> -> AccessibilityLabelStyle
+//  [0]  (unconditional)                                      -> FallbackLabelStyle
 public struct DefaultLabelStyle: LabelStyle {
     public init() {}
     public func makeBody(configuration: Configuration) -> some View {
         // Chain: innermost [16] is added first (.modifier first call),
         //        outermost [0] is added last (.modifier last call).
-        // _makeView executes outermost to innermost. The innermost style pushes
-        // last onto the style stack, so innermost wins over outermost.
+        // _makeView executes from outermost to innermost. The innermost modifier
+        // pushes last onto the style stack, so innermost wins over outermost.
         // FallbackLabelStyle is outermost = default when no context matches.
         Label(configuration)
             // [16] innermost: (Plain, GroupedForm) -> GroupedFormLabelStyle
@@ -364,7 +386,7 @@ public struct DefaultLabelStyle: LabelStyle {
                     falseBody: EmptyModifier()
                 )
             )
-            // [0] outermost: FallbackLabelStyle, used when no context matches.
+            // [0] outermost: FallbackLabelStyle, default when no context matches.
             .modifier(LabelStyleWritingModifier(style: FallbackLabelStyle()))
     }
 }
@@ -502,7 +524,7 @@ extension LabelStyle where Self == TitleOnlyLabelStyle {
     public static var titleOnly: TitleOnlyLabelStyle { .init() }
 }
 
-// LabelStyleModifier<S>: StyleModifier that pushes S onto the
+// LabelStyleModifier<S>: StyleModifier pushes S onto the
 // StyleInput<LabelStyleConfiguration> custom-inputs stack.
 // _makeView/_makeViewList are provided by StyleModifier default extension.
 struct LabelStyleModifier<S: LabelStyle>: StyleModifier {

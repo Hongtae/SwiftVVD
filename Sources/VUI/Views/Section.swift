@@ -37,8 +37,8 @@ extension Section: View where Parent: View, Content: View, Footer: View {
         }
 
         guard platformItemListShouldCollectStaticItemContributors(inputs) else {
-            // FIXME: Define Section's non-menu rendering/list behavior before adding
-            // header/footer rendering here.
+            // Non-menu section rendering/list behavior is not wired yet.
+            // Current implementation keeps menu producer behavior as the active path.
             return Content._makeView(view: view[\.content], inputs: inputs)
         }
 
@@ -73,7 +73,7 @@ extension Section: View where Parent: View, Content: View, Footer: View {
                 ))
             }
             list.merge(contentListAttr.value)
-            // Explicit footers are currently not materialized as menu items.
+            // Explicit footers are not materialized in the platform item list.
             list.append(PlatformItemList.Item(
                 id: PlatformItemList.stableID(sectionIDSource, slot: 2),
                 label: AnyView(EmptyView()),

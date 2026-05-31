@@ -6,8 +6,8 @@
 //
 
 /// Writes a fixed value for a PreferenceKey into the view tree.
-/// Conforms to MultiViewModifier so preference values are applied per child.
-/// _makeViewList: uses MultiViewModifier default (wraps with .modified layoutMod).
+/// Conforms to MultiViewModifier; _makeViewList uses the MultiViewModifier
+/// default unless the PreferredColorSchemeKey static-list specialization applies.
 /// _makeView: called per child during ModifiedElements materialization.
 public struct _PreferenceWritingModifier<Key: PreferenceKey>: MultiViewModifier {
     public typealias Body = Never
@@ -33,9 +33,12 @@ public struct _PreferenceWritingModifier<Key: PreferenceKey>: MultiViewModifier 
         return outputs
     }
 
-    // PreferredColorSchemeKey has a static-list fast path so each child receives
-    // derived environment and trait attributes. Dynamic lists and all other keys
-    // use the generic MultiViewModifier list path.
+    // PreferredColorSchemeKey has a static-list specialization. Static child
+    // generators get per-child ColorSchemeEnv / ColorSchemeTrait rules, while
+    // dynamic lists must fall through to the generic ModifiedViewList.ListModifier path.
+    //
+    // All other keys use the generic MultiViewModifier._makeViewList path:
+    // body call + _ViewListOutputs.multiModifier wrapping.
     public static func _makeViewList(
         modifier: _GraphValue<Self>,
         inputs: _ViewListInputs,
@@ -47,12 +50,12 @@ public struct _PreferenceWritingModifier<Key: PreferenceKey>: MultiViewModifier 
 
         let innerOutputs = body(_Graph(), inputs)
 
-        // Path 1: PreferredColorSchemeKey staticList. Attach per-child
-        // ColorSchemeEnv and ColorSchemeTrait rules.
+        // Path 1: PreferredColorSchemeKey staticList. Set per-child
+        // ColorSchemeEnv / ColorSchemeTrait rules.
         if Key.self == PreferredColorSchemeKey.self,
            let graph = AttributeGraph.current,
            case .staticList(let innerElements) = innerOutputs.views {
-            // Safe: runtime guard above establishes Key.Value == ColorScheme?.
+            // Safe: runtime guard above confirms Key.Value == ColorScheme?; reinterpret ID only.
             let modifierValueAttr = Attribute<ColorScheme?>(modifier[\.value]._attribute.identifier)
             let parentEnvAttr = inputs.base.cachedEnvironment.value.environment
             let updatedElements = _applyColorSchemeEnvToElements(
@@ -69,7 +72,9 @@ public struct _PreferenceWritingModifier<Key: PreferenceKey>: MultiViewModifier 
             )
         }
 
-        // Path 2: generic path for both staticList and dynamicList.
+        // Path 2: generic path, equivalent to MultiViewModifier._makeViewList.
+        // Handles both staticList and dynamicList. Dynamic PCS must take this path:
+        // ModifiedViewList.ListModifier + ApplyModifiers + pred chain.
         var outputs = innerOutputs
         outputs.multiModifier(modifier, inputs: inputs)
         return outputs
@@ -77,8 +82,7 @@ public struct _PreferenceWritingModifier<Key: PreferenceKey>: MultiViewModifier 
 }
 
 /// Applies a transform closure to an existing PreferenceKey value flowing up the tree.
-/// Conforms to MultiViewModifier so transforms are applied per child.
-/// _makeViewList: uses MultiViewModifier default (wraps with .modified layoutMod).
+/// Conforms to MultiViewModifier; _makeViewList uses the MultiViewModifier default.
 /// _makeView: called per child during ModifiedElements materialization.
 public struct _PreferenceTransformModifier<Key: PreferenceKey>: MultiViewModifier {
     public typealias Body = Never
@@ -101,7 +105,7 @@ public struct _PreferenceTransformModifier<Key: PreferenceKey>: MultiViewModifie
         var outputs = body(_Graph(), inputs)
 
         // Get transform as a reactive AG attribute so updates to the modifier
-        // field propagate downstream.
+        // field propagate downstream through modifier[\.transform].
         let transformAttr: Attribute<(inout Key.Value) -> Void> = modifier[\.transform]._attribute
         outputs.preferences.makePreferenceTransformer(
             key: Key.self,
@@ -114,6 +118,9 @@ public struct _PreferenceTransformModifier<Key: PreferenceKey>: MultiViewModifie
 }
 
 // MARK: - PreferredColorSchemeKey specialization
+
+// Free functions host the PreferredColorSchemeKey static-list specialization.
+// The unconstrained generic _makeViewList can call these after checking Key.self.
 
 // File-private free function, not a static method on the where-constrained extension because
 // Swift cannot call `where Key == PreferredColorSchemeKey` methods from the unconstrained
@@ -160,8 +167,8 @@ private func _applyColorSchemeEnvToElements(
 
 extension _PreferenceWritingModifier where Key == PreferredColorSchemeKey {
 
-    /// Rule that derives EnvironmentValues for a preferred color scheme.
-    /// Reads the PCS modifier value and the parent EnvironmentValues, then returns a derived
+    /// Rule that derives EnvironmentValues for a child from the PCS modifier value.
+    /// Reads the PCS modifier value and the parent EnvironmentValues, returning derived
     /// EnvironmentValues with colorScheme applied. Set as each child's envAttr so the
     /// child re-evaluates reactively when either the parent env or the color scheme changes.
     struct ColorSchemeEnv: Rule {
@@ -178,8 +185,8 @@ extension _PreferenceWritingModifier where Key == PreferredColorSchemeKey {
         }
     }
 
-    /// Rule that derives ViewTraitCollection for a preferred color scheme.
-    /// Reads the PCS modifier value and the child's ViewTraitCollection, then returns a derived
+    /// Rule that derives ViewTraitCollection for a child from the PCS modifier value.
+    /// Reads the PCS modifier value and the child's ViewTraitCollection, returning derived
     /// ViewTraitCollection with PreviewColorSchemeTraitKey applied.
     struct ColorSchemeTrait: Rule {
         typealias Value = ViewTraitCollection

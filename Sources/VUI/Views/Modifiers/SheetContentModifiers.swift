@@ -5,7 +5,7 @@
 //  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-// Reset and clear modifier chain applied inside SheetContent.body.
+// Reset/clear modifier chain applied inside SheetContent.body.
 
 // MARK: - EnvironmentModifier protocol
 
@@ -52,7 +52,9 @@ extension EnvironmentValues {
 
 // MARK: - _SheetHostingContextKey (anonymous Optional<Bool>)
 
-// Optional hosting context environment key reset by SheetContent.body.
+// Anonymous Optional<Bool> environment key set in step 3 of SheetContent.body chain.
+// The exact public/private property name is unavailable, so this file keeps a
+// local key dedicated to sheet hosting context reset.
 // Value is always nil (Optional<Bool>.none) in SheetContent.body.
 private struct _SheetHostingContextKey: EnvironmentKey {
     static var defaultValue: Bool? { nil }
@@ -74,12 +76,12 @@ struct ResetScrollEnvironmentModifier: ViewModifier {
     // AdditionalResetModifier resets: scrollAnchors, ScrollToTopGestureActionKey,
     // ScrollContentBackgroundKey, popoverAutomaticallyDismissesWhenScrolledOutOfView
     // ResetTransform resets ScrollEnvironmentProperties.
-    // These scroll-specific env keys and types are not implemented yet.
+    // The scroll-specific environment keys are owned by the scroll subsystem.
+    // Until those keys are available here, this reset modifier leaves inputs unchanged.
     struct AdditionalResetModifier: ViewModifier, _GraphInputsModifier {
         typealias Body = Never
         static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GraphInputs) {
-            // Stub: resets scroll-related environment values (scrollAnchors etc.)
-            // Full implementation is deferred until the scroll subsystem is implemented.
+            // Writes the scroll reset values once scroll environment storage is available.
         }
     }
 
@@ -89,8 +91,8 @@ struct ResetScrollEnvironmentModifier: ViewModifier {
     func body(content: _ViewModifier_Content<ResetScrollEnvironmentModifier>) -> some View {
         content
             .modifier(AdditionalResetModifier())
-        // Stub: .modifier(TransformScrollStorageModifier(transform: ResetTransform()))
-        // TransformScrollStorageModifier is not implemented yet.
+        // TransformScrollStorageModifier(transform:) belongs here once scroll
+        // environment storage is available.
     }
 }
 
@@ -98,7 +100,7 @@ struct ResetScrollEnvironmentModifier: ViewModifier {
 
 // ListStackBehavior controls list stack-push navigation behavior.
 // Written by resetListStackBehavior() to reset to default stack behavior.
-// Full fields can be added when list navigation behavior is implemented.
+// List navigation fields are added by the navigation subsystem.
 struct ListStackBehavior: Equatable {}
 
 private struct _ListHasStackBehaviorKey: EnvironmentKey {
@@ -127,11 +129,10 @@ extension View {
 // Env keys reset: SearchFieldPlacementKey, SearchFieldToolbarItemPlacementKey,
 //   __Key_searchStorage, IsSearchingKey, SearchScopeActivationKey,
 //   SearchFocusContextKey, __Key_searchTextClearAction
-// None of these search env keys are implemented yet.
+// Search environment storage is added by the search subsystem.
 struct ResetSearchEnvironmentModifier: EnvironmentModifier {
     static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GraphInputs) {
-        // Stub: resets search-related environment values (SearchFieldPlacementKey etc.)
-        // Full implementation is deferred until the search subsystem is implemented.
+        // Writes the search reset values once search environment storage is available.
     }
 }
 
@@ -141,11 +142,10 @@ struct ResetSearchEnvironmentModifier: EnvironmentModifier {
 // Resets form-related environment values for sheet content.
 // Env keys reset: FormInsetsKey, FormRowInfoVisibilityKey, FormRowAccessoryVisibilityKey,
 //   EffectiveFormStyleKey, GroupedFormSizeVariantKey
-// None of these form env keys are implemented yet.
+// Form environment storage is added by the form subsystem.
 struct ResetFormEnvironmentModifier: EnvironmentModifier {
     static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GraphInputs) {
-        // Stub: resets form-related environment values (FormInsetsKey etc.)
-        // Full implementation is deferred until the form subsystem is implemented.
+        // Writes the form reset values once form environment storage is available.
     }
 }
 
@@ -154,11 +154,10 @@ struct ResetFormEnvironmentModifier: EnvironmentModifier {
 // ResetTabViewEnvironmentModifier: EnvironmentModifier, _GraphInputsModifier
 // Resets tab view-related environment values for sheet content.
 // Env keys reset: TabBarPlacementKey (rawValue 5 = .automatic), IsTabBarShowingSectionsKey (false)
-// These tab view env keys are not implemented yet.
+// Tab view environment storage is added by the tab view subsystem.
 struct ResetTabViewEnvironmentModifier: EnvironmentModifier {
     static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GraphInputs) {
-        // Stub: resets tab view-related environment values (TabBarPlacementKey etc.)
-        // Full implementation is deferred until the tab view subsystem is implemented.
+        // Writes the tab view reset values once tab view environment storage is available.
     }
 }
 
@@ -166,13 +165,12 @@ struct ResetTabViewEnvironmentModifier: EnvironmentModifier {
 
 // ClearNavigationContextModifier: ViewInputsModifier, ViewModifier
 // Clears navigation context from _ViewInputs using _makeViewInputs path.
-// Has no body(content:) and uses the ViewInputsModifier protocol.
+// Has no body(content:). Uses ViewInputsModifier protocol (_makeViewInputs).
 struct ClearNavigationContextModifier: ViewModifier, _ViewInputsModifier {
     typealias Body = Never
 
     static func _makeViewInputs(modifier: _GraphValue<Self>, inputs: inout _ViewInputs) {
-        // Stub: clears navigation context state from _ViewInputs.customInputs.
-        // Full implementation is deferred until the navigation subsystem is implemented.
+        // Clears navigation context once navigation input storage is available.
     }
 }
 
@@ -185,9 +183,8 @@ extension View {
 // MARK: - NavigationEnabled
 
 // NavigationEnabled: written to isNavigationEnabledInternal env key in SheetContent.body.
-// Full fields can be added when navigation behavior is implemented.
+// Navigation state fields are added by the navigation subsystem.
 struct NavigationEnabled: Equatable {
-    // Placeholder until the navigation subsystem is implemented.
 }
 
 private struct _NavigationEnabledKey: EnvironmentKey {
@@ -204,10 +201,9 @@ extension EnvironmentValues {
 // MARK: - NavigationState.SelectionSeed
 
 // NavigationState.SelectionSeed: written to navigationSelectionSeed env key in SheetContent.body.
-// Full fields can be added when navigation behavior is implemented.
+// Selection seed fields are added by the navigation subsystem.
 enum NavigationState {
     struct SelectionSeed: Equatable {
-        // Placeholder until the navigation subsystem is implemented.
     }
 }
 
@@ -226,9 +222,8 @@ extension EnvironmentValues {
 
 // PresentSharingPickerAction: env value for presenting the sharing picker.
 // Written as nil (Optional.none) by clearSharingPickerHost() to reset sharing context.
-// Full fields can be added when sharing behavior is implemented.
+// Sharing action fields are added by the sharing subsystem.
 struct PresentSharingPickerAction {
-    // Placeholder until the sharing subsystem is implemented.
 }
 
 private struct _PresentSharingPickerKey: EnvironmentKey {

@@ -153,7 +153,7 @@ struct HasKeyboardShortcut: ViewInputFlag {
     var description: String { "HasKeyboardShortcut" }
 }
 
-// Trait used by menu item collection to preserve explicit keyboard shortcuts.
+// Stores the shortcut trait consumed by platform item collection.
 struct KeyboardShortcutPickerOptionTraitKey: _ViewTraitKey {
     typealias Value = KeyboardShortcut?
     static var defaultValue: KeyboardShortcut? { nil }

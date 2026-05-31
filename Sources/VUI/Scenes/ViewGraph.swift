@@ -7,10 +7,13 @@
 
 import Foundation
 
-// Dirty bitmask for root values that need updating.
+// ViewGraphRootValues - dirty bitmask for which root values need updating.
+// Member names are part of the host contract. Raw values use the current
+// local bit mapping until the root-value mask is verified.
 struct ViewGraphRootValues: OptionSet {
     let rawValue: UInt16
 
+    // Raw values are provisional; keep bit order isolated here.
     static let rootView      = ViewGraphRootValues(rawValue: 1 << 0)
     static let environment   = ViewGraphRootValues(rawValue: 1 << 1)
     static let size          = ViewGraphRootValues(rawValue: 1 << 2)
@@ -23,19 +26,22 @@ struct ViewGraphRootValues: OptionSet {
     static let all           = ViewGraphRootValues(rawValue: 0x01FF)
 }
 
-// Current rendering phase of ViewGraph.
+// ViewRenderingPhase - current rendering phase of ViewGraph.
+// The phase is still represented as an opaque raw value until concrete cases
+// are needed by the host scheduler.
 struct ViewRenderingPhase: Equatable, Hashable {
     var rawValue: UInt8
     init(rawValue: UInt8 = 0) { self.rawValue = rawValue }
 }
 
-// Rendering context passed to ViewGraphRenderDelegate.updateRenderContext.
+// ViewGraphRenderContext - rendering context passed to ViewGraphRenderDelegate.updateRenderContext.
 struct ViewGraphRenderContext {
     var contentsScale: CGFloat
     var opaqueBackground: Bool
 }
 
-// Owns a ViewGraph and tracks its update/render state.
+// ViewGraphOwner - owns a ViewGraph and tracks its update/render state.
+// WindowController is the current platform host object for this contract.
 protocol ViewGraphOwner: AnyObject {
     var viewGraph: ViewGraph { get }
     var currentTimestamp: Time { get set }
@@ -44,45 +50,53 @@ protocol ViewGraphOwner: AnyObject {
     var externalUpdateCount: Int { get set }
 }
 
-// Extends ViewGraphOwner with a responder tree root and gesture graph.
+// ViewRendererHost - extends ViewGraphOwner with a responder tree root and shared gesture graph.
+// WindowController owns both graph objects and exposes the event state needed
+// by generated responders through this protocol.
 protocol ViewRendererHost: ViewGraphOwner {
     var responderNode: ResponderNode? { get }
     var gestureGraph: GestureGraph? { get }
 }
 
-// Update scheduling callbacks for the view graph.
+// ViewGraphDelegate - update scheduling callbacks for the view graph.
+// ViewGraph.delegate: Optional<ViewGraphDelegate>
 protocol ViewGraphDelegate: AnyObject {
     func setNeedsUpdate()
     func requestUpdate(after: Double)
     func `as`<T>(_ type: T.Type) -> T?
 }
 
-// Environment and inputs update hook for ViewGraphHost.
+// ViewGraphHostDelegate - environment/input update hook for ViewGraphHost.
+// ViewGraphHost.delegate: Optional<ViewGraphHostDelegate>
 protocol ViewGraphHostDelegate: AnyObject {
     func updateGraphInputs(_ inputs: inout _GraphInputs)
 }
 
-// Rendering callback delegate.
+// ViewGraphRenderDelegate - rendering callback delegate.
+// ViewGraphHost.renderDelegate: Optional<ViewGraphRenderDelegate>
 protocol ViewGraphRenderDelegate: AnyObject {
-    // The root object being rendered.
+    // The root backend object being rendered.
     var renderingRootView: AnyObject { get }
 
     func updateRenderContext(_ context: inout ViewGraphRenderContext)
 
+    // Host scheduling hooks.
     func withMainThreadRender(wasAsync: Bool, _ body: () -> Time) -> Time
     func renderIntervalForDisplayLink(timestamp: Time) -> Double
 }
 
-// Notifies ViewGraph when root input values change.
+// ViewGraphRootValueUpdater - notifies ViewGraph when root input values change.
+// Current host code implements no-op stubs for transform, focus, and
+// accessibility paths until those root inputs are wired.
+// ViewGraphHost.updateDelegate: Optional<ViewGraphRootValueUpdater>
+// WindowController conforms as the host object that updates root input attributes.
 protocol ViewGraphRootValueUpdater: AnyObject {
-    // Required values.
     func updateRootView()
     func updateEnvironment()
     func updateSize()
     func updateSafeArea()
     func updateContainerSize()
 
-    // Optional values implemented by hosts as needed.
     func updateTransform()
     func updateFocusStore()
     func updateFocusedItem()
@@ -90,7 +104,9 @@ protocol ViewGraphRootValueUpdater: AnyObject {
     func updateAccessibilityEnvironment()
 }
 
-// Intermediate base class between GraphHost and ViewGraph.
+// ViewGraphHost - intermediate base class between GraphHost and ViewGraph.
+// The backend currently drives updateOutputs from the render loop. The class
+// keeps the shared host lifecycle surface so scheduling can be tightened later.
 class ViewGraphHost: GraphHost, ViewGraphOwner {
 
     weak var delegate: (any ViewGraphHostDelegate)?
@@ -108,15 +124,19 @@ class ViewGraphHost: GraphHost, ViewGraphOwner {
     var externalUpdateCount: Int = 0
     var viewGraph: ViewGraph { self as! ViewGraph }
 
-    // CADisplayLink will be used once implemented. It is not used currently.
+    // Pending parity: display/update timers are simplified.
+    // The current backend calls updateOutputs directly from WindowController.
     func startDisplayLink() {}
     func clearDisplayLink() {}
     func startUpdateTimer(delay: Double) {}
     func clearUpdateTimer() {}
 
-    /// Central entry point for the AG evaluation cycle.
+    /// Central AG evaluation entry point for host-driven output updates.
     ///
-    /// Flow: render loop -> WindowController.updateFrame -> viewGraph.updateOutputs.
+    /// Current flow:
+    ///   display/update trigger
+    ///   dirty root values applied through updateDelegate
+    ///   graph inbox and queued actions flushed in the current graph context
     func updateOutputs(at time: Time) {
         currentTimestamp = time
 
@@ -124,12 +144,11 @@ class ViewGraphHost: GraphHost, ViewGraphOwner {
         valuesNeedingUpdate = []
 
         data.withCurrent {
-            // Flush async invalidations from @State and @Observable.
+            // Flush async invalidations before applying root-value changes.
             data.graph.inbox.drain()
             data.graph.drainActions()
 
-            // Call updateDelegate methods for dirty root values.
-            // Each method updates the corresponding ViewGraph input attribute.
+            // Apply dirty root values through the host updater.
             if dirty.contains(.rootView)      { updateDelegate?.updateRootView() }
             if dirty.contains(.environment)   { updateDelegate?.updateEnvironment() }
             if dirty.contains(.size)          { updateDelegate?.updateSize() }
@@ -140,7 +159,8 @@ class ViewGraphHost: GraphHost, ViewGraphOwner {
             if dirty.contains(.focusedValues) { updateDelegate?.updateFocusedValues() }
             if dirty.contains(.containerSize) { updateDelegate?.updateContainerSize() }
 
-            // ViewGraphHostDelegate.updateGraphInputs is called from the AG rule update path.
+            // Pending parity: ViewGraphHostDelegate.updateGraphInputs is not
+            // wired here. WindowController updates root input attributes directly.
         }
     }
 
@@ -149,7 +169,12 @@ class ViewGraphHost: GraphHost, ViewGraphOwner {
     override init(graph: AttributeGraph) { super.init(graph: graph) }
 }
 
-// View-level AG host owned by WindowController.
+// ViewGraph - view-level AG host.
+// This keeps the GraphHost, ViewGraphHost, ViewGraph hierarchy while being
+// owned directly by WindowController. The initializer builds the root view
+// output rule and captures the requested output attributes.
+//
+// GestureGraph ownership is shared with the renderer host for event dispatch.
 class ViewGraph: ViewGraphHost {
 
     // Update scheduling callback.
@@ -161,10 +186,11 @@ class ViewGraph: ViewGraphHost {
     // Outputs requested at init time.
     var requestedOutputs: Outputs
 
-    // Back-reference to the owning ViewRendererHost.
+    // Back-reference to the owning ViewRendererHost. Gesture responders use
+    // this to reach the shared gesture graph during view construction.
     weak var rendererHost: (any ViewRendererHost)?
 
-    // AG input attributes updated by ViewGraphRootValueUpdater.
+    // AG input attributes updated by WindowController's root-value updater.
     private(set) var sizeAttr: Attribute<ViewSize>?
     private(set) var envAttr: Attribute<EnvironmentValues>?
     private(set) var timeAttr: Attribute<Time>?
@@ -204,10 +230,10 @@ class ViewGraph: ViewGraphHost {
             self.interval = dt
             if let r = reason { reasons.insert(r) }
         }
-        mutating func maxVelocity(_ v: Double) {}  // TODO: implement
+        mutating func maxVelocity(_ v: Double) {}  // Scheduling velocity is not modeled yet.
     }
 
-    // Takes a concrete view value to lift into this graph.
+    // Backend init that takes a concrete view value to lift into the graph.
     convenience init<V: View>(rootViewType: V.Type, content: V, rendererHost: any ViewRendererHost, requestedOutputs: Outputs = .defaults) {
         self.init(rootViewType: V.self, rendererHost: rendererHost, requestedOutputs: requestedOutputs) { g in
             _GraphValue<V>(_attribute: g.makeInput(value: content))
@@ -215,9 +241,9 @@ class ViewGraph: ViewGraphHost {
     }
 
     // Cross-graph variant: content lives in a parent AG and is mirrored via crossGraphRef.
-    // When parent @State changes, the parent contentAttr re-evaluates and notifies the child inbox.
-    // The child then updates on its next updateOutputs pass. Caller must evaluate contentAttr in
-    // sourceGraph first so the crossGraphRef finds a non-nil cached value.
+    // When parent state changes, parent contentAttr re-evaluates, the child inbox
+    // is notified, and the child updates on its next updateOutputs. Caller must evaluate contentAttr in sourceGraph
+    // first (call `_ = contentAttr.value`) so the crossGraphRef finds a non-nil cached value.
     convenience init(crossGraphContentAttr: Attribute<AnyView>, sourceGraph: AttributeGraph,
                      rendererHost: any ViewRendererHost, requestedOutputs: Outputs = .defaults) {
         self.init(rootViewType: AnyView.self, rendererHost: rendererHost, requestedOutputs: requestedOutputs) { g in
@@ -291,7 +317,7 @@ class ViewGraph: ViewGraphHost {
                 stackOrientation: nil
             )
 
-            // GestureResponder.init reads gestureGraph from ViewGraph.
+            // GestureResponder.init reads the shared gesture graph from ViewGraph.
             let outputs: _ViewOutputs = V._makeView(view: contentGV, inputs: viewInputs)
 
             let resourceNodes = outputs.preferences.values(for: ResourceList.Key.self)
@@ -408,8 +434,7 @@ class ViewGraph: ViewGraphHost {
         self.rootResourceList   = rootRLResult
     }
 
-    /// ViewGraph-level updateOutputs override.
-    /// time changes every frame, so it is updated without a dirty bit.
+    /// Updates host outputs, then refreshes the time input every frame.
     override func updateOutputs(at time: Time) {
         super.updateOutputs(at: time)
         data.withCurrent {
@@ -420,7 +445,6 @@ class ViewGraph: ViewGraphHost {
     // Returns the current display list from the AG graph.
     func displayList() -> DisplayList? { rootDisplayList?.value }
 
-    // Dispatches input events through the responder tree.
-    // TODO: implement proper event routing via GestureGraph (Phase 4)
+    // Pending parity: route input events through GestureGraph.
     func sendEvents(_ events: [Any], rootNode: ResponderNode, at time: Time) {}
 }

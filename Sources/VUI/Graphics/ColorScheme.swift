@@ -16,12 +16,14 @@ public enum ColorSchemeContrast: CaseIterable, Hashable, Equatable, Sendable {
     case increased
 }
 
+// colorSchemeContrast uses a top-level environment key.
 struct ColorSchemeContrastKey: EnvironmentKey {
     static let defaultValue: ColorSchemeContrast = .standard
 }
 
 extension EnvironmentValues {
-    // Explicit color scheme overrides the platform color scheme fallback.
+    // ExplicitColorSchemeKey overrides PlatformColorSchemeKey fallback.
+    // The setter writes only the explicit key.
     struct ExplicitColorSchemeKey: EnvironmentKey {
         static let defaultValue: ColorScheme? = nil
     }
@@ -34,7 +36,7 @@ extension EnvironmentValues {
         set { self[ExplicitColorSchemeKey.self] = newValue }
     }
 
-    // get-only public; wraps _colorSchemeContrast.
+    // get-only public; wraps _colorSchemeContrast (system-injected via PlatformColorSchemeKey analogue).
     public var colorSchemeContrast: ColorSchemeContrast {
         get { self[ColorSchemeContrastKey.self] }
     }
@@ -59,7 +61,7 @@ public struct PreviewColorSchemeTraitKey: _ViewTraitKey {
 
 public struct PreferredColorSchemeKey: PreferenceKey {
     public typealias Value = ColorScheme?
-    // keep-first: only writes nextValue() when value is currently nil.
+    // Keep-first reduction: only writes nextValue() when value is currently nil.
     public static func reduce(value: inout ColorScheme?, nextValue: () -> ColorScheme?) {
         if value == nil {
             value = nextValue()

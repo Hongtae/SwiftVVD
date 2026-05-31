@@ -85,7 +85,7 @@ extension GestureState where Value: ExpressibleByNilLiteral {
 extension GestureState: @unchecked Sendable where Value: Sendable {}
 
 // _makeProperty wires GestureState into the AG graph.
-// Creates an AG input node backed by a FunctionalLocation,
+// Mirrors State._makeProperty: creates an AG input node backed by a FunctionalLocation,
 // then patches the GestureState struct inside the DynamicProperty buffer so that
 // wrappedValue reads/writes go through the AG node.
 extension GestureState {
@@ -201,6 +201,7 @@ public struct GestureStateGesture<Base, State>: Gesture where Base: Gesture {
         // otherwise this attribute acts as the sole storage.
         let stateAttr: Attribute<State> = graph.makeInput(
             value: selfAttr.value.state._value)
+        let didRunTerminalReset = MutableBox(false)
 
         // Side-effect rule: driven by the base gesture's phase.
         // During .active: call the updating body.
@@ -212,24 +213,30 @@ public struct GestureStateGesture<Base, State>: Gesture where Base: Gesture {
 
             switch phaseAttr.value {
             case .active(let v):
+                didRunTerminalReset.value = false
                 // Read current state, call body, write back.
                 var current = location?.getValue() ?? stateAttr.value
                 var tx = Transaction()
+                tx.tracksVelocity = true
                 gsg.body(v, &current, &tx)
                 stateAttr.setValue(current)
                 location?.setValue(current, transaction: tx)
 
             case .ended, .failed:
+                guard !didRunTerminalReset.value else { break }
+                didRunTerminalReset.value = true
                 // Gesture terminated: apply reset and restore initial value.
                 var resetValue = location?.getValue() ?? stateAttr.value
                 var tx = Transaction()
+                tx.tracksVelocity = true
                 gsg.state._reset(resetValue, &tx)
                 resetValue = initialValue
                 stateAttr.setValue(resetValue)
                 location?.setValue(resetValue, transaction: tx)
 
             case .possible:
-                // Not yet active, nothing to do.
+                didRunTerminalReset.value = false
+                // Not yet active: nothing to do.
                 break
             }
         }
@@ -238,4 +245,16 @@ public struct GestureStateGesture<Base, State>: Gesture where Base: Gesture {
     }
 
     public typealias Body = Never
+}
+
+extension GestureStateGesture: GestureEventTypeAccepting {
+    static func acceptsEventType(_ eventType: Any.Type) -> Bool {
+        gestureTypeAcceptsEvent(Base.self, eventType: eventType)
+    }
+}
+
+extension GestureStateGesture: DynamicGestureEventTypeAccepting {
+    func acceptsEventType(_ eventType: Any.Type) -> Bool {
+        gestureValueAcceptsEvent(base, eventType: eventType)
+    }
 }

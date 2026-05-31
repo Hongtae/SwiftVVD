@@ -8,15 +8,16 @@
 import Foundation
 
 /// Protocol satisfied by types that provide a static default value.
+/// Only the `defaultValue` surface is currently used by VUI.
 protocol Defaultable {
     static var defaultValue: Self { get }
 }
 
-/// Encapsulates a view's layout logic via a reference to a LayoutEngineBox.
-/// Dispatch goes through the LayoutEngineBox vtable (class dispatch).
+/// Encapsulates a view's layout logic via a boxed layout engine.
+/// `changeCount` participates in equality and graph dependency tracking.
 struct LayoutComputer {
     /// The boxed layout engine. Holds a LayoutEngineBox<E> for some concrete E.
-    /// Typed as any _AnyLayoutEngineBoxDispatch (class-bound existential = 8 bytes).
+    /// Typed as a class-bound layout-engine dispatch existential.
     var box: any _AnyLayoutEngineBoxDispatch
 
     /// Monotonically increasing counter; incremented each time the engine value changes.
@@ -86,7 +87,7 @@ struct LayoutComputer {
         LayoutComputer(sizeThatFits: { _ in size })
     }
 
-    // Stored once because LayoutComputer.defaultValue contains a reference type.
+    // Shared zero-size sentinel used by layout proxy and subview fallback paths.
     nonisolated(unsafe) private static let _defaultValue = LayoutComputer(sizeThatFits: { _ in .zero })
 
     static var defaultValue: LayoutComputer { _defaultValue }

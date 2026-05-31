@@ -9,7 +9,8 @@ import Foundation
 
 // MARK: - DependentGesture
 
-// DependentGesture reads gesture dependency preferences to determine priority.
+// DependentGesture forwards the body gesture unchanged.
+// Explicit dependency handling lives in recognizers that require it.
 struct DependentGesture<E: EventType>: GestureModifier {
     typealias BodyValue = E
     typealias Value = E
@@ -20,21 +21,20 @@ struct DependentGesture<E: EventType>: GestureModifier {
         inputs: _GestureInputs,
         body: (_GestureInputs) -> _GestureOutputs<E>
     ) -> _GestureOutputs<E> {
-        // GestureDependency handling is not implemented yet because ExclusiveGesture handles it separately.
-        // DependentGesture acts as pass-through.
         body(inputs)
     }
 }
 
 // MARK: - EventFilter
 
-// EventFilter is used to filter events before they reach the body gesture.
+// EventFilter forwards the shared event stream unchanged.
+// Event type filtering is handled in EventListenerPhase.
 struct EventFilter<E: EventType>: GestureModifier {
     typealias BodyValue = E
     typealias Value = E
     typealias Body = Never
 
-    // Currently pass-through without predicate because type filtering happens in EventListenerPhase.
+    // Retained for the API shape expected by callers that construct this modifier.
     var predicate: ((E) -> Bool)?
 
     static func makeGesture(
@@ -42,7 +42,6 @@ struct EventFilter<E: EventType>: GestureModifier {
         inputs: _GestureInputs,
         body: (_GestureInputs) -> _GestureOutputs<E>
     ) -> _GestureOutputs<E> {
-        // Predicate filtering happens at the EventListenerPhase level, so pass through.
         body(inputs)
     }
 }
@@ -64,13 +63,12 @@ struct CategoryGesture<V>: GestureModifier {
         inputs: _GestureInputs,
         body: (_GestureInputs) -> _GestureOutputs<V>
     ) -> _GestureOutputs<V> {
-        // Injects GestureCategory.Key preference into outputs.
-        // Preference injection is not implemented yet, so pass through.
+        // The category is stored on the modifier. makeGesture forwards the body outputs.
         body(inputs)
     }
 }
 
-// Gesture.category(_:includeChildren:) -> ModifierGesture<CategoryGesture<Value>, Self>.
+// Gesture.category(_:includeChildren:) -> ModifierGesture<CategoryGesture<Value>, Self>
 // DragGesture uses .drag, LongPressGesture uses .longPress, TapGesture uses .select.
 extension Gesture {
     func category(
@@ -83,9 +81,9 @@ extension Gesture {
 
 // MARK: - RepeatGesture / RepeatResetSeed / RepeatPhase
 
-// RepeatGesture<E>: handles multi-tap recognition.
-// RepeatResetSeed: Rule -> Value=UInt32 (sum of two attrs).
-// RepeatPhase<E>: StatefulRule -> tap count tracking.
+// RepeatGesture<E> handles multi-tap recognition.
+// RepeatResetSeed combines the global reset seed with local tap-count changes.
+// RepeatPhase tracks tap count state.
 
 struct RepeatGesture<E: EventType>: GestureModifier {
     typealias BodyValue = E
@@ -111,7 +109,7 @@ struct RepeatGesture<E: EventType>: GestureModifier {
         let bodyOutputs = body(inputs)
         let self_ = modifier._attribute.value
 
-        // RepeatResetSeed: sum of global resetSeed + local tap-count modifier attr.
+        // RepeatResetSeed combines the global reset seed with the local tap-count attr.
         let tapCountAttr: Attribute<UInt32> = graph.makeInput(value: 0)
         let repeatResetSeed = RepeatResetSeed(
             globalSeedAttr: inputs.resetSeed,
@@ -132,7 +130,7 @@ struct RepeatGesture<E: EventType>: GestureModifier {
     }
 }
 
-// RepeatResetSeed: Rule -> Value=UInt32 (globalSeed + localCount).
+// RepeatResetSeed value is globalSeed + localCount.
 struct RepeatResetSeed {
     var globalSeedAttr: Attribute<UInt32>
     var localCountAttr: Attribute<UInt32>
@@ -178,9 +176,9 @@ struct RepeatPhase<E: EventType>: StatefulRule, ResettableGestureRule {
         let now = timeAttr.value.seconds
         let childPhase = childPhaseAttr.value
 
-        // Check inter-tap timeout (maximumDelay exceeded since last tap)
+        // Check inter-tap timeout against the last completed tap.
         if !isFirstTap && lastTapTime > 0 && (now - lastTapTime) > maximumDelay {
-            // Tap interval exceeded, fail.
+            // Tap interval exceeded, so the sequence fails.
             isFirstTap = true
             completedTaps = 0
             AttributeGraph.setStatefulOutput(GesturePhase<E>.failed)
@@ -198,7 +196,7 @@ struct RepeatPhase<E: EventType>: StatefulRule, ResettableGestureRule {
             if completedTaps == 0 {
                 isFirstTap = false
             }
-            // count == 1: become active immediately.
+            // A single-tap repeat becomes active immediately.
             if requiredCount == 1 {
                 AttributeGraph.setStatefulOutput(GesturePhase<E>.active(v))
             } else {
@@ -209,7 +207,7 @@ struct RepeatPhase<E: EventType>: StatefulRule, ResettableGestureRule {
             lastTapTime = now
 
             if completedTaps >= requiredCount {
-                // Required tap count reached, succeed.
+                // Required tap count reached, completing the sequence.
                 completedTaps = 0
                 isFirstTap = true
                 // Increment tapCountAttr to signal RepeatResetSeed.
@@ -217,7 +215,7 @@ struct RepeatPhase<E: EventType>: StatefulRule, ResettableGestureRule {
                 tapCountAttr.setValue(newCount)
                 AttributeGraph.setStatefulOutput(GesturePhase<E>.ended(v))
             } else {
-                // More taps needed, stay possible.
+                // More taps are needed, so remain possible.
                 AttributeGraph.setStatefulOutput(GesturePhase<E>.possible(nil))
             }
         case .failed:
@@ -239,7 +237,7 @@ enum RequiredTapCountKey: PreferenceKey {
     }
 }
 
-// RequiredTapCountWriter<E>._makeGesture writes RequiredTapCountKey preference.
+// RequiredTapCountWriter<E> writes RequiredTapCountKey preference.
 struct RequiredTapCountWriter<E: EventType>: GestureModifier {
     typealias BodyValue = E
     typealias Value = E
@@ -265,13 +263,13 @@ struct RequiredTapCountWriter<E: EventType>: GestureModifier {
 
 // MARK: - SizeGesture / SizeGestureChild
 
-// SizeGesture<T>: wraps inner gesture T with reactive CGSize from inputs.size.
-// _makeGesture reads the ViewSize AG attribute, calls content(size), and then
-// calls T._makeGesture with the resulting _GraphValue<T>.
+// Wraps an inner gesture with the current reactive size from inputs.size.
+// The content closure is called with the latest CGSize to produce the child gesture.
 struct SizeGesture<T: Gesture>: Gesture {
     typealias Value = T.Value
     typealias Body = Never
 
+    // Produces the child gesture for the current size.
     var content: (CGSize) -> T
 
     public var body: Never { fatalError("SizeGesture.body must not be called") }
@@ -286,7 +284,7 @@ struct SizeGesture<T: Gesture>: Gesture {
         let sizeAttr = inputs.size
         let contentGV = gesture[\.content]
 
-        // Reactive rule that calls content(currentSize) -> T.
+        // Reactive rule that calls content(currentSize).
         let contentAttr = contentGV._attribute
         let childAttr: Attribute<T> = graph.makeRule {
             let size = sizeAttr.value.value      // CGSize
@@ -294,6 +292,18 @@ struct SizeGesture<T: Gesture>: Gesture {
             return content(size)
         }
         return T._makeGesture(gesture: _GraphValue(_attribute: childAttr), inputs: inputs)
+    }
+}
+
+extension SizeGesture: GestureEventTypeAccepting {
+    static func acceptsEventType(_ eventType: Any.Type) -> Bool {
+        gestureTypeAcceptsEvent(T.self, eventType: eventType)
+    }
+}
+
+extension SizeGesture: DynamicGestureEventTypeAccepting {
+    func acceptsEventType(_ eventType: Any.Type) -> Bool {
+        gestureTypeAcceptsEvent(T.self, eventType: eventType)
     }
 }
 
@@ -334,7 +344,7 @@ struct DelayedGesture<T: EventType>: GestureModifier {
     }
 }
 
-// DelayedPhase<T>: StatefulRule + ResettableGestureRule
+// DelayedPhase<T>: StatefulRule + ResettableGestureRule.
 // Holds state: startTimestamp, pendingFlag (0=idle,1=waiting,2=fired), lastResetSeed.
 // When duration==0: immediate pass-through (common case for _ButtonGesture).
 // When duration>0: waits until elapsed >= duration before becoming .active.
@@ -377,7 +387,7 @@ struct DelayedPhase<T: EventType>: StatefulRule, ResettableGestureRule {
             pendingFlag = 0
             AttributeGraph.setStatefulOutput(GesturePhase<T>.failed)
         case .active(let ev):
-            // duration=0 or pendingFlag==2: immediate pass-through.
+            // duration=0 or pendingFlag==2 means immediate pass-through.
             if modifier.duration <= 0 {
                 pendingFlag = 2  // mark fired so .ended passes through correctly
                 AttributeGraph.setStatefulOutput(GesturePhase<T>.active(ev))
@@ -385,7 +395,7 @@ struct DelayedPhase<T: EventType>: StatefulRule, ResettableGestureRule {
                 startTimestamp = timeAttr.value.seconds
                 pendingFlag = 1
                 AttributeGraph.setStatefulOutput(GesturePhase<T>.possible(nil))
-                // Re-evaluate on the next event delivery.
+                // The next event delivery re-evaluates the pending delay.
             } else if pendingFlag == 1 {
                 let elapsed = timeAttr.value.seconds - startTimestamp
                 if elapsed >= modifier.duration {
@@ -394,11 +404,11 @@ struct DelayedPhase<T: EventType>: StatefulRule, ResettableGestureRule {
                 } else {
                     AttributeGraph.setStatefulOutput(GesturePhase<T>.possible(nil))
                 }
-            } else {  // pendingFlag == 2: already fired
+            } else {  // pendingFlag == 2, already fired
                 AttributeGraph.setStatefulOutput(GesturePhase<T>.active(ev))
             }
         case .ended(let ev):
-            // End before duration fails; end after duration succeeds.
+            // Ending before duration fails. Ending after firing succeeds.
             if pendingFlag == 2 {
                 AttributeGraph.setStatefulOutput(GesturePhase<T>.ended(ev))
             } else {

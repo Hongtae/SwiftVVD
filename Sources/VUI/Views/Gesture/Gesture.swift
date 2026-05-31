@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import VVD
 
 // Gesture Protocol
 
@@ -38,6 +39,23 @@ extension Optional: Gesture where Wrapped: Gesture {
         Wrapped._makeGesture(gesture: gesture[\.unsafelyUnwrapped], inputs: inputs)
     }
     public typealias Body = Never
+}
+
+extension Optional: GestureEventTypeAccepting where Wrapped: Gesture {
+    static func acceptsEventType(_ eventType: Any.Type) -> Bool {
+        gestureTypeAcceptsEvent(Wrapped.self, eventType: eventType)
+    }
+}
+
+extension Optional: DynamicGestureEventTypeAccepting where Wrapped: Gesture {
+    func acceptsEventType(_ eventType: Any.Type) -> Bool {
+        switch self {
+        case .some(let wrapped):
+            return gestureValueAcceptsEvent(wrapped, eventType: eventType)
+        case .none:
+            return gestureTypeAcceptsEvent(Wrapped.self, eventType: eventType)
+        }
+    }
 }
 
 // GesturePhase
@@ -160,8 +178,6 @@ struct EventID: Hashable, CustomStringConvertible {
     var description: String { "\(type)#\(serial)" }
 }
 
-// EventPhase
-//
 /// Common lifecycle phase shared by all EventType values.
 enum EventPhase: UInt8 {
     case began     = 0
@@ -175,8 +191,40 @@ protocol EventType {
     /// The lifecycle phase of this event.
     var eventPhase: EventPhase { get }
     /// The global position of this event, if applicable.
-    /// { get set } is required so CoordinateSpaceGesture can create transformed copies by mutating location.
+    /// Mutable so coordinate-space gestures can create transformed copies.
     var location: CGPoint? { get set }
+}
+
+protocol ModifiersEventType: EventType {
+    var modifiers: EventModifiers { get }
+}
+
+protocol GestureEventTypeAccepting {
+    static func acceptsEventType(_ eventType: Any.Type) -> Bool
+}
+
+protocol DynamicGestureEventTypeAccepting {
+    func acceptsEventType(_ eventType: Any.Type) -> Bool
+}
+
+func gestureTypeAcceptsEvent<G: Gesture>(
+    _ gestureType: G.Type,
+    eventType: Any.Type
+) -> Bool {
+    guard let accepting = gestureType as? any GestureEventTypeAccepting.Type else {
+        return true
+    }
+    return accepting.acceptsEventType(eventType)
+}
+
+func gestureValueAcceptsEvent<G: Gesture>(
+    _ gesture: G,
+    eventType: Any.Type
+) -> Bool {
+    if let accepting = gesture as? any DynamicGestureEventTypeAccepting {
+        return accepting.acceptsEventType(eventType)
+    }
+    return gestureTypeAcceptsEvent(G.self, eventType: eventType)
 }
 
 /// Represents a tap/click interaction on desktop (mouse button press).
@@ -192,18 +240,18 @@ struct TappableEvent: EventType {
     }
 }
 
-// SpatialEventType: EventType refinement for spatial pointer/touch events.
+// EventType refinement for spatial pointer/touch events.
+// location stays Optional through EventType, but spatial events are expected to fill it.
 protocol SpatialEventType: EventType {
     var globalLocation: CGPoint { get set }
     var radius: CGFloat { get }
     var kind: SpatialEvent.Kind? { get }
 }
 
-// SpatialEvent
-// Spatial event used by PrimitiveButtonGestureCore.
-// Separate from TappableEvent because it carries spatial movement metadata.
+// Spatial event payload used by primitive spatial gesture chains.
+// Separate from TappableEvent because it carries spatial kind, radius, and global location.
 struct SpatialEvent: EventType, SpatialEventType, Equatable {
-    // MouseEvent.kind=1(pointer), PanEvent.kind=2(touch), default nil=3(sentinel)
+    // nil kind is used as the unclassified/default sentinel.
     enum Kind: UInt8, Hashable, Equatable {
         case pointer = 1  // mouse/trackpad pointer
         case touch   = 2  // direct touch (finger/pencil)
@@ -239,21 +287,121 @@ struct SpatialEvent: EventType, SpatialEventType, Equatable {
     }
 }
 
-/// Represents a pan/drag interaction (continuous positional movement).
-struct PanEvent: EventType {
+struct ScrollEvent: EventType, ModifiersEventType, Equatable {
+    var delta: CGSize
     var translation: CGSize
-    var globalTranslation: CGSize
+    var previousTranslation: CGSize
     var location: CGPoint?
-    var velocity: CGSize
     var eventPhase: EventPhase
+    var modifiers: EventModifiers
 
-    init(translation: CGSize, globalTranslation: CGSize, location: CGPoint,
-         velocity: CGSize = .zero, phase: EventPhase = .moved) {
+    init(
+        delta: CGSize,
+        translation: CGSize,
+        previousTranslation: CGSize,
+        location: CGPoint,
+        phase: EventPhase,
+        modifiers: EventModifiers = []
+    ) {
+        self.delta = delta
         self.translation = translation
-        self.globalTranslation = globalTranslation
+        self.previousTranslation = previousTranslation
         self.location = location
-        self.velocity = velocity
         self.eventPhase = phase
+        self.modifiers = modifiers
+    }
+}
+
+struct HoverEvent: EventType, ModifiersEventType, Equatable {
+    var location: CGPoint?
+    var eventPhase: EventPhase
+    var modifiers: EventModifiers
+    var deviceID: Int
+
+    init(
+        location: CGPoint,
+        phase: EventPhase,
+        deviceID: Int,
+        modifiers: EventModifiers = []
+    ) {
+        self.location = location
+        self.eventPhase = phase
+        self.deviceID = deviceID
+        self.modifiers = modifiers
+    }
+}
+
+struct MagnifyEvent: EventType, ModifiersEventType, Equatable {
+    var magnification: CGFloat
+    var previousMagnification: CGFloat
+    var location: CGPoint?
+    var eventPhase: EventPhase
+    var modifiers: EventModifiers
+    var timestamp: Double
+
+    init(
+        magnification: CGFloat,
+        previousMagnification: CGFloat,
+        location: CGPoint,
+        phase: EventPhase,
+        timestamp: Double,
+        modifiers: EventModifiers = []
+    ) {
+        self.magnification = magnification
+        self.previousMagnification = previousMagnification
+        self.location = location
+        self.eventPhase = phase
+        self.timestamp = timestamp
+        self.modifiers = modifiers
+    }
+}
+
+struct RotateEvent: EventType, ModifiersEventType, Equatable {
+    var rotation: Angle
+    var previousRotation: Angle
+    var location: CGPoint?
+    var eventPhase: EventPhase
+    var modifiers: EventModifiers
+    var timestamp: Double
+
+    init(
+        rotation: Angle,
+        previousRotation: Angle,
+        location: CGPoint,
+        phase: EventPhase,
+        timestamp: Double,
+        modifiers: EventModifiers = []
+    ) {
+        self.rotation = rotation
+        self.previousRotation = previousRotation
+        self.location = location
+        self.eventPhase = phase
+        self.timestamp = timestamp
+        self.modifiers = modifiers
+    }
+}
+
+struct KeyEvent: EventType, ModifiersEventType {
+    var key: KeyEquivalent?
+    var virtualKey: VirtualKey
+    var characters: String
+    var location: CGPoint?
+    var eventPhase: EventPhase
+    var modifiers: EventModifiers
+
+    init(
+        key: KeyEquivalent?,
+        virtualKey: VirtualKey,
+        characters: String,
+        phase: EventPhase,
+        modifiers: EventModifiers = []
+    ) {
+        self.key = key
+        self.virtualKey = virtualKey
+        self.characters = characters
+        self.location = nil
+        self.eventPhase = phase
+        self.modifiers = modifiers
     }
 }
 
@@ -277,8 +425,10 @@ struct PlatformGestureInputs {}
 // PubliclyPrimitiveGesture / TappableEventType
 
 /// Marker protocol for gesture types that implement recognition via `body` computed property.
-/// The base Gesture extension (Self.Value == Self.Body.Value) covers body-based
-/// _makeGesture via gesture[\.body] keypath nodes.
+///
+/// Body-based gesture construction is handled by the generic `Gesture`
+/// implementation using `gesture[\.body]` key-path nodes, then recursing into the
+/// returned modifier chain.
 protocol PubliclyPrimitiveGesture: Gesture {}
 
 /// Protocol for tap/click event types that carry a button identifier.
@@ -303,7 +453,7 @@ struct EventListener<E: EventType>: Gesture {
         self.ignoresOtherEvents = ignoresOtherEvents
     }
 
-    // EventListener<E>.Value = E. Projects phase: GesturePhase<E> from EventListenerPhase output.
+    // EventListener<E>.Value is the event type projected from EventListenerPhase output.
     typealias Value = E
     typealias Body = Never
 
@@ -311,6 +461,7 @@ struct EventListener<E: EventType>: Gesture {
         guard let graph = AttributeGraph.current else {
             fatalError("EventListener._makeGesture requires AG context")
         }
+        // Build the stateful recognizer node and expose only its phase field.
         let phase = EventListenerPhase<E>(
             listenerAttr: gesture._attribute,
             eventsAttr: inputs.events,
@@ -323,9 +474,14 @@ struct EventListener<E: EventType>: Gesture {
             lastResetSeed: 0
         )
         let valueAttr = graph.makeStatefulRule(phase)
-        // implemented via subscriptNode(keyPath:)
         let phaseAttr: Attribute<GesturePhase<E>> = graph.subscriptNode(parent: valueAttr, keyPath: \.phase)
         return _GestureOutputs(phase: phaseAttr)
+    }
+}
+
+extension EventListener: GestureEventTypeAccepting {
+    static func acceptsEventType(_ eventType: Any.Type) -> Bool {
+        eventType == E.self
     }
 }
 
@@ -341,8 +497,7 @@ protocol ResettableGestureRule: StatefulRule {
     var resetSeed: UInt32 { get }
     /// Last seed value processed by this rule.
     var lastResetSeed: UInt32 { get set }
-    /// Current output phase, read from the AG node's cached stateful output.
-    /// Reads the phase from the cached stateful output.
+    /// Current output phase read from the AG node's cached stateful output.
     var phaseValue: GesturePhase<PhaseValue> { get }
     /// Resets the gesture phase to its initial state (.possible(nil)).
     mutating func resetPhase()
@@ -359,7 +514,7 @@ extension ResettableGestureRule where Value == GesturePhase<PhaseValue> {
 extension ResettableGestureRule {
     /// Compares the current seed against lastResetSeed to determine whether a reset is needed.
     ///
-    /// algorithm:
+    /// Reset algorithm:
     ///   defer { lastResetSeed = resetSeed }
     ///   if lastResetSeed == resetSeed: return !phaseValue.isTerminal
     ///   else: resetPhase(); return true
@@ -384,6 +539,8 @@ extension ResettableGestureRule {
 // and drives the EventListenerPhase.Value output.
 struct EventListenerPhase<E: EventType>: StatefulRule, ResettableGestureRule {
 
+    // Failure causes carried by EventListenerPhase output. The error payload cannot
+    // participate in Equatable/Hashable synthesis, so conformance is manual.
     enum FailureReason: Equatable, Hashable {
         case excluded
         case failureDependency(on: AnyHashable)
@@ -417,8 +574,8 @@ struct EventListenerPhase<E: EventType>: StatefulRule, ResettableGestureRule {
         var trackingID: EventID?
         var failureReason: FailureReason?
 
-        // GesturePhase<E> has no E: Equatable constraint, so auto-synthesis is unavailable
-        // -> manual implementation comparing cases only
+        // GesturePhase<E> has no E: Equatable constraint, so auto-synthesis is unavailable.
+        // Compare cases only; payload equality is not available here.
         static func == (lhs: Self, rhs: Self) -> Bool {
             guard lhs.trackingID == rhs.trackingID,
                   lhs.failureReason == rhs.failureReason else { return false }
@@ -431,33 +588,34 @@ struct EventListenerPhase<E: EventType>: StatefulRule, ResettableGestureRule {
         }
     }
 
-    let listenerAttr: Attribute<EventListener<E>>
-    let eventsAttr: Attribute<[EventID: any EventType]>
-    let positionAttr: Attribute<CGPoint>
-    let transformAttr: Attribute<ViewTransform>
-    let resetSeedAttr: Attribute<UInt32>
-    let preconvertedBool: Bool
-    let ignoresOtherEvents: Bool
-
-    var trackingID: EventID?
-    var lastResetSeed: UInt32
+    // Stateful rule inputs and local tracking state.
+    let listenerAttr: Attribute<EventListener<E>>           // reactive ignoresOtherEvents source
+    let eventsAttr: Attribute<[EventID: any EventType]>     // raw event dictionary
+    let positionAttr: Attribute<CGPoint>                    // animated position
+    let transformAttr: Attribute<ViewTransform>             // view transform
+    let resetSeedAttr: Attribute<UInt32>                    // gesture session seed
+    let preconvertedBool: Bool                              // skip transform step when true
+    let ignoresOtherEvents: Bool                            // ignore events from other streams
+    var trackingID: EventID?                                // currently tracked EventID
+    var lastResetSeed: UInt32                               // last processed reset seed
 
     // ResettableGestureRule conformance
     typealias PhaseValue = E
     var resetSeed: UInt32 { resetSeedAttr.value }
     // phaseValue: EventListenerPhase.Value != GesturePhase<E>, so no default impl applies.
-    // read previous stateful output and extract the .phase field.
+    // Read previous stateful output and extract the .phase field.
     var phaseValue: GesturePhase<E> {
         (AttributeGraph.currentStatefulOutput() as Value?)?.phase ?? .possible(nil)
     }
 
     mutating func updateValue() {
+        // Reset stale tracked state before processing the current event dictionary.
         guard resetIfNeeded() else { return }
         let events = eventsAttr.value
         let output: Value
 
-        // Helper: convert an event's global location to local view coordinates when needed.
-        // preconvertedBool=true skips this because events are already in local coordinates.
+        // Helper: convert event's global location to local view coordinates (when not pre-converted).
+        // preconvertedBool=true skips this (events already in local coords).
         func localised(_ event: E) -> E {
             guard !preconvertedBool, let globalLoc = event.location else { return event }
             var e = event
@@ -480,12 +638,12 @@ struct EventListenerPhase<E: EventType>: StatefulRule, ResettableGestureRule {
                     output = Value(phase: .failed, trackingID: nil, failureReason: nil)
                 }
             } else {
-                // tracked event disappeared -> implicit cancellation
+                // Treat a missing tracked event as implicit cancellation.
                 trackingID = nil
                 output = Value(phase: .failed, trackingID: nil, failureReason: nil)
             }
         } else {
-            // search for a new began event
+            // Search for a new began event
             var found: (EventID, E)?
             for (id, event) in events {
                 if let typed = event as? E, typed.eventPhase == .began {
@@ -512,6 +670,10 @@ struct EventListenerPhase<E: EventType>: StatefulRule, ResettableGestureRule {
 // _GestureInputs
 
 /// Inputs passed to `Gesture._makeGesture`.
+///
+/// Stored fields carry view inputs, event/time/reset attributes, inherited combiner
+/// phase, gesture preferences, traversal options, and platform-specific inputs.
+/// Computed accessors expose the derived environment and geometry attributes.
 public struct _GestureInputs {
 
     // InheritedPhase
@@ -520,9 +682,9 @@ public struct _GestureInputs {
     struct InheritedPhase: OptionSet, Sendable, CustomStringConvertible {
         var rawValue: Int
         init(rawValue: Int) { self.rawValue = rawValue }
-        /// bit0: a parent/sibling gesture has failed, so this gesture may proceed ("allowed")
+        /// bit0: a parent/sibling gesture has failed, so this gesture may proceed.
         static let failed = InheritedPhase(rawValue: 1)   // bit 0
-        /// bit1: a parent/sibling gesture is active, so this gesture must wait ("blocked")
+        /// bit1: a parent/sibling gesture is active, so this gesture must wait.
         static let active = InheritedPhase(rawValue: 2)   // bit 1
         /// Default value: .failed (= 1). "Nobody is blocking" = proceed allowed.
         static var defaultValue: InheritedPhase { .failed }
@@ -537,6 +699,9 @@ public struct _GestureInputs {
     // Options
 
     /// Flags controlling gesture graph traversal and dispatch behaviour.
+    /// Reserved bit assignments:
+    ///   preconvertedEventLocations=0x01, allowsIncompleteEventSequences=0x02,
+    ///   skipCombiners=0x04, includeDebugOutput=0x08, gestureGraph=0x10, hasChangedCallbacks=0x20
     struct Options: OptionSet, Sendable {
         var rawValue: UInt32
         init(rawValue: UInt32) { self.rawValue = rawValue }
@@ -602,6 +767,9 @@ public struct _GestureInputs {
     /// The inherited phase attribute.
     var inheritedPhase: Attribute<InheritedPhase> { _inheritedPhase }
 
+    // Init
+
+    /// Designated initializer.
     init(
         _ viewInputs: _ViewInputs,
         viewSubgraph: AGSubgraph?,
@@ -646,6 +814,8 @@ public struct _GestureInputs {
 // _GestureOutputs
 
 /// Outputs produced by `Gesture._makeGesture`.
+///
+/// Carries the phase attribute, preference outputs, and optional debug data.
 public struct _GestureOutputs<V> {
     /// The AG attribute that delivers the current phase of this gesture.
     var phase: Attribute<GesturePhase<V>>
@@ -675,5 +845,6 @@ public struct _GestureOutputs<V> {
     }
 
     mutating func setIndirectDependency(_ attr: AGAttribute?) {
+        // No-op for direct (non-lazy) instantiation.
     }
 }

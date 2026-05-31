@@ -14,8 +14,8 @@ public protocol EnvironmentalModifier: ViewModifier where Self.Body == Never {
 }
 
 extension EnvironmentalModifier {
-    // Resolve the modifier after dynamic-property processing so environment-backed
-    // fields are current before the resolved modifier builds its view.
+    // EnvironmentalBodyAccessor<Self>.makeBody combines DynamicProperty
+    // processing and resolve(in:) into a single DynamicBody/StaticBody AG rule.
     public static func _makeView(
         modifier: _GraphValue<Self>,
         inputs: _ViewInputs,

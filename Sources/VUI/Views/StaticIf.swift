@@ -5,16 +5,17 @@
 //  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-// Protocol for predicates that can be evaluated
+// ViewInputPredicate: protocol for predicates that can be evaluated
 // from _GraphInputs (the common base of _ViewInputs and _ViewListInputs).
+// Internal type used for construction-time branch selection.
 protocol ViewInputPredicate {
     static func evaluate(inputs: _GraphInputs) -> Bool
 }
 
-// StaticIf evaluates Predicate once against
+// StaticIf<Predicate, TrueContent, FalseContent>: evaluates Predicate once against
 // the current inputs and unconditionally routes to either TrueContent or FalseContent.
 // Unlike _ConditionalContent, the branch cannot change after view construction.
-// View and ViewModifier conformances are conditional.
+// Unconstrained base struct; View and ViewModifier conformances are conditional.
 struct StaticIf<Predicate, TrueContent, FalseContent> {
     var trueBody: TrueContent
     var falseBody: FalseContent
@@ -82,7 +83,7 @@ extension StaticIf: ViewModifier
     }
 }
 
-// ViewInputPredicate that is true
+// AndOperationViewInputPredicate<A, B>: ViewInputPredicate that is true
 // when both A and B evaluate to true.
 struct AndOperationViewInputPredicate<A: ViewInputPredicate, B: ViewInputPredicate>: ViewInputPredicate {
     static func evaluate(inputs: _GraphInputs) -> Bool {
@@ -90,10 +91,10 @@ struct AndOperationViewInputPredicate<A: ViewInputPredicate, B: ViewInputPredica
     }
 }
 
-// ViewInput with Bool value semantics.
+// ViewInputFlag: ViewInput with Bool value semantics.
 protocol ViewInputFlag: ViewInput where Value == Bool {}
 
-// ViewInputFlag that also acts as a ViewInputPredicate.
+// ViewInputBoolFlag: ViewInputFlag that also acts as a ViewInputPredicate.
 // evaluate(inputs:) reads the Bool from customInputs.
 protocol ViewInputBoolFlag: ViewInputFlag, ViewInputPredicate {}
 
@@ -103,7 +104,8 @@ extension ViewInputBoolFlag {
     }
 }
 
-// ViewModifier and _GraphInputsModifier that writes a Bool flag into customInputs.
+// ViewInputFlagModifier<T: ViewInputFlag>: ViewModifier + _GraphInputsModifier that writes
+// a Bool flag into customInputs.
 struct ViewInputFlagModifier<T: ViewInputFlag>: ViewModifier, _GraphInputsModifier {
     typealias Body = Never
     let value: Bool
@@ -113,7 +115,7 @@ struct ViewInputFlagModifier<T: ViewInputFlag>: ViewModifier, _GraphInputsModifi
     }
 }
 
-// ViewInputPredicate that evaluates whether
+// StyleContextAcceptsPredicate<T>: ViewInputPredicate that evaluates whether
 // the current style context matches type T.
 // T can be a single StyleContext type OR a tuple (A, B, ...) for OR logic.
 // Tuple fields are extracted at runtime via _forEachField.
@@ -124,7 +126,7 @@ struct StyleContextAcceptsPredicate<T>: ViewInputPredicate {
         if let singleType = T.self as? any StyleContext.Type {
             return ctx.acceptsTop(singleType)
         }
-        // Tuple type with OR logic over fields.
+        // Tuple type: OR logic over fields
         var result = false
         _forEachField(of: T.self) { _, _, childType in
             if let scType = childType as? any StyleContext.Type, ctx.acceptsTop(scType) {
@@ -137,16 +139,16 @@ struct StyleContextAcceptsPredicate<T>: ViewInputPredicate {
     }
 }
 
-// Parameter-pack style predicate variant.
-// T is evaluated the same way as StyleContextAcceptsPredicate<T>.
-// This covers either a single type or a tuple with OR logic.
+// StyleContextAcceptsAnyPredicate<T>: parameter-pack version.
+// In VUI, T is treated the same as StyleContextAcceptsPredicate<T>
+// (single type or tuple with OR logic).
 struct StyleContextAcceptsAnyPredicate<T>: ViewInputPredicate {
     static func evaluate(inputs: _GraphInputs) -> Bool {
         StyleContextAcceptsPredicate<T>.evaluate(inputs: inputs)
     }
 }
 
-// ViewInputBoolFlag that is true when the label is inside
+// IsDefaultButtonLabel: ViewInputBoolFlag that is true when the label is inside
 // a default-style button in a toolbar context (set by ButtonStyleContainerModifier).
 struct IsDefaultButtonLabel: ViewInputBoolFlag {
     typealias Value = Bool
@@ -154,7 +156,7 @@ struct IsDefaultButtonLabel: ViewInputBoolFlag {
     var description: String { "IsDefaultButtonLabel" }
 }
 
-// NOT predicate wrapping P.
+// InvertedViewInputPredicate<P>: NOT predicate wrapping P.
 struct InvertedViewInputPredicate<P: ViewInputBoolFlag>: ViewInputBoolFlag, _GraphInputsModifier {
     typealias Value = Bool
     typealias Body = Never
@@ -172,7 +174,7 @@ struct InvertedViewInputPredicate<P: ViewInputBoolFlag>: ViewInputBoolFlag, _Gra
     }
 }
 
-// Free function helper for constructing StaticIf with type inference.
+// _staticIf: free function helper for constructing StaticIf with type inference.
 // Usage:
 //   _staticIf(SomePredicate.self) { trueContent } falseContent: { falseContent }
 @inline(__always)
@@ -184,7 +186,7 @@ func _staticIf<P: ViewInputPredicate, T: View, F: View>(
     StaticIf(trueBody: trueContent(), falseBody: falseContent())
 }
 
-// ViewInputPredicate that is true when the label is embedded in
+// MultiViewLabel: ViewInputPredicate that is true when the label is embedded in
 // a variadic multi-view container context (e.g. List, Grid rows).
 // On macOS, this is always false in practice.
 struct MultiViewLabel: ViewInputPredicate {
@@ -199,7 +201,7 @@ private struct MultiViewLabelKey: PropertyKey {
     var description: String { "MultiViewLabelKey" }
 }
 
-// ViewInputPredicate that checks the current
+// InterfaceIdiomPredicate<Idiom>: ViewInputPredicate that checks the current
 // interface idiom. On macOS, VisionInterfaceIdiom is always false.
 struct InterfaceIdiomPredicate<Idiom>: ViewInputPredicate {
     static func evaluate(inputs: _GraphInputs) -> Bool {
@@ -208,7 +210,7 @@ struct InterfaceIdiomPredicate<Idiom>: ViewInputPredicate {
     }
 }
 
-// Marker type for visionOS interface idiom.
+// VisionInterfaceIdiom: marker type for visionOS interface idiom.
 // Used as InterfaceIdiomPredicate<VisionInterfaceIdiom>.
 struct VisionInterfaceIdiom {}
 
@@ -217,7 +219,7 @@ struct Semantics_v4 {}
 struct Semantics_v6 {}
 
 // _SemanticFeature<T>: ViewInputPredicate that gates behavior on semantic version.
-// Modern semantics are enabled by default, so evaluate always returns true.
+// VUI targets the current semantics baseline, so all known feature markers are active.
 struct _SemanticFeature<T>: ViewInputPredicate {
     static func evaluate(inputs: _GraphInputs) -> Bool {
         return true

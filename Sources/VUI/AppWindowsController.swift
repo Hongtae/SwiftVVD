@@ -8,16 +8,8 @@
 import Foundation
 
 // AppWindowsController manages statically declared scene WindowControllers for the app.
-//
-// Stored controllers:
-//   - mainWindowControllers: WindowGroup controllers by window key.
-//   - singleWindowControllers: single Window scene controller by window key.
-//   - auxiliaryWindowControllers: reserved for statically declared auxiliary scenes.
-//   - settingsWindowController: optional Settings scene controller.
-//
-// Dynamic children such as popovers, modals, and sheets are owned by the parent
-// WindowController directly through PresentationChildEntry and ModalChildEntry.
-// AppWindowsController is not involved in those presentation lifecycles.
+// Dynamic presentation children such as popovers, modals, and sheets are owned
+// directly by their parent WindowController, not by this static-scene registry.
 class AppWindowsController: @unchecked Sendable {
 
     // WindowGroup: array because openWindow() can open multiple instances per key.
@@ -29,7 +21,7 @@ class AppWindowsController: @unchecked Sendable {
     // Reserved for statically declared auxiliary scenes.
     var auxiliaryWindowControllers: [WindowKey: WindowController] = [:]
 
-    // Settings scene, at most one app-wide.
+    // Settings scene — at most one app-wide.
     var settingsWindowController: WindowController? = nil
 
     // Controllers that have been closed but may be restored.
@@ -38,12 +30,12 @@ class AppWindowsController: @unchecked Sendable {
     // Tracks the number of open windows per key (for openWindow action).
     var windowCounts: [WindowKey: UInt32] = [:]
 
-    // Cascade offset per key applied when opening successive windows of the same type.
+    // Cascade offset per key — applied when opening successive windows of the same type.
     var cascadeNumbers: [WindowKey: UInt32] = [:]
     var auxiliaryCascadeNumber: UInt32 = 0
 
     // All currently live static-scene controllers (flattened across all registries).
-    // Dynamic children (sheets, popovers, modals) are not included here because they are
+    // Dynamic children (sheets, popovers, modals) are NOT included here — they are
     // owned by their parent WindowController.
     var allWindowControllers: [WindowController] {
         var result: [WindowController] = []

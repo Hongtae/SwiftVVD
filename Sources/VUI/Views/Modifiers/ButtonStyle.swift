@@ -28,19 +28,19 @@ public struct ButtonRole: Equatable, Sendable {
     let _role: Role
 }
 
-// LinkDestination: stub type for URL/navigation button destinations.
+// LinkDestination stores URL/navigation button destinations.
 struct LinkDestination {
     let url: URL
 }
 
 // ButtonAction: multi-payload enum, 3 cases.
-// Internal type. The public surface is PrimitiveButtonStyleConfiguration.trigger().
+// Internal type. Public callers use PrimitiveButtonStyleConfiguration.trigger().
 enum ButtonAction {
     // case 0: standard action closure
     case handler(() -> Void)
     // case 1: URL/navigation destination (internal, used by Link-style buttons)
     case destination(LinkDestination)
-    // case 2: App Intents action (not implemented yet)
+    // case 2: App Intents action payload. This path is inert in the local runtime.
     case appIntentAction(_AppIntentActionStorage)
 
     func callAsFunction() {
@@ -51,7 +51,7 @@ enum ButtonAction {
     }
 }
 
-// _AppIntentActionStorage: 48-byte stub for App Intents ButtonAction payload.
+// _AppIntentActionStorage: fixed-size storage for App Intents ButtonAction payload.
 struct _AppIntentActionStorage {
     private let _storage: (UInt64, UInt64, UInt64, UInt64, UInt64, UInt64) = (0,0,0,0,0,0)
 }
@@ -356,7 +356,7 @@ extension ButtonStyleConfiguration.Label {
 
 extension ButtonStyleConfiguration.Label: _PrimitiveView {}
 
-// WrappedButtonStyle: ButtonStyle -> PrimitiveButtonStyle adapter
+// WrappedButtonStyle: ButtonStyle-to-PrimitiveButtonStyle adapter
 
 struct WrappedButtonStyle<S: ButtonStyle>: PrimitiveButtonStyle {
     let style: S
@@ -423,7 +423,7 @@ extension ButtonStyle {
 }
 
 // ButtonStyleWriter: _GraphInputsModifier that injects AnyButtonStyleType into ButtonStyleInput.
-// 0 stored fields. The modifier instance is not used in _makeInputs.
+// Has no stored fields. The modifier instance is not used in _makeInputs.
 // StyleInput stack push is handled by ButtonStyleModifier via StyleModifier._makeView default impl.
 struct ButtonStyleWriter<S: PrimitiveButtonStyle>: _GraphInputsModifier, ViewModifier {
     typealias Body = Never
@@ -476,7 +476,7 @@ struct AnyButtonStyleType: Equatable {
     }
 }
 
-// ButtonStyleInput: ViewInput for the current active PrimitiveButtonStyle type.
+// ButtonStyleInput: current active PrimitiveButtonStyle type for the view channel.
 // Set by ButtonStyleWriter._makeInputs for every buttonStyle() application.
 struct ButtonStyleInput: ViewInput {
     typealias Value = AnyButtonStyleType
@@ -484,9 +484,9 @@ struct ButtonStyleInput: ViewInput {
     var description: String { "ButtonStyleInput" }
 }
 
-// EffectiveButtonStyleInput: GraphInput for the top-level effective style type cache.
+// EffectiveButtonStyleInput: top-level effective style type cache in the graph channel.
 // Set by ButtonStyleWriter._makeInputs when isTopLevelStyle == true.
-// No ViewInput conformance because it is stored in the base channel.
+// No ViewInput conformance. Stored in the base channel.
 struct EffectiveButtonStyleInput: GraphInput {
     typealias Value = AnyButtonStyleType
     static var defaultValue: AnyButtonStyleType { AnyButtonStyleType(DefaultButtonStyle.self) }

@@ -7,8 +7,9 @@
 
 import Foundation
 
-// Stack<Element>: LIFO linked list used as the Value type for PropertyKey
+// Stack<Element> is a LIFO linked list used as the Value type for PropertyKey
 // conformers such as StyleInput, SourceInput, and BodyInput.
+// push constructs .node(element, currentStack).
 enum Stack<Element> {
     case empty
     indirect case node(Element, Stack<Element>)
@@ -62,7 +63,7 @@ struct BloomFilter: CustomStringConvertible {
     var description: String { "BloomFilter(value: \(value))" }
 }
 
-// Unique ID assigned to each PropertyList element.
+// Property-list element identity uses AttributeGraph's unique-ID allocator.
 struct UniqueID: Equatable, CustomStringConvertible {
     let value: UInt32
     init() {
@@ -71,7 +72,8 @@ struct UniqueID: Equatable, CustomStringConvertible {
     var description: String { "UniqueID(value: \(value))" }
 }
 
-// Tracks per-key environment changes when attached by the graph infrastructure.
+// Placeholder for per-key change tracking integration. It remains empty until
+// tracker support is wired into graph-managed environment reads.
 class _PropertyListTracker {}
 
 @usableFromInline
@@ -106,9 +108,8 @@ struct PropertyList: CustomStringConvertible {
 }
 
 extension PropertyList {
-    // Early exit when new value equals the current value (no structural change).
-    // Dead nodes (same key, older value) accumulate in the after-chain but are
-    // shadowed by the head. find() returns the first match.
+    // Setting a value prepends a new node unless it equals the current value.
+    // Older nodes for the same key remain shadowed by the head.
     @usableFromInline
     subscript<K: PropertyKey>(_ key: K.Type) -> K.Value {
         get { value(forKey: key) }
@@ -120,12 +121,12 @@ extension PropertyList {
         }
     }
 
-    // Unconditionally prepends a value for `key`.
+    // Unconditional prepend helper.
     mutating func prependValue<K: PropertyKey>(_ value: K.Value, for key: K.Type) {
         elements = TypedElement(key: key, value: value, after: elements)
     }
 
-    // MARK: - Convenience helpers
+    // MARK: - Local helpers
 
     func nonDefaultValue<T: PropertyKey>(forKey key: T.Type) -> T.Value? {
         var element = self.elements
@@ -165,7 +166,7 @@ extension PropertyList {
     @usableFromInline
     class Element: CustomStringConvertible {
         let keyType: any PropertyKey.Type
-        let before: Element?               // set by init, caller passes nil in the persistent-list setter path
+        let before: Element?               // set by init — caller passes nil in the persistent-list setter path
         let after: Element?                // next element in chain
         var skip: Unmanaged<Element>?      // skip-list pointer (nil = not used)
         let length: UInt32                 // chain length from this node to end
@@ -205,7 +206,7 @@ extension PropertyList {
         func rebuilt(appending tail: Element?) -> Element { fatalError("TypedElement must override rebuilt(appending:)") }
     }
 
-    // Typed subclass where value is stored with the concrete Value type rather than Any.
+    // Typed subclass — value is stored with the concrete Value type rather than Any.
     final class TypedElement<T: PropertyKey>: Element {
         var value: T.Value
 

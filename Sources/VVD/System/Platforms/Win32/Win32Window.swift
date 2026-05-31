@@ -9,6 +9,8 @@
 import Foundation
 import WinSDK
 
+// MARK: - Win32 Helpers
+
 private func win32ErrorString(_ code: DWORD) -> String {
 
     var buffer: UnsafeMutablePointer<WCHAR>?
@@ -45,26 +47,16 @@ private func dpiScaleForWindow(_ hWnd: HWND) -> CGFloat {
     return 1.0
 }
 
-// TIMER ID, Interval
+// Timer settings.
 private let updateKeyboardMouseTimerId: UINT_PTR = 10
 private let updateKeyboardMouseTimeInterval: UINT = 10
 
-// WINDOW MESSAGE
+// Custom window messages.
 private let WM_VVDWINDOW_SHOWCURSOR = (WM_USER + 0x1175)
 private let WM_VVDWINDOW_UPDATEMOUSECAPTURE = (WM_USER + 0x1180)
 
-// WM_GESTURE / WM_GESTURENOTIFY constants (User32, Windows 7+)
-// private let GID_ZOOM: DWORD = 3
-// private let GID_ROTATE: DWORD = 5
-
-// private let GF_BEGIN: DWORD = 0x00000001
-// private let GF_END: DWORD = 0x00000004
-
-// private let GC_ZOOM: DWORD   = 0x00000001
-// private let GC_ROTATE: DWORD = 0x00000001
-
 // Converts GID_ROTATE ullArguments to a cumulative angle in radians.
-// Maps WORD range [0, 65535] to [-2pi, +2pi].
+// Maps WORD range 0...65535 to -2 * Double.pi ... +2 * Double.pi.
 @inline(__always)
 private func gestureRotateAngle(_ arg: ULONGLONG) -> Double {
     let word = Double(arg & 0xFFFF)
@@ -76,8 +68,12 @@ nonisolated(unsafe) private let HWND_TOP:HWND? = nil
 nonisolated(unsafe) private let HWND_TOPMOST:HWND = HWND(bitPattern: -1)!
 nonisolated(unsafe) private let HWND_NOTOPMOST:HWND = HWND(bitPattern: -2)!
 
+// MARK: - Win32Window
+
 @MainActor
 final class Win32Window: Window {
+
+    // MARK: - Types
 
     private struct MouseButtonDownMask: OptionSet {
         let rawValue: UInt8
@@ -94,6 +90,8 @@ final class Win32Window: Window {
     }
 
     typealias HWND = WinSDK.HWND
+
+    // MARK: - Stored Properties
 
     nonisolated(unsafe) 
     private(set) var hWnd: HWND?
@@ -125,11 +123,13 @@ final class Win32Window: Window {
     private var textCompositionMode: Bool = false
     private var keyboardStates: [UInt8] = [UInt8](repeating: 0, count: 256)
 
-    // WM_GESTURE tracking for previous values used by incremental delta computation.
+    // WM_GESTURE tracking values for incremental delta computation.
     private var _lastGestureDistance: DWORD = 0
     private var _lastGestureAngle: Double = 0.0
 
     private var dropTarget: UnsafeMutablePointer<Win32DropTarget>?
+
+    // MARK: - Resize Tracking
 
     private func beginResizeEventIfNeeded() {
         guard self.resizing && self.resizeEventActive == false else { return }
@@ -156,11 +156,15 @@ final class Win32Window: Window {
         self.geometryInvalidatedInMoveSizeLoop = false
     }
 
+    // MARK: - Modal State
+
     private struct ModalEntry: @unchecked Sendable {
         let window: Win32Window
         let completionHandler: (()->Void)?
     }
     private var modalEntries: [ModalEntry] = []
+
+    // MARK: - Window Class Registration
 
     private static let windowClassName = "_SwiftVVD_WndClass"
     private static let registeredClassAtom: ATOM? = {
@@ -209,6 +213,8 @@ final class Win32Window: Window {
         case enabled
     }
 
+    // MARK: - Lifecycle
+
     required init?(name: String, style: WindowStyle, delegate: WindowDelegate?, data: [String: Any]) {
 
         OleInitialize(nil)
@@ -239,12 +245,12 @@ final class Win32Window: Window {
             dwStyleEx |= DWORD(WS_EX_TOOLWINDOW)
             dwStyleEx |= DWORD(WS_EX_TOPMOST)
 
-            ncRenderingPolicy = .enabled // enable windows theme
+            ncRenderingPolicy = .enabled // Enable Windows theme.
         }
         let anyTitlebarStyle: WindowStyle = [.title, .closeButton, .minimizeButton, .maximizeButton]
         if style.intersection(anyTitlebarStyle).isEmpty {
-            dwStyle |= DWORD(WS_POPUP)  // window without titlebar
-            ncRenderingPolicy = .enabled // enable windows theme
+            dwStyle |= DWORD(WS_POPUP)  // Window without title bar.
+            ncRenderingPolicy = .enabled // Enable Windows theme.
         }
 
         let hWnd = name.withCString(encodedAs: UTF16.self) { title in
@@ -332,6 +338,8 @@ final class Win32Window: Window {
         }
     }
 
+    // MARK: - Visibility
+
     func show() {
         if let hWnd = self.hWnd {
             if IsIconic(hWnd) {
@@ -363,6 +371,8 @@ final class Win32Window: Window {
             }
         }
     }
+
+    // MARK: - Geometry
 
     var origin: CGPoint {
         get { self.windowFrame.origin }
@@ -422,6 +432,8 @@ final class Win32Window: Window {
         }
     }
 
+    // MARK: - Close Handling
+
     func requestToClose() -> Bool {
         var close = true
         if self.isValid {
@@ -434,7 +446,7 @@ final class Win32Window: Window {
     }
     
     func close() {
-        // close all modal windows
+        // Close all modal windows.
         let entries = self.modalEntries
         self.modalEntries.removeAll()
         let completionHandlers = entries.compactMap { $0.completionHandler }
@@ -450,7 +462,6 @@ final class Win32Window: Window {
             if let dt = self.dropTarget {
                 RevokeDragDrop(hWnd)
                 let refCount = dt.withMemoryRebound(to: IDropTarget.self, capacity: 1) {
-                    // $0.pointee.lpVtbl.pointee.Release($0)
                     dt.pointee.vtbl.Release($0)
                 }
                 if refCount > 0 {
@@ -467,7 +478,7 @@ final class Win32Window: Window {
 
             Log.verbose("Window: \(self.name) destroyed")
 
-            // post event!
+            // Post the final close event.
             self.postWindowEvent(type: .closed)
         }
         self.hWnd = nil
@@ -497,6 +508,8 @@ final class Win32Window: Window {
             self.name = value
         }
     }
+
+    // MARK: - Input State
 
     func showMouse(_ show: Bool, forDeviceID deviceID: Int) {
         if let hWnd = self.hWnd, deviceID == 0 {
@@ -565,6 +578,8 @@ final class Win32Window: Window {
         return false
     }
 
+    // MARK: - Input Synchronization
+
     private func synchronizeMouse() {
         guard self.visible else { return }
         guard self.resizing == false else { return }
@@ -573,7 +588,7 @@ final class Win32Window: Window {
             guard self.activated else { return }
         }
 
-        // check mouse has gone out of window region.
+        // Check whether the mouse moved outside the window region.
         if let hWnd = self.hWnd, GetCapture() != hWnd {
             var pt = POINT()
             GetCursorPos(&pt)
@@ -614,14 +629,14 @@ final class Win32Window: Window {
 
             if keyStates[key] & 0x80 != self.keyboardStates[key] & 0x80 {
                 if keyStates[key] & 0x80 != 0 {
-                    // post keydown event
+                    // Post key-down event.
                     postKeyboardEvent(KeyboardEvent(type: .keyDown,
                                                     window: self,
                                                     deviceID: 0,
                                                     key: virtualKey,
                                                     text: ""))
                 } else {
-                    // post keyup event
+                    // Post key-up event.
                     postKeyboardEvent(KeyboardEvent(type: .keyUp,
                                                     window: self,
                                                     deviceID: 0,
@@ -634,14 +649,14 @@ final class Win32Window: Window {
         let capslock = Int(VK_CAPITAL)
         if keyStates[capslock] & 0x01 != self.keyboardStates[capslock] & 0x01 {
             if keyStates[capslock] & 0x01 != 0 {
-                // capslock on
+                // Caps Lock on.
                 postKeyboardEvent(KeyboardEvent(type: .keyDown,
                                                 window: self,
                                                 deviceID: 0,
                                                 key: .capslock,
                                                 text: ""))
             } else {
-                // capslock off
+                // Caps Lock off.
                 postKeyboardEvent(KeyboardEvent(type: .keyUp,
                                                 window: self,
                                                 deviceID: 0,
@@ -677,9 +692,11 @@ final class Win32Window: Window {
                                             text: ""))
         }
 
-        GetKeyboardState(&keyboardStates) // to empty keyboard queue
+        GetKeyboardState(&keyboardStates) // Empty the keyboard queue.
         self.keyboardStates = [UInt8](repeating: 0, count: 256)
     }
+
+    // MARK: - Coordinate Conversion
 
     func convertPointToScreen(_ point: CGPoint) -> CGPoint {
         let x = LONG(point.x * self.contentScaleFactor)
@@ -695,6 +712,8 @@ final class Win32Window: Window {
         return CGPoint(x: Int(pt.x), y: Int(pt.y)) * (1.0 / self.contentScaleFactor)
     }
 
+    // MARK: - Screen
+
     var screen: (any Screen)? {
         if let hWnd {
             let monitor = MonitorFromWindow(hWnd, DWORD(MONITOR_DEFAULTTONULL))
@@ -702,6 +721,8 @@ final class Win32Window: Window {
         }
         return nil
     }
+
+    // MARK: - Modal Presentation
 
     var canPresentModalWindow: Bool {
         hWnd != nil
@@ -740,13 +761,13 @@ final class Win32Window: Window {
         var presentNext = false
         modalWindow.removeEventObserver(self)
 
-        // check if the window to be dismissed is the current modal-window
+        // Check whether the dismissed window is the current modal window.
         if let current = self.modalEntries.first {
             if current.window === modalWindow {
                 presentNext = true
             }
         }
-        // remove modal-entry from the list and collect completion handlers
+        // Remove modal entries and collect completion handlers.
         var completionHandlers: [(() -> Void)] = []
         self.modalEntries = self.modalEntries.filter {
             if $0.window !== modalWindow {
@@ -757,7 +778,7 @@ final class Win32Window: Window {
             }
             return false
         }
-        // enable host window if no more modal-windows
+        // Enable the host window when no modal windows remain.
         if self.modalEntries.isEmpty {
             presentNext = true
         }
@@ -768,7 +789,7 @@ final class Win32Window: Window {
 
             self.presentNextModal()
         }
-        // call completion handlers after presenting next modal
+        // Call completion handlers after presenting the next modal.
         if !completionHandlers.isEmpty {
             Task { completionHandlers.forEach { $0() } }
         }
@@ -776,7 +797,7 @@ final class Win32Window: Window {
     }
 
     private func presentNextModal() {
-        // remove invalid windows from the list
+        // Remove invalid windows from the modal list.
         var cancelledHandlers: [()->Void] = []
         self.modalEntries = self.modalEntries.filter {
             if $0.window.isValid { return true }
@@ -826,6 +847,8 @@ final class Win32Window: Window {
             }
         }
     }
+
+    // MARK: - Window Procedure
 
     private static func windowProc(_ hWnd: HWND?, _ uMsg: UINT, _ wParam: WPARAM, _ lParam: LPARAM) -> LRESULT {
         let window: Win32Window? = if let hWnd {
@@ -986,9 +1009,9 @@ final class Win32Window: Window {
                     } else {
                         let w = Int(LOWORD(lParam))
                         let h = Int(HIWORD(lParam))
-                        let size = CGSize(width: w, height: h)  // pixel size
+                        let size = CGSize(width: w, height: h)  // Pixel size.
                         window.beginResizeEventIfNeeded()
-                        window.contentBounds.size = size * (1.0 / window.contentScaleFactor) // DPI scaled
+                        window.contentBounds.size = size * (1.0 / window.contentScaleFactor) // DPI-scaled size.
 
                         var rc = RECT()
                         GetWindowRect(hWnd, &rc)
@@ -1013,7 +1036,7 @@ final class Win32Window: Window {
                 }
                 return 0
             case UINT(WM_DPICHANGED):
-                // Note: xDPI, yDPI are identical for Windows apps
+                // xDPI and yDPI are identical for Windows apps.
                 let xDPI = LOWORD(wParam)
                 let yDPI = HIWORD(wParam)
 
@@ -1099,8 +1122,9 @@ final class Win32Window: Window {
                                 postEvent = false
                             } else {
                                 window.setMousePosition(window.mousePosition, forDeviceID: 0)
-                                // In Windows8 (or later) with scaled-DPI mode, setting mouse position generate inaccurate result.
-                                // We need to keep new position in locked-mouse state. (non-movable mouse)
+                                // On Windows 8 or later in scaled-DPI mode, setting the
+                                // mouse position can be inaccurate. Keep the resulting
+                                // position while the mouse is locked.
                                 window.lockedMousePosition = window.mousePosition(forDeviceID: 0)!
                             }
                         } else {
@@ -1224,7 +1248,7 @@ final class Win32Window: Window {
                                                      location: pos))
                 }
                 PostMessageW(hWnd, UINT(WM_VVDWINDOW_UPDATEMOUSECAPTURE), 0, 0)
-                return 1 // should return TRUE
+                return 1 // Return TRUE.
             case UINT(WM_XBUTTONUP):
                 let pts = MAKEPOINTS(lParam)
                 let pos = CGPoint(x: Int(pts.x), y: Int(pts.y)) * (1.0 / window.contentScaleFactor)
@@ -1250,9 +1274,9 @@ final class Win32Window: Window {
                                                      location: pos))
                 }
                 PostMessageW(hWnd, UINT(WM_VVDWINDOW_UPDATEMOUSECAPTURE), 0, 0)                  
-                return 1 // should return TRUE
+                return 1 // Return TRUE.
             case UINT(WM_GESTURENOTIFY):
-                // Enable Zoom and Rotate; block Pan so it falls through as WM_MOUSEWHEEL.
+                // Enable Zoom and Rotate. Block Pan so it falls through as WM_MOUSEWHEEL.
                 var configs: [GESTURECONFIG] = [
                     GESTURECONFIG(dwID: DWORD(GID_ZOOM),   dwWant: DWORD(GC_ZOOM),   dwBlock: 0),
                     GESTURECONFIG(dwID: DWORD(GID_ROTATE), dwWant: DWORD(GC_ROTATE), dwBlock: 0),
@@ -1347,9 +1371,8 @@ final class Win32Window: Window {
             case UINT(WM_IME_COMPOSITION):
                 window.synchronizeKeyStates()
                 if lParam & LPARAM(GCS_RESULTSTR) != 0 {
-                    // composition finished.
-                    // Result characters will be received via WM_CHAR,
-                    // reset input-candidate characters here.
+                    // Composition finished. Result characters will arrive through
+                    // WM_CHAR, so reset input-candidate characters here.
                     window.postKeyboardEvent(KeyboardEvent(type: .textComposition,
                                                            window: window,
                                                            deviceID: 0,
@@ -1357,7 +1380,7 @@ final class Win32Window: Window {
                                                            text: ""))  
                 }
                 if lParam & LPARAM(GCS_COMPSTR) != 0 {
-                    // composition in progress.
+                    // Composition in progress.
                     if let hIMC = ImmGetContext(hWnd) {
                         if window.textCompositionMode {
                             let bufferLength = ImmGetCompositionStringW(hIMC, DWORD(GCS_COMPSTR), nil, 0)
@@ -1376,14 +1399,14 @@ final class Win32Window: Window {
                                                                        key: .none,
                                                                        text: compositionText))  
 
-                            } else {    // composition character's length become 0. (erased)
+                            } else {    // Composition character length became zero.
                                 window.postKeyboardEvent(KeyboardEvent(type: .textComposition,
                                                                        window: window,
                                                                        deviceID: 0,
                                                                        key: .none,
                                                                        text: ""))  
                             }
-                        } else {        // not text-input mode.
+                        } else {        // Text input mode is disabled.
                             ImmNotifyIME(hIMC, DWORD(NI_COMPOSITIONSTR), DWORD(CPS_CANCEL), 0)
                         }
                         ImmReleaseContext(hWnd, hIMC)
@@ -1428,24 +1451,23 @@ final class Win32Window: Window {
                 break
             case UINT(WM_SYSCOMMAND):
                 switch wParam {
-                case WPARAM(SC_CONTEXTHELP), // help menu
-                     WPARAM(SC_KEYMENU),     // alt-key
-                     WPARAM(SC_HOTKEY):                  // hotkey
+                case WPARAM(SC_CONTEXTHELP), // Help menu.
+                     WPARAM(SC_KEYMENU),     // Alt key.
+                     WPARAM(SC_HOTKEY):      // Hot key.
                     return 0
                 default:
                     break
                 }
             case UINT(WM_SYSKEYDOWN),
                  UINT(WM_SYSKEYUP):
-                return 0    // block ALT-key
+                return 0    // Block Alt key.
             case UINT(WM_KEYDOWN),
                  UINT(WM_KEYUP):
                 return 0
             case UINT(WM_VVDWINDOW_SHOWCURSOR):
-                // If we need to control mouse position from other thread,
-                // we should call AttachThreadInput() to synchronize threads.
-                // but we are not going to control position, but control visibility
-                // only, we can use window message.
+                // Mouse-position control from another thread would need
+                // AttachThreadInput(). Cursor visibility can be controlled by
+                // this window message.
                 if wParam != 0 {
                     while ShowCursor(true) < 0 {}
                 } else {
@@ -1470,4 +1492,4 @@ final class Win32Window: Window {
         return DefWindowProcW(hWnd, uMsg, wParam, lParam)
     }
 }
-#endif //if ENABLE_WIN32
+#endif // ENABLE_WIN32

@@ -5,7 +5,7 @@
 //  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-// File-scope state class
+// File-scope state class: cannot be nested inside a generic function in Swift.
 private final class _ConditionalBranchState {
     var isTrue: Bool? = nil
     var isUpdating = false
@@ -21,11 +21,10 @@ extension _ConditionalContent: View where TrueContent: View, FalseContent: View 
 
     /// Dynamic-subgraph implementation.
     ///
-    /// Relay structure:
-    ///   At _makeView time, iterates inputs.preferences.keys.keys and creates
-    ///   one relay Attribute per key. Relay node IDs are fixed for the lifetime
-    ///   of the view; only the rule re-evaluates (and forwards a different value)
-    ///   when the branch switches.
+    /// At _makeView time, this iterates inputs.preferences.keys.keys and creates
+    /// one relay Attribute per key. Relay node IDs are fixed for the lifetime of
+    /// the view; only the rule re-evaluates and forwards a different value when
+    /// the branch switches.
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         guard let graph = AttributeGraph.current else {
             fatalError("\(self)._makeView called outside an active AttributeGraph context.")
@@ -102,7 +101,8 @@ extension _ConditionalContent: View where TrueContent: View, FalseContent: View 
             return state.activeLCAttr?.value ?? LayoutComputer.fixed(.zero)
         }
 
-        // Create one relay node per key in inputs.preferences.keys.keys.
+        // Create one relay node per requested preference key.
+        // Relay output count follows the input preference key count.
         //
         // SE-0352 implicit existential opening:
         //   Each element of inputs.preferences.keys.keys has type `any PreferenceKey.Type`.

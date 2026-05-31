@@ -2,7 +2,7 @@
 //  File: Spacer.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -53,7 +53,6 @@ extension Spacer: _PrimitiveView {
                         height: proposal.height.map { max($0, minLen) } ?? minLen
                     )
                 },
-                // Spacer contributes zero spacing.
                 spacing: .zero
             )
         }
@@ -104,7 +103,6 @@ extension _ViewInputs {
 }
 
 struct DividerStyleConfiguration {
-    // Divider orientation resolved from stack context.
     var orientation: Axis
 }
 
@@ -143,7 +141,6 @@ private struct PlainDividerStyleBody: View {
 
     @ViewBuilder
     var body: some View {
-        // Draw vertical dividers as thin columns and horizontal dividers as thin rows.
         if configuration.orientation == .vertical {
             _ShapeView(shape: DividerShape(Rectangle()), style: SeparatorShapeStyle())
                 .frame(width: thickness, height: nil, alignment: .center)
@@ -168,7 +165,7 @@ extension Divider {
     struct Child: Rule {
         typealias Value = ResolvedDivider
 
-        // Static and dynamic stack-orientation inputs used to resolve the divider axis.
+        // Use either static stack orientation or a dynamic orientation attribute.
         var stackOrientation: Axis?
         var dynamicStackOrientation: OptionalAttribute<Axis?>
 
@@ -200,7 +197,7 @@ struct PlatformItemListDividerRepresentable: PlatformDividerRepresentable {
             fatalError("\(self).makeRepresentation called outside an active AttributeGraph context.")
         }
 
-        // Emit divider as a platform item-list system item.
+        // Use an identity attribute to produce a stable platform item identifier.
         let identityAttr: Attribute<Void> = graph.makeRule { () }
         let itemID = PlatformItemList.stableID(identityAttr.identifier)
         let preferenceAttr: Attribute<PlatformItemList> = graph.makeRule {

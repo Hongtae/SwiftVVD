@@ -91,6 +91,20 @@ public struct SequenceGesture<First, Second>: Gesture where First: Gesture, Seco
 extension SequenceGesture.Value: Equatable where First.Value: Equatable, Second.Value: Equatable {}
 extension SequenceGesture.Value: Sendable where First.Value: Sendable, Second.Value: Sendable {}
 
+extension SequenceGesture: GestureEventTypeAccepting {
+    static func acceptsEventType(_ eventType: Any.Type) -> Bool {
+        gestureTypeAcceptsEvent(First.self, eventType: eventType) ||
+            gestureTypeAcceptsEvent(Second.self, eventType: eventType)
+    }
+}
+
+extension SequenceGesture: DynamicGestureEventTypeAccepting {
+    func acceptsEventType(_ eventType: Any.Type) -> Bool {
+        gestureValueAcceptsEvent(first, eventType: eventType) ||
+            gestureValueAcceptsEvent(second, eventType: eventType)
+    }
+}
+
 extension Gesture {
     @inlinable public func sequenced<Other>(before other: Other) -> SequenceGesture<Self, Other> where Other: Gesture {
         SequenceGesture(self, other)

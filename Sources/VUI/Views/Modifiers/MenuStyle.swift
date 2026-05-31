@@ -244,7 +244,7 @@ private struct _ButtonMenuStyleBody: View {
     var body: some View {
         if let primaryAction = configuration._primaryAction {
             // Keep explicit ButtonMenuStyle on the same split trigger model as
-            // standalone primary-action Menu.
+            // the sampled standalone primary-action Menu path.
             HStack(spacing: 0) {
                 let labelBg: Color = isLabelPressing ? Color(white: 0.88)
                                    : isLabelHovered ? Color(white: 0.93)

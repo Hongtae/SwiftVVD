@@ -25,7 +25,7 @@ public struct SimultaneousGesture<First, Second>: Gesture where First: Gesture, 
             fatalError("SimultaneousGesture._makeGesture requires AG context")
         }
 
-        // Both gestures receive identical inputs — they run simultaneously.
+        // Both gestures receive identical inputs, so they run simultaneously.
         let firstOutputs = First._makeGesture(gesture: gesture[\.first], inputs: inputs)
         let secondOutputs = Second._makeGesture(gesture: gesture[\.second], inputs: inputs)
 
@@ -66,6 +66,20 @@ public struct SimultaneousGesture<First, Second>: Gesture where First: Gesture, 
 extension SimultaneousGesture.Value: Equatable where First.Value: Equatable, Second.Value: Equatable {}
 extension SimultaneousGesture.Value: Hashable where First.Value: Hashable, Second.Value: Hashable {}
 extension SimultaneousGesture.Value: Sendable where First.Value: Sendable, Second.Value: Sendable {}
+
+extension SimultaneousGesture: GestureEventTypeAccepting {
+    static func acceptsEventType(_ eventType: Any.Type) -> Bool {
+        gestureTypeAcceptsEvent(First.self, eventType: eventType) ||
+            gestureTypeAcceptsEvent(Second.self, eventType: eventType)
+    }
+}
+
+extension SimultaneousGesture: DynamicGestureEventTypeAccepting {
+    func acceptsEventType(_ eventType: Any.Type) -> Bool {
+        gestureValueAcceptsEvent(first, eventType: eventType) ||
+            gestureValueAcceptsEvent(second, eventType: eventType)
+    }
+}
 
 extension Gesture {
     @inlinable public func simultaneously<Other>(with other: Other) -> SimultaneousGesture<Self, Other> where Other: Gesture {

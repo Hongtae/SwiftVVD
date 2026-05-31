@@ -30,7 +30,6 @@ extension Scene {
     }
 
     /// Injects an `Observable` object into the environment by its concrete type.
-    /// Uses `_EnvironmentKeyWritingModifier<T?>`.
     /// Downstream scenes and views can read it with `@Environment(T.self)`.
     /// Passing `nil` removes the object from the environment.
     public func environment<T: AnyObject & Observable>(_ object: T?) -> some Scene {

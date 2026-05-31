@@ -23,6 +23,7 @@ private struct LayoutChildGeometries: Rule {
 }
 
 /// AG Rule: extracts one ViewGeometry from the LayoutChildGeometries output by index.
+/// Position and size projections are created with makeRule closures.
 private struct LayoutChildGeometry: Rule {
     typealias Value = ViewGeometry
     var geometriesAttr: Attribute<[ViewGeometry]>
@@ -55,24 +56,26 @@ private struct StaticLayoutComputer<L: Layout>: StatefulRule {
 
 /// Dynamic container storage used by DynamicContainerInfo.
 private enum DynamicContainer {
-    /// Per-item lifecycle and layout state.
+    /// Field roles: subgraph, uniqueId, viewCount, outputs,
+    /// needsTransitions, listener, zIndex, removalOrder, precedingViewCount, resetSeed, phase.
+    /// The identity is stored in canonical form for lookup across updates.
     final class ItemInfo {
         var subgraph: AGSubgraph
         var uniqueId: _ViewList_ID.Canonical
         var viewCount: Int
         var outputs: _ViewOutputs
         var needsTransitions: Bool
-        // FIXME: Transition listener/completion is intentionally not wired yet.
-        // Removed items are retained for one update as a phase-2 suffix until
-        // AnyTransition, TransitionPhase, and animation completion infrastructure exists.
+        // Transition listener/completion wiring is not implemented yet.
+        // Removed items should remain alive until the listener completes. Until then,
+        // the retained output uses a one-update phase-2 suffix.
         var listener: AnyObject?
         var zIndex: Double
         var removalOrder: Int
         var precedingViewCount: Int
         var resetSeed: UInt32
         var phase: UInt8
-        // Cache for non-unary DynamicContainer items. Keeps each materialized child
-        // addressable until the multi-output storage path is fully wired.
+        // Cache for non-unary DynamicContainer items. This keeps each materialized
+        // child addressable until multi-output storage is modeled.
         var layoutAttributes: [LayoutProxyAttributes]
         var preferenceOutputs: [PreferencesOutputs]
 
@@ -112,8 +115,9 @@ private enum DynamicContainer {
         }
     }
 
-        /// Collection state for dynamic layout items. Equality compares the seed field.
-        struct Info: Equatable {
+    /// Field roles: items, indexMap, displayMap, removedCount, unusedCount,
+    /// allUnary, seed. Equality compares the seed field.
+    struct Info: Equatable {
         var items: [ItemInfo] = []
         var indexMap: [_ViewList_ID.Canonical: Int] = [:]
         var displayMap: [UInt32]?
@@ -143,9 +147,10 @@ private enum DynamicContainer {
         mutating func replaceItems(
             active activeItems: [ItemInfo],
             removed removedItems: [ItemInfo] = [],
-            // FIXME: Scroll retained-unused lifecycle is not wired yet.
-            // Keep this empty until scroll-specific DynamicContainer item geometry
-            // and retained-unused lifecycle rules are implemented.
+            // Scroll retained-unused lifecycle is not implemented yet.
+            // Scrollable layout can keep phase-3 unused items with scroll
+            // geometry/identifier rules. Keep this empty until scroll-specific
+            // DynamicContainer item geometry is implemented.
             unused unusedItems: [ItemInfo] = []
         ) {
             let oldIdentity = items.map { ItemIdentity(item: $0) }
@@ -178,7 +183,8 @@ private enum DynamicContainer {
         }
 
         private mutating func rebuildDisplayMap() {
-            // zIndex/depth can produce displayMap. This currently covers stored values only.
+            // zIndex/depth can produce displayMap. LayoutProxyAttributes does not
+            // currently provide a zIndex source, so this only covers stored values.
             guard items.contains(where: { $0.zIndex != 0 }) else {
                 displayMap = nil
                 return
@@ -200,8 +206,8 @@ private enum DynamicContainer {
                 let lhs = items[lhsIndex]
                 let rhs = items[rhsIndex]
                 if lhs.zIndex != rhs.zIndex { return lhs.zIndex < rhs.zIndex }
-                // At equal depth, phase-2 removals sort before active phase-1
-                // items in the retained-inclusive segment.
+                // At equal depth, phase-2 removals sort before active phase-1 items
+                // in the retained-inclusive segment.
                 if lhs.phase != rhs.phase {
                     if lhs.phase == 2 { return true }
                     if rhs.phase == 2 { return false }
@@ -224,8 +230,8 @@ private enum DynamicContainer {
     }
 }
 
-/// Stores layout attributes keyed by DynamicContainer item id and rebuilds the
-/// sorted attribute cache when DynamicContainer.Info.seed changes.
+/// Stores layout attributes keyed by DynamicContainer item id and rebuilds its sorted
+/// attribute cache when DynamicContainer.Info.seed changes.
 private struct DynamicLayoutMap {
     var map: [_ViewList_ID.Canonical: [LayoutProxyAttributes]] = [:]
     var sortedArray: [LayoutProxyAttributes] = []
@@ -259,11 +265,12 @@ private struct DynamicLayoutMap {
         let activeItems = info.activeItems
         let orderedItems: [DynamicContainer.ItemInfo]
         if let displayMap = info.displayMap {
-            // When retained removals are present, displayMap starts with the
-            // active segment and then appends a retained-inclusive segment.
-            // FIXME: retained transition layout is incomplete. LayoutSubviews
-            // only consumes the active prefix until transition listener/completion
-            // and removed-item placement semantics are implemented.
+            // When retained removals are present, displayMap starts with the active
+            // segment and then appends a retained-inclusive segment.
+            // Retained transition layout is incomplete. DynamicContainer.Info builds
+            // the retained segment, but LayoutSubviews only consumes the active prefix
+            // until transition listener/completion and removed-item placement semantics
+            // are implemented.
             let activeDisplayMap = info.removedCount > 0 ?
                 displayMap.prefix(activeItems.count) : displayMap[...]
             orderedItems = activeDisplayMap.compactMap { index in
@@ -314,8 +321,8 @@ private struct DynamicContainerInfo: StatefulRule {
                 liveIDs.insert(id)
 
                 let viewCount = sublist.elements.count
-                // allUnary is false when any active DynamicContainer item reports
-                // viewCount != 1. The same viewCount is used for cumulative child offsets.
+                // allUnary becomes false when any active item reports viewCount != 1.
+                // The same viewCount is used for cumulative child offsets.
                 if let existing = info.item(for: id), existing.viewCount != viewCount {
                     existing.invalidate()
                     retainedElements.removeValue(forKey: id)
@@ -338,8 +345,8 @@ private struct DynamicContainerInfo: StatefulRule {
                     )
                 }
                 if let item {
-                    // Item depth is driven by view-level zIndex. displayMap stores
-                    // UInt32 item indexes sorted by that depth.
+                    // Item object depth is driven by view-level zIndex. displayMap
+                    // stores UInt32 item indexes sorted by that depth.
                     item.zIndex = sublist.traits[ZIndexTraitKey.self]
                     item.needsTransitions = sublist.traits[CanTransitionTraitKey.self]
                     item.phase = 1
@@ -373,11 +380,11 @@ private struct DynamicContainerInfo: StatefulRule {
                 continue
             }
 
-            // FIXME: transition listener/completion is not wired yet.
-            // Keep one phase-2 retained item output so DynamicContainer.Info has a
-            // removed suffix, then erase it on the next update if it is still absent.
-            // Replace this with listener-driven retention when
-            // AnyTransition/TransitionPhase/animation completion infrastructure exists.
+            // Transition listener/completion wiring is not implemented yet.
+            // Keep one phase-2 retained item output so DynamicContainer.Info has the
+            // expected removed suffix shape, then erase it on the next update if it is
+            // still absent. Replace this with listener-driven retention when transition
+            // and animation-completion infrastructure exists.
             item.phase = 2
             item.removalOrder = removedItems.count
             removedItems.append(item)
@@ -407,14 +414,14 @@ private struct DynamicContainerInfo: StatefulRule {
             let traitsListAttr = sublist.list.map { OptionalAttribute($0) } ??
                 OptionalAttribute<any ViewList>()
 
-            // Non-unary items are a single DynamicContainer item whose viewCount
-            // spans multiple child outputs, not multiple item records.
+            // Non-unary items are a single DynamicContainer item whose viewCount spans
+            // multiple child outputs, not multiple item records.
             for elementOffset in offset..<(offset + viewCount) {
                 let posAttr = graph.makeInput(value: CGPoint.zero)
                 let sizeAttr = graph.makeInput(value: ViewSize(.zero))
                 let childTransform: Attribute<ViewTransform> = graph.makeRule {
                     var t = parentTransform.value
-                    // The renderer placement bridge writes absolute root/window origins
+                    // The backend placement bridge writes absolute root/window origins
                     // into posAttr. Keep parent transform items, but do not translate the
                     // already-absolute origin through the parent position again.
                     t.appendPosition(posAttr.value)
@@ -514,7 +521,7 @@ private struct DynamicLayoutComputer<L: Layout>: StatefulRule {
 /// Creates a single AG reduce rule whose input list is resolved dynamically
 /// from `nodeListAttr` at evaluation time.
 ///
-/// SE-0352 allows this to be called with `any PreferenceKey.Type`; the
+/// SE-0352 allows this to be called with `any PreferenceKey.Type`. The
 /// compiler opens the existential and binds `K` to the concrete key type,
 /// so `Attribute<K.Value>` is correctly typed at call time.
 private func _makeDynReduceAttr<K: PreferenceKey>(
@@ -570,8 +577,8 @@ extension Layout {
             fatalError("\(self)._makeLayoutView called outside an active AttributeGraph context.")
         }
 
-        // Layout body inputs use a dynamic stack-orientation value so primitives
-        // can follow the concrete layout instance.
+        // Clear static stack-orientation bits for layout body inputs and expose the
+        // live orientation through DynamicStackOrientation.
         let dynamicStackOrientationAttr: Attribute<Axis?> = graph.makeRule(
             DynamicStackOrientationRule(layout: root._attribute)
         )
@@ -583,7 +590,8 @@ extension Layout {
 
         // Debug overlay for the layout container itself.
         // Reads the container's pos/size from LayoutChildGeometries-driven posAttr/sizeAttr
-        // via the parent. FIXME: route this through a dedicated layout-container geometry source.
+        // via the parent. Replace this with the exact layout-container overlay
+        // mechanism once modeled.
         let cachedEnvironmentAttr = inputs.base.cachedEnvironment
         let containerPosAttr  = inputs.position
         let containerSizeAttr = inputs.size
@@ -605,7 +613,7 @@ extension Layout {
 
         switch childListOutputs.views {
         case .staticList(let elements):
-            // Step 1: makeElements traversal creates per-child indirect posAttr/sizeAttr,
+            // Step 1: makeElements traversal. Create per-child indirect posAttr/sizeAttr,
             //   call makeView, collect child LCs + prefs. Indirect attrs resolve the chicken-and-egg:
             //   makeView needs posAttr/sizeAttr handles, and those are wired to concrete attrs later.
             var childProxyAttrs: [LayoutProxyAttributes] = []
@@ -613,12 +621,12 @@ extension Layout {
 
             var from = 0
             elements.makeElements(from: &from, inputs: layoutInputs, indirectMap: nil) { elementInputs, makeView in
-                // Renderer bridge: primitive display rules read the position/size
+                // Backend bridge: primitive display rules read the position/size
                 // attributes they received during makeView. StaticLayoutComputer's
                 // geometry projection is not enough unless the render backend pulls
                 // those projection attrs directly, so keep concrete placement attrs
                 // and update them from the LayoutComputer.place path.
-                // FIXME: replace this bridge once the renderer consumes
+                // Replace this bridge once the renderer consumes
                 // LayoutChildGeometries projection directly.
                 let posAttr = graph.makeInput(value: CGPoint.zero)
                 let sizeAttr = graph.makeInput(value: ViewSize.zero)
@@ -626,7 +634,7 @@ extension Layout {
                 let parentTransformAttr = inputs.transform
                 let childTransformAttr: Attribute<ViewTransform> = graph.makeRule {
                     var t = parentTransformAttr.value
-                    // The renderer placement bridge writes absolute root/window origins
+                    // The backend placement bridge writes absolute root/window origins
                     // into posAttr. Keep parent transform items, but do not translate the
                     // already-absolute origin through the parent position again.
                     t.appendPosition(posAttr.value)
@@ -685,7 +693,7 @@ extension Layout {
             mergedPreferences = PreferencesOutputs.merge(allPreferences, in: graph)
 
         case .dynamicList(let viewListAttr, _):
-            // DynamicContainerInfo manages item lifecycle; DynamicLayoutComputer consumes its Info.
+            // DynamicContainerInfo manages item lifecycle. DynamicLayoutComputer consumes its Info.
             var dynamicInputs = layoutInputs
             dynamicInputs.stackOrientation = layoutInputs.stackOrientation
             dynamicInputs[DynamicStackOrientation.self] = OptionalAttribute(dynamicStackOrientationAttr)

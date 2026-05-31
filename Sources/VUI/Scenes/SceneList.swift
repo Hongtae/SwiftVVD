@@ -6,14 +6,15 @@
 //
 
 
-// Namespace for scene list grouping — .app covers all WindowGroup/Window scenes.
+// Namespace for scene list grouping. .app covers all WindowGroup/Window scenes.
+// Other namespaces are reserved for future scene categories.
 enum SceneListNamespace: Hashable {
     case app
     case menuBarExtras
     case dialog
 }
 
-// SceneID — (content type token, creation index within that type)
+// SceneID contains the content type token and creation index within that type.
 // Structure: (type: Any.Type, index: UInt8)
 struct SceneID: Hashable {
     var typeID: ObjectIdentifier   // ObjectIdentifier wraps Any.Type for Hashable conformance
@@ -25,18 +26,18 @@ struct SceneID: Hashable {
     }
 }
 
-// WindowKey — unique identifier for a platform window.
+// WindowKey is the unique identifier for a platform window.
 // Structure: (namespace: SceneListNamespace, sceneID: SceneID)
 struct WindowKey: Hashable {
     var namespace: SceneListNamespace
     var sceneID: SceneID
 }
 
-// SceneList — namespace for scene-list preference channel types.
+// SceneList is the namespace for scene-list preference channel types.
 //
 // Channel direction:
-//   Scene → AppGraph : SceneList.Key preference (output from _makeScene)
-//   AppGraph → Scene : PrimarySceneSummariesInputKey (input to _makeScene, defined in AppGraph.swift)
+//   Scene to AppGraph: SceneList.Key preference output from _makeScene.
+//   AppGraph to Scene: PrimarySceneSummariesInputKey input to _makeScene, defined in AppGraph.swift.
 enum SceneList {
 
     // Key: PreferenceKey output from WindowGroupScene/_makeScene.
@@ -50,13 +51,13 @@ enum SceneList {
         }
     }
 
-    // Item — one window entry reported by a Scene via SceneList.Key.
+    // Item is one window entry reported by a Scene through SceneList.Key.
     struct Item {
         // Classifies which controller registry the window belongs to.
-        // Mirrors the dictonary split in AppWindowsController.
+        // Mirrors the dictionary split in AppWindowsController.
         enum Kind {
-            case main       // WindowGroup — one or more instances per key
-            case single     // Window — exactly one instance per key
+            case main       // WindowGroup has one or more instances per key.
+            case single     // Window has exactly one instance per key.
             case settings   // Settings scene
             case auxiliary  // Auxiliary/popover window
         }
@@ -64,14 +65,14 @@ enum SceneList {
         // Identifies the window slot this scene is claiming.
         var windowKey: WindowKey
 
-        // Window kind — determines which registry in AppWindowsController receives this item.
+        // Window kind determines which registry in AppWindowsController receives this item.
         var kind: Kind
 
         // Creation-time window hints from scene modifiers.
         var sceneConfiguration: SceneConfiguration = SceneConfiguration()
 
         // Factory called once by AppWindowsController when it decides to open this window.
-        // Captured at _makeScene time; holds AG graph cursors for the content view.
+        // Captured at _makeScene time. Holds AG graph cursors for the content view.
         var makeController: () -> WindowController
 
         init(windowKey: WindowKey, kind: Kind = .main, makeController: @escaping () -> WindowController) {
@@ -80,7 +81,7 @@ enum SceneList {
             self.makeController = makeController
         }
 
-        // Summary — snapshot of an open window sent back from AppGraph to Scene
+        // Summary is a snapshot of an open window sent back from AppGraph to Scene
         // via PrimarySceneSummariesInputKey (reverse channel).
         struct Summary {
             var windowKey: WindowKey

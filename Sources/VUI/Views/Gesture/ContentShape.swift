@@ -11,6 +11,13 @@ import Synchronization
 // ContentShapeKinds
 
 /// Specifies which interaction contexts a content shape applies to.
+///
+/// Raw values:
+///   .interaction         = 1
+///   .dragPreview         = 2
+///   .contextMenuPreview  = 4
+///   .hoverEffect         = 8
+///   .accessibility       = 16 (renamed from focusEffect in later SDKs)
 public struct ContentShapeKinds: OptionSet, Sendable {
     public var rawValue: Int
     public init(rawValue: Int) { self.rawValue = rawValue }
@@ -146,7 +153,7 @@ public struct _ContentShapeModifier<S: Shape>: ViewModifier, PrimitiveViewModifi
             return combined
         }
 
-        // Remove existing ViewRespondersKey entries — ContentShapeResponder replaces them.
+        // Remove existing ViewRespondersKey entries; ContentShapeResponder replaces them.
         let keyID = ObjectIdentifier(ViewRespondersKey.self)
         outputs.preferences.preferences.removeAll(where: { ObjectIdentifier($0.key) == keyID })
 
@@ -202,7 +209,7 @@ public struct _ContentShapeKindModifier<S: Shape>: ViewModifier, PrimitiveViewMo
 
         // Only wire a ContentShapeResponder when the kind includes .interaction.
         // Other kinds (dragPreview, contextMenuPreview, etc.) would go through
-        // ContentShapePathData preference — not yet implemented.
+        // ContentShapePathData preference; not yet implemented.
         guard kinds.contains(.interaction) else { return outputs }
 
         let innerNodes = outputs.preferences.values(for: ViewRespondersKey.self)

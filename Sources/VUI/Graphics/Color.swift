@@ -2,7 +2,7 @@
 //  File: Color.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -187,7 +187,7 @@ extension Color: ShapeStyle {
         shape.shading = .color(self)
     }
     
-    // Stored in linear light (linearRed/Green/Blue); red/green/blue are sRGB computed properties.
+    // Stored in linear light; red/green/blue are computed sRGB accessors.
     public struct Resolved: Hashable, Animatable, ShapeStyle, CustomStringConvertible, Codable {
         public var linearRed:   Float
         public var linearGreen: Float
@@ -201,7 +201,7 @@ extension Color: ShapeStyle {
                 self.linearRed   = red
                 self.linearGreen = green
                 self.linearBlue  = blue
-            default:  // .sRGB, .displayP3, approximate with sRGB gamma
+            default:  // .sRGB, .displayP3: approximate with sRGB gamma
                 self.linearRed   = Self.sRGBToLinear(red)
                 self.linearGreen = Self.sRGBToLinear(green)
                 self.linearBlue  = Self.sRGBToLinear(blue)
@@ -231,6 +231,7 @@ extension Color: ShapeStyle {
             set { linearBlue = Self.sRGBToLinear(newValue) }
         }
         
+        // Animatable data follows the stored linear channel order plus opacity.
         public typealias AnimatableData = AnimatablePair<Float, AnimatablePair<Float, AnimatablePair<Float, Float>>>
         public var animatableData: AnimatableData {
             get { .init(linearRed, .init(linearGreen, .init(linearBlue, opacity))) }

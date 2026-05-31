@@ -51,15 +51,15 @@ struct ChangedCallbacks<Value>: GestureCallbacks {
     func cancel(state: Void) -> (() -> ())? { nil }
 }
 
-/// State for FullGestureCallbacks, tracking firing state and last phase for change detection.
+/// State for FullGestureCallbacks.
+/// Tracks firing state and last phase for change detection.
 struct FullGestureCallbacksState<Value: Equatable> {
     var hasFired:  Bool = false
     var lastPhase: GesturePhase<Value> = .possible(nil)
 }
 
 /// Container for .onEnded + .onChanged + (optional) .onFailed + (optional) .onPossible callbacks.
-///
-/// cancel() ignores state and returns the failure callback.
+/// cancel() ignores state and returns self.failed.
 struct FullGestureCallbacks<Value: Equatable>: GestureCallbacks {
     var possible: ((Optional<Value>) -> ())?
     var changed:  ((Value) -> ())?
@@ -97,7 +97,7 @@ struct FullGestureCallbacks<Value: Equatable>: GestureCallbacks {
         return nil
     }
 
-    // cancel ignores state and returns the failure callback
+    // Cancel ignores state and returns the failure callback.
     func cancel(state: FullGestureCallbacksState<Value>) -> (() -> ())? {
         return failed
     }
@@ -116,17 +116,16 @@ struct FailedCallbacks<Value>: GestureCallbacks {
 }
 
 /// Callback container for LongPressGesture / DelayedLongPressGesture.
+/// StateType is Bool: true while pressing, false otherwise.
 ///
-/// StateType = Bool: current pressing state (true=pressing, false=not pressing).
-///
-/// dispatch algorithm:
+/// Dispatch algorithm:
 ///   - isPressing = phase.isActive
-///   - pressing(isPressing) fires only when state changes from previous value
-///   - phase == .ended && was pressing -> pressed() fires
+///   - pressing(isPressing) fired only when state changes from previous value
+///   - phase==.ended && was pressing: pressed() fires
 ///
-/// cancel algorithm:
-///   - state == false -> return nil
-///   - state == true -> return pressing(false)
+/// Cancel algorithm:
+///   - state==false: return nil (was not pressing, nothing to clean up)
+///   - state==true: return pressing(false) to clear the pressing UI state
 struct PressableGestureCallbacks<Value>: GestureCallbacks {
     var pressing: ((Bool) -> Void)?   // Bool is always isPressing, unrelated to Value
     var pressed:  (() -> Void)?
@@ -151,7 +150,7 @@ struct PressableGestureCallbacks<Value>: GestureCallbacks {
         return nil
     }
 
-    // state=false -> nil, state=true -> pressing(false)
+    // Cancel clears the pressing UI state only if it was active.
     func cancel(state: Bool) -> (() -> ())? {
         guard state, let cb = pressing else { return nil }
         return { cb(false) }
@@ -164,6 +163,7 @@ struct PressableGestureCallbacks<Value>: GestureCallbacks {
 ///
 /// pass-through: output phase = inner phase (from phaseAttr).
 /// side-effect: calls callbacks.dispatch(phase:state:) on each phase change.
+///
 struct CallbacksPhase<C: GestureCallbacks>: StatefulRule, ResettableGestureRule {
     typealias Value = GesturePhase<C.Value>
 
@@ -172,6 +172,7 @@ struct CallbacksPhase<C: GestureCallbacks>: StatefulRule, ResettableGestureRule 
     let resetSeedAttr:   Attribute<UInt32>
     let useGestureGraph: Bool
 
+    // Generic-dependent callback state.
     var state: C.StateType
     var lastResetSeed: UInt32
 
@@ -217,8 +218,8 @@ struct CallbacksPhase<C: GestureCallbacks>: StatefulRule, ResettableGestureRule 
         state = stateRef
 
         if let action = animCompletion {
-            // dispatch via GestureGraph.enqueueAction so the callback fires in the
-            // pendingActions drain phase, outside AG evaluation
+            // Route through GestureGraph so the callback fires in the pendingActions
+            // drain phase, outside AG evaluation.
             if let gg = gestureGraph {
                 gg.enqueueAction(action)
             } else {
@@ -280,7 +281,7 @@ public struct _EndedGesture<Content: Gesture>: Gesture {
     public typealias Value = Content.Value
     public typealias Body = Never
 
-    // Internal storage for the composed callback gesture.
+    // Internal storage for the modifier/body chain.
     var _body: ModifierGesture<CallbacksGesture<EndedCallbacks<Content.Value>>, Content>
 
     // body: Never is satisfied by Gesture's default extension (fatalError)
@@ -291,6 +292,18 @@ public struct _EndedGesture<Content: Gesture>: Gesture {
     ) -> _GestureOutputs<Value> {
         type(of: gesture._attribute.value._body)
             ._makeGesture(gesture: gesture[\._body], inputs: inputs)
+    }
+}
+
+extension _EndedGesture: GestureEventTypeAccepting {
+    static func acceptsEventType(_ eventType: Any.Type) -> Bool {
+        gestureTypeAcceptsEvent(Content.self, eventType: eventType)
+    }
+}
+
+extension _EndedGesture: DynamicGestureEventTypeAccepting {
+    func acceptsEventType(_ eventType: Any.Type) -> Bool {
+        gestureValueAcceptsEvent(_body.body, eventType: eventType)
     }
 }
 
@@ -313,6 +326,18 @@ public struct _ChangedGesture<Content: Gesture>: Gesture where Content.Value: Eq
         modifiedInputs.options.insert(.allowsIncompleteEventSequences)
         return type(of: gesture._attribute.value._body)
             ._makeGesture(gesture: gesture[\._body], inputs: modifiedInputs)
+    }
+}
+
+extension _ChangedGesture: GestureEventTypeAccepting {
+    static func acceptsEventType(_ eventType: Any.Type) -> Bool {
+        gestureTypeAcceptsEvent(Content.self, eventType: eventType)
+    }
+}
+
+extension _ChangedGesture: DynamicGestureEventTypeAccepting {
+    func acceptsEventType(_ eventType: Any.Type) -> Bool {
+        gestureValueAcceptsEvent(_body.body, eventType: eventType)
     }
 }
 

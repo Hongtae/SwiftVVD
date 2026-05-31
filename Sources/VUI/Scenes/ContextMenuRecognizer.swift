@@ -181,8 +181,8 @@ struct ContextMenuRecognizer {
     }
 
     private func movedBeyondLongPressTolerance(from start: CGPoint, to current: CGPoint) -> Bool {
-        // FIXME: Tune context-menu long-press movement tolerance if touch/stylus
-        // behavior becomes visually mismatched.
+        // Refine the long-press movement tolerance if touch/stylus behavior
+        // becomes visually mismatched.
         let dx = current.x - start.x
         let dy = current.y - start.y
         let squaredDistance = dx * dx + dy * dy

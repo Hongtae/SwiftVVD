@@ -7,14 +7,14 @@
 
 import Foundation
 
-// PropertyKey hierarchy
+// PropertyKey hierarchy for graph inputs.
 //
-// PropertyKey (PropertyList.swift): base defaultValue and valuesEqual.
-// GraphInput: adds AG reuse support.
-// ViewInput: marker for keys stored in _ViewInputs.customInputs.
+// PropertyKey  (PropertyList.swift) - base: defaultValue, valuesEqual
+//   -> GraphInput - adds AG reuse support (makeReusable, tryToReuse, isTriviallyReusable)
+//      -> ViewInput - marker: keys stored in _ViewInputs.customInputs channel
 
 /// Opaque map passed to GraphReusable methods.
-/// AG reuse optimization not yet implemented.
+/// Reserved for AG reuse bookkeeping.
 struct IndirectAttributeMap {}
 
 /// Protocol for values that support AG node reuse.
@@ -70,6 +70,7 @@ final class MutableBox<Value>: @unchecked Sendable {
 }
 
 /// Animation time value passed through the AG graph.
+/// Only stored property: `seconds: Double` (8 bytes).
 struct Time {
     var seconds: Double
 
@@ -86,6 +87,9 @@ struct Time {
 }
 
 /// Render phase passed through the AG graph.
+/// Stored: isBeingRemoved: Bool, resetSeed: UInt32.
+/// Computed: isInserted (derived from stored fields).
+/// Total size: 8 bytes (Bool + 3-byte pad + UInt32).
 struct Phase {
     var isBeingRemoved: Bool = false
     var resetSeed: UInt32 = 0
@@ -106,6 +110,8 @@ struct Phase {
 }
 
 /// Animated view frame snapshot passed through the animation system.
+/// { origin: CGPoint (16 bytes), size: ViewSize (32 bytes) }
+/// Total size: 48 bytes.
 struct ViewFrame: Equatable {
     var origin: CGPoint
     var size: ViewSize
@@ -132,7 +138,7 @@ struct ViewFrame: Equatable {
 /// (via `MutableBox`) so all descendants share a single environment Attribute.
 struct CachedEnvironment {
 
-    // ID is represented directly as an Int value.
+    // Direct Int identity used for cache lookup.
     struct ID {
         var value: Int
     }
@@ -164,11 +170,11 @@ struct CachedEnvironment {
     var mapItems: [MapItem]
 
     /// Per-frame animation layout snapshot.
-    /// Nil until layout AG nodes are wired; animation modifiers read from here.
+    /// Nil until layout AG nodes are wired. Animation modifiers read from here.
     var animatedFrame: AnimatedFrame?
 
     /// Cache of resolved shape styles keyed by ResolvedShapeStyles.
-    /// Placeholder for resolved shape-style storage.
+    /// Reserved for resolved shape-style storage.
     var resolvedShapeStyles: Any?
 
     /// Platform-specific renderer cache (e.g. Metal layer reference).
@@ -187,7 +193,7 @@ struct CachedEnvironment {
 /// `_makeView` traversal.  All fields are Attribute references (IDs), so
 /// copying this struct is cheap.
 public struct _GraphInputs {
-    /// Arbitrary typed values threaded through the view tree, such as styles and options.
+    /// Arbitrary typed values threaded through the view tree (styles, options, etc.).
     var customInputs: PropertyList
 
     /// Current animation time.
@@ -212,13 +218,13 @@ public struct _GraphInputs {
     /// Set of AG node IDs whose inputs have been merged into this context.
     var mergedInputs: Set<AGAttribute>
 
-    // Base-channel subscript backed by customInputs.
+    // Base-channel subscript stores in customInputs (PropertyList).
     subscript<T: GraphInput>(_ key: T.Type) -> T.Value {
         get { customInputs.value(forKey: key) }
         set { customInputs.setValue(newValue, forKey: key) }
     }
 
-    // Stack operations for base-channel keys with Stack values
+    // Stack operations for base-channel keys with Stack values.
     // Used by the ViewModifier body-input stack (BodyInput<Content>).
 
     /// Push an element onto the Stack stored for `key` in the base channel.
@@ -244,9 +250,11 @@ public struct _GraphInputs {
     }
 
     /// Returns true if any BodyInput<T> stack in customInputs is non-empty.
+    /// Full PropertyList body-stack scanning is not implemented yet.
     var containsNonEmptyBodyStack: Bool { false }
 
     // MARK: - merge(_:ignoringPhase:)
+    //
     // Merges `other`'s fields into `self`:
     //   1. PropertyList merge (customInputs)
     //   2. Environment: create MergedEnvironment AG rule if attrs differ
@@ -349,7 +357,7 @@ struct MergedTransaction: Rule {
 }
 
 // Merges two Phases: isBeingRemoved OR'd, resetSeed updated when other is nonzero.
-// Phase.merge(_:) defines the concrete field-level merge semantics.
+// Phase.merge(_:) keeps the isBeingRemoved/resetSeed field semantics.
 struct MergedPhase: Rule {
     typealias Value = Phase
     let selfWeak: AGWeakAttribute

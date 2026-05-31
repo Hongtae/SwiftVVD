@@ -14,7 +14,7 @@ public protocol View {
 
     static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs
     static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs
-    // Returns a static view count when known, otherwise nil.
+    // Returns static view count, or nil when the count is dynamic or unknown.
     static func _viewListCount(inputs: _ViewListCountInputs) -> Int?
 }
 
@@ -24,8 +24,8 @@ extension View {
 }
 
 extension View {
-    /// Default implementation for Body == Never (primitive views not yet AG-implemented):
-    /// returns a stub 10×10 LayoutComputer so the layout tree wires correctly.
+    /// Default implementation for Body = Never primitive views that are not yet AG-implemented:
+    /// returns a stub 10x10 LayoutComputer so the layout tree wires correctly.
     ///
     /// For Body != Never: creates a reactive body rule that
     ///   1. reads the live `EnvironmentValues` AG node (registers dependency), and
@@ -48,8 +48,8 @@ extension View {
             fatalError("\(Self.self) may not have Body == Never")
         }
 
-        // Build DynamicProperty buffer (e.g. @Environment resolve closures).
-        // The current body path uses withObservationTracking for @Observable support.
+        // Build the DynamicProperty buffer before evaluating body. ViewBodyAccessor
+        // exists for parity but is not wired into this default body route yet.
         var graphInputs = inputs.base
         let dpFields = DynamicPropertyCache.fields(of: Self.self)
         let dpBuffer = _DynamicPropertyBuffer(fields: dpFields, container: view, inputs: &graphInputs)
@@ -84,7 +84,7 @@ extension View {
     /// Default implementation: produces a reactive body rule (same as `_makeView`)
     /// then delegates list construction to `Body._makeViewList`.
     ///
-    /// For Body == Never: returns a single-proxy static list so the parent layout
+    /// For Body = Never, returns a single-proxy static list so the parent layout
     /// can call `_makeView` via the proxy.
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
         if self is any _PrimitiveView.Type {
@@ -129,7 +129,7 @@ extension View {
     }
 }
 
-// _PrimitiveView is a View type that does not have a body. (body = Never)
+// _PrimitiveView is a View type that does not have a body. Body = Never.
 protocol _PrimitiveView {
 }
 
@@ -142,7 +142,7 @@ extension _PrimitiveView {
 extension Never: View {
 }
 
-// File-scope state class. It cannot be nested inside a generic function in Swift.
+// File-scope state class. Swift cannot nest it inside a generic function.
 private final class _OptionalViewState {
     var hasValue: Bool? = nil
     var subgraph: AGSubgraph? = nil
@@ -155,8 +155,8 @@ extension Optional: View where Wrapped: View {
 
     /// Dynamic-subgraph implementation for optional views.
     ///
-    /// When `.none` becomes `.some`, creates a AGSubgraph and wires `Wrapped._makeView` into it.
-    /// When `.some` becomes `.none`, invalidates the subgraph; master rule returns `.fixed(.zero)`.
+    /// When `.none` changes to `.some`, creates an AGSubgraph and wires `Wrapped._makeView` into it.
+    /// When `.some` changes to `.none`, invalidates the subgraph. The master rule returns `.fixed(.zero)`.
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
         guard let graph = AttributeGraph.current else {
             fatalError("\(self)._makeView called outside an active AttributeGraph context.")
@@ -200,9 +200,10 @@ extension Optional: View where Wrapped: View {
             return state.lcAttr?.value ?? LayoutComputer.fixed(.zero)
         }
 
-        // Optional child views keep ResourceList/DisplayList and other requested
-        // preferences alive when they switch between nil and some.
-        // FIXME: Revisit this relay once Optional-specific preference handling is complete.
+        // Optional uses the same preference relay shape as _ConditionalContent so
+        // child views keep ResourceList/DisplayList and other requested preferences
+        // alive when they switch between nil and some.
+        // Optional-specific relay behavior remains a follow-up.
         var outPrefs = PreferencesOutputs()
         for key in inputs.preferences.keys.keys {
             func addRelay<K: PreferenceKey>(_ k: K.Type) {
@@ -357,12 +358,11 @@ extension TypedUnaryViewGenerator: Hashable {
 /// not concrete values: the parent creates the nodes at `_makeView` time (wiring phase)
 /// and fills in their values later during the layout pass.
 public struct _ViewInputs {
-    /// Shared graph-level inputs (time, environment, transaction, etc.).
+    /// Shared graph-level inputs such as time, environment, and transaction.
     /// Base channel: _GraphInputs.customInputs stores GraphInput keys.
     var base: _GraphInputs
 
-    /// View-level input channel. Stores ViewInput keys.
-    /// Separate from base.customInputs.
+    /// View-level input channel. Stores ViewInput keys separately from base.customInputs.
     var customInputs: PropertyList
 
     /// Which preference keys this subtree should collect.
@@ -389,10 +389,11 @@ public struct _ViewInputs {
     var containerSize: OptionalAttribute<ViewSize>
 
     /// The nearest stack layout orientation seen by primitive children.
-    /// Used by primitives such as Divider to resolve their axis.
+    /// Primitive Divider reads this before resolving its axis.
     var stackOrientation: Axis?
 
-    // View-channel subscript for _ViewInputs.customInputs (ViewInput keys).
+    // View-channel subscript. Stores in _ViewInputs.customInputs (ViewInput keys).
+    // Used by view-specific inputs that should not be stored in the graph channel.
     subscript<T: ViewInput>(_ key: T.Type) -> T.Value {
         get { customInputs.value(forKey: key) }
         set { customInputs.setValue(newValue, forKey: key) }
@@ -400,11 +401,13 @@ public struct _ViewInputs {
 
     /// Copies per-subtree caches (e.g. CachedEnvironment box) before constructing a child
     /// in a retained subgraph, so each child has an independent cache copy.
+    /// Mutates self in place and gives the child a distinct cached-environment box.
     mutating func copyCaches() {
         base.cachedEnvironment = MutableBox(base.cachedEnvironment.value)
     }
 
     /// Creates placeholder outputs that can later be attached to concrete child outputs.
+    /// Creates an indirect AG attribute for the layout output and each requested preference slot.
     func makeIndirectOutputs() -> _ViewOutputs {
         guard let graph = AttributeGraph.current else {
             fatalError("_ViewInputs.makeIndirectOutputs called outside AG context.")
@@ -420,7 +423,7 @@ public struct _ViewInputs {
 /// The bundle of AG context Attributes passed from parent to child during `_makeViewList`.
 ///
 /// Unlike `_ViewInputs`, this struct does NOT carry layout Attributes (`position`, `size`,
-/// `transform`, etc.).  Those are created fresh by the parent Layout when it later calls
+/// `transform`, etc.). Those are created fresh by the parent Layout when it later calls
 /// `_makeView` on each child proxy.  Only the non-layout context (`_GraphInputs`) is
 /// threaded through the list-traversal phase so that per-child environment modifications
 /// (applied by ancestor modifiers) are captured in each child's `ViewProxy.baseInputs`.
@@ -428,11 +431,11 @@ public struct _ViewInputs {
 /// Additional list-specific fields (`implicitID`, `options`, `_traits`, etc.) are reserved
 /// for ForEach ID tracking, ViewTrait propagation, and container-context injection respectively.
 public struct _ViewListInputs {
-    /// Shared graph-level inputs (time, environment, transaction, etc.).
+    /// Shared graph-level inputs such as time, environment, and transaction.
     var base: _GraphInputs
 
     /// Implicit order index assigned to each view within the list.
-    /// Incremented as each child is processed; used by ForEach for stable identity.
+    /// Incremented as each child is processed. Used by ForEach for stable identity.
     var implicitID: Int
 
     /// Additional options controlling list traversal behaviour (separate from base.options).
@@ -458,7 +461,7 @@ public struct _ViewListInputs {
 
 extension _ViewListInputs {
     /// Create list inputs from single-view inputs.
-    /// Only `base` (_GraphInputs) is carried over; layout Attributes are omitted
+    /// Only `base` (_GraphInputs) is carried over. Layout Attributes are omitted
     /// because they are irrelevant during the list-traversal (wiring) phase.
     init(from viewInputs: _ViewInputs) {
         self.init(
@@ -484,7 +487,7 @@ extension _ViewInputs {
 /// - `preferences`: one `AGAttribute` per registered `PreferenceKey` (type-erased)
 /// - `_layoutComputer`: `OptionalAttribute`, absent for invisible/preference-only views
 public struct _ViewOutputs {
-    /// Preference nodes produced by this view (e.g., DisplayList, Accessibility, etc.).
+    /// Preference nodes produced by this view, such as DisplayList or Accessibility.
     var preferences: PreferencesOutputs
 
     /// The layout-computation node for this view.
@@ -499,6 +502,7 @@ public struct _ViewOutputs {
     }
 
     /// Points each placeholder output slot at the corresponding concrete child output.
+    /// Used after a delayed or erased child has produced real outputs.
     func attachIndirectOutputs(to placeholders: _ViewOutputs) {
         guard let graph = AttributeGraph.current else {
             fatalError("_ViewOutputs.attachIndirectOutputs called outside AG context.")
@@ -510,6 +514,7 @@ public struct _ViewOutputs {
     }
 
     /// Registers a permanent AG dependency on `attr` for all placeholder output slots.
+    /// Keeps delayed placeholder outputs invalidated by the child source attribute.
     func setIndirectDependency(_ attr: AGAttribute?) {
         guard let dep = attr else { return }
         guard let graph = AttributeGraph.current else {
@@ -521,7 +526,7 @@ public struct _ViewOutputs {
         preferences.setIndirectDependency(dep)
     }
 
-    /// Detaches all placeholder output slots, pointing them to nil/default values.
+    /// Detaches all placeholder output slots and restores their default values.
     func detachIndirectOutputs() {
         guard let graph = AttributeGraph.current else {
             fatalError("_ViewOutputs.detachIndirectOutputs called outside AG context.")
@@ -568,7 +573,8 @@ extension _ViewListOutputs {
         )
     }
 
-    /// FIXME: Route through BodyUnaryViewGenerator when generic layout wiring is ready.
+    /// Closure-backed unary list fallback used until the generic body-unary generator
+    /// wiring path is implemented.
     static func unaryViewList(
         viewType: Any.Type,
         inputs: _ViewListInputs,

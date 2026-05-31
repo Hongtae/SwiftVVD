@@ -14,7 +14,7 @@ struct ZIndexTraitKey: _ViewTraitKey {
 }
 
 extension View {
-    /// Sets the drawing depth for views in the same layout container.
+    /// Writes the z-index trait consumed by dynamic containers during display ordering.
     @inlinable public func zIndex(_ value: Double) -> some View {
         _trait(ZIndexTraitKey.self, value)
     }

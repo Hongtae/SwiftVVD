@@ -24,13 +24,15 @@ final class HoverResponder: AnyHoverResponder {
     var snapshotSize: ViewSize
     var snapshotIsEnabled: Bool
     var innerResponders: [any ViewResponder]
+    weak var eventBindingManager: EventBindingManager?
     private var isActive = false
 
     init(callback: @escaping (Bool) -> Void,
          transform: ViewTransform,
          size: ViewSize,
          isEnabled: Bool,
-         innerResponders: [any ViewResponder]) {
+         innerResponders: [any ViewResponder],
+         eventBindingManager: EventBindingManager?) {
         self.hitTestKey = _hoverResponderNextKey.withLock { key in
             defer { key &+= 1 }
             return key
@@ -40,6 +42,7 @@ final class HoverResponder: AnyHoverResponder {
         self.snapshotSize = size
         self.snapshotIsEnabled = isEnabled
         self.innerResponders = innerResponders
+        self.eventBindingManager = eventBindingManager
     }
 
     func hitTestPolicy(options: ContainsPointsOptions) -> HitTestPolicy {
@@ -76,6 +79,94 @@ final class HoverResponder: AnyHoverResponder {
 extension MultiViewResponder {
     func hoverResponders(containing point: CGPoint) -> [any AnyHoverResponder] {
         respondersContaining(point: point).compactMap { $0 as? any AnyHoverResponder }
+    }
+}
+
+final class HoverEventDispatcher {
+    private var activeResponders: [Int: [any AnyHoverResponder]] = [:]
+
+    func hasActiveResponders(deviceID: Int) -> Bool {
+        !(activeResponders[deviceID] ?? []).isEmpty
+    }
+
+    @discardableResult
+    func receiveEvents(
+        _ events: [EventID: any EventType],
+        rootResponder: MultiViewResponder?,
+        enqueueAction: (@escaping () -> Void) -> Void
+    ) -> Set<EventID> {
+        var consumed: Set<EventID> = []
+        for (eventID, event) in events {
+            guard let hoverEvent = event as? HoverEvent,
+                  let location = hoverEvent.location else { continue }
+            let wasActive = hasActiveResponders(deviceID: hoverEvent.deviceID)
+            let allowHit = hoverEvent.eventPhase != .ended && hoverEvent.eventPhase != .cancelled
+            let isActive = updateResponders(
+                at: location,
+                deviceID: hoverEvent.deviceID,
+                allowHit: allowHit,
+                rootResponder: rootResponder,
+                enqueueAction: enqueueAction
+            )
+            if wasActive || isActive {
+                consumed.insert(eventID)
+            }
+        }
+        return consumed
+    }
+
+    func reset(enqueueAction: (@escaping () -> Void) -> Void) {
+        var actions: [() -> Void] = []
+        for responders in activeResponders.values {
+            for responder in responders {
+                if let action = responder.updateHover(isActive: false, point: nil) {
+                    actions.append(action)
+                }
+            }
+        }
+        activeResponders.removeAll()
+        actions.forEach(enqueueAction)
+    }
+
+    private func responderID(_ responder: any AnyHoverResponder) -> ObjectIdentifier {
+        ObjectIdentifier(responder as AnyObject)
+    }
+
+    @discardableResult
+    private func updateResponders(
+        at location: CGPoint,
+        deviceID: Int,
+        allowHit: Bool,
+        rootResponder: MultiViewResponder?,
+        enqueueAction: (@escaping () -> Void) -> Void
+    ) -> Bool {
+        let newResponders = allowHit
+            ? (rootResponder?.hoverResponders(containing: location) ?? [])
+            : []
+        let oldResponders = activeResponders[deviceID] ?? []
+        let oldIDs = Set(oldResponders.map(responderID))
+        let newIDs = Set(newResponders.map(responderID))
+
+        var actions: [() -> Void] = []
+        for responder in oldResponders where !newIDs.contains(responderID(responder)) {
+            if let action = responder.updateHover(isActive: false, point: nil) {
+                actions.append(action)
+            }
+        }
+        for responder in newResponders where !oldIDs.contains(responderID(responder)) {
+            if let action = responder.updateHover(isActive: true, point: location) {
+                actions.append(action)
+            }
+        }
+
+        if newResponders.isEmpty {
+            activeResponders.removeValue(forKey: deviceID)
+        } else {
+            activeResponders[deviceID] = newResponders
+        }
+
+        actions.forEach(enqueueAction)
+        return !newResponders.isEmpty
     }
 }
 
@@ -118,12 +209,16 @@ public struct _HoverRegionModifier: ViewModifier, MultiViewModifier {
         }
 
         let environmentAttr = inputs.base.cachedEnvironment.value.environment
+        let eventBindingManager =
+            (AttributeGraphRef.current?.context as? ViewGraph)?
+                .rendererHost?.gestureGraph?.eventBindingManager
         let responder = HoverResponder(
             callback: modifier._attribute.value.callback,
             transform: inputs.transform.value,
             size: inputs.size.value,
             isEnabled: environmentAttr.value.isEnabled,
-            innerResponders: innerRespondersAttr.value
+            innerResponders: innerRespondersAttr.value,
+            eventBindingManager: eventBindingManager
         )
         graph.makeSideEffectRule { [weak responder] in
             guard let responder else { return }
@@ -132,10 +227,11 @@ public struct _HoverRegionModifier: ViewModifier, MultiViewModifier {
             responder.snapshotSize = inputs.size.value
             responder.snapshotIsEnabled = environmentAttr.value.isEnabled
             responder.innerResponders = innerRespondersAttr.value
+            responder.eventBindingManager?.enqueueHoverUpdateIfNeeded()
         }
 
-        // Install the responder preference surface and dispatch enter/exit from
-        // WindowController.
+        // Install the responder preference surface and ask the event manager
+        // for a hover refresh when geometry changes.
         outputs.preferences.preferences.removeAll { $0.key == ViewRespondersKey.self }
         let respondersAttr: Attribute<[any ViewResponder]> = graph.makeInput(value: [responder])
         outputs.preferences.append(ViewRespondersKey.self, node: respondersAttr.identifier)

@@ -2,7 +2,7 @@
 //  File: ViewSpacing.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -97,8 +97,8 @@ public struct ViewSpacing: Sendable {
             if zeroEdges.contains(.bottom) || next.zeroEdges.contains(.top) {
                 return 0
             }
-            // Text-to-text vertical spacing is collapsed until the full spacing
-            // category model is implemented.
+            // Reduced category model: keep the known Text/Text vertical case without
+            // pretending the full private spacing model is represented here.
             if textVerticalSpacing && next.textVerticalSpacing {
                 return 0
             }

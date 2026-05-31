@@ -26,20 +26,22 @@ extension EnvironmentKey where Self.Value: Equatable {
     }
 }
 
-// Wraps every EnvironmentKey as a PropertyKey so it can be stored in PropertyList.
+// Adapter that stores EnvironmentKey values in the PropertyList backing store.
 struct EnvironmentPropertyKey<K: EnvironmentKey>: PropertyKey {
     typealias Value = K.Value
     static var defaultValue: K.Value { K.defaultValue }
     static func valuesEqual(_ a: K.Value, _ b: K.Value) -> Bool { K._valuesEqual(a, b) }
 }
 
-// Stores Observable objects in the environment by concrete type.
+// Stores Observable objects in the environment property list via a per-type key.
+// ObservableObjectKey<T> is the PropertyList carrier for object storage.
 struct ObservableObjectKey<T: AnyObject & Observable>: PropertyKey {
     typealias Value = T?
     static var defaultValue: T? { nil }
     static func valuesEqual(_ a: T?, _ b: T?) -> Bool { a === b }
 }
 
+// PropertyList-backed environment values plus an optional tracker placeholder.
 public struct EnvironmentValues: CustomStringConvertible {
     var _plist: PropertyList
     var tracker: _PropertyListTracker?
@@ -164,10 +166,9 @@ extension Environment: DynamicProperty {
     /// Registers a write closure in `buffer.contexts[fieldOffset]`.
     ///
     /// The closure is called inside the body rule (see `View._makeView`) with a pointer
-    /// to the corresponding field in a mutable copy of the view struct.  It reads the
+    /// to the corresponding field in a mutable copy of the view struct. It reads the
     /// current `.keyPath` value from the copy, resolves it against the live
-    /// `EnvironmentValues` AG node, and writes the resulting `.value` back. This is
-    /// mirroring the mutation that occurs before `body` is called.
+    /// `EnvironmentValues` AG node, and writes the resulting `.value` back.
     public static func _makeProperty<V>(in buffer: inout _DynamicPropertyBuffer,
                                         container: _GraphValue<V>,
                                         fieldOffset: Int,

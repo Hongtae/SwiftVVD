@@ -22,7 +22,7 @@ public struct Menu<Label, Content>: View where Label: View, Content: View {
                 StaticSourceWriter<MenuStyleConfiguration.Content, ModifiedContent<Content, StyleContextWriter<MenuStyleContext>>>(
                 source: self.content.modifier(StyleContextWriter<MenuStyleContext>())
                 ))
-            // Install the item-list menu style inside MenuStyleContext so nested
+            // Install PlatformItemListMenuStyle inside MenuStyleContext so nested
             // Menu values become submenu platform items for context menus.
             .modifier(
                 StaticIf<StyleContextAcceptsPredicate<MenuStyleContext>,
@@ -240,8 +240,8 @@ extension MenuDropdownModifier {
             responder.innerResponders = innerRespondersAttr.value
         }
 
-        // Standalone menus install a responder trigger, while nested menus under
-        // MenuStyleContext remain PlatformItemListMenuStyle collection.
+        // Standalone Menu installs a dropdown responder; nested Menu under
+        // MenuStyleContext remains PlatformItemListMenuStyle collection.
         outputs.preferences.preferences.removeAll { $0.key == ViewRespondersKey.self }
         let respondersAttr: Attribute<[any ViewResponder]> = graph.makeInput(value: [responder])
         outputs.preferences.append(ViewRespondersKey.self, node: respondersAttr.identifier)

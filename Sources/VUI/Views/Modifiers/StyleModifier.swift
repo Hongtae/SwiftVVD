@@ -5,11 +5,11 @@
 //  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-// ============================================================
-// AnyStyleModifierType: protocol for type-erased dispatch.
+// MARK: - AnyStyleModifierType
+
+// Protocol for type-erased style dispatch.
 // StyleModifierType<M: StyleModifier> conforms to this.
-// static methods: makeView, makeViewList, viewListCount
-// ============================================================
+// Static methods: makeView, makeViewList, viewListCount.
 protocol AnyStyleModifierType {
     static func makeView<V: StyleableView>(
         view: _GraphValue<V>, modifier: AnyStyleModifier, inputs: _ViewInputs
@@ -20,11 +20,11 @@ protocol AnyStyleModifierType {
     static func viewListCount(inputs: _ViewListCountInputs) -> Int?
 }
 
-// ============================================================
+// MARK: - StyleModifier
+
 // StyleModifier: protocol for modifier types wrapping a style.
-// Requirements: var style, init(style:), styleBody(configuration:)
+// Requirements: var style, init(style:), styleBody(configuration:).
 // ViewModifier conformance with Body == Never.
-// ============================================================
 protocol StyleModifier: ViewModifier where Body == Never {
     associatedtype Style
     var style: Style { get set }
@@ -80,12 +80,12 @@ extension StyleModifier {
     }
 }
 
-// ============================================================
+// MARK: - StyleModifierType
+
 // StyleModifierType<M: StyleModifier>: AnyStyleModifierType
 // Concrete dispatcher parameterized by the concrete StyleModifier type M.
 // makeView uses AnyStyleModifier.value to read M from the AG node,
 // then calls M.styleBody(configuration:) to build the view.
-// ============================================================
 struct StyleModifierType<M: StyleModifier>: AnyStyleModifierType {
     static func makeView<V: StyleableView>(
         view: _GraphValue<V>, modifier: AnyStyleModifier, inputs: _ViewInputs
@@ -126,11 +126,11 @@ struct StyleModifierType<M: StyleModifier>: AnyStyleModifierType {
     static func viewListCount(inputs: _ViewListCountInputs) -> Int? { nil }
 }
 
-// ============================================================
-// AG node value wrappers, stored in the attribute graph node pointed to
+// MARK: - Style Modifier Wrappers
+
+// AG node value wrappers stored in the attribute graph node pointed to
 // by AnyStyleModifier.value.
 // ButtonStyleModifier<S>: StyleModifier wrapper for PrimitiveButtonStyle.
-// ============================================================
 struct ButtonStyleModifier<S: PrimitiveButtonStyle>: StyleModifier {
     typealias Body = Never
     typealias StyleConfiguration = PrimitiveButtonStyleConfiguration
@@ -161,11 +161,11 @@ struct ToggleStyleModifier<S: ToggleStyle>: StyleModifier {
 
 // LabelStyleModifier<S>: StyleModifier conformance is declared in LabelStyle.swift.
 
-// ============================================================
+// MARK: - Wrapped Style Access
+
 // Internal protocols for accessing the wrapped style value.
 // Used by ResolvedButtonStyle._makeView and ResolvedLabelStyle._makeView
 // (which extract style via existential dispatch before calling makeBody).
-// ============================================================
 protocol _HasPrimStyle {
     func _primStyle() -> any PrimitiveButtonStyle
 }
@@ -177,7 +177,7 @@ protocol _HasLabelStyle {
     func _labelStyle() -> any LabelStyle
 }
 
-// Dispatch protocols: conditional conformances of StyleModifierType allow
+// Dispatch protocols. Conditional conformances of StyleModifierType allow
 // the metatype stored in AnyStyleModifier._type to be cast to these and
 // used for type-erased style extraction.
 protocol _StyleModifierPrimDispatch {
@@ -200,11 +200,11 @@ extension StyleModifierType: _StyleModifierLabelDispatch where M: _HasLabelStyle
 
 // Note: LabelStyleModifier<S>: _HasLabelStyle conformance is in LabelStyle.swift.
 
-// ============================================================
-// Type-erased style modifier. Two stored properties match reference Mirror output:
-//   value: AGAttribute points to the AG node storing the style
-//   _type: AnyStyleModifierType.Type is the metatype for dispatch
-// ============================================================
+// MARK: - AnyStyleModifier
+
+// Type-erased style modifier.
+//   value: AGAttribute points to the AG node storing the style.
+//   _type: AnyStyleModifierType.Type is the metatype for dispatch.
 struct AnyStyleModifier {
     let value: AGAttribute
     let _type: any AnyStyleModifierType.Type
@@ -218,11 +218,11 @@ struct AnyStyleModifier {
     }
 }
 
-// ============================================================
+// MARK: - StyleInput
+
 // PropertyKey with Stack<AnyStyleModifier> value.
 // PrimitiveButtonStyle uses StyleInput<PrimitiveButtonStyleConfiguration>.
 // LabelStyle uses StyleInput<LabelStyleConfiguration>.
-// ============================================================
 struct StyleInput<Configuration>: GraphInput {
     typealias Value = Stack<AnyStyleModifier>
     static var defaultValue: Stack<AnyStyleModifier> { .empty }
@@ -230,11 +230,11 @@ struct StyleInput<Configuration>: GraphInput {
     var description: String { "StyleInput<\(Configuration.self)>" }
 }
 
-// ============================================================
+// MARK: - StyleableView
+
 // StyleableView: protocol for views resolved by the style system.
 // Provides body.getter (used by StyleableView._makeView default impl)
 // and configuration storage.
-// ============================================================
 protocol StyleableView: View {
     associatedtype Configuration
     var configuration: Configuration { get }

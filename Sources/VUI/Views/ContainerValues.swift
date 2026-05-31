@@ -27,7 +27,7 @@ public struct ContainerValues {
     }
 }
 
-// ContainerValuesInput is the PropertyKey that carries ContainerValues
+// ContainerValuesInput is the GraphInput key that carries ContainerValues
 // through the customInputs stack. Written by _ContainerValueWritingModifier,
 // read by containers (Layout, VariadicView) when collecting subview metadata.
 struct ContainerValuesInput: GraphInput {
@@ -40,7 +40,7 @@ struct ContainerValuesInput: GraphInput {
 // _ContainerValueWritingModifier<Value> writes a single
 // ContainerValues entry (identified by keyPath) into customInputs so that
 // the enclosing container can read it via LayoutSubview.containerValues.
-// Body=Never + custom _makeView/_makeViewList (pass-through with input mutation).
+// Body = Never. Custom _makeView/_makeViewList pass through with input mutation.
 public struct _ContainerValueWritingModifier<Value> {
     public var keyPath: WritableKeyPath<ContainerValues, Value>
     public var value: Value

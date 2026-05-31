@@ -8,8 +8,9 @@
 import Foundation
 import VVD
 
-// Backend trigger that translates standalone menu left-click activation into
-// the shared popup presentation path.
+// Standalone Menu opens through a backend control-style trigger rather than the
+// gesture responder path. This translates left-click activation into the shared
+// popup presentation path.
 struct MenuPresentationTrigger {
     private weak var activeResponder: MenuDropdownResponder?
 

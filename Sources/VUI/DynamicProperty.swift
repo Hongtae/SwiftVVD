@@ -6,11 +6,6 @@
 //
 
 /// Protocol for managing a DynamicProperty's backing storage in _DynamicPropertyBuffer.
-///
-/// Requirements:
-///   reset() -> ()
-///   update(property: inout Property, phase: Phase) -> Bool
-///   getState<T>(type: T.Type) -> Binding<T>?
 protocol DynamicPropertyBox {
     associatedtype Property: DynamicProperty
     mutating func reset()
@@ -51,8 +46,8 @@ public struct _DynamicPropertyBuffer {
 
     var isEmpty: Bool { contexts.isEmpty }
 
-    // Box instance is stored in contexts keyed by fieldOffset;
-    // update closure writes back to the View struct field at that offset.
+    // Stores the box context by field offset. The update closure copies the
+    // container field, lets the box update it, then writes it back.
     mutating func append<T: DynamicPropertyBox>(_ box: T, fieldOffset: Int) {
         let boxRef = MutableBox(box)
         properties.append(.init(type: T.Property.self, offset: fieldOffset))
@@ -63,7 +58,7 @@ public struct _DynamicPropertyBuffer {
         }
     }
 
-    // Calls addFields which loops over DynamicPropertyCache.Fields and calls _makeProperty per entry.
+    // Builds the buffer by applying each cached dynamic-property field.
     init<T>(fields: DynamicPropertyCache.Fields, container: _GraphValue<T>, inputs: inout _GraphInputs) {
         for entry in fields.entries {
             entry.type._makeProperty(in: &self, container: container,
@@ -71,7 +66,7 @@ public struct _DynamicPropertyBuffer {
         }
     }
 
-    // Applies stored update closures to the container's fields in-place.
+    // Applies stored update closures to the container's fields in place.
     func applyContexts<T>(to container: inout T) {
         guard !contexts.isEmpty else { return }
         withUnsafeMutableBytes(of: &container) { rawBytes in

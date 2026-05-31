@@ -11,7 +11,7 @@ import Foundation
 
 /// Controls how a gesture responder interacts with others during hit testing.
 enum GestureResponderExclusionPolicy: Equatable, CustomStringConvertible {
-    /// No special exclusion, default gesture priority.
+    /// No special exclusion. Uses default gesture priority.
     case `default`
     /// This responder takes priority over others.
     case highPriority
@@ -70,7 +70,7 @@ struct HighPriorityGestureCombiner: GestureCombiner {
     static var exclusionPolicy: GestureResponderExclusionPolicy { .highPriority }
     static func combine(_ first: AnyGesture<()>, _ second: AnyGesture<()>) -> Result {
         // HighPriority swaps first/second so the added gesture becomes
-        // ExclusiveGesture's first child, giving it recognition priority.
+        // ExclusiveGesture's first child and gets recognition priority.
         _MapGesture(content: ExclusiveGesture(second, first), transform: { _ in () })
     }
 }
@@ -94,9 +94,9 @@ struct GloballySimultaneousGestureCombiner: GestureCombiner {
 // GestureViewModifier
 
 /// Internal protocol for view modifiers that attach gestures to views.
-/// `AddGestureModifier` conforms to this; the protocol provides a default
+/// `AddGestureModifier` conforms to this. The protocol provides a default
 /// `ViewModifier._makeView` implementation that delegates to `makeView`.
-// Adding MultiViewModifier here makes the ModifiedContent._makeViewList check unified.
+/// Refining MultiViewModifier keeps view and view-list attachment checks unified.
 protocol GestureViewModifier: MultiViewModifier where Body == Never {
     associatedtype Combiner: GestureCombiner
     var gestureMask: GestureMask { get }
@@ -114,6 +114,9 @@ protocol GestureViewModifier: MultiViewModifier where Body == Never {
         modifier: _GraphValue<Self>,
         inputs: _GestureInputs
     ) -> _GestureOutputs<()>
+
+    static func acceptsEventType(_ eventType: Any.Type) -> Bool
+    func acceptsEventType(_ eventType: Any.Type) -> Bool
 }
 
 extension GestureViewModifier {
@@ -124,6 +127,11 @@ extension GestureViewModifier {
     ) -> _ViewOutputs {
         makeView(modifier: modifier, inputs: inputs, body: body)
     }
+
+    static func acceptsEventType(_ eventType: Any.Type) -> Bool { true }
+    func acceptsEventType(_ eventType: Any.Type) -> Bool {
+        Self.acceptsEventType(eventType)
+    }
     // _makeViewList: inherited from MultiViewModifier (creates ModifiedElements).
     // ModifiedElements materialization calls _makeView per child.
 }
@@ -132,10 +140,10 @@ extension GestureViewModifier {
 
 /// Single modifier type for all gesture-attaching view modifiers.
 /// The `Combiner` type parameter distinguishes priority:
-///   - `DefaultGestureCombiner`              -> `.gesture(_:including:)`
-///   - `HighPriorityGestureCombiner`         -> `.highPriorityGesture(_:including:)`
-///   - `SimultaneousGestureCombiner`         -> `.simultaneousGesture(_:including:)`
-///   - `GloballySimultaneousGestureCombiner` -> globally simultaneous
+///   - `DefaultGestureCombiner`: `.gesture(_:including:)`
+///   - `HighPriorityGestureCombiner`: `.highPriorityGesture(_:including:)`
+///   - `SimultaneousGestureCombiner`: `.simultaneousGesture(_:including:)`
+///   - `GloballySimultaneousGestureCombiner`: internal
 struct AddGestureModifier<T: Gesture, Combiner: GestureCombiner>: GestureViewModifier {
     var gesture: T
     var name: String?
@@ -169,6 +177,14 @@ extension View {
 // AddGestureModifier _makeSessionGesture + GestureFilter
 
 extension AddGestureModifier {
+    static func acceptsEventType(_ eventType: Any.Type) -> Bool {
+        gestureTypeAcceptsEvent(T.self, eventType: eventType)
+    }
+
+    func acceptsEventType(_ eventType: Any.Type) -> Bool {
+        gestureValueAcceptsEvent(gesture, eventType: eventType)
+    }
+
     /// Creates the gesture graph for one active session.
     /// Maps the raw `_GestureOutputs<T.Value>` to `_GestureOutputs<()>` so the session
     /// only needs to track terminal state, not the concrete value type.
@@ -191,10 +207,9 @@ extension AddGestureModifier {
 /// StatefulRule that lazily creates a GestureResponder<M> inside a dedicated AGSubgraph
 /// and keeps it updated whenever the modifier or inner view responders change.
 ///
-/// AGSubgraph ownership:
-///   GestureFilter owns a separate AGSubgraph where GestureResponder<M> is created.
-///   On first updateValue() the responder is created inside self.subgraph context.
-///   On subsequent evaluations: mask and inner responders updated in place (same instance).
+/// GestureFilter owns a separate AGSubgraph in which GestureResponder<M> is born.
+/// On first updateValue() the responder is created inside self.subgraph context.
+/// On subsequent evaluations, mask and inner responders update in place.
 struct GestureFilter<M: GestureViewModifier>: StatefulRule {
     typealias Value = [any ViewResponder]
 
@@ -228,7 +243,7 @@ struct GestureFilter<M: GestureViewModifier>: StatefulRule {
         }
         // Refresh geometry snapshots (used for synchronous hit-testing in GestureGraph context).
         // Also store the raw ViewGraph AG attributes so createSession can wire cross-graph refs
-        // and gesture coordinate-transform nodes always read the latest ViewGraph geometry.
+        // and gesture coordinate-transform nodes read the latest ViewGraph geometry.
         _responder!.snapshotTransform = viewInputs.transform.value
         _responder!.snapshotSize = viewInputs.size.value
         _responder!.snapshotPreferenceKeys = viewInputs.preferences.hostKeys.value
@@ -238,7 +253,6 @@ struct GestureFilter<M: GestureViewModifier>: StatefulRule {
         let innerResponders = innerRespondersAttr.value
         _responder!.responders = innerResponders
         // Wire nextResponder so that isDescendant() can traverse the chain upward.
-        // isDescendant walks nextResponder, not parent.
         for r in innerResponders where r.nextResponder == nil {
             r.nextResponder = _responder!
         }
@@ -259,8 +273,8 @@ extension AddGestureModifier {
 
         var outputs = body(_Graph(), inputs)
 
-        // If ViewRespondersKey is not in the preference keys, there is no gesture host collecting
-        // responders, so skip GestureFilter creation entirely.
+        // If ViewRespondersKey is not in the preference keys, there is no gesture host
+        // collecting responders, so skip GestureFilter creation entirely.
         guard inputs.preferences.keys.contains(ViewRespondersKey.self) else { return outputs }
 
         let capturedViewInputs = inputs
