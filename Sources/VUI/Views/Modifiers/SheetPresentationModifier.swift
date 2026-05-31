@@ -18,6 +18,9 @@ struct SheetPreference {
     let drawsBackground: Bool
     let placement: Placement
     let activeInspector: Bool?
+    // Backend policy captured from the presentation modifier's environment.
+    // Default is overlay; editors can opt into platform modal windows.
+    let usesPlatformWindow: Bool
 
     enum Placement: Equatable {
         case automatic
@@ -108,6 +111,7 @@ struct CoreSheetPresentationModifier<AnchorProvider: SheetAnchorProvider>: Envir
         let placement = placement
         let drawsBackground = drawsBackground
         let activeInspector = activeInspector
+        let usesPlatformWindow = environment.modalSessionUsingPlatformWindow
 
         return anchorProvider.preferenceTransformModifier { value, transaction in
             let namespaceID = namespace.wrappedValue
@@ -127,7 +131,8 @@ struct CoreSheetPresentationModifier<AnchorProvider: SheetAnchorProvider>: Envir
                         itemID: itemID,
                         drawsBackground: drawsBackground,
                         placement: placement,
-                        activeInspector: activeInspector
+                        activeInspector: activeInspector,
+                        usesPlatformWindow: usesPlatformWindow
                     ))
                 }
             } else {

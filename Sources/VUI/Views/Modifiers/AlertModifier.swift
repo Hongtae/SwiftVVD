@@ -114,6 +114,9 @@ struct AlertPreference: @unchecked Sendable {
     let severity: DialogSeverity
     // onDismiss support is not wired yet.
     let onDismiss: (() -> Void)?
+    // Backend policy captured from the alert modifier's environment.
+    // Default is overlay; editors can opt into platform modal windows.
+    let usesPlatformWindow: Bool
 }
 
 // MARK: - MakeAlertStorage
@@ -145,7 +148,7 @@ struct MakeAlertStorage<Actions: View, Message: View>: StatefulRule {
         guard let graph = AttributeGraph.current else {
             fatalError("MakeAlertStorage.updateValue called outside AG context")
         }
-        _ = environment.value
+        let environment = environment.value
         var actionsList: PlatformItemList?
         var messageList: PlatformItemList?
         if actionsItemList.isValid(in: graph) {
@@ -171,7 +174,8 @@ struct MakeAlertStorage<Actions: View, Message: View>: StatefulRule {
             messageItemList: messageList,
             isPresented: m.isPresented,
             severity: m.severity,
-            onDismiss: nil
+            onDismiss: nil,
+            usesPlatformWindow: environment.modalSessionUsingPlatformWindow
         )
         let storage = AlertStorage(preference: pref)
         let id = identity

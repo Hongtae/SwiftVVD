@@ -28,6 +28,9 @@ struct ConfirmationDialogPreference: @unchecked Sendable {
     let isPresented: Binding<Bool>
     // Used by the modal queue when the presentation is dismissed.
     let onDismiss: (() -> Void)?
+    // Backend policy captured from the dialog modifier's environment.
+    // Default is overlay; editors can opt into platform modal windows.
+    let usesPlatformWindow: Bool
 }
 
 // MARK: - ConfirmationDialog
@@ -70,7 +73,7 @@ struct MakeConfirmationDialog<Actions: View, Message: View>: StatefulRule {
         guard let graph = AttributeGraph.current else {
             fatalError("MakeConfirmationDialog.updateValue called outside AG context")
         }
-        _ = environment.value
+        let environment = environment.value
         var actionsList: PlatformItemList?
         var messageList: PlatformItemList?
         if actionsItemList.isValid(in: graph) {
@@ -96,7 +99,8 @@ struct MakeConfirmationDialog<Actions: View, Message: View>: StatefulRule {
             makeMessage: (m.message is EmptyView) ? nil : { AnyView(m.message) },
             messageItemList: messageList,
             isPresented: m.isPresented,
-            onDismiss: nil
+            onDismiss: nil,
+            usesPlatformWindow: environment.modalSessionUsingPlatformWindow
         )
         let storage = ConfirmationDialog(preference: pref)
         let id = identity

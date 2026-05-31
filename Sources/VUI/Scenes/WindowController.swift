@@ -430,9 +430,14 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     func overlayHitTest(_ locationInParent: CGPoint) -> Bool { false }
 
     // MARK: - Modal session callbacks (override in ModalWindowController)
+    var modalSessionPrefersPlatformWindow: Bool { false }
     // Called by the parent's _activateModal after attachWindow has been invoked.
     // At this point the entry is already initiated and the modal is visible.
     func onModalSessionInitiated() {}
+    func onModalSessionDismissalRequested(reason: ModalDismissReason,
+                                          completion: @escaping () -> Void) -> Bool {
+        false
+    }
     func onModalSessionDismissedByUser()   {}
     func onModalSessionDismissedByParent() {}
     func onModalSessionCancelled()         {}
@@ -516,20 +521,14 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         if let topModal, topModal.isOverlay, topModal.initiated {
             let modalController = topModal.controller
             let event = event
-            // No coordinate offset for full-area overlays (sheet/alert).
-            // Positioned overlays (e.g. ModalWindowScene) apply offset via their own drawFrame.
             if event.type == .wheel {
-                modalController.handleMouseWheel(at: event.location, delta: event.delta)
+                _ = modalController.handleMouseWheel(at: event.location, delta: event.delta)
             } else {
-                if !modalController.handleMouseEvent(event: event) {
-                    if event.type == .move || event.type == .buttonUp {
-                        modalController.handleMouseHover(at: event.location,
-                                                        deviceID: event.deviceID,
-                                                        isTopMost: true)
-                        self.handleMouseHover(at: event.location,
-                                              deviceID: event.deviceID,
-                                              isTopMost: false)
-                    }
+                _ = modalController.handleMouseEvent(event: event)
+                if event.type == .move || event.type == .buttonUp {
+                    _ = modalController.handleMouseHover(at: event.location,
+                                                         deviceID: event.deviceID,
+                                                         isTopMost: true)
                 }
             }
             return
@@ -883,24 +882,17 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     // Uses the same active-plus-pending shape as window sheet queues.
     //
     // isOverlay is set at _activateModal time (not at enqueue time) based on:
-    //   - parent's window state (self.window == nil means overlay is required)
-    //   - session semantics (.alert/.confirmationDialog always use overlay)
+    //   - the child controller's frozen modalSessionUsingPlatformWindow value
+    //   - the parent's platform-window capability at activation time
     // Before activation, isOverlay defaults to false; queued entries are never drawn (initiated = false).
     //
-    // session: .legacy = ModalWindowScene-based; .sheet/.alert/.confirmationDialog = preference-driven.
-    //   In dismissAllModalWindows, position (first vs rest) determines reason:
+    // In dismissAllModalWindows, position (first vs rest) determines reason:
     //   first = was active, so .byParent; rest = queued and never shown, so .cancelled.
-    //
-    // TODO: When preference-driven overlay animation is ported, add an explicit
-    // input gate to ModalChildEntry (for example isInputEnabled/isAnimating).
-    // During the short scale/opacity transition, the child still renders normally
-    // because GraphicsContext carries the scale/filter state, but the parent must
-    // drop input events until animation completion flips the gate open.
     private struct ModalChildEntry: @unchecked Sendable {
         let controller: WindowController   // strong, WindowController owns its modal children
         var isOverlay: Bool = false   // set to true only when overlay is confirmed; false = platform window
         var initiated: Bool = false   // true once activation completes; updateView/drawFrame gate on this
-        var session: PresentationSession = .legacy
+        var session: PresentationSession
         var contentAttr: Attribute<AnyView>? = nil
         var attachWindow: AttachWindowResolver? = nil
     }
@@ -978,11 +970,11 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
 
     // MARK: Modal child management
 
-    // Called by AppWindowsController (scene-based) or internally (preference-driven).
+    // Called internally by preference-driven sheet/alert/dialog presentation.
     // isOverlay is not determined here. It is deferred to _activateModal when the entry
     // reaches the front of the queue and the parent's window state is known.
     func addModalChild(_ child: WindowController,
-                       session: PresentationSession = .legacy,
+                       session: PresentationSession,
                        contentAttr: Attribute<AnyView>? = nil,
                        attachWindow: AttachWindowResolver? = nil) {
         child.parentWindow = self
@@ -1005,9 +997,13 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     private func _activateModal(entry: ModalChildEntry) {
         let child = entry.controller
 
-        // Use overlay only when this controller has no platform window to parent from.
-        // Per-session overlay/platform selection will be restored after overlay support is complete.
-        let asOverlay = (self.window == nil)
+        // ModalWindowController freezes modalSessionUsingPlatformWindow at
+        // creation time. Later environment/session updates must not switch an
+        // existing child between overlay and platform-window mode.
+        let canUsePlatformWindow = child.modalSessionPrefersPlatformWindow &&
+            entry.attachWindow != nil &&
+            runOnMainQueueSync { self.window?.canPresentModalWindow == true }
+        let asOverlay = !canUsePlatformWindow
 
         if !asOverlay, let attachWindow = entry.attachWindow {
             // Race guard: a preference-driven session can be dismissed before
@@ -1104,7 +1100,26 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         _activateModal(entry: entry)
     }
 
-    // Remove a modal (active or queued) and clean up its session / callbacks.
+    // Notify a modal child that its presentation state has become dismissed.
+    // The child owns the visible dismissal and calls the completion when it is
+    // actually ready to be removed from the parent's modal queue.
+    private func notifyModalChildDismissalRequested(_ child: WindowController,
+                                                    reason: ModalDismissReason) {
+        let shouldNotifyChild = modalChildren.withLock { entries -> Bool in
+            guard let i = entries.firstIndex(where: { $0.controller === child }) else { return false }
+            return i == 0 && entries[i].isOverlay && entries[i].initiated
+        }
+        if shouldNotifyChild,
+           child.onModalSessionDismissalRequested(reason: reason, completion: { [weak self, weak child] in
+               guard let self, let child else { return }
+               self.removeModalChild(child, reason: reason)
+           }) {
+            return
+        }
+        removeModalChild(child, reason: reason)
+    }
+
+    // Actually remove a modal (active or queued) and clean up its session / callbacks.
     func removeModalChild(_ child: WindowController,
                           reason: ModalDismissReason = .byParent) {
         var removedEntry: ModalChildEntry?
@@ -1118,44 +1133,18 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         child.parentWindow = nil
 
         if let e = removedEntry {
-            switch e.session {
-            case .sheet, .alert, .confirmationDialog:
-                // Preference-driven: clean up binding + onDismiss.
-                e.session.cleanup(reason: reason)
-                // Close the platform window if one was created.
-                let ctrl = child
-                Task { @MainActor [weak self, ctrl] in
-                    if let w = ctrl.window {
-                        self?.window?.dismissModalWindow(w)
-                        w.close()
-                    }
-                }
-            case .legacy:
-                // Scene-based: fire session callbacks on the child controller.
-                switch reason {
-                case .userAction:
-                    child.onModalSessionDismissedByUser()
-                case .dismissed, .byParent:
-                    child.onModalSessionDismissedByParent()
-                case .cancelled:
-                    child.onModalSessionCancelled()
+            // Preference-driven: clean up binding + onDismiss.
+            e.session.cleanup(reason: reason)
+            // Close the platform window if one was created.
+            let ctrl = child
+            Task { @MainActor [weak self, ctrl] in
+                if let w = ctrl.window {
+                    self?.window?.dismissModalWindow(w)
+                    w.close()
                 }
             }
         }
 
-        if wasFirst { _showNextInQueue() }
-    }
-
-    // Detach without firing session callbacks (caller handles the response).
-    func detachModalChild(_ child: WindowController) {
-        var wasFirst = false
-        modalChildren.withLock { entries in
-            if let i = entries.firstIndex(where: { $0.controller === child }) {
-                wasFirst = (i == 0)
-                entries.remove(at: i)
-            }
-        }
-        child.parentWindow = nil
         if wasFirst { _showNextInQueue() }
     }
 
@@ -1170,13 +1159,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
             child.parentWindow = nil
             // first (index 0) was active, so byParent; rest were queued and never shown, so cancelled.
             let reason: ModalDismissReason = (i == 0) ? .byParent : .cancelled
-            switch entry.session {
-            case .sheet, .alert, .confirmationDialog:
-                entry.session.cleanup(reason: reason)
-            case .legacy:
-                if reason == .byParent { child.onModalSessionDismissedByParent() }
-                else                   { child.onModalSessionCancelled() }
-            }
+            entry.session.cleanup(reason: reason)
         }
     }
 
@@ -1189,7 +1172,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         guard let graph = AttributeGraph.current else {
             fatalError("\(#function) must be called from within an AG context (side-effect rule).")
         }
-        func platformRootContent(for pref: SheetPreference) -> AnyView {
+        func rootContent(for pref: SheetPreference) -> AnyView {
             // The platform hosting root wraps erased presentation content in SheetContent.
             AnyView(SheetContent(content: pref.content))
         }
@@ -1216,7 +1199,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         // Dismiss sessions that are no longer in incoming.
         for (id, ctrl) in existing {
             if !incomingIDs.contains(id) {
-                removeModalChild(ctrl, reason: .dismissed)
+                notifyModalChildDismissalRequested(ctrl, reason: .dismissed)
             }
         }
 
@@ -1234,35 +1217,25 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                 return entries[index].contentAttr
             }
             if let existingContentAttr {
-                existingContentAttr.setValue(platformRootContent(for: pref), transaction: transaction)
+                existingContentAttr.setValue(rootContent(for: pref), transaction: transaction)
                 continue
             }
 
-            let contentAttr: Attribute<AnyView> = graph.makeInput(value: platformRootContent(for: pref))
+            let contentAttr: Attribute<AnyView> = graph.makeInput(value: rootContent(for: pref))
 
             let sheetKey = WindowKey(namespace: scene.namespace, sceneID: scene.sceneID)
-            // ModalWindowController restores the modal-specific child policy
-            // that the old ModalWindowSceneContext owned: fit content after
-            // layout, auto-resize the platform child, and keep modal lifecycle
-            // hooks separate from the base window controller.
+            // ModalWindowController owns the modal-specific child policy:
+            // fit content after layout, auto-resize the platform child, and keep
+            // modal lifecycle hooks separate from the base window controller.
             //
-            // FIXME: finalize the sheet bridge and overlay animation path
-            // before this becomes the final architecture.
+            // FIXME: finalize the sheet bridge before this becomes the final architecture.
             let ctrl = ModalWindowController(crossGraphContent: contentAttr,
                                              sourceGraph: graph,
                                              scene: sheetKey,
-                                             parentController: self)
+                                             parentController: self,
+                                             usesPlatformWindow: pref.usesPlatformWindow)
             addModalChild(ctrl, session: .sheet(pref), contentAttr: contentAttr) { [weak ctrl] attach in
-                Task { @MainActor [weak ctrl] in
-                    guard let attach, let ctrl else { return }
-                    guard let childWindow = ctrl.makeWindow() else {
-                        Log.error("WindowController: failed to create sheet platform window")
-                        return
-                    }
-                    childWindow.contentSize = CGSize(width: 10, height: 10)
-                    childWindow.origin = .zero
-                    attach(childWindow)
-                }
+                ctrl?.resolveModalWindowAttachment(attach)
             }
 
         }
@@ -1285,7 +1258,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         let existingIDs = Set(existing.map { $0.0 })
         for (id, ctrl) in existing {
             if !dialogs.contains(where: { sid($0) == id }) {
-                removeModalChild(ctrl, reason: .dismissed)
+                notifyModalChildDismissalRequested(ctrl, reason: .dismissed)
             }
         }
         for pref in dialogs {
@@ -1296,18 +1269,10 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
             let ctrl = ModalWindowController(crossGraphContent: attr,
                                              sourceGraph: graph,
                                              scene: key,
-                                             parentController: self)
+                                             parentController: self,
+                                             usesPlatformWindow: pref.usesPlatformWindow)
             addModalChild(ctrl, session: .confirmationDialog(pref)) { [weak ctrl] attach in
-                Task { @MainActor [weak ctrl] in
-                    guard let attach, let ctrl else { return }
-                    guard let childWindow = ctrl.makeWindow() else {
-                        Log.error("WindowController: failed to create confirmation dialog platform window")
-                        return
-                    }
-                    childWindow.contentSize = CGSize(width: 10, height: 10)
-                    childWindow.origin = .zero
-                    attach(childWindow)
-                }
+                ctrl?.resolveModalWindowAttachment(attach)
             }
         }
     }
@@ -1332,7 +1297,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         // Dismiss removed alerts.
         for (id, ctrl) in existing {
             if !alerts.contains(where: { sid($0) == id }) {
-                removeModalChild(ctrl, reason: .dismissed)
+                notifyModalChildDismissalRequested(ctrl, reason: .dismissed)
             }
         }
 
@@ -1346,18 +1311,10 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
             let ctrl = ModalWindowController(crossGraphContent: alertAttr,
                                              sourceGraph: graph,
                                              scene: alertKey,
-                                             parentController: self)
+                                             parentController: self,
+                                             usesPlatformWindow: pref.usesPlatformWindow)
             addModalChild(ctrl, session: .alert(pref)) { [weak ctrl] attach in
-                Task { @MainActor [weak ctrl] in
-                    guard let attach, let ctrl else { return }
-                    guard let childWindow = ctrl.makeWindow() else {
-                        Log.error("WindowController: failed to create alert platform window")
-                        return
-                    }
-                    childWindow.contentSize = CGSize(width: 10, height: 10)
-                    childWindow.origin = .zero
-                    attach(childWindow)
-                }
+                ctrl?.resolveModalWindowAttachment(attach)
             }
         }
     }

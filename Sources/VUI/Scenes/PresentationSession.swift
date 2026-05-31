@@ -17,18 +17,14 @@ enum PresentationSession: @unchecked Sendable {
     case sheet(SheetPreference)
     case alert(AlertPreference)
     case confirmationDialog(ConfirmationDialogPreference)
-    /// ModalWindowScene-based modal. Remove this case once all modals are migrated
-    /// to preference-driven (sheet/alert) sessions.
-    case legacy
 
-    // Common lifecycle accessors (not meaningful for .legacy).
+    // Common lifecycle accessors.
 
     var isPresented: Binding<Bool>? {
         switch self {
         case .sheet:                     return nil
         case .alert(let p):              return p.isPresented
         case .confirmationDialog(let p): return p.isPresented
-        case .legacy:                    return nil
         }
     }
 
@@ -37,17 +33,12 @@ enum PresentationSession: @unchecked Sendable {
         case .sheet(let p):              return p.onDismiss
         case .alert(let p):              return p.onDismiss
         case .confirmationDialog(let p): return p.onDismiss
-        case .legacy:                    return nil
         }
     }
 
     // Called by WindowController.removeModalChild when the modal is dismissed.
     // reason drives isPresented reset and onDismiss call semantics.
-    // .legacy is handled separately via scene callbacks in removeModalChild.
     func cleanup(reason: ModalDismissReason) {
-        if case .legacy = self {
-            return  // handled via onModalSession* callbacks, not here
-        }
         if case .sheet(let p) = self {
             switch reason {
             case .userAction, .dismissed, .byParent:
@@ -71,7 +62,7 @@ enum PresentationSession: @unchecked Sendable {
 
 // MARK: - ModalDismissReason
 
-enum ModalDismissReason {
+enum ModalDismissReason: Equatable {
     case userAction   // user closed the window / tapped dismiss
     case dismissed    // programmatic (isPresented already false)
     case byParent     // parent window closed
