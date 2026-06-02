@@ -8,26 +8,36 @@
 import Foundation
 import Synchronization
 
+public enum HoverPhase: Equatable {
+    case active(CGPoint)
+    case ended
+}
+
 protocol AnyHoverResponder: ViewResponder {
     func updateHover(isActive: Bool, point: CGPoint?) -> (() -> Void)?
 }
 
 private let _hoverResponderNextKey = Mutex<UInt32>(0xA0000000)
 
-final class HoverResponder: AnyHoverResponder {
+final class HoverResponder: MultiViewResponder, AnyHoverResponder {
     let hitTestKey: UInt32
     weak var nextResponder: ResponderNode?
     var gestureContainer: AnyObject? { nil }
 
-    var callback: (Bool) -> Void
+    var callback: ((Bool) -> Void)?
+    var continuousCallback: ((HoverPhase) -> Void)?
+    var coordinateSpace: CoordinateSpace
     var snapshotTransform: ViewTransform
     var snapshotSize: ViewSize
     var snapshotIsEnabled: Bool
     var innerResponders: [any ViewResponder]
     weak var eventBindingManager: EventBindingManager?
     private var isActive = false
+    private var phase: HoverPhase = .ended
 
-    init(callback: @escaping (Bool) -> Void,
+    init(callback: ((Bool) -> Void)?,
+         continuousCallback: ((HoverPhase) -> Void)?,
+         coordinateSpace: CoordinateSpace,
          transform: ViewTransform,
          size: ViewSize,
          isEnabled: Bool,
@@ -38,11 +48,22 @@ final class HoverResponder: AnyHoverResponder {
             return key
         }
         self.callback = callback
+        self.continuousCallback = continuousCallback
+        self.coordinateSpace = coordinateSpace
         self.snapshotTransform = transform
         self.snapshotSize = size
         self.snapshotIsEnabled = isEnabled
         self.innerResponders = innerResponders
         self.eventBindingManager = eventBindingManager
+        super.init()
+        updateInnerResponders(innerResponders)
+    }
+
+    func updateInnerResponders(_ responders: [any ViewResponder]) {
+        innerResponders = responders
+        for responder in responders where responder.nextResponder == nil {
+            responder.nextResponder = self
+        }
     }
 
     func hitTestPolicy(options: ContainsPointsOptions) -> HitTestPolicy {
@@ -67,12 +88,38 @@ final class HoverResponder: AnyHoverResponder {
         return ContainsPointsResult(mask: mask, priority: 16.0, children: innerResponders)
     }
 
+    private func hoverPhase(isActive active: Bool, point: CGPoint?) -> HoverPhase {
+        guard active, var point else { return .ended }
+        switch coordinateSpace {
+        case .local:
+            var points = [point]
+            snapshotTransform.convertGlobal(to: .local, points: &points)
+            point = points[0]
+        case .global, .named:
+            break
+        }
+        return .active(point)
+    }
+
     func updateHover(isActive newValue: Bool, point: CGPoint?) -> (() -> Void)? {
-        let active = snapshotIsEnabled && newValue
-        guard isActive != active else { return nil }
+        let active = snapshotIsEnabled && newValue && point != nil
+        let nextPhase = hoverPhase(isActive: active, point: point)
+        let shouldSendBool = isActive != active
+        let shouldSendContinuous = phase != nextPhase
+        guard shouldSendBool || shouldSendContinuous else { return nil }
+
         isActive = active
+        phase = nextPhase
         let callback = callback
-        return { callback(active) }
+        let continuousCallback = continuousCallback
+        return {
+            if shouldSendBool {
+                callback?(active)
+            }
+            if shouldSendContinuous {
+                continuousCallback?(nextPhase)
+            }
+        }
     }
 }
 
@@ -144,7 +191,6 @@ final class HoverEventDispatcher {
             ? (rootResponder?.hoverResponders(containing: location) ?? [])
             : []
         let oldResponders = activeResponders[deviceID] ?? []
-        let oldIDs = Set(oldResponders.map(responderID))
         let newIDs = Set(newResponders.map(responderID))
 
         var actions: [() -> Void] = []
@@ -153,7 +199,7 @@ final class HoverEventDispatcher {
                 actions.append(action)
             }
         }
-        for responder in newResponders where !oldIDs.contains(responderID(responder)) {
+        for responder in newResponders {
             if let action = responder.updateHover(isActive: true, point: location) {
                 actions.append(action)
             }
@@ -214,6 +260,8 @@ public struct _HoverRegionModifier: ViewModifier, MultiViewModifier {
                 .rendererHost?.gestureGraph?.eventBindingManager
         let responder = HoverResponder(
             callback: modifier._attribute.value.callback,
+            continuousCallback: nil,
+            coordinateSpace: .local,
             transform: inputs.transform.value,
             size: inputs.size.value,
             isEnabled: environmentAttr.value.isEnabled,
@@ -226,7 +274,7 @@ public struct _HoverRegionModifier: ViewModifier, MultiViewModifier {
             responder.snapshotTransform = inputs.transform.value
             responder.snapshotSize = inputs.size.value
             responder.snapshotIsEnabled = environmentAttr.value.isEnabled
-            responder.innerResponders = innerRespondersAttr.value
+            responder.updateInnerResponders(innerRespondersAttr.value)
             responder.eventBindingManager?.enqueueHoverUpdateIfNeeded()
         }
 
@@ -243,9 +291,99 @@ extension _HoverRegionModifier {
     public typealias Body = Never
 }
 
+public struct _ContinuousHoverModifier: ViewModifier, MultiViewModifier {
+    public let coordinateSpace: CoordinateSpace
+    public let callback: (HoverPhase) -> Void
+
+    @inlinable public init(
+        coordinateSpace: CoordinateSpace = .local,
+        _ callback: @escaping (HoverPhase) -> Void
+    ) {
+        self.coordinateSpace = coordinateSpace
+        self.callback = callback
+    }
+
+    public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
+        guard let graph = AttributeGraph.current else {
+            fatalError("_ContinuousHoverModifier._makeView called outside AG context")
+        }
+
+        var outputs = body(_Graph(), inputs)
+
+        guard inputs.preferences.keys.contains(ViewRespondersKey.self) else {
+            return outputs
+        }
+
+        let innerResponderNodes = outputs.preferences.preferences
+            .filter { $0.key == ViewRespondersKey.self }
+            .map { $0.value }
+
+        let innerRespondersAttr: Attribute<[any ViewResponder]>
+        if innerResponderNodes.isEmpty {
+            innerRespondersAttr = graph.makeInput(value: [])
+        } else if innerResponderNodes.count == 1 {
+            innerRespondersAttr = Attribute<[any ViewResponder]>(innerResponderNodes[0])
+        } else {
+            innerRespondersAttr = graph.makeRule {
+                var combined = ViewRespondersKey.defaultValue
+                for nodeID in innerResponderNodes {
+                    let val = Attribute<[any ViewResponder]>(nodeID).value
+                    ViewRespondersKey.reduce(value: &combined) { val }
+                }
+                return combined
+            }
+        }
+
+        let environmentAttr = inputs.base.cachedEnvironment.value.environment
+        let eventBindingManager =
+            (AttributeGraphRef.current?.context as? ViewGraph)?
+                .rendererHost?.gestureGraph?.eventBindingManager
+        let responder = HoverResponder(
+            callback: nil,
+            continuousCallback: modifier._attribute.value.callback,
+            coordinateSpace: modifier._attribute.value.coordinateSpace,
+            transform: inputs.transform.value,
+            size: inputs.size.value,
+            isEnabled: environmentAttr.value.isEnabled,
+            innerResponders: innerRespondersAttr.value,
+            eventBindingManager: eventBindingManager
+        )
+        graph.makeSideEffectRule { [weak responder] in
+            guard let responder else { return }
+            responder.continuousCallback = modifier._attribute.value.callback
+            responder.coordinateSpace = modifier._attribute.value.coordinateSpace
+            responder.snapshotTransform = inputs.transform.value
+            responder.snapshotSize = inputs.size.value
+            responder.snapshotIsEnabled = environmentAttr.value.isEnabled
+            responder.updateInnerResponders(innerRespondersAttr.value)
+            responder.eventBindingManager?.enqueueHoverUpdateIfNeeded()
+        }
+
+        outputs.preferences.preferences.removeAll { $0.key == ViewRespondersKey.self }
+        let respondersAttr: Attribute<[any ViewResponder]> = graph.makeInput(value: [responder])
+        outputs.preferences.append(ViewRespondersKey.self, node: respondersAttr.identifier)
+        return outputs
+    }
+}
+
+extension _ContinuousHoverModifier {
+    public typealias Body = Never
+}
+
 extension View {
     @inlinable
     public func onHover(perform action: @escaping (Bool) -> Void) -> some View {
         modifier(_HoverRegionModifier(action))
+    }
+
+    @inlinable
+    public func onContinuousHover(
+        coordinateSpace: some CoordinateSpaceProtocol = .local,
+        perform action: @escaping (HoverPhase) -> Void
+    ) -> some View {
+        modifier(_ContinuousHoverModifier(
+            coordinateSpace: coordinateSpace.coordinateSpace,
+            action
+        ))
     }
 }

@@ -163,8 +163,66 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         }
     }
 
+    private func keyCharacter(for key: VirtualKey) -> Character? {
+        switch key {
+        case .a: return "a"
+        case .b: return "b"
+        case .c: return "c"
+        case .d: return "d"
+        case .e: return "e"
+        case .f: return "f"
+        case .g: return "g"
+        case .h: return "h"
+        case .i: return "i"
+        case .j: return "j"
+        case .k: return "k"
+        case .l: return "l"
+        case .m: return "m"
+        case .n: return "n"
+        case .o: return "o"
+        case .p: return "p"
+        case .q: return "q"
+        case .r: return "r"
+        case .s: return "s"
+        case .t: return "t"
+        case .u: return "u"
+        case .v: return "v"
+        case .w: return "w"
+        case .x: return "x"
+        case .y: return "y"
+        case .z: return "z"
+        case .num0, .pad0: return "0"
+        case .num1, .pad1: return "1"
+        case .num2, .pad2: return "2"
+        case .num3, .pad3: return "3"
+        case .num4, .pad4: return "4"
+        case .num5, .pad5: return "5"
+        case .num6, .pad6: return "6"
+        case .num7, .pad7: return "7"
+        case .num8, .pad8: return "8"
+        case .num9, .pad9: return "9"
+        case .period, .padPeriod: return "."
+        case .comma: return ","
+        case .slash, .padSlash: return "/"
+        case .accentTilde: return "`"
+        case .semicolon: return ";"
+        case .quote: return "'"
+        case .backslash: return "\\"
+        case .equal, .padEqual: return "="
+        case .hyphen, .padMinus: return "-"
+        case .padAsterisk: return "*"
+        case .padPlus: return "+"
+        case .openBracket: return "["
+        case .closeBracket: return "]"
+        default: return nil
+        }
+    }
+
     private func keyEquivalent(for event: KeyboardEvent) -> KeyEquivalent? {
         if let character = event.text.first {
+            return KeyEquivalent(character)
+        }
+        if let character = keyCharacter(for: event.key) {
             return KeyEquivalent(character)
         }
         switch event.key {
@@ -184,6 +242,40 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         case .right: return .rightArrow
         default: return nil
         }
+    }
+
+    private func keyCharacters(for event: KeyboardEvent) -> String {
+        if !event.text.isEmpty {
+            return event.text
+        }
+        if let character = keyCharacter(for: event.key) {
+            return String(character)
+        }
+        if event.key == .space {
+            return " "
+        }
+        return ""
+    }
+
+    private func keyEventPhase(for event: KeyboardEvent) -> EventPhase? {
+        switch event.type {
+        case .keyDown:
+            return .began
+        case .keyUp:
+            return .ended
+        case .textInput, .textComposition:
+            return nil
+        }
+    }
+
+    private func keyEvent(from event: KeyboardEvent) -> KeyEvent? {
+        guard let phase = keyEventPhase(for: event) else { return nil }
+        return KeyEvent(
+            key: keyEquivalent(for: event),
+            virtualKey: event.key,
+            characters: keyCharacters(for: event),
+            phase: phase
+        )
     }
 
     func requestHoverUpdate(in manager: EventBindingManager) {
@@ -753,14 +845,8 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         let handleEvent = { (event: KeyboardEvent) -> Bool in
             if let window = self.window, window !== event.window { return false }
             self.contextMenuRecognizer.handleKeyboardEvent(event)
-            if event.type == .keyUp {
+            if let keyEvent = self.keyEvent(from: event) {
                 let eventID = EventID(type: KeyEvent.self, serial: self.nextEventSerial())
-                let keyEvent = KeyEvent(
-                    key: self.keyEquivalent(for: event),
-                    virtualKey: event.key,
-                    characters: event.text,
-                    phase: EventPhase.ended
-                )
                 _ = self.sendHostEvents([eventID: keyEvent], track: true, at: self.currentTimestamp)
             }
             Log.debug("WindowController.onKeyboardEvent: \(event)")
