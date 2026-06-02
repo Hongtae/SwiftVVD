@@ -58,6 +58,11 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
 
     // MARK: - Platform Event Routing
 
+    private struct KeyEventStreamKey: Hashable {
+        var deviceID: Int
+        var key: VirtualKey
+    }
+
     // Platform event to EventID routing table.
     // WindowController maps backend device identifiers before forwarding events
     // to the gesture graph.
@@ -68,6 +73,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     private var _mouseSpatialEventID: EventID? = nil      // single mouse pointer spatial EventID
     private var _scrollEventID: EventID?
     private var _scrollTranslation: CGSize = .zero
+    private var _keyEventIDs: [KeyEventStreamKey: EventID] = [:]
     private var _hoverEventIDs: [Int: EventID] = [:]
     private var _magnifyEventID: EventID?
     private var _magnification: CGFloat = 1.0
@@ -126,6 +132,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         var outbound: [EventID: any EventType] = [:]
         var consumed: Set<EventID> = []
         for (eventID, event) in events {
+            let forwardsTrackedUpdates = event is KeyEvent
             switch event.eventPhase {
             case .began:
                 _hostTrackedEventIDs.insert(eventID)
@@ -133,14 +140,14 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                 outbound[eventID] = event
                 consumed.insert(eventID)
             case .moved:
-                if !_hostForwardedEventIDs.contains(eventID) {
+                if forwardsTrackedUpdates || !_hostForwardedEventIDs.contains(eventID) {
                     _hostTrackedEventIDs.insert(eventID)
                     _hostForwardedEventIDs.insert(eventID)
                     outbound[eventID] = event
                     consumed.insert(eventID)
                 }
             case .ended, .cancelled:
-                if !_hostForwardedEventIDs.contains(eventID) {
+                if forwardsTrackedUpdates || !_hostForwardedEventIDs.contains(eventID) {
                     outbound[eventID] = event
                     consumed.insert(eventID)
                 }
@@ -257,14 +264,44 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         return ""
     }
 
+    private func eventModifiers(from flags: KeyboardModifierFlags) -> EventModifiers {
+        var modifiers: EventModifiers = []
+        if flags.contains(.capsLock) { modifiers.insert(.capsLock) }
+        if flags.contains(.shift) { modifiers.insert(.shift) }
+        if flags.contains(.control) { modifiers.insert(.control) }
+        if flags.contains(.option) { modifiers.insert(.option) }
+        if flags.contains(.command) { modifiers.insert(.command) }
+        if flags.contains(.numericPad) { modifiers.insert(.numericPad) }
+        if flags.contains(.function) { modifiers.insert(.function) }
+        return modifiers
+    }
+
     private func keyEventPhase(for event: KeyboardEvent) -> EventPhase? {
         switch event.type {
         case .keyDown:
-            return .began
+            return event.isRepeat ? .moved : .began
         case .keyUp:
             return .ended
         case .textInput, .textComposition:
             return nil
+        }
+    }
+
+    private func keyEventID(for event: KeyboardEvent) -> EventID {
+        let streamKey = KeyEventStreamKey(deviceID: event.deviceID, key: event.key)
+        switch event.type {
+        case .keyDown:
+            if event.isRepeat, let eventID = _keyEventIDs[streamKey] {
+                return eventID
+            }
+            let eventID = EventID(type: KeyEvent.self, serial: nextEventSerial())
+            _keyEventIDs[streamKey] = eventID
+            return eventID
+        case .keyUp:
+            return _keyEventIDs.removeValue(forKey: streamKey)
+                ?? EventID(type: KeyEvent.self, serial: nextEventSerial())
+        case .textInput, .textComposition:
+            return EventID(type: KeyEvent.self, serial: nextEventSerial())
         }
     }
 
@@ -274,7 +311,8 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
             key: keyEquivalent(for: event),
             virtualKey: event.key,
             characters: keyCharacters(for: event),
-            phase: phase
+            phase: phase,
+            modifiers: eventModifiers(from: event.modifiers)
         )
     }
 
@@ -845,12 +883,17 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         let handleEvent = { (event: KeyboardEvent) -> Bool in
             if let window = self.window, window !== event.window { return false }
             self.contextMenuRecognizer.handleKeyboardEvent(event)
+            var keyConsumed = false
             if let keyEvent = self.keyEvent(from: event) {
-                let eventID = EventID(type: KeyEvent.self, serial: self.nextEventSerial())
-                _ = self.sendHostEvents([eventID: keyEvent], track: true, at: self.currentTimestamp)
+                let eventID = self.keyEventID(for: event)
+                keyConsumed = !self.sendHostEvents(
+                    [eventID: keyEvent],
+                    track: true,
+                    at: self.currentTimestamp
+                ).isEmpty
             }
             Log.debug("WindowController.onKeyboardEvent: \(event)")
-            return false
+            return keyConsumed
         }
 
         var handlers = self.presentationChildren.withLock {
@@ -1265,6 +1308,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         _mouseSpatialEventID = nil
         _scrollEventID = nil
         _scrollTranslation = .zero
+        _keyEventIDs.removeAll()
         _hoverEventIDs.removeAll()
         _magnifyEventID = nil
         _magnification = 1.0

@@ -56,12 +56,30 @@ public enum KeyboardEventType {
     case textComposition
 }
 
+public struct KeyboardModifierFlags: OptionSet, Sendable, Hashable {
+    public let rawValue: Int
+
+    public init(rawValue: Int) {
+        self.rawValue = rawValue
+    }
+
+    public static let capsLock = KeyboardModifierFlags(rawValue: 1 << 0)
+    public static let shift = KeyboardModifierFlags(rawValue: 1 << 1)
+    public static let control = KeyboardModifierFlags(rawValue: 1 << 2)
+    public static let option = KeyboardModifierFlags(rawValue: 1 << 3)
+    public static let command = KeyboardModifierFlags(rawValue: 1 << 4)
+    public static let numericPad = KeyboardModifierFlags(rawValue: 1 << 5)
+    public static let function = KeyboardModifierFlags(rawValue: 1 << 6)
+}
+
 public struct KeyboardEvent {
     public var type: KeyboardEventType
     public weak var window: (any Window)?
     public var deviceID: Int
     public var key: VirtualKey
     public var text: String
+    public var isRepeat: Bool = false
+    public var modifiers: KeyboardModifierFlags = []
 }
 
 public enum GestureEventType {

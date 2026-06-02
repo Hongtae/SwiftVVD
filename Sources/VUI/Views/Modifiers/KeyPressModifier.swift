@@ -9,13 +9,7 @@ import Foundation
 import Synchronization
 
 public struct KeyPress: Sendable, Hashable {
-    public enum Phase: Sendable, Hashable {
-        case down
-        case `repeat`
-        case up
-    }
-
-    public struct Phases: OptionSet, Sendable, Hashable {
+    public struct Phases: OptionSet, Sendable, Hashable, CustomDebugStringConvertible {
         public let rawValue: Int
 
         public init(rawValue: Int) {
@@ -27,15 +21,20 @@ public struct KeyPress: Sendable, Hashable {
         public static let up = Phases(rawValue: 1 << 2)
         public static let all: Phases = [.down, .repeat, .up]
 
-        func contains(_ phase: Phase) -> Bool {
-            switch phase {
-            case .down:
-                return contains(Self.down)
-            case .repeat:
-                return contains(Self.repeat)
-            case .up:
-                return contains(Self.up)
+        public var debugDescription: String {
+            if self == .down { return ".down" }
+            if self == .repeat { return ".repeat" }
+            if self == .up { return ".up" }
+            if self == .all { return ".all" }
+
+            var parts: [String] = []
+            if contains(.down) { parts.append(".down") }
+            if contains(.repeat) { parts.append(".repeat") }
+            if contains(.up) { parts.append(".up") }
+            if parts.isEmpty {
+                return "[]"
             }
+            return "[\(parts.joined(separator: ", "))]"
         }
     }
 
@@ -47,13 +46,13 @@ public struct KeyPress: Sendable, Hashable {
     public var key: KeyEquivalent
     public var characters: String
     public var modifiers: EventModifiers
-    public var phase: Phase
+    public var phase: Phases
 
     public init(
         key: KeyEquivalent,
         characters: String,
         modifiers: EventModifiers = [],
-        phase: Phase
+        phase: Phases
     ) {
         self.key = key
         self.characters = characters
@@ -62,7 +61,7 @@ public struct KeyPress: Sendable, Hashable {
     }
 
     init?(_ event: KeyEvent) {
-        guard let phase = Phase(event.eventPhase) else { return nil }
+        guard let phase = Phases(event.eventPhase) else { return nil }
         let key = event.key ?? event.characters.first.map { KeyEquivalent($0) }
         guard let key else { return nil }
         self.init(
@@ -74,7 +73,13 @@ public struct KeyPress: Sendable, Hashable {
     }
 }
 
-extension KeyPress.Phase {
+extension KeyPress: CustomDebugStringConvertible {
+    public var debugDescription: String {
+        "KeyPress(phase: \(phase.debugDescription), key: \(key), characters: \(characters), modifiers: \(modifiers.rawValue))"
+    }
+}
+
+extension KeyPress.Phases {
     init?(_ eventPhase: EventPhase) {
         switch eventPhase {
         case .began:
@@ -98,12 +103,14 @@ final class KeyPressResponder: MultiViewResponder, ViewResponder {
 
     var phases: KeyPress.Phases
     var keys: Set<KeyEquivalent>?
+    var characters: CharacterSet?
     var callback: (KeyPress) -> KeyPress.Result
     var snapshotIsEnabled: Bool
 
     init(
         phases: KeyPress.Phases,
         keys: Set<KeyEquivalent>?,
+        characters: CharacterSet?,
         callback: @escaping (KeyPress) -> KeyPress.Result,
         isEnabled: Bool,
         innerResponders: [any ViewResponder]
@@ -114,6 +121,7 @@ final class KeyPressResponder: MultiViewResponder, ViewResponder {
         }
         self.phases = phases
         self.keys = keys
+        self.characters = characters
         self.callback = callback
         self.snapshotIsEnabled = isEnabled
         super.init()
@@ -145,6 +153,9 @@ final class KeyPressResponder: MultiViewResponder, ViewResponder {
         guard snapshotIsEnabled else { return .ignored }
         guard phases.contains(keyPress.phase) else { return .ignored }
         if let keys, !keys.contains(keyPress.key) { return .ignored }
+        if let characters, !keyPress.characters.unicodeScalars.contains(where: { characters.contains($0) }) {
+            return .ignored
+        }
         return callback(keyPress)
     }
 }
@@ -203,15 +214,18 @@ final class KeyEventDispatcher {
 public struct _KeyPressModifier: ViewModifier, MultiViewModifier {
     public let phases: KeyPress.Phases
     public let keys: Set<KeyEquivalent>?
+    public let characters: CharacterSet?
     public let callback: (KeyPress) -> KeyPress.Result
 
     public init(
         phases: KeyPress.Phases,
         keys: Set<KeyEquivalent>? = nil,
+        characters: CharacterSet? = nil,
         callback: @escaping (KeyPress) -> KeyPress.Result
     ) {
         self.phases = phases
         self.keys = keys
+        self.characters = characters
         self.callback = callback
     }
 
@@ -255,6 +269,7 @@ public struct _KeyPressModifier: ViewModifier, MultiViewModifier {
         let responder = KeyPressResponder(
             phases: modifierValue.phases,
             keys: modifierValue.keys,
+            characters: modifierValue.characters,
             callback: modifierValue.callback,
             isEnabled: environmentAttr.value.isEnabled,
             innerResponders: innerRespondersAttr.value
@@ -264,6 +279,7 @@ public struct _KeyPressModifier: ViewModifier, MultiViewModifier {
             let modifierValue = modifier._attribute.value
             responder.phases = modifierValue.phases
             responder.keys = modifierValue.keys
+            responder.characters = modifierValue.characters
             responder.callback = modifierValue.callback
             responder.snapshotIsEnabled = environmentAttr.value.isEnabled
             responder.updateInnerResponders(innerRespondersAttr.value)
@@ -282,7 +298,7 @@ extension _KeyPressModifier {
 
 extension View {
     public func onKeyPress(
-        phases: KeyPress.Phases = .down,
+        phases: KeyPress.Phases = [.down, .repeat],
         action: @escaping (KeyPress) -> KeyPress.Result
     ) -> some View {
         modifier(_KeyPressModifier(phases: phases, callback: action))
@@ -290,7 +306,22 @@ extension View {
 
     public func onKeyPress(
         _ key: KeyEquivalent,
-        phases: KeyPress.Phases = .down,
+        action: @escaping () -> KeyPress.Result
+    ) -> some View {
+        onKeyPress(keys: [key], phases: [.down, .repeat]) { _ in action() }
+    }
+
+    public func onKeyPress(
+        _ key: KeyEquivalent,
+        phases: KeyPress.Phases,
+        action: @escaping (KeyPress) -> KeyPress.Result
+    ) -> some View {
+        onKeyPress(keys: [key], phases: phases, action: action)
+    }
+
+    public func onKeyPress(
+        _ key: KeyEquivalent,
+        phases: KeyPress.Phases,
         action: @escaping () -> KeyPress.Result
     ) -> some View {
         onKeyPress(keys: [key], phases: phases) { _ in action() }
@@ -298,9 +329,17 @@ extension View {
 
     public func onKeyPress(
         keys: Set<KeyEquivalent>,
-        phases: KeyPress.Phases = .down,
+        phases: KeyPress.Phases = [.down, .repeat],
         action: @escaping (KeyPress) -> KeyPress.Result
     ) -> some View {
         modifier(_KeyPressModifier(phases: phases, keys: keys, callback: action))
+    }
+
+    public func onKeyPress(
+        characters: CharacterSet,
+        phases: KeyPress.Phases = [.down, .repeat],
+        action: @escaping (KeyPress) -> KeyPress.Result
+    ) -> some View {
+        modifier(_KeyPressModifier(phases: phases, characters: characters, callback: action))
     }
 }

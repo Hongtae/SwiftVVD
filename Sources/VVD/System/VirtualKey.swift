@@ -2,10 +2,10 @@
 //  File: VirtualKey.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-public enum VirtualKey: Sendable {
+public enum VirtualKey: Hashable, Sendable {
     case none
     case escape
     case f1, f2, f3, f4

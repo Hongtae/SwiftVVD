@@ -122,6 +122,7 @@ final class Win32Window: Window {
     private var mouseLocked: Bool = false
     private var textCompositionMode: Bool = false
     private var keyboardStates: [UInt8] = [UInt8](repeating: 0, count: 256)
+    private var pendingKeyRepeat: Int? = nil
 
     // WM_GESTURE tracking values for incremental delta computation.
     private var _lastGestureDistance: DWORD = 0
@@ -615,11 +616,33 @@ final class Win32Window: Window {
         }
     }
 
+    private func keyboardModifiers(from keyStates: [UInt8]) -> KeyboardModifierFlags {
+        let capsLock = keyStates[Int(VK_CAPITAL)] & 0x01 != 0
+        let leftShift = keyStates[Int(VK_LSHIFT)] & 0x80 != 0
+        let rightShift = keyStates[Int(VK_RSHIFT)] & 0x80 != 0
+        let leftControl = keyStates[Int(VK_LCONTROL)] & 0x80 != 0
+        let rightControl = keyStates[Int(VK_RCONTROL)] & 0x80 != 0
+        let leftAlt = keyStates[Int(VK_LMENU)] & 0x80 != 0
+        let rightAlt = keyStates[Int(VK_RMENU)] & 0x80 != 0
+        let leftWin = keyStates[Int(VK_LWIN)] & 0x80 != 0
+        let rightWin = keyStates[Int(VK_RWIN)] & 0x80 != 0
+
+        var modifiers: KeyboardModifierFlags = []
+        if capsLock { modifiers.insert(.capsLock) }
+        if leftShift || rightShift { modifiers.insert(.shift) }
+        if leftControl || rightControl { modifiers.insert(.control) }
+        if leftAlt || rightAlt { modifiers.insert(.option) }
+        if leftWin || rightWin { modifiers.insert(.command) }
+        return modifiers
+    }
+
     private func synchronizeKeyStates() {
         guard self.activated else { return }
 
         var keyStates: [UInt8] = [UInt8](repeating: 0, count: 256)
         GetKeyboardState(&keyStates)
+
+        let modifiers = self.keyboardModifiers(from: keyStates)
 
         for key in 0..<256 {
             if key == VK_CAPITAL { continue }
@@ -634,17 +657,36 @@ final class Win32Window: Window {
                                                     window: self,
                                                     deviceID: 0,
                                                     key: virtualKey,
-                                                    text: ""))
+                                                    text: "",
+                                                    modifiers: modifiers))
+                    if self.pendingKeyRepeat == key {
+                        self.pendingKeyRepeat = nil
+                    }
                 } else {
                     // Post key-up event.
                     postKeyboardEvent(KeyboardEvent(type: .keyUp,
                                                     window: self,
                                                     deviceID: 0,
                                                     key: virtualKey,
-                                                    text: ""))
+                                                    text: "",
+                                                    modifiers: modifiers))
+                    if self.pendingKeyRepeat == key {
+                        self.pendingKeyRepeat = nil
+                    }
                 }
+            } else if isDown && self.pendingKeyRepeat == key {
+                postKeyboardEvent(KeyboardEvent(type: .keyDown,
+                                                window: self,
+                                                deviceID: 0,
+                                                key: virtualKey,
+                                                text: "",
+                                                isRepeat: true,
+                                                modifiers: modifiers))
+                self.pendingKeyRepeat = nil
+            } else if isDown == false && self.pendingKeyRepeat == key {
+                self.pendingKeyRepeat = nil
             }
-        } 
+        }
 
         let capslock = Int(VK_CAPITAL)
         if keyStates[capslock] & 0x01 != self.keyboardStates[capslock] & 0x01 {
@@ -654,14 +696,16 @@ final class Win32Window: Window {
                                                 window: self,
                                                 deviceID: 0,
                                                 key: .capslock,
-                                                text: ""))
+                                                text: "",
+                                                modifiers: modifiers))
             } else {
                 // Caps Lock off.
                 postKeyboardEvent(KeyboardEvent(type: .keyUp,
                                                 window: self,
                                                 deviceID: 0,
                                                 key: .capslock,
-                                                text: ""))
+                                                text: "",
+                                                modifiers: modifiers))
             }
         }
         self.keyboardStates = keyStates
@@ -694,6 +738,7 @@ final class Win32Window: Window {
 
         GetKeyboardState(&keyboardStates) // Empty the keyboard queue.
         self.keyboardStates = [UInt8](repeating: 0, count: 256)
+        self.pendingKeyRepeat = nil
     }
 
     // MARK: - Coordinate Conversion
@@ -1460,7 +1505,7 @@ final class Win32Window: Window {
                 }
             case UINT(WM_SYSKEYDOWN),
                  UINT(WM_SYSKEYUP):
-                return 0    // Block Alt key.
+                return 0    // block ALT-key
             case UINT(WM_KEYDOWN),
                  UINT(WM_KEYUP):
                 return 0

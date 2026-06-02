@@ -40,6 +40,19 @@ private let RIGHT_ALTERNATE_BIT = UInt(0x80040)
 private let LEFT_COMMAND_BIT = UInt(0x100008)
 private let RIGHT_COMMAND_BIT = UInt(0x100010)
 
+private extension KeyboardModifierFlags {
+    init(_ flags: NSEvent.ModifierFlags) {
+        self.init()
+        if flags.contains(.capsLock) { insert(.capsLock) }
+        if flags.contains(.shift) { insert(.shift) }
+        if flags.contains(.control) { insert(.control) }
+        if flags.contains(.option) { insert(.option) }
+        if flags.contains(.command) { insert(.command) }
+        if flags.contains(.numericPad) { insert(.numericPad) }
+        if flags.contains(.function) { insert(.function) }
+    }
+}
+
 @MainActor
 private final class AppKitViewImpl: NSView, NSTextInputClient, NSWindowDelegate, AppKitView {
 
@@ -239,15 +252,18 @@ private final class AppKitViewImpl: NSView, NSTextInputClient, NSWindowDelegate,
         if self.textInput {
             self.inputContext?.handleEvent(event)
         }
-        if event.isARepeat == false {
-            self.postKeyboardEvent(type: .keyDown, keyCode: event.keyCode)
-        }
+        self.postKeyboardEvent(type: .keyDown,
+                               keyCode: event.keyCode,
+                               isRepeat: event.isARepeat,
+                               modifiers: KeyboardModifierFlags(event.modifierFlags))
     }
 
     override func keyUp(with event: NSEvent) {
         if self.textInput {
         }
-        self.postKeyboardEvent(type: .keyUp, keyCode: event.keyCode)
+        self.postKeyboardEvent(type: .keyUp,
+                               keyCode: event.keyCode,
+                               modifiers: KeyboardModifierFlags(event.modifierFlags))
     }
 
     override func flagsChanged(with event: NSEvent) {
@@ -258,11 +274,15 @@ private final class AppKitViewImpl: NSView, NSTextInputClient, NSWindowDelegate,
         let updateKey = { (modifier: NSEvent.ModifierFlags, vkey: VirtualKey) in
             if flags.contains(modifier) {
                 if self.modifierKeyFlags.contains(modifier) == false {
-                    self.postKeyboardEvent(type: .keyDown, mappedVKey: vkey)
+                    self.postKeyboardEvent(type: .keyDown,
+                                           mappedVKey: vkey,
+                                           modifiers: KeyboardModifierFlags(flags))
                 }
             } else {
                 if self.modifierKeyFlags.contains(modifier) {
-                    self.postKeyboardEvent(type: .keyUp, mappedVKey: vkey)
+                    self.postKeyboardEvent(type: .keyUp,
+                                           mappedVKey: vkey,
+                                           modifiers: KeyboardModifierFlags(flags))
                 }
             }
         }
@@ -676,20 +696,35 @@ private final class AppKitViewImpl: NSView, NSTextInputClient, NSWindowDelegate,
         }
     }
 
-    func postKeyboardEvent(type: KeyboardEventType, keyCode: UInt16) {
+    func postKeyboardEvent(
+        type: KeyboardEventType,
+        keyCode: UInt16,
+        isRepeat: Bool = false,
+        modifiers: KeyboardModifierFlags = []
+    ) {
         let mappedVKey = VirtualKey.from(code: keyCode)
         if mappedVKey != .none {
-            self.postKeyboardEvent(type: type, mappedVKey: mappedVKey)
+            self.postKeyboardEvent(type: type,
+                                   mappedVKey: mappedVKey,
+                                   isRepeat: isRepeat,
+                                   modifiers: modifiers)
         }
     }
 
-    func postKeyboardEvent(type: KeyboardEventType, mappedVKey: VirtualKey) {
+    func postKeyboardEvent(
+        type: KeyboardEventType,
+        mappedVKey: VirtualKey,
+        isRepeat: Bool = false,
+        modifiers: KeyboardModifierFlags = []
+    ) {
         if let window = self.proxyWindow {
             window.postKeyboardEvent(KeyboardEvent(type: type,
                                                    window: window,
                                                    deviceID: 0,
                                                    key: mappedVKey,
-                                                   text: ""))
+                                                   text: "",
+                                                   isRepeat: isRepeat,
+                                                   modifiers: modifiers))
         }
     }
 

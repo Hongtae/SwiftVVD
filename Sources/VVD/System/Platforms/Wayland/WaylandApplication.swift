@@ -2,7 +2,7 @@
 //  File: WaylandApplication.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_WAYLAND
@@ -224,6 +224,13 @@ final class WaylandApplication: Application, @unchecked Sendable {
 
     private let outputModeCurrentFlag: UInt32 = 0x1
 
+    private struct KeyRepeatState {
+        let key: UInt32
+        let virtualKey: VirtualKey
+        weak var window: WaylandWindow?
+        var nextFireTime: Date
+    }
+
     var activationPolicy: ActivationPolicy = .regular
     var isActive: Bool {
         activeWindow != nil
@@ -243,6 +250,9 @@ final class WaylandApplication: Application, @unchecked Sendable {
     private var xkbContext: XKBContext? = nil
 
     private var requestExitWithCode: Int? = nil
+    private var keyRepeatRate: Int32 = 0
+    private var keyRepeatDelay: Int32 = 0
+    private var keyRepeatState: KeyRepeatState? = nil
 
     static func run(delegate: ApplicationDelegate?) -> Int {
         precondition(Thread.isMainThread, "\(#function) must be called on the main thread.")
@@ -267,7 +277,8 @@ final class WaylandApplication: Application, @unchecked Sendable {
 
             wl_display_read_events(display)
             wl_display_dispatch_pending(display)
-            
+            app.processKeyRepeat()
+
             if let code = app.requestExitWithCode {
                 result = code
                 break
@@ -605,6 +616,7 @@ final class WaylandApplication: Application, @unchecked Sendable {
     }
 
     fileprivate func keyboardLeave(serial: UInt32, surface: OpaquePointer?) {
+        self.keyRepeatState = nil
         Log.debug("wl_keyboard_listener.leave (serial:\(serial))")
     }
 
@@ -624,6 +636,12 @@ final class WaylandApplication: Application, @unchecked Sendable {
             MainActor.assumeIsolated {
                 self.activeWindow?.postKeyboardEvent(keyEvent)
             }
+
+            if pressed {
+                self.scheduleKeyRepeat(for: key, virtualKey: code)
+            } else if self.keyRepeatState?.key == key {
+                self.keyRepeatState = nil
+            }
         }
 
         if let symbol = self.xkbContext?.symbol(forKey: key) {
@@ -642,7 +660,56 @@ final class WaylandApplication: Application, @unchecked Sendable {
     }
 
     fileprivate func keyboardRepeatInfo(rate: Int32, delay: Int32) {
+        self.keyRepeatRate = rate
+        self.keyRepeatDelay = delay
+        if rate <= 0 {
+            self.keyRepeatState = nil
+        }
         Log.debug("wl_keyboard_listener.repeat_info (rate:\(rate), delay:\(delay))")
+    }
+
+    private func scheduleKeyRepeat(for key: UInt32, virtualKey: VirtualKey) {
+        guard self.keyRepeatRate > 0,
+              self.xkbContext?.shouldRepeats(key) == true,
+              let window = self.activeWindow else {
+            return
+        }
+
+        self.keyRepeatState = KeyRepeatState(
+            key: key,
+            virtualKey: virtualKey,
+            window: window,
+            nextFireTime: Date().addingTimeInterval(Double(max(0, self.keyRepeatDelay)) / 1000.0)
+        )
+    }
+
+    private func processKeyRepeat() {
+        guard self.keyRepeatRate > 0, var state = self.keyRepeatState else { return }
+
+        let now = Date()
+        guard now >= state.nextFireTime else { return }
+        guard let window = state.window else {
+            self.keyRepeatState = nil
+            return
+        }
+        let isActive = MainActor.assumeIsolated { window.activated }
+        guard isActive else {
+            self.keyRepeatState = nil
+            return
+        }
+
+        let keyEvent = KeyboardEvent(type: .keyDown,
+                                     window: window,
+                                     deviceID: 0,
+                                     key: state.virtualKey,
+                                     text: "",
+                                     isRepeat: true)
+        MainActor.assumeIsolated {
+            window.postKeyboardEvent(keyEvent)
+        }
+
+        state.nextFireTime = now.addingTimeInterval(1.0 / Double(self.keyRepeatRate))
+        self.keyRepeatState = state
     }
 }
 

@@ -199,7 +199,7 @@ final class HoverEventDispatcher {
                 actions.append(action)
             }
         }
-        for responder in newResponders {
+        for responder in newResponders.reversed() {
             if let action = responder.updateHover(isActive: true, point: location) {
                 actions.append(action)
             }
