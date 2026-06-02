@@ -43,7 +43,7 @@ import Foundation
             location.getValue()
         }
         nonmutating set {
-            location.setValue(newValue, transaction: transaction)
+            location.setValue(newValue, transaction: resolvedTransaction)
         }
     }
 
@@ -112,7 +112,7 @@ extension Binding: Collection where Value: MutableCollection {
         let setter = { newValue in
             var enclosingValue = location.getValue()
             enclosingValue[position] = newValue
-            location.setValue(enclosingValue, transaction: Transaction())
+            location.setValue(enclosingValue, transaction: resolvedTransaction)
         }
         return Binding<Value>.Element(get: getter, set: setter)
     }
@@ -132,6 +132,10 @@ extension Binding: RandomAccessCollection where Value: MutableCollection, Value:
 }
 
 extension Binding {
+    private var resolvedTransaction: Transaction {
+        transaction.isEmpty ? Transaction.current : transaction
+    }
+
     public func transaction(_ transaction: Transaction) -> Binding<Value> {
         var binding = self
         binding.transaction = transaction
@@ -149,4 +153,3 @@ extension Binding: DynamicProperty {
         buffer.properties.append(.init(type: self, offset: fieldOffset))
     }
 }
-

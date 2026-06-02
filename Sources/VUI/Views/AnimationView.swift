@@ -21,14 +21,12 @@ public struct _AnimationView<Content>: View where Content: Equatable, Content: V
             fatalError("\(self)._makeView called outside an active AttributeGraph context.")
         }
         let parentTransAttr = inputs.base.transaction
-        let newTransAttr: Attribute<Transaction> = graph.makeRule {
-            let v = view._attribute.value
-            var t = parentTransAttr.value
-            if let anim = v.animation {
-                t.animation = anim
-            }
-            return t
-        }
+        let newTransAttr: Attribute<Transaction> = graph.makeStatefulRule(
+            AnimationViewTransactionRule(
+                view: view._attribute,
+                parent: parentTransAttr
+            )
+        )
         var modifiedInputs = inputs
         modifiedInputs.base.transaction = newTransAttr
         return Content._makeView(view: view[\.content], inputs: modifiedInputs)
@@ -39,14 +37,12 @@ public struct _AnimationView<Content>: View where Content: Equatable, Content: V
             fatalError("\(self)._makeViewList called outside an active AttributeGraph context.")
         }
         let parentTransAttr = inputs.base.transaction
-        let newTransAttr: Attribute<Transaction> = graph.makeRule {
-            let v = view._attribute.value
-            var t = parentTransAttr.value
-            if let anim = v.animation {
-                t.animation = anim
-            }
-            return t
-        }
+        let newTransAttr: Attribute<Transaction> = graph.makeStatefulRule(
+            AnimationViewTransactionRule(
+                view: view._attribute,
+                parent: parentTransAttr
+            )
+        )
         var modifiedInputs = inputs
         modifiedInputs.base.transaction = newTransAttr
         return Content._makeViewList(view: view[\.content], inputs: modifiedInputs)
@@ -56,4 +52,24 @@ public struct _AnimationView<Content>: View where Content: Equatable, Content: V
 }
 
 extension _AnimationView: _PrimitiveView {
+}
+
+private struct AnimationViewTransactionRule<Content: View & Equatable>: StatefulRule {
+    typealias Value = Transaction
+
+    var view: Attribute<_AnimationView<Content>>
+    var parent: Attribute<Transaction>
+    var previousContent: Content?
+
+    mutating func updateValue() {
+        let viewValue = view.value
+        var transaction = parent.value
+        if let previousContent,
+           previousContent != viewValue.content,
+           !transaction.disablesAnimations {
+            transaction.animation = viewValue.animation
+        }
+        previousContent = viewValue.content
+        AttributeGraph.setStatefulOutput(transaction)
+    }
 }

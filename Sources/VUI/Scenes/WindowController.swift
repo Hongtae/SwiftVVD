@@ -583,6 +583,16 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
             sourceGraph.inbox.drain()
             sourceGraph.drainActions()
         }
+        drainActionOutbox(sourceGraph)
+    }
+
+    @discardableResult
+    private func drainActionOutbox(_ graph: AttributeGraph) -> Bool {
+        let actions = graph.actionOutbox
+        guard !actions.isEmpty else { return false }
+        graph.actionOutbox.removeAll()
+        actions.forEach { $0() }
+        return true
     }
 
     func updateView(tick: UInt64, delta: Double, date: Date,
@@ -632,6 +642,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
             // Internally: data.withCurrent, inbox drain, dirty root update, time update.
             flushCrossGraphSourceIfNeeded()
             viewGraph.updateOutputs(at: time)
+            drainActionOutbox(viewGraph.data.graph)
 
             // Resource loading: requires GraphicsContext, handled separately after updateOutputs.
             viewGraph.data.withCurrent {
@@ -644,6 +655,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                     }
                     viewGraph.data.graph.inbox.drain()
                     viewGraph.data.graph.drainActions()
+                    drainActionOutbox(viewGraph.data.graph)
                 }
             }
 
@@ -676,6 +688,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                     onViewLayoutUpdated()
                 }
             }
+            drainActionOutbox(viewGraph.data.graph)
         }
         // Preserve redraw requests raised earlier in this frame, including
         // child modal input handled during the parent event pass.
@@ -714,6 +727,9 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                 }
             }
             self.viewChangedWhileDrawing = !changeSet.isEmpty
+        }
+        if drainActionOutbox(viewGraph.data.graph) {
+            viewChangedWhileDrawing = true
         }
         // Overlay presentation children: draw on top after self.
         for entry in self.presentationChildren.withLock({ $0 }) {

@@ -41,7 +41,7 @@ import Observation
         }
         nonmutating set {
             if let _location {
-                _location.setValue(newValue, transaction: Transaction())
+                _location.setValue(newValue, transaction: Transaction.current)
             }
         }
     }
@@ -126,11 +126,12 @@ extension State {
                     // without accessing the node.
                     return cache.value
                 },
-                set: { newValue, _ in
+                set: { newValue, transaction in
                     cache.value = newValue
-                    let box = MutableBox(newValue)   // @unchecked Sendable for capture
+                    let box = UnsafeBox(newValue)
+                    let transactionBox = UnsafeBox(transaction)
                     inbox.enqueue {
-                        attr.setValue(box.value)
+                        attr.setValue(box.value, transaction: transactionBox.value)
                     }
                 }
             ))

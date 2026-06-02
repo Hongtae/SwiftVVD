@@ -21,14 +21,12 @@ public struct _AnimationModifier<Value>: ViewModifier where Value: Equatable {
             fatalError("\(self)._makeView called outside an active AttributeGraph context.")
         }
         let parentTransAttr = inputs.base.transaction
-        let newTransAttr: Attribute<Transaction> = graph.makeRule {
-            let m = modifier._attribute.value
-            var t = parentTransAttr.value
-            if let anim = m.animation {
-                t.animation = anim
-            }
-            return t
-        }
+        let newTransAttr: Attribute<Transaction> = graph.makeStatefulRule(
+            AnimationModifierTransactionRule(
+                modifier: modifier._attribute,
+                parent: parentTransAttr
+            )
+        )
         var modifiedInputs = inputs
         modifiedInputs.base.transaction = newTransAttr
         return body(_Graph(), modifiedInputs)
@@ -39,14 +37,12 @@ public struct _AnimationModifier<Value>: ViewModifier where Value: Equatable {
             fatalError("\(self)._makeViewList called outside an active AttributeGraph context.")
         }
         let parentTransAttr = inputs.base.transaction
-        let newTransAttr: Attribute<Transaction> = graph.makeRule {
-            let m = modifier._attribute.value
-            var t = parentTransAttr.value
-            if let anim = m.animation {
-                t.animation = anim
-            }
-            return t
-        }
+        let newTransAttr: Attribute<Transaction> = graph.makeStatefulRule(
+            AnimationModifierTransactionRule(
+                modifier: modifier._attribute,
+                parent: parentTransAttr
+            )
+        )
         var modifiedInputs = inputs
         modifiedInputs.base.transaction = newTransAttr
         return body(_Graph(), modifiedInputs)
@@ -56,6 +52,26 @@ public struct _AnimationModifier<Value>: ViewModifier where Value: Equatable {
 }
 
 extension _AnimationModifier: Equatable {
+}
+
+private struct AnimationModifierTransactionRule<Observed: Equatable>: StatefulRule {
+    typealias Value = Transaction
+
+    var modifier: Attribute<_AnimationModifier<Observed>>
+    var parent: Attribute<Transaction>
+    var previousValue: Observed?
+
+    mutating func updateValue() {
+        let modifierValue = modifier.value
+        var transaction = parent.value
+        if let previousValue,
+           previousValue != modifierValue.value,
+           !transaction.disablesAnimations {
+            transaction.animation = modifierValue.animation
+        }
+        previousValue = modifierValue.value
+        AttributeGraph.setStatefulOutput(transaction)
+    }
 }
 
 extension View {

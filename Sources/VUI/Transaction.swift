@@ -95,6 +95,10 @@ extension Transaction {
     }
     @TaskLocal
     static var _current: _Local?
+
+    static var current: Transaction {
+        _current?.transaction ?? Transaction()
+    }
 }
 
 // Gesture / physics animation keys

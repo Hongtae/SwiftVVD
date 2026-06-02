@@ -9,14 +9,133 @@ import Foundation
 
 @usableFromInline
 class AnimationBoxBase: @unchecked Sendable {
+    var duration: TimeInterval { 0 }
+
+    func value(at progress: Double) -> Double {
+        progress
+    }
 }
 
+@usableFromInline
+final class TimingCurveAnimationBox: AnimationBoxBase, @unchecked Sendable {
+    let curve: UnitCurve
+    let storedDuration: TimeInterval
+
+    init(curve: UnitCurve, duration: TimeInterval) {
+        self.curve = curve
+        self.storedDuration = duration
+    }
+
+    override var duration: TimeInterval {
+        storedDuration
+    }
+
+    override func value(at progress: Double) -> Double {
+        curve.value(at: progress)
+    }
+}
 
 public struct Animation: Equatable, Sendable {
     var box: AnimationBoxBase
 
+    @usableFromInline
+    init(box: AnimationBoxBase) {
+        self.box = box
+    }
+
     public static func == (lhs: Animation, rhs: Animation) -> Bool {
         lhs.box === rhs.box
+    }
+}
+
+public struct AnimationCompletionCriteria: Hashable, Sendable {
+    private let storage: UInt8
+
+    private init(storage: UInt8) {
+        self.storage = storage
+    }
+
+    public static let logicallyComplete = AnimationCompletionCriteria(storage: 0)
+    public static let removed = AnimationCompletionCriteria(storage: 1)
+}
+
+final class AnimationCompletionObserver: @unchecked Sendable {
+    private struct Entry {
+        var criteria: AnimationCompletionCriteria
+        var completion: () -> Void
+    }
+
+    private var entries: [Entry] = []
+    private var activeAnimations: Int = 0
+    private var bodyFinished = false
+    private var registeredAnimation = false
+    private var completed = false
+
+    init(criteria: AnimationCompletionCriteria, completion: @escaping () -> Void) {
+        entries.append(Entry(criteria: criteria, completion: completion))
+    }
+
+    func add(criteria: AnimationCompletionCriteria, completion: @escaping () -> Void) {
+        guard !completed else { return }
+        entries.append(Entry(criteria: criteria, completion: completion))
+    }
+
+    func animationDidStart() -> AnimationCompletionToken? {
+        guard !completed else { return nil }
+        registeredAnimation = true
+        activeAnimations += 1
+        return AnimationCompletionToken(observer: self)
+    }
+
+    func bodyDidFinish() -> [() -> Void] {
+        bodyFinished = true
+        return completionsIfReady()
+    }
+
+    fileprivate func animationDidFinish() -> [() -> Void] {
+        guard activeAnimations > 0 else { return [] }
+        activeAnimations -= 1
+        return completionsIfReady()
+    }
+
+    private func completionsIfReady() -> [() -> Void] {
+        guard !completed,
+              bodyFinished,
+              registeredAnimation,
+              activeAnimations == 0 else {
+            return []
+        }
+        completed = true
+        return entries.map(\.completion)
+    }
+}
+
+final class AnimationCompletionToken: @unchecked Sendable {
+    private let observer: AnimationCompletionObserver
+    private var finished = false
+
+    init(observer: AnimationCompletionObserver) {
+        self.observer = observer
+    }
+
+    func finish() -> [() -> Void] {
+        guard !finished else { return [] }
+        finished = true
+        return observer.animationDidFinish()
+    }
+}
+
+func enqueueAnimationCompletionActions(_ actions: [() -> Void]) {
+    guard !actions.isEmpty else { return }
+    let wrapped = actions.map { action in
+        {
+            AttributeGraph.withoutTracking(action)
+        }
+    }
+    if let graph = AttributeGraph.current {
+        graph.actionOutbox.append(contentsOf: wrapped)
+    } else {
+        wrapped.forEach { $0() }
     }
 }
 
@@ -33,7 +152,7 @@ extension Animation: CustomStringConvertible, CustomDebugStringConvertible, Cust
 }
 
 extension Animation {
-    public static let `default`: Animation = .init(box: AnimationBoxBase())
+    public static let `default`: Animation = .easeInOut
 }
 
 extension Animation {
@@ -62,12 +181,35 @@ extension Animation {
         timingCurve(0.0, 0.0, 1.0, 1.0)
     }
     public static func timingCurve(_ p1x: Double, _ p1y: Double, _ p2x: Double, _ p2y: Double, duration: TimeInterval = 0.35) -> Animation {
-        fatalError()
+        let curve = UnitCurve(c1x: p1x, c1y: p1y, c2x: p2x, c2y: p2y)
+        return Animation(box: TimingCurveAnimationBox(curve: curve, duration: max(0, duration)))
     }
 
     public static func timingCurve(_ curve: UnitCurve, duration: TimeInterval) -> Animation {
         timingCurve(curve.c1x, curve.c1y, curve.c2x, curve.c2y, duration: duration)
     }
+}
+
+public func withAnimation<Result>(
+    _ animation: Animation? = .default,
+    _ body: () throws -> Result
+) rethrows -> Result {
+    try withTransaction(Transaction(animation: animation), body)
+}
+
+public func withAnimation<Result>(
+    _ animation: Animation? = .default,
+    completionCriteria: AnimationCompletionCriteria = .logicallyComplete,
+    _ body: () throws -> Result,
+    completion: @escaping () -> Void
+) rethrows -> Result {
+    var transaction = Transaction(animation: animation)
+    transaction.addAnimationCompletion(criteria: completionCriteria, completion)
+    let result = try withTransaction(transaction, body)
+    enqueueAnimationCompletionActions(
+        transaction.animationCompletionObserver?.bodyDidFinish() ?? []
+    )
+    return result
 }
 
 private struct AnimationTransactionKey: TransactionKey {
@@ -78,6 +220,15 @@ private struct AnimationTransactionKey: TransactionKey {
 private struct DisablesAnimationsTransactionKey: TransactionKey {
     typealias Value = Bool
     static var defaultValue: Bool { false }
+}
+
+private struct AnimationCompletionObserverTransactionKey: TransactionKey {
+    typealias Value = AnimationCompletionObserver?
+    static var defaultValue: AnimationCompletionObserver? { nil }
+
+    static func _valuesEqual(_ lhs: AnimationCompletionObserver?, _ rhs: AnimationCompletionObserver?) -> Bool {
+        lhs === rhs
+    }
 }
 
 extension Transaction {
@@ -93,6 +244,25 @@ extension Transaction {
     public var disablesAnimations: Bool {
         get { self[DisablesAnimationsTransactionKey.self] }
         set { self[DisablesAnimationsTransactionKey.self] = newValue }
+    }
+
+    var animationCompletionObserver: AnimationCompletionObserver? {
+        get { self[AnimationCompletionObserverTransactionKey.self] }
+        set { self[AnimationCompletionObserverTransactionKey.self] = newValue }
+    }
+
+    public mutating func addAnimationCompletion(
+        criteria: AnimationCompletionCriteria = .logicallyComplete,
+        _ completion: @escaping () -> Void
+    ) {
+        if let observer = animationCompletionObserver {
+            observer.add(criteria: criteria, completion: completion)
+        } else {
+            animationCompletionObserver = AnimationCompletionObserver(
+                criteria: criteria,
+                completion: completion
+            )
+        }
     }
 }
 

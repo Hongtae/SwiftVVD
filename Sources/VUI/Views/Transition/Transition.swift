@@ -31,27 +31,22 @@ extension PlaceholderContentView: _PrimitiveView {
 public struct _Transition_ContentTransition {
 }
 
-public enum TransitionPhase {
+public enum TransitionPhase: Hashable, Sendable {
     case willAppear
     case identity
     case didDisappear
     public var isIdentity: Bool {
-        get { fatalError() }
-    }
-    public static func == (a: TransitionPhase, b: TransitionPhase) -> Bool {
-        fatalError()
-    }
-    public func hash(into hasher: inout Swift.Hasher) {
-        fatalError()
-    }
-    public var hashValue: Int {
-        get { fatalError() }
+        self == .identity
     }
 }
 
 extension TransitionPhase {
     public var value: Double {
-        get { fatalError() }
+        switch self {
+        case .willAppear: return -1
+        case .identity: return 0
+        case .didDisappear: return 1
+        }
     }
 }
 
@@ -62,16 +57,43 @@ public struct TransitionProperties: Sendable {
     }
 }
 
+extension Transition {
+    public static var properties: TransitionProperties {
+        TransitionProperties()
+    }
+
+    public func _makeContentTransition(transition: inout _Transition_ContentTransition) {
+    }
+}
 
 @usableFromInline
 class AnyTransitionBox: @unchecked Sendable {
+    enum Storage: @unchecked Sendable {
+        case identity
+        case opacity
+        case slide
+        case offset(CGSize)
+        case push(Edge)
+        case scale(CGFloat, UnitPoint)
+        case modifier(active: Any, identity: Any)
+        case asymmetric(insertion: AnyTransition, removal: AnyTransition)
+        case combined(AnyTransition, AnyTransition)
+        case animation(AnyTransition, Animation?)
+        case custom(Any)
+    }
+
+    let storage: Storage
+
+    init(storage: Storage = .identity) {
+        self.storage = storage
+    }
 }
 
 public struct AnyTransition: Sendable {
     fileprivate let box: AnyTransitionBox
 
     public init<T>(_ transition: T) where T: Transition {
-        fatalError()
+        self.box = AnyTransitionBox(storage: .custom(transition))
     }
     
     init(box: AnyTransitionBox) {
@@ -79,42 +101,42 @@ public struct AnyTransition: Sendable {
     }
 
     public static var slide: AnyTransition {
-        fatalError()
+        AnyTransition(box: AnyTransitionBox(storage: .slide))
     }
     public static func offset(_ offset: CGSize) -> AnyTransition {
-        fatalError()
+        AnyTransition(box: AnyTransitionBox(storage: .offset(offset)))
     }
     public static func offset(x: CGFloat = 0, y: CGFloat = 0) -> AnyTransition {
-        fatalError()
+        offset(CGSize(width: x, height: y))
     }
     public func combined(with other: AnyTransition) -> AnyTransition {
-        fatalError()
+        AnyTransition(box: AnyTransitionBox(storage: .combined(self, other)))
     }
     public static func push(from edge: Edge) -> AnyTransition {
-        fatalError()
+        AnyTransition(box: AnyTransitionBox(storage: .push(edge)))
     }
     public static var scale: AnyTransition {
-        fatalError()
+        scale(scale: 1)
     }
     public static func scale(scale: CGFloat, anchor: UnitPoint = .center) -> AnyTransition {
-        fatalError()
+        AnyTransition(box: AnyTransitionBox(storage: .scale(scale, anchor)))
     }
-    public static let opacity: AnyTransition = AnyTransition(box: AnyTransitionBox())
+    public static let opacity: AnyTransition = AnyTransition(box: AnyTransitionBox(storage: .opacity))
 
     public static func modifier<E>(active: E, identity: E) -> AnyTransition where E: ViewModifier {
-        fatalError()
+        AnyTransition(box: AnyTransitionBox(storage: .modifier(active: active, identity: identity)))
     }
     public static func asymmetric(insertion: AnyTransition, removal: AnyTransition) -> AnyTransition {
-        fatalError()
+        AnyTransition(box: AnyTransitionBox(storage: .asymmetric(insertion: insertion, removal: removal)))
     }
 
-    public static let identity: AnyTransition = AnyTransition(box: AnyTransitionBox())
+    public static let identity: AnyTransition = AnyTransition(box: AnyTransitionBox(storage: .identity))
 
     public static func move(edge: Edge) -> AnyTransition {
-        fatalError()
+        AnyTransition(box: AnyTransitionBox(storage: .push(edge)))
     }
 
     public func animation(_ animation: Animation?) -> AnyTransition {
-        fatalError()
+        AnyTransition(box: AnyTransitionBox(storage: .animation(self, animation)))
     }
 }

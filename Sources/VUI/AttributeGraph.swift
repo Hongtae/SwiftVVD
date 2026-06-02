@@ -478,6 +478,7 @@ class AttributeGraph: @unchecked Sendable {
 
     private struct Node {
         var value: Any?
+        var transaction: Transaction? = nil
         var kind: NodeKind
         var needsEvaluation: Bool = true
         var isEvaluating: Bool = false  // for cycle detection
@@ -726,6 +727,16 @@ class AttributeGraph: @unchecked Sendable {
         return cached
     }
 
+    func transaction(for id: AGAttribute) -> Transaction? {
+        assert(AttributeGraph.current === self)
+        let index = Int(id.rawValue)
+        guard index < slots.count,
+              let node = slots[index].node else {
+            return nil
+        }
+        return node.transaction
+    }
+
     /// Registers a cross-graph observer: when node `sourceAttr` in this graph changes,
     /// `targetNode` in `targetGraph` is marked dirty via the target graph's inbox.
     func addCrossGraphObserver(
@@ -898,8 +909,16 @@ class AttributeGraph: @unchecked Sendable {
         }
         if let oldValue = slots[index].node!.value as? Value, oldValue == newValue { return }
         slots[index].node!.value = newValue
+        let transactionToPropagate = transaction.isEmpty ? nil : transaction
+        slots[index].node!.transaction = transactionToPropagate
         let outputs = slots[index].node!.outputs
-        for outputIndex in outputs { markNeedsEvaluation(AGAttribute(rawValue: outputIndex)) }
+        for outputIndex in outputs {
+            markNeedsEvaluation(
+                AGAttribute(rawValue: outputIndex),
+                transaction: transactionToPropagate,
+                propagateTransaction: true
+            )
+        }
         notifyCrossGraphObservers(for: attribute.identifier.rawValue)
         AttributeGraph.changeSet?.record(attribute.identifier)
     }
@@ -911,8 +930,16 @@ class AttributeGraph: @unchecked Sendable {
             fatalError("setValue called on AGAttribute @\(attribute.identifier.rawValue) that does not exist.")
         }
         slots[index].node!.value = newValue
+        let transactionToPropagate = transaction.isEmpty ? nil : transaction
+        slots[index].node!.transaction = transactionToPropagate
         let outputs = slots[index].node!.outputs
-        for outputIndex in outputs { markNeedsEvaluation(AGAttribute(rawValue: outputIndex)) }
+        for outputIndex in outputs {
+            markNeedsEvaluation(
+                AGAttribute(rawValue: outputIndex),
+                transaction: transactionToPropagate,
+                propagateTransaction: true
+            )
+        }
         notifyCrossGraphObservers(for: attribute.identifier.rawValue)
         AttributeGraph.changeSet?.record(attribute.identifier)
     }
@@ -997,7 +1024,12 @@ class AttributeGraph: @unchecked Sendable {
     ///   fire synchronously. When `false` (used by `removeNode`), side-effect nodes
     ///   are only marked dirty. They must NOT be evaluated because an input node
     ///   they depend on may have already been freed.
-    func markNeedsEvaluation(_ startID: AGAttribute, evaluateSideEffects: Bool = true) {
+    func markNeedsEvaluation(
+        _ startID: AGAttribute,
+        evaluateSideEffects: Bool = true,
+        transaction: Transaction? = nil,
+        propagateTransaction: Bool = false
+    ) {
         assert(AttributeGraph.current === self)
         // Iterative BFS to avoid stack overflow on deep dependency graphs.
         // Side-effect nodes are collected separately and evaluated after the BFS completes,
@@ -1013,8 +1045,13 @@ class AttributeGraph: @unchecked Sendable {
             guard visited.insert(rawID).inserted else { continue }
             let index = Int(rawID)
             guard var node = slots[index].node else { continue }  // freed slot, skip
+            if propagateTransaction {
+                node.transaction = transaction
+            }
             if !node.needsEvaluation {
                 node.needsEvaluation = true
+                slots[index].node = node
+            } else if propagateTransaction {
                 slots[index].node = node
             }
             if node.kind.isSideEffect {

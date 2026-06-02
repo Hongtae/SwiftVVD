@@ -33,9 +33,140 @@ extension Animatable where Self.AnimatableData == EmptyAnimatableData {
 }
 
 extension Animatable {
-    // Hook for animation value substitution. The current implementation leaves
-    // the graph value unchanged.
     public static func _makeAnimatable(value: inout _GraphValue<Self>, inputs: _GraphInputs) {
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(Self.self)._makeAnimatable called outside an active AttributeGraph context.")
+        }
+        let attr: Attribute<Self> = graph.makeStatefulRule(
+            AnimatableAttribute(
+                source: value._attribute,
+                time: inputs.time,
+                transaction: inputs.transaction
+            )
+        )
+        value = _GraphValue(_attribute: attr)
+    }
+}
+
+private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
+    typealias Value = AnimatedValue
+
+    var source: Attribute<AnimatedValue>
+    var time: Attribute<Time>
+    var transaction: Attribute<Transaction>
+
+    var startValue: AnimatedValue?
+    var targetValue: AnimatedValue?
+    var currentValue: AnimatedValue?
+    var startTime: Time = .zero
+    var animation: Animation?
+    var completionToken: AnimationCompletionToken?
+
+    mutating func updateValue() {
+        guard let graph = AttributeGraph.current else {
+            fatalError("AnimatableAttribute.updateValue called outside an active AttributeGraph context.")
+        }
+
+        let target = source.value
+        let inheritedTransaction = transaction.value
+        let sourceTransaction = graph.transaction(for: source.identifier)
+        let effectiveTransaction = sourceTransaction ?? inheritedTransaction
+
+        if currentValue == nil {
+            finish(with: target)
+            return
+        }
+
+        let targetChanged = targetValue.map {
+            $0.animatableData != target.animatableData
+        } ?? true
+
+        if targetChanged {
+            guard let animation = effectiveTransaction.effectiveAnimation,
+                  animation.box.duration > 0 else {
+                finish(with: target)
+                return
+            }
+            let now = time.value
+            let start = interpolatedValue(at: now) ?? currentValue ?? target
+            guard start.animatableData != target.animatableData else {
+                finish(with: target)
+                return
+            }
+            startValue = start
+            targetValue = target
+            currentValue = start
+            startTime = now
+            self.animation = animation
+            if completionToken == nil {
+                completionToken = effectiveTransaction.animationCompletionObserver?.animationDidStart()
+            }
+        }
+
+        guard let animation,
+              let startValue,
+              let targetValue else {
+            finish(with: target)
+            return
+        }
+
+        let now = time.value
+        let rawProgress = min(
+            max((now.seconds - startTime.seconds) / animation.box.duration, 0),
+            1
+        )
+        if rawProgress >= 1 {
+            finish(with: targetValue)
+            return
+        }
+
+        let progress = animation.box.value(at: rawProgress)
+        let output = interpolate(from: startValue, to: targetValue, progress: progress)
+        currentValue = output
+        AttributeGraph.setStatefulOutput(output)
+    }
+
+    private mutating func finish(with value: AnimatedValue) {
+        let completions = completionToken?.finish() ?? []
+        completionToken = nil
+        startValue = nil
+        targetValue = value
+        currentValue = value
+        animation = nil
+        AttributeGraph.setStatefulOutput(value)
+        enqueueAnimationCompletionActions(completions)
+    }
+
+    private func interpolatedValue(at time: Time) -> AnimatedValue? {
+        guard let animation,
+              let startValue,
+              let targetValue else {
+            return currentValue
+        }
+        let rawProgress = min(
+            max((time.seconds - startTime.seconds) / animation.box.duration, 0),
+            1
+        )
+        return interpolate(
+            from: startValue,
+            to: targetValue,
+            progress: animation.box.value(at: rawProgress)
+        )
+    }
+
+    private func interpolate(
+        from start: AnimatedValue,
+        to target: AnimatedValue,
+        progress: Double
+    ) -> AnimatedValue {
+        var data = target.animatableData
+        data -= start.animatableData
+        data.scale(by: progress)
+        data += start.animatableData
+
+        var output = target
+        output.animatableData = data
+        return output
     }
 }
 
