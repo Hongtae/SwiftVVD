@@ -41,22 +41,30 @@ protocol Rule: _AttributeBody {
 /// Implement `updateValue()` to recompute the output. Call `AttributeGraph.setStatefulOutput(_:)`
 /// inside `updateValue()` to publish a new value. If `setStatefulOutput` is not called, the
 /// previously cached output is retained unchanged.
+/// Override `destroy()` to release deferred work tied to the node's lifetime.
 ///
 /// Used by view-system filters (e.g. GestureFilter, ContentShapeResponderFilter) that own
 /// a lazily-initialized responder object and update only its properties on re-evaluation.
 protocol StatefulRule: _AttributeBody {
     associatedtype Value
     mutating func updateValue()
+    mutating func destroy()
+}
+
+extension StatefulRule {
+    mutating func destroy() {}
 }
 
 private protocol _AnyStatefulBox: AnyObject {
     func callUpdate()
+    func callDestroy()
 }
 
 private class _StatefulBox<R: StatefulRule>: _AnyStatefulBox {
     var rule: R
     init(_ rule: R) { self.rule = rule }
     func callUpdate() { rule.updateValue() }
+    func callDestroy() { rule.destroy() }
 }
 
 // MARK: - Core Node Types
@@ -462,6 +470,8 @@ class AttributeGraph: @unchecked Sendable {
         // StatefulRule node. The box owns the rule struct and is reused across evaluations.
         // Output is written by calling AttributeGraph.setStatefulOutput(_:) inside updateValue().
         // If setStatefulOutput is not called during a given evaluation, the previous value is kept.
+        // The box receives destroy() once before node removal so stateful rules can release
+        // pending deferred work associated with the node's lifetime.
         case stateful(any _AnyStatefulBox)
 
         // KeyPath-derived node. Value is projected from a parent node via a key path.
@@ -839,6 +849,10 @@ class AttributeGraph: @unchecked Sendable {
 #if DEBUG
         recordRemovedNodeTombstone(id: id, node: removingNode)
 #endif
+
+        if case .stateful(let box) = removingNode.kind {
+            box.callDestroy()
+        }
 
         // 1. Break input connections (removes this node from its inputs' output sets)
         clearInputs(for: id, includingStatic: true)

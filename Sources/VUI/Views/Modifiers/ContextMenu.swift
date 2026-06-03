@@ -162,6 +162,9 @@ final class ContextMenuResponder: ViewResponder {
         guard let graph = AttributeGraph.current else {
             fatalError("ContextMenuResponder.present called outside AG context")
         }
+        // Flush pending item-list mutations before taking the initial popup
+        // snapshot. The open menu should start from the same source state that
+        // future live refreshes will observe.
         graph.inbox.drain()
         graph.drainActions()
         parent.dismissAllPresentationChildren()
@@ -171,7 +174,8 @@ final class ContextMenuResponder: ViewResponder {
         let liveContentSubgraph = AGSubgraph()
         AGSubgraph.$current.withValue(liveContentSubgraph) {
             // Update the already-open popup root content when the collected
-            // item-list source invalidates.
+            // item-list source invalidates. The session owns this subgraph so
+            // dismissing the menu also stops the source-graph side effect.
             graph.makeSideEffectRule { [weak session] in
                 let items = self.itemList.value.menuItems
                 session?.root?.replaceMenuItems(items)
@@ -277,6 +281,9 @@ final class ContextMenuPresentationSession {
         guard let subgraph = liveContentSubgraph else { return }
         liveContentSubgraph = nil
         if let sourceGraph {
+            // The live refresh rule belongs to the source graph, not the popup
+            // child graph. Bind that graph while invalidating so weak handles and
+            // deferred graph actions resolve against the owner.
             AttributeGraph.$current.withValue(sourceGraph) {
                 subgraph.invalidate()
             }
@@ -432,6 +439,8 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
         let graph = viewGraph.data.graph
         let content = UnsafeBox(AnyView(contextMenuPopupContent(items: items,
                                                                 actions: popupActions)))
+        // Replace child root content through the child graph inbox. The source
+        // graph may be evaluating the item list when this refresh is requested.
         graph.inbox.enqueue {
             contentAttr.setValue(content.value)
         }

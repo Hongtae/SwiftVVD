@@ -8,8 +8,15 @@
 import Foundation
 
 @usableFromInline
-class AnimationBoxBase: @unchecked Sendable {
+class AnimationBoxBase: CustomStringConvertible, @unchecked Sendable {
+    // Box subclasses keep the public Animation value small while preserving
+    // modifier composition such as delay, speed, repeat, and spring variants.
     var duration: TimeInterval { 0 }
+
+    @usableFromInline
+    var description: String {
+        String(describing: type(of: self))
+    }
 
     func value(at progress: Double) -> Double {
         progress
@@ -17,7 +24,20 @@ class AnimationBoxBase: @unchecked Sendable {
 }
 
 @usableFromInline
-final class TimingCurveAnimationBox: AnimationBoxBase, @unchecked Sendable {
+final class DefaultAnimationBox: AnimationBoxBase, @unchecked Sendable {
+    private let curve = UnitCurve.easeInOut
+
+    override var duration: TimeInterval {
+        0.35
+    }
+
+    override func value(at progress: Double) -> Double {
+        curve.value(at: progress)
+    }
+}
+
+@usableFromInline
+final class BezierAnimationBox: AnimationBoxBase, @unchecked Sendable {
     let curve: UnitCurve
     let storedDuration: TimeInterval
 
@@ -35,6 +55,153 @@ final class TimingCurveAnimationBox: AnimationBoxBase, @unchecked Sendable {
     }
 }
 
+@usableFromInline
+final class DelayAnimationBox: AnimationBoxBase, @unchecked Sendable {
+    let base: AnimationBoxBase
+    let delay: TimeInterval
+
+    init(base: AnimationBoxBase, delay: TimeInterval) {
+        self.base = base
+        self.delay = delay
+    }
+
+    override var duration: TimeInterval {
+        max(0, base.duration + delay)
+    }
+
+    override func value(at progress: Double) -> Double {
+        guard base.duration > 0 else { return base.value(at: 1) }
+        let localTime = progress * duration - delay
+        let localProgress = min(max(localTime / base.duration, 0), 1)
+        return base.value(at: localProgress)
+    }
+}
+
+@usableFromInline
+final class SpeedAnimationBox: AnimationBoxBase, @unchecked Sendable {
+    let base: AnimationBoxBase
+    let speed: Double
+
+    init(base: AnimationBoxBase, speed: Double) {
+        self.base = base
+        self.speed = speed
+    }
+
+    override var duration: TimeInterval {
+        guard speed > 0 else { return .infinity }
+        return base.duration / speed
+    }
+
+    override func value(at progress: Double) -> Double {
+        guard speed > 0 else { return base.value(at: 0) }
+        return base.value(at: progress)
+    }
+}
+
+@usableFromInline
+final class RepeatAnimationBox: AnimationBoxBase, @unchecked Sendable {
+    let base: AnimationBoxBase
+    let repeatCount: Int?
+    let autoreverses: Bool
+
+    init(base: AnimationBoxBase, repeatCount: Int?, autoreverses: Bool) {
+        self.base = base
+        self.repeatCount = repeatCount
+        self.autoreverses = autoreverses
+    }
+
+    private var resolvedRepeatCount: Int {
+        max(repeatCount ?? 1, 1)
+    }
+
+    override var duration: TimeInterval {
+        guard let repeatCount else { return .infinity }
+        return base.duration * TimeInterval(max(repeatCount, 1))
+    }
+
+    override func value(at progress: Double) -> Double {
+        guard base.duration > 0 else { return base.value(at: 1) }
+        let cycles: Double
+        if let repeatCount {
+            cycles = Double(max(repeatCount, 1))
+        } else {
+            cycles = 1
+        }
+
+        let rawCycle: Double
+        if repeatCount == nil {
+            rawCycle = max(progress, 0).truncatingRemainder(dividingBy: 1)
+        } else {
+            rawCycle = min(max(progress, 0), 1) * cycles
+        }
+
+        if repeatCount != nil, rawCycle >= cycles {
+            let endsReversed = autoreverses && resolvedRepeatCount.isMultiple(of: 2)
+            return base.value(at: endsReversed ? 0 : 1)
+        }
+
+        let cycleIndex = Int(floor(rawCycle))
+        var localProgress = rawCycle - Double(cycleIndex)
+        if autoreverses && !cycleIndex.isMultiple(of: 2) {
+            localProgress = 1 - localProgress
+        }
+        return base.value(at: min(max(localProgress, 0), 1))
+    }
+}
+
+@usableFromInline
+final class FluidSpringAnimationBox: AnimationBoxBase, @unchecked Sendable {
+    let response: TimeInterval
+    let dampingFraction: Double
+    let blendDuration: TimeInterval
+
+    init(response: TimeInterval, dampingFraction: Double, blendDuration: TimeInterval) {
+        self.response = response
+        self.dampingFraction = dampingFraction
+        self.blendDuration = blendDuration
+    }
+
+    override var duration: TimeInterval {
+        max(0, response + blendDuration)
+    }
+
+    override func value(at progress: Double) -> Double {
+        let clamped = min(max(progress, 0), 1)
+        let damping = max(dampingFraction, 0.001)
+        let decay = exp(-damping * 6 * clamped)
+        let oscillation = cos((1 + max(0, 1 - damping)) * .pi * clamped)
+        return min(max(1 - decay * oscillation, 0), 1)
+    }
+}
+
+@usableFromInline
+final class SpringAnimationBox: AnimationBoxBase, @unchecked Sendable {
+    let mass: Double
+    let stiffness: Double
+    let damping: Double
+    let initialVelocity: Double
+
+    init(mass: Double, stiffness: Double, damping: Double, initialVelocity: Double) {
+        self.mass = mass
+        self.stiffness = stiffness
+        self.damping = damping
+        self.initialVelocity = initialVelocity
+    }
+
+    override var duration: TimeInterval {
+        let naturalFrequency = sqrt(max(stiffness, 0.001) / max(mass, 0.001))
+        return max(0.001, 2 * .pi / naturalFrequency)
+    }
+
+    override func value(at progress: Double) -> Double {
+        let clamped = min(max(progress, 0), 1)
+        let dampingRatio = damping / (2 * sqrt(max(stiffness * mass, 0.001)))
+        let decay = exp(-max(dampingRatio, 0.001) * 6 * clamped)
+        let velocityTerm = initialVelocity * clamped * decay * 0.1
+        return min(max(1 - decay * cos(.pi * clamped) + velocityTerm, 0), 1)
+    }
+}
+
 public struct Animation: Equatable, Sendable {
     var box: AnimationBoxBase
 
@@ -45,6 +212,12 @@ public struct Animation: Equatable, Sendable {
 
     public static func == (lhs: Animation, rhs: Animation) -> Bool {
         lhs.box === rhs.box
+    }
+}
+
+extension Animation: Hashable {
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(ObjectIdentifier(box))
     }
 }
 
@@ -65,22 +238,30 @@ final class AnimationCompletionObserver: @unchecked Sendable {
         var completion: () -> Void
     }
 
+    private let lock = NSLock()
     private var entries: [Entry] = []
     private var activeAnimations: Int = 0
     private var bodyFinished = false
     private var registeredAnimation = false
     private var completed = false
 
+    // Completion observers are shared by every animatable node touched by one
+    // transaction. The transaction body must finish, at least one animation must
+    // register, and all registered tokens must finish before callbacks run.
     init(criteria: AnimationCompletionCriteria, completion: @escaping () -> Void) {
         entries.append(Entry(criteria: criteria, completion: completion))
     }
 
     func add(criteria: AnimationCompletionCriteria, completion: @escaping () -> Void) {
+        lock.lock()
+        defer { lock.unlock() }
         guard !completed else { return }
         entries.append(Entry(criteria: criteria, completion: completion))
     }
 
     func animationDidStart() -> AnimationCompletionToken? {
+        lock.lock()
+        defer { lock.unlock() }
         guard !completed else { return nil }
         registeredAnimation = true
         activeAnimations += 1
@@ -88,25 +269,43 @@ final class AnimationCompletionObserver: @unchecked Sendable {
     }
 
     func bodyDidFinish() -> [() -> Void] {
+        lock.lock()
+        defer { lock.unlock() }
         bodyFinished = true
-        return completionsIfReady()
+        return completionsIfReady(allowNoRegisteredAnimation: false)
     }
 
     fileprivate func animationDidFinish() -> [() -> Void] {
+        lock.lock()
+        defer { lock.unlock() }
         guard activeAnimations > 0 else { return [] }
         activeAnimations -= 1
-        return completionsIfReady()
+        return completionsIfReady(allowNoRegisteredAnimation: false)
     }
 
-    private func completionsIfReady() -> [() -> Void] {
+    func noRegisteredAnimationFallbackDidFire() -> [() -> Void] {
+        lock.lock()
+        defer { lock.unlock() }
+        return completionsIfReady(allowNoRegisteredAnimation: true)
+    }
+
+    private func completionsIfReady(allowNoRegisteredAnimation: Bool) -> [() -> Void] {
         guard !completed,
               bodyFinished,
-              registeredAnimation,
+              (registeredAnimation || allowNoRegisteredAnimation),
               activeAnimations == 0 else {
             return []
         }
         completed = true
-        return entries.map(\.completion)
+        // Removal callbacks are drained first so retained subtree teardown can
+        // invalidate nodes before ordinary completion callbacks observe state.
+        let removedCompletions = entries
+            .filter { $0.criteria == .removed }
+            .map(\.completion)
+        let otherCompletions = entries
+            .filter { $0.criteria != .removed }
+            .map(\.completion)
+        return removedCompletions + otherCompletions
     }
 }
 
@@ -132,10 +331,26 @@ func enqueueAnimationCompletionActions(_ actions: [() -> Void]) {
             AttributeGraph.withoutTracking(action)
         }
     }
+    // Completion actions may trigger arbitrary view mutations. Queue them until
+    // the graph leaves the current evaluation/draw pass when possible.
     if let graph = AttributeGraph.current {
         graph.actionOutbox.append(contentsOf: wrapped)
     } else {
         wrapped.forEach { $0() }
+    }
+}
+
+private struct AnimationCompletionObserverBox: @unchecked Sendable {
+    var observer: AnimationCompletionObserver
+}
+
+func enqueueNoRegisteredAnimationFallback(_ observer: AnimationCompletionObserver?) {
+    guard let observer else { return }
+    let box = AnimationCompletionObserverBox(observer: observer)
+    DispatchQueue.main.async {
+        enqueueAnimationCompletionActions(
+            box.observer.noRegisteredAnimationFallbackDidFire()
+        )
     }
 }
 
@@ -147,12 +362,12 @@ extension Animation: CustomStringConvertible, CustomDebugStringConvertible, Cust
         "Animation"
     }
     public var customMirror: Mirror {
-        fatalError()
+        Mirror(self, children: ["base": box])
     }
 }
 
 extension Animation {
-    public static let `default`: Animation = .easeInOut
+    public static let `default`: Animation = Animation(box: DefaultAnimationBox())
 }
 
 extension Animation {
@@ -182,11 +397,140 @@ extension Animation {
     }
     public static func timingCurve(_ p1x: Double, _ p1y: Double, _ p2x: Double, _ p2y: Double, duration: TimeInterval = 0.35) -> Animation {
         let curve = UnitCurve(c1x: p1x, c1y: p1y, c2x: p2x, c2y: p2y)
-        return Animation(box: TimingCurveAnimationBox(curve: curve, duration: max(0, duration)))
+        return Animation(box: BezierAnimationBox(curve: curve, duration: max(0, duration)))
     }
 
     public static func timingCurve(_ curve: UnitCurve, duration: TimeInterval) -> Animation {
         timingCurve(curve.c1x, curve.c1y, curve.c2x, curve.c2y, duration: duration)
+    }
+
+    public func delay(_ delay: TimeInterval) -> Animation {
+        Animation(box: DelayAnimationBox(base: box, delay: delay))
+    }
+
+    public func speed(_ speed: Double) -> Animation {
+        Animation(box: SpeedAnimationBox(base: box, speed: speed))
+    }
+
+    public func repeatCount(_ repeatCount: Int, autoreverses: Bool = true) -> Animation {
+        Animation(box: RepeatAnimationBox(base: box, repeatCount: repeatCount, autoreverses: autoreverses))
+    }
+
+    public func repeatForever(autoreverses: Bool = true) -> Animation {
+        Animation(box: RepeatAnimationBox(base: box, repeatCount: nil, autoreverses: autoreverses))
+    }
+}
+
+extension Animation {
+    public static func spring(duration: TimeInterval = 0.5,
+                              bounce: Double = 0.0,
+                              blendDuration: Double = 0) -> Animation {
+        spring(
+            response: duration,
+            dampingFraction: springDampingFraction(bounce: bounce),
+            blendDuration: blendDuration
+        )
+    }
+
+    public static func spring(response: Double = 0.5,
+                              dampingFraction: Double = 0.825,
+                              blendDuration: TimeInterval = 0) -> Animation {
+        Animation(
+            box: FluidSpringAnimationBox(
+                response: response,
+                dampingFraction: dampingFraction,
+                blendDuration: blendDuration
+            )
+        )
+    }
+
+    public static var spring: Animation {
+        spring(duration: 0.5, bounce: 0.0, blendDuration: 0)
+    }
+
+    public static func interactiveSpring(response: Double = 0.15,
+                                         dampingFraction: Double = 0.86,
+                                         blendDuration: TimeInterval = 0.25) -> Animation {
+        Animation(
+            box: FluidSpringAnimationBox(
+                response: response,
+                dampingFraction: dampingFraction,
+                blendDuration: blendDuration
+            )
+        )
+    }
+
+    public static var interactiveSpring: Animation {
+        interactiveSpring(duration: 0.15, extraBounce: 0.0, blendDuration: 0.25)
+    }
+
+    public static func interactiveSpring(duration: TimeInterval = 0.15,
+                                         extraBounce: Double = 0.0,
+                                         blendDuration: TimeInterval = 0.25) -> Animation {
+        spring(
+            duration: duration,
+            bounce: 0.15 + extraBounce,
+            blendDuration: blendDuration
+        )
+    }
+
+    public static var smooth: Animation {
+        smooth()
+    }
+
+    public static func smooth(duration: TimeInterval = 0.5, extraBounce: Double = 0.0) -> Animation {
+        spring(duration: duration, bounce: extraBounce)
+    }
+
+    public static var snappy: Animation {
+        snappy()
+    }
+
+    public static func snappy(duration: TimeInterval = 0.5, extraBounce: Double = 0.0) -> Animation {
+        spring(duration: duration, bounce: 0.15 + extraBounce)
+    }
+
+    public static var bouncy: Animation {
+        bouncy()
+    }
+
+    public static func bouncy(duration: TimeInterval = 0.5, extraBounce: Double = 0.0) -> Animation {
+        spring(duration: duration, bounce: 0.3 + extraBounce)
+    }
+
+    public static func interpolatingSpring(mass: Double = 1.0,
+                                           stiffness: Double,
+                                           damping: Double,
+                                           initialVelocity: Double = 0.0) -> Animation {
+        Animation(
+            box: SpringAnimationBox(
+                mass: mass,
+                stiffness: stiffness,
+                damping: damping,
+                initialVelocity: initialVelocity
+            )
+        )
+    }
+
+    public static func interpolatingSpring(duration: TimeInterval = 0.5,
+                                           bounce: Double = 0.0,
+                                           initialVelocity: Double = 0.0) -> Animation {
+        let stiffness = pow(2 * .pi / max(duration, 0.001), 2)
+        let damping = 2 * sqrt(stiffness) * springDampingFraction(bounce: bounce)
+        return interpolatingSpring(
+            mass: 1.0,
+            stiffness: stiffness,
+            damping: damping,
+            initialVelocity: initialVelocity
+        )
+    }
+
+    public static var interpolatingSpring: Animation {
+        interpolatingSpring()
+    }
+
+    private static func springDampingFraction(bounce: Double) -> Double {
+        min(max(1 - bounce, 0.0), 1.0)
     }
 }
 
@@ -206,9 +550,11 @@ public func withAnimation<Result>(
     var transaction = Transaction(animation: animation)
     transaction.addAnimationCompletion(criteria: completionCriteria, completion)
     let result = try withTransaction(transaction, body)
+    let observer = transaction.animationCompletionObserver
     enqueueAnimationCompletionActions(
-        transaction.animationCompletionObserver?.bodyDidFinish() ?? []
+        observer?.bodyDidFinish() ?? []
     )
+    enqueueNoRegisteredAnimationFallback(observer)
     return result
 }
 
@@ -241,6 +587,11 @@ extension Transaction {
         get { self[AnimationTransactionKey.self] }
         set { self[AnimationTransactionKey.self] = newValue }
     }
+
+    var hasExplicitAnimationValue: Bool {
+        plist.nonDefaultValue(forKey: TransactionKeyItem<AnimationTransactionKey>.self) != nil
+    }
+
     public var disablesAnimations: Bool {
         get { self[DisablesAnimationsTransactionKey.self] }
         set { self[DisablesAnimationsTransactionKey.self] = newValue }

@@ -13,6 +13,8 @@ enum TransitionAnimationKey: String, Hashable {
     case alpha
 }
 
+// Small keyframe container for modal overlay chrome. The animation system owns
+// transaction timing; this type only maps transition progress to visual tracks.
 struct TransitionAnimationConfiguration<Key: Hashable> {
     struct Track {
         let curve: UnitCurve
@@ -59,13 +61,20 @@ private final class ModalPresentationContext: @unchecked Sendable {
         let phase: TransitionPhase
         let duration: Double
         let configuration: AnimationConfiguration
+        var completionToken: AnimationCompletionToken?
         var elapsed: Double = 0
         var completion: (() -> Void)?
 
         var progress: Double {
-            min(elapsed / duration, 1.0)
+            guard duration > 0 else { return 1.0 }
+            return min(elapsed / duration, 1.0)
         }
         var isComplete: Bool { elapsed >= duration }
+    }
+
+    private struct PendingDismissal: @unchecked Sendable {
+        var transaction: Transaction
+        var completion: () -> Void
     }
 
     private let padding: CGFloat = 4
@@ -75,11 +84,11 @@ private final class ModalPresentationContext: @unchecked Sendable {
     private var windowOffset: CGPoint = .zero
     private var needsInputPlacement = true
     private var transition: TransitionAnimation? = nil
-    private var pendingDismissalCompletion: (() -> Void)?
+    private var pendingDismissal: PendingDismissal?
     private let shadowFilter = GraphicsContext.Filter.shadow(radius: 8.0, x: 0, y: 0)
 
-    // Overlay modals need an engine-side transition when no platform window or
-    // alert animation owns presentation.
+    // Overlay modals use the transition for drawing. Platform modals use the
+    // same timing path to preserve transaction completion boundaries.
     private var transitionDuration: Double { 0.25 }
     private var transitionPresentAnimation: AnimationConfiguration {
         AnimationConfiguration(
@@ -124,6 +133,29 @@ private final class ModalPresentationContext: @unchecked Sendable {
         guard let config = transition?.configuration,
               let track = config.tracks[key] else { return 1.0 }
         return track.value(at: rawProgress)
+    }
+
+    private func resolvedDuration(for transaction: Transaction) -> Double {
+        // An explicit nil animation or disabled animation keeps modal completion
+        // on the immediate fallback path.
+        if transaction.disablesAnimations || (transaction.hasExplicitAnimationValue && transaction.animation == nil) {
+            return 0
+        }
+        guard let animation = transaction.effectiveAnimation else {
+            return transitionDuration
+        }
+        return max(0, animation.box.duration)
+    }
+
+    private func completionToken(for transaction: Transaction) -> AnimationCompletionToken? {
+        // Platform modal children may not draw through this overlay path, but
+        // they still register a token so transaction completions wait for the
+        // same modal timing boundary.
+        guard let animation = transaction.effectiveAnimation,
+              animation.box.duration > 0 else {
+            return nil
+        }
+        return transaction.animationCompletionObserver?.animationDidStart()
     }
 
     func onViewLoaded() {
@@ -253,29 +285,45 @@ private final class ModalPresentationContext: @unchecked Sendable {
         return parentLocation - windowOffset
     }
 
-    func beginPresentAnimation(controller: WindowController) {
-        guard controller.window == nil else { return }
-        pendingDismissalCompletion = nil
+    func beginPresentAnimation(controller: WindowController,
+                               transaction: Transaction) {
+        pendingDismissal = nil
+        let duration = resolvedDuration(for: transaction)
+        let completionToken = completionToken(for: transaction)
+        guard duration > 0 || completionToken != nil else {
+            transition = nil
+            return
+        }
         transition = TransitionAnimation(
             phase: .presenting,
-            duration: transitionDuration,
-            configuration: transitionPresentAnimation
+            duration: duration,
+            configuration: transitionPresentAnimation,
+            completionToken: completionToken
         )
     }
 
-    private func beginDismissAnimation(completion: @escaping () -> Void) {
+    private func beginDismissAnimation(transaction: Transaction,
+                                       completion: @escaping () -> Void) {
+        let duration = resolvedDuration(for: transaction)
+        let completionToken = completionToken(for: transaction)
+        guard duration > 0 || completionToken != nil else {
+            transition = nil
+            completion()
+            return
+        }
         transition = TransitionAnimation(
             phase: .dismissing,
-            duration: transitionDuration,
+            duration: duration,
             configuration: transitionDismissAnimation,
+            completionToken: completionToken,
             completion: completion
         )
     }
 
     func requestDismissal(controller: WindowController,
                           reason: ModalDismissReason,
+                          transaction: Transaction,
                           completion: @escaping () -> Void) -> Bool {
-        guard controller.window == nil else { return false }
         guard reason == .dismissed || reason == .userAction else { return false }
         if let transition {
             switch transition.phase {
@@ -283,15 +331,18 @@ private final class ModalPresentationContext: @unchecked Sendable {
                 // Finish the presentation animation before starting dismissal.
                 // Reversing nonlinear scale/alpha tracks would require value-to-time
                 // inversion and is not part of a confirmed modal contract.
-                if pendingDismissalCompletion == nil {
-                    pendingDismissalCompletion = completion
+                if pendingDismissal == nil {
+                    pendingDismissal = PendingDismissal(
+                        transaction: transaction,
+                        completion: completion
+                    )
                 }
                 return true
             case .dismissing:
                 return true
             }
         }
-        beginDismissAnimation(completion: completion)
+        beginDismissAnimation(transaction: transaction, completion: completion)
         return true
     }
 
@@ -299,17 +350,26 @@ private final class ModalPresentationContext: @unchecked Sendable {
         guard var transition else { return false }
         transition.elapsed += delta
         if transition.isComplete {
+            let completions = transition.completionToken?.finish() ?? []
             switch transition.phase {
             case .presenting:
-                if let completion = pendingDismissalCompletion {
-                    pendingDismissalCompletion = nil
-                    beginDismissAnimation(completion: completion)
+                if let dismissal = pendingDismissal {
+                    pendingDismissal = nil
+                    // Present completion drains before the deferred dismissal
+                    // begins, preserving one transaction boundary at a time.
+                    enqueueAnimationCompletionActions(completions)
+                    beginDismissAnimation(
+                        transaction: dismissal.transaction,
+                        completion: dismissal.completion
+                    )
                 } else {
                     self.transition = nil
+                    enqueueAnimationCompletionActions(completions)
                 }
             case .dismissing:
                 self.transition = nil
                 transition.completion?()
+                enqueueAnimationCompletionActions(completions)
             }
         } else {
             self.transition = transition
@@ -434,14 +494,17 @@ final class ModalWindowController: WindowController, @unchecked Sendable {
     }
 
     func requestModalDismissal(reason: ModalDismissReason,
+                               transaction: Transaction,
                                completion: @escaping () -> Void) -> Bool {
         presentationContext.requestDismissal(controller: self,
                                              reason: reason,
+                                             transaction: transaction,
                                              completion: completion)
     }
 
-    func onModalSessionInitiated() {
-        presentationContext.beginPresentAnimation(controller: self)
+    func onModalSessionInitiated(transaction: Transaction) {
+        presentationContext.beginPresentAnimation(controller: self,
+                                                 transaction: transaction)
     }
 
     func onModalSessionDismissedByUser() {

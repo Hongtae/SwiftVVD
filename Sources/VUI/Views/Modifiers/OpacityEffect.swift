@@ -7,41 +7,44 @@
 
 import Foundation
 
-public struct _OpacityEffect: ViewModifier {
-    public var opacity: Double
-    
-    @inlinable public init(opacity: Double) {
-        self.opacity = opacity
-    }
-
-    public typealias Body = Never
-
-    public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
+enum _OpacityEffectSupport {
+    static func makeView<Modifier>(
+        modifier: _GraphValue<Modifier>,
+        opacity: _GraphValue<Double>,
+        inputs: _ViewInputs,
+        body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
+    ) -> _ViewOutputs where Modifier: ViewModifier {
         guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
+            fatalError("\(Modifier.self)._makeView called outside an active AttributeGraph context.")
         }
         var outputs = body(_Graph(), inputs)
-        applyOpacity(to: &outputs.preferences, modifier: modifier, graph: graph)
+        applyOpacity(to: &outputs.preferences, opacity: opacity, graph: graph)
         return outputs
     }
 
-    public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
+    static func makeViewList<Modifier>(
+        modifier: _GraphValue<Modifier>,
+        inputs: _ViewListInputs,
+        body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs
+    ) -> _ViewListOutputs where Modifier: ViewModifier {
         guard AttributeGraph.current != nil else {
-            fatalError("\(self)._makeViewList called outside an active AttributeGraph context.")
+            fatalError("\(Modifier.self)._makeViewList called outside an active AttributeGraph context.")
         }
         var outputs = body(_Graph(), inputs)
         outputs.multiModifier(modifier, inputs: inputs)
         return outputs
     }
 
-    private static func applyOpacity(to preferences: inout PreferencesOutputs,
-                                     modifier: _GraphValue<Self>,
-                                     graph: AttributeGraph) {
+    private static func applyOpacity(
+        to preferences: inout PreferencesOutputs,
+        opacity: _GraphValue<Double>,
+        graph: AttributeGraph
+    ) {
         let displayNodes = preferences.values(for: DisplayList.Key.self)
         guard !displayNodes.isEmpty else { return }
 
         let weakNodes = displayNodes.compactMap { graph.weakAttributeIfValid(for: $0) }
-        let opacityAttr: Attribute<Double> = modifier[\.opacity]._attribute
+        let opacityAttr: Attribute<Double> = opacity._attribute
         let transformedAttr: Attribute<DisplayList> = graph.makeRule {
             var combined = DisplayList.Key.defaultValue
             for weakNode in weakNodes where weakNode.isValid(in: graph) {
@@ -81,6 +84,78 @@ public struct _OpacityEffect: ViewModifier {
             }
         }
         return result
+    }
+}
+
+public struct _OpacityEffect: Equatable, Animatable, ViewModifier, Sendable {
+    public var opacity: Double
+
+    @inlinable public init(opacity: Double) {
+        self.opacity = opacity
+    }
+
+    public var animatableData: Double {
+        get { opacity }
+        set { opacity = newValue }
+    }
+
+    public typealias Body = Never
+
+    public static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
+        var modifier = modifier
+        Self._makeAnimatable(value: &modifier, inputs: inputs.base)
+        return _OpacityEffectSupport.makeView(
+            modifier: modifier,
+            opacity: modifier[\.opacity],
+            inputs: inputs,
+            body: body
+        )
+    }
+
+    public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
+        _OpacityEffectSupport.makeViewList(
+            modifier: modifier,
+            inputs: inputs,
+            body: body
+        )
+    }
+}
+
+struct OpacityRendererEffect: Equatable, Animatable, ViewModifier {
+    var opacity: Double
+
+    var animatableData: Double {
+        get { opacity }
+        set { opacity = newValue }
+    }
+
+    typealias Body = Never
+
+    static func _makeView(
+        modifier: _GraphValue<Self>,
+        inputs: _ViewInputs,
+        body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
+    ) -> _ViewOutputs {
+        var modifier = modifier
+        Self._makeAnimatable(value: &modifier, inputs: inputs.base)
+        return _OpacityEffectSupport.makeView(
+            modifier: modifier,
+            opacity: modifier[\.opacity],
+            inputs: inputs,
+            body: body
+        )
+    }
+
+    static func _makeViewList(
+        modifier: _GraphValue<Self>,
+        inputs: _ViewListInputs,
+        body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs
+    ) -> _ViewListOutputs {
+        _OpacityEffectSupport.makeViewList(
+            modifier: modifier,
+            inputs: inputs,
+            body: body
+        )
     }
 }
 

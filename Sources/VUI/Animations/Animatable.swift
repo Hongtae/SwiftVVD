@@ -60,7 +60,25 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
     var currentValue: AnimatedValue?
     var startTime: Time = .zero
     var animation: Animation?
-    var completionToken: AnimationCompletionToken?
+    // Each entry represents one transaction completion token waiting on this
+    // animatable node. Retargeting extends older entries to the replacement
+    // animation deadline while the newest token is inserted first.
+    private var completionRecords: [CompletionRecord] = []
+
+    private struct CompletionRecord {
+        var token: AnimationCompletionToken
+        var deadline: Time
+    }
+
+    init(
+        source: Attribute<AnimatedValue>,
+        time: Attribute<Time>,
+        transaction: Attribute<Transaction>
+    ) {
+        self.source = source
+        self.time = time
+        self.transaction = transaction
+    }
 
     mutating func updateValue() {
         guard let graph = AttributeGraph.current else {
@@ -73,7 +91,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         let effectiveTransaction = sourceTransaction ?? inheritedTransaction
 
         if currentValue == nil {
-            finish(with: target)
+            finishValue(with: target)
             return
         }
 
@@ -84,29 +102,35 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         if targetChanged {
             guard let animation = effectiveTransaction.effectiveAnimation,
                   animation.box.duration > 0 else {
-                finish(with: target)
+                finishValue(with: target)
                 return
             }
             let now = time.value
             let start = interpolatedValue(at: now) ?? currentValue ?? target
             guard start.animatableData != target.animatableData else {
-                finish(with: target)
+                finishValue(with: target)
                 return
+            }
+            let deadline = now + animation.box.duration
+            // Existing listeners stay attached to this node after a retarget and
+            // complete at the replacement animation boundary.
+            for index in completionRecords.indices {
+                completionRecords[index].deadline = deadline
+            }
+            if let token = effectiveTransaction.animationCompletionObserver?.animationDidStart() {
+                completionRecords.insert(CompletionRecord(token: token, deadline: deadline), at: 0)
             }
             startValue = start
             targetValue = target
             currentValue = start
             startTime = now
             self.animation = animation
-            if completionToken == nil {
-                completionToken = effectiveTransaction.animationCompletionObserver?.animationDidStart()
-            }
         }
 
         guard let animation,
               let startValue,
               let targetValue else {
-            finish(with: target)
+            finishValue(with: target)
             return
         }
 
@@ -116,7 +140,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             1
         )
         if rawProgress >= 1 {
-            finish(with: targetValue)
+            finishAnimation(with: targetValue, at: now)
             return
         }
 
@@ -126,15 +150,53 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         AttributeGraph.setStatefulOutput(output)
     }
 
-    private mutating func finish(with value: AnimatedValue) {
-        let completions = completionToken?.finish() ?? []
-        completionToken = nil
+    mutating func destroy() {
+        // Node removal is the last chance to finish listeners that were waiting
+        // on this animatable value but no longer have a live output node.
+        let completions = finishAllCompletionRecords()
+        enqueueAnimationCompletionActions(completions)
+    }
+
+    private mutating func finishValue(with value: AnimatedValue) {
         startValue = nil
         targetValue = value
         currentValue = value
         animation = nil
         AttributeGraph.setStatefulOutput(value)
+        guard !completionRecords.isEmpty else { return }
+        let now = time.value
+        let completions = finishDueCompletionRecords(at: now)
         enqueueAnimationCompletionActions(completions)
+    }
+
+    private mutating func finishAnimation(with value: AnimatedValue, at now: Time) {
+        startValue = nil
+        targetValue = value
+        currentValue = value
+        animation = nil
+        AttributeGraph.setStatefulOutput(value)
+        let completions = finishDueCompletionRecords(at: now)
+        enqueueAnimationCompletionActions(completions)
+    }
+
+    private mutating func finishDueCompletionRecords(at now: Time) -> [() -> Void] {
+        var readyCompletions: [() -> Void] = []
+        var pendingRecords: [CompletionRecord] = []
+        for record in completionRecords {
+            if record.deadline < now || record.deadline == now {
+                readyCompletions.append(contentsOf: record.token.finish())
+            } else {
+                pendingRecords.append(record)
+            }
+        }
+        completionRecords = pendingRecords
+        return readyCompletions
+    }
+
+    private mutating func finishAllCompletionRecords() -> [() -> Void] {
+        let records = completionRecords
+        completionRecords.removeAll()
+        return records.flatMap { $0.token.finish() }
     }
 
     private func interpolatedValue(at time: Time) -> AnimatedValue? {

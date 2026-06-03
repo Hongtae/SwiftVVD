@@ -56,8 +56,66 @@ private struct StaticLayoutComputer<L: Layout>: StatefulRule {
 
 /// Dynamic container storage used by DynamicContainerInfo.
 private enum DynamicContainer {
+    final class TransitionRemovalListener: @unchecked Sendable {
+        private let lock = NSLock()
+        private let seed: Attribute<UInt32>
+        private let inbox: AGInbox
+        private var seedValue: UInt32 = 0
+        private var completionInstalled = false
+        private var completed = false
+
+        init(seed: Attribute<UInt32>, inbox: AGInbox) {
+            self.seed = seed
+            self.inbox = inbox
+        }
+
+        var isComplete: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return completed
+        }
+
+        func readSeed() {
+            _ = seed.value
+        }
+
+        func installCompletion(into transaction: inout Transaction) -> AnimationCompletionObserver? {
+            lock.lock()
+            if completionInstalled {
+                lock.unlock()
+                return transaction.animationCompletionObserver
+            }
+            completionInstalled = true
+            lock.unlock()
+
+            transaction.addAnimationCompletion(criteria: .removed) { [weak self] in
+                self?.complete()
+            }
+            return transaction.animationCompletionObserver
+        }
+
+        private func complete() {
+            let nextSeed: UInt32
+            lock.lock()
+            guard !completed else {
+                lock.unlock()
+                return
+            }
+            completed = true
+            seedValue &+= 1
+            nextSeed = seedValue
+            lock.unlock()
+
+            let seed = self.seed
+            inbox.enqueue {
+                seed.setValue(nextSeed)
+            }
+        }
+    }
+
     /// Field roles: subgraph, uniqueId, viewCount, outputs,
-    /// needsTransitions, listener, zIndex, removalOrder, precedingViewCount, resetSeed, phase.
+    /// needsTransitions, listener, zIndex, removalOrder, precedingViewCount,
+    /// resetSeed, phase, completion seed, transition transactions.
     /// The identity is stored in canonical form for lookup across updates.
     final class ItemInfo {
         var subgraph: AGSubgraph
@@ -65,10 +123,7 @@ private enum DynamicContainer {
         var viewCount: Int
         var outputs: _ViewOutputs
         var needsTransitions: Bool
-        // Transition listener/completion wiring is not implemented yet.
-        // Removed items should remain alive until the listener completes. Until then,
-        // the retained output uses a one-update phase-2 suffix.
-        var listener: AnyObject?
+        var listener: TransitionRemovalListener?
         var zIndex: Double
         var removalOrder: Int
         var precedingViewCount: Int
@@ -78,6 +133,9 @@ private enum DynamicContainer {
         // child addressable until multi-output storage is modeled.
         var layoutAttributes: [LayoutProxyAttributes]
         var preferenceOutputs: [PreferencesOutputs]
+        var transitionPhaseSetters: [_TransitionPhaseSetter]
+        var transitionCompletionSeed: Attribute<UInt32>?
+        var transitionTransactions: _TransitionTransactionResolver?
 
         init(
             subgraph: AGSubgraph,
@@ -86,13 +144,16 @@ private enum DynamicContainer {
             outputs: _ViewOutputs,
             layoutAttributes: [LayoutProxyAttributes],
             preferenceOutputs: [PreferencesOutputs],
+            transitionPhaseSetters: [_TransitionPhaseSetter] = [],
             needsTransitions: Bool = false,
-            listener: AnyObject? = nil,
+            listener: TransitionRemovalListener? = nil,
             zIndex: Double = 0,
             removalOrder: Int = 0,
             precedingViewCount: Int = 0,
             resetSeed: UInt32 = 0,
-            phase: UInt8 = 1
+            phase: UInt8 = 1,
+            transitionCompletionSeed: Attribute<UInt32>? = nil,
+            transitionTransactions: _TransitionTransactionResolver? = nil
         ) {
             self.subgraph = subgraph
             self.uniqueId = uniqueId
@@ -107,6 +168,18 @@ private enum DynamicContainer {
             self.phase = phase
             self.layoutAttributes = layoutAttributes
             self.preferenceOutputs = preferenceOutputs
+            self.transitionPhaseSetters = transitionPhaseSetters
+            self.transitionCompletionSeed = transitionCompletionSeed
+            self.transitionTransactions = transitionTransactions
+        }
+
+        func setTransitionPhase(
+            _ phase: TransitionPhase,
+            transaction: Transaction = Transaction()
+        ) {
+            for setter in transitionPhaseSetters {
+                setter(phase, transaction)
+            }
         }
 
         func invalidate() {
@@ -142,6 +215,11 @@ private enum DynamicContainer {
         var activeItems: ArraySlice<ItemInfo> {
             let activeEnd = max(0, items.count - unusedCount - removedCount)
             return items.prefix(activeEnd)
+        }
+
+        var activeAndRemovedItems: ArraySlice<ItemInfo> {
+            let retainedEnd = max(0, items.count - unusedCount)
+            return items.prefix(retainedEnd)
         }
 
         mutating func replaceItems(
@@ -309,6 +387,8 @@ private struct DynamicContainerInfo: StatefulRule {
 
         let capturedInputs = inputs
         let currentList = viewListAttr.value
+        let inheritedTransaction = inputs.base.transaction.value
+        let listTransaction = graph.transaction(for: viewListAttr.identifier) ?? inheritedTransaction
         var from = 0
         var liveIDs = Set<_ViewList_ID.Canonical>()
         var orderedItems: [DynamicContainer.ItemInfo] = []
@@ -321,15 +401,20 @@ private struct DynamicContainerInfo: StatefulRule {
                 liveIDs.insert(id)
 
                 let viewCount = sublist.elements.count
+                let needsTransitions = sublist.traits[CanTransitionTraitKey.self]
                 // allUnary becomes false when any active item reports viewCount != 1.
                 // The same viewCount is used for cumulative child offsets.
                 if let existing = info.item(for: id), existing.viewCount != viewCount {
                     existing.invalidate()
                     retainedElements.removeValue(forKey: id)
                 }
+                if let existing = info.item(for: id), existing.needsTransitions != needsTransitions {
+                    existing.invalidate()
+                    retainedElements.removeValue(forKey: id)
+                }
 
                 let reusableItem = info.item(for: id).flatMap { existing in
-                    existing.viewCount == viewCount ? existing : nil
+                    existing.viewCount == viewCount && existing.needsTransitions == needsTransitions ? existing : nil
                 }
                 let item: DynamicContainer.ItemInfo?
                 if let reusableItem {
@@ -340,6 +425,7 @@ private struct DynamicContainerInfo: StatefulRule {
                         viewCount: viewCount,
                         sublist: sublist,
                         offset: offset,
+                        transition: needsTransitions ? sublist.traits[TransitionTraitKey.self] : nil,
                         capturedInputs: capturedInputs,
                         graph: graph
                     )
@@ -348,7 +434,11 @@ private struct DynamicContainerInfo: StatefulRule {
                     // Item object depth is driven by view-level zIndex. displayMap
                     // stores UInt32 item indexes sorted by that depth.
                     item.zIndex = sublist.traits[ZIndexTraitKey.self]
-                    item.needsTransitions = sublist.traits[CanTransitionTraitKey.self]
+                    item.needsTransitions = needsTransitions
+                    if item.phase != 1 {
+                        item.listener = nil
+                        item.setTransitionPhase(.identity, transaction: listTransaction)
+                    }
                     item.phase = 1
                     item.precedingViewCount = precedingViewCount
                     precedingViewCount += item.viewCount
@@ -358,34 +448,68 @@ private struct DynamicContainerInfo: StatefulRule {
             return true
         }
 
-        let removedItems = retainedRemovedItems(excluding: liveIDs)
+        let removedItems = retainedRemovedItems(
+            excluding: liveIDs,
+            transaction: listTransaction,
+            graph: graph
+        )
         info.replaceItems(active: orderedItems, removed: removedItems)
         AttributeGraph.setStatefulOutput(info)
     }
 
     private mutating func retainedRemovedItems(
-        excluding liveIDs: Set<_ViewList_ID.Canonical>
+        excluding liveIDs: Set<_ViewList_ID.Canonical>,
+        transaction: Transaction,
+        graph: AttributeGraph
     ) -> [DynamicContainer.ItemInfo] {
         var removedItems: [DynamicContainer.ItemInfo] = []
         for item in info.items where !liveIDs.contains(item.uniqueId) {
             if item.phase == 2 {
+                guard let listener = item.listener else {
+                    item.invalidate()
+                    retainedElements.removeValue(forKey: item.uniqueId)
+                    continue
+                }
+                listener.readSeed()
+                if listener.isComplete {
+                    item.invalidate()
+                    retainedElements.removeValue(forKey: item.uniqueId)
+                    continue
+                }
+                item.removalOrder = removedItems.count
+                removedItems.append(item)
+                continue
+            }
+
+            let transitionTransaction = item.transitionTransactions?(.didDisappear, transaction)
+                .first { candidate in
+                    guard let animation = candidate.effectiveAnimation else { return false }
+                    return animation.box.duration > 0
+                } ?? transaction
+
+            guard item.needsTransitions,
+                  let animation = transitionTransaction.effectiveAnimation,
+                  animation.box.duration > 0,
+                  let completionSeed = item.transitionCompletionSeed else {
                 item.invalidate()
                 retainedElements.removeValue(forKey: item.uniqueId)
                 continue
             }
 
-            guard item.needsTransitions else {
-                item.invalidate()
-                retainedElements.removeValue(forKey: item.uniqueId)
-                continue
-            }
+            let listener = DynamicContainer.TransitionRemovalListener(
+                seed: completionSeed,
+                inbox: graph.inbox
+            )
+            item.listener = listener
 
-            // Transition listener/completion wiring is not implemented yet.
-            // Keep one phase-2 retained item output so DynamicContainer.Info has the
-            // expected removed suffix shape, then erase it on the next update if it is
-            // still absent. Replace this with listener-driven retention when transition
-            // and animation-completion infrastructure exists.
+            var removalTransaction = transitionTransaction
+            let observer = listener.installCompletion(into: &removalTransaction)
             item.phase = 2
+            item.setTransitionPhase(.didDisappear, transaction: removalTransaction)
+            listener.readSeed()
+            enqueueAnimationCompletionActions(observer?.bodyDidFinish() ?? [])
+            enqueueNoRegisteredAnimationFallback(observer)
+
             item.removalOrder = removedItems.count
             removedItems.append(item)
         }
@@ -397,6 +521,7 @@ private struct DynamicContainerInfo: StatefulRule {
         viewCount: Int,
         sublist: _ViewList_Sublist,
         offset: Int,
+        transition: AnyTransition?,
         capturedInputs: _ViewInputs,
         graph: AttributeGraph
     ) -> DynamicContainer.ItemInfo? {
@@ -411,6 +536,8 @@ private struct DynamicContainerInfo: StatefulRule {
             var firstOutputs: _ViewOutputs?
             var layoutAttributes: [LayoutProxyAttributes] = []
             var preferenceOutputs: [PreferencesOutputs] = []
+            var transitionPhaseSetters: [_TransitionPhaseSetter] = []
+            let transitionCompletionSeed = transition.map { _ in graph.makeInput(value: UInt32(0)) }
             let traitsListAttr = sublist.list.map { OptionalAttribute($0) } ??
                 OptionalAttribute<any ViewList>()
 
@@ -439,6 +566,17 @@ private struct DynamicContainerInfo: StatefulRule {
                     childInputs.safeAreaInsets = capturedInputs.safeAreaInsets
                     childInputs.containerSize = OptionalAttribute(capturedInputs.size)
                     childInputs.stackOrientation = capturedInputs.stackOrientation
+                    if let transition {
+                        return withoutActuallyEscaping(makeView) { escapableMakeView in
+                            transition._makeView(
+                                phase: .identity,
+                                inputs: childInputs,
+                                phaseSetters: &transitionPhaseSetters
+                            ) { _, transitionInputs in
+                                escapableMakeView(transitionInputs)
+                            }
+                        }
+                    }
                     return makeView(childInputs)
                 }
 
@@ -483,7 +621,15 @@ private struct DynamicContainerInfo: StatefulRule {
                 viewCount: viewCount,
                 outputs: outputs,
                 layoutAttributes: layoutAttributes,
-                preferenceOutputs: preferenceOutputs
+                preferenceOutputs: preferenceOutputs,
+                transitionPhaseSetters: transitionPhaseSetters,
+                needsTransitions: transition != nil,
+                transitionCompletionSeed: transitionCompletionSeed,
+                transitionTransactions: transition.map { transition in
+                    { phase, transaction in
+                        transition._filteredTransactions(from: transaction, phase: phase)
+                    }
+                }
             )
         }
 
@@ -718,7 +864,11 @@ extension Layout {
             for keyType in inputs.preferences.keys.keys {
                 let nodeListAttr: Attribute<[AGWeakAttribute]> = graph.makeRule {
                     let info = containerInfoAttr.value
-                    return info.activeItems.flatMap { item in
+                    // Retained removals still need to render through DisplayList.Key.
+                    // Other preferences stay active-only until their lifecycle is modeled.
+                    let items = ObjectIdentifier(keyType) == ObjectIdentifier(DisplayList.Key.self) ?
+                        info.activeAndRemovedItems : info.activeItems
+                    return items.flatMap { item in
                         item.preferenceOutputs.flatMap { preferences in
                             preferences.values(for: keyType).compactMap {
                                 graph.weakAttributeIfValid(for: $0)

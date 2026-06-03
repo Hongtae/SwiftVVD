@@ -16,12 +16,63 @@ public protocol Transition {
 }
 
 public struct PlaceholderContentView<Value>: View {
+    public var body: Never { neverBody() }
+
+    // Transition bodies are built around a placeholder. The real content builder
+    // is pushed through inputs so a transition can wrap either a unary view or a
+    // view-list subtree without owning the original source view.
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        fatalError()
+        var inputs = inputs
+        guard let elem = inputs.popLast(BodyInput<Self>.self) else {
+            return _ViewOutputs()
+        }
+        if elem.isViewList {
+            guard let fn = elem.makeViewListFn else {
+                fatalError("PlaceholderContentView<\(Value.self)>._makeView: missing view-list body.")
+            }
+            guard let graph = AttributeGraph.current else {
+                fatalError("PlaceholderContentView<\(Value.self)>._makeView called outside AG context.")
+            }
+            let rootAttr: Attribute<_VStackLayout> = graph.makeInput(value: _VStackLayout())
+            return _VStackLayout._makeLayoutView(root: _GraphValue(_attribute: rootAttr), inputs: inputs) { _, childInputs in
+                fn(_Graph(), childInputs.listInputs)
+            }
+        } else {
+            guard let fn = elem.makeViewFn else {
+                fatalError("PlaceholderContentView<\(Value.self)>._makeView: missing view body.")
+            }
+            return fn(_Graph(), inputs)
+        }
     }
+
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        fatalError()
+        var inputs = inputs
+        guard let elem = inputs.base.popLast(BodyInput<Self>.self) else {
+            return _ViewListOutputs(views: .staticList(.merged([])), nextImplicitID: 0, staticCount: 0)
+        }
+        if elem.isViewList {
+            guard let fn = elem.makeViewListFn else {
+                fatalError("PlaceholderContentView<\(Value.self)>._makeViewList: missing view-list body.")
+            }
+            return fn(_Graph(), inputs)
+        } else {
+            guard let fn = elem.makeViewFn else {
+                fatalError("PlaceholderContentView<\(Value.self)>._makeViewList: missing view body.")
+            }
+            return _ViewListOutputs.unaryViewList(viewType: Self.self, inputs: inputs) { viewInputs in
+                var viewInputs = viewInputs
+                var mergedBase = inputs.base
+                mergedBase.merge(viewInputs.base, ignoringPhase: false)
+                viewInputs.base = mergedBase
+                return fn(_Graph(), viewInputs)
+            }
+        }
     }
+
+    public static func _viewListCount(inputs: _ViewListCountInputs, body: (_ViewListCountInputs) -> Int?) -> Int? {
+        body(inputs)
+    }
+
     public typealias Body = Never
 }
 
@@ -64,79 +115,782 @@ extension Transition {
 
     public func _makeContentTransition(transition: inout _Transition_ContentTransition) {
     }
+
+    public func apply<V>(content: V, phase: TransitionPhase) -> some View where V: View {
+        content.modifier(ApplyTransitionModifier(transition: self, phase: phase))
+    }
+}
+
+struct ApplyTransitionModifier<T: Transition>: ViewModifier {
+    var transition: T
+    var phase: TransitionPhase
+
+    func body(content: Content) -> T.Body {
+        transition.body(content: PlaceholderContentView<T>(), phase: phase)
+    }
+
+    static func _makeView(
+        modifier: _GraphValue<Self>,
+        inputs: _ViewInputs,
+        body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
+    ) -> _ViewOutputs {
+        guard AttributeGraph.current != nil else {
+            fatalError("\(Self.self)._makeView called outside an active AttributeGraph context.")
+        }
+        var graphInputs = inputs.base
+        let dpFields = DynamicPropertyCache.fields(of: Self.self)
+        let (bodyGV, _) = makeBody(modifier: modifier, inputs: &graphInputs, fields: dpFields)
+
+        var inputs = inputs
+        inputs.base = graphInputs
+        // Store the original body builder under the placeholder key. When the
+        // transition body evaluates PlaceholderContentView, it relays back here.
+        inputs.base.append(BodyInputElement(makeView: body), forKey: BodyInput<PlaceholderContentView<T>>.self)
+        return T.Body._makeView(view: bodyGV, inputs: inputs)
+    }
+
+    static func _makeViewList(
+        modifier: _GraphValue<Self>,
+        inputs: _ViewListInputs,
+        body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs
+    ) -> _ViewListOutputs {
+        guard AttributeGraph.current != nil else {
+            fatalError("\(Self.self)._makeViewList called outside an active AttributeGraph context.")
+        }
+        var graphInputs = inputs.base
+        let dpFields = DynamicPropertyCache.fields(of: Self.self)
+        let (bodyGV, _) = makeBody(modifier: modifier, inputs: &graphInputs, fields: dpFields)
+
+        var inputs = inputs
+        inputs.base = graphInputs
+        inputs.base.append(BodyInputElement(makeViewList: body), forKey: BodyInput<PlaceholderContentView<T>>.self)
+        return T.Body._makeViewList(view: bodyGV, inputs: inputs)
+    }
+}
+
+struct TransitionBodyAccessor<T: Transition>: BodyAccessor {
+    typealias Container = ApplyTransitionModifier<T>
+    typealias Body = T.Body
+
+    let containerAttr: Attribute<ApplyTransitionModifier<T>>
+
+    mutating func updateBody(of modifier: ApplyTransitionModifier<T>, changed: Bool) -> T.Body {
+        modifier.body(content: _ViewModifier_Content<ApplyTransitionModifier<T>>())
+    }
+
+    static func makeBody(
+        container: _GraphValue<ApplyTransitionModifier<T>>,
+        inputs: inout _GraphInputs,
+        fields: DynamicPropertyCache.Fields
+    ) -> (_GraphValue<T.Body>, Optional<_DynamicPropertyBuffer>) {
+        guard let graph = AttributeGraph.current else {
+            fatalError("TransitionBodyAccessor.makeBody called outside AttributeGraph context")
+        }
+        let buffer = _DynamicPropertyBuffer(fields: fields, container: container, inputs: &inputs)
+        let accessor = TransitionBodyAccessor(containerAttr: container._attribute)
+        if buffer.isEmpty {
+            let attr = graph.makeStatefulRule(StaticBody<TransitionBodyAccessor<T>, MainThreadFlags>(accessor: accessor))
+            return (_GraphValue(_attribute: attr), nil)
+        } else {
+            let attr = graph.makeStatefulRule(DynamicBody<TransitionBodyAccessor<T>, MainThreadFlags>(accessor: accessor, buffer: buffer))
+            return (_GraphValue(_attribute: attr), buffer)
+        }
+    }
+}
+
+extension ApplyTransitionModifier {
+    static func makeBody(
+        modifier: _GraphValue<Self>,
+        inputs: inout _GraphInputs,
+        fields: DynamicPropertyCache.Fields
+    ) -> (_GraphValue<T.Body>, Optional<_DynamicPropertyBuffer>) {
+        TransitionBodyAccessor<T>.makeBody(container: modifier, inputs: &inputs, fields: fields)
+    }
+}
+
+public struct IdentityTransition: Transition {
+    public init() {}
+
+    public func body(content: Content, phase: TransitionPhase) -> Content {
+        content
+    }
+
+    public static let properties = TransitionProperties(hasMotion: false)
+}
+
+public struct OpacityTransition: Transition {
+    public init() {}
+
+    public func body(content: Content, phase: TransitionPhase) -> some View {
+        content.opacity(phase.isIdentity ? 1 : 0)
+    }
+
+    public static let properties = TransitionProperties(hasMotion: false)
+}
+
+public struct MoveTransition: Transition {
+    public var edge: Edge
+
+    public init(edge: Edge) {
+        self.edge = edge
+    }
+
+    public func body(content: Content, phase: TransitionPhase) -> some View {
+        content.modifier(MoveLayout(edge: phase.isIdentity ? nil : edge, activeEdge: edge))
+    }
+
+    struct MoveLayout: ViewModifier, Animatable, CustomReflectable {
+        var edge: Edge?
+        var activeEdge: Edge?
+        var progress: CGFloat
+
+        init(edge: Edge?, activeEdge: Edge? = nil) {
+            self.edge = edge
+            self.activeEdge = activeEdge ?? edge
+            self.progress = edge == nil ? 0 : 1
+        }
+
+        var animatableData: CGFloat {
+            get { progress }
+            set { progress = newValue }
+        }
+
+        typealias Body = Never
+
+        var customMirror: Mirror {
+            Mirror(self, children: ["edge": edge as Any])
+        }
+
+        static func _makeView(
+            modifier: _GraphValue<Self>,
+            inputs: _ViewInputs,
+            body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
+        ) -> _ViewOutputs {
+            var modifier = modifier
+            Self._makeAnimatable(value: &modifier, inputs: inputs.base)
+            return _GeometryEffectSupport.makeView(
+                modifier: modifier,
+                inputs: inputs,
+                body: body
+            ) { modifier, size in
+                modifier.effectValue(size: size)
+            }
+        }
+
+        static func _makeViewList(
+            modifier: _GraphValue<Self>,
+            inputs: _ViewListInputs,
+            body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs
+        ) -> _ViewListOutputs {
+            guard AttributeGraph.current != nil else {
+                fatalError("\(Self.self)._makeViewList called outside an active AttributeGraph context.")
+            }
+            var outputs = body(_Graph(), inputs)
+            outputs.multiModifier(modifier, inputs: inputs)
+            return outputs
+        }
+
+        func effectValue(size: CGSize) -> ProjectionTransform {
+            guard progress != 0,
+                  let edge = edge ?? activeEdge else {
+                return ProjectionTransform()
+            }
+            let offset: CGSize
+            switch edge {
+            case .leading:
+                offset = CGSize(width: -size.width * progress, height: 0)
+            case .trailing:
+                offset = CGSize(width: size.width * progress, height: 0)
+            case .top:
+                offset = CGSize(width: 0, height: -size.height * progress)
+            case .bottom:
+                offset = CGSize(width: 0, height: size.height * progress)
+            }
+            return ProjectionTransform(
+                CGAffineTransform(translationX: offset.width, y: offset.height)
+            )
+        }
+    }
+}
+
+public struct PushTransition: Transition {
+    public var edge: Edge
+
+    public init(edge: Edge) {
+        self.edge = edge
+    }
+
+    public func body(content: Content, phase: TransitionPhase) -> some View {
+        let activeEdge = phase.isIdentity ? edge : edge(for: phase)
+        return content
+            .modifier(MoveTransition.MoveLayout(
+                edge: phase.isIdentity ? nil : activeEdge,
+                activeEdge: activeEdge
+            ))
+            .modifier(OpacityRendererEffect(opacity: phase.isIdentity ? 1 : 0))
+    }
+
+    private func edge(for phase: TransitionPhase) -> Edge {
+        switch phase {
+        case .willAppear:
+            return edge
+        case .identity:
+            return edge
+        case .didDisappear:
+            return edge.opposite
+        }
+    }
+}
+
+public struct SlideTransition: Transition {
+    public init() {}
+
+    public func body(content: Content, phase: TransitionPhase) -> some View {
+        let edge = edge(for: phase)
+        return content.modifier(MoveTransition.MoveLayout(
+            edge: phase.isIdentity ? nil : edge,
+            activeEdge: edge
+        ))
+    }
+
+    private func edge(for phase: TransitionPhase) -> Edge {
+        switch phase {
+        case .willAppear:
+            return .leading
+        case .identity:
+            return .leading
+        case .didDisappear:
+            return .trailing
+        }
+    }
+}
+
+public struct ScaleTransition: Transition {
+    public var scale: Double
+    public var anchor: UnitPoint
+
+    public init(_ scale: Double, anchor: UnitPoint = .center) {
+        self.scale = scale
+        self.anchor = anchor
+    }
+
+    public func body(content: Content, phase: TransitionPhase) -> some View {
+        content.scaleEffect(phase.isIdentity ? 1 : CGFloat(scale), anchor: anchor)
+    }
+}
+
+public struct AsymmetricTransition<Insertion, Removal>: Transition
+    where Insertion: Transition, Removal: Transition {
+    public var insertion: Insertion
+    public var removal: Removal
+
+    public init(insertion: Insertion, removal: Removal) {
+        self.insertion = insertion
+        self.removal = removal
+    }
+
+    @ViewBuilder
+    public func body(content: Content, phase: TransitionPhase) -> some View {
+        switch phase {
+        case .willAppear:
+            insertion.apply(content: content, phase: phase)
+        case .identity:
+            content
+        case .didDisappear:
+            removal.apply(content: content, phase: phase)
+        }
+    }
+
+    public static var properties: TransitionProperties {
+        TransitionProperties(hasMotion: Insertion.properties.hasMotion || Removal.properties.hasMotion)
+    }
+}
+
+protocol _TransitionTransactionFiltering {
+    // A transition can alter the transaction used when its phase changes. The
+    // resolver variant exposes child-specific filtered transactions for
+    // retained-removal decisions before the phase setter runs.
+    func _filter(transaction: inout Transaction, phase: TransitionPhase)
+    func _filteredTransactions(from transaction: Transaction, phase: TransitionPhase) -> [Transaction]
+}
+
+private func _applyTransitionTransactionFilters<T: Transition>(
+    _ transition: T,
+    to transaction: inout Transaction,
+    phase: TransitionPhase
+) {
+    if let filtering = transition as? any _TransitionTransactionFiltering {
+        filtering._filter(transaction: &transaction, phase: phase)
+    }
+}
+
+private func _transitionFilteredTransactions<T: Transition>(
+    _ transition: T,
+    from transaction: Transaction,
+    phase: TransitionPhase
+) -> [Transaction] {
+    if let filtering = transition as? any _TransitionTransactionFiltering {
+        return filtering._filteredTransactions(from: transaction, phase: phase)
+    }
+    return [transaction]
+}
+
+extension AsymmetricTransition: _TransitionTransactionFiltering {
+    func _filter(transaction: inout Transaction, phase: TransitionPhase) {
+        switch phase {
+        case .willAppear:
+            _applyTransitionTransactionFilters(insertion, to: &transaction, phase: phase)
+        case .identity:
+            break
+        case .didDisappear:
+            _applyTransitionTransactionFilters(removal, to: &transaction, phase: phase)
+        }
+    }
+
+    func _filteredTransactions(from transaction: Transaction, phase: TransitionPhase) -> [Transaction] {
+        switch phase {
+        case .willAppear:
+            return _transitionFilteredTransactions(insertion, from: transaction, phase: phase)
+        case .identity:
+            return [transaction]
+        case .didDisappear:
+            return _transitionFilteredTransactions(removal, from: transaction, phase: phase)
+        }
+    }
+}
+
+struct CombiningTransition<First, Second>: Transition where First: Transition, Second: Transition {
+    var transition1: First
+    var transition2: Second
+
+    func body(content: Content, phase: TransitionPhase) -> some View {
+        transition2.apply(content: transition1.apply(content: content, phase: phase), phase: phase)
+    }
+
+    static var properties: TransitionProperties {
+        TransitionProperties(hasMotion: First.properties.hasMotion || Second.properties.hasMotion)
+    }
+}
+
+extension CombiningTransition: _TransitionTransactionFiltering {
+    func _filter(transaction: inout Transaction, phase: TransitionPhase) {
+        _applyTransitionTransactionFilters(transition2, to: &transaction, phase: phase)
+        _applyTransitionTransactionFilters(transition1, to: &transaction, phase: phase)
+    }
+
+    func _filteredTransactions(from transaction: Transaction, phase: TransitionPhase) -> [Transaction] {
+        _transitionFilteredTransactions(transition1, from: transaction, phase: phase) +
+        _transitionFilteredTransactions(transition2, from: transaction, phase: phase)
+    }
+}
+
+struct FilteredTransition<Base: Transition>: Transition {
+    var transition: Base
+    var filter: (inout Transaction, TransitionPhase) -> Void
+
+    func body(content: Content, phase: TransitionPhase) -> some View {
+        transition
+            .apply(content: content, phase: phase)
+            .transaction { transaction in
+                filter(&transaction, phase)
+            }
+    }
+
+    static var properties: TransitionProperties {
+        Base.properties
+    }
+}
+
+extension FilteredTransition: _TransitionTransactionFiltering {
+    func _filter(transaction: inout Transaction, phase: TransitionPhase) {
+        filter(&transaction, phase)
+        _applyTransitionTransactionFilters(transition, to: &transaction, phase: phase)
+    }
+
+    func _filteredTransactions(from transaction: Transaction, phase: TransitionPhase) -> [Transaction] {
+        var transaction = transaction
+        filter(&transaction, phase)
+        return _transitionFilteredTransactions(transition, from: transaction, phase: phase)
+    }
+}
+
+struct ModifierTransition<Modifier: ViewModifier>: Transition {
+    var activeModifier: Modifier
+    var identityModifier: Modifier
+
+    @ViewBuilder
+    func body(content: Content, phase: TransitionPhase) -> some View {
+        if phase.isIdentity {
+            content.modifier(identityModifier)
+        } else {
+            content.modifier(activeModifier)
+        }
+    }
+}
+
+struct OffsetTransition: Transition {
+    var offset: CGSize
+
+    func body(content: Content, phase: TransitionPhase) -> some View {
+        content.offset(phase.isIdentity ? .zero : offset)
+    }
+}
+
+extension Edge {
+    var opposite: Edge {
+        switch self {
+        case .top:
+            return .bottom
+        case .leading:
+            return .trailing
+        case .bottom:
+            return .top
+        case .trailing:
+            return .leading
+        }
+    }
+}
+
+typealias _TransitionPhaseSetter = (TransitionPhase, Transaction) -> Void
+typealias _TransitionTransactionResolver = (TransitionPhase, Transaction) -> [Transaction]
+
+@usableFromInline
+class AnyTransitionBox {
+    // Type-erased transition boxes carry composition behavior without forcing
+    // every call site to keep the concrete Transition type.
+    @usableFromInline
+    init() {}
+
+    func combined(with other: AnyTransitionBox) -> AnyTransitionBox {
+        AnyCombinedTransitionBox(first: self, second: other)
+    }
+
+    func combineFirst<First: Transition>(_ first: First) -> AnyTransitionBox {
+        AnyCombinedTransitionBox(first: TransitionBox(base: first), second: self)
+    }
+
+    func asymmetric(removal: AnyTransitionBox) -> AnyTransitionBox {
+        AnyAsymmetricTransitionBox(insertion: self, removal: removal)
+    }
+
+    func asymmetricRemoval<Insertion: Transition>(insertion: Insertion) -> AnyTransitionBox {
+        AnyAsymmetricTransitionBox(insertion: TransitionBox(base: insertion), removal: self)
+    }
+
+    func animation(_ animation: Animation?) -> AnyTransitionBox {
+        transaction { transaction, phase in
+            if !phase.isIdentity {
+                transaction.animation = animation
+            }
+        }
+    }
+
+    func transaction(_ filter: @escaping (inout Transaction, TransitionPhase) -> Void) -> AnyTransitionBox {
+        AnyFilteredTransitionBox(base: self, filter: filter)
+    }
+
+    func filteredTransactions(from transaction: Transaction, phase: TransitionPhase) -> [Transaction] {
+        [transaction]
+    }
+
+    func _makeView(
+        phase: TransitionPhase,
+        inputs: _ViewInputs,
+        phaseSetters: inout [_TransitionPhaseSetter],
+        body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
+    ) -> _ViewOutputs {
+        body(_Graph(), inputs)
+    }
 }
 
 @usableFromInline
-class AnyTransitionBox: @unchecked Sendable {
-    enum Storage: @unchecked Sendable {
-        case identity
-        case opacity
-        case slide
-        case offset(CGSize)
-        case push(Edge)
-        case scale(CGFloat, UnitPoint)
-        case modifier(active: Any, identity: Any)
-        case asymmetric(insertion: AnyTransition, removal: AnyTransition)
-        case combined(AnyTransition, AnyTransition)
-        case animation(AnyTransition, Animation?)
-        case custom(Any)
+final class TransitionBox<Base: Transition>: AnyTransitionBox {
+    let base: Base
+
+    init(base: Base) {
+        self.base = base
+        super.init()
     }
 
-    let storage: Storage
+    override func combined(with other: AnyTransitionBox) -> AnyTransitionBox {
+        other.combineFirst(base)
+    }
 
-    init(storage: Storage = .identity) {
-        self.storage = storage
+    override func combineFirst<First: Transition>(_ first: First) -> AnyTransitionBox {
+        TransitionBox<CombiningTransition<First, Base>>(
+            base: CombiningTransition(transition1: first, transition2: base)
+        )
+    }
+
+    override func asymmetric(removal: AnyTransitionBox) -> AnyTransitionBox {
+        removal.asymmetricRemoval(insertion: base)
+    }
+
+    override func asymmetricRemoval<Insertion: Transition>(insertion: Insertion) -> AnyTransitionBox {
+        TransitionBox<AsymmetricTransition<Insertion, Base>>(
+            base: AsymmetricTransition(insertion: insertion, removal: base)
+        )
+    }
+
+    override func animation(_ animation: Animation?) -> AnyTransitionBox {
+        transaction { transaction, phase in
+            if !phase.isIdentity {
+                transaction.animation = animation
+            }
+        }
+    }
+
+    override func transaction(_ filter: @escaping (inout Transaction, TransitionPhase) -> Void) -> AnyTransitionBox {
+        TransitionBox<FilteredTransition<Base>>(
+            base: FilteredTransition(transition: base, filter: filter)
+        )
+    }
+
+    override func filteredTransactions(from transaction: Transaction, phase: TransitionPhase) -> [Transaction] {
+        _transitionFilteredTransactions(base, from: transaction, phase: phase)
+    }
+
+    override func _makeView(
+        phase: TransitionPhase,
+        inputs: _ViewInputs,
+        phaseSetters: inout [_TransitionPhaseSetter],
+        body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
+    ) -> _ViewOutputs {
+        guard let graph = AttributeGraph.current else {
+            fatalError("TransitionBox<\(Base.self)>._makeView called outside AG context.")
+        }
+        let attr: Attribute<ApplyTransitionModifier<Base>> = graph.makeInput(
+            value: ApplyTransitionModifier(transition: base, phase: phase)
+        )
+        // Retained items keep this setter so removal can flip the same transition
+        // subtree to didDisappear with the transaction selected for that phase.
+        phaseSetters.append { [base] phase, transaction in
+            var filteredTransaction = transaction
+            _applyTransitionTransactionFilters(base, to: &filteredTransaction, phase: phase)
+            attr.setValue(
+                ApplyTransitionModifier(transition: base, phase: phase),
+                transaction: filteredTransaction
+            )
+        }
+        return ApplyTransitionModifier<Base>._makeView(
+            modifier: _GraphValue(_attribute: attr),
+            inputs: inputs,
+            body: body
+        )
     }
 }
 
-public struct AnyTransition: Sendable {
+private final class AnyCombinedTransitionBox: AnyTransitionBox {
+    let first: AnyTransitionBox
+    let second: AnyTransitionBox
+
+    init(first: AnyTransitionBox, second: AnyTransitionBox) {
+        self.first = first
+        self.second = second
+        super.init()
+    }
+
+    override func filteredTransactions(from transaction: Transaction, phase: TransitionPhase) -> [Transaction] {
+        first.filteredTransactions(from: transaction, phase: phase) +
+        second.filteredTransactions(from: transaction, phase: phase)
+    }
+}
+
+private final class AnyAsymmetricTransitionBox: AnyTransitionBox {
+    let insertion: AnyTransitionBox
+    let removal: AnyTransitionBox
+
+    init(insertion: AnyTransitionBox, removal: AnyTransitionBox) {
+        self.insertion = insertion
+        self.removal = removal
+        super.init()
+    }
+
+    override func filteredTransactions(from transaction: Transaction, phase: TransitionPhase) -> [Transaction] {
+        switch phase {
+        case .willAppear:
+            return insertion.filteredTransactions(from: transaction, phase: phase)
+        case .identity:
+            return [transaction]
+        case .didDisappear:
+            return removal.filteredTransactions(from: transaction, phase: phase)
+        }
+    }
+}
+
+private final class AnyFilteredTransitionBox: AnyTransitionBox {
+    let base: AnyTransitionBox
+    let filter: (inout Transaction, TransitionPhase) -> Void
+
+    init(base: AnyTransitionBox, filter: @escaping (inout Transaction, TransitionPhase) -> Void) {
+        self.base = base
+        self.filter = filter
+        super.init()
+    }
+
+    override func filteredTransactions(from transaction: Transaction, phase: TransitionPhase) -> [Transaction] {
+        var filteredTransaction = transaction
+        filter(&filteredTransaction, phase)
+        return base.filteredTransactions(from: filteredTransaction, phase: phase)
+    }
+
+    override func _makeView(
+        phase: TransitionPhase,
+        inputs: _ViewInputs,
+        phaseSetters: inout [_TransitionPhaseSetter],
+        body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
+    ) -> _ViewOutputs {
+        var basePhaseSetters: [_TransitionPhaseSetter] = []
+        let outputs = base._makeView(
+            phase: phase,
+            inputs: inputs,
+            phaseSetters: &basePhaseSetters,
+            body: body
+        )
+        phaseSetters.append { [filter, basePhaseSetters] phase, transaction in
+            var filteredTransaction = transaction
+            filter(&filteredTransaction, phase)
+            for setter in basePhaseSetters {
+                setter(phase, filteredTransaction)
+            }
+        }
+        return outputs
+    }
+}
+
+public struct AnyTransition {
     fileprivate let box: AnyTransitionBox
 
     public init<T>(_ transition: T) where T: Transition {
-        self.box = AnyTransitionBox(storage: .custom(transition))
+        self.box = TransitionBox(base: transition)
     }
-    
+
     init(box: AnyTransitionBox) {
         self.box = box
     }
 
     public static var slide: AnyTransition {
-        AnyTransition(box: AnyTransitionBox(storage: .slide))
+        AnyTransition(SlideTransition())
     }
+
     public static func offset(_ offset: CGSize) -> AnyTransition {
-        AnyTransition(box: AnyTransitionBox(storage: .offset(offset)))
+        AnyTransition(OffsetTransition(offset: offset))
     }
+
     public static func offset(x: CGFloat = 0, y: CGFloat = 0) -> AnyTransition {
         offset(CGSize(width: x, height: y))
     }
+
     public func combined(with other: AnyTransition) -> AnyTransition {
-        AnyTransition(box: AnyTransitionBox(storage: .combined(self, other)))
+        AnyTransition(box: box.combined(with: other.box))
     }
+
     public static func push(from edge: Edge) -> AnyTransition {
-        AnyTransition(box: AnyTransitionBox(storage: .push(edge)))
+        AnyTransition(PushTransition(edge: edge))
     }
+
     public static var scale: AnyTransition {
         scale(scale: 1)
     }
+
     public static func scale(scale: CGFloat, anchor: UnitPoint = .center) -> AnyTransition {
-        AnyTransition(box: AnyTransitionBox(storage: .scale(scale, anchor)))
+        AnyTransition(ScaleTransition(Double(scale), anchor: anchor))
     }
-    public static let opacity: AnyTransition = AnyTransition(box: AnyTransitionBox(storage: .opacity))
+
+    nonisolated(unsafe) public static let opacity: AnyTransition = AnyTransition(OpacityTransition())
 
     public static func modifier<E>(active: E, identity: E) -> AnyTransition where E: ViewModifier {
-        AnyTransition(box: AnyTransitionBox(storage: .modifier(active: active, identity: identity)))
-    }
-    public static func asymmetric(insertion: AnyTransition, removal: AnyTransition) -> AnyTransition {
-        AnyTransition(box: AnyTransitionBox(storage: .asymmetric(insertion: insertion, removal: removal)))
+        AnyTransition(ModifierTransition(activeModifier: active, identityModifier: identity))
     }
 
-    public static let identity: AnyTransition = AnyTransition(box: AnyTransitionBox(storage: .identity))
+    public static func asymmetric(insertion: AnyTransition, removal: AnyTransition) -> AnyTransition {
+        AnyTransition(box: insertion.box.asymmetric(removal: removal.box))
+    }
+
+    public static var identity: AnyTransition {
+        AnyTransition(IdentityTransition())
+    }
 
     public static func move(edge: Edge) -> AnyTransition {
-        AnyTransition(box: AnyTransitionBox(storage: .push(edge)))
+        AnyTransition(MoveTransition(edge: edge))
     }
 
     public func animation(_ animation: Animation?) -> AnyTransition {
-        AnyTransition(box: AnyTransitionBox(storage: .animation(self, animation)))
+        AnyTransition(box: box.animation(animation))
+    }
+
+    public func transaction(_ filter: @escaping (inout Transaction, TransitionPhase) -> Void) -> AnyTransition {
+        AnyTransition(box: box.transaction(filter))
+    }
+
+    func _filteredTransactions(from transaction: Transaction, phase: TransitionPhase) -> [Transaction] {
+        box.filteredTransactions(from: transaction, phase: phase)
+    }
+
+    func _makeView(
+        phase: TransitionPhase,
+        inputs: _ViewInputs,
+        phaseSetters: inout [_TransitionPhaseSetter],
+        body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
+    ) -> _ViewOutputs {
+        box._makeView(phase: phase, inputs: inputs, phaseSetters: &phaseSetters, body: body)
+    }
+}
+
+extension Transition where Self == IdentityTransition {
+    public static var identity: IdentityTransition {
+        Self()
+    }
+}
+
+extension Transition where Self == OpacityTransition {
+    public static var opacity: OpacityTransition {
+        Self()
+    }
+}
+
+extension Transition where Self == MoveTransition {
+    public static func move(edge: Edge) -> Self {
+        Self(edge: edge)
+    }
+}
+
+extension Transition where Self == PushTransition {
+    public static func push(from edge: Edge) -> Self {
+        Self(edge: edge)
+    }
+}
+
+extension Transition where Self == SlideTransition {
+    public static var slide: SlideTransition {
+        Self()
+    }
+}
+
+extension Transition where Self == ScaleTransition {
+    public static var scale: ScaleTransition {
+        Self(1e-5)
+    }
+
+    public static func scale(_ scale: Double, anchor: UnitPoint = .center) -> Self {
+        Self(scale, anchor: anchor)
+    }
+}
+
+extension Transition {
+    public func animation(_ animation: Animation?) -> some Transition {
+        FilteredTransition(transition: self) { transaction, phase in
+            if !phase.isIdentity {
+                transaction.animation = animation
+            }
+        }
+    }
+
+    public func transaction(_ filter: @escaping (inout Transaction, TransitionPhase) -> Void) -> some Transition {
+        FilteredTransition(transition: self, filter: filter)
+    }
+
+    public func combined<T>(with other: T) -> some Transition where T: Transition {
+        CombiningTransition(transition1: self, transition2: other)
     }
 }

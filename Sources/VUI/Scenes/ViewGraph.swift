@@ -384,7 +384,9 @@ class ViewGraph: ViewGraphHost {
                 }
                 g.makeSideEffectRule { [weak self] in
                     guard let host = self?.rendererHost as? WindowController else { return }
-                    host.updateSheetPresentation(sheetAttr.value)
+                    let value = sheetAttr.value
+                    let transaction = AttributeGraph.current?.transaction(for: sheetAttr.identifier) ?? Transaction()
+                    host.updateSheetPresentation(value, transaction: transaction)
                 }
             }
 

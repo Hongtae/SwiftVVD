@@ -1448,6 +1448,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         var session: PresentationSession
         var contentAttr: Attribute<AnyView>? = nil
         var attachWindow: AttachWindowResolver? = nil
+        var presentationTransaction: Transaction = Transaction()
     }
     private let modalChildren = Mutex<[ModalChildEntry]>([])
 
@@ -1566,12 +1567,14 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     // reaches the front of the queue and the parent's window state is known.
     func addModal(child: ModalWindowController,
                   session: PresentationSession,
+                  transaction: Transaction = Transaction(),
                   contentAttr: Attribute<AnyView>? = nil,
                   attachWindow: AttachWindowResolver? = nil) {
         child.parentWindow = self
         var entry = ModalChildEntry(controller: child, session: session)
         entry.contentAttr = contentAttr
         entry.attachWindow = attachWindow
+        entry.presentationTransaction = transaction
         let isFirst = modalChildren.withLock {
             let first = $0.isEmpty
             $0.append(entry)
@@ -1627,7 +1630,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                         return true
                     }
                     if didInitiate {
-                        child?.onModalSessionInitiated()
+                        child?.onModalSessionInitiated(transaction: entry.presentationTransaction)
                     }
                 } else {
                     Log.error("WindowController: presentModalWindow failed")
@@ -1656,7 +1659,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                     }
                 }
                 if result.fallback {
-                    child.onModalSessionInitiated()
+                    child.onModalSessionInitiated(transaction: entry.presentationTransaction)
                 }
                 if result.initiated {
                     self.resetGestureHandlers(reason: "modal session initiated")
@@ -1672,7 +1675,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                     entries[i].initiated = true
                 }
             }
-            child.onModalSessionInitiated()
+            child.onModalSessionInitiated(transaction: entry.presentationTransaction)
             self.resetGestureHandlers(reason: "modal overlay initiated")
             self.handleMouseHover(at: .zero, deviceID: 0, isTopMost: false)
         }
@@ -1691,16 +1694,17 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         _activateModal(entry: entry)
     }
 
-    // Start modal dismissal. Active overlay children own the visible dismissal
+    // Start modal dismissal. Active modal children own the dismissal timing
     // and call the completion when they are ready for final removal.
     private func dismissModal(child: ModalWindowController,
-                              reason: ModalDismissReason) {
+                              reason: ModalDismissReason,
+                              transaction: Transaction = Transaction()) {
         let shouldNotifyChild = modalChildren.withLock { entries -> Bool in
             guard let i = entries.firstIndex(where: { $0.controller === child }) else { return false }
-            return i == 0 && entries[i].isOverlay && entries[i].initiated
+            return i == 0 && entries[i].initiated
         }
         if shouldNotifyChild,
-           child.requestModalDismissal(reason: reason, completion: { [weak self, weak child] in
+           child.requestModalDismissal(reason: reason, transaction: transaction, completion: { [weak self, weak child] in
                guard let self, let child else { return }
                self.removeModal(child: child, reason: reason)
            }) {
@@ -1769,7 +1773,8 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     // Sheet, alert, and dialog presentation go through the unified modalChildren queue.
 
     /// Called from ViewGraph side-effect rule when SheetPreference.Key changes.
-    func updateSheetPresentation(_ value: SheetPreference.Value) {
+    func updateSheetPresentation(_ value: SheetPreference.Value,
+                                 transaction: Transaction = Transaction()) {
         guard let graph = AttributeGraph.current else {
             fatalError("\(#function) must be called from within an AG context (side-effect rule).")
         }
@@ -1779,10 +1784,17 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
             AnyView(SheetContent(content: pref.content))
         }
         let incoming: [SheetPreference]
+        let dismissalTransactions: [Namespace.ID: Transaction]
         switch value {
-        case .single(let pref): incoming = [pref]
-        case .keyed:            incoming = []
-        case .none:             incoming = []
+        case .single(let pref):
+            incoming = [pref]
+            dismissalTransactions = [:]
+        case .keyed(let transactions):
+            incoming = []
+            dismissalTransactions = transactions
+        case .none:
+            incoming = []
+            dismissalTransactions = [:]
         }
 
         func sid(_ p: SheetPreference) -> Namespace.ID {
@@ -1801,12 +1813,15 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         // Dismiss sessions that are no longer in incoming.
         for (id, ctrl) in existing {
             if !incomingIDs.contains(id) {
-                dismissModal(child: ctrl, reason: .dismissed)
+                dismissModal(
+                    child: ctrl,
+                    reason: .dismissed,
+                    transaction: dismissalTransactions[id] ?? transaction
+                )
             }
         }
 
         // Update existing sessions and enqueue new ones.
-        let transaction = Transaction._current?.transaction ?? Transaction()
         for pref in incoming {
             let existingContentAttr: Attribute<AnyView>? = modalChildren.withLock { entries in
                 guard let index = entries.firstIndex(where: {
@@ -1837,7 +1852,12 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                                              scene: sheetKey,
                                              parentController: self,
                                              usesPlatformWindow: pref.usesPlatformWindow)
-            addModal(child: ctrl, session: .sheet(pref), contentAttr: contentAttr) { [weak ctrl] attach in
+            addModal(
+                child: ctrl,
+                session: .sheet(pref),
+                transaction: transaction,
+                contentAttr: contentAttr
+            ) { [weak ctrl] attach in
                 ctrl?.resolveModalWindowAttachment(attach)
             }
 
