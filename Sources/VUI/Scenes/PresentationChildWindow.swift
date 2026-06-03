@@ -172,6 +172,15 @@ class PresentationChildWindowController: WindowController, @unchecked Sendable {
     private var frameInParent: CGRect
     private var didTearDown = false
 
+    init<Content: View>(content: Content,
+                        scene: WindowKey,
+                        usesPlatformWindow: Bool,
+                        frameInParent: CGRect = .zero) {
+        self.usesPlatformWindow = usesPlatformWindow
+        self.frameInParent = frameInParent
+        super.init(content: content, scene: scene)
+    }
+
     init(crossGraphContent contentAttr: Attribute<AnyView>,
          sourceGraph: AttributeGraph,
          scene: WindowKey,

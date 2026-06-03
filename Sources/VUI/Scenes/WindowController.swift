@@ -461,6 +461,26 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         // self.viewGraph.delegate = self
     }
 
+    init<Content: View>(content: Content,
+                        scene: WindowKey) {
+        self._titleGraph = nil
+        self._style = .genericWindow
+        self.environment = EnvironmentValues()
+        self.sceneResources = SceneResources()
+        self.windowContext = nil
+        self.scene = scene
+        self.date = .now
+
+        self.gestureGraph = GestureGraph()
+        self.gestureGraph!.rendererHost = self
+        configureGestureEventBridge()
+
+        self._viewGraph = ViewGraph(replaceableContent: content, rendererHost: self)
+        self.crossGraphSourceGraph = nil
+        self.viewGraph.renderDelegate = self
+        self.viewGraph.updateDelegate = self
+    }
+
     deinit {
         endPresentationSession()
     }
@@ -579,6 +599,12 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
 
     private func flushCrossGraphSourceIfNeeded() {
         guard let sourceGraph = crossGraphSourceGraph else { return }
+        guard window == nil else {
+            // Platform presentation children have their own render task. Their
+            // source graph is owned by the parent window's update loop, so
+            // draining it here would make one AttributeGraph run on two threads.
+            return
+        }
         AttributeGraph.$current.withValue(sourceGraph) {
             sourceGraph.inbox.drain()
             sourceGraph.drainActions()

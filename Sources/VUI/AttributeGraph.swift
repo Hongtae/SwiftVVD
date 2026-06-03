@@ -383,7 +383,18 @@ struct AttributeGraphRef: @unchecked Sendable {
     /// Establishes both AttributeGraphRef.current (self) and AttributeGraph.current (self.graph)
     /// for the duration of the closure. This is the canonical way to enter a GraphHost's AG context.
     func withCurrent<R>(_ body: () throws -> R) rethrows -> R {
-        try AttributeGraphRef.$current.withValue(self) {
+        if let activeGraph = AttributeGraph.current, activeGraph !== graph {
+            // Dependency tracking is graph-local. Cross-graph re-entry must not
+            // inherit the outer graph's currently evaluating node.
+            return try AttributeGraph.withoutTracking {
+                try AttributeGraphRef.$current.withValue(self) {
+                    try AttributeGraph.$current.withValue(graph) {
+                        try body()
+                    }
+                }
+            }
+        }
+        return try AttributeGraphRef.$current.withValue(self) {
             try AttributeGraph.$current.withValue(graph) {
                 try body()
             }

@@ -197,6 +197,7 @@ class ViewGraph: ViewGraphHost {
     private(set) var phaseAttr: Attribute<Phase>?
 
     // AG output attributes collected after V._makeView.
+    private(set) var rootAnyViewContentInput: Attribute<AnyView>?
     private(set) var rootLayoutComputer: Attribute<LayoutComputer>?
     private(set) var rootFittedSize: Attribute<CGSize>?
     private(set) var rootDisplayList: Attribute<DisplayList>?
@@ -238,6 +239,19 @@ class ViewGraph: ViewGraphHost {
         self.init(rootViewType: V.self, rendererHost: rendererHost, requestedOutputs: requestedOutputs) { g in
             _GraphValue<V>(_attribute: g.makeInput(value: content))
         }
+    }
+
+    convenience init<Content: View>(replaceableContent content: Content,
+                                    rendererHost: any ViewRendererHost,
+                                    requestedOutputs: Outputs = .defaults) {
+        var contentAttr: Attribute<AnyView>?
+        let erasedContent = AnyView(content)
+        self.init(rootViewType: AnyView.self, rendererHost: rendererHost, requestedOutputs: requestedOutputs) { g in
+            let attr: Attribute<AnyView> = g.makeInput(value: erasedContent)
+            contentAttr = attr
+            return _GraphValue<AnyView>(_attribute: attr)
+        }
+        self.rootAnyViewContentInput = contentAttr
     }
 
     // Cross-graph variant: content lives in a parent AG and is mirrored via crossGraphRef.

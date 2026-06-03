@@ -169,26 +169,14 @@ final class ContextMenuResponder: ViewResponder {
         let actions = ContextMenuPopupActions()
         let initialItems = self.itemList.value.menuItems
         let liveContentSubgraph = AGSubgraph()
-        let contentAttr: Attribute<AnyView> = AGSubgraph.$current.withValue(liveContentSubgraph) {
-            let initialContent = contextMenuPopupContent(items: initialItems,
-                                                         actions: actions)
-            let attr: Attribute<AnyView> = graph.makeInput(value: initialContent)
+        AGSubgraph.$current.withValue(liveContentSubgraph) {
             // Update the already-open popup root content when the collected
             // item-list source invalidates.
             graph.makeSideEffectRule { [weak session] in
                 let items = self.itemList.value.menuItems
-                if let root = session?.root {
-                    root.replaceMenuItems(items)
-                } else {
-                    attr.setValue(contextMenuPopupContent(items: items,
-                                                           actions: actions))
-                }
+                session?.root?.replaceMenuItems(items)
             }
-            return attr
         }
-        // WindowController.init(crossGraphContent:) requires a cached source value
-        // before the child ViewGraph installs its cross-graph reference.
-        _ = contentAttr.value
         session.installLiveContent(sourceGraph: graph, subgraph: liveContentSubgraph)
         session.updatePresentation(isPresented)
         session.markPresented()
@@ -198,8 +186,8 @@ final class ContextMenuResponder: ViewResponder {
         }
         activeSession = session
         let usesPlatformWindow = environment.value.presentationChildUsingPlatformWindow
-        let ctrl = ContextMenuWindowController(crossGraphContent: contentAttr,
-                                               sourceGraph: graph,
+        let ctrl = ContextMenuWindowController(content: contextMenuPopupContent(items: initialItems,
+                                                                                actions: actions),
                                                scene: parent.scene,
                                                anchor: location,
                                                items: initialItems,
@@ -312,8 +300,7 @@ struct ContextMenuSubmenuPlacement {
 // deactivate/move dismissal policy; this subclass only owns menu-session state,
 // submenu fan-out, and context-menu-specific teardown.
 final class ContextMenuWindowController: PopupWindowController, @unchecked Sendable {
-    private let contentAttr: Attribute<AnyView>
-    private weak var contentSourceGraph: AttributeGraph?
+    private var contentAttr: Attribute<AnyView>?
     private let popupActions: ContextMenuPopupActions
     private let menuSession: ContextMenuPresentationSession
     private let submenuPlacement: ContextMenuSubmenuPlacement?
@@ -321,8 +308,7 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
     private var openedSubmenuID: AnyHashable?
     private weak var openedSubmenu: ContextMenuWindowController?
 
-    init(crossGraphContent contentAttr: Attribute<AnyView>,
-         sourceGraph: AttributeGraph,
+    init<Content: View>(content: Content,
          scene: WindowKey,
          anchor: CGPoint,
          items: [PlatformItemList.Item],
@@ -330,18 +316,16 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
          usesPlatformWindow: Bool,
          session: ContextMenuPresentationSession,
          submenuPlacement: ContextMenuSubmenuPlacement? = nil) {
-        self.contentAttr = contentAttr
         self.popupActions = actions
         self.menuSession = session
         self.submenuPlacement = submenuPlacement
         self.menuItems = items
         let frame = CGRect(origin: anchor, size: .zero)
-        super.init(crossGraphContent: contentAttr,
-                   sourceGraph: sourceGraph,
+        super.init(content: content,
                    scene: scene,
                    usesPlatformWindow: usesPlatformWindow,
                    frameInParent: frame)
-        self.contentSourceGraph = sourceGraph
+        self.contentAttr = viewGraph.rootAnyViewContentInput
     }
 
     func openSubmenu(_ item: PlatformItemList.Item, at origin: CGPoint) {
@@ -352,17 +336,8 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
         dismissAllPresentationChildren()
 
         let actions = ContextMenuPopupActions()
-        let contentAttr: Attribute<AnyView> = viewGraph.data.withCurrent {
-            let graph = viewGraph.data.graph
-            let attr: Attribute<AnyView> = graph.makeInput(
-                value: AnyView(ContextMenuPopupView(items: item.children,
-                                                    actions: actions))
-            )
-            _ = attr.value
-            return attr
-        }
-        let child = ContextMenuWindowController(crossGraphContent: contentAttr,
-                                                sourceGraph: viewGraph.data.graph,
+        let child = ContextMenuWindowController(content: ContextMenuPopupView(items: item.children,
+                                                                              actions: actions),
                                                 scene: scene,
                                                 anchor: origin,
                                                 items: item.children,
@@ -453,10 +428,12 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
     }
 
     private func replaceMenuContent(with items: [PlatformItemList.Item]) {
-        guard let contentSourceGraph else { return }
-        AttributeGraph.$current.withValue(contentSourceGraph) {
-            contentAttr.setValue(contextMenuPopupContent(items: items,
-                                                         actions: popupActions))
+        guard let contentAttr else { return }
+        let graph = viewGraph.data.graph
+        let content = UnsafeBox(AnyView(contextMenuPopupContent(items: items,
+                                                                actions: popupActions)))
+        graph.inbox.enqueue {
+            contentAttr.setValue(content.value)
         }
     }
 
@@ -827,8 +804,8 @@ private struct ContextMenuSubmenuIndicatorShape: Shape {
 }
 
 func contextMenuPopupContent(items: [PlatformItemList.Item],
-                             actions: ContextMenuPopupActions) -> AnyView {
-    AnyView(ContextMenuPopupView(items: items, actions: actions))
+                             actions: ContextMenuPopupActions) -> some View {
+    ContextMenuPopupView(items: items, actions: actions)
 }
 
 private func contextMenuPopupRenderedItems(_ items: [PlatformItemList.Item]) -> [PlatformItemList.Item] {

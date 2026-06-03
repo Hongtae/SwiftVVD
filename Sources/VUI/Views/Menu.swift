@@ -368,22 +368,12 @@ final class MenuDropdownResponder: AnyHoverResponder {
         let actions = ContextMenuPopupActions()
         let initialItems = itemList.value.menuItems
         let liveContentSubgraph = AGSubgraph()
-        let contentAttr: Attribute<AnyView> = AGSubgraph.$current.withValue(liveContentSubgraph) {
-            let initialContent = contextMenuPopupContent(items: initialItems,
-                                                         actions: actions)
-            let attr: Attribute<AnyView> = graph.makeInput(value: initialContent)
+        AGSubgraph.$current.withValue(liveContentSubgraph) {
             graph.makeSideEffectRule { [weak session] in
                 let items = self.itemList.value.menuItems
-                if let root = session?.root {
-                    root.replaceMenuItems(items)
-                } else {
-                    attr.setValue(contextMenuPopupContent(items: items,
-                                                           actions: actions))
-                }
+                session?.root?.replaceMenuItems(items)
             }
-            return attr
         }
-        _ = contentAttr.value
         session.installLiveContent(sourceGraph: graph, subgraph: liveContentSubgraph)
         session.onFinish = { [weak self, weak session] in
             guard let self, self.activeSession === session else { return }
@@ -393,8 +383,8 @@ final class MenuDropdownResponder: AnyHoverResponder {
         activeSession = session
         setMenuOpen(true)
 
-        let ctrl = ContextMenuWindowController(crossGraphContent: contentAttr,
-                                               sourceGraph: graph,
+        let ctrl = ContextMenuWindowController(content: contextMenuPopupContent(items: initialItems,
+                                                                                actions: actions),
                                                scene: parent.scene,
                                                anchor: presentationAnchor(),
                                                items: initialItems,
