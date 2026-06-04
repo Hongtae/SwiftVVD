@@ -53,6 +53,15 @@ struct ViewSize: Equatable, Sendable {
     }
 }
 
+extension ViewSize: Animatable {
+    typealias AnimatableData = CGSize.AnimatableData
+
+    var animatableData: AnimatableData {
+        get { value.animatableData }
+        set { value.animatableData = newValue }
+    }
+}
+
 /// Minimal geometry descriptor for a scroll view's current scroll state.
 /// Used by `ViewTransform.appendScrollGeometry` to embed the scroll offset
 /// in the transform chain so that hit-testing correctly maps through scroll containers.

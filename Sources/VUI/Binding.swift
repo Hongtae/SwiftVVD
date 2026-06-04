@@ -107,7 +107,7 @@ extension Binding: Collection where Value: MutableCollection {
     public subscript(position: Binding<Value>.Index) -> Binding<Value>.Element {
         let location = self.location
         let getter = {
-            location.getValue()[position] 
+            location.getValue()[position]
         }
         let setter = { newValue in
             var enclosingValue = location.getValue()
@@ -133,7 +133,15 @@ extension Binding: RandomAccessCollection where Value: MutableCollection, Value:
 
 extension Binding {
     private var resolvedTransaction: Transaction {
-        transaction.isEmpty ? Transaction.current : transaction
+        let current = Transaction.current
+        guard !transaction.isEmpty else {
+            return current
+        }
+        guard current.isEmpty else {
+            finalizeAnimationCompletionObserver(transaction.animationCompletionObserver)
+            return current
+        }
+        return transaction
     }
 
     public func transaction(_ transaction: Transaction) -> Binding<Value> {

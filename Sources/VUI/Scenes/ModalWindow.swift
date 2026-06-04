@@ -42,7 +42,7 @@ struct TransitionAnimationConfiguration<Key: Hashable> {
             return keyframes.last!.value
         }
     }
-    
+
     let tracks: [Key: Track]
 }
 
@@ -61,7 +61,7 @@ private final class ModalPresentationContext: @unchecked Sendable {
         let phase: TransitionPhase
         let duration: Double
         let configuration: AnimationConfiguration
-        var completionToken: AnimationCompletionToken?
+        var completionTokens: [AnimationCompletionToken]
         var elapsed: Double = 0
         var completion: (() -> Void)?
 
@@ -89,7 +89,7 @@ private final class ModalPresentationContext: @unchecked Sendable {
 
     // Overlay modals use the transition for drawing. Platform modals use the
     // same timing path to preserve transaction completion boundaries.
-    private var transitionDuration: Double { 0.25 }
+    private var transitionDuration: Double { 0.30 }
     private var transitionPresentAnimation: AnimationConfiguration {
         AnimationConfiguration(
             tracks: [
@@ -136,9 +136,10 @@ private final class ModalPresentationContext: @unchecked Sendable {
     }
 
     private func resolvedDuration(for transaction: Transaction) -> Double {
-        // An explicit nil animation or disabled animation keeps modal completion
-        // on the immediate fallback path.
-        if transaction.disablesAnimations || (transaction.hasExplicitAnimationValue && transaction.animation == nil) {
+        // An explicit nil animation keeps modal completion on the immediate
+        // fallback path. A disabled transaction can still carry an explicit
+        // animation that owns the modal timing boundary.
+        if transaction.hasExplicitAnimationValue && transaction.animation == nil {
             return 0
         }
         guard let animation = transaction.effectiveAnimation else {
@@ -147,15 +148,30 @@ private final class ModalPresentationContext: @unchecked Sendable {
         return max(0, animation.box.duration)
     }
 
-    private func completionToken(for transaction: Transaction) -> AnimationCompletionToken? {
+    private func completionTokens(
+        for transaction: Transaction,
+        duration: Double,
+        registersDefaultCompletion: Bool
+    ) -> [AnimationCompletionToken] {
         // Platform modal children may not draw through this overlay path, but
-        // they still register a token so transaction completions wait for the
+        // they still register tokens so transaction completions wait for the
         // same modal timing boundary.
-        guard let animation = transaction.effectiveAnimation,
-              animation.box.duration > 0 else {
-            return nil
+        guard duration > 0 else {
+            return []
         }
-        return transaction.animationCompletionObserver?.animationDidStart()
+        if let animation = transaction.effectiveAnimation {
+            guard animation.box.duration > 0 else {
+                return []
+            }
+        } else if !registersDefaultCompletion {
+            return []
+        }
+        guard let observer = transaction.animationCompletionObserver else {
+            return []
+        }
+        return observer.criteriaForNewAnimation().compactMap {
+            observer.animationDidStart(criteria: $0)
+        }
     }
 
     func onViewLoaded() {
@@ -289,8 +305,12 @@ private final class ModalPresentationContext: @unchecked Sendable {
                                transaction: Transaction) {
         pendingDismissal = nil
         let duration = resolvedDuration(for: transaction)
-        let completionToken = completionToken(for: transaction)
-        guard duration > 0 || completionToken != nil else {
+        let completionTokens = completionTokens(
+            for: transaction,
+            duration: duration,
+            registersDefaultCompletion: true
+        )
+        guard duration > 0 || !completionTokens.isEmpty else {
             transition = nil
             return
         }
@@ -298,15 +318,19 @@ private final class ModalPresentationContext: @unchecked Sendable {
             phase: .presenting,
             duration: duration,
             configuration: transitionPresentAnimation,
-            completionToken: completionToken
+            completionTokens: completionTokens
         )
     }
 
     private func beginDismissAnimation(transaction: Transaction,
                                        completion: @escaping () -> Void) {
         let duration = resolvedDuration(for: transaction)
-        let completionToken = completionToken(for: transaction)
-        guard duration > 0 || completionToken != nil else {
+        let completionTokens = completionTokens(
+            for: transaction,
+            duration: duration,
+            registersDefaultCompletion: false
+        )
+        guard duration > 0 || !completionTokens.isEmpty else {
             transition = nil
             completion()
             return
@@ -315,7 +339,7 @@ private final class ModalPresentationContext: @unchecked Sendable {
             phase: .dismissing,
             duration: duration,
             configuration: transitionDismissAnimation,
-            completionToken: completionToken,
+            completionTokens: completionTokens,
             completion: completion
         )
     }
@@ -350,7 +374,7 @@ private final class ModalPresentationContext: @unchecked Sendable {
         guard var transition else { return false }
         transition.elapsed += delta
         if transition.isComplete {
-            let completions = transition.completionToken?.finish() ?? []
+            let completions = finishCompletionTokens(transition.completionTokens)
             switch transition.phase {
             case .presenting:
                 if let dismissal = pendingDismissal {
@@ -375,6 +399,12 @@ private final class ModalPresentationContext: @unchecked Sendable {
             self.transition = transition
         }
         return true
+    }
+
+    private func finishCompletionTokens(_ tokens: [AnimationCompletionToken]) -> [() -> Void] {
+        let removedTokens = tokens.filter { $0.criteria == .removed }
+        let otherTokens = tokens.filter { $0.criteria != .removed }
+        return (removedTokens + otherTokens).flatMap { $0.finish() }
     }
 
     func onModalSessionDismissedByUser() {

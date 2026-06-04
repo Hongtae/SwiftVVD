@@ -236,45 +236,65 @@ public struct MoveTransition: Transition {
     }
 
     public func body(content: Content, phase: TransitionPhase) -> some View {
-        content.modifier(MoveLayout(edge: phase.isIdentity ? nil : edge, activeEdge: edge))
+        content.modifier(MoveLayout(edge: phase.isIdentity ? nil : edge))
     }
 
-    struct MoveLayout: ViewModifier, Animatable, CustomReflectable {
+    struct MoveLayout: ViewModifier, Animatable {
         var edge: Edge?
-        var activeEdge: Edge?
-        var progress: CGFloat
 
-        init(edge: Edge?, activeEdge: Edge? = nil) {
+        init(edge: Edge?) {
             self.edge = edge
-            self.activeEdge = activeEdge ?? edge
-            self.progress = edge == nil ? 0 : 1
         }
 
-        var animatableData: CGFloat {
-            get { progress }
-            set { progress = newValue }
-        }
-
+        typealias AnimatableData = EmptyAnimatableData
         typealias Body = Never
-
-        var customMirror: Mirror {
-            Mirror(self, children: ["edge": edge as Any])
-        }
 
         static func _makeView(
             modifier: _GraphValue<Self>,
             inputs: _ViewInputs,
             body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
         ) -> _ViewOutputs {
-            var modifier = modifier
-            Self._makeAnimatable(value: &modifier, inputs: inputs.base)
-            return _GeometryEffectSupport.makeView(
-                modifier: modifier,
-                inputs: inputs,
-                body: body
-            ) { modifier, size in
-                modifier.effectValue(size: size)
+            guard let graph = AttributeGraph.current else {
+                fatalError("\(Self.self)._makeView called outside an active AttributeGraph context.")
             }
+
+            let progressSource: Attribute<MoveLayoutProgress> = graph.makeRule {
+                MoveLayoutProgress(value: modifier._attribute.value.edge == nil ? 0 : 1)
+            }
+            var progress = _GraphValue<MoveLayoutProgress>(_attribute: progressSource)
+            MoveLayoutProgress._makeAnimatable(value: &progress, inputs: inputs.base)
+
+            let activeEdge: Attribute<Edge?> = graph.makeStatefulRule(
+                MoveLayoutActiveEdge(modifier: modifier._attribute)
+            )
+            let sizeAttr = inputs.size
+            let positionAttr = inputs.position
+            let parentTransformAttr = inputs.transform
+            let progressAttr = progress._attribute
+
+            let effectAttr: Attribute<ProjectionTransform> = graph.makeRule {
+                Self.effectValue(
+                    edge: activeEdge.value,
+                    progress: progressAttr.value.value,
+                    size: sizeAttr.value.value
+                )
+            }
+            let transformAttr: Attribute<ViewTransform> = graph.makeRule {
+                var transform = parentTransformAttr.value
+                transform.appendProjectionTransform(effectAttr.value, inverse: false)
+                return transform
+            }
+
+            var modifiedInputs = inputs
+            modifiedInputs.transform = transformAttr
+            var outputs = body(_Graph(), modifiedInputs)
+            _GeometryEffectSupport.applyProjectionEffect(
+                to: &outputs.preferences,
+                effect: effectAttr,
+                position: positionAttr,
+                graph: graph
+            )
+            return outputs
         }
 
         static func _makeViewList(
@@ -291,8 +311,15 @@ public struct MoveTransition: Transition {
         }
 
         func effectValue(size: CGSize) -> ProjectionTransform {
-            guard progress != 0,
-                  let edge = edge ?? activeEdge else {
+            Self.effectValue(
+                edge: edge,
+                progress: edge == nil ? 0 : 1,
+                size: size
+            )
+        }
+
+        private static func effectValue(edge: Edge?, progress: CGFloat, size: CGSize) -> ProjectionTransform {
+            guard progress != 0, let edge else {
                 return ProjectionTransform()
             }
             let offset: CGSize
@@ -311,6 +338,33 @@ public struct MoveTransition: Transition {
             )
         }
     }
+
+    private struct MoveLayoutActiveEdge: StatefulRule {
+        typealias Value = Edge?
+        var modifier: Attribute<MoveLayout>
+        private var lastEdge: Edge?
+
+        init(modifier: Attribute<MoveLayout>) {
+            self.modifier = modifier
+            self.lastEdge = nil
+        }
+
+        mutating func updateValue() {
+            if let edge = modifier.value.edge {
+                lastEdge = edge
+            }
+            AttributeGraph.setStatefulOutput(modifier.value.edge ?? lastEdge)
+        }
+    }
+
+    private struct MoveLayoutProgress: Animatable, Equatable {
+        var value: CGFloat
+
+        var animatableData: CGFloat {
+            get { value }
+            set { value = newValue }
+        }
+    }
 }
 
 public struct PushTransition: Transition {
@@ -324,8 +378,7 @@ public struct PushTransition: Transition {
         let activeEdge = phase.isIdentity ? edge : edge(for: phase)
         return content
             .modifier(MoveTransition.MoveLayout(
-                edge: phase.isIdentity ? nil : activeEdge,
-                activeEdge: activeEdge
+                edge: phase.isIdentity ? nil : activeEdge
             ))
             .modifier(OpacityRendererEffect(opacity: phase.isIdentity ? 1 : 0))
     }
@@ -348,8 +401,7 @@ public struct SlideTransition: Transition {
     public func body(content: Content, phase: TransitionPhase) -> some View {
         let edge = edge(for: phase)
         return content.modifier(MoveTransition.MoveLayout(
-            edge: phase.isIdentity ? nil : edge,
-            activeEdge: edge
+            edge: phase.isIdentity ? nil : edge
         ))
     }
 
@@ -414,6 +466,14 @@ protocol _TransitionTransactionFiltering {
     func _filteredTransactions(from transaction: Transaction, phase: TransitionPhase) -> [Transaction]
 }
 
+private protocol _TransitionRemovalRetentionFiltering {
+    func _retainedRemovalTransactions(
+        from transaction: Transaction,
+        phase: TransitionPhase,
+        original: Transaction
+    ) -> [Transaction]
+}
+
 private func _applyTransitionTransactionFilters<T: Transition>(
     _ transition: T,
     to transaction: inout Transaction,
@@ -431,6 +491,32 @@ private func _transitionFilteredTransactions<T: Transition>(
 ) -> [Transaction] {
     if let filtering = transition as? any _TransitionTransactionFiltering {
         return filtering._filteredTransactions(from: transaction, phase: phase)
+    }
+    return [transaction]
+}
+
+private func _hasPositiveAnimation(_ transaction: Transaction) -> Bool {
+    guard let animation = transaction.effectiveAnimation else { return false }
+    return animation.box.duration > 0
+}
+
+private func _transitionRetainedRemovalTransactions<T: Transition>(
+    _ transition: T,
+    from transaction: Transaction,
+    phase: TransitionPhase,
+    original: Transaction
+) -> [Transaction] {
+    if let filtering = transition as? any _TransitionRemovalRetentionFiltering {
+        return filtering._retainedRemovalTransactions(
+            from: transaction,
+            phase: phase,
+            original: original
+        )
+    }
+    if transition is OffsetTransition,
+       !_hasPositiveAnimation(original),
+       _hasPositiveAnimation(transaction) {
+        return []
     }
     return [transaction]
 }
@@ -459,6 +545,33 @@ extension AsymmetricTransition: _TransitionTransactionFiltering {
     }
 }
 
+extension AsymmetricTransition: _TransitionRemovalRetentionFiltering {
+    func _retainedRemovalTransactions(
+        from transaction: Transaction,
+        phase: TransitionPhase,
+        original: Transaction
+    ) -> [Transaction] {
+        switch phase {
+        case .willAppear:
+            return _transitionRetainedRemovalTransactions(
+                insertion,
+                from: transaction,
+                phase: phase,
+                original: original
+            )
+        case .identity:
+            return [transaction]
+        case .didDisappear:
+            return _transitionRetainedRemovalTransactions(
+                removal,
+                from: transaction,
+                phase: phase,
+                original: original
+            )
+        }
+    }
+}
+
 struct CombiningTransition<First, Second>: Transition where First: Transition, Second: Transition {
     var transition1: First
     var transition2: Second
@@ -481,6 +594,27 @@ extension CombiningTransition: _TransitionTransactionFiltering {
     func _filteredTransactions(from transaction: Transaction, phase: TransitionPhase) -> [Transaction] {
         _transitionFilteredTransactions(transition1, from: transaction, phase: phase) +
         _transitionFilteredTransactions(transition2, from: transaction, phase: phase)
+    }
+}
+
+extension CombiningTransition: _TransitionRemovalRetentionFiltering {
+    func _retainedRemovalTransactions(
+        from transaction: Transaction,
+        phase: TransitionPhase,
+        original: Transaction
+    ) -> [Transaction] {
+        _transitionRetainedRemovalTransactions(
+            transition1,
+            from: transaction,
+            phase: phase,
+            original: original
+        ) +
+        _transitionRetainedRemovalTransactions(
+            transition2,
+            from: transaction,
+            phase: phase,
+            original: original
+        )
     }
 }
 
@@ -511,6 +645,23 @@ extension FilteredTransition: _TransitionTransactionFiltering {
         var transaction = transaction
         filter(&transaction, phase)
         return _transitionFilteredTransactions(transition, from: transaction, phase: phase)
+    }
+}
+
+extension FilteredTransition: _TransitionRemovalRetentionFiltering {
+    func _retainedRemovalTransactions(
+        from transaction: Transaction,
+        phase: TransitionPhase,
+        original: Transaction
+    ) -> [Transaction] {
+        var transaction = transaction
+        filter(&transaction, phase)
+        return _transitionRetainedRemovalTransactions(
+            transition,
+            from: transaction,
+            phase: phase,
+            original: original
+        )
     }
 }
 
@@ -593,6 +744,14 @@ class AnyTransitionBox {
         [transaction]
     }
 
+    func retainedRemovalTransactions(
+        from transaction: Transaction,
+        phase: TransitionPhase,
+        original: Transaction
+    ) -> [Transaction] {
+        filteredTransactions(from: transaction, phase: phase)
+    }
+
     func _makeView(
         phase: TransitionPhase,
         inputs: _ViewInputs,
@@ -650,6 +809,19 @@ final class TransitionBox<Base: Transition>: AnyTransitionBox {
         _transitionFilteredTransactions(base, from: transaction, phase: phase)
     }
 
+    override func retainedRemovalTransactions(
+        from transaction: Transaction,
+        phase: TransitionPhase,
+        original: Transaction
+    ) -> [Transaction] {
+        _transitionRetainedRemovalTransactions(
+            base,
+            from: transaction,
+            phase: phase,
+            original: original
+        )
+    }
+
     override func _makeView(
         phase: TransitionPhase,
         inputs: _ViewInputs,
@@ -694,6 +866,23 @@ private final class AnyCombinedTransitionBox: AnyTransitionBox {
         first.filteredTransactions(from: transaction, phase: phase) +
         second.filteredTransactions(from: transaction, phase: phase)
     }
+
+    override func retainedRemovalTransactions(
+        from transaction: Transaction,
+        phase: TransitionPhase,
+        original: Transaction
+    ) -> [Transaction] {
+        first.retainedRemovalTransactions(
+            from: transaction,
+            phase: phase,
+            original: original
+        ) +
+        second.retainedRemovalTransactions(
+            from: transaction,
+            phase: phase,
+            original: original
+        )
+    }
 }
 
 private final class AnyAsymmetricTransitionBox: AnyTransitionBox {
@@ -716,6 +905,29 @@ private final class AnyAsymmetricTransitionBox: AnyTransitionBox {
             return removal.filteredTransactions(from: transaction, phase: phase)
         }
     }
+
+    override func retainedRemovalTransactions(
+        from transaction: Transaction,
+        phase: TransitionPhase,
+        original: Transaction
+    ) -> [Transaction] {
+        switch phase {
+        case .willAppear:
+            return insertion.retainedRemovalTransactions(
+                from: transaction,
+                phase: phase,
+                original: original
+            )
+        case .identity:
+            return [transaction]
+        case .didDisappear:
+            return removal.retainedRemovalTransactions(
+                from: transaction,
+                phase: phase,
+                original: original
+            )
+        }
+    }
 }
 
 private final class AnyFilteredTransitionBox: AnyTransitionBox {
@@ -732,6 +944,20 @@ private final class AnyFilteredTransitionBox: AnyTransitionBox {
         var filteredTransaction = transaction
         filter(&filteredTransaction, phase)
         return base.filteredTransactions(from: filteredTransaction, phase: phase)
+    }
+
+    override func retainedRemovalTransactions(
+        from transaction: Transaction,
+        phase: TransitionPhase,
+        original: Transaction
+    ) -> [Transaction] {
+        var filteredTransaction = transaction
+        filter(&filteredTransaction, phase)
+        return base.retainedRemovalTransactions(
+            from: filteredTransaction,
+            phase: phase,
+            original: original
+        )
     }
 
     override func _makeView(
@@ -825,6 +1051,14 @@ public struct AnyTransition {
 
     func _filteredTransactions(from transaction: Transaction, phase: TransitionPhase) -> [Transaction] {
         box.filteredTransactions(from: transaction, phase: phase)
+    }
+
+    func _retainedRemovalTransactions(from transaction: Transaction, phase: TransitionPhase) -> [Transaction] {
+        box.retainedRemovalTransactions(
+            from: transaction,
+            phase: phase,
+            original: transaction
+        )
     }
 
     func _makeView(

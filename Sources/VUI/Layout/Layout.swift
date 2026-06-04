@@ -38,6 +38,24 @@ private struct LayoutChildGeometry: Rule {
     }
 }
 
+private func animatedLayoutPosition(
+    source: Attribute<CGPoint>,
+    inputs: _GraphInputs
+) -> Attribute<CGPoint> {
+    var value = _GraphValue<CGPoint>(_attribute: source)
+    CGPoint._makeAnimatable(value: &value, inputs: inputs)
+    return value._attribute
+}
+
+private func animatedLayoutSize(
+    source: Attribute<ViewSize>,
+    inputs: _GraphInputs
+) -> Attribute<ViewSize> {
+    var value = _GraphValue<ViewSize>(_attribute: source)
+    ViewSize._makeAnimatable(value: &value, inputs: inputs)
+    return value._attribute
+}
+
 /// StatefulRule: produces LayoutComputer wrapping ViewLayoutEngine<L> for a static child list.
 /// Re-fires when layoutAttr changes (e.g. animating spacing). Child LC deps are tracked
 /// downstream by LayoutChildGeometries (which calls childGeometries via ViewLayoutEngine).
@@ -485,9 +503,10 @@ private struct DynamicContainerInfo: StatefulRule {
                 .first { candidate in
                     guard let animation = candidate.effectiveAnimation else { return false }
                     return animation.box.duration > 0
-                } ?? transaction
+                }
 
             guard item.needsTransitions,
+                  let transitionTransaction,
                   let animation = transitionTransaction.effectiveAnimation,
                   animation.box.duration > 0,
                   let completionSeed = item.transitionCompletionSeed else {
@@ -544,8 +563,10 @@ private struct DynamicContainerInfo: StatefulRule {
             // Non-unary items are a single DynamicContainer item whose viewCount spans
             // multiple child outputs, not multiple item records.
             for elementOffset in offset..<(offset + viewCount) {
-                let posAttr = graph.makeInput(value: CGPoint.zero)
-                let sizeAttr = graph.makeInput(value: ViewSize(.zero))
+                let rawPosAttr = graph.makeInput(value: CGPoint.zero)
+                let posAttr = animatedLayoutPosition(source: rawPosAttr, inputs: baseInputs.base)
+                let rawSizeAttr = graph.makeInput(value: ViewSize(.zero))
+                let sizeAttr = animatedLayoutSize(source: rawSizeAttr, inputs: baseInputs.base)
                 let childTransform: Attribute<ViewTransform> = graph.makeRule {
                     var t = parentTransform.value
                     // The backend placement bridge writes absolute root/window origins
@@ -596,9 +617,9 @@ private struct DynamicContainerInfo: StatefulRule {
                         spacing: inner.spacing,
                         place: { pos, anchor, proposal in
                             let sz = inner.sizeThatFits(proposal)
-                            posAttr.setValue(CGPoint(x: pos.x - sz.width * anchor.x,
-                                                     y: pos.y - sz.height * anchor.y))
-                            sizeAttr.setValue(ViewSize(sz))
+                            rawPosAttr.setValue(CGPoint(x: pos.x - sz.width * anchor.x,
+                                                        y: pos.y - sz.height * anchor.y))
+                            rawSizeAttr.setValue(ViewSize(sz, proposal: proposal))
                             inner.place(at: pos, anchor: anchor, proposal: proposal)
                         },
                         explicitAlignment: { inner.explicitAlignment($0, at: $1) }
@@ -627,7 +648,7 @@ private struct DynamicContainerInfo: StatefulRule {
                 transitionCompletionSeed: transitionCompletionSeed,
                 transitionTransactions: transition.map { transition in
                     { phase, transaction in
-                        transition._filteredTransactions(from: transaction, phase: phase)
+                        transition._retainedRemovalTransactions(from: transaction, phase: phase)
                     }
                 }
             )
@@ -774,8 +795,10 @@ extension Layout {
                 // and update them from the LayoutComputer.place path.
                 // Replace this bridge once the renderer consumes
                 // LayoutChildGeometries projection directly.
-                let posAttr = graph.makeInput(value: CGPoint.zero)
-                let sizeAttr = graph.makeInput(value: ViewSize.zero)
+                let rawPosAttr = graph.makeInput(value: CGPoint.zero)
+                let posAttr = animatedLayoutPosition(source: rawPosAttr, inputs: layoutInputs.base)
+                let rawSizeAttr = graph.makeInput(value: ViewSize.zero)
+                let sizeAttr = animatedLayoutSize(source: rawSizeAttr, inputs: layoutInputs.base)
 
                 let parentTransformAttr = inputs.transform
                 let childTransformAttr: Attribute<ViewTransform> = graph.makeRule {
@@ -810,8 +833,8 @@ extension Layout {
                                     x: position.x - resolvedSize.width * anchor.x,
                                     y: position.y - resolvedSize.height * anchor.y
                                 )
-                                posAttr.setValue(origin)
-                                sizeAttr.setValue(ViewSize(resolvedSize))
+                                rawPosAttr.setValue(origin)
+                                rawSizeAttr.setValue(ViewSize(resolvedSize, proposal: proposal))
                                 inner.place(at: position, anchor: anchor, proposal: proposal)
                             },
                             priority: inner.priority,

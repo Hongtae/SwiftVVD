@@ -74,13 +74,12 @@ extension TransactionKey where Self: EnvironmentKey, Self.Value: Equatable {
 }
 
 public func withTransaction<Result>(_ transaction: Transaction, _ body: () throws -> Result) rethrows -> Result {
-    do {
-        return try Transaction.$_current.withValue(.init(transaction: transaction)) {
-            try body()
-        }
-    } catch {
-        throw error
+    let scopedTransaction = transaction.scopedTransaction(inheritingFrom: Transaction.current)
+    let result = try Transaction.$_current.withValue(.init(transaction: scopedTransaction)) {
+        try body()
     }
+    finalizeAnimationCompletionObserver(transaction.animationCompletionObserver)
+    return result
 }
 
 public func withTransaction<R, V>(_ keyPath: WritableKeyPath<Transaction, V>, _ value: V, _ body: () throws -> R) rethrows -> R {
@@ -98,6 +97,27 @@ extension Transaction {
 
     static var current: Transaction {
         _current?.transaction ?? Transaction()
+    }
+
+    func scopedTransaction(inheritingFrom parent: Transaction) -> Transaction {
+        var transaction = self
+        if !hasExplicitAnimationValue,
+           parent.hasExplicitAnimationValue {
+            transaction.animation = parent.animation
+        }
+        if !hasExplicitDisablesAnimationsValue,
+           parent.hasExplicitDisablesAnimationsValue {
+            transaction.disablesAnimations = parent.disablesAnimations
+        }
+        if !hasExplicitIsContinuousValue,
+           parent.hasExplicitIsContinuousValue {
+            transaction.isContinuous = parent.isContinuous
+        }
+        if !hasExplicitTracksVelocityValue,
+           parent.hasExplicitTracksVelocityValue {
+            transaction.tracksVelocity = parent.tracksVelocity
+        }
+        return transaction
     }
 }
 
@@ -127,6 +147,10 @@ extension Transaction {
         set { self[IsContinuousKey.self] = newValue }
     }
 
+    var hasExplicitIsContinuousValue: Bool {
+        plist.nonDefaultValue(forKey: TransactionKeyItem<IsContinuousKey>.self) != nil
+    }
+
     /// Whether the animation system should track and apply gesture velocity.
     /// Used by spring animations to match the in-progress gesture velocity.
     public var tracksVelocity: Bool {
@@ -134,27 +158,23 @@ extension Transaction {
         set { self[TracksVelocityKey.self] = newValue }
     }
 
-    /// Override the default display-link frame interval for this transaction's animations.
-    /// `nil` means use the default frame rate.
-    public var animationFrameInterval: Double? {
+    var hasExplicitTracksVelocityValue: Bool {
+        plist.nonDefaultValue(forKey: TransactionKeyItem<TracksVelocityKey>.self) != nil
+    }
+
+    var animationFrameInterval: Double? {
         get { self[AnimationFrameIntervalKey.self] }
         set { self[AnimationFrameIntervalKey.self] = newValue }
     }
 
-    /// When `true`, content transitions (e.g. `.contentTransition(.numericText())`)
-    /// are suppressed and views update without their transition animation.
-    public var disablesContentTransitions: Bool {
+    var disablesContentTransitions: Bool {
         get { self[DisablesContentTransitionsKey.self] }
         set { self[DisablesContentTransitionsKey.self] = newValue }
     }
 
-    /// `true` when an animation is attached to this transaction and animations are not disabled.
-    public var isAnimated: Bool { animation != nil && !disablesAnimations }
+    var isAnimated: Bool { animation != nil }
 
-    /// The animation to use, taking `disablesAnimations` into account.
-    /// Returns `nil` when animations are disabled even if `animation` is set.
-    public var effectiveAnimation: Animation? { disablesAnimations ? nil : animation }
+    var effectiveAnimation: Animation? { animation }
 
-    /// Disables all animations for this transaction.
-    public mutating func disableAnimations() { disablesAnimations = true }
+    mutating func disableAnimations() { disablesAnimations = true }
 }
