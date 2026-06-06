@@ -41,6 +41,15 @@ class AnimationBoxBase: CustomAnimation, CustomStringConvertible, @unchecked Sen
         presentationDuration
     }
 
+    func noRegisteredCompletionDelay() -> TimeInterval? {
+        let delay = max(duration, presentationDuration)
+        return delay.isFinite ? delay : nil
+    }
+
+    func noRegisteredCompletionDelay(for criteria: AnimationCompletionCriteria) -> TimeInterval? {
+        noRegisteredCompletionDelay()
+    }
+
     @usableFromInline
     func animate<Value>(
         value: Value,
@@ -184,6 +193,16 @@ final class DelayAnimationBox: AnimationBoxBase, @unchecked Sendable {
         max(0, base.presentationDuration(for: value) + delay)
     }
 
+    override func noRegisteredCompletionDelay() -> TimeInterval? {
+        guard let baseDelay = base.noRegisteredCompletionDelay() else { return nil }
+        return max(0, baseDelay + delay)
+    }
+
+    override func noRegisteredCompletionDelay(for criteria: AnimationCompletionCriteria) -> TimeInterval? {
+        guard let baseDelay = base.noRegisteredCompletionDelay(for: criteria) else { return nil }
+        return max(0, baseDelay + delay)
+    }
+
     override func value(at progress: Double) -> Double {
         guard base.duration > 0 else { return base.value(at: 1) }
         let localTime = progress * duration - delay
@@ -238,6 +257,20 @@ final class SpeedAnimationBox: AnimationBoxBase, @unchecked Sendable {
         return scaledPresentationDuration(
             basePresentationDuration: base.presentationDuration(for: value)
         )
+    }
+
+    override func noRegisteredCompletionDelay() -> TimeInterval? {
+        guard speed > 0, let baseDelay = base.noRegisteredCompletionDelay() else {
+            return nil
+        }
+        return baseDelay / speed
+    }
+
+    override func noRegisteredCompletionDelay(for criteria: AnimationCompletionCriteria) -> TimeInterval? {
+        guard speed > 0, let baseDelay = base.noRegisteredCompletionDelay(for: criteria) else {
+            return nil
+        }
+        return baseDelay / speed
     }
 
     override func value(at progress: Double) -> Double {
@@ -310,6 +343,30 @@ final class RepeatAnimationBox: AnimationBoxBase, @unchecked Sendable {
             return duration
         }
         return basePresentationDuration * TimeInterval(resolvedRepeatCount)
+    }
+
+    override func noRegisteredCompletionDelay() -> TimeInterval? {
+        guard repeatCount != nil, let baseDelay = base.noRegisteredCompletionDelay() else {
+            return nil
+        }
+        return baseDelay * TimeInterval(resolvedRepeatCount)
+    }
+
+    override func noRegisteredCompletionDelay(for criteria: AnimationCompletionCriteria) -> TimeInterval? {
+        guard repeatCount != nil, let baseDelay = base.noRegisteredCompletionDelay(for: criteria) else {
+            return nil
+        }
+        let delay = baseDelay * TimeInterval(resolvedRepeatCount)
+        if criteria == .logicallyComplete,
+           base is SpringAnimationBox,
+           baseHasResidualPresentation(basePresentationDuration: base.presentationDuration) {
+            return max(0, delay - defaultDisplayFrameInterval)
+        }
+        return delay
+    }
+
+    private var defaultDisplayFrameInterval: TimeInterval {
+        1.0 / 60.0
     }
 
     override func value(at progress: Double) -> Double {
@@ -515,6 +572,8 @@ extension CustomAnimation {
 @usableFromInline
 final class CustomAnimationBox<Base: CustomAnimation>: AnimationBoxBase, @unchecked Sendable {
     let base: Base
+    private let noRegisteredFallbackSampleInterval: TimeInterval = 0.1
+    private let noRegisteredFallbackSampleLimit: TimeInterval = 10
 
     init(base: Base) {
         self.base = base
@@ -530,6 +589,18 @@ final class CustomAnimationBox<Base: CustomAnimation>: AnimationBoxBase, @unchec
 
     override var preservesRetargetedCompletionDeadlines: Bool {
         true
+    }
+
+    override func noRegisteredCompletionDelay() -> TimeInterval? {
+        var context = AnimationContext<Double>()
+        var time: TimeInterval = 0
+        while time <= noRegisteredFallbackSampleLimit {
+            if base.animate(value: 1.0, time: time, context: &context) == nil {
+                return time
+            }
+            time += noRegisteredFallbackSampleInterval
+        }
+        return nil
     }
 
     override func animate<Value>(
@@ -1412,6 +1483,7 @@ final class AnimationCompletionObserver: @unchecked Sendable {
     private struct Entry {
         var criteria: AnimationCompletionCriteria
         var completion: () -> Void
+        var order: Int
     }
 
     private let lock = NSLock()
@@ -1420,19 +1492,22 @@ final class AnimationCompletionObserver: @unchecked Sendable {
     private var bodyFinished = false
     private var registeredAnimation = false
     private var completedCriteria = Set<AnimationCompletionCriteria>()
+    private var nextEntryOrder = 0
 
     // Completion observers are shared by every animatable node touched by one
     // transaction. Criteria have separate token counts so logical completion can
     // finish before removal/presentation completion.
     init(criteria: AnimationCompletionCriteria, completion: @escaping () -> Void) {
-        entries.append(Entry(criteria: criteria, completion: completion))
+        entries.append(Entry(criteria: criteria, completion: completion, order: nextEntryOrder))
+        nextEntryOrder += 1
     }
 
     func add(criteria: AnimationCompletionCriteria, completion: @escaping () -> Void) {
         lock.lock()
         defer { lock.unlock() }
         guard !completedCriteria.contains(criteria) else { return }
-        entries.append(Entry(criteria: criteria, completion: completion))
+        entries.append(Entry(criteria: criteria, completion: completion, order: nextEntryOrder))
+        nextEntryOrder += 1
     }
 
     func criteriaForNewAnimation() -> [AnimationCompletionCriteria] {
@@ -1469,10 +1544,47 @@ final class AnimationCompletionObserver: @unchecked Sendable {
         return completionsIfReady(allowNoRegisteredAnimation: false)
     }
 
-    func noRegisteredAnimationFallbackDidFire() -> [() -> Void] {
+    func noRegisteredAnimationFallbackDidFire(usesAnimatedOrdering: Bool) -> [() -> Void] {
         lock.lock()
         defer { lock.unlock() }
-        return completionsIfReady(allowNoRegisteredAnimation: true)
+        guard !registeredAnimation else {
+            return completionsIfReady(allowNoRegisteredAnimation: false)
+        }
+        if usesAnimatedOrdering {
+            return completionsIfReady(allowNoRegisteredAnimation: true)
+        }
+        return noRegisteredCompletionsIfReady()
+    }
+
+    func noRegisteredAnimationFallbackDidFire(criteria: AnimationCompletionCriteria) -> [() -> Void] {
+        lock.lock()
+        defer { lock.unlock() }
+        guard bodyFinished,
+              !registeredAnimation,
+              !completedCriteria.contains(criteria),
+              entries.contains(where: { $0.criteria == criteria }) else {
+            return []
+        }
+        completedCriteria.insert(criteria)
+        return entries
+            .filter { $0.criteria == criteria }
+            .map(\.completion)
+    }
+
+    private func noRegisteredCompletionsIfReady() -> [() -> Void] {
+        guard bodyFinished else { return [] }
+        let pendingEntries = entries.filter { !completedCriteria.contains($0.criteria) }
+        guard let firstCriteria = pendingEntries.first?.criteria else { return [] }
+        let primary = pendingEntries
+            .filter { $0.criteria == firstCriteria }
+            .sorted { $0.order > $1.order }
+        let remaining = pendingEntries
+            .filter { $0.criteria != firstCriteria }
+            .sorted { $0.order < $1.order }
+        for entry in pendingEntries {
+            completedCriteria.insert(entry.criteria)
+        }
+        return (primary + remaining).map(\.completion)
     }
 
     private func completionsIfReady(allowNoRegisteredAnimation: Bool) -> [() -> Void] {
@@ -1545,19 +1657,42 @@ private struct AnimationCompletionObserverBox: @unchecked Sendable {
     var observer: AnimationCompletionObserver
 }
 
-func enqueueNoRegisteredAnimationFallback(_ observer: AnimationCompletionObserver?) {
+func enqueueNoRegisteredAnimationFallback(
+    _ observer: AnimationCompletionObserver?,
+    animation: Animation? = nil
+) {
     guard let observer else { return }
     let box = AnimationCompletionObserverBox(observer: observer)
-    DispatchQueue.main.async {
-        enqueueAnimationCompletionActions(
-            box.observer.noRegisteredAnimationFallbackDidFire()
-        )
+    if let animation {
+        for criteria in box.observer.criteriaForNewAnimation() {
+            guard let fallbackDelay = animation.box.noRegisteredCompletionDelay(for: criteria) else {
+                continue
+            }
+            let fire: @Sendable () -> Void = {
+                enqueueAnimationCompletionActions(
+                    box.observer.noRegisteredAnimationFallbackDidFire(criteria: criteria)
+                )
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + fallbackDelay, execute: fire)
+        }
+    } else {
+        let fire: @Sendable () -> Void = {
+            enqueueAnimationCompletionActions(
+                box.observer.noRegisteredAnimationFallbackDidFire(
+                    usesAnimatedOrdering: false
+                )
+            )
+        }
+        DispatchQueue.main.async(execute: fire)
     }
 }
 
-func finalizeAnimationCompletionObserver(_ observer: AnimationCompletionObserver?) {
+func finalizeAnimationCompletionObserver(
+    _ observer: AnimationCompletionObserver?,
+    animation: Animation? = nil
+) {
     enqueueAnimationCompletionActions(observer?.bodyDidFinish() ?? [])
-    enqueueNoRegisteredAnimationFallback(observer)
+    enqueueNoRegisteredAnimationFallback(observer, animation: animation)
 }
 
 extension Animation: CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable {

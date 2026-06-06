@@ -78,7 +78,10 @@ public func withTransaction<Result>(_ transaction: Transaction, _ body: () throw
     let result = try Transaction.$_current.withValue(.init(transaction: scopedTransaction)) {
         try body()
     }
-    finalizeAnimationCompletionObserver(transaction.animationCompletionObserver)
+    finalizeAnimationCompletionObserver(
+        scopedTransaction.animationCompletionObserver,
+        animation: scopedTransaction.effectiveAnimation
+    )
     return result
 }
 
