@@ -2,7 +2,7 @@
 //  File: Animatable.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -230,9 +230,18 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             } else if shouldHoldRemovedCompletionRecordsForInfiniteReplacement(
                 replacementAnimation: animation
             ) {
-                for index in completionRecords.indices where completionRecords[index].criteria == .removed {
-                    completionRecords[index].deadline = deadline
-                    completionRecords[index].generation = replacementGeneration
+                let holdsPreviousRepeatGroup = shouldHoldFiniteRepeatCompletionRecordsAsGroupForInfiniteReplacement(
+                    previousAnimation: previousAnimation
+                )
+                for index in completionRecords.indices {
+                    let isPreviousGenerationRecord = previousGeneration.map {
+                        completionRecords[index].orderGeneration == $0
+                    } ?? false
+                    if completionRecords[index].criteria == .removed ||
+                       (holdsPreviousRepeatGroup && isPreviousGenerationRecord) {
+                        completionRecords[index].deadline = deadline
+                        completionRecords[index].generation = replacementGeneration
+                    }
                 }
             } else if shouldMoveResidualWrapperCompletionRecordsToSourceCustomReplacement(
                 previousAnimation: previousAnimation,
@@ -302,9 +311,17 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
                    presentationDuration: presentationDuration
                ) {
                 let presentationDeadline = completionStart + presentationDuration
+                let movesPreviousRepeatGroup = shouldMoveFiniteRepeatCompletionRecordsAsGroupToPresentation(
+                    previousAnimation: previousAnimation
+                )
                 for index in completionRecords.indices {
+                    let isPreviousGenerationRecord = previousGeneration.map {
+                        completionRecords[index].orderGeneration == $0
+                    } ?? false
                     if completionRecords[index].criteria == .removed ||
-                       completionRecords[index].deadline.seconds > presentationDeadline.seconds {
+                       completionRecords[index].deadline.seconds > presentationDeadline.seconds ||
+                       (movesPreviousRepeatGroup &&
+                        isPreviousGenerationRecord) {
                         completionRecords[index].deadline = presentationDeadline
                     }
                 }
@@ -314,9 +331,17 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
                 presentationDuration: presentationDuration
             ) {
                 let presentationDeadline = completionStart + presentationDuration
+                let movesPreviousRepeatGroup = shouldMoveFiniteRepeatCompletionRecordsAsGroupToPresentation(
+                    previousAnimation: previousAnimation
+                )
                 for index in completionRecords.indices {
+                    let isPreviousGenerationRecord = previousGeneration.map {
+                        completionRecords[index].orderGeneration == $0
+                    } ?? false
                     if completionRecords[index].criteria == .removed ||
-                       completionRecords[index].deadline.seconds > presentationDeadline.seconds {
+                       completionRecords[index].deadline.seconds > presentationDeadline.seconds ||
+                       (movesPreviousRepeatGroup &&
+                        isPreviousGenerationRecord) {
                         completionRecords[index].deadline = presentationDeadline
                     }
                 }
@@ -1190,6 +1215,28 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
 
     private func isFiniteNonResidualDelayOrSpeed(_ box: AnimationBoxBase) -> Bool {
         guard box is DelayAnimationBox || box is SpeedAnimationBox else {
+            return false
+        }
+        return box.duration.isFinite &&
+            box.presentationDuration == box.duration
+    }
+
+    private func shouldMoveFiniteRepeatCompletionRecordsAsGroupToPresentation(
+        previousAnimation: Animation?
+    ) -> Bool {
+        guard let previousAnimation else { return false }
+        return isFiniteNonResidualRepeat(previousAnimation.box)
+    }
+
+    private func shouldHoldFiniteRepeatCompletionRecordsAsGroupForInfiniteReplacement(
+        previousAnimation: Animation?
+    ) -> Bool {
+        guard let previousAnimation else { return false }
+        return isFiniteNonResidualRepeat(previousAnimation.box)
+    }
+
+    private func isFiniteNonResidualRepeat(_ box: AnimationBoxBase) -> Bool {
+        guard box is RepeatAnimationBox else {
             return false
         }
         return box.duration.isFinite &&

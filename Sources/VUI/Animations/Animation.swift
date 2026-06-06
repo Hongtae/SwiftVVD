@@ -50,6 +50,10 @@ class AnimationBoxBase: CustomAnimation, CustomStringConvertible, @unchecked Sen
         noRegisteredCompletionDelay()
     }
 
+    var defaultDisplayFrameInterval: TimeInterval {
+        1.0 / 60.0
+    }
+
     @usableFromInline
     func animate<Value>(
         value: Value,
@@ -200,7 +204,13 @@ final class DelayAnimationBox: AnimationBoxBase, @unchecked Sendable {
 
     override func noRegisteredCompletionDelay(for criteria: AnimationCompletionCriteria) -> TimeInterval? {
         guard let baseDelay = base.noRegisteredCompletionDelay(for: criteria) else { return nil }
-        return max(0, baseDelay + delay)
+        var fallbackDelay = max(0, baseDelay + delay)
+        if criteria == .removed,
+           base is SpringAnimationBox,
+           base.presentationDuration > base.duration {
+            fallbackDelay += defaultDisplayFrameInterval
+        }
+        return fallbackDelay
     }
 
     override func value(at progress: Double) -> Double {
@@ -216,13 +226,7 @@ final class DelayAnimationBox: AnimationBoxBase, @unchecked Sendable {
         context: inout AnimationContext<Value>
     ) -> Value? where Value: VectorArithmetic {
         let localTime = time - delay
-        guard localTime >= 0 else {
-            var output = value
-            output.scale(by: 0)
-            return output
-        }
-
-        let output = base.animate(value: value, time: localTime, context: &context)
+        let output = base.animate(value: value, time: max(localTime, 0), context: &context)
         if output == nil, time < presentationDuration(for: value) {
             return value
         }
@@ -267,7 +271,7 @@ final class SpeedAnimationBox: AnimationBoxBase, @unchecked Sendable {
     }
 
     override func noRegisteredCompletionDelay(for criteria: AnimationCompletionCriteria) -> TimeInterval? {
-        guard speed > 0, let baseDelay = base.noRegisteredCompletionDelay(for: criteria) else {
+        guard speed > 0, let baseDelay = base.noRegisteredCompletionDelay() else {
             return nil
         }
         return baseDelay / speed
@@ -283,12 +287,6 @@ final class SpeedAnimationBox: AnimationBoxBase, @unchecked Sendable {
         time: TimeInterval,
         context: inout AnimationContext<Value>
     ) -> Value? where Value: VectorArithmetic {
-        guard speed > 0 else {
-            var output = value
-            output.scale(by: base.value(at: 0))
-            return output
-        }
-
         let output = base.animate(value: value, time: time * speed, context: &context)
         if output == nil, time < presentationDuration(for: value) {
             return value
@@ -365,10 +363,6 @@ final class RepeatAnimationBox: AnimationBoxBase, @unchecked Sendable {
         return delay
     }
 
-    private var defaultDisplayFrameInterval: TimeInterval {
-        1.0 / 60.0
-    }
-
     override func value(at progress: Double) -> Double {
         guard base.duration > 0 else { return base.value(at: 1) }
         let cycles: Double
@@ -403,6 +397,9 @@ final class RepeatAnimationBox: AnimationBoxBase, @unchecked Sendable {
         time: TimeInterval,
         context: inout AnimationContext<Value>
     ) -> Value? where Value: VectorArithmetic {
+        guard base.duration.isFinite else {
+            return base.animate(value: value, time: time, context: &context)
+        }
         guard repeatCount == nil else {
             let basePresentationDuration = base.presentationDuration(for: value)
             guard baseHasResidualPresentation(basePresentationDuration: basePresentationDuration) else {
@@ -873,9 +870,7 @@ final class FluidSpringAnimationBox: AnimationBoxBase, @unchecked Sendable {
         time: TimeInterval,
         context: AnimationContext<Value>
     ) -> Value? where Value: VectorArithmetic {
-        guard duration > 0 else { return nil }
-        let spring = Spring(response: max(response, 0.001), dampingRatio: dampingFraction)
-        return spring.velocity(target: value, initialVelocity: .zero, time: time)
+        context.state[FluidSpringAnimationStateKey<Value>.self].velocity
     }
 
     override func shouldMerge<Value>(
@@ -971,16 +966,6 @@ final class SpringAnimationBox: AnimationBoxBase, @unchecked Sendable {
         var velocity = value
         velocity.scale(by: initialVelocity)
         return spring.value(target: value, initialVelocity: velocity, time: time)
-    }
-
-    override func velocity<Value>(
-        value: Value,
-        time: TimeInterval,
-        context: AnimationContext<Value>
-    ) -> Value? where Value: VectorArithmetic {
-        var velocity = value
-        velocity.scale(by: initialVelocity)
-        return spring.velocity(target: value, initialVelocity: velocity, time: time)
     }
 
     private var spring: Spring {
@@ -1517,6 +1502,12 @@ final class AnimationCompletionObserver: @unchecked Sendable {
             .filter { !completedCriteria.contains($0) }
     }
 
+    func firstCriteriaForNewAnimation() -> AnimationCompletionCriteria? {
+        lock.lock()
+        defer { lock.unlock() }
+        return entries.first { !completedCriteria.contains($0.criteria) }?.criteria
+    }
+
     func animationDidStart(criteria: AnimationCompletionCriteria) -> AnimationCompletionToken? {
         lock.lock()
         defer { lock.unlock() }
@@ -1664,6 +1655,18 @@ func enqueueNoRegisteredAnimationFallback(
     guard let observer else { return }
     let box = AnimationCompletionObserverBox(observer: observer)
     if let animation {
+        if box.observer.firstCriteriaForNewAnimation() == .removed,
+           let fallbackDelay = animation.box.noRegisteredCompletionDelay() {
+            let fire: @Sendable () -> Void = {
+                enqueueAnimationCompletionActions(
+                    box.observer.noRegisteredAnimationFallbackDidFire(
+                        usesAnimatedOrdering: true
+                    )
+                )
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + fallbackDelay, execute: fire)
+            return
+        }
         for criteria in box.observer.criteriaForNewAnimation() {
             guard let fallbackDelay = animation.box.noRegisteredCompletionDelay(for: criteria) else {
                 continue

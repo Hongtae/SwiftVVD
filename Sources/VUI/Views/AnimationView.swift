@@ -90,6 +90,9 @@ private struct AnimationViewTransactionRule<Content: View & Equatable>: Stateful
         if let previousContent,
            previousContent != viewValue.content,
            !transaction.disablesAnimations {
+            if viewValue.animation == nil {
+                enqueueNoRegisteredAnimationFallback(transaction.animationCompletionObserver)
+            }
             transaction.animation = viewValue.animation
         }
         previousContent = viewValue.content

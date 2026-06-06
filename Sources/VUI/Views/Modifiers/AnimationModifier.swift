@@ -67,6 +67,9 @@ private struct AnimationModifierTransactionRule<Observed: Equatable>: StatefulRu
         if let previousValue,
            previousValue != modifierValue.value,
            !transaction.disablesAnimations {
+            if modifierValue.animation == nil {
+                enqueueNoRegisteredAnimationFallback(transaction.animationCompletionObserver)
+            }
             transaction.animation = modifierValue.animation
         }
         previousValue = modifierValue.value
