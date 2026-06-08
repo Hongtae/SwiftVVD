@@ -33,6 +33,10 @@ public struct Transaction {
     }
 }
 
+@available(*, unavailable)
+extension Transaction: Sendable {
+}
+
 public protocol TransactionKey {
     associatedtype Value
     static var defaultValue: Self.Value { get }

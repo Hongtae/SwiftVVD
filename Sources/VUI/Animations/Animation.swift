@@ -22,13 +22,24 @@ class AnimationBoxBase: CustomAnimation, CustomStringConvertible, @unchecked Sen
     }
 
     @usableFromInline
+    var debugDescription: String {
+        description
+    }
+
+    @usableFromInline
     static func == (lhs: AnimationBoxBase, rhs: AnimationBoxBase) -> Bool {
-        lhs === rhs
+        lhs.isEqual(to: rhs)
     }
 
     @usableFromInline
     func hash(into hasher: inout Hasher) {
+        hasher.combine(ObjectIdentifier(type(of: self)))
         hasher.combine(ObjectIdentifier(self))
+    }
+
+    @usableFromInline
+    func isEqual(to other: AnimationBoxBase) -> Bool {
+        self === other
     }
 
     func value(at progress: Double) -> Double {
@@ -118,6 +129,18 @@ final class DefaultAnimationBox: AnimationBoxBase, @unchecked Sendable {
         base.presentationDuration
     }
 
+    override var description: String {
+        "DefaultAnimation()"
+    }
+
+    override func isEqual(to other: AnimationBoxBase) -> Bool {
+        other is DefaultAnimationBox
+    }
+
+    override func hash(into hasher: inout Hasher) {
+        hasher.combine(ObjectIdentifier(DefaultAnimationBox.self))
+    }
+
     override func value(at progress: Double) -> Double {
         base.value(at: progress)
     }
@@ -168,6 +191,21 @@ final class BezierAnimationBox: AnimationBoxBase, @unchecked Sendable {
         storedDuration
     }
 
+    override var description: String {
+        "BezierAnimation(duration: \(storedDuration), curve: \(curve))"
+    }
+
+    override func isEqual(to other: AnimationBoxBase) -> Bool {
+        guard let other = other as? BezierAnimationBox else { return false }
+        return curve == other.curve && storedDuration == other.storedDuration
+    }
+
+    override func hash(into hasher: inout Hasher) {
+        hasher.combine(ObjectIdentifier(BezierAnimationBox.self))
+        hasher.combine(curve)
+        hasher.combine(storedDuration)
+    }
+
     override func value(at progress: Double) -> Double {
         curve.value(at: progress)
     }
@@ -189,6 +227,21 @@ final class DelayAnimationBox: AnimationBoxBase, @unchecked Sendable {
 
     override var presentationDuration: TimeInterval {
         max(0, base.presentationDuration + delay)
+    }
+
+    override var description: String {
+        "DelayAnimation(base: \(base), delay: \(delay))"
+    }
+
+    override func isEqual(to other: AnimationBoxBase) -> Bool {
+        guard let other = other as? DelayAnimationBox else { return false }
+        return base == other.base && delay == other.delay
+    }
+
+    override func hash(into hasher: inout Hasher) {
+        hasher.combine(ObjectIdentifier(DelayAnimationBox.self))
+        hasher.combine(base)
+        hasher.combine(delay)
     }
 
     override func presentationDuration<Value>(
@@ -254,6 +307,21 @@ final class SpeedAnimationBox: AnimationBoxBase, @unchecked Sendable {
         return scaledPresentationDuration(basePresentationDuration: base.presentationDuration)
     }
 
+    override var description: String {
+        "SpeedAnimation(base: \(base), speed: \(speed))"
+    }
+
+    override func isEqual(to other: AnimationBoxBase) -> Bool {
+        guard let other = other as? SpeedAnimationBox else { return false }
+        return base == other.base && speed == other.speed
+    }
+
+    override func hash(into hasher: inout Hasher) {
+        hasher.combine(ObjectIdentifier(SpeedAnimationBox.self))
+        hasher.combine(base)
+        hasher.combine(speed)
+    }
+
     override func presentationDuration<Value>(
         for value: Value
     ) -> TimeInterval where Value: VectorArithmetic {
@@ -313,6 +381,25 @@ final class RepeatAnimationBox: AnimationBoxBase, @unchecked Sendable {
 
     private var resolvedRepeatCount: Int {
         max(repeatCount ?? 1, 1)
+    }
+
+    override var description: String {
+        "RepeatAnimation(base: \(base), repeatCount: \(String(describing: repeatCount)), " +
+            "autoreverses: \(autoreverses))"
+    }
+
+    override func isEqual(to other: AnimationBoxBase) -> Bool {
+        guard let other = other as? RepeatAnimationBox else { return false }
+        return base == other.base &&
+            repeatCount == other.repeatCount &&
+            autoreverses == other.autoreverses
+    }
+
+    override func hash(into hasher: inout Hasher) {
+        hasher.combine(ObjectIdentifier(RepeatAnimationBox.self))
+        hasher.combine(base)
+        hasher.combine(repeatCount)
+        hasher.combine(autoreverses)
     }
 
     override var duration: TimeInterval {
@@ -580,6 +667,24 @@ final class CustomAnimationBox<Base: CustomAnimation>: AnimationBoxBase, @unchec
         base
     }
 
+    override var description: String {
+        String(describing: base)
+    }
+
+    override var debugDescription: String {
+        String(reflecting: base)
+    }
+
+    override func isEqual(to other: AnimationBoxBase) -> Bool {
+        guard let other = other as? CustomAnimationBox<Base> else { return false }
+        return base == other.base
+    }
+
+    override func hash(into hasher: inout Hasher) {
+        hasher.combine(ObjectIdentifier(CustomAnimationBox<Base>.self))
+        hasher.combine(base)
+    }
+
     override var duration: TimeInterval {
         .infinity
     }
@@ -806,6 +911,25 @@ final class FluidSpringAnimationBox: AnimationBoxBase, @unchecked Sendable {
         max(duration, presentationDurationEstimate)
     }
 
+    override var description: String {
+        "FluidSpringAnimation(response: \(response), dampingFraction: \(dampingFraction), " +
+            "blendDuration: \(blendDuration))"
+    }
+
+    override func isEqual(to other: AnimationBoxBase) -> Bool {
+        guard let other = other as? FluidSpringAnimationBox else { return false }
+        return response == other.response &&
+            dampingFraction == other.dampingFraction &&
+            blendDuration == other.blendDuration
+    }
+
+    override func hash(into hasher: inout Hasher) {
+        hasher.combine(ObjectIdentifier(FluidSpringAnimationBox.self))
+        hasher.combine(response)
+        hasher.combine(dampingFraction)
+        hasher.combine(blendDuration)
+    }
+
     override func presentationDuration<Value>(
         for value: Value
     ) -> TimeInterval where Value: VectorArithmetic {
@@ -927,6 +1051,27 @@ final class SpringAnimationBox: AnimationBoxBase, @unchecked Sendable {
         )
     }
 
+    override var description: String {
+        "SpringAnimation(mass: \(mass), stiffness: \(stiffness), damping: \(damping), " +
+            "initialVelocity: \(initialVelocity))"
+    }
+
+    override func isEqual(to other: AnimationBoxBase) -> Bool {
+        guard let other = other as? SpringAnimationBox else { return false }
+        return mass == other.mass &&
+            stiffness == other.stiffness &&
+            damping == other.damping &&
+            initialVelocity == other.initialVelocity
+    }
+
+    override func hash(into hasher: inout Hasher) {
+        hasher.combine(ObjectIdentifier(SpringAnimationBox.self))
+        hasher.combine(mass)
+        hasher.combine(stiffness)
+        hasher.combine(damping)
+        hasher.combine(initialVelocity)
+    }
+
     override func presentationDuration<Value>(
         for value: Value
     ) -> TimeInterval where Value: VectorArithmetic {
@@ -983,14 +1128,13 @@ public struct Spring: Hashable, Sendable {
     var _mass: Double
 
     public init(duration: TimeInterval = 0.5, bounce: Double = 0.0) {
-        let response = max(duration, 0.001)
         let dampingRatio = Self.dampingRatio(bounce: bounce)
-        self.init(response: response, dampingRatio: dampingRatio)
+        self.init(response: duration, dampingRatio: dampingRatio)
     }
 
     public init(response: Double, dampingRatio: Double) {
-        let naturalFrequency = 2 * Double.pi / max(response, 0.001)
-        let ratio = max(dampingRatio, 0)
+        let naturalFrequency = 2 * Double.pi / response
+        let ratio = dampingRatio
         self.angularFrequency = Self.angularFrequency(
             naturalFrequency: naturalFrequency,
             dampingRatio: ratio
@@ -1005,20 +1149,31 @@ public struct Spring: Hashable, Sendable {
         damping: Double,
         allowOverDamping: Bool = false
     ) {
-        let resolvedMass = max(mass, 0.001)
-        let resolvedStiffness = max(stiffness, 0.001)
-        let naturalFrequency = sqrt(resolvedStiffness / resolvedMass)
-        var ratio = damping / (2 * sqrt(resolvedStiffness * resolvedMass))
-        if !allowOverDamping {
-            ratio = min(ratio, 1)
+        if stiffness == 0 {
+            self.angularFrequency = 0
+            self.decayConstant = 0
+        } else {
+            var decay = damping / (2 * mass)
+            let frequencySquared = stiffness / mass
+            var angularSquared = frequencySquared - decay * decay
+            if !allowOverDamping,
+               frequencySquared > 0,
+               angularSquared < 0 {
+                decay = sqrt(frequencySquared)
+                angularSquared = 0
+            }
+            if angularSquared < 0 {
+                if frequencySquared < 0 {
+                    self.angularFrequency = sqrt(-angularSquared)
+                } else {
+                    self.angularFrequency = -sqrt(-angularSquared)
+                }
+            } else {
+                self.angularFrequency = sqrt(angularSquared)
+            }
+            self.decayConstant = decay
         }
-        ratio = max(ratio, 0)
-        self.angularFrequency = Self.angularFrequency(
-            naturalFrequency: naturalFrequency,
-            dampingRatio: ratio
-        )
-        self.decayConstant = ratio * naturalFrequency
-        self._mass = resolvedMass
+        self._mass = mass
     }
 
     public init(
@@ -1044,18 +1199,18 @@ public struct Spring: Hashable, Sendable {
 
     public var bounce: Double {
         let ratio = dampingRatio
-        if ratio <= 1 {
-            return 1 - ratio
+        if angularFrequency < 0 {
+            return 1 / ratio - 1
         }
-        return 1 / ratio - 1
+        return 1 - ratio
     }
 
     public var response: Double {
-        2 * Double.pi / max(naturalFrequency, 0.001)
+        2 * Double.pi / naturalFrequency
     }
 
     public var dampingRatio: Double {
-        decayConstant / max(naturalFrequency, 0.001)
+        decayConstant / naturalFrequency
     }
 
     public var mass: Double {
@@ -1076,9 +1231,9 @@ public struct Spring: Hashable, Sendable {
 
     private var naturalFrequency: Double {
         if angularFrequency < 0 {
-            return sqrt(max(decayConstant * decayConstant - angularFrequency * angularFrequency, 0.001))
+            return sqrt(decayConstant * decayConstant - angularFrequency * angularFrequency)
         }
-        return sqrt(max(decayConstant * decayConstant + angularFrequency * angularFrequency, 0.001))
+        return sqrt(decayConstant * decayConstant + angularFrequency * angularFrequency)
     }
 
     private static func angularFrequency(naturalFrequency: Double, dampingRatio: Double) -> Double {
@@ -1392,6 +1547,7 @@ extension Spring {
         var velocity2 = c2
         velocity2.scale(by: root2 * e2)
         velocity += velocity2
+        velocity += target
         return (value, velocity)
     }
 }
@@ -1409,7 +1565,7 @@ public struct Animation: Equatable, Sendable {
     }
 
     public static func == (lhs: Animation, rhs: Animation) -> Bool {
-        lhs.box === rhs.box
+        lhs.box == rhs.box
     }
 }
 
@@ -1449,7 +1605,7 @@ extension Animation: Hashable {
     }
 
     public func hash(into hasher: inout Hasher) {
-        hasher.combine(ObjectIdentifier(box))
+        box.hash(into: &hasher)
     }
 }
 
@@ -1700,13 +1856,13 @@ func finalizeAnimationCompletionObserver(
 
 extension Animation: CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable {
     public var description: String {
-        "Animation"
+        box.description
     }
     public var debugDescription: String {
-        "Animation"
+        "AnyAnimator(\(box.debugDescription))"
     }
     public var customMirror: Mirror {
-        Mirror(self, children: ["base": box])
+        Mirror(self, children: ["base": box.customAnimationBase])
     }
 }
 
@@ -1776,6 +1932,7 @@ extension Animation {
         )
     }
 
+    @_disfavoredOverload
     public static func spring(response: Double = 0.5,
                               dampingFraction: Double = 0.825,
                               blendDuration: TimeInterval = 0) -> Animation {
@@ -1800,6 +1957,7 @@ extension Animation {
         spring(duration: 0.5, bounce: 0.0, blendDuration: 0)
     }
 
+    @_disfavoredOverload
     public static func interactiveSpring(response: Double = 0.15,
                                          dampingFraction: Double = 0.86,
                                          blendDuration: TimeInterval = 0.25) -> Animation {

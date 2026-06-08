@@ -172,6 +172,49 @@ extension GeometryEffect {
     }
 }
 
+public struct _IgnoredByLayoutEffect<Base>: GeometryEffect where Base: GeometryEffect {
+    public var base: Base
+
+    public static var _affectsLayout: Bool {
+        false
+    }
+
+    @inlinable public init(_ base: Base) {
+        self.base = base
+    }
+
+    public func effectValue(size: CGSize) -> ProjectionTransform {
+        base.effectValue(size: size)
+    }
+
+    public var animatableData: Base.AnimatableData {
+        get { base.animatableData }
+        set { base.animatableData = newValue }
+    }
+
+    public typealias AnimatableData = Base.AnimatableData
+    public typealias Body = Never
+}
+
+@available(*, unavailable)
+extension _IgnoredByLayoutEffect: Sendable {
+}
+
+extension _IgnoredByLayoutEffect: Equatable where Base: Equatable {
+    public static func == (
+        lhs: _IgnoredByLayoutEffect<Base>,
+        rhs: _IgnoredByLayoutEffect<Base>
+    ) -> Bool {
+        lhs.base == rhs.base
+    }
+}
+
+extension GeometryEffect {
+    @inlinable public func ignoredByLayout() -> _IgnoredByLayoutEffect<Self> {
+        _IgnoredByLayoutEffect(self)
+    }
+}
+
 public struct _OffsetEffect: GeometryEffect, Equatable {
     public var offset: CGSize
 
