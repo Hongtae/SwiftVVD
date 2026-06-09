@@ -1,0 +1,4 @@
+module miniaudio {
+    umbrella header "miniaudio.h"
+    export *
+}
