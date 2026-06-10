@@ -2,102 +2,75 @@
 //  File: AudioListener.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
-import OpenAL
+import miniaudio
 
-public final class AudioListener: Sendable {
+public final class AudioListener: @unchecked Sendable {
+    private let listenerIndex: ma_uint32 = 0
+
     public var gain: Float {
         get {
-            var v: Float = 1.0
-            alGetListenerf(AL_GAIN, &v)
-            return v
+            ma_engine_get_volume(device.engine)
         }
-        set(v) {
-            alListenerf(AL_GAIN, max(v, 0.0))
+        set {
+            _ = ma_engine_set_volume(device.engine, max(newValue, 0.0))
         }
     }
 
     public var position: Vector3 {
         get {
-            var v: Float3 = (0, 0, 0)
-            alGetListener3f(AL_POSITION, &v.0, &v.1, &v.2)
-            return Vector3(v)
+            let v = ma_engine_listener_get_position(device.engine, listenerIndex)
+            return Vector3(Scalar(v.x), Scalar(v.y), Scalar(v.z))
         }
-        set(v) {
-            let v = v.float3
-            alListener3f(AL_POSITION, v.0, v.1, v.2)
+        set {
+            let v = newValue.float3
+            ma_engine_listener_set_position(device.engine, listenerIndex, v.0, v.1, v.2)
         }
     }
 
     public var velocity: Vector3 {
         get {
-            var v: Float3 = (0, 0, 0)
-            alGetListener3f(AL_VELOCITY, &v.0, &v.1, &v.2)
-            return Vector3(v)
+            let v = ma_engine_listener_get_velocity(device.engine, listenerIndex)
+            return Vector3(Scalar(v.x), Scalar(v.y), Scalar(v.z))
         }
-        set(v) {
-            let v = v.float3
-            alListener3f(AL_VELOCITY, v.0, v.1, v.2)
+        set {
+            let v = newValue.float3
+            ma_engine_listener_set_velocity(device.engine, listenerIndex, v.0, v.1, v.2)
         }
     }
-    
+
     public var forward: Vector3 {
         get {
-            var v: [ALfloat] = [
-                0.0, 0.0, -1.0, // forward
-                0.0, 1.0, 0.0,  // up
-            ]
-            alGetListenerfv(AL_ORIENTATION, &v)
-            return Vector3(Scalar(v[0]), Scalar(v[1]), Scalar(v[2]))
+            let v = ma_engine_listener_get_direction(device.engine, listenerIndex)
+            return Vector3(Scalar(v.x), Scalar(v.y), Scalar(v.z))
         }
-        set(vec) {
-            var v: [ALfloat] = [
-                0.0, 0.0, -1.0, // forward
-                0.0, 1.0, 0.0,  // up
-            ]
-            alGetListenerfv(AL_ORIENTATION, &v)
-            let v2 = vec.normalized()
-            v[0] = ALfloat(v2.x)
-            v[1] = ALfloat(v2.y)
-            v[2] = ALfloat(v2.z)
-            alListenerfv(AL_ORIENTATION, v)
+        set {
+            let v = newValue.normalized().float3
+            ma_engine_listener_set_direction(device.engine, listenerIndex, v.0, v.1, v.2)
         }
     }
 
     public var up: Vector3 {
         get {
-            var v: [ALfloat] = [
-                0.0, 0.0, -1.0, // forward
-                0.0, 1.0, 0.0,  // up
-            ]
-            alGetListenerfv(AL_ORIENTATION, &v)
-            return Vector3(Scalar(v[3]), Scalar(v[4]), Scalar(v[5]))
+            let v = ma_engine_listener_get_world_up(device.engine, listenerIndex)
+            return Vector3(Scalar(v.x), Scalar(v.y), Scalar(v.z))
         }
-        set(vec) {
-            var v: [ALfloat] = [
-                0.0, 0.0, -1.0, // forward
-                0.0, 1.0, 0.0,  // up
-            ]
-            alGetListenerfv(AL_ORIENTATION, &v)
-            let v2 = vec.normalized()
-            v[3] = ALfloat(v2.x)
-            v[4] = ALfloat(v2.y)
-            v[5] = ALfloat(v2.z)
-            alListenerfv(AL_ORIENTATION, v)
+        set {
+            let v = newValue.normalized().float3
+            ma_engine_listener_set_world_up(device.engine, listenerIndex, v.0, v.1, v.2)
         }
     }
 
     public let device: AudioDevice
 
     public func setOrientation(forward: Vector3, up: Vector3) {
-        let f = forward.normalized()
-        let u = up.normalized()
-        let v = [ALfloat(f.x), ALfloat(f.y), ALfloat(f.z),
-                 ALfloat(u.x), ALfloat(u.y), ALfloat(u.z)]
-        alListenerfv(AL_ORIENTATION, v)
+        let f = forward.normalized().float3
+        let u = up.normalized().float3
+        ma_engine_listener_set_direction(device.engine, listenerIndex, f.0, f.1, f.2)
+        ma_engine_listener_set_world_up(device.engine, listenerIndex, u.0, u.1, u.2)
     }
 
     public func setOrientation(matrix: Matrix3) {
@@ -106,5 +79,7 @@ public final class AudioListener: Sendable {
 
     init(device: AudioDevice) {
         self.device = device
+        ma_engine_listener_set_enabled(device.engine, listenerIndex, 1)
+        self.setOrientation(forward: Vector3(0, 0, -1), up: Vector3(0, 1, 0))
     }
 }

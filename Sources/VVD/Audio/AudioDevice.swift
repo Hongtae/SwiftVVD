@@ -2,143 +2,135 @@
 //  File: AudioDevice.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
-import OpenAL
+import miniaudio
 
-public struct ALDevice {
+public struct AudioDeviceInfo: Sendable {
     public let name: String
-    public let majorVersion: Int
-    public let minorVersion: Int
+    public let isDefault: Bool
+
+    let id: ma_device_id
+
+    init(name: String, isDefault: Bool, id: ma_device_id) {
+        self.name = name
+        self.isDefault = isDefault
+        self.id = id
+    }
 }
 
-public func availableALDevices() -> [ALDevice] {
-    var devices: [ALDevice] = []
-    if alcIsExtensionPresent(nil, "ALC_ENUMERATION_EXT") == AL_TRUE {
+private func string<T>(fromDeviceName name: inout T) -> String {
+    let capacity = MemoryLayout<T>.size
+    return withUnsafePointer(to: &name) { ptr in
+        ptr.withMemoryRebound(to: CChar.self,
+                              capacity: capacity) {
+            String(cString: $0)
+        }
+    }
+}
 
-        // defaultDeviceName contains the name of the default device 
-        let defaultDeviceName = String(utf8String: alcGetString(nil, ALC_DEFAULT_DEVICE_SPECIFIER))
+public func availableAudioDevices() -> [AudioDeviceInfo] {
+    let context = UnsafeMutablePointer<ma_context>.allocate(capacity: 1)
+    defer { context.deallocate() }
 
-        // Pass in NULL device handle to get list of devices 
-        if var devicesRawCStrArray = alcGetString(nil, ALC_DEVICE_SPECIFIER) {
-            // devices contains the device names, separated by NULL
-            // and terminated by two consecutive NULLs. 
+    guard ma_context_init(nil, 0, nil, context) == MA_SUCCESS else {
+        return []
+    }
+    defer { ma_context_uninit(context) }
 
-            while devicesRawCStrArray.pointee != 0 {
-                if let device = alcOpenDevice(devicesRawCStrArray) {
+    var playbackInfos: UnsafeMutablePointer<ma_device_info>?
+    var playbackCount: ma_uint32 = 0
 
-                    let name = String(cString: alcGetString(device, ALC_DEVICE_SPECIFIER))
-                    var majorVersion: Int32 = 0
-                    var minorVersion: Int32 = 0
-                    alcGetIntegerv(device, ALC_MAJOR_VERSION, Int32(MemoryLayout<Int32>.size), &majorVersion)
-                    alcGetIntegerv(device, ALC_MINOR_VERSION, Int32(MemoryLayout<Int32>.size), &minorVersion)
+    guard ma_context_get_devices(context,
+                                 &playbackInfos,
+                                 &playbackCount,
+                                 nil,
+                                 nil) == MA_SUCCESS,
+          let playbackInfos else {
+        return []
+    }
 
-                    let dev = ALDevice(name: name,
-                                       majorVersion: Int(majorVersion),
-                                       minorVersion: Int(minorVersion))
-                    if name == defaultDeviceName {
-                        devices.insert(dev, at: 0)
-                    } else {
-                        devices.append(dev)
-                    }
+    var devices: [AudioDeviceInfo] = []
+    devices.reserveCapacity(Int(playbackCount))
 
-                    alcCloseDevice(device)
-                }
-                let len = strlen(devicesRawCStrArray) + 1
-                devicesRawCStrArray = devicesRawCStrArray.advanced(by: len)
-            }
+    for index in 0..<Int(playbackCount) {
+        var info = playbackInfos[index]
+        let device = AudioDeviceInfo(name: string(fromDeviceName: &info.name),
+                                     isDefault: info.isDefault != 0,
+                                     id: info.id)
+        if device.isDefault {
+            devices.insert(device, at: 0)
+        } else {
+            devices.append(device)
         }
     }
     return devices
 }
 
-public typealias ALCdevice = OpaquePointer
-public typealias ALCcontext = OpaquePointer
-
-
 public final class AudioDevice: @unchecked Sendable {
-    public let device: ALCdevice
-    public let context: ALCcontext
-
+    let engine: UnsafeMutablePointer<ma_engine>
     public let deviceName: String
-    public let majorVersion: Int
-    public let minorVersion: Int
+    public let sampleRate: Int
+    public let channels: Int
 
-    struct BitsChannels: Hashable {
-        let bits: Int
-        let channels: Int
+    public convenience init?(device: AudioDeviceInfo? = nil) {
+        self.init(device: device, noDevice: false)
     }
-    var formatTable: [BitsChannels: Int32] = [:]
 
-    public init?(deviceName: String) {
-        guard let device = alcOpenDevice(deviceName) else { return nil }
+    convenience init?(noDevice: Bool) {
+        self.init(device: nil, noDevice: noDevice)
+    }
 
-        if let context = alcCreateContext(device, nil) {
-            alcMakeContextCurrent(context)
+    private init?(device: AudioDeviceInfo?, noDevice: Bool) {
+        let engine = UnsafeMutablePointer<ma_engine>.allocate(capacity: 1)
 
-            self.device = device
-            self.context = context
+        var config = ma_engine_config_init()
+        config.listenerCount = 1
+        if noDevice {
+            config.noDevice = ma_bool32(MA_TRUE)
+            config.channels = 2
+            config.sampleRate = 48_000
+        }
 
-            self.deviceName = String(utf8String: alcGetString(device, ALC_DEVICE_SPECIFIER)) ?? ""
-            var majorVersion : Int32 = 0
-            var minorVersion : Int32 = 0
-            alcGetIntegerv(device, ALC_MAJOR_VERSION, Int32(MemoryLayout<Int32>.size), &majorVersion)
-            alcGetIntegerv(device, ALC_MINOR_VERSION, Int32(MemoryLayout<Int32>.size), &minorVersion)
-
-            self.majorVersion = Int(majorVersion)
-            self.minorVersion = Int(minorVersion)
-
-            Log.info("OpenAL device: \(deviceName) Version: \(majorVersion).\(minorVersion).")
-
-            // update format table
-            formatTable[BitsChannels(bits: 4, channels: 1)] = alGetEnumValue("AL_FORMAT_MONO_IMA4")
-            formatTable[BitsChannels(bits: 4, channels: 2)] = alGetEnumValue("AL_FORMAT_STEREO_IMA4")
-
-            formatTable[BitsChannels(bits: 8, channels: 1)] = AL_FORMAT_MONO8
-            formatTable[BitsChannels(bits: 8, channels: 2)] = AL_FORMAT_STEREO8
-            formatTable[BitsChannels(bits: 8, channels: 4)] = alGetEnumValue("AL_FORMAT_QUAD8")
-            formatTable[BitsChannels(bits: 8, channels: 6)] = alGetEnumValue("AL_FORMAT_51CHN8")
-            formatTable[BitsChannels(bits: 8, channels: 8)] = alGetEnumValue("AL_FORMAT_71CHN8")
-
-            formatTable[BitsChannels(bits:16, channels: 1)] = AL_FORMAT_MONO16
-            formatTable[BitsChannels(bits:16, channels: 2)] = AL_FORMAT_STEREO16
-            formatTable[BitsChannels(bits:16, channels: 4)] = alGetEnumValue("AL_FORMAT_QUAD16")
-            formatTable[BitsChannels(bits:16, channels: 6)] = alGetEnumValue("AL_FORMAT_51CHN16")
-            formatTable[BitsChannels(bits:16, channels: 8)] = alGetEnumValue("AL_FORMAT_71CHN16")
-
-            formatTable[BitsChannels(bits:32, channels: 1)] = alGetEnumValue("AL_FORMAT_MONO_FLOAT32")
-            formatTable[BitsChannels(bits:32, channels: 2)] = alGetEnumValue("AL_FORMAT_STEREO_FLOAT32")
-            formatTable[BitsChannels(bits:32, channels: 4)] = alGetEnumValue("AL_FORMAT_QUAD32")
-            formatTable[BitsChannels(bits:32, channels: 6)] = alGetEnumValue("AL_FORMAT_51CHN32")
-            formatTable[BitsChannels(bits:32, channels: 8)] = alGetEnumValue("AL_FORMAT_71CHN32")
-
+        let result: ma_result
+        if let device, noDevice == false {
+            var id = device.id
+            result = withUnsafeMutablePointer(to: &id) { idPtr in
+                config.pPlaybackDeviceID = idPtr
+                return ma_engine_init(&config, engine)
+            }
+            self.deviceName = device.name
+        } else if noDevice {
+            config.pPlaybackDeviceID = nil
+            result = ma_engine_init(&config, engine)
+            self.deviceName = "No Audio Device"
         } else {
-            Log.err("alcCreateContext failed.")
+            config.pPlaybackDeviceID = nil
+            result = ma_engine_init(&config, engine)
+            self.deviceName = availableAudioDevices().first(where: \.isDefault)?.name ?? "Default Audio Device"
+        }
+
+        guard result == MA_SUCCESS else {
+            engine.deallocate()
+            Log.err("ma_engine_init failed. result: \(result)")
             return nil
         }
+
+        self.engine = engine
+        self.sampleRate = Int(ma_engine_get_sample_rate(engine))
+        self.channels = Int(ma_engine_get_channels(engine))
+
+        Log.info("miniaudio device: \(deviceName), \(sampleRate) Hz, \(channels) channels.")
     }
 
     deinit {
-        if alcGetCurrentContext() == context {
-            alcMakeContextCurrent(nil)
-        }
-        alcDestroyContext(context)
-        alcCloseDevice(device)
+        ma_engine_uninit(engine)
+        engine.deallocate()
     }
 
-    public func makeSource() -> AudioSource? {
-        var sourceID: ALuint = 0
-        alGenSources(1, &sourceID)
-        alSourcei(sourceID, AL_LOOPING, 0)
-        alSourcei(sourceID, AL_BUFFER, 0)
-        alSourceStop(sourceID)
-
-        return AudioSource(device: self, sourceID: sourceID)
-    }
-
-    public func format(bits: Int, channels: Int) -> Int32 {
-        return formatTable[BitsChannels(bits: bits, channels: channels)] ?? 0
+    public func makeSource(stream: AudioStream) -> AudioSource? {
+        AudioSource(device: self, stream: stream)
     }
 }

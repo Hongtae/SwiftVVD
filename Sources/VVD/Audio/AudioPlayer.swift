@@ -2,29 +2,33 @@
 //  File: AudioPlayer.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-public class AudioPlayer {
+import Synchronization
+
+public class AudioPlayer: @unchecked Sendable {
 
     public nonisolated var sampleRate: Int  { stream.sampleRate }
     public nonisolated var channels: Int    { stream.channels }
     public nonisolated var bits: Int        { stream.bits }
     public nonisolated var duration: Double { stream.timeTotal }
 
-    public var position: Double { stream.timePosition }
+    public var position: Double { source.timePosition }
 
     public let source: AudioSource
     public let stream: AudioStream
 
-    var playing = false
-    var buffering = false
-    var bufferedPosition: Double = 0.0
-    var playbackPosition: Double = 0.0
-    var playLoopCount = 0
+    public var retainedWhilePlaying = false
     var maxBufferingTime = 1.0
 
-    public var retainedWhilePlaying = false
+    private struct PlayerState: Sendable {
+        var playing = false
+        var playbackPosition: Double = 0.0
+        var playLoopCount = 1
+    }
+
+    private let playerState = Mutex(PlayerState())
 
     public nonisolated init(source: AudioSource, stream: AudioStream) {
         self.source = source
@@ -33,56 +37,155 @@ public class AudioPlayer {
 
     deinit {
         source.stop()
-        source.dequeueBuffers()
     }
 
     public func play() {
-        if self.playing == false {
-            self.playing = true
-            self.buffering = true
-            self.playLoopCount = 1
+        let wasPaused = source.state == .paused
+        if wasPaused == false && source.atEnd {
+            source.timePosition = 0.0
+        }
+        let startPosition = source.timePosition
+        let shouldStart = playerState.withLock { state in
+            if state.playing {
+                return false
+            }
+            state.playing = true
+            state.playLoopCount = 1
+            state.playbackPosition = startPosition
+            return true
+        }
+
+        if shouldStart {
+            if wasPaused {
+                source.play()
+            }
+            playbackStateChanged(true, position: startPosition)
         }
     }
 
     public func play(start: Double, loopCount: Int = 1) {
-        if self.playing == false {
-            self.source.stop()
-            self.source.dequeueBuffers()
+        let safeLoopCount = max(loopCount, 1)
+        source.stop()
+        source.timePosition = max(start, 0.0)
 
-            self.playing = true
-            self.buffering = true
-            self.playLoopCount = loopCount
-            _=self.stream.seek(time: start)
-            self.playbackPosition = self.stream.timePosition
+        playerState.withLock { state in
+            state.playing = true
+            state.playLoopCount = safeLoopCount
+            state.playbackPosition = source.timePosition
         }
+
+        playbackStateChanged(true, position: source.timePosition)
     }
 
     public func stop() {
-        _=self.stream.seek(pcm: 0)
-        self.source.stop()
-        self.source.dequeueBuffers()
-        
-        self.playing = false
-        self.playbackPosition = 0
-        self.bufferedPosition = 0
+        source.stop()
+
+        playerState.withLock { state in
+            state.playing = false
+            state.playbackPosition = 0.0
+            state.playLoopCount = 1
+        }
+
+        playbackStateChanged(false, position: 0.0)
     }
 
     public func pause() {
-        if self.playing {
-            self.source.pause()
+        let position = source.timePosition
+        let shouldPause = playerState.withLock { state in
+            if state.playing == false {
+                return false
+            }
+            state.playing = false
+            state.playbackPosition = position
+            return true
+        }
+
+        if shouldPause {
+            source.pause()
+            playbackStateChanged(false, position: position)
         }
     }
 
     public var isPaused: Bool {
-        return self.source.state == .paused
-    }
-
-    open func bufferingStateChanged(_: Bool, timeStamp: Double) {
+        source.state == .paused
     }
 
     open func playbackStateChanged(_: Bool, position: Double) {
     }
 
-    open func processStream(data: UnsafeRawPointer, byteCount: Int, timeStamp: Double) {        
+    func servicePlayback(buffer: inout UnsafeMutableRawBufferPointer,
+                         targetBufferedTime: Double) -> Bool {
+        let isPlaying = playerState.withLock { $0.playing }
+        if isPlaying == false {
+            return false
+        }
+
+        if source.state != .paused {
+            switch source.fillBuffer(into: &buffer, targetBufferedTime: targetBufferedTime) {
+            case .idle, .buffered, .endOfStream:
+                break
+            case .error:
+                Log.err("AudioStream.read failed.")
+                source.stop()
+                playerState.withLock { state in
+                    state.playing = false
+                    state.playbackPosition = source.timePosition
+                    state.playLoopCount = 1
+                }
+                playbackStateChanged(false, position: source.timePosition)
+                return false
+            }
+
+            if source.state == .stopped && source.bufferedFrameCount > 0 {
+                source.play()
+            }
+        }
+
+        return monitorPlayback()
+    }
+
+    func monitorPlayback() -> Bool {
+        let isPlaying = playerState.withLock { $0.playing }
+        if isPlaying == false {
+            return false
+        }
+
+        if source.atEnd {
+            let shouldLoop = playerState.withLock { state in
+                if state.playLoopCount > 1 {
+                    state.playLoopCount -= 1
+                    state.playbackPosition = 0.0
+                    return true
+                }
+                state.playing = false
+                state.playbackPosition = source.timePosition
+                return false
+            }
+
+            if shouldLoop {
+                source.timePosition = 0.0
+                playbackStateChanged(true, position: 0.0)
+                return retainedWhilePlaying
+            }
+
+            let position = source.timePosition
+            source.markStoppedAtEnd()
+            playbackStateChanged(false, position: position)
+            return false
+        }
+
+        let position = source.timePosition
+        let didMove = playerState.withLock { state in
+            if state.playing && state.playbackPosition != position {
+                state.playbackPosition = position
+                return true
+            }
+            return false
+        }
+
+        if didMove {
+            playbackStateChanged(true, position: position)
+        }
+        return retainedWhilePlaying
     }
 }
