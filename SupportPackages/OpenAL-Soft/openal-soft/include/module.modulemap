@@ -1,5 +1,0 @@
-module OpenAL {
-    header "AL/al.h"
-    header "AL/alc.h"
-    export *
-}
