@@ -234,6 +234,46 @@ public struct _OffsetEffect: GeometryEffect, Equatable {
     public typealias Body = Never
 }
 
+public struct _RotationEffect: GeometryEffect, Equatable {
+    public var angle: Angle
+    public var anchor: UnitPoint
+
+    @inlinable public init(angle: Angle, anchor: UnitPoint = .center) {
+        self.angle = angle
+        self.anchor = anchor
+    }
+
+    public func effectValue(size: CGSize) -> ProjectionTransform {
+        let anchorPoint = CGPoint(
+            x: anchor.x * size.width,
+            y: anchor.y * size.height
+        )
+        let cosine = cos(angle.radians)
+        let sine = sin(angle.radians)
+        let transform = CGAffineTransform(
+            a: cosine,
+            b: sine,
+            c: -sine,
+            d: cosine,
+            tx: anchorPoint.x - anchorPoint.x * cosine + anchorPoint.y * sine,
+            ty: anchorPoint.y - anchorPoint.x * sine - anchorPoint.y * cosine
+        )
+        return ProjectionTransform(transform)
+    }
+
+    public typealias AnimatableData = AnimatablePair<Angle.AnimatableData, UnitPoint.AnimatableData>
+
+    public var animatableData: AnimatableData {
+        get { AnimatableData(angle.animatableData, anchor.animatableData) }
+        set {
+            angle.animatableData = newValue.first
+            anchor.animatableData = newValue.second
+        }
+    }
+
+    public typealias Body = Never
+}
+
 public struct _ScaleEffect: GeometryEffect, Equatable {
     public var scale: CGSize
     public var anchor: UnitPoint
@@ -277,6 +317,10 @@ extension View {
 
     @inlinable public func offset(x: CGFloat = 0, y: CGFloat = 0) -> some View {
         offset(CGSize(width: x, height: y))
+    }
+
+    @inlinable public func rotationEffect(_ angle: Angle, anchor: UnitPoint = .center) -> some View {
+        modifier(_RotationEffect(angle: angle, anchor: anchor))
     }
 
     @inlinable public func scaleEffect(_ scale: CGSize, anchor: UnitPoint = .center) -> some View {

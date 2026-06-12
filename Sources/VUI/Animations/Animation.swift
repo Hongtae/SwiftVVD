@@ -34,7 +34,6 @@ class AnimationBoxBase: CustomAnimation, CustomStringConvertible, @unchecked Sen
     @usableFromInline
     func hash(into hasher: inout Hasher) {
         hasher.combine(ObjectIdentifier(type(of: self)))
-        hasher.combine(ObjectIdentifier(self))
     }
 
     @usableFromInline
@@ -138,7 +137,7 @@ final class DefaultAnimationBox: AnimationBoxBase, @unchecked Sendable {
     }
 
     override func hash(into hasher: inout Hasher) {
-        hasher.combine(ObjectIdentifier(DefaultAnimationBox.self))
+        super.hash(into: &hasher)
     }
 
     override func value(at progress: Double) -> Double {
@@ -201,7 +200,41 @@ final class BezierAnimationBox: AnimationBoxBase, @unchecked Sendable {
     }
 
     override func hash(into hasher: inout Hasher) {
-        hasher.combine(ObjectIdentifier(BezierAnimationBox.self))
+        super.hash(into: &hasher)
+        hasher.combine(curve)
+        hasher.combine(storedDuration)
+    }
+
+    override func value(at progress: Double) -> Double {
+        curve.value(at: progress)
+    }
+}
+
+@usableFromInline
+final class UnitCurveAnimationBox: AnimationBoxBase, @unchecked Sendable {
+    let curve: UnitCurve
+    let storedDuration: TimeInterval
+
+    init(curve: UnitCurve, duration: TimeInterval) {
+        self.curve = curve
+        self.storedDuration = duration
+    }
+
+    override var duration: TimeInterval {
+        storedDuration
+    }
+
+    override var description: String {
+        "UnitCurveAnimation(duration: \(storedDuration), curve: \(curve))"
+    }
+
+    override func isEqual(to other: AnimationBoxBase) -> Bool {
+        guard let other = other as? UnitCurveAnimationBox else { return false }
+        return curve == other.curve && storedDuration == other.storedDuration
+    }
+
+    override func hash(into hasher: inout Hasher) {
+        super.hash(into: &hasher)
         hasher.combine(curve)
         hasher.combine(storedDuration)
     }
@@ -239,7 +272,7 @@ final class DelayAnimationBox: AnimationBoxBase, @unchecked Sendable {
     }
 
     override func hash(into hasher: inout Hasher) {
-        hasher.combine(ObjectIdentifier(DelayAnimationBox.self))
+        super.hash(into: &hasher)
         hasher.combine(base)
         hasher.combine(delay)
     }
@@ -317,7 +350,7 @@ final class SpeedAnimationBox: AnimationBoxBase, @unchecked Sendable {
     }
 
     override func hash(into hasher: inout Hasher) {
-        hasher.combine(ObjectIdentifier(SpeedAnimationBox.self))
+        super.hash(into: &hasher)
         hasher.combine(base)
         hasher.combine(speed)
     }
@@ -396,7 +429,7 @@ final class RepeatAnimationBox: AnimationBoxBase, @unchecked Sendable {
     }
 
     override func hash(into hasher: inout Hasher) {
-        hasher.combine(ObjectIdentifier(RepeatAnimationBox.self))
+        super.hash(into: &hasher)
         hasher.combine(base)
         hasher.combine(repeatCount)
         hasher.combine(autoreverses)
@@ -485,7 +518,7 @@ final class RepeatAnimationBox: AnimationBoxBase, @unchecked Sendable {
         context: inout AnimationContext<Value>
     ) -> Value? where Value: VectorArithmetic {
         guard base.duration.isFinite else {
-            return base.animate(value: value, time: time, context: &context)
+            return animateNonFiniteBase(value: value, time: time, context: &context)
         }
         guard repeatCount == nil else {
             let basePresentationDuration = base.presentationDuration(for: value)
@@ -554,6 +587,34 @@ final class RepeatAnimationBox: AnimationBoxBase, @unchecked Sendable {
             context: &localContext
         ) ?? value
     }
+
+    private func animateNonFiniteBase<Value>(
+        value: Value,
+        time: TimeInterval,
+        context: inout AnimationContext<Value>
+    ) -> Value? where Value: VectorArithmetic {
+        var repeatState = context.state[RepeatState<Value>.self]
+        let localTime = time - repeatState.startTime
+        let isReversedCycle = autoreverses && !repeatState.iteration.isMultiple(of: 2)
+
+        guard let output = base.animate(value: value, time: localTime, context: &context) else {
+            repeatState.iteration += 1
+            repeatState.startTime = time
+            context.state = AnimationState<Value>()
+            context.state[RepeatState<Value>.self] = repeatState
+            if let repeatCount, repeatState.iteration >= repeatCount {
+                return nil
+            }
+            return value
+        }
+
+        if isReversedCycle {
+            var reversed = value
+            reversed -= output
+            return reversed
+        }
+        return output
+    }
 }
 
 public protocol AnimationStateKey {
@@ -581,6 +642,294 @@ public struct AnimationState<Value> where Value: VectorArithmetic {
 extension AnimationState: Sendable {
 }
 
+struct AnimationSettlingContext<Value: VectorArithmetic> {
+    struct Data {
+        var delta: Value
+        var velocity: Value
+
+        init(delta: Value, velocity: Value) {
+            self.delta = delta
+            self.velocity = velocity
+        }
+    }
+
+    var data: Data
+    var environment: EnvironmentValues
+
+    var delta: Value {
+        data.delta
+    }
+
+    var velocity: Value {
+        data.velocity
+    }
+
+    init(data: Data, environment: EnvironmentValues) {
+        self.data = data
+        self.environment = environment
+    }
+
+    init(delta: Value, velocity: Value, environment: EnvironmentValues) {
+        self.init(
+            data: Data(delta: delta, velocity: velocity),
+            environment: environment
+        )
+    }
+}
+
+protocol AnimationFinishingDefinition<Value> {
+    associatedtype Value: VectorArithmetic
+
+    static func shouldFinishEarly(in context: AnimationSettlingContext<Value>) -> Bool
+}
+
+protocol ExtendedAnimatable: Animatable, AnimationFinishingDefinition where AnimatableData == Value {
+}
+
+struct AnimationFinishingDefinitionKey<AnimatableValue: VectorArithmetic>: AnimationStateKey {
+    typealias Value = (any AnimationFinishingDefinition<AnimatableValue>.Type)?
+
+    static var defaultValue: Value {
+        nil
+    }
+}
+
+struct RepeatState<AnimatableValue: VectorArithmetic>: AnimationStateKey {
+    typealias Value = RepeatState<AnimatableValue>
+
+    var iteration: Int = 0
+    var startTime: TimeInterval = 0
+
+    static var defaultValue: RepeatState<AnimatableValue> {
+        RepeatState()
+    }
+}
+
+struct VelocityState<AnimatableValue: VectorArithmetic>: AnimationStateKey {
+    typealias Value = VelocityState<AnimatableValue>
+
+    var sampler: VelocitySampler<AnimatableValue>
+
+    init(sampler: VelocitySampler<AnimatableValue> = VelocitySampler()) {
+        self.sampler = sampler
+    }
+
+    static var defaultValue: VelocityState<AnimatableValue> {
+        VelocityState()
+    }
+}
+
+struct VelocityTrackingAnimation: CustomAnimation {
+    private static let decayPerMillisecond = 0.9880293350219727
+    private static let activityWindow: TimeInterval = 2
+
+    nonisolated func animate<Value>(
+        value: Value,
+        time: TimeInterval,
+        context: inout AnimationContext<Value>
+    ) -> Value? where Value: VectorArithmetic {
+        var velocityState = context.velocityState
+        if velocityState.sampler.isEmpty {
+            velocityState.sampler.addSample(value, time: time)
+            context.velocityState = velocityState
+        }
+
+        let activeUntil = (velocityState.sampler.lastTime ?? 0) + Self.activityWindow
+        let projectedVelocity = velocity(value: value, time: time, context: context)
+        if (projectedVelocity?.magnitudeSquared ?? 0) > 0 || activeUntil > time {
+            return value
+        }
+
+        context.isLogicallyComplete = true
+        return nil
+    }
+
+    nonisolated func velocity<Value>(
+        value: Value,
+        time: TimeInterval,
+        context: AnimationContext<Value>
+    ) -> Value? where Value: VectorArithmetic {
+        let velocityState = context.velocityState
+        let lastTime = velocityState.sampler.lastTime ?? 0
+        let decay = pow(Self.decayPerMillisecond, (time - lastTime) * 1000)
+        var velocity = velocityState.sampler.velocity.valuePerSecond
+        velocity.scale(by: decay)
+        return velocity
+    }
+
+    nonisolated func shouldMerge<Value>(
+        previous: Animation,
+        value: Value,
+        time: TimeInterval,
+        context: inout AnimationContext<Value>
+    ) -> Bool where Value: VectorArithmetic {
+        var velocityState = context.velocityState
+        velocityState.sampler.addSample(value, time: time)
+        context.velocityState = velocityState
+        return true
+    }
+}
+
+struct CombinedAnimationState<AnimatableValue: VectorArithmetic>: AnimationStateKey {
+    typealias Value = CombinedAnimationState<AnimatableValue>
+
+    struct Entry {
+        var value: AnimatableValue
+        var state: AnimationState<AnimatableValue>?
+    }
+
+    var entries: [Entry] = []
+
+    static var defaultValue: CombinedAnimationState<AnimatableValue> {
+        CombinedAnimationState()
+    }
+}
+
+extension AnimationState {
+    var combinedState: CombinedAnimationState<Value> {
+        get {
+            self[CombinedAnimationState<Value>.self]
+        }
+        set {
+            self[CombinedAnimationState<Value>.self] = newValue
+        }
+    }
+}
+
+struct DefaultCombiningAnimation: CustomAnimation {
+    struct Entry: Hashable {
+        var animation: Animation
+        var elapsed: TimeInterval
+    }
+
+    var entries: [Entry] = []
+
+    init(entries: [Entry] = []) {
+        self.entries = entries
+    }
+
+    init(first: Animation, firstElapsed: TimeInterval, second: Animation) {
+        if let box = first.box as? CustomAnimationBox<DefaultCombiningAnimation> {
+            var entries = box.base.entries
+            entries.append(Entry(animation: second, elapsed: firstElapsed))
+            self.entries = entries
+        } else {
+            self.entries = [
+                Entry(animation: first, elapsed: 0),
+                Entry(animation: second, elapsed: firstElapsed),
+            ]
+        }
+    }
+
+    nonisolated func animate<Value>(
+        value: Value,
+        time: TimeInterval,
+        context: inout AnimationContext<Value>
+    ) -> Value? where Value: VectorArithmetic {
+        var combinedState = context.state.combinedState
+        guard entries.count == combinedState.entries.count,
+              !entries.isEmpty else {
+            context.isLogicallyComplete = true
+            return nil
+        }
+
+        var output = Value.zero
+        var hasActiveOutput = false
+        var lastChildIsLogicallyComplete = false
+        var nextEntries = combinedState.entries
+
+        for index in entries.indices {
+            guard var childState = nextEntries[index].state else {
+                if index == entries.indices.last {
+                    combinedState.entries = nextEntries
+                    context.state.combinedState = combinedState
+                    context.isLogicallyComplete = true
+                    return nil
+                }
+                output = nextEntries[index].value
+                continue
+            }
+
+            var childValue = nextEntries[index].value
+            childValue -= output
+            let localTime = time - entries[index].elapsed
+            var childContext = context.withState(childState)
+            guard let childOutput = entries[index].animation.animate(
+                value: childValue,
+                time: localTime,
+                context: &childContext
+            ) else {
+                nextEntries[index].state = nil
+                output = nextEntries[index].value
+                if index == entries.indices.last {
+                    combinedState.entries = nextEntries
+                    context.state.combinedState = combinedState
+                    context.isLogicallyComplete = true
+                    return nil
+                }
+                continue
+            }
+
+            output += childOutput
+            hasActiveOutput = true
+            childState = childContext.state
+            nextEntries[index].state = childState
+            if index == entries.indices.last {
+                lastChildIsLogicallyComplete = childContext.isLogicallyComplete
+            }
+        }
+
+        combinedState.entries = nextEntries
+        context.state.combinedState = combinedState
+        context.isLogicallyComplete = lastChildIsLogicallyComplete
+        return hasActiveOutput ? output : nil
+    }
+}
+
+func combineAnimation<Value>(
+    into animation: inout Animation,
+    state: inout AnimationState<Value>,
+    value: Value,
+    elapsed: TimeInterval,
+    newAnimation: Animation,
+    newValue: Value
+) where Value: VectorArithmetic {
+    var combinedState = state.combinedState
+    var replacementValue = value
+    replacementValue += newValue
+
+    if animation.box is CustomAnimationBox<DefaultCombiningAnimation> {
+        combinedState.entries.append(
+            CombinedAnimationState<Value>.Entry(
+                value: replacementValue,
+                state: AnimationState()
+            )
+        )
+    } else {
+        combinedState.entries.append(
+            CombinedAnimationState<Value>.Entry(
+                value: value,
+                state: state
+            )
+        )
+        combinedState.entries.append(
+            CombinedAnimationState<Value>.Entry(
+                value: replacementValue,
+                state: AnimationState()
+            )
+        )
+    }
+
+    state.combinedState = combinedState
+    animation = Animation(
+        DefaultCombiningAnimation(
+            first: animation,
+            firstElapsed: elapsed,
+            second: newAnimation
+        )
+    )
+}
+
 public struct AnimationContext<Value> where Value: VectorArithmetic {
     public var state: AnimationState<Value>
     public var isLogicallyComplete: Bool
@@ -600,6 +949,38 @@ public struct AnimationContext<Value> where Value: VectorArithmetic {
         self.resolvedEnvironment = environment
     }
 
+    var finishingDefinition: (any AnimationFinishingDefinition<Value>.Type)? {
+        get {
+            state[AnimationFinishingDefinitionKey<Value>.self]
+        }
+        set {
+            state[AnimationFinishingDefinitionKey<Value>.self] = newValue
+        }
+    }
+
+    var velocityState: VelocityState<Value> {
+        get {
+            state[VelocityState<Value>.self]
+        }
+        set {
+            state[VelocityState<Value>.self] = newValue
+        }
+    }
+
+    func shouldFinishEarly(
+        data: @autoclosure () -> AnimationSettlingContext<Value>.Data
+    ) -> Bool {
+        guard let definition = finishingDefinition else {
+            return false
+        }
+        return definition.shouldFinishEarly(
+            in: AnimationSettlingContext(
+                data: data(),
+                environment: environment
+            )
+        )
+    }
+
     public func withState<T>(_ state: AnimationState<T>) -> AnimationContext<T> where T: VectorArithmetic {
         AnimationContext<T>(
             state: state,
@@ -611,6 +992,82 @@ public struct AnimationContext<Value> where Value: VectorArithmetic {
 
 @available(*, unavailable)
 extension AnimationContext: Sendable {
+}
+
+func makeAnimationContext<AnimatedValue: Animatable>(
+    for type: AnimatedValue.Type,
+    state: AnimationState<AnimatedValue.AnimatableData>,
+    isLogicallyComplete: Bool = false,
+    environment: EnvironmentValues
+) -> AnimationContext<AnimatedValue.AnimatableData> {
+    var context = AnimationContext(
+        state: state,
+        isLogicallyComplete: isLogicallyComplete,
+        environment: environment
+    )
+    context.finishingDefinition = type as? any AnimationFinishingDefinition<AnimatedValue.AnimatableData>.Type
+    return context
+}
+
+extension _RotationEffect: ExtendedAnimatable {
+    static func shouldFinishEarly(in context: AnimationSettlingContext<AnimatableData>) -> Bool {
+        let delta = context.delta
+        let velocity = context.velocity
+        let angleThreshold = 1.28
+        let angleMagnitudeSquared = delta.first * delta.first + velocity.first * velocity.first
+        return angleMagnitudeSquared < angleThreshold * angleThreshold &&
+            delta.second.first == 0 &&
+            delta.second.second == 0
+    }
+}
+
+extension ViewFrame: ExtendedAnimatable {
+    typealias AnimatableData = AnimatablePair<CGPoint.AnimatableData, ViewSize.AnimatableData>
+
+    var animatableData: AnimatableData {
+        get { AnimatableData(origin.animatableData, size.animatableData) }
+        set {
+            origin.animatableData = newValue.first
+            size.animatableData = newValue.second
+        }
+    }
+
+    static func shouldFinishEarly(in context: AnimationSettlingContext<AnimatableData>) -> Bool {
+        let pixelLength = context.environment.animationPixelLength
+        let doublePixelLength = pixelLength * 2
+        return componentSettled(
+            delta: context.delta.first.first,
+            velocity: context.velocity.first.first,
+            threshold: pixelLength
+        ) && componentSettled(
+            delta: context.delta.first.second,
+            velocity: context.velocity.first.second,
+            threshold: pixelLength
+        ) && componentSettled(
+            delta: context.delta.second.first,
+            velocity: context.velocity.second.first,
+            threshold: doublePixelLength
+        ) && componentSettled(
+            delta: context.delta.second.second,
+            velocity: context.velocity.second.second,
+            threshold: doublePixelLength
+        )
+    }
+
+    private static func componentSettled(
+        delta: CGFloat,
+        velocity: CGFloat,
+        threshold: CGFloat
+    ) -> Bool {
+        let thresholdSquared = threshold * threshold
+        return delta * delta + velocity * velocity < thresholdSquared
+    }
+}
+
+extension EnvironmentValues {
+    fileprivate var animationPixelLength: CGFloat {
+        defaultPixelLength ?? (1 / displayScale)
+    }
 }
 
 @preconcurrency public protocol CustomAnimation: Hashable, Sendable {
@@ -681,7 +1138,7 @@ final class CustomAnimationBox<Base: CustomAnimation>: AnimationBoxBase, @unchec
     }
 
     override func hash(into hasher: inout Hasher) {
-        hasher.combine(ObjectIdentifier(CustomAnimationBox<Base>.self))
+        super.hash(into: &hasher)
         hasher.combine(base)
     }
 
@@ -732,20 +1189,23 @@ final class CustomAnimationBox<Base: CustomAnimation>: AnimationBoxBase, @unchec
 }
 
 @usableFromInline
-struct FluidSpringAnimationState<Value: VectorArithmetic> {
+struct SpringState<AnimatableValue: VectorArithmetic>: AnimationStateKey {
+    @usableFromInline
+    typealias Value = SpringState<AnimatableValue>
+
     var time: TimeInterval
-    var position: Value
-    var velocity: Value
-    var acceleration: Value
+    var position: AnimatableValue
+    var velocity: AnimatableValue
+    var acceleration: AnimatableValue
     var responseBlendStartTime: TimeInterval
     var responseBlendDelta: TimeInterval
     var isInitialized: Bool
 
     init(
         time: TimeInterval = 0,
-        position: Value = .zero,
-        velocity: Value = .zero,
-        acceleration: Value = .zero,
+        position: AnimatableValue = .zero,
+        velocity: AnimatableValue = .zero,
+        acceleration: AnimatableValue = .zero,
         responseBlendStartTime: TimeInterval = 0,
         responseBlendDelta: TimeInterval = 0,
         isInitialized: Bool = false
@@ -758,13 +1218,10 @@ struct FluidSpringAnimationState<Value: VectorArithmetic> {
         self.responseBlendDelta = responseBlendDelta
         self.isInitialized = isInitialized
     }
-}
 
-@usableFromInline
-enum FluidSpringAnimationStateKey<Value: VectorArithmetic>: AnimationStateKey {
     @usableFromInline
-    static var defaultValue: FluidSpringAnimationState<Value> {
-        FluidSpringAnimationState()
+    static var defaultValue: SpringState<AnimatableValue> {
+        SpringState()
     }
 }
 
@@ -775,12 +1232,37 @@ func fluidSpringStiffness(response: TimeInterval) -> Double {
     return min(frequency * frequency, 45_000)
 }
 
+func fluidSpringFinishingVelocityScale(
+    stiffness: Double,
+    dampingFraction: Double
+) -> Double {
+    2 * dampingFraction * sqrt(stiffness) / stiffness
+}
+
+func fluidSpringSettlingData<Value: VectorArithmetic>(
+    target: Value,
+    output: Value,
+    state: SpringState<Value>,
+    stiffness: Double,
+    dampingFraction: Double
+) -> AnimationSettlingContext<Value>.Data {
+    var velocity = state.velocity
+    velocity.scale(by: fluidSpringFinishingVelocityScale(
+        stiffness: stiffness,
+        dampingFraction: dampingFraction
+    ))
+    return AnimationSettlingContext<Value>.Data(
+        delta: target - output,
+        velocity: velocity
+    )
+}
+
 @usableFromInline
 func blendedFluidSpringResponse<Value: VectorArithmetic>(
     response: TimeInterval,
     blendDuration: TimeInterval,
     time: TimeInterval,
-    state: FluidSpringAnimationState<Value>
+    state: SpringState<Value>
 ) -> TimeInterval {
     guard blendDuration > 0, state.responseBlendDelta != 0 else {
         return response
@@ -797,14 +1279,14 @@ func integratedFluidSpringValue<Value: VectorArithmetic>(
     dampingFraction: Double,
     stiffness: Double,
     time: TimeInterval,
-    state: inout FluidSpringAnimationState<Value>
+    state: inout SpringState<Value>
 ) -> Value {
     let step = 1.0 / 300.0
     let halfStep = 1.0 / 600.0
     let clampedTime = max(time, 0)
 
     if !state.isInitialized {
-        state = FluidSpringAnimationState(isInitialized: true)
+        state = SpringState(isInitialized: true)
     } else if clampedTime - state.time > 1 {
         state.time = max(0, clampedTime - (1.0 / 60.0))
     }
@@ -840,7 +1322,7 @@ func integratedFluidSpringValue<Value: VectorArithmetic>(
 @usableFromInline
 func isFluidSpringSettled<Value: VectorArithmetic>(
     target: Value,
-    state: FluidSpringAnimationState<Value>
+    state: SpringState<Value>
 ) -> Bool {
     let velocitySquared = state.velocity.magnitudeSquared
     let accelerationSquared = state.acceleration.magnitudeSquared
@@ -867,7 +1349,7 @@ func fluidSpringSettlingDuration<Value: VectorArithmetic>(
     let step = 1.0 / 300.0
     let limit = max(duration * 12, 10)
     let stiffness = fluidSpringStiffness(response: response)
-    var state = FluidSpringAnimationState<Value>()
+    var state = SpringState<Value>()
     var time: TimeInterval = 0
     while time <= limit {
         _ = integratedFluidSpringValue(
@@ -924,7 +1406,7 @@ final class FluidSpringAnimationBox: AnimationBoxBase, @unchecked Sendable {
     }
 
     override func hash(into hasher: inout Hasher) {
-        hasher.combine(ObjectIdentifier(FluidSpringAnimationBox.self))
+        super.hash(into: &hasher)
         hasher.combine(response)
         hasher.combine(dampingFraction)
         hasher.combine(blendDuration)
@@ -946,7 +1428,7 @@ final class FluidSpringAnimationBox: AnimationBoxBase, @unchecked Sendable {
     override func value(at progress: Double) -> Double {
         let clamped = min(max(progress, 0), 1)
         guard clamped < 1, duration > 0 else { return 1 }
-        var state = FluidSpringAnimationState<Double>()
+        var state = SpringState<Double>()
         return integratedFluidSpringValue(
             target: 1.0,
             dampingFraction: dampingFraction,
@@ -968,21 +1450,33 @@ final class FluidSpringAnimationBox: AnimationBoxBase, @unchecked Sendable {
         if time >= duration {
             context.isLogicallyComplete = true
         }
-        var state = context.state[FluidSpringAnimationStateKey<Value>.self]
+        var state = context.state[SpringState<Value>.self]
         let effectiveResponse = blendedFluidSpringResponse(
             response: response,
             blendDuration: blendDuration,
             time: time,
             state: state
         )
+        let stiffness = fluidSpringStiffness(response: effectiveResponse)
         let output = integratedFluidSpringValue(
             target: value,
             dampingFraction: dampingFraction,
-            stiffness: fluidSpringStiffness(response: effectiveResponse),
+            stiffness: stiffness,
             time: time,
             state: &state
         )
-        context.state[FluidSpringAnimationStateKey<Value>.self] = state
+        context.state[SpringState<Value>.self] = state
+        if context.shouldFinishEarly(
+            data: fluidSpringSettlingData(
+                target: value,
+                output: output,
+                state: state,
+                stiffness: stiffness,
+                dampingFraction: dampingFraction
+            )
+        ) {
+            return nil
+        }
         guard !isFluidSpringSettled(target: value, state: state) else {
             return nil
         }
@@ -994,7 +1488,7 @@ final class FluidSpringAnimationBox: AnimationBoxBase, @unchecked Sendable {
         time: TimeInterval,
         context: AnimationContext<Value>
     ) -> Value? where Value: VectorArithmetic {
-        context.state[FluidSpringAnimationStateKey<Value>.self].velocity
+        context.state[SpringState<Value>.self].velocity
     }
 
     override func shouldMerge<Value>(
@@ -1005,7 +1499,7 @@ final class FluidSpringAnimationBox: AnimationBoxBase, @unchecked Sendable {
     ) -> Bool where Value: VectorArithmetic {
         _ = previous.box.animate(value: value, time: time, context: &context)
 
-        var state = context.state[FluidSpringAnimationStateKey<Value>.self]
+        var state = context.state[SpringState<Value>.self]
         state.time = max(state.time, time)
 
         if let previousSpring = previous.box as? FluidSpringAnimationBox,
@@ -1017,7 +1511,7 @@ final class FluidSpringAnimationBox: AnimationBoxBase, @unchecked Sendable {
             state.responseBlendDelta = 0
         }
 
-        context.state[FluidSpringAnimationStateKey<Value>.self] = state
+        context.state[SpringState<Value>.self] = state
         return true
     }
 }
@@ -1065,7 +1559,7 @@ final class SpringAnimationBox: AnimationBoxBase, @unchecked Sendable {
     }
 
     override func hash(into hasher: inout Hasher) {
-        hasher.combine(ObjectIdentifier(SpringAnimationBox.self))
+        super.hash(into: &hasher)
         hasher.combine(mass)
         hasher.combine(stiffness)
         hasher.combine(damping)
@@ -1868,6 +2362,7 @@ extension Animation: CustomStringConvertible, CustomDebugStringConvertible, Cust
 
 extension Animation {
     public static let `default`: Animation = Animation(box: DefaultAnimationBox())
+    static let velocityTracking: Animation = Animation(VelocityTrackingAnimation())
 }
 
 extension Animation {
@@ -1896,12 +2391,22 @@ extension Animation {
         timingCurve(0.0, 0.0, 1.0, 1.0)
     }
     public static func timingCurve(_ p1x: Double, _ p1y: Double, _ p2x: Double, _ p2y: Double, duration: TimeInterval = 0.35) -> Animation {
-        let curve = UnitCurve(c1x: p1x, c1y: p1y, c2x: p2x, c2y: p2y)
-        return Animation(box: BezierAnimationBox(curve: curve, duration: max(0, duration)))
+        let curve = UnitCurve.bezier(
+            startControlPoint: UnitPoint(x: p1x, y: p1y),
+            endControlPoint: UnitPoint(x: p2x, y: p2y)
+        )
+        return Animation(box: BezierAnimationBox(curve: curve, duration: duration))
     }
 
     public static func timingCurve(_ curve: UnitCurve, duration: TimeInterval) -> Animation {
-        timingCurve(curve.c1x, curve.c1y, curve.c2x, curve.c2y, duration: duration)
+        if let points = curve.bezierControlPointsForAnimation {
+            let bezier = UnitCurve.bezier(
+                startControlPoint: points.startControlPoint,
+                endControlPoint: points.endControlPoint
+            )
+            return Animation(box: BezierAnimationBox(curve: bezier, duration: duration))
+        }
+        return Animation(box: UnitCurveAnimationBox(curve: curve, duration: duration))
     }
 
     public func delay(_ delay: TimeInterval) -> Animation {
@@ -2025,7 +2530,7 @@ extension Animation {
     public static func interpolatingSpring(duration: TimeInterval = 0.5,
                                            bounce: Double = 0.0,
                                            initialVelocity: Double = 0.0) -> Animation {
-        let stiffness = pow(2 * .pi / max(duration, 0.001), 2)
+        let stiffness = pow(2 * .pi / max(duration, 0.0), 2)
         let damping = 2 * sqrt(stiffness) * springDampingFraction(bounce: bounce)
         return interpolatingSpring(
             mass: 1.0,
@@ -2049,7 +2554,10 @@ extension Animation {
     }
 
     private static func springDampingFraction(bounce: Double) -> Double {
-        min(max(1 - bounce, 0.0), 1.0)
+        if bounce >= 0 {
+            return max(1 - bounce, 0.0)
+        }
+        return 1 / max(1 + bounce, 0.001)
     }
 }
 
@@ -2136,55 +2644,133 @@ extension Transaction {
 
 
 public struct UnitCurve: Sendable, Hashable {
-    let c1x, c1y, c2x, c2y: Double
+    private enum Function: Sendable, Hashable {
+        case linear
+        case bezier(startControlPoint: UnitPoint, endControlPoint: UnitPoint)
+        case circularEaseIn
+        case circularEaseOut
+        case circularEaseInOut
+    }
+
+    private let function: Function
+
+    private init(function: Function) {
+        self.function = function
+    }
 
     public static func bezier(startControlPoint: UnitPoint, endControlPoint: UnitPoint) -> UnitCurve {
-        UnitCurve(c1x: Double(startControlPoint.x),
-                  c1y: Double(startControlPoint.y),
-                  c2x: Double(endControlPoint.x),
-                  c2y: Double(endControlPoint.y))
+        UnitCurve(function: .bezier(
+            startControlPoint: startControlPoint,
+            endControlPoint: endControlPoint
+        ))
     }
 
     public func value(at progress: Double) -> Double {
-        let timingFunction = TimingFunction(controlPoints: c1x, c1y, c2x, c2y)
-        return timingFunction.solve(x: progress)
+        switch function {
+        case .linear:
+            return progress
+        case let .bezier(startControlPoint, endControlPoint):
+            return TimingFunction(
+                controlPoints: startControlPoint,
+                endControlPoint
+            ).solve(x: progress)
+        case .circularEaseIn:
+            return 1 - sqrt(1 - progress * progress)
+        case .circularEaseOut:
+            let remaining = 1 - progress
+            return sqrt(1 - remaining * remaining)
+        case .circularEaseInOut:
+            if progress <= 0.5 {
+                let scaled = 2 * progress
+                return (1 - sqrt(1 - scaled * scaled)) / 2
+            }
+            let scaled = 2 - 2 * progress
+            return (1 + sqrt(1 - scaled * scaled)) / 2
+        }
     }
 
     public func velocity(at progress: Double) -> Double {
-        let timingFunction = TimingFunction(controlPoints: c1x, c1y, c2x, c2y)
-        return timingFunction.derivative(x: progress)
+        switch function {
+        case .linear:
+            return 1
+        case let .bezier(startControlPoint, endControlPoint):
+            return TimingFunction(
+                controlPoints: startControlPoint,
+                endControlPoint
+            ).derivative(x: progress)
+        case .circularEaseIn:
+            return Self.circularVelocity(numerator: progress, denominator: 1 - progress * progress)
+        case .circularEaseOut:
+            let remaining = 1 - progress
+            return Self.circularVelocity(numerator: remaining, denominator: 1 - remaining * remaining)
+        case .circularEaseInOut:
+            if progress <= 0.5 {
+                let scaled = 2 * progress
+                return Self.circularVelocity(numerator: scaled, denominator: 1 - scaled * scaled)
+            }
+            let scaled = 2 - 2 * progress
+            return Self.circularVelocity(numerator: scaled, denominator: 1 - scaled * scaled)
+        }
     }
 
     public var inverse: UnitCurve {
-        // Swap x and y coordinates to get inverse function
-        UnitCurve(c1x: c1y, c1y: c1x, c2x: c2y, c2y: c2x)
+        switch function {
+        case .linear:
+            return .linear
+        case let .bezier(startControlPoint, endControlPoint):
+            return UnitCurve.bezier(
+                startControlPoint: UnitPoint(x: startControlPoint.y, y: startControlPoint.x),
+                endControlPoint: UnitPoint(x: endControlPoint.y, y: endControlPoint.x)
+            )
+        case .circularEaseIn:
+            return .circularEaseOut
+        case .circularEaseOut:
+            return .circularEaseIn
+        case .circularEaseInOut:
+            return .circularEaseInOut
+        }
+    }
+
+    fileprivate var bezierControlPointsForAnimation: (startControlPoint: UnitPoint, endControlPoint: UnitPoint)? {
+        switch function {
+        case .linear:
+            return (UnitPoint(x: 0, y: 0), UnitPoint(x: 1, y: 1))
+        case let .bezier(startControlPoint, endControlPoint):
+            return (startControlPoint, endControlPoint)
+        case .circularEaseIn, .circularEaseOut, .circularEaseInOut:
+            return nil
+        }
+    }
+
+    private static func circularVelocity(numerator: Double, denominator: Double) -> Double {
+        abs(numerator) / sqrt(denominator)
     }
 }
 
 extension UnitCurve {
-    /// Linear timing curve (no easing)
-    public static let linear = UnitCurve.bezier(
-        startControlPoint: UnitPoint(x: 0, y: 0),
-        endControlPoint: UnitPoint(x: 1, y: 1)
-    )
+    public static let linear = UnitCurve(function: .linear)
 
-    /// Ease-in timing curve (slow start)
+    @available(*, deprecated, message: "Use easeInOut instead")
+    public static let easeInEaseOut = easeInOut
+
     public static let easeIn = UnitCurve.bezier(
         startControlPoint: UnitPoint(x: 0.42, y: 0),
         endControlPoint: UnitPoint(x: 1, y: 1)
     )
 
-    /// Ease-out timing curve (slow end)
     public static let easeOut = UnitCurve.bezier(
         startControlPoint: UnitPoint(x: 0, y: 0),
         endControlPoint: UnitPoint(x: 0.58, y: 1)
     )
 
-    /// Ease-in-out timing curve (slow start and end)
     public static let easeInOut = UnitCurve.bezier(
         startControlPoint: UnitPoint(x: 0.42, y: 0),
         endControlPoint: UnitPoint(x: 0.58, y: 1)
     )
+
+    public static let circularEaseIn = UnitCurve(function: .circularEaseIn)
+    public static let circularEaseOut = UnitCurve(function: .circularEaseOut)
+    public static let circularEaseInOut = UnitCurve(function: .circularEaseInOut)
 }
 
 struct TimingFunction {
@@ -2209,6 +2795,15 @@ struct TimingFunction {
         ay = 1.0 - cy - by
     }
 
+    init(controlPoints startControlPoint: UnitPoint, _ endControlPoint: UnitPoint) {
+        self.init(
+            controlPoints: Double(startControlPoint.x),
+            Double(startControlPoint.y),
+            Double(endControlPoint.x),
+            Double(endControlPoint.y)
+        )
+    }
+
     /// Transforms time ratio (0-1) to eased progress weight (0-1).
     /// - Parameters:
     ///   - x: The current time ratio (0.0 to 1.0).
@@ -2225,13 +2820,24 @@ struct TimingFunction {
     ///   - epsilon: The required precision. Defaults to 1e-6 for UI tasks.
     /// - Returns: The rate of change (dy/dx) at the given time.
     func derivative(x: Double, epsilon: Double = 1e-6) -> Double {
-        if x <= 0 || x >= 1 { return 0 }
+        if x <= 0 { return derivative(at: 0) }
+        if x >= 1 { return derivative(at: 1) }
 
         let t = solveCurveX(x, epsilon: epsilon)
+        return derivative(at: t)
+    }
+
+    private func derivative(at t: Double) -> Double {
         let dx = sampleDerivativeX(t)
         let dy = sampleDerivativeY(t)
 
-        return dx != 0 ? dy / dx : 0
+        if abs(dx) > 1e-12 {
+            return dy / dx
+        }
+        if abs(dy) <= 1e-12 {
+            return t <= 0 ? 1 : 0
+        }
+        return dy > 0 ? .infinity : -.infinity
     }
 
     private func sampleX(_ t: Double) -> Double {

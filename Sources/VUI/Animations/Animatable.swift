@@ -64,10 +64,13 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
     var animation: Animation?
     var animationState = AnimationState<AnimatedValue.AnimatableData>()
     var mergeState = AnimationState<AnimatedValue.AnimatableData>()
+    private var animationContextIsLogicallyComplete = false
     private var updatesMergeStateWithAnimation = true
     private var baseLayers: [AnimationLayer] = []
     private var samplingLayers: [SideEffectSamplingLayer] = []
-    private var customReplacementBarrier: CustomReplacementBarrier?
+    private var customReplacementCompletionGroup: CustomReplacementCompletionGroup?
+    private var combinedResidualCompletionGroup: CombinedResidualCompletionGroup?
+    private var combinedFiniteCompletionGroup: CombinedFiniteCompletionGroup?
     private var contextLogicalCompletionSuppressedGenerations: Set<UInt64> = []
     private var currentGeneration: UInt64?
     private var nextGeneration: UInt64 = 1
@@ -93,6 +96,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         var targetValue: AnimatedValue
         var startTime: Time
         var state: AnimationState<AnimatedValue.AnimatableData>
+        var contextIsLogicallyComplete: Bool = false
         var generation: UInt64
         var isFinished: Bool = false
     }
@@ -101,12 +105,19 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         var layers: [AnimationLayer]
     }
 
-    private struct CustomReplacementBarrier {
+    private struct CustomReplacementCompletionGroup {
         var replacementGeneration: UInt64
         var oldGenerations: Set<UInt64>
-        var completedOldGenerations: Set<UInt64> = []
-        var baseLogicalReadyGenerations: Set<UInt64> = []
-        var replacementCompleted = false
+    }
+
+    private struct CombinedResidualCompletionGroup {
+        var replacementGeneration: UInt64
+        var oldGenerations: [UInt64]
+    }
+
+    private struct CombinedFiniteCompletionGroup {
+        var replacementGeneration: UInt64
+        var oldGenerations: Set<UInt64>
     }
 
     init(
@@ -180,6 +191,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
                     targetValue: previousTarget,
                     startTime: previousStartTime,
                     state: previousAnimationState,
+                    contextIsLogicallyComplete: animationContextIsLogicallyComplete,
                     generation: previousGeneration
                 )
                 previousLayer = layer
@@ -197,10 +209,52 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
                 previousTarget: targetValue,
                 now: now
             )
+            var activeAnimation = animation
+            var activeStart = merged ? mergedStart : start
+            var activeStartTime = merged ? mergedStartTime : now
+            let usesCombinedAnimation = shouldUseCombinedAnimationForFalseRetarget(
+                merged: merged,
+                previousAnimation: previousAnimation,
+                replacementAnimation: animation
+            )
+            if usesCombinedAnimation,
+               let previousAnimation,
+               let previousStart,
+               let previousTarget = targetValue {
+                if !baseLayers.isEmpty,
+                   let converted = combinedAnimationFromLayerStack(
+                       previousSamplingLayers,
+                       appending: animation,
+                       target: target,
+                       at: now
+                   ) {
+                    activeAnimation = converted.animation
+                    animationState = converted.state
+                    activeStart = converted.start
+                    activeStartTime = converted.startTime
+                } else {
+                    var combinedAnimation = previousAnimation
+                    var combinedState = previousAnimationState
+                    combineAnimation(
+                        into: &combinedAnimation,
+                        state: &combinedState,
+                        value: animatableDelta(from: previousStart, to: previousTarget),
+                        elapsed: max(now.seconds - previousStartTime.seconds, 0),
+                        newAnimation: animation,
+                        newValue: animatableDelta(from: previousTarget, to: target)
+                    )
+                    activeAnimation = combinedAnimation
+                    animationState = combinedState
+                    activeStart = previousStart
+                    activeStartTime = previousStartTime
+                }
+            }
             if !previousSamplingLayers.isEmpty {
                 samplingLayers.append(SideEffectSamplingLayer(layers: previousSamplingLayers))
             }
-            if !merged,
+            if usesCombinedAnimation {
+                baseLayers.removeAll()
+            } else if !merged,
                let previousLayer {
                 baseLayers.append(previousLayer)
             } else {
@@ -213,14 +267,43 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
                 for: animatableDelta(from: deadlineStartValue, to: target)
             )
             let deadline = completionStart + animation.box.duration
-            if shouldHoldCompletionRecordsForCustomToCustomReplacement(
+            if shouldGroupCompletionRecordsForCustomToCustomReplacement(
                 previousAnimation: previousAnimation,
                 replacementAnimation: animation
             ) {
-                customReplacementBarrier = CustomReplacementBarrier(
+                customReplacementCompletionGroup = CustomReplacementCompletionGroup(
                     replacementGeneration: replacementGeneration,
-                    oldGenerations: Set(previousSamplingLayers.map(\.generation))
+                    oldGenerations: customReplacementOldGenerations(
+                        from: previousSamplingLayers,
+                        previousGeneration: previousGeneration
+                    )
                 )
+            } else if shouldMoveCombinedCompletionRecordsToResidualReplacementFinalization(
+                previousAnimation: previousAnimation,
+                replacementAnimation: animation,
+                presentationDuration: presentationDuration
+            ), let customReplacementCompletionGroup {
+                let oldGenerations = customReplacementCompletionGroup.oldGenerations
+                    .union([customReplacementCompletionGroup.replacementGeneration])
+                    .sorted()
+                combinedResidualCompletionGroup = CombinedResidualCompletionGroup(
+                    replacementGeneration: replacementGeneration,
+                    oldGenerations: oldGenerations
+                )
+                for index in completionRecords.indices where oldGenerations.contains(completionRecords[index].orderGeneration) {
+                    completionRecords[index].deadline = .infinity
+                }
+            } else if shouldMoveCombinedCompletionRecordsToFiniteReplacementFinalization(
+                previousAnimation: previousAnimation,
+                replacementAnimation: animation
+            ), let customReplacementCompletionGroup {
+                let oldGenerations = customReplacementCompletionGroup.oldGenerations
+                    .union([customReplacementCompletionGroup.replacementGeneration])
+                combinedFiniteCompletionGroup = CombinedFiniteCompletionGroup(
+                    replacementGeneration: replacementGeneration,
+                    oldGenerations: oldGenerations
+                )
+                self.customReplacementCompletionGroup = nil
             } else if shouldHoldSourceCustomCompletionRecordsUntilDefaultFinalization(
                 previousAnimation: previousAnimation,
                 replacementAnimation: animation
@@ -389,13 +472,15 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
                     previousAnimation: previousAnimation,
                     replacementAnimation: animation
                 )
+                let completesWithoutWaitingForSamplingWindow = isVelocityTrackingAnimation(animation.box)
                 for criteria in observer.criteriaForNewAnimation() {
                     guard let token = observer.animationDidStart(criteria: criteria) else {
                         continue
                     }
-                    let recordDeadline = criteria == .removed || holdsNewLogicalUntilPresentation
-                        ? presentationDeadline
-                        : deadline
+                    let waitsForPresentation = criteria == .removed || holdsNewLogicalUntilPresentation
+                    let recordDeadline = completesWithoutWaitingForSamplingWindow
+                        ? completionStart
+                        : (waitsForPresentation ? presentationDeadline : deadline)
                     completionRecords.insert(
                         CompletionRecord(
                             token: token,
@@ -407,11 +492,11 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
                     )
                 }
             }
-            startValue = merged ? mergedStart : start
+            startValue = activeStart
             targetValue = target
             currentValue = start
-            startTime = merged ? mergedStartTime : now
-            self.animation = animation
+            startTime = activeStartTime
+            self.animation = activeAnimation
             currentGeneration = replacementGeneration
         }
 
@@ -429,8 +514,10 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         }
         let now = time.value
         let elapsed = max(now.seconds - startTime.seconds, 0)
-        var context = AnimationContext(
+        var context = makeAnimationContext(
+            for: AnimatedValue.self,
             state: animationState,
+            isLogicallyComplete: animationContextIsLogicallyComplete,
             environment: environment.value
         )
         let baseValue = sampledBaseStackValue(at: now) ?? startValue
@@ -441,13 +528,21 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             context: &context
         ) else {
             animationState = context.state
-            if markCustomReplacementCompleted(for: currentGeneration) {
+            animationContextIsLogicallyComplete = context.isLogicallyComplete
+            if isCombinedFiniteCompletionGroupReplacement(currentGeneration) {
                 currentValue = targetValue
                 AttributeGraph.setStatefulOutput(targetValue)
-                sampleSideEffectLayers(at: now)
-                enqueueAnimationCompletionActions(
-                    finishCustomReplacementBarrierIfReady(at: now)
-                )
+                let completions = finishCombinedFiniteCompletionGroup()
+                enqueueAnimationCompletionActions(completions)
+                return
+            }
+            if isCustomReplacementCompletionGroupReplacement(currentGeneration) {
+                currentValue = targetValue
+                AttributeGraph.setStatefulOutput(targetValue)
+                // The replacement nil boundary owns this handoff; discarded
+                // side-effect layers should not be sampled again after it.
+                let completions = finishCustomReplacementCompletionGroup(at: now)
+                enqueueAnimationCompletionActions(completions)
                 return
             }
             let completions = finishDueCompletionRecords(at: now)
@@ -456,6 +551,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             return
         }
         animationState = context.state
+        animationContextIsLogicallyComplete = context.isLogicallyComplete
         if updatesMergeStateWithAnimation {
             mergeState = context.state
         }
@@ -511,6 +607,12 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
 
         let replacementGeneration = nextGeneration
         nextGeneration += 1
+        let immediateCompletionGroup = customReplacementCompletionGroup.map {
+            CombinedFiniteCompletionGroup(
+                replacementGeneration: replacementGeneration,
+                oldGenerations: $0.oldGenerations.union([$0.replacementGeneration])
+            )
+        }
 
         if let observer = transaction.animationCompletionObserver {
             for criteria in observer.criteriaForNewAnimation() {
@@ -535,15 +637,30 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         animation = nil
         animationState = AnimationState()
         mergeState = AnimationState()
+        animationContextIsLogicallyComplete = false
         updatesMergeStateWithAnimation = true
         baseLayers.removeAll()
         samplingLayers.removeAll()
-        customReplacementBarrier = nil
+        customReplacementCompletionGroup = nil
+        combinedResidualCompletionGroup = nil
+        combinedFiniteCompletionGroup = nil
         contextLogicalCompletionSuppressedGenerations.removeAll()
         currentGeneration = nil
         AttributeGraph.setStatefulOutput(value)
-        let completions = finishAllCompletionRecords()
+        let completions = finishImmediateReplacementCompletionRecords(
+            completionGroup: immediateCompletionGroup
+        )
         enqueueAnimationCompletionActions(completions)
+    }
+
+    private mutating func finishImmediateReplacementCompletionRecords(
+        completionGroup: CombinedFiniteCompletionGroup?
+    ) -> [() -> Void] {
+        if let completionGroup {
+            return finishCombinedFiniteCompletionRecords(completionGroup) +
+                finishAllCompletionRecords()
+        }
+        return finishAllCompletionRecords()
     }
 
     private func sampleActiveAnimationBeforeImmediateReplacement(at now: Time) {
@@ -554,8 +671,10 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         }
 
         let elapsed = max(now.seconds - startTime.seconds, 0)
-        var context = AnimationContext(
+        var context = makeAnimationContext(
+            for: AnimatedValue.self,
             state: animationState,
+            isLogicallyComplete: animationContextIsLogicallyComplete,
             environment: environment.value
         )
         _ = animation.box.animate(
@@ -572,9 +691,13 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         animation = nil
         animationState = AnimationState()
         mergeState = AnimationState()
+        animationContextIsLogicallyComplete = false
         updatesMergeStateWithAnimation = true
         baseLayers.removeAll()
         samplingLayers.removeAll()
+        customReplacementCompletionGroup = nil
+        combinedResidualCompletionGroup = nil
+        combinedFiniteCompletionGroup = nil
         contextLogicalCompletionSuppressedGenerations.removeAll()
         currentGeneration = nil
         AttributeGraph.setStatefulOutput(value)
@@ -593,15 +716,38 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         targetValue = value
         currentValue = value
         animation = nil
+        animationContextIsLogicallyComplete = false
         let discardedInfiniteGenerations = discardedInfiniteLayerGenerations()
+        let combinedResidualGroup = combinedResidualCompletionGroup
+        let combinedFiniteGroup = combinedFiniteCompletionGroup
         baseLayers.removeAll()
         samplingLayers.removeAll()
-        customReplacementBarrier = nil
+        customReplacementCompletionGroup = nil
+        combinedResidualCompletionGroup = nil
+        combinedFiniteCompletionGroup = nil
         contextLogicalCompletionSuppressedGenerations.removeAll()
         AttributeGraph.setStatefulOutput(value)
         var completions: [() -> Void]
         if finishAllRecords {
             completions = finishAllCompletionRecords()
+        } else if let currentGeneration,
+                  let combinedFiniteGroup,
+                  combinedFiniteGroup.replacementGeneration == currentGeneration {
+            completions = finishCombinedFiniteCompletionRecords(combinedFiniteGroup)
+            completions.append(
+                contentsOf: finishInfiniteCompletionRecords(
+                    for: discardedInfiniteGenerations.subtracting([currentGeneration])
+                )
+            )
+        } else if let currentGeneration,
+                  let combinedResidualGroup,
+                  combinedResidualGroup.replacementGeneration == currentGeneration {
+            completions = finishCombinedResidualCompletionGroup(combinedResidualGroup)
+            completions.append(
+                contentsOf: finishInfiniteCompletionRecords(
+                    for: discardedInfiniteGenerations.subtracting([currentGeneration])
+                )
+            )
         } else if let currentGeneration {
             completions = finishCompletionRecords(for: currentGeneration)
             completions.append(
@@ -636,6 +782,107 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         return finishRecords(records)
     }
 
+    private mutating func finishCombinedResidualCompletionGroup(
+        _ group: CombinedResidualCompletionGroup
+    ) -> [() -> Void] {
+        let oldGenerationSet = Set(group.oldGenerations)
+        var oldRemovedRecords: [CompletionRecord] = []
+        var replacementRemovedRecords: [CompletionRecord] = []
+        var replacementOtherRecords: [CompletionRecord] = []
+        var oldOtherRecords: [CompletionRecord] = []
+        var pendingRecords: [CompletionRecord] = []
+
+        for record in completionRecords {
+            if oldGenerationSet.contains(record.orderGeneration) {
+                if record.criteria == .removed {
+                    oldRemovedRecords.append(record)
+                } else {
+                    oldOtherRecords.append(record)
+                }
+            } else if record.generation == group.replacementGeneration {
+                if record.criteria == .removed {
+                    replacementRemovedRecords.append(record)
+                } else {
+                    replacementOtherRecords.append(record)
+                }
+            } else {
+                pendingRecords.append(record)
+            }
+        }
+
+        completionRecords = pendingRecords
+        oldRemovedRecords.sort { $0.orderGeneration < $1.orderGeneration }
+        oldOtherRecords.sort { $0.orderGeneration < $1.orderGeneration }
+        let orderedRecords = replacementOtherRecords +
+            oldRemovedRecords +
+            replacementRemovedRecords +
+            oldOtherRecords
+        return orderedRecords.flatMap { $0.token.finish() }
+    }
+
+    private mutating func finishCombinedFiniteCompletionGroup() -> [() -> Void] {
+        guard let group = combinedFiniteCompletionGroup else {
+            return []
+        }
+        let finalValue = targetValue ?? currentValue
+        startValue = nil
+        if let finalValue {
+            targetValue = finalValue
+            currentValue = finalValue
+        }
+        animation = nil
+        animationState = AnimationState()
+        mergeState = AnimationState()
+        animationContextIsLogicallyComplete = false
+        updatesMergeStateWithAnimation = true
+        baseLayers.removeAll()
+        samplingLayers.removeAll()
+        currentGeneration = nil
+        customReplacementCompletionGroup = nil
+        combinedResidualCompletionGroup = nil
+        combinedFiniteCompletionGroup = nil
+        contextLogicalCompletionSuppressedGenerations.removeAll()
+
+        return finishCombinedFiniteCompletionRecords(group)
+    }
+
+    private mutating func finishCombinedFiniteCompletionRecords(
+        _ group: CombinedFiniteCompletionGroup
+    ) -> [() -> Void] {
+        var oldRemovedRecords: [CompletionRecord] = []
+        var replacementRemovedRecords: [CompletionRecord] = []
+        var replacementOtherRecords: [CompletionRecord] = []
+        var oldOtherRecords: [CompletionRecord] = []
+        var pendingRecords: [CompletionRecord] = []
+
+        for record in completionRecords {
+            if group.oldGenerations.contains(record.orderGeneration) {
+                if record.criteria == .removed {
+                    oldRemovedRecords.append(record)
+                } else {
+                    oldOtherRecords.append(record)
+                }
+            } else if record.generation == group.replacementGeneration {
+                if record.criteria == .removed {
+                    replacementRemovedRecords.append(record)
+                } else {
+                    replacementOtherRecords.append(record)
+                }
+            } else {
+                pendingRecords.append(record)
+            }
+        }
+
+        completionRecords = pendingRecords
+        oldRemovedRecords.sort { $0.orderGeneration < $1.orderGeneration }
+        oldOtherRecords.sort { $0.orderGeneration < $1.orderGeneration }
+        let orderedRecords = oldRemovedRecords +
+            replacementRemovedRecords +
+            replacementOtherRecords +
+            oldOtherRecords
+        return orderedRecords.flatMap { $0.token.finish() }
+    }
+
     private mutating func finishCompletionRecords(
         for generation: UInt64,
         preferLogicalBeforeRemoved: Bool = false
@@ -644,6 +891,23 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             for: generation,
             preferLogicalBeforeRemoved: preferLogicalBeforeRemoved
         ) { _ in true }
+    }
+
+    private mutating func finishCompletionRecords(
+        for generations: Set<UInt64>,
+        matching predicate: (CompletionRecord) -> Bool = { _ in true }
+    ) -> [() -> Void] {
+        var readyRecords: [CompletionRecord] = []
+        var pendingRecords: [CompletionRecord] = []
+        for record in completionRecords {
+            if generations.contains(record.generation), predicate(record) {
+                readyRecords.append(record)
+            } else {
+                pendingRecords.append(record)
+            }
+        }
+        completionRecords = pendingRecords
+        return finishRecords(readyRecords)
     }
 
     private mutating func finishCompletionRecords(
@@ -743,8 +1007,10 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             return currentValue
         }
         let elapsed = max(time.seconds - startTime.seconds, 0)
-        var context = AnimationContext(
+        var context = makeAnimationContext(
+            for: AnimatedValue.self,
             state: animationState,
+            isLogicallyComplete: animationContextIsLogicallyComplete,
             environment: environment.value
         )
         guard let animatedDelta = animation.box.animate(
@@ -773,9 +1039,6 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             }
         }
         samplingLayers = remainingLayers
-        enqueueAnimationCompletionActions(
-            finishCustomReplacementBarrierIfReady(at: now)
-        )
     }
 
     private mutating func isSideEffectSamplingLayerComplete(
@@ -789,8 +1052,10 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         for index in samplingLayer.layers.indices {
             let layer = samplingLayer.layers[index]
             let elapsed = max(now.seconds - layer.startTime.seconds, 0)
-            var context = AnimationContext(
+            var context = makeAnimationContext(
+                for: AnimatedValue.self,
                 state: layer.state,
+                isLogicallyComplete: layer.contextIsLogicallyComplete,
                 environment: environment.value
             )
             let animatedDelta = layer.animation.box.animate(
@@ -799,8 +1064,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
                 context: &context
             )
             if context.isLogicallyComplete {
-                if !isCustomReplacementBarrierGeneration(layer.generation),
-                   !contextLogicalCompletionSuppressedGenerations.contains(layer.generation) {
+                if !contextLogicalCompletionSuppressedGenerations.contains(layer.generation) {
                     let completions = finishCompletionRecords(for: layer.generation) {
                         $0.criteria != .removed
                     }
@@ -818,7 +1082,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
                 if index == samplingLayer.layers.indices.last {
                     didReachLastLayer = true
                 }
-                if markCustomReplacementOldGenerationCompleted(layer.generation) {
+                if isDeferredCompletionGroupOldGeneration(layer.generation) {
                     continue
                 }
                 let completions = finishCompletionRecords(for: layer.generation)
@@ -843,8 +1107,10 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             }
 
             let elapsed = max(now.seconds - layer.startTime.seconds, 0)
-            var context = AnimationContext(
+            var context = makeAnimationContext(
+                for: AnimatedValue.self,
                 state: layer.state,
+                isLogicallyComplete: layer.contextIsLogicallyComplete,
                 environment: environment.value
             )
             let animatedDelta = layer.animation.box.animate(
@@ -852,12 +1118,9 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
                 time: elapsed,
                 context: &context
             )
-            if context.isLogicallyComplete,
-               isCustomReplacementBarrierGeneration(layer.generation) {
-                markCustomReplacementBaseLogicalReady(layer.generation)
-            }
             guard let animatedDelta else {
                 layer.state = context.state
+                layer.contextIsLogicallyComplete = context.isLogicallyComplete
                 layer.isFinished = true
                 layers[index] = layer
                 baseValue = layer.targetValue
@@ -865,6 +1128,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             }
 
             layer.state = context.state
+            layer.contextIsLogicallyComplete = context.isLogicallyComplete
             layers[index] = layer
             baseValue = applying(
                 delta: animatedDelta,
@@ -877,49 +1141,35 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         return baseValue
     }
 
-    private mutating func markCustomReplacementCompleted(for generation: UInt64?) -> Bool {
+    private func isCustomReplacementCompletionGroupReplacement(_ generation: UInt64?) -> Bool {
         guard let generation,
-              var barrier = customReplacementBarrier,
-              barrier.replacementGeneration == generation else {
+              let group = customReplacementCompletionGroup else {
             return false
         }
-        barrier.replacementCompleted = true
-        customReplacementBarrier = barrier
-        return true
+        return group.replacementGeneration == generation
     }
 
-    private mutating func markCustomReplacementOldGenerationCompleted(_ generation: UInt64) -> Bool {
-        guard var barrier = customReplacementBarrier,
-              barrier.oldGenerations.contains(generation) else {
+    private func isCombinedFiniteCompletionGroupReplacement(_ generation: UInt64?) -> Bool {
+        guard let generation,
+              let group = combinedFiniteCompletionGroup else {
             return false
         }
-        barrier.completedOldGenerations.insert(generation)
-        customReplacementBarrier = barrier
-        return true
+        return group.replacementGeneration == generation
     }
 
-    private mutating func markCustomReplacementBaseLogicalReady(_ generation: UInt64) {
-        guard var barrier = customReplacementBarrier,
-              barrier.oldGenerations.contains(generation) else {
-            return
-        }
-        barrier.baseLogicalReadyGenerations.insert(generation)
-        customReplacementBarrier = barrier
+    private func isCustomReplacementCompletionGroupOldGeneration(_ generation: UInt64) -> Bool {
+        customReplacementCompletionGroup?.oldGenerations.contains(generation) ?? false
     }
 
-    private func isCustomReplacementBarrierGeneration(_ generation: UInt64) -> Bool {
-        guard let barrier = customReplacementBarrier else { return false }
-        return barrier.replacementGeneration == generation ||
-            barrier.oldGenerations.contains(generation)
+    private func isDeferredCompletionGroupOldGeneration(_ generation: UInt64) -> Bool {
+        isCustomReplacementCompletionGroupOldGeneration(generation) ||
+            (combinedFiniteCompletionGroup?.oldGenerations.contains(generation) ?? false)
     }
 
-    private mutating func finishCustomReplacementBarrierIfReady(at now: Time) -> [() -> Void] {
-        guard let barrier = customReplacementBarrier,
-              barrier.replacementCompleted,
-              barrier.oldGenerations.isSubset(of: barrier.completedOldGenerations) else {
+    private mutating func finishCustomReplacementCompletionGroup(at now: Time) -> [() -> Void] {
+        guard let group = customReplacementCompletionGroup else {
             return []
         }
-
         let finalValue = targetValue ?? currentValue
         startValue = nil
         if let finalValue {
@@ -930,26 +1180,54 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         animation = nil
         animationState = AnimationState()
         mergeState = AnimationState()
+        animationContextIsLogicallyComplete = false
         updatesMergeStateWithAnimation = true
         baseLayers.removeAll()
         samplingLayers.removeAll()
         currentGeneration = nil
-        customReplacementBarrier = nil
+        customReplacementCompletionGroup = nil
+        combinedResidualCompletionGroup = nil
+        combinedFiniteCompletionGroup = nil
         contextLogicalCompletionSuppressedGenerations.removeAll()
 
-        var completions: [() -> Void] = []
-        for generation in barrier.oldGenerations.sorted() {
-            completions.append(
-                contentsOf: finishCompletionRecords(
-                    for: generation,
-                    preferLogicalBeforeRemoved: barrier.baseLogicalReadyGenerations.contains(generation)
-                )
-            )
+        return finishCustomReplacementCompletionRecords(group)
+    }
+
+    private mutating func finishCustomReplacementCompletionRecords(
+        _ group: CustomReplacementCompletionGroup
+    ) -> [() -> Void] {
+        var oldRemovedRecords: [CompletionRecord] = []
+        var replacementRemovedRecords: [CompletionRecord] = []
+        var replacementOtherRecords: [CompletionRecord] = []
+        var oldOtherRecords: [CompletionRecord] = []
+        var pendingRecords: [CompletionRecord] = []
+
+        for record in completionRecords {
+            if group.oldGenerations.contains(record.orderGeneration) {
+                if record.criteria == .removed {
+                    oldRemovedRecords.append(record)
+                } else {
+                    oldOtherRecords.append(record)
+                }
+            } else if record.generation == group.replacementGeneration {
+                if record.criteria == .removed {
+                    replacementRemovedRecords.append(record)
+                } else {
+                    replacementOtherRecords.append(record)
+                }
+            } else {
+                pendingRecords.append(record)
+            }
         }
-        completions.append(
-            contentsOf: finishCompletionRecords(for: barrier.replacementGeneration)
-        )
-        return completions
+
+        completionRecords = pendingRecords
+        oldRemovedRecords.sort { $0.orderGeneration < $1.orderGeneration }
+        oldOtherRecords.sort { $0.orderGeneration < $1.orderGeneration }
+        let orderedRecords = oldRemovedRecords +
+            replacementRemovedRecords +
+            replacementOtherRecords +
+            oldOtherRecords
+        return orderedRecords.flatMap { $0.token.finish() }
     }
 
     private func animatableDelta(
@@ -997,7 +1275,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             !replacementAnimation.box.preservesRetargetedCompletionDeadlines
     }
 
-    private func shouldHoldCompletionRecordsForCustomToCustomReplacement(
+    private func shouldGroupCompletionRecordsForCustomToCustomReplacement(
         previousAnimation: Animation?,
         replacementAnimation: Animation
     ) -> Bool {
@@ -1006,12 +1284,99 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             isSourceDefinedCustomAnimation(replacementAnimation.box)
     }
 
+    private func shouldUseCombinedAnimationForFalseRetarget(
+        merged: Bool,
+        previousAnimation: Animation?,
+        replacementAnimation: Animation
+    ) -> Bool {
+        !merged &&
+            previousAnimation != nil &&
+            isSourceCustomReplacementAnimation(replacementAnimation.box)
+    }
+
+    private func combinedAnimationFromLayerStack(
+        _ layers: [AnimationLayer],
+        appending replacementAnimation: Animation,
+        target replacementTarget: AnimatedValue,
+        at now: Time
+    ) -> (
+        animation: Animation,
+        state: AnimationState<AnimatedValue.AnimatableData>,
+        start: AnimatedValue,
+        startTime: Time
+    )? {
+        guard let firstLayer = layers.first,
+              let lastLayer = layers.last else {
+            return nil
+        }
+
+        var entries: [DefaultCombiningAnimation.Entry] = []
+        var stateEntries: [CombinedAnimationState<AnimatedValue.AnimatableData>.Entry] = []
+        entries.reserveCapacity(layers.count)
+        stateEntries.reserveCapacity(layers.count)
+
+        for layer in layers {
+            entries.append(
+                DefaultCombiningAnimation.Entry(
+                    animation: layer.animation,
+                    elapsed: max(layer.startTime.seconds - firstLayer.startTime.seconds, 0)
+                )
+            )
+            stateEntries.append(
+                CombinedAnimationState.Entry(
+                    value: animatableDelta(
+                        from: firstLayer.startValue,
+                        to: layer.targetValue
+                    ),
+                    state: layer.state
+                )
+            )
+        }
+
+        var combinedAnimation = Animation(DefaultCombiningAnimation(entries: entries))
+        var combinedState = AnimationState<AnimatedValue.AnimatableData>()
+        combinedState.combinedState = CombinedAnimationState(entries: stateEntries)
+        combineAnimation(
+            into: &combinedAnimation,
+            state: &combinedState,
+            value: animatableDelta(from: firstLayer.startValue, to: lastLayer.targetValue),
+            elapsed: max(now.seconds - firstLayer.startTime.seconds, 0),
+            newAnimation: replacementAnimation,
+            newValue: animatableDelta(from: lastLayer.targetValue, to: replacementTarget)
+        )
+
+        return (
+            animation: combinedAnimation,
+            state: combinedState,
+            start: firstLayer.startValue,
+            startTime: firstLayer.startTime
+        )
+    }
+
+    private func customReplacementOldGenerations(
+        from previousSamplingLayers: [AnimationLayer],
+        previousGeneration: UInt64?
+    ) -> Set<UInt64> {
+        var generations = Set(previousSamplingLayers.map(\.generation))
+        if let previousGeneration {
+            for record in completionRecords where record.generation == previousGeneration {
+                generations.insert(record.orderGeneration)
+            }
+        }
+        if let group = customReplacementCompletionGroup {
+            generations.formUnion(group.oldGenerations)
+            generations.insert(group.replacementGeneration)
+        }
+        return generations
+    }
+
     private func shouldHoldSourceCustomCompletionRecordsUntilDefaultFinalization(
         previousAnimation: Animation?,
         replacementAnimation: Animation
     ) -> Bool {
         guard let previousAnimation else { return false }
         return isSourceDefinedCustomAnimation(previousAnimation.box) &&
+            !isDefaultCombiningAnimation(previousAnimation.box) &&
             replacementAnimation.box is DefaultAnimationBox
     }
 
@@ -1023,6 +1388,10 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             previousAnimation: previousAnimation,
             replacementAnimation: replacementAnimation
         )
+    }
+
+    private func isVelocityTrackingAnimation(_ box: AnimationBoxBase) -> Bool {
+        box is CustomAnimationBox<VelocityTrackingAnimation>
     }
 
     private func shouldMoveBuiltInCompletionRecordsToSourceCustomReplacement(
@@ -1081,6 +1450,25 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         return previousAnimation.box.preservesRetargetedCompletionDeadlines &&
             !previousAnimation.box.duration.isFinite &&
             replacementAnimation.box.duration.isFinite
+    }
+
+    private func shouldMoveCombinedCompletionRecordsToResidualReplacementFinalization(
+        previousAnimation: Animation?,
+        replacementAnimation: Animation,
+        presentationDuration: TimeInterval
+    ) -> Bool {
+        guard let previousAnimation else { return false }
+        return isDefaultCombiningAnimation(previousAnimation.box) &&
+            presentationDuration > replacementAnimation.box.duration
+    }
+
+    private func shouldMoveCombinedCompletionRecordsToFiniteReplacementFinalization(
+        previousAnimation: Animation?,
+        replacementAnimation: Animation
+    ) -> Bool {
+        guard let previousAnimation else { return false }
+        return isDefaultCombiningAnimation(previousAnimation.box) &&
+            isFiniteNonResidualAnimation(replacementAnimation.box)
     }
 
     private func shouldMoveResidualWrapperCompletionRecordsToSourceCustomReplacement(
@@ -1257,6 +1645,16 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         !box.duration.isFinite && box.preservesRetargetedCompletionDeadlines
     }
 
+    private func isSourceCustomReplacementAnimation(_ box: AnimationBoxBase) -> Bool {
+        isSourceDefinedCustomAnimation(box) &&
+            !isDefaultCombiningAnimation(box) &&
+            !isVelocityTrackingAnimation(box)
+    }
+
+    private func isDefaultCombiningAnimation(_ box: AnimationBoxBase) -> Bool {
+        box is CustomAnimationBox<DefaultCombiningAnimation>
+    }
+
     private mutating func mergeAnimationStateIfNeeded(
         newAnimation: Animation,
         previousAnimation: Animation?,
@@ -1269,11 +1667,14 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
               let previousTarget else {
             animationState = AnimationState()
             mergeState = AnimationState()
+            animationContextIsLogicallyComplete = false
             return false
         }
         let elapsed = max(now.seconds - startTime.seconds, 0)
-        var context = AnimationContext(
+        var context = makeAnimationContext(
+            for: AnimatedValue.self,
             state: mergeState,
+            isLogicallyComplete: animationContextIsLogicallyComplete,
             environment: environment.value
         )
         let shouldMerge = newAnimation.box.shouldMerge(
@@ -1285,9 +1686,11 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         if shouldMerge {
             animationState = context.state
             mergeState = context.state
+            animationContextIsLogicallyComplete = context.isLogicallyComplete
         } else {
             animationState = AnimationState()
-            mergeState = context.state
+            mergeState = AnimationState()
+            animationContextIsLogicallyComplete = false
         }
         return shouldMerge
     }

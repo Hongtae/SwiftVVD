@@ -181,7 +181,9 @@ extension Transaction {
 
     var isAnimated: Bool { animation != nil }
 
-    var effectiveAnimation: Animation? { animation }
+    var effectiveAnimation: Animation? {
+        animation ?? (tracksVelocity ? .velocityTracking : nil)
+    }
 
     mutating func disableAnimations() { disablesAnimations = true }
 }
