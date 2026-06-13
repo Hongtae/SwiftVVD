@@ -71,6 +71,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
     private var customReplacementCompletionGroup: CustomReplacementCompletionGroup?
     private var combinedResidualCompletionGroup: CombinedResidualCompletionGroup?
     private var combinedFiniteCompletionGroup: CombinedFiniteCompletionGroup?
+    private var velocityTrackingImmediateCompletionGroup: CustomReplacementCompletionGroup?
     private var contextLogicalCompletionSuppressedGenerations: Set<UInt64> = []
     private var currentGeneration: UInt64?
     private var nextGeneration: UInt64 = 1
@@ -159,7 +160,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
                 }
                 return sampleCurrentAnimationValue()
             }
-            guard animation.box.duration > 0 else {
+            guard !animation.box.isImmediatelyComplete else {
                 finishZeroDurationAnimationRetarget(
                     with: target,
                     transaction: effectiveTransaction
@@ -267,7 +268,19 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
                 for: animatableDelta(from: deadlineStartValue, to: target)
             )
             let deadline = completionStart + animation.box.duration
-            if shouldGroupCompletionRecordsForCustomToCustomReplacement(
+            velocityTrackingImmediateCompletionGroup = nil
+            if shouldFinishCombinedCompletionRecordsWithVelocityTrackingReplacement(
+                previousAnimation: previousAnimation,
+                replacementAnimation: animation
+            ), let customReplacementCompletionGroup {
+                let oldGenerations = customReplacementCompletionGroup.oldGenerations
+                    .union([customReplacementCompletionGroup.replacementGeneration])
+                velocityTrackingImmediateCompletionGroup = CustomReplacementCompletionGroup(
+                    replacementGeneration: replacementGeneration,
+                    oldGenerations: oldGenerations
+                )
+                self.customReplacementCompletionGroup = nil
+            } else if shouldGroupCompletionRecordsForCustomToCustomReplacement(
                 previousAnimation: previousAnimation,
                 replacementAnimation: animation
             ) {
@@ -478,9 +491,12 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
                         continue
                     }
                     let waitsForPresentation = criteria == .removed || holdsNewLogicalUntilPresentation
+                    let registeredDeadline = animation.box.registeredCompletionDelay(for: criteria).map {
+                        completionStart + $0
+                    }
                     let recordDeadline = completesWithoutWaitingForSamplingWindow
                         ? completionStart
-                        : (waitsForPresentation ? presentationDeadline : deadline)
+                        : registeredDeadline ?? (waitsForPresentation ? presentationDeadline : deadline)
                     completionRecords.insert(
                         CompletionRecord(
                             token: token,
@@ -559,6 +575,14 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         sampleSideEffectLayers(at: now)
         currentValue = output
         AttributeGraph.setStatefulOutput(output)
+        if let velocityTrackingImmediateCompletionGroup {
+            self.velocityTrackingImmediateCompletionGroup = nil
+            samplingLayers.removeAll()
+            let completions = finishCustomReplacementCompletionRecords(
+                velocityTrackingImmediateCompletionGroup
+            )
+            enqueueAnimationCompletionActions(completions)
+        }
         if context.isLogicallyComplete,
            let currentGeneration,
            !contextLogicalCompletionSuppressedGenerations.contains(currentGeneration) {
@@ -644,6 +668,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         customReplacementCompletionGroup = nil
         combinedResidualCompletionGroup = nil
         combinedFiniteCompletionGroup = nil
+        velocityTrackingImmediateCompletionGroup = nil
         contextLogicalCompletionSuppressedGenerations.removeAll()
         currentGeneration = nil
         AttributeGraph.setStatefulOutput(value)
@@ -698,6 +723,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         customReplacementCompletionGroup = nil
         combinedResidualCompletionGroup = nil
         combinedFiniteCompletionGroup = nil
+        velocityTrackingImmediateCompletionGroup = nil
         contextLogicalCompletionSuppressedGenerations.removeAll()
         currentGeneration = nil
         AttributeGraph.setStatefulOutput(value)
@@ -725,6 +751,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         customReplacementCompletionGroup = nil
         combinedResidualCompletionGroup = nil
         combinedFiniteCompletionGroup = nil
+        velocityTrackingImmediateCompletionGroup = nil
         contextLogicalCompletionSuppressedGenerations.removeAll()
         AttributeGraph.setStatefulOutput(value)
         var completions: [() -> Void]
@@ -841,6 +868,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         customReplacementCompletionGroup = nil
         combinedResidualCompletionGroup = nil
         combinedFiniteCompletionGroup = nil
+        velocityTrackingImmediateCompletionGroup = nil
         contextLogicalCompletionSuppressedGenerations.removeAll()
 
         return finishCombinedFiniteCompletionRecords(group)
@@ -1083,6 +1111,10 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
                     didReachLastLayer = true
                 }
                 if isDeferredCompletionGroupOldGeneration(layer.generation) {
+                    let completions = finishCompletionRecords(for: layer.generation) {
+                        $0.criteria != .removed
+                    }
+                    enqueueAnimationCompletionActions(completions)
                     continue
                 }
                 let completions = finishCompletionRecords(for: layer.generation)
@@ -1163,7 +1195,8 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
 
     private func isDeferredCompletionGroupOldGeneration(_ generation: UInt64) -> Bool {
         isCustomReplacementCompletionGroupOldGeneration(generation) ||
-            (combinedFiniteCompletionGroup?.oldGenerations.contains(generation) ?? false)
+            (combinedFiniteCompletionGroup?.oldGenerations.contains(generation) ?? false) ||
+            (combinedResidualCompletionGroup?.oldGenerations.contains(generation) ?? false)
     }
 
     private mutating func finishCustomReplacementCompletionGroup(at now: Time) -> [() -> Void] {
@@ -1188,6 +1221,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         customReplacementCompletionGroup = nil
         combinedResidualCompletionGroup = nil
         combinedFiniteCompletionGroup = nil
+        velocityTrackingImmediateCompletionGroup = nil
         contextLogicalCompletionSuppressedGenerations.removeAll()
 
         return finishCustomReplacementCompletionRecords(group)
@@ -1282,6 +1316,15 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         guard let previousAnimation else { return false }
         return isSourceDefinedCustomAnimation(previousAnimation.box) &&
             isSourceDefinedCustomAnimation(replacementAnimation.box)
+    }
+
+    private func shouldFinishCombinedCompletionRecordsWithVelocityTrackingReplacement(
+        previousAnimation: Animation?,
+        replacementAnimation: Animation
+    ) -> Bool {
+        guard let previousAnimation else { return false }
+        return isDefaultCombiningAnimation(previousAnimation.box) &&
+            isVelocityTrackingAnimation(replacementAnimation.box)
     }
 
     private func shouldUseCombinedAnimationForFalseRetarget(

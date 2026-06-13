@@ -15,6 +15,7 @@ class AnimationBoxBase: CustomAnimation, CustomStringConvertible, @unchecked Sen
     var presentationDuration: TimeInterval { duration }
     var preservesRetargetedCompletionDeadlines: Bool { false }
     var customAnimationBase: any CustomAnimation { self }
+    var isImmediatelyComplete: Bool { duration <= 0 }
 
     @usableFromInline
     var description: String {
@@ -52,12 +53,19 @@ class AnimationBoxBase: CustomAnimation, CustomStringConvertible, @unchecked Sen
     }
 
     func noRegisteredCompletionDelay() -> TimeInterval? {
+        if isImmediatelyComplete {
+            return 0
+        }
         let delay = max(duration, presentationDuration)
         return delay.isFinite ? delay : nil
     }
 
     func noRegisteredCompletionDelay(for criteria: AnimationCompletionCriteria) -> TimeInterval? {
         noRegisteredCompletionDelay()
+    }
+
+    func registeredCompletionDelay(for criteria: AnimationCompletionCriteria) -> TimeInterval? {
+        nil
     }
 
     var defaultDisplayFrameInterval: TimeInterval {
@@ -70,7 +78,7 @@ class AnimationBoxBase: CustomAnimation, CustomStringConvertible, @unchecked Sen
         time: TimeInterval,
         context: inout AnimationContext<Value>
     ) -> Value? where Value: VectorArithmetic {
-        guard duration > 0 else {
+        guard !isImmediatelyComplete else {
             context.isLogicallyComplete = true
             return nil
         }
@@ -262,6 +270,10 @@ final class DelayAnimationBox: AnimationBoxBase, @unchecked Sendable {
         max(0, base.presentationDuration + delay)
     }
 
+    override var preservesRetargetedCompletionDeadlines: Bool {
+        base.preservesRetargetedCompletionDeadlines
+    }
+
     override var description: String {
         "DelayAnimation(base: \(base), delay: \(delay))"
     }
@@ -313,6 +325,9 @@ final class DelayAnimationBox: AnimationBoxBase, @unchecked Sendable {
     ) -> Value? where Value: VectorArithmetic {
         let localTime = time - delay
         let output = base.animate(value: value, time: max(localTime, 0), context: &context)
+        if output == nil, base.preservesRetargetedCompletionDeadlines {
+            return nil
+        }
         if output == nil, time < presentationDuration(for: value) {
             return value
         }
@@ -338,6 +353,10 @@ final class SpeedAnimationBox: AnimationBoxBase, @unchecked Sendable {
     override var presentationDuration: TimeInterval {
         guard speed > 0 else { return .infinity }
         return scaledPresentationDuration(basePresentationDuration: base.presentationDuration)
+    }
+
+    override var preservesRetargetedCompletionDeadlines: Bool {
+        base.preservesRetargetedCompletionDeadlines
     }
 
     override var description: String {
@@ -389,6 +408,9 @@ final class SpeedAnimationBox: AnimationBoxBase, @unchecked Sendable {
         context: inout AnimationContext<Value>
     ) -> Value? where Value: VectorArithmetic {
         let output = base.animate(value: value, time: time * speed, context: &context)
+        if output == nil, base.preservesRetargetedCompletionDeadlines {
+            return nil
+        }
         if output == nil, time < presentationDuration(for: value) {
             return value
         }
@@ -414,6 +436,10 @@ final class RepeatAnimationBox: AnimationBoxBase, @unchecked Sendable {
 
     private var resolvedRepeatCount: Int {
         max(repeatCount ?? 1, 1)
+    }
+
+    override var preservesRetargetedCompletionDeadlines: Bool {
+        base.preservesRetargetedCompletionDeadlines
     }
 
     override var description: String {
@@ -481,6 +507,17 @@ final class RepeatAnimationBox: AnimationBoxBase, @unchecked Sendable {
             return max(0, delay - defaultDisplayFrameInterval)
         }
         return delay
+    }
+
+    override func registeredCompletionDelay(for criteria: AnimationCompletionCriteria) -> TimeInterval? {
+        guard criteria == .logicallyComplete,
+              repeatCount == nil,
+              base is DefaultAnimationBox ||
+              base is FluidSpringAnimationBox ||
+              base is SpringAnimationBox else {
+            return nil
+        }
+        return base.isImmediatelyComplete ? 0 : base.duration
     }
 
     override func value(at progress: Double) -> Double {
@@ -1497,9 +1534,23 @@ final class FluidSpringAnimationBox: AnimationBoxBase, @unchecked Sendable {
         time: TimeInterval,
         context: inout AnimationContext<Value>
     ) -> Bool where Value: VectorArithmetic {
-        _ = previous.box.animate(value: value, time: time, context: &context)
+        let previousVelocity = previous.box.velocity(
+            value: value,
+            time: time,
+            context: context
+        )
+        let previousOutput = previous.box.animate(
+            value: value,
+            time: time,
+            context: &context
+        )
 
         var state = context.state[SpringState<Value>.self]
+        if !state.isInitialized {
+            state.position = previousOutput ?? value
+            state.velocity = previousVelocity ?? .zero
+            state.isInitialized = true
+        }
         state.time = max(state.time, time)
 
         if let previousSpring = previous.box as? FluidSpringAnimationBox,
@@ -1535,7 +1586,10 @@ final class SpringAnimationBox: AnimationBoxBase, @unchecked Sendable {
     }
 
     override var presentationDuration: TimeInterval {
-        max(
+        guard !isImmediatelyComplete else {
+            return 0
+        }
+        return max(
             duration,
             spring.settlingDuration(
                 target: 1.0,
@@ -1543,6 +1597,12 @@ final class SpringAnimationBox: AnimationBoxBase, @unchecked Sendable {
                 epsilon: 0.007
             )
         )
+    }
+
+    override var isImmediatelyComplete: Bool {
+        // Infinite stiffness represents a zero-period spring; duration remains
+        // clamped only to keep spring math numerically guarded.
+        stiffness == .infinity
     }
 
     override var description: String {
@@ -1569,6 +1629,9 @@ final class SpringAnimationBox: AnimationBoxBase, @unchecked Sendable {
     override func presentationDuration<Value>(
         for value: Value
     ) -> TimeInterval where Value: VectorArithmetic {
+        guard !isImmediatelyComplete else {
+            return 0
+        }
         var velocity = value
         velocity.scale(by: initialVelocity)
         return max(
@@ -1583,7 +1646,7 @@ final class SpringAnimationBox: AnimationBoxBase, @unchecked Sendable {
 
     override func value(at progress: Double) -> Double {
         let clamped = min(max(progress, 0), 1)
-        guard clamped < 1, duration > 0 else { return 1 }
+        guard clamped < 1, !isImmediatelyComplete else { return 1 }
         return spring.value(target: 1.0, initialVelocity: initialVelocity, time: clamped * duration)
     }
 
@@ -1592,7 +1655,7 @@ final class SpringAnimationBox: AnimationBoxBase, @unchecked Sendable {
         time: TimeInterval,
         context: inout AnimationContext<Value>
     ) -> Value? where Value: VectorArithmetic {
-        guard duration > 0 else {
+        guard !isImmediatelyComplete else {
             context.isLogicallyComplete = true
             return nil
         }
