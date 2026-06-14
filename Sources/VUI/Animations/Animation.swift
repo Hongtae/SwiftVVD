@@ -14,8 +14,39 @@ class AnimationBoxBase: CustomAnimation, CustomStringConvertible, @unchecked Sen
     var duration: TimeInterval { 0 }
     var presentationDuration: TimeInterval { duration }
     var preservesRetargetedCompletionDeadlines: Bool { false }
-    var customAnimationBase: any CustomAnimation { self }
+    var customAnimationBase: any CustomAnimation { makeBaseValue() }
+    var function: Animation.Function {
+        if let base = customAnimationBase as? any InternalCustomAnimation {
+            return base.function
+        }
+        return .custom(self)
+    }
     var isImmediatelyComplete: Bool { duration <= 0 }
+
+    func makeBaseValue() -> any CustomAnimation {
+        self
+    }
+
+    func makeDelayedBase(delay: TimeInterval) -> any CustomAnimation {
+        guard let base = customAnimationBase as? any InternalCustomAnimation else {
+            return self
+        }
+        return base.modified(DelayAnimation(delay: delay))
+    }
+
+    func makeSpeedBase(speed: Double) -> any CustomAnimation {
+        guard let base = customAnimationBase as? any InternalCustomAnimation else {
+            return self
+        }
+        return base.modified(SpeedAnimation(speed: speed))
+    }
+
+    func makeRepeatBase(repeatCount: Int?, autoreverses: Bool) -> any CustomAnimation {
+        guard let base = customAnimationBase as? any InternalCustomAnimation else {
+            return self
+        }
+        return base.modified(RepeatAnimation(repeatCount: repeatCount, autoreverses: autoreverses))
+    }
 
     @usableFromInline
     var description: String {
@@ -140,6 +171,10 @@ final class DefaultAnimationBox: AnimationBoxBase, @unchecked Sendable {
         "DefaultAnimation()"
     }
 
+    override func makeBaseValue() -> any CustomAnimation {
+        DefaultAnimation()
+    }
+
     override func isEqual(to other: AnimationBoxBase) -> Bool {
         other is DefaultAnimationBox
     }
@@ -186,10 +221,10 @@ final class DefaultAnimationBox: AnimationBoxBase, @unchecked Sendable {
 
 @usableFromInline
 final class BezierAnimationBox: AnimationBoxBase, @unchecked Sendable {
-    let curve: UnitCurve
+    let curve: UnitCurve.CubicSolver
     let storedDuration: TimeInterval
 
-    init(curve: UnitCurve, duration: TimeInterval) {
+    init(curve: UnitCurve.CubicSolver, duration: TimeInterval) {
         self.curve = curve
         self.storedDuration = duration
     }
@@ -200,6 +235,10 @@ final class BezierAnimationBox: AnimationBoxBase, @unchecked Sendable {
 
     override var description: String {
         "BezierAnimation(duration: \(storedDuration), curve: \(curve))"
+    }
+
+    override func makeBaseValue() -> any CustomAnimation {
+        BezierAnimation(duration: storedDuration, curve: curve)
     }
 
     override func isEqual(to other: AnimationBoxBase) -> Bool {
@@ -214,7 +253,7 @@ final class BezierAnimationBox: AnimationBoxBase, @unchecked Sendable {
     }
 
     override func value(at progress: Double) -> Double {
-        curve.value(at: progress)
+        curve.solve(x: progress)
     }
 }
 
@@ -236,6 +275,10 @@ final class UnitCurveAnimationBox: AnimationBoxBase, @unchecked Sendable {
         "UnitCurveAnimation(duration: \(storedDuration), curve: \(curve))"
     }
 
+    override func makeBaseValue() -> any CustomAnimation {
+        UnitCurveAnimation(duration: storedDuration, curve: curve)
+    }
+
     override func isEqual(to other: AnimationBoxBase) -> Bool {
         guard let other = other as? UnitCurveAnimationBox else { return false }
         return curve == other.curve && storedDuration == other.storedDuration
@@ -249,6 +292,20 @@ final class UnitCurveAnimationBox: AnimationBoxBase, @unchecked Sendable {
 
     override func value(at progress: Double) -> Double {
         curve.value(at: progress)
+    }
+
+    override func velocity<Value>(
+        value: Value,
+        time: TimeInterval,
+        context: AnimationContext<Value>
+    ) -> Value? where Value: VectorArithmetic {
+        guard !isImmediatelyComplete else {
+            return nil
+        }
+        let progress = min(max(time / storedDuration, 0), 1)
+        var output = value
+        output.scale(by: curve.velocity(at: progress) / storedDuration)
+        return output
     }
 }
 
@@ -276,6 +333,10 @@ final class DelayAnimationBox: AnimationBoxBase, @unchecked Sendable {
 
     override var description: String {
         "DelayAnimation(base: \(base), delay: \(delay))"
+    }
+
+    override var customAnimationBase: any CustomAnimation {
+        base.makeDelayedBase(delay: delay)
     }
 
     override func isEqual(to other: AnimationBoxBase) -> Bool {
@@ -363,6 +424,10 @@ final class SpeedAnimationBox: AnimationBoxBase, @unchecked Sendable {
         "SpeedAnimation(base: \(base), speed: \(speed))"
     }
 
+    override var customAnimationBase: any CustomAnimation {
+        base.makeSpeedBase(speed: speed)
+    }
+
     override func isEqual(to other: AnimationBoxBase) -> Bool {
         guard let other = other as? SpeedAnimationBox else { return false }
         return base == other.base && speed == other.speed
@@ -445,6 +510,10 @@ final class RepeatAnimationBox: AnimationBoxBase, @unchecked Sendable {
     override var description: String {
         "RepeatAnimation(base: \(base), repeatCount: \(String(describing: repeatCount)), " +
             "autoreverses: \(autoreverses))"
+    }
+
+    override var customAnimationBase: any CustomAnimation {
+        base.makeRepeatBase(repeatCount: repeatCount, autoreverses: autoreverses)
     }
 
     override func isEqual(to other: AnimationBoxBase) -> Bool {
@@ -1147,6 +1216,380 @@ extension CustomAnimation {
     }
 }
 
+protocol InternalCustomAnimation: CustomAnimation {
+    var function: Animation.Function { get }
+    var animationBox: AnimationBoxBase { get }
+}
+
+extension InternalCustomAnimation {
+    func animate<Value>(
+        value: Value,
+        time: TimeInterval,
+        context: inout AnimationContext<Value>
+    ) -> Value? where Value: VectorArithmetic {
+        animationBox.animate(value: value, time: time, context: &context)
+    }
+
+    func velocity<Value>(
+        value: Value,
+        time: TimeInterval,
+        context: AnimationContext<Value>
+    ) -> Value? where Value: VectorArithmetic {
+        animationBox.velocity(value: value, time: time, context: context)
+    }
+
+    func shouldMerge<Value>(
+        previous: Animation,
+        value: Value,
+        time: TimeInterval,
+        context: inout AnimationContext<Value>
+    ) -> Bool where Value: VectorArithmetic {
+        animationBox.shouldMerge(previous: previous, value: value, time: time, context: &context)
+    }
+
+    func modified<Modifier>(
+        _ modifier: Modifier
+    ) -> any CustomAnimation where Modifier: CustomAnimationModifier {
+        InternalCustomAnimationModifiedContent(base: self, modifier: modifier)
+    }
+}
+
+protocol CustomAnimationModifier: Hashable {
+    func animate<Value, Base>(
+        base: Base,
+        value: Value,
+        time: TimeInterval,
+        context: inout AnimationContext<Value>
+    ) -> Value? where Value: VectorArithmetic, Base: CustomAnimation
+
+    func velocity<Value, Base>(
+        base: Base,
+        value: Value,
+        time: TimeInterval,
+        context: AnimationContext<Value>
+    ) -> Value? where Value: VectorArithmetic, Base: CustomAnimation
+
+    func shouldMerge<Value, Base>(
+        base: Base,
+        previous: Self,
+        previousBase: Base,
+        value: Value,
+        time: TimeInterval,
+        context: inout AnimationContext<Value>
+    ) -> Bool where Value: VectorArithmetic, Base: CustomAnimation
+
+    func function(base: Animation.Function) -> Animation.Function
+    func box(base: AnimationBoxBase) -> AnimationBoxBase
+}
+
+extension CustomAnimationModifier {
+    func velocity<Value, Base>(
+        base: Base,
+        value: Value,
+        time: TimeInterval,
+        context: AnimationContext<Value>
+    ) -> Value? where Value: VectorArithmetic, Base: CustomAnimation {
+        nil
+    }
+
+    func shouldMerge<Value, Base>(
+        base: Base,
+        previous: Self,
+        previousBase: Base,
+        value: Value,
+        time: TimeInterval,
+        context: inout AnimationContext<Value>
+    ) -> Bool where Value: VectorArithmetic, Base: CustomAnimation {
+        false
+    }
+
+    func animationBox<Base>(for base: Base) -> AnimationBoxBase where Base: CustomAnimation {
+        if let base = base as? any InternalCustomAnimation {
+            return base.animationBox
+        }
+        return Animation(base).box
+    }
+}
+
+struct DefaultAnimation: InternalCustomAnimation {
+    var function: Animation.Function {
+        FluidSpringAnimation(
+            response: 0.5,
+            dampingFraction: 1,
+            blendDuration: 0
+        ).function
+    }
+
+    var animationBox: AnimationBoxBase {
+        DefaultAnimationBox()
+    }
+}
+
+struct BezierAnimation: InternalCustomAnimation {
+    var duration: TimeInterval
+    var curve: UnitCurve.CubicSolver
+
+    var function: Animation.Function {
+        let points = curve.controlPointsForAnimation
+        return .bezier(duration, points.startControlPoint, points.endControlPoint)
+    }
+
+    var animationBox: AnimationBoxBase {
+        BezierAnimationBox(curve: curve, duration: duration)
+    }
+}
+
+struct UnitCurveAnimation: InternalCustomAnimation {
+    var duration: TimeInterval
+    var curve: UnitCurve
+
+    var function: Animation.Function {
+        curve.animationFunction(duration: duration)
+    }
+
+    var animationBox: AnimationBoxBase {
+        UnitCurveAnimationBox(curve: curve, duration: duration)
+    }
+}
+
+struct DelayAnimation: CustomAnimationModifier {
+    var delay: TimeInterval
+
+    func animate<Value, Base>(
+        base: Base,
+        value: Value,
+        time: TimeInterval,
+        context: inout AnimationContext<Value>
+    ) -> Value? where Value: VectorArithmetic, Base: CustomAnimation {
+        box(base: animationBox(for: base)).animate(
+            value: value,
+            time: time,
+            context: &context
+        )
+    }
+
+    func function(base: Animation.Function) -> Animation.Function {
+        .delay(delay, base)
+    }
+
+    func box(base: AnimationBoxBase) -> AnimationBoxBase {
+        DelayAnimationBox(base: base, delay: delay)
+    }
+}
+
+struct SpeedAnimation: CustomAnimationModifier {
+    var speed: Double
+
+    func animate<Value, Base>(
+        base: Base,
+        value: Value,
+        time: TimeInterval,
+        context: inout AnimationContext<Value>
+    ) -> Value? where Value: VectorArithmetic, Base: CustomAnimation {
+        box(base: animationBox(for: base)).animate(
+            value: value,
+            time: time,
+            context: &context
+        )
+    }
+
+    func function(base: Animation.Function) -> Animation.Function {
+        .speed(speed, base)
+    }
+
+    func box(base: AnimationBoxBase) -> AnimationBoxBase {
+        SpeedAnimationBox(base: base, speed: speed)
+    }
+}
+
+struct RepeatAnimation: CustomAnimationModifier {
+    var repeatCount: Int?
+    var autoreverses: Bool
+
+    func animate<Value, Base>(
+        base: Base,
+        value: Value,
+        time: TimeInterval,
+        context: inout AnimationContext<Value>
+    ) -> Value? where Value: VectorArithmetic, Base: CustomAnimation {
+        box(base: animationBox(for: base)).animate(
+            value: value,
+            time: time,
+            context: &context
+        )
+    }
+
+    func function(base: Animation.Function) -> Animation.Function {
+        .repeat(repeatCount.map(Double.init) ?? .infinity, autoreverses, base)
+    }
+
+    func box(base: AnimationBoxBase) -> AnimationBoxBase {
+        RepeatAnimationBox(base: base, repeatCount: repeatCount, autoreverses: autoreverses)
+    }
+}
+
+struct CustomAnimationModifiedContent<Base, Modifier>: InternalCustomAnimation, @unchecked Sendable
+where Base: CustomAnimation, Modifier: CustomAnimationModifier {
+    var base: Base
+    var modifier: Modifier
+
+    func animate<Value>(
+        value: Value,
+        time: TimeInterval,
+        context: inout AnimationContext<Value>
+    ) -> Value? where Value: VectorArithmetic {
+        modifier.animate(base: base, value: value, time: time, context: &context)
+    }
+
+    func velocity<Value>(
+        value: Value,
+        time: TimeInterval,
+        context: AnimationContext<Value>
+    ) -> Value? where Value: VectorArithmetic {
+        modifier.velocity(base: base, value: value, time: time, context: context)
+    }
+
+    func shouldMerge<Value>(
+        previous: Animation,
+        value: Value,
+        time: TimeInterval,
+        context: inout AnimationContext<Value>
+    ) -> Bool where Value: VectorArithmetic {
+        guard let previousBase = previous.base as? Self else { return false }
+        return modifier.shouldMerge(
+            base: base,
+            previous: previousBase.modifier,
+            previousBase: previousBase.base,
+            value: value,
+            time: time,
+            context: &context
+        )
+    }
+
+    var function: Animation.Function {
+        modifier.function(base: .custom(base))
+    }
+
+    var animationBox: AnimationBoxBase {
+        if let baseValue = base as? any InternalCustomAnimation {
+            return modifier.box(base: baseValue.animationBox)
+        }
+        return modifier.box(base: Animation(base).box)
+    }
+}
+
+struct InternalCustomAnimationModifiedContent<Base, Modifier>: InternalCustomAnimation, @unchecked Sendable
+where Base: CustomAnimation, Modifier: CustomAnimationModifier {
+    var _base: CustomAnimationModifiedContent<Base, Modifier>
+
+    init(base: Base, modifier: Modifier) {
+        self._base = CustomAnimationModifiedContent(base: base, modifier: modifier)
+    }
+
+    var base: Base {
+        _base.base
+    }
+
+    var modifier: Modifier {
+        _base.modifier
+    }
+
+    func animate<Value>(
+        value: Value,
+        time: TimeInterval,
+        context: inout AnimationContext<Value>
+    ) -> Value? where Value: VectorArithmetic {
+        modifier.animate(base: base, value: value, time: time, context: &context)
+    }
+
+    func velocity<Value>(
+        value: Value,
+        time: TimeInterval,
+        context: AnimationContext<Value>
+    ) -> Value? where Value: VectorArithmetic {
+        modifier.velocity(base: base, value: value, time: time, context: context)
+    }
+
+    func shouldMerge<Value>(
+        previous: Animation,
+        value: Value,
+        time: TimeInterval,
+        context: inout AnimationContext<Value>
+    ) -> Bool where Value: VectorArithmetic {
+        guard let previousBase = previous.base as? Self else { return false }
+        return modifier.shouldMerge(
+            base: base,
+            previous: previousBase.modifier,
+            previousBase: previousBase.base,
+            value: value,
+            time: time,
+            context: &context
+        )
+    }
+
+    var function: Animation.Function {
+        let baseFunction: Animation.Function
+        if let base = _base.base as? any InternalCustomAnimation {
+            baseFunction = base.function
+        } else {
+            baseFunction = .custom(_base.base)
+        }
+        return _base.modifier.function(base: baseFunction)
+    }
+
+    var animationBox: AnimationBoxBase {
+        _base.animationBox
+    }
+}
+
+struct FluidSpringAnimation: InternalCustomAnimation {
+    var response: TimeInterval
+    var dampingFraction: Double
+    var blendDuration: TimeInterval
+
+    var function: Animation.Function {
+        let stiffness = fluidSpringStiffness(response: response)
+        let damping = 2 * dampingFraction * sqrt(stiffness)
+        let duration = Spring(mass: 1, stiffness: stiffness, damping: damping)
+            .settlingDuration(target: Double(1), initialVelocity: Double.zero, epsilon: 0.001)
+        return .spring(duration, 1, stiffness, damping, 0)
+    }
+
+    var animationBox: AnimationBoxBase {
+        FluidSpringAnimationBox(
+            response: response,
+            dampingFraction: dampingFraction,
+            blendDuration: blendDuration
+        )
+    }
+}
+
+struct SpringAnimation: InternalCustomAnimation {
+    var mass: Double
+    var stiffness: Double
+    var damping: Double
+    var initialVelocity: _Velocity<Double>
+
+    var function: Animation.Function {
+        let duration = Spring(mass: mass, stiffness: stiffness, damping: damping)
+            .settlingDuration(
+                target: Double(1),
+                initialVelocity: initialVelocity.valuePerSecond,
+                epsilon: 0.001
+            )
+        return .spring(duration, mass, stiffness, damping, initialVelocity.valuePerSecond)
+    }
+
+    var animationBox: AnimationBoxBase {
+        SpringAnimationBox(
+            mass: mass,
+            stiffness: stiffness,
+            damping: damping,
+            initialVelocity: initialVelocity.valuePerSecond
+        )
+    }
+}
+
 @usableFromInline
 final class CustomAnimationBox<Base: CustomAnimation>: AnimationBoxBase, @unchecked Sendable {
     let base: Base
@@ -1159,6 +1602,21 @@ final class CustomAnimationBox<Base: CustomAnimation>: AnimationBoxBase, @unchec
 
     override var customAnimationBase: any CustomAnimation {
         base
+    }
+
+    override func makeDelayedBase(delay: TimeInterval) -> any CustomAnimation {
+        CustomAnimationModifiedContent(base: base, modifier: DelayAnimation(delay: delay))
+    }
+
+    override func makeSpeedBase(speed: Double) -> any CustomAnimation {
+        CustomAnimationModifiedContent(base: base, modifier: SpeedAnimation(speed: speed))
+    }
+
+    override func makeRepeatBase(repeatCount: Int?, autoreverses: Bool) -> any CustomAnimation {
+        CustomAnimationModifiedContent(
+            base: base,
+            modifier: RepeatAnimation(repeatCount: repeatCount, autoreverses: autoreverses)
+        )
     }
 
     override var description: String {
@@ -1435,6 +1893,14 @@ final class FluidSpringAnimationBox: AnimationBoxBase, @unchecked Sendable {
             "blendDuration: \(blendDuration))"
     }
 
+    override func makeBaseValue() -> any CustomAnimation {
+        FluidSpringAnimation(
+            response: response,
+            dampingFraction: dampingFraction,
+            blendDuration: blendDuration
+        )
+    }
+
     override func isEqual(to other: AnimationBoxBase) -> Bool {
         guard let other = other as? FluidSpringAnimationBox else { return false }
         return response == other.response &&
@@ -1608,6 +2074,15 @@ final class SpringAnimationBox: AnimationBoxBase, @unchecked Sendable {
     override var description: String {
         "SpringAnimation(mass: \(mass), stiffness: \(stiffness), damping: \(damping), " +
             "initialVelocity: \(initialVelocity))"
+    }
+
+    override func makeBaseValue() -> any CustomAnimation {
+        SpringAnimation(
+            mass: mass,
+            stiffness: stiffness,
+            damping: damping,
+            initialVelocity: _Velocity(valuePerSecond: initialVelocity)
+        )
     }
 
     override func isEqual(to other: AnimationBoxBase) -> Bool {
@@ -2110,6 +2585,32 @@ extension Spring {
 }
 
 public struct Animation: Equatable, Sendable {
+    indirect enum Function {
+        case linear(TimeInterval)
+        case circularEaseIn(TimeInterval)
+        case circularEaseOut(TimeInterval)
+        case circularEaseInOut(TimeInterval)
+        case bezier(TimeInterval, CGPoint, CGPoint)
+        case spring(TimeInterval, Double, Double, Double, Double)
+        case customFunction((Double, inout AnimationContext<Double>) -> Double?)
+        case delay(TimeInterval, Function)
+        case speed(Double, Function)
+        case `repeat`(Double, Bool, Function)
+
+        static func custom<Base>(_ base: Base) -> Function where Base: CustomAnimation {
+            .customFunction { time, context in
+                base.animate(value: 1, time: time, context: &context)
+            }
+        }
+
+        var bezierForm: (duration: TimeInterval, cp1: CGPoint, cp2: CGPoint)? {
+            if case let .bezier(duration, cp1, cp2) = self {
+                return (duration, cp1, cp2)
+            }
+            return nil
+        }
+    }
+
     var box: AnimationBoxBase
 
     @usableFromInline
@@ -2159,6 +2660,10 @@ extension Animation: Hashable {
 
     public var base: any CustomAnimation {
         box.customAnimationBase
+    }
+
+    var function: Function {
+        box.function
     }
 
     public func hash(into hasher: inout Hasher) {
@@ -2454,7 +2959,7 @@ extension Animation {
         timingCurve(0.0, 0.0, 1.0, 1.0)
     }
     public static func timingCurve(_ p1x: Double, _ p1y: Double, _ p2x: Double, _ p2y: Double, duration: TimeInterval = 0.35) -> Animation {
-        let curve = UnitCurve.bezier(
+        let curve = UnitCurve.CubicSolver(
             startControlPoint: UnitPoint(x: p1x, y: p1y),
             endControlPoint: UnitPoint(x: p2x, y: p2y)
         )
@@ -2462,11 +2967,7 @@ extension Animation {
     }
 
     public static func timingCurve(_ curve: UnitCurve, duration: TimeInterval) -> Animation {
-        if let points = curve.bezierControlPointsForAnimation {
-            let bezier = UnitCurve.bezier(
-                startControlPoint: points.startControlPoint,
-                endControlPoint: points.endControlPoint
-            )
+        if let bezier = curve.cubicSolverForAnimation {
             return Animation(box: BezierAnimationBox(curve: bezier, duration: duration))
         }
         return Animation(box: UnitCurveAnimationBox(curve: curve, duration: duration))
@@ -2707,6 +3208,95 @@ extension Transaction {
 
 
 public struct UnitCurve: Sendable, Hashable {
+    struct CubicSolver: Sendable, Hashable {
+        let ax, bx, cx, ay, by, cy: Double
+
+        init(startControlPoint: UnitPoint, endControlPoint: UnitPoint) {
+            let c1x = Double(startControlPoint.x)
+            let c1y = Double(startControlPoint.y)
+            let c2x = Double(endControlPoint.x)
+            let c2y = Double(endControlPoint.y)
+            cx = 3.0 * c1x
+            bx = 3.0 * (c2x - c1x) - cx
+            ax = 1.0 - cx - bx
+            cy = 3.0 * c1y
+            by = 3.0 * (c2y - c1y) - cy
+            ay = 1.0 - cy - by
+        }
+
+        var controlPointsForAnimation: (startControlPoint: CGPoint, endControlPoint: CGPoint) {
+            let first = CGPoint(x: cx / 3.0, y: cy / 3.0)
+            let second = CGPoint(
+                x: bx / 3.0 + 2.0 * first.x,
+                y: by / 3.0 + 2.0 * first.y
+            )
+            return (first, second)
+        }
+
+        func solve(x: Double, epsilon: Double = 1e-6) -> Double {
+            if x <= 0 { return 0 }
+            if x >= 1 { return 1 }
+            return sampleY(solveCurveX(x, epsilon: epsilon))
+        }
+
+        func derivative(x: Double, epsilon: Double = 1e-6) -> Double {
+            if x <= 0 { return derivative(at: 0) }
+            if x >= 1 { return derivative(at: 1) }
+            return derivative(at: solveCurveX(x, epsilon: epsilon))
+        }
+
+        private func derivative(at t: Double) -> Double {
+            let dx = sampleDerivativeX(t)
+            let dy = sampleDerivativeY(t)
+
+            if abs(dx) > 1e-12 {
+                return dy / dx
+            }
+            if abs(dy) <= 1e-12 {
+                return t <= 0 ? 1 : 0
+            }
+            return dy > 0 ? .infinity : -.infinity
+        }
+
+        private func sampleX(_ t: Double) -> Double {
+            ((ax * t + bx) * t + cx) * t
+        }
+
+        private func sampleY(_ t: Double) -> Double {
+            ((ay * t + by) * t + cy) * t
+        }
+
+        private func sampleDerivativeX(_ t: Double) -> Double {
+            (3.0 * ax * t + 2.0 * bx) * t + cx
+        }
+
+        private func sampleDerivativeY(_ t: Double) -> Double {
+            (3.0 * ay * t + 2.0 * by) * t + cy
+        }
+
+        private func solveCurveX(_ x: Double, epsilon: Double) -> Double {
+            var t = x
+            for _ in 0..<8 {
+                let x2 = sampleX(t) - x
+                if abs(x2) < epsilon { return t }
+                let d2 = sampleDerivativeX(t)
+                if abs(d2) < 1e-6 { break }
+                t -= x2 / d2
+            }
+
+            var low: Double = 0
+            var high: Double = 1
+            t = x
+            while low < high {
+                let x2 = sampleX(t)
+                if abs(x2 - x) < epsilon { return t }
+                if x > x2 { low = t } else { high = t }
+                t = (high - low) * 0.5 + low
+            }
+            return t
+        }
+    }
+
     private enum Function: Sendable, Hashable {
         case linear
         case bezier(startControlPoint: UnitPoint, endControlPoint: UnitPoint)
@@ -2733,9 +3323,9 @@ public struct UnitCurve: Sendable, Hashable {
         case .linear:
             return progress
         case let .bezier(startControlPoint, endControlPoint):
-            return TimingFunction(
-                controlPoints: startControlPoint,
-                endControlPoint
+            return CubicSolver(
+                startControlPoint: startControlPoint,
+                endControlPoint: endControlPoint
             ).solve(x: progress)
         case .circularEaseIn:
             return 1 - sqrt(1 - progress * progress)
@@ -2757,9 +3347,9 @@ public struct UnitCurve: Sendable, Hashable {
         case .linear:
             return 1
         case let .bezier(startControlPoint, endControlPoint):
-            return TimingFunction(
-                controlPoints: startControlPoint,
-                endControlPoint
+            return CubicSolver(
+                startControlPoint: startControlPoint,
+                endControlPoint: endControlPoint
             ).derivative(x: progress)
         case .circularEaseIn:
             return Self.circularVelocity(numerator: progress, denominator: 1 - progress * progress)
@@ -2802,6 +3392,35 @@ public struct UnitCurve: Sendable, Hashable {
             return (startControlPoint, endControlPoint)
         case .circularEaseIn, .circularEaseOut, .circularEaseInOut:
             return nil
+        }
+    }
+
+    fileprivate var cubicSolverForAnimation: CubicSolver? {
+        guard let controlPoints = bezierControlPointsForAnimation else {
+            return nil
+        }
+        return CubicSolver(
+            startControlPoint: controlPoints.startControlPoint,
+            endControlPoint: controlPoints.endControlPoint
+        )
+    }
+
+    fileprivate func animationFunction(duration: TimeInterval) -> Animation.Function {
+        switch function {
+        case .linear:
+            return .linear(duration)
+        case let .bezier(startControlPoint, endControlPoint):
+            return .bezier(
+                duration,
+                CGPoint(x: startControlPoint.x, y: startControlPoint.y),
+                CGPoint(x: endControlPoint.x, y: endControlPoint.y)
+            )
+        case .circularEaseIn:
+            return .circularEaseIn(duration)
+        case .circularEaseOut:
+            return .circularEaseOut(duration)
+        case .circularEaseInOut:
+            return .circularEaseInOut(duration)
         }
     }
 

@@ -84,7 +84,7 @@ struct NullSheetAnchor<Key: PreferenceKey>: SheetAnchorProvider {
         for body: @escaping (inout SheetPreference.Value, Transaction) -> Void
     ) -> _PreferenceTransformModifier<SheetPreference.Key> {
         _PreferenceTransformModifier<SheetPreference.Key> { value in
-            body(&value, Transaction._current?.transaction ?? Transaction())
+            body(&value, Transaction.current)
         }
     }
 }

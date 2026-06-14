@@ -78,10 +78,17 @@ extension TransactionKey where Self: EnvironmentKey, Self.Value: Equatable {
 }
 
 public func withTransaction<Result>(_ transaction: Transaction, _ body: () throws -> Result) rethrows -> Result {
-    let scopedTransaction = transaction.scopedTransaction(inheritingFrom: Transaction.current)
-    let result = try Transaction.$_current.withValue(.init(transaction: scopedTransaction)) {
-        try body()
+    let previous = Transaction.ThreadStorage.current
+    let scopedTransaction = transaction.scopedTransaction(inheritingFrom: previous ?? Transaction())
+    Transaction.ThreadStorage.current = scopedTransaction
+    let result: Result
+    do {
+        result = try body()
+    } catch {
+        Transaction.ThreadStorage.current = previous
+        throw error
     }
+    Transaction.ThreadStorage.current = previous
     finalizeAnimationCompletionObserver(
         scopedTransaction.animationCompletionObserver,
         animation: scopedTransaction.effectiveAnimation
@@ -96,14 +103,33 @@ public func withTransaction<R, V>(_ keyPath: WritableKeyPath<Transaction, V>, _ 
 }
 
 extension Transaction {
-    struct _Local: @unchecked Sendable {
+    final class ThreadStorageBox {
         let transaction: Transaction
+
+        init(transaction: Transaction) {
+            self.transaction = transaction
+        }
     }
-    @TaskLocal
-    static var _current: _Local?
+
+    enum ThreadStorage {
+        private static let key = "VUI.Transaction.current"
+
+        static var current: Transaction? {
+            get {
+                (Thread.current.threadDictionary[key] as? ThreadStorageBox)?.transaction
+            }
+            set {
+                if let newValue {
+                    Thread.current.threadDictionary[key] = ThreadStorageBox(transaction: newValue)
+                } else {
+                    Thread.current.threadDictionary.removeObject(forKey: key)
+                }
+            }
+        }
+    }
 
     static var current: Transaction {
-        _current?.transaction ?? Transaction()
+        ThreadStorage.current ?? Transaction()
     }
 
     func scopedTransaction(inheritingFrom parent: Transaction) -> Transaction {
