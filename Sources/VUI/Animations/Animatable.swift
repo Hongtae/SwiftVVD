@@ -40,6 +40,7 @@ extension Animatable {
         let attr: Attribute<Self> = graph.makeStatefulRule(
             AnimatableAttribute(
                 source: value._attribute,
+                phase: inputs.phase,
                 time: inputs.time,
                 transaction: inputs.transaction,
                 environment: inputs.cachedEnvironment.value.environment
@@ -52,10 +53,9 @@ extension Animatable {
 private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
     typealias Value = AnimatedValue
 
-    var source: Attribute<AnimatedValue>
-    var time: Attribute<Time>
-    var transaction: Attribute<Transaction>
-    var environment: Attribute<EnvironmentValues>
+    var _source: Attribute<AnimatedValue>
+    var _environment: Attribute<EnvironmentValues>
+    var helper: AnimatableAttributeHelper<AnimatedValue>
 
     var startValue: AnimatedValue?
     var targetValue: AnimatedValue?
@@ -123,14 +123,18 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
 
     init(
         source: Attribute<AnimatedValue>,
+        phase: Attribute<Phase>,
         time: Attribute<Time>,
         transaction: Attribute<Transaction>,
         environment: Attribute<EnvironmentValues>
     ) {
-        self.source = source
-        self.time = time
-        self.transaction = transaction
-        self.environment = environment
+        self._source = source
+        self._environment = environment
+        self.helper = AnimatableAttributeHelper(
+            _phase: phase,
+            _time: time,
+            _transaction: transaction
+        )
     }
 
     mutating func updateValue() {
@@ -138,19 +142,19 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             fatalError("AnimatableAttribute.updateValue called outside an active AttributeGraph context.")
         }
 
-        let target = source.value
-        let inheritedTransaction = transaction.value
-        let sourceTransaction = graph.transaction(for: source.identifier)
-        let effectiveTransaction = sourceTransaction ?? inheritedTransaction
+        if helper.checkReset() {
+            resetAnimationStateForPhaseChange()
+        }
+
+        let target = _source.value
+        let effectiveTransaction = helper.effectiveTransaction(source: _source, in: graph)
 
         if currentValue == nil {
             finishValue(with: target)
             return
         }
 
-        let targetChanged = targetValue.map {
-            $0.animatableData != target.animatableData
-        } ?? true
+        let targetChanged = helper.hasModelDataChanged(target.animatableData)
 
         if targetChanged {
             guard let animation = effectiveTransaction.effectiveAnimation else {
@@ -167,7 +171,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
                 )
                 return
             }
-            let now = time.value
+            let now = helper._time.value
             let start = currentValue ?? target
             guard start.animatableData != target.animatableData else {
                 finishValue(with: target)
@@ -510,6 +514,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             }
             startValue = activeStart
             targetValue = target
+            helper.updatePreviousModelData(target.animatableData)
             currentValue = start
             startTime = activeStartTime
             self.animation = activeAnimation
@@ -528,13 +533,13 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             }
             return
         }
-        let now = time.value
+        let now = helper._time.value
         let elapsed = max(now.seconds - startTime.seconds, 0)
         var context = makeAnimationContext(
             for: AnimatedValue.self,
             state: animationState,
             isLogicallyComplete: animationContextIsLogicallyComplete,
-            environment: environment.value
+            environment: _environment.value
         )
         let baseValue = sampledBaseStackValue(at: now) ?? startValue
         let delta = animatableDelta(from: baseValue, to: targetValue)
@@ -606,6 +611,28 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         enqueueAnimationCompletionActions(completions)
     }
 
+    private mutating func resetAnimationStateForPhaseChange() {
+        startValue = nil
+        targetValue = nil
+        currentValue = nil
+        animation = nil
+        animationState = AnimationState()
+        mergeState = AnimationState()
+        animationContextIsLogicallyComplete = false
+        updatesMergeStateWithAnimation = true
+        baseLayers.removeAll()
+        samplingLayers.removeAll()
+        customReplacementCompletionGroup = nil
+        combinedResidualCompletionGroup = nil
+        combinedFiniteCompletionGroup = nil
+        velocityTrackingImmediateCompletionGroup = nil
+        contextLogicalCompletionSuppressedGenerations.removeAll()
+        currentGeneration = nil
+        nextGeneration = 1
+        let completions = finishAllCompletionRecords()
+        enqueueAnimationCompletionActions(completions)
+    }
+
     private mutating func continueAnimationAfterNoAnimationRetarget(to target: AnimatedValue) -> Bool {
         guard animation != nil,
               let startValue,
@@ -619,6 +646,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             self.currentValue = applying(delta: retargetDelta, to: currentValue, target: target)
         }
         targetValue = target
+        helper.updatePreviousModelData(target.animatableData)
         return true
     }
 
@@ -626,7 +654,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         with value: AnimatedValue,
         transaction: Transaction
     ) {
-        let now = time.value
+        let now = helper._time.value
         sampleActiveAnimationBeforeImmediateReplacement(at: now)
 
         let replacementGeneration = nextGeneration
@@ -657,6 +685,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
 
         startValue = nil
         targetValue = value
+        helper.updatePreviousModelData(value.animatableData)
         currentValue = value
         animation = nil
         animationState = AnimationState()
@@ -700,7 +729,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             for: AnimatedValue.self,
             state: animationState,
             isLogicallyComplete: animationContextIsLogicallyComplete,
-            environment: environment.value
+            environment: _environment.value
         )
         _ = animation.box.animate(
             value: animatableDelta(from: startValue, to: targetValue),
@@ -712,6 +741,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
     private mutating func finishValue(with value: AnimatedValue) {
         startValue = nil
         targetValue = value
+        helper.updatePreviousModelData(value.animatableData)
         currentValue = value
         animation = nil
         animationState = AnimationState()
@@ -728,7 +758,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         currentGeneration = nil
         AttributeGraph.setStatefulOutput(value)
         guard !completionRecords.isEmpty else { return }
-        let now = time.value
+        let now = helper._time.value
         let completions = finishDueCompletionRecords(at: now)
         enqueueAnimationCompletionActions(completions)
     }
@@ -740,6 +770,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
     ) {
         startValue = nil
         targetValue = value
+        helper.updatePreviousModelData(value.animatableData)
         currentValue = value
         animation = nil
         animationContextIsLogicallyComplete = false
@@ -855,6 +886,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         startValue = nil
         if let finalValue {
             targetValue = finalValue
+            helper.updatePreviousModelData(finalValue.animatableData)
             currentValue = finalValue
         }
         animation = nil
@@ -1039,7 +1071,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             for: AnimatedValue.self,
             state: animationState,
             isLogicallyComplete: animationContextIsLogicallyComplete,
-            environment: environment.value
+            environment: _environment.value
         )
         guard let animatedDelta = animation.box.animate(
             value: animatableDelta(from: startValue, to: targetValue),
@@ -1084,7 +1116,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
                 for: AnimatedValue.self,
                 state: layer.state,
                 isLogicallyComplete: layer.contextIsLogicallyComplete,
-                environment: environment.value
+                environment: _environment.value
             )
             let animatedDelta = layer.animation.box.animate(
                 value: animatableDelta(from: baseValue, to: layer.targetValue),
@@ -1143,7 +1175,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
                 for: AnimatedValue.self,
                 state: layer.state,
                 isLogicallyComplete: layer.contextIsLogicallyComplete,
-                environment: environment.value
+                environment: _environment.value
             )
             let animatedDelta = layer.animation.box.animate(
                 value: animatableDelta(from: baseValue, to: layer.targetValue),
@@ -1207,6 +1239,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         startValue = nil
         if let finalValue {
             targetValue = finalValue
+            helper.updatePreviousModelData(finalValue.animatableData)
             currentValue = finalValue
             AttributeGraph.setStatefulOutput(finalValue)
         }
@@ -1718,7 +1751,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             for: AnimatedValue.self,
             state: mergeState,
             isLogicallyComplete: animationContextIsLogicallyComplete,
-            environment: environment.value
+            environment: _environment.value
         )
         let shouldMerge = newAnimation.box.shouldMerge(
             previous: previousAnimation,
@@ -1736,6 +1769,41 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             animationContextIsLogicallyComplete = false
         }
         return shouldMerge
+    }
+}
+
+private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
+    var _phase: Attribute<Phase>
+    var _time: Attribute<Time>
+    var _transaction: Attribute<Transaction>
+    var previousModelData: AnimatedValue.AnimatableData?
+    var resetSeed: UInt32 = 0
+
+    mutating func checkReset() -> Bool {
+        let currentResetSeed = _phase.value.resetSeed
+        guard currentResetSeed != resetSeed else { return false }
+        reset(to: currentResetSeed)
+        return true
+    }
+
+    func hasModelDataChanged(_ data: AnimatedValue.AnimatableData) -> Bool {
+        previousModelData.map { $0 != data } ?? true
+    }
+
+    mutating func updatePreviousModelData(_ data: AnimatedValue.AnimatableData) {
+        previousModelData = data
+    }
+
+    private mutating func reset(to currentResetSeed: UInt32) {
+        previousModelData = nil
+        resetSeed = currentResetSeed
+    }
+
+    func effectiveTransaction(
+        source: Attribute<AnimatedValue>,
+        in graph: AttributeGraph
+    ) -> Transaction {
+        graph.transaction(for: source.identifier) ?? _transaction.value
     }
 }
 

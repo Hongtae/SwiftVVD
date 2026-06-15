@@ -60,9 +60,15 @@ struct FunctionalLocation<Value>: _Location {
         var setValue: (Value, Transaction)->Void
     }
     let functions: Functions
+    let marksMutation: Bool
 
-    init(get: @escaping ()->Value, set: @escaping (Value, Transaction)->Void) {
+    init(
+        get: @escaping ()->Value,
+        set: @escaping (Value, Transaction)->Void,
+        marksMutation: Bool = true
+    ) {
         self.functions = Functions(getValue: get, setValue: set)
+        self.marksMutation = marksMutation
     }
 
     func getValue() -> Value {
@@ -70,6 +76,9 @@ struct FunctionalLocation<Value>: _Location {
     }
 
     func setValue(_ value: Value, transaction: Transaction) {
+        if marksMutation {
+            Transaction.ThreadStorage.markMutation(for: transaction)
+        }
         functions.setValue(value, transaction)
     }
 }
@@ -91,6 +100,7 @@ struct StoredLocation<Value>: _Location {
         _value
     }
     mutating func setValue(_ value: Value, transaction: Transaction) {
+        Transaction.ThreadStorage.markMutation(for: transaction)
         self._value = value
         self.valueUpdated(value)
     }
@@ -107,6 +117,7 @@ struct ObservableLocation<Value>: _Location {
         _value
     }
     func setValue(_ value: Value, transaction: Transaction) {
+        Transaction.ThreadStorage.markMutation(for: transaction)
         self.valueUpdated(value)
     }
 }

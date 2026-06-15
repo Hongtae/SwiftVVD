@@ -527,7 +527,10 @@ private struct DynamicContainerInfo: StatefulRule {
             item.setTransitionPhase(.didDisappear, transaction: removalTransaction)
             listener.readSeed()
             enqueueAnimationCompletionActions(observer?.bodyDidFinish() ?? [])
-            enqueueNoRegisteredAnimationFallback(observer)
+            enqueueNoRegisteredAnimationFallback(
+                observer,
+                animation: removalTransaction.effectiveAnimation
+            )
 
             item.removalOrder = removedItems.count
             removedItems.append(item)

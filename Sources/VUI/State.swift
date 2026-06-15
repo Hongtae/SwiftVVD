@@ -8,6 +8,19 @@
 import Foundation
 import Observation
 
+@usableFromInline
+func _stateValuesAreKnownEqual<Value>(_ lhs: Value, _ rhs: Value) -> Bool {
+    guard let lhs = lhs as? AnyHashable,
+          let rhs = rhs as? AnyHashable else {
+        return withUnsafeBytes(of: lhs) { lhsBytes in
+            withUnsafeBytes(of: rhs) { rhsBytes in
+                lhsBytes.elementsEqual(rhsBytes)
+            }
+        }
+    }
+    return lhs == rhs
+}
+
 @propertyWrapper public struct State<Value>: DynamicProperty {
     @usableFromInline
     var _value: Value
@@ -127,13 +140,18 @@ extension State {
                     return cache.value
                 },
                 set: { newValue, transaction in
+                    if _stateValuesAreKnownEqual(cache.value, newValue) {
+                        return
+                    }
                     cache.value = newValue
+                    Transaction.ThreadStorage.markMutation(for: transaction)
                     let box = UnsafeBox(newValue)
                     let transactionBox = UnsafeBox(transaction)
                     inbox.enqueue {
                         attr.setValue(box.value, transaction: transactionBox.value)
                     }
-                }
+                },
+                marksMutation: false
             ))
             mountedLocation.value = location
             var s = currentState

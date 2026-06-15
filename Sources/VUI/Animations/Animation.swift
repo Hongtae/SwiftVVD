@@ -109,6 +109,7 @@ class AnimationBoxBase: CustomAnimation, CustomStringConvertible, @unchecked Sen
         time: TimeInterval,
         context: inout AnimationContext<Value>
     ) -> Value? where Value: VectorArithmetic {
+        guard !time.isNaN else { return nil }
         guard !isImmediatelyComplete else {
             context.isLogicallyComplete = true
             return nil
@@ -2784,9 +2785,12 @@ final class AnimationCompletionObserver: @unchecked Sendable {
         guard bodyFinished else { return [] }
         let pendingEntries = entries.filter { !completedCriteria.contains($0.criteria) }
         guard let firstCriteria = pendingEntries.first?.criteria else { return [] }
+        let hasMultipleCriteria = pendingEntries.contains { $0.criteria != firstCriteria }
         let primary = pendingEntries
             .filter { $0.criteria == firstCriteria }
-            .sorted { $0.order > $1.order }
+            .sorted {
+                hasMultipleCriteria ? $0.order > $1.order : $0.order < $1.order
+            }
         let remaining = pendingEntries
             .filter { $0.criteria != firstCriteria }
             .sorted { $0.order < $1.order }
@@ -2910,9 +2914,23 @@ func enqueueNoRegisteredAnimationFallback(
 
 func finalizeAnimationCompletionObserver(
     _ observer: AnimationCompletionObserver?,
-    animation: Animation? = nil
+    animation: Animation? = nil,
+    bodyDidMutate: Bool = true,
+    immediateNoMutationCompletion: Bool = false
 ) {
     enqueueAnimationCompletionActions(observer?.bodyDidFinish() ?? [])
+    guard bodyDidMutate else {
+        if immediateNoMutationCompletion {
+            enqueueAnimationCompletionActions(
+                observer?.noRegisteredAnimationFallbackDidFire(
+                    usesAnimatedOrdering: false
+                ) ?? []
+            )
+        } else {
+            enqueueNoRegisteredAnimationFallback(observer, animation: nil)
+        }
+        return
+    }
     enqueueNoRegisteredAnimationFallback(observer, animation: animation)
 }
 
@@ -3129,7 +3147,11 @@ public func withAnimation<Result>(
     _ animation: Animation? = .default,
     _ body: () throws -> Result
 ) rethrows -> Result {
-    try withTransaction(Transaction(animation: animation), body)
+    try withTransaction(
+        Transaction(animation: animation),
+        immediateNoMutationCompletion: true,
+        body
+    )
 }
 
 public func withAnimation<Result>(
@@ -3140,7 +3162,11 @@ public func withAnimation<Result>(
 ) rethrows -> Result {
     var transaction = Transaction(animation: animation)
     transaction.addAnimationCompletion(criteria: completionCriteria, completion)
-    return try withTransaction(transaction, body)
+    return try withTransaction(
+        transaction,
+        immediateNoMutationCompletion: true,
+        body
+    )
 }
 
 private struct AnimationTransactionKey: TransactionKey {

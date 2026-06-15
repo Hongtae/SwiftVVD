@@ -66,9 +66,14 @@ extension View {
             withObservationTracking {
                 result = viewCopy.body
             } onChange: { [weak inbox, handle] in
+                let transactionBox = UnsafeBox(Transaction.current)
                 inbox?.enqueue {
                     if let id = handle.value {
-                        AttributeGraph.current?.markNeedsEvaluation(id)
+                        AttributeGraph.current?.markNeedsEvaluation(
+                            id,
+                            transaction: transactionBox.value,
+                            propagateTransaction: !transactionBox.value.isEmpty
+                        )
                     }
                 }
             }
@@ -113,9 +118,14 @@ extension View {
             withObservationTracking {
                 result = viewCopy.body
             } onChange: { [weak inbox, handle] in
+                let transactionBox = UnsafeBox(Transaction.current)
                 inbox?.enqueue {
                     if let id = handle.value {
-                        AttributeGraph.current?.markNeedsEvaluation(id)
+                        AttributeGraph.current?.markNeedsEvaluation(
+                            id,
+                            transaction: transactionBox.value,
+                            propagateTransaction: !transactionBox.value.isEmpty
+                        )
                     }
                 }
             }

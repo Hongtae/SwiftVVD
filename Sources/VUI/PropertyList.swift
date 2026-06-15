@@ -147,6 +147,25 @@ extension PropertyList {
     mutating func setValue<T: PropertyKey>(_ value: T.Value, forKey key: T.Type) {
         self[key] = value
     }
+
+    func forEachValue<Value>(ofType valueType: Value.Type,
+                             _ body: (any PropertyKey.Type, Value) -> Bool) -> Bool {
+        var seenKeys = Set<ObjectIdentifier>()
+        var element = self.elements
+        while let current = element {
+            // PropertyList keeps older nodes for the same key as shadowed tail
+            // entries. Typed iteration must visit only the first live value per
+            // key, otherwise a popped stack can still look non-empty through an
+            // obsolete tail node.
+            let keyID = ObjectIdentifier(current.keyType)
+            if seenKeys.insert(keyID).inserted,
+               current.visitValue(ofType: valueType, body) {
+                return true
+            }
+            element = current.after
+        }
+        return false
+    }
 }
 
 // Base protocol for PropertyList key types.
@@ -204,6 +223,11 @@ extension PropertyList {
 
         // Rebuild this node with `tail` at the end of the chain (subclass must override).
         func rebuilt(appending tail: Element?) -> Element { fatalError("TypedElement must override rebuilt(appending:)") }
+
+        func visitValue<Value>(ofType valueType: Value.Type,
+                               _ body: (any PropertyKey.Type, Value) -> Bool) -> Bool {
+            false
+        }
     }
 
     // Typed subclass — value is stored with the concrete Value type rather than Any.
@@ -223,6 +247,12 @@ extension PropertyList {
         override func rebuilt(appending tail: Element?) -> Element {
             TypedElement<T>(key: T.self, value: value,
                             after: after?.rebuilt(appending: tail) ?? tail)
+        }
+
+        override func visitValue<Value>(ofType valueType: Value.Type,
+                                        _ body: (any PropertyKey.Type, Value) -> Bool) -> Bool {
+            guard let typedValue = value as? Value else { return false }
+            return body(T.self, typedValue)
         }
     }
 

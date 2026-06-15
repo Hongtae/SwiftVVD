@@ -135,7 +135,7 @@ private final class ModalPresentationContext: @unchecked Sendable {
         return track.value(at: rawProgress)
     }
 
-    private func resolvedDuration(for transaction: Transaction) -> Double {
+    private func resolvedPresentDuration(for transaction: Transaction) -> Double {
         // An explicit nil animation keeps modal completion on the immediate
         // fallback path. A disabled transaction can still carry an explicit
         // animation that owns the modal timing boundary.
@@ -145,7 +145,25 @@ private final class ModalPresentationContext: @unchecked Sendable {
         guard let animation = transaction.effectiveAnimation else {
             return transitionDuration
         }
-        return max(0, animation.box.duration)
+        let animationDuration = max(0, animation.box.duration)
+        guard animationDuration > 0 else {
+            return 0
+        }
+        return animationDuration + transitionDuration
+    }
+
+    private func resolvedDismissDuration(for transaction: Transaction) -> Double {
+        if transaction.hasExplicitAnimationValue && transaction.animation == nil {
+            return 0
+        }
+        guard let animation = transaction.effectiveAnimation else {
+            return transitionDuration
+        }
+        let animationDuration = max(0, animation.box.duration)
+        guard animationDuration > 0 else {
+            return 0
+        }
+        return animationDuration + transitionDuration
     }
 
     private func completionTokens(
@@ -304,7 +322,7 @@ private final class ModalPresentationContext: @unchecked Sendable {
     func beginPresentAnimation(controller: WindowController,
                                transaction: Transaction) {
         pendingDismissal = nil
-        let duration = resolvedDuration(for: transaction)
+        let duration = resolvedPresentDuration(for: transaction)
         let completionTokens = completionTokens(
             for: transaction,
             duration: duration,
@@ -324,7 +342,7 @@ private final class ModalPresentationContext: @unchecked Sendable {
 
     private func beginDismissAnimation(transaction: Transaction,
                                        completion: @escaping () -> Void) {
-        let duration = resolvedDuration(for: transaction)
+        let duration = resolvedDismissDuration(for: transaction)
         let completionTokens = completionTokens(
             for: transaction,
             duration: duration,

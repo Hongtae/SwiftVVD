@@ -87,25 +87,39 @@ struct Time {
 }
 
 /// Render phase passed through the AG graph.
-/// Stored: isBeingRemoved: Bool, resetSeed: UInt32.
-/// Computed: isInserted (derived from stored fields).
-/// Total size: 8 bytes (Bool + 3-byte pad + UInt32).
+/// Stored as one UInt32: bit 0 is the removal flag, bits 1...31 are resetSeed.
 struct Phase {
-    var isBeingRemoved: Bool = false
-    var resetSeed: UInt32 = 0
+    var rawValue: UInt32 = 0
 
-    var isInserted: Bool { !isBeingRemoved && resetSeed != 0 }
+    var isBeingRemoved: Bool {
+        get { (rawValue & 0x1) != 0 }
+        set {
+            if newValue {
+                rawValue |= 0x1
+            } else {
+                rawValue &= ~UInt32(0x1)
+            }
+        }
+    }
 
-    static var invalid: Phase { Phase() }
+    var resetSeed: UInt32 {
+        get { rawValue >> 1 }
+        set { rawValue = (rawValue & 0x1) | (newValue &<< 1) }
+    }
+
+    var isInserted: Bool { !isBeingRemoved }
+
+    static var invalid: Phase { Phase(value: UInt32(bitPattern: Int32(-16))) }
 
     init() {}
     init(value: UInt32) {
-        self.resetSeed = value
+        self.rawValue = value
     }
 
     mutating func merge(_ other: Phase) {
-        if other.isBeingRemoved { isBeingRemoved = true }
-        if other.resetSeed != 0 { resetSeed = other.resetSeed }
+        let preservedRemoval = rawValue & 0x1
+        let seedBits = rawValue & ~UInt32(0x1)
+        rawValue = (seedBits &+ other.rawValue) | preservedRemoval
     }
 }
 
@@ -249,9 +263,12 @@ public struct _GraphInputs {
         customInputs.value(forKey: key).top
     }
 
-    /// Returns true if any BodyInput<T> stack in customInputs is non-empty.
-    /// Full PropertyList body-stack scanning is not implemented yet.
-    var containsNonEmptyBodyStack: Bool { false }
+    /// Returns true when any current BodyInput<T> stack in customInputs is non-empty.
+    var containsNonEmptyBodyStack: Bool {
+        customInputs.forEachValue(ofType: Stack<BodyInputElement>.self) { _, stack in
+            !stack.isEmpty
+        }
+    }
 
     // MARK: - merge(_:ignoringPhase:)
     //
@@ -356,8 +373,7 @@ struct MergedTransaction: Rule {
     }
 }
 
-// Merges two Phases: isBeingRemoved OR'd, resetSeed updated when other is nonzero.
-// Phase.merge(_:) keeps the isBeingRemoved/resetSeed field semantics.
+// Merges two Phases while preserving the receiver removal bit.
 struct MergedPhase: Rule {
     typealias Value = Phase
     let selfWeak: AGWeakAttribute

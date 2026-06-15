@@ -2,7 +2,7 @@
 //  File: Binding.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -11,20 +11,49 @@ import Foundation
     public var transaction: Transaction
     var location: AnyLocation<Value>
     var _value: Value
+    var passesLocalTransactionToSetter: Bool
+    var finalizesLocalTransactionAfterSetter: Bool
 
     public init(get: @escaping () -> Value, set: @escaping (Value) -> Void) {
         self.transaction = Transaction()
+        self.passesLocalTransactionToSetter = false
+        self.finalizesLocalTransactionAfterSetter = true
         self.location = LocationBox(location: FunctionalLocation(
             get: get,
             set: { value, transaction in
                 set(value)
-            }))
+            },
+            marksMutation: false
+        ))
         self._value = self.location.getValue()
     }
 
     public init(get: @escaping () -> Value, set: @escaping (Value, Transaction) -> Void) {
         self.transaction = Transaction()
-        self.location = LocationBox(location: FunctionalLocation(get: get, set: set))
+        self.passesLocalTransactionToSetter = true
+        self.finalizesLocalTransactionAfterSetter = true
+        self.location = LocationBox(location: FunctionalLocation(
+            get: get,
+            set: set,
+            marksMutation: false
+        ))
+        self._value = self.location.getValue()
+    }
+
+    init(
+        get: @escaping () -> Value,
+        set: @escaping (Value, Transaction) -> Void,
+        passesLocalTransactionToSetter: Bool,
+        finalizesLocalTransactionAfterSetter: Bool
+    ) {
+        self.transaction = Transaction()
+        self.passesLocalTransactionToSetter = passesLocalTransactionToSetter
+        self.finalizesLocalTransactionAfterSetter = finalizesLocalTransactionAfterSetter
+        self.location = LocationBox(location: FunctionalLocation(
+            get: get,
+            set: set,
+            marksMutation: false
+        ))
         self._value = self.location.getValue()
     }
 
@@ -32,6 +61,8 @@ import Foundation
         self.transaction = Transaction()
         self.location = location
         self._value = location.getValue()
+        self.passesLocalTransactionToSetter = false
+        self.finalizesLocalTransactionAfterSetter = false
     }
 
     public static func constant(_ value: Value) -> Binding<Value> {
@@ -43,7 +74,15 @@ import Foundation
             location.getValue()
         }
         nonmutating set {
-            location.setValue(newValue, transaction: resolvedTransaction)
+            let shouldFinalizeLocalTransactionAfterSetter =
+                finalizesLocalTransactionAfterSetter
+                && !transaction.isEmpty
+                && (passesLocalTransactionToSetter || Transaction.current.isEmpty)
+            let setterTransaction = passesLocalTransactionToSetter ? transaction : resolvedTransaction
+            location.setValue(newValue, transaction: setterTransaction)
+            if shouldFinalizeLocalTransactionAfterSetter {
+                finalizeAnimationCompletionObserver(transaction.animationCompletionObserver)
+            }
         }
     }
 
@@ -66,7 +105,12 @@ import Foundation
             enclosingValue[keyPath: keyPath] = value
             location.setValue(enclosingValue, transaction: transaction)
         }
-        return Binding<Subject>(get: getter, set: setter)
+        return Binding<Subject>(
+            get: getter,
+            set: setter,
+            passesLocalTransactionToSetter: false,
+            finalizesLocalTransactionAfterSetter: false
+        )
     }
 }
 

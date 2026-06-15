@@ -1449,6 +1449,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         var contentAttr: Attribute<AnyView>? = nil
         var attachWindow: AttachWindowResolver? = nil
         var presentationTransaction: Transaction = Transaction()
+        var dismissCallbackDelivered: Bool = false
     }
     private let modalChildren = Mutex<[ModalChildEntry]>([])
 
@@ -1708,9 +1709,25 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                guard let self, let child else { return }
                self.removeModal(child: child, reason: reason)
            }) {
+            deliverSheetDismissCallbackIfNeeded(child: child, reason: reason)
             return
         }
         removeModal(child: child, reason: reason)
+    }
+
+    private func deliverSheetDismissCallbackIfNeeded(child: ModalWindowController,
+                                                     reason: ModalDismissReason) {
+        var sessionToNotify: PresentationSession?
+        modalChildren.withLock { entries in
+            guard let index = entries.firstIndex(where: { $0.controller === child }),
+                  !entries[index].dismissCallbackDelivered,
+                  case .sheet = entries[index].session else {
+                return
+            }
+            entries[index].dismissCallbackDelivered = true
+            sessionToNotify = entries[index].session
+        }
+        sessionToNotify?.cleanup(reason: reason)
     }
 
     // Immediately remove a modal (active or queued) and clean up its session / callbacks.
@@ -1739,7 +1756,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         child.endPresentationSession()
 
         // Preference-driven: clean up binding + onDismiss.
-        e.session.cleanup(reason: reason)
+        e.session.cleanup(reason: reason, notifyDismiss: !e.dismissCallbackDelivered)
 
         if wasFirst { _showNextInQueue() }
     }

@@ -34,7 +34,7 @@ class AppGraph<A: App>: @unchecked Sendable {
         AttributeGraph.$current.withValue(graph) {
             // Stub AG input nodes for _GraphInputs fields.
             let timeAttr        = graph.makeInput(value: time)
-            let phaseAttr       = graph.makeInput(value: Phase(value: 1))
+            let phaseAttr       = graph.makeInput(value: Phase())
             let transactionAttr = graph.makeInput(value: Transaction())
             let envAttr         = graph.makeInput(value: EnvironmentValues())
 

@@ -78,20 +78,42 @@ extension TransactionKey where Self: EnvironmentKey, Self.Value: Equatable {
 }
 
 public func withTransaction<Result>(_ transaction: Transaction, _ body: () throws -> Result) rethrows -> Result {
-    let previous = Transaction.ThreadStorage.current
-    let scopedTransaction = transaction.scopedTransaction(inheritingFrom: previous ?? Transaction())
-    Transaction.ThreadStorage.current = scopedTransaction
+    try withTransaction(
+        transaction,
+        immediateNoMutationCompletion: false,
+        body
+    )
+}
+
+func withTransaction<Result>(
+    _ transaction: Transaction,
+    immediateNoMutationCompletion: Bool,
+    _ body: () throws -> Result
+) rethrows -> Result {
+    let previous = Transaction.ThreadStorage.currentBox
+    let parentTransaction = previous?.transaction ?? Transaction()
+    let scopedTransaction = transaction.scopedTransaction(inheritingFrom: parentTransaction)
+    let scopedBox = Transaction.ThreadStorageBox(transaction: scopedTransaction)
+    Transaction.ThreadStorage.currentBox = scopedBox
     let result: Result
     do {
         result = try body()
     } catch {
-        Transaction.ThreadStorage.current = previous
+        Transaction.ThreadStorage.currentBox = previous
+        finalizeAnimationCompletionObserver(
+            scopedTransaction.animationCompletionObserver,
+            animation: scopedTransaction.effectiveAnimation,
+            bodyDidMutate: scopedBox.bodyDidMutate,
+            immediateNoMutationCompletion: immediateNoMutationCompletion
+        )
         throw error
     }
-    Transaction.ThreadStorage.current = previous
+    Transaction.ThreadStorage.currentBox = previous
     finalizeAnimationCompletionObserver(
         scopedTransaction.animationCompletionObserver,
-        animation: scopedTransaction.effectiveAnimation
+        animation: scopedTransaction.effectiveAnimation,
+        bodyDidMutate: scopedBox.bodyDidMutate,
+        immediateNoMutationCompletion: immediateNoMutationCompletion
     )
     return result
 }
@@ -105,6 +127,7 @@ public func withTransaction<R, V>(_ keyPath: WritableKeyPath<Transaction, V>, _ 
 extension Transaction {
     final class ThreadStorageBox {
         let transaction: Transaction
+        var bodyDidMutate = false
 
         init(transaction: Transaction) {
             self.transaction = transaction
@@ -114,17 +137,38 @@ extension Transaction {
     enum ThreadStorage {
         private static let key = "VUI.Transaction.current"
 
-        static var current: Transaction? {
+        static var currentBox: ThreadStorageBox? {
             get {
-                (Thread.current.threadDictionary[key] as? ThreadStorageBox)?.transaction
+                Thread.current.threadDictionary[key] as? ThreadStorageBox
             }
             set {
                 if let newValue {
-                    Thread.current.threadDictionary[key] = ThreadStorageBox(transaction: newValue)
+                    Thread.current.threadDictionary[key] = newValue
                 } else {
                     Thread.current.threadDictionary.removeObject(forKey: key)
                 }
             }
+        }
+
+        static var current: Transaction? {
+            get {
+                currentBox?.transaction
+            }
+            set {
+                if let newValue {
+                    currentBox = ThreadStorageBox(transaction: newValue)
+                } else {
+                    currentBox = nil
+                }
+            }
+        }
+
+        static func markMutation(for transaction: Transaction) {
+            guard let currentBox,
+                  currentBox.transaction.animationCompletionObserver === transaction.animationCompletionObserver else {
+                return
+            }
+            currentBox.bodyDidMutate = true
         }
     }
 

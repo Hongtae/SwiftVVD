@@ -290,7 +290,7 @@ class ViewGraph: ViewGraphHost {
             let contentGV = makeContent(g)
 
             let timeAttr        = g.makeInput(value: time)
-            let phaseAttr       = g.makeInput(value: Phase(value: 1))
+            let phaseAttr       = g.makeInput(value: Phase())
             let transactionAttr = g.makeInput(value: Transaction())
             let envAttr         = g.makeInput(value: EnvironmentValues())
             let graphInputs = _GraphInputs(
