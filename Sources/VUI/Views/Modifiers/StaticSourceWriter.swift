@@ -12,10 +12,6 @@
 //   MenuStyleConfiguration.Label/Content, etc.
 protocol ViewAlias: View {}
 
-// _ViewListCountInputs: empty struct used as the inputs parameter for
-// AnySourceFormula.viewListCount(source:inputs:).
-public struct _ViewListCountInputs {}
-
 // AnySourceFormula: protocol for type-erased view dispatch.
 // SourceFormula<T> conforms via its metatype stored in AnySource.formula.
 // The `view` parameter carries the alias view's _GraphValue (e.g. Label's node).

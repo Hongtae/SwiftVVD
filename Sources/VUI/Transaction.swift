@@ -211,6 +211,11 @@ private struct AnimationFrameIntervalKey: TransactionKey {
     static let defaultValue: Double? = nil
 }
 
+// Animation scheduling reason key
+private struct AnimationReasonKey: TransactionKey {
+    static let defaultValue: UInt32? = nil
+}
+
 // Content transition key
 private struct DisablesContentTransitionsKey: TransactionKey {
     static let defaultValue: Bool = false
@@ -242,6 +247,11 @@ extension Transaction {
     var animationFrameInterval: Double? {
         get { self[AnimationFrameIntervalKey.self] }
         set { self[AnimationFrameIntervalKey.self] = newValue }
+    }
+
+    var animationReason: UInt32? {
+        get { self[AnimationReasonKey.self] }
+        set { self[AnimationReasonKey.self] = newValue }
     }
 
     var disablesContentTransitions: Bool {

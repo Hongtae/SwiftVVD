@@ -1005,10 +1005,15 @@ private extension Layout {
 
 private extension Layout {
     @inline(__always)
-    mutating func _setAnimatableData(_ data: AnyLayout.AnimatableData) {
-        assert(data.value is Self.AnimatableData)
-        self.animatableData = data.value as! Self.AnimatableData
+    func _makeAnyAnimatableData() -> AnyLayout.AnimatableData {
+        AnyLayout.AnimatableData(self)
     }
+
+    @inline(__always)
+    mutating func _setAnimatableData(_ data: AnyLayout.AnimatableData) {
+        data.update(&self)
+    }
+
     @inline(__always)
     func _updateCache(_ cache: inout AnyLayout.Cache,
                       subviews: AnyLayout.Subviews) {
@@ -1093,7 +1098,7 @@ public struct AnyLayout: Layout {
     }
 
     public var animatableData: AnimatableData {
-        get { AnimatableData(self.layout.animatableData) }
+        get { self.layout._makeAnyAnimatableData() }
         set { self.layout._setAnimatableData(newValue) }
     }
 

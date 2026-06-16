@@ -56,6 +56,41 @@ struct BodyInput<Content>: ViewInput {
     static var isTriviallyReusable: Bool { true }
 }
 
+// MARK: - BodyCountInput<Content>
+// Count-only companion to BodyInput. It carries the body count closure while
+// a modifier body's `_viewListCount` asks `_ViewModifier_Content` for the
+// modified content count.
+struct BodyCountInput<Content>: GraphInput {
+    typealias CountBody = (_ViewListCountInputs) -> Int?
+    typealias Value = Stack<CountBody>
+
+    static var defaultValue: Stack<CountBody> { .empty }
+    static func valuesEqual(_ a: Value, _ b: Value) -> Bool { false }
+    static var isTriviallyReusable: Bool { true }
+}
+
+extension _ViewListCountInputs {
+    static func withBodyCache<Content>(
+        type: Content.Type,
+        inputs: _ViewListCountInputs,
+        content: (_ViewListCountInputs) -> Int?,
+        body: @escaping (_ViewListCountInputs) -> Int?
+    ) -> Int? {
+        var inputs = inputs
+        inputs.append(body, to: BodyCountInput<Content>.self)
+        return content(inputs)
+    }
+
+    @usableFromInline
+    func cachedViewListCount<Content>(type: Content.Type) -> Int? {
+        var inputs = self
+        guard let body: BodyCountInput<Content>.CountBody = inputs.popLast(BodyCountInput<Content>.self) else {
+            return nil
+        }
+        return body(inputs)
+    }
+}
+
 // MARK: - ViewModifierContentProvider
 // Protocol adopted by _ViewModifier_Content<Modifier>.
 // providerMakeView: pops a BodyInputElement from the base stack and calls it.
@@ -84,15 +119,15 @@ extension _ViewModifier_Content: View {
         Self.providerMakeViewList(view: view, inputs: inputs)
     }
 
-    // Count resolution falls back to body(inputs), which may return a dynamic/unknown count.
+    // Count resolution reads the matching BodyCountInput stack entry.
     public static func _viewListCount(inputs: _ViewListCountInputs, body: (_ViewListCountInputs) -> Int?) -> Int? {
-        body(inputs)
+        _viewListCount(inputs: inputs)
     }
 
     // Always-emitted client wrapper.
     @_alwaysEmitIntoClient
     public static func _viewListCount(inputs: _ViewListCountInputs) -> Int? {
-        _viewListCount(inputs: inputs) { _ in nil }
+        inputs.cachedViewListCount(type: Self.self)
     }
 }
 
@@ -179,9 +214,24 @@ extension ViewModifier {
         body(content: _ViewModifier_Content())
     }
 
-    // Default count handling delegates to the modified content.
+    // Default count handling evaluates the modifier body, which asks
+    // _ViewModifier_Content to read the body count closure from BodyCountInput.
     public static func _viewListCount(inputs: _ViewListCountInputs, body: (_ViewListCountInputs) -> Int?) -> Int? {
-        body(inputs)
+        withoutActuallyEscaping(body) { body in
+            viewListCount(inputs: inputs, body: body)
+        }
+    }
+
+    static func viewListCount(
+        inputs: _ViewListCountInputs,
+        body: @escaping (_ViewListCountInputs) -> Int?
+    ) -> Int? {
+        _ViewListCountInputs.withBodyCache(
+            type: Content.self,
+            inputs: inputs,
+            content: { inputs in Body._viewListCount(inputs: inputs) },
+            body: body
+        )
     }
 
     // Modifier bodies must be value types. Build the modifier body through

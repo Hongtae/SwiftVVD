@@ -33,57 +33,7 @@ extension View {
     /// Both environment changes and @Observable mutations invalidate the body rule
     /// automatically, causing it to re-evaluate on the next render pass.
     public static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeView called outside an active AttributeGraph context.")
-        }
-
-        if self is any _PrimitiveView.Type {
-            let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
-                LayoutComputer.fixed(CGSize(width: 10, height: 10))
-            }
-            return _ViewOutputs(preferences: PreferencesOutputs(),
-                                layoutComputer: OptionalAttribute(lcAttr))
-        }
-        if Body.self is Never.Type {
-            fatalError("\(Self.self) may not have Body == Never")
-        }
-
-        // Build the DynamicProperty buffer before evaluating body. ViewBodyAccessor
-        // exists for parity but is not wired into this default body route yet.
-        var graphInputs = inputs.base
-        let dpFields = DynamicPropertyCache.fields(of: Self.self)
-        let dpBuffer = _DynamicPropertyBuffer(fields: dpFields, container: view, inputs: &graphInputs)
-
-        // Body rule: reactive to environment changes and @Observable mutations.
-        let inbox  = graph.inbox
-        let handle = MutableBox<AGAttribute?>(nil)
-
-        let bodyAttr: Attribute<Body> = graph.makeRule {
-            var viewCopy = view._attribute.value
-            dpBuffer.applyContexts(to: &viewCopy)
-
-            var result: Body!
-            withObservationTracking {
-                result = viewCopy.body
-            } onChange: { [weak inbox, handle] in
-                let transactionBox = UnsafeBox(Transaction.current)
-                inbox?.enqueue {
-                    if let id = handle.value {
-                        AttributeGraph.current?.markNeedsEvaluation(
-                            id,
-                            transaction: transactionBox.value,
-                            propagateTransaction: !transactionBox.value.isEmpty
-                        )
-                    }
-                }
-            }
-            return result
-        }
-        handle.value = bodyAttr.identifier
-
-        var childInputs = inputs
-        childInputs.base = graphInputs
-        return Body._makeView(view: _GraphValue(_attribute: bodyAttr), inputs: childInputs)
+        _makeDefaultView(view: view, inputs: inputs)
     }
 
     /// Default implementation: produces a reactive body rule (same as `_makeView`)
@@ -92,51 +42,109 @@ extension View {
     /// For Body = Never, returns a single-proxy static list so the parent layout
     /// can call `_makeView` via the proxy.
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        if self is any _PrimitiveView.Type {
-            return _ViewListOutputs.unaryViewList(view: view, inputs: inputs)
+        _makeDefaultViewList(view: view, inputs: inputs)
+    }
+}
+
+func _makeDefaultView<V: View>(view: _GraphValue<V>, inputs: _ViewInputs) -> _ViewOutputs {
+    guard let graph = AttributeGraph.current else {
+        fatalError("\(V.self)._makeView called outside an active AttributeGraph context.")
+    }
+
+    if V.self is any _PrimitiveView.Type {
+        let lcAttr: Attribute<LayoutComputer> = graph.makeRule {
+            LayoutComputer.fixed(CGSize(width: 10, height: 10))
         }
-        if Body.self is Never.Type {
-            fatalError("\(Self.self) may not have Body == Never")
-        }
+        return _ViewOutputs(preferences: PreferencesOutputs(),
+                            layoutComputer: OptionalAttribute(lcAttr))
+    }
+    if V.Body.self is Never.Type {
+        fatalError("\(V.self) may not have Body == Never")
+    }
 
-        guard let graph = AttributeGraph.current else {
-            fatalError("\(self)._makeViewList called outside an active AttributeGraph context.")
-        }
+    // Build the DynamicProperty buffer before evaluating body. ViewBodyAccessor
+    // exists for parity but is not wired into this default body route yet.
+    var graphInputs = inputs.base
+    let dpFields = DynamicPropertyCache.fields(of: V.self)
+    let dpBuffer = _DynamicPropertyBuffer(fields: dpFields, container: view, inputs: &graphInputs)
 
-        var graphInputs = inputs.base
-        let dpFields = DynamicPropertyCache.fields(of: Self.self)
-        let dpBuffer = _DynamicPropertyBuffer(fields: dpFields, container: view, inputs: &graphInputs)
+    // Body rule: reactive to environment changes and @Observable mutations.
+    let inbox  = graph.inbox
+    let handle = MutableBox<AGAttribute?>(nil)
 
-        let inbox  = graph.inbox
-        let handle = MutableBox<AGAttribute?>(nil)
+    let bodyAttr: Attribute<V.Body> = graph.makeRule {
+        var viewCopy = view._attribute.value
+        dpBuffer.applyContexts(to: &viewCopy)
 
-        let bodyAttr: Attribute<Body> = graph.makeRule {
-            var viewCopy = view._attribute.value
-            dpBuffer.applyContexts(to: &viewCopy)
-
-            var result: Body!
-            withObservationTracking {
-                result = viewCopy.body
-            } onChange: { [weak inbox, handle] in
-                let transactionBox = UnsafeBox(Transaction.current)
-                inbox?.enqueue {
-                    if let id = handle.value {
-                        AttributeGraph.current?.markNeedsEvaluation(
-                            id,
-                            transaction: transactionBox.value,
-                            propagateTransaction: !transactionBox.value.isEmpty
-                        )
-                    }
+        var result: V.Body!
+        withObservationTracking {
+            result = viewCopy.body
+        } onChange: { [weak inbox, handle] in
+            let transactionBox = UnsafeBox(Transaction.current)
+            inbox?.enqueue {
+                if let id = handle.value {
+                    AttributeGraph.current?.markNeedsEvaluation(
+                        id,
+                        transaction: transactionBox.value,
+                        propagateTransaction: !transactionBox.value.isEmpty
+                    )
                 }
             }
-            return result
         }
-        handle.value = bodyAttr.identifier
-
-        var childInputs = inputs
-        childInputs.base = graphInputs
-        return Body._makeViewList(view: _GraphValue(_attribute: bodyAttr), inputs: childInputs)
+        return result
     }
+    handle.value = bodyAttr.identifier
+
+    var childInputs = inputs
+    childInputs.base = graphInputs
+    return V.Body._makeView(view: _GraphValue(_attribute: bodyAttr), inputs: childInputs)
+}
+
+func _makeDefaultViewList<V: View>(view: _GraphValue<V>, inputs: _ViewListInputs) -> _ViewListOutputs {
+    if V.self is any _PrimitiveView.Type {
+        return _ViewListOutputs.unaryViewList(view: view, inputs: inputs)
+    }
+    if V.Body.self is Never.Type {
+        fatalError("\(V.self) may not have Body == Never")
+    }
+
+    guard let graph = AttributeGraph.current else {
+        fatalError("\(V.self)._makeViewList called outside an active AttributeGraph context.")
+    }
+
+    var graphInputs = inputs.base
+    let dpFields = DynamicPropertyCache.fields(of: V.self)
+    let dpBuffer = _DynamicPropertyBuffer(fields: dpFields, container: view, inputs: &graphInputs)
+
+    let inbox  = graph.inbox
+    let handle = MutableBox<AGAttribute?>(nil)
+
+    let bodyAttr: Attribute<V.Body> = graph.makeRule {
+        var viewCopy = view._attribute.value
+        dpBuffer.applyContexts(to: &viewCopy)
+
+        var result: V.Body!
+        withObservationTracking {
+            result = viewCopy.body
+        } onChange: { [weak inbox, handle] in
+            let transactionBox = UnsafeBox(Transaction.current)
+            inbox?.enqueue {
+                if let id = handle.value {
+                    AttributeGraph.current?.markNeedsEvaluation(
+                        id,
+                        transaction: transactionBox.value,
+                        propagateTransaction: !transactionBox.value.isEmpty
+                    )
+                }
+            }
+        }
+        return result
+    }
+    handle.value = bodyAttr.identifier
+
+    var childInputs = inputs
+    childInputs.base = graphInputs
+    return V.Body._makeViewList(view: _GraphValue(_attribute: bodyAttr), inputs: childInputs)
 }
 
 // _PrimitiveView is a View type that does not have a body. Body = Never.
@@ -484,6 +492,52 @@ extension _ViewListInputs {
             contentOffset: nil,
             debugReplaceableViewCount: nil
         )
+    }
+}
+
+// _ViewListCountInputs threads the graph-level input channel through static
+// view-list count evaluation. It intentionally omits layout fields because
+// count resolution happens before concrete child layout attributes exist.
+public struct _ViewListCountInputs {
+    var base: _GraphInputs
+    var options: UInt32
+
+    init(base: _GraphInputs, options: UInt32 = 0) {
+        self.base = base
+        self.options = options
+    }
+
+    init(_ inputs: _ViewListInputs) {
+        self.init(base: inputs.base, options: inputs.options)
+    }
+
+    var customInputs: PropertyList {
+        get { base.customInputs }
+        set { base.customInputs = newValue }
+    }
+
+    var baseOptions: UInt32 {
+        get { base.options }
+        set { base.options = newValue }
+    }
+
+    subscript<T: GraphInput>(_ key: T.Type) -> T.Value {
+        get { base[key] }
+        set { base[key] = newValue }
+    }
+
+    mutating func append<T: GraphInput, E>(_ element: E, to key: T.Type) where T.Value == Stack<E> {
+        base.append(element, forKey: key)
+    }
+
+    mutating func popLast<T: GraphInput, E>(_ key: T.Type) -> E? where T.Value == Stack<E> {
+        base.popLast(key)
+    }
+}
+
+extension _ViewListInputs {
+    var countInputs: _ViewListCountInputs {
+        _ViewListCountInputs(self)
     }
 }
 

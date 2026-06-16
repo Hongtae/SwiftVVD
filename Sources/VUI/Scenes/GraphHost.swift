@@ -14,6 +14,14 @@ import Foundation
 class GraphHost {
     var data: AttributeGraphRef
 
+    static var currentHost: GraphHost {
+        guard let ref = AttributeGraphRef.current,
+              let host = ref.context as? GraphHost else {
+            fatalError("GraphHost.currentHost accessed outside an active graph host context.")
+        }
+        return host
+    }
+
     /// Creates a new AttributeGraph core and wraps it in an AttributeGraphRef owned by self.
     init() {
         let graph = AttributeGraph()

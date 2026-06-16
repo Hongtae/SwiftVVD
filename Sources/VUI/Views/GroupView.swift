@@ -13,6 +13,10 @@ extension Group: View where Content: View {
     public static func _makeViewList(view: _GraphValue<Group<Content>>, inputs: _ViewListInputs) -> _ViewListOutputs {
         Content._makeViewList(view: view[\.content], inputs: inputs)
     }
+
+    public static func _viewListCount(inputs: _ViewListCountInputs) -> Int? {
+        Content._viewListCount(inputs: inputs)
+    }
 }
 
 extension Group: _PrimitiveView where Content: View {

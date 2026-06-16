@@ -186,6 +186,8 @@ class ViewGraph: ViewGraphHost {
     // Outputs requested at init time.
     var requestedOutputs: Outputs
 
+    var nextUpdate: (views: NextUpdate, gestures: NextUpdate) = (NextUpdate(), NextUpdate())
+
     // Back-reference to the owning ViewRendererHost. Gesture responders use
     // this to reach the shared gesture graph during view construction.
     weak var rendererHost: (any ViewRendererHost)?
@@ -222,13 +224,18 @@ class ViewGraph: ViewGraphHost {
     // Update scheduling value type.
     // Stored as a tuple: nextUpdate: (views: NextUpdate, gestures: NextUpdate)
     struct NextUpdate {
-        var time: Double = .infinity
+        var time: Time = .infinity
         var interval: Double = .infinity
         var reasons: Set<UInt32> = []
 
-        mutating func at(_ t: Double) { time = t }
+        mutating func at(_ t: Time) {
+            if t < time {
+                time = t
+            }
+        }
+
         mutating func interval(_ dt: Double, reason: UInt32? = nil) {
-            self.interval = dt
+            interval = Swift.min(interval, dt)
             if let r = reason { reasons.insert(r) }
         }
         mutating func maxVelocity(_ v: Double) {}  // Scheduling velocity is not modeled yet.
@@ -452,10 +459,15 @@ class ViewGraph: ViewGraphHost {
 
     /// Updates host outputs, then refreshes the time input every frame.
     override func updateOutputs(at time: Time) {
+        beginNextUpdate(at: time)
         super.updateOutputs(at: time)
         data.withCurrent {
             timeAttr?.setValue(time)
         }
+    }
+
+    func beginNextUpdate(at time: Time) {
+        nextUpdate = (NextUpdate(), NextUpdate())
     }
 
     // Returns the current display list from the AG graph.

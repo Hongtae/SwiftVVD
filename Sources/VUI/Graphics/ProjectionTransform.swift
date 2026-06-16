@@ -2,7 +2,7 @@
 //  File: ProjectionTransform.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -37,7 +37,7 @@ public struct ProjectionTransform: Equatable, Sendable {
     }
 
     public var isAffine: Bool {
-        return m31 != 0.0 || m32 != 0.0
+        return m13 == 0.0 && m23 == 0.0 && m33 == 1.0
     }
 
     public var determinant: CGFloat {

@@ -48,6 +48,13 @@ class AnimationBoxBase: CustomAnimation, CustomStringConvertible, @unchecked Sen
         return base.modified(RepeatAnimation(repeatCount: repeatCount, autoreverses: autoreverses))
     }
 
+    func makeLogicalCompletionBase(duration: TimeInterval) -> any CustomAnimation {
+        guard let base = customAnimationBase as? any InternalCustomAnimation else {
+            return self
+        }
+        return base.modified(LogicalCompletionModifier(duration: duration))
+    }
+
     @usableFromInline
     var description: String {
         String(describing: type(of: self))
@@ -724,6 +731,110 @@ final class RepeatAnimationBox: AnimationBoxBase, @unchecked Sendable {
     }
 }
 
+@usableFromInline
+final class LogicalCompletionAnimationBox: AnimationBoxBase, @unchecked Sendable {
+    let base: AnimationBoxBase
+    let logicalDuration: TimeInterval
+
+    init(base: AnimationBoxBase, duration: TimeInterval) {
+        self.base = base
+        self.logicalDuration = duration
+    }
+
+    override var duration: TimeInterval {
+        base.duration
+    }
+
+    override var presentationDuration: TimeInterval {
+        base.presentationDuration
+    }
+
+    override var preservesRetargetedCompletionDeadlines: Bool {
+        base.preservesRetargetedCompletionDeadlines
+    }
+
+    override var description: String {
+        String(describing: customAnimationBase)
+    }
+
+    override var debugDescription: String {
+        String(reflecting: customAnimationBase)
+    }
+
+    override var customAnimationBase: any CustomAnimation {
+        base.makeLogicalCompletionBase(duration: logicalDuration)
+    }
+
+    override func isEqual(to other: AnimationBoxBase) -> Bool {
+        guard let other = other as? LogicalCompletionAnimationBox else { return false }
+        return base == other.base && logicalDuration == other.logicalDuration
+    }
+
+    override func hash(into hasher: inout Hasher) {
+        super.hash(into: &hasher)
+        hasher.combine(base)
+        hasher.combine(logicalDuration)
+    }
+
+    override func presentationDuration<Value>(
+        for value: Value
+    ) -> TimeInterval where Value: VectorArithmetic {
+        base.presentationDuration(for: value)
+    }
+
+    override func noRegisteredCompletionDelay() -> TimeInterval? {
+        base.noRegisteredCompletionDelay()
+    }
+
+    override func noRegisteredCompletionDelay(for criteria: AnimationCompletionCriteria) -> TimeInterval? {
+        if criteria == .logicallyComplete {
+            return max(0, logicalDuration)
+        }
+        return base.noRegisteredCompletionDelay(for: criteria)
+    }
+
+    override func registeredCompletionDelay(for criteria: AnimationCompletionCriteria) -> TimeInterval? {
+        if criteria == .logicallyComplete {
+            return max(0, logicalDuration)
+        }
+        return base.registeredCompletionDelay(for: criteria)
+    }
+
+    override func value(at progress: Double) -> Double {
+        base.value(at: progress)
+    }
+
+    override func animate<Value>(
+        value: Value,
+        time: TimeInterval,
+        context: inout AnimationContext<Value>
+    ) -> Value? where Value: VectorArithmetic {
+        let wasLogicallyComplete = context.isLogicallyComplete
+        let output = base.animate(value: value, time: time, context: &context)
+        if !wasLogicallyComplete {
+            context.isLogicallyComplete = time >= logicalDuration
+        }
+        return output
+    }
+
+    override func velocity<Value>(
+        value: Value,
+        time: TimeInterval,
+        context: AnimationContext<Value>
+    ) -> Value? where Value: VectorArithmetic {
+        base.velocity(value: value, time: time, context: context)
+    }
+
+    override func shouldMerge<Value>(
+        previous: Animation,
+        value: Value,
+        time: TimeInterval,
+        context: inout AnimationContext<Value>
+    ) -> Bool where Value: VectorArithmetic {
+        base.shouldMerge(previous: previous, value: value, time: time, context: &context)
+    }
+}
+
 public protocol AnimationStateKey {
     associatedtype Value
     static var defaultValue: Self.Value { get }
@@ -1107,12 +1218,26 @@ func makeAnimationContext<AnimatedValue: Animatable>(
     isLogicallyComplete: Bool = false,
     environment: EnvironmentValues
 ) -> AnimationContext<AnimatedValue.AnimatableData> {
+    makeAnimationContext(
+        state: state,
+        isLogicallyComplete: isLogicallyComplete,
+        environment: environment,
+        finishingDefinition: type as? any AnimationFinishingDefinition<AnimatedValue.AnimatableData>.Type
+    )
+}
+
+func makeAnimationContext<Value: VectorArithmetic>(
+    state: AnimationState<Value>,
+    isLogicallyComplete: Bool = false,
+    environment: EnvironmentValues,
+    finishingDefinition: (any AnimationFinishingDefinition<Value>.Type)?
+) -> AnimationContext<Value> {
     var context = AnimationContext(
         state: state,
         isLogicallyComplete: isLogicallyComplete,
         environment: environment
     )
-    context.finishingDefinition = type as? any AnimationFinishingDefinition<AnimatedValue.AnimatableData>.Type
+    context.finishingDefinition = finishingDefinition
     return context
 }
 
@@ -1429,6 +1554,32 @@ struct RepeatAnimation: CustomAnimationModifier {
     }
 }
 
+struct LogicalCompletionModifier: CustomAnimationModifier {
+    var duration: TimeInterval
+
+    func animate<Value, Base>(
+        base: Base,
+        value: Value,
+        time: TimeInterval,
+        context: inout AnimationContext<Value>
+    ) -> Value? where Value: VectorArithmetic, Base: CustomAnimation {
+        let wasLogicallyComplete = context.isLogicallyComplete
+        let output = base.animate(value: value, time: time, context: &context)
+        if !wasLogicallyComplete {
+            context.isLogicallyComplete = time >= duration
+        }
+        return output
+    }
+
+    func function(base: Animation.Function) -> Animation.Function {
+        base
+    }
+
+    func box(base: AnimationBoxBase) -> AnimationBoxBase {
+        LogicalCompletionAnimationBox(base: base, duration: duration)
+    }
+}
+
 struct CustomAnimationModifiedContent<Base, Modifier>: InternalCustomAnimation, @unchecked Sendable
 where Base: CustomAnimation, Modifier: CustomAnimationModifier {
     var base: Base
@@ -1617,6 +1768,13 @@ final class CustomAnimationBox<Base: CustomAnimation>: AnimationBoxBase, @unchec
         CustomAnimationModifiedContent(
             base: base,
             modifier: RepeatAnimation(repeatCount: repeatCount, autoreverses: autoreverses)
+        )
+    }
+
+    override func makeLogicalCompletionBase(duration: TimeInterval) -> any CustomAnimation {
+        CustomAnimationModifiedContent(
+            base: base,
+            modifier: LogicalCompletionModifier(duration: duration)
         )
     }
 
@@ -3006,6 +3164,10 @@ extension Animation {
     public func repeatForever(autoreverses: Bool = true) -> Animation {
         Animation(box: RepeatAnimationBox(base: box, repeatCount: nil, autoreverses: autoreverses))
     }
+
+    public func logicallyComplete(after duration: TimeInterval) -> Animation {
+        Animation(box: LogicalCompletionAnimationBox(base: box, duration: duration))
+    }
 }
 
 extension Animation {
@@ -3457,9 +3619,6 @@ public struct UnitCurve: Sendable, Hashable {
 
 extension UnitCurve {
     public static let linear = UnitCurve(function: .linear)
-
-    @available(*, deprecated, message: "Use easeInOut instead")
-    public static let easeInEaseOut = easeInOut
 
     public static let easeIn = UnitCurve.bezier(
         startControlPoint: UnitPoint(x: 0.42, y: 0),

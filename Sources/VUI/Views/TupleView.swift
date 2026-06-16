@@ -132,6 +132,10 @@ extension TupleView {
             staticCount: count
         )
     }
+
+    public static func _viewListCount(inputs: _ViewListCountInputs) -> Int? {
+        _subviewTypes.count
+    }
 }
 
 extension TupleView: _PrimitiveView {
