@@ -522,13 +522,12 @@ private struct DynamicContainerInfo: StatefulRule {
             item.listener = listener
 
             var removalTransaction = transitionTransaction
-            let observer = listener.installCompletion(into: &removalTransaction)
+            _ = listener.installCompletion(into: &removalTransaction)
             item.phase = 2
             item.setTransitionPhase(.didDisappear, transaction: removalTransaction)
             listener.readSeed()
-            enqueueAnimationCompletionActions(observer?.bodyDidFinish() ?? [])
-            enqueueNoRegisteredAnimationFallback(
-                observer,
+            finalizeAnimationCompletions(
+                in: removalTransaction,
                 animation: removalTransaction.effectiveAnimation
             )
 

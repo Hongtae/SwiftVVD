@@ -67,6 +67,7 @@ class EventBindingManager {
     var focusedResponder: ResponderNode?
     private(set) var lastDirectConsumedEventIDs: Set<EventID> = []
     private var hoverUpdatePending = false
+    private let lock = NSLock()
 
     init() {}
 
@@ -95,8 +96,10 @@ class EventBindingManager {
         _ events: [EventID: any EventType],
         at time: Time
     ) -> GesturePhase<Void> {
-        lastDirectConsumedEventIDs = delegate?.receiveDirectEvents(events, in: self) ?? []
-        return sendDownstream(events, bridge: nil, at: time)
+        withDispatchScope {
+            lastDirectConsumedEventIDs = delegate?.receiveDirectEvents(events, in: self) ?? []
+            return sendDownstreamBody(events, bridge: nil, at: time)
+        }
     }
 
     /// Routes a pre-computed event dictionary downstream to the appropriate EventGraphHost.
@@ -112,6 +115,26 @@ class EventBindingManager {
     /// Routes a pre-computed event dictionary downstream to the appropriate EventGraphHost.
     @discardableResult
     func sendDownstream(
+        _ events: [EventID: any EventType],
+        bridge: EventBindingBridge?,
+        at time: Time
+    ) -> GesturePhase<Void> {
+        withDispatchScope {
+            sendDownstreamBody(events, bridge: bridge, at: time)
+        }
+    }
+
+    private func withDispatchScope<Result>(_ body: () -> Result) -> Result {
+        lock.lock()
+        Update.begin()
+        defer {
+            Update.end()
+            lock.unlock()
+        }
+        return body()
+    }
+
+    private func sendDownstreamBody(
         _ events: [EventID: any EventType],
         bridge: EventBindingBridge?,
         at time: Time
@@ -133,6 +156,16 @@ class EventBindingManager {
     /// Backward-compatible entry for callers that still carry the host explicitly.
     @discardableResult
     func sendDownstream(
+        _ events: [EventID: any EventType],
+        host explicitHost: any EventGraphHost,
+        at time: Time
+    ) -> GesturePhase<Void> {
+        withDispatchScope {
+            sendDownstreamBody(events, host: explicitHost, at: time)
+        }
+    }
+
+    private func sendDownstreamBody(
         _ events: [EventID: any EventType],
         host explicitHost: any EventGraphHost,
         at time: Time
@@ -331,8 +364,10 @@ class EventBindingBridge: GestureGraphDelegate {
         guard !pendingActions.isEmpty else { return }
         let actions = pendingActions
         pendingActions.removeAll()
-        for action in actions {
-            action()
+        Update.enqueueAction {
+            for action in actions {
+                action()
+            }
         }
     }
 }

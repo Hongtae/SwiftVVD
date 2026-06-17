@@ -49,6 +49,13 @@ extension ViewList {
     var debugDescription: String { "ViewList(\(count(style: _ViewList_IteratorStyle())))" }
 }
 
+// MARK: - _ViewList_Backing
+
+/// Concrete backing adapter returned by variadic children.
+struct _ViewList_Backing {
+    var list: any ViewList
+}
+
 // MARK: - BaseViewList
 
 /// ViewList backed by a _ViewList_Elements tree.
@@ -190,6 +197,37 @@ enum _ViewList_Edit: Hashable { case inserted, removed }
 struct _ViewList_ID_Views {}
 struct HeterogeneousViewIDsAccumulator {}
 
+// MARK: - _ViewList_SublistTransform
+
+protocol _ViewList_SublistTransform_Item {
+    func apply(to sublist: inout _ViewList_Sublist)
+}
+
+struct _ViewList_SublistTransform {
+    var items: [any _ViewList_SublistTransform_Item]
+    var subgraphCount: Int
+
+    init() {
+        self.items = []
+        self.subgraphCount = 0
+    }
+
+    mutating func push(_ item: any _ViewList_SublistTransform_Item) {
+        items.append(item)
+    }
+
+    @discardableResult
+    mutating func pop() -> (any _ViewList_SublistTransform_Item)? {
+        items.popLast()
+    }
+
+    func apply(to sublist: inout _ViewList_Sublist) {
+        for item in items {
+            item.apply(to: &sublist)
+        }
+    }
+}
+
 // MARK: - _ViewList_TemporarySublistTransform
 
 /// Context passed during ViewList sublist traversal.
@@ -210,10 +248,10 @@ struct _ViewList_TemporarySublistTransform {
 }
 
 private final class _TemporarySublistTransformStorage {
-    var listModifiers: [ListModifier]
+    var items: [any _ViewList_SublistTransform_Item]
 
-    init(listModifiers: [ListModifier] = []) {
-        self.listModifiers = listModifiers
+    init(items: [any _ViewList_SublistTransform_Item] = []) {
+        self.items = items
     }
 }
 
@@ -270,6 +308,20 @@ extension _ViewList_Elements {
         indirectMap: IndirectAttributeMap,
         testOnly: Bool
     ) -> Bool { false }
+}
+
+struct EmptyViewListElements: _ViewList_Elements {
+    var count: Int { 0 }
+
+    @discardableResult
+    func makeElements(
+        from: inout Int,
+        inputs: _ViewInputs,
+        indirectMap: IndirectAttributeMap?,
+        body: (_ViewInputs, (_ViewInputs) -> _ViewOutputs) -> (_ViewOutputs?, Bool)
+    ) -> (_ViewOutputs?, Bool) {
+        (nil, true)
+    }
 }
 
 // MARK: - UnaryElements
@@ -830,7 +882,7 @@ struct ViewContentOffset {}
 
 /// Abstract base for `_ViewListOutputs.Views.dynamicList` modifier chain.
 /// Stores a type-erased projection closure for concrete modifier dispatch.
-class ListModifier {
+class ListModifier: _ViewList_SublistTransform_Item {
     var pred: ListModifier?
     let modifierType: any ViewModifier.Type
     let modifier: AGWeakAttribute
@@ -860,7 +912,7 @@ class ListModifier {
         list = modified
     }
 
-    fileprivate func apply(to sublist: inout _ViewList_Sublist) {
+    func apply(to sublist: inout _ViewList_Sublist) {
         sublist.elements = ModifiedElements(
             base: sublist.elements,
             modifier: modifier,
@@ -873,16 +925,16 @@ class ListModifier {
 extension _ViewList_TemporarySublistTransform {
     /// Pushes a ListModifier during ModifiedViewList.applyNodes, then applies
     /// the stack when sublists are materialized.
-    fileprivate func withPushedItem(_ item: ListModifier) -> Self {
+    fileprivate func withPushedItem(_ item: any _ViewList_SublistTransform_Item) -> Self {
         let storage = self.storage ?? _TemporarySublistTransformStorage()
-        storage.listModifiers.append(item)
+        storage.items.append(item)
         return Self(storage: storage, flag: true)
     }
 
     fileprivate func apply(to sublist: inout _ViewList_Sublist) {
         guard let storage, flag else { return }
-        for modifier in storage.listModifiers {
-            modifier.apply(to: &sublist)
+        for item in storage.items {
+            item.apply(to: &sublist)
         }
     }
 }
@@ -935,6 +987,7 @@ func _forEachSublist(
     in list: any ViewList,
     listAttribute: Attribute<any ViewList>? = nil,
     style: _ViewList_IteratorStyle = _ViewList_IteratorStyle(),
+    sublistTransform: _ViewList_SublistTransform = _ViewList_SublistTransform(),
     body: (_ViewList_Sublist) -> Bool
 ) -> Bool {
     var from = 0
@@ -946,6 +999,7 @@ func _forEachSublist(
     ) { _, _, node, transform in
         guard case .sublist(var sublist) = node else { return true }
         transform.apply(to: &sublist)
+        sublistTransform.apply(to: &sublist)
         return body(sublist)
     }
 }
@@ -957,6 +1011,7 @@ func _applySublists(
     from: inout Int,
     listAttribute: Attribute<any ViewList>? = nil,
     style: _ViewList_IteratorStyle = _ViewList_IteratorStyle(),
+    sublistTransform: _ViewList_SublistTransform = _ViewList_SublistTransform(),
     body: (_ViewList_Sublist) -> Bool
 ) -> Bool {
     list.applyNodes(
@@ -967,6 +1022,7 @@ func _applySublists(
     ) { _, _, node, transform in
         guard case .sublist(var sublist) = node else { return true }
         transform.apply(to: &sublist)
+        sublistTransform.apply(to: &sublist)
         return body(sublist)
     }
 }

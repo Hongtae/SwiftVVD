@@ -31,6 +31,51 @@ public struct _TransactionModifier: ViewModifier, _GraphInputsModifier {
     public typealias Body = Never
 }
 
+public struct _ValueTransactionModifier<Value>: ViewModifier, _GraphInputsModifier where Value: Equatable {
+    public var value: Value
+    public var transform: (inout Transaction) -> Void
+
+    @inlinable public init(value: Value, transform: @escaping (inout Transaction) -> Void) {
+        self.value = value
+        self.transform = transform
+    }
+
+    public static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GraphInputs) {
+        guard let graph = AttributeGraph.current else {
+            fatalError("\(self)._makeInputs called outside an active AttributeGraph context.")
+        }
+        let parentTransAttr = inputs.transaction
+        let newTransAttr: Attribute<Transaction> = graph.makeStatefulRule(
+            ValueTransactionModifierTransactionRule(
+                modifier: modifier._attribute,
+                parent: parentTransAttr
+            )
+        )
+        inputs.transaction = newTransAttr
+    }
+
+    public typealias Body = Never
+}
+
+private struct ValueTransactionModifierTransactionRule<Observed: Equatable>: StatefulRule {
+    typealias Value = Transaction
+
+    var modifier: Attribute<_ValueTransactionModifier<Observed>>
+    var parent: Attribute<Transaction>
+    var previousValue: Observed?
+
+    mutating func updateValue() {
+        let modifierValue = modifier.value
+        var transaction = parent.value
+        if let previousValue,
+           previousValue != modifierValue.value {
+            modifierValue.transform(&transaction)
+        }
+        previousValue = modifierValue.value
+        AttributeGraph.setStatefulOutput(transaction)
+    }
+}
+
 public struct _PushPopTransactionModifier<Content>: ViewModifier where Content: ViewModifier {
     public var content: Content
     public var base: _TransactionModifier
@@ -62,6 +107,10 @@ public struct _PushPopTransactionModifier<Content>: ViewModifier where Content: 
 extension View {
     @inlinable public func transaction(_ transform: @escaping (inout Transaction) -> Void) -> some View {
         return modifier(_TransactionModifier(transform: transform))
+    }
+
+    @inlinable public func transaction<V>(value: V, _ transform: @escaping (inout Transaction) -> Void) -> some View where V: Equatable {
+        return modifier(_ValueTransactionModifier(value: value, transform: transform))
     }
 }
 

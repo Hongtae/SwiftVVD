@@ -54,6 +54,18 @@ public struct _VariadicView_Children: View {
 
     var list: any ViewList
     var contentSubgraph: AGSubgraph?
+    var transform: _ViewList_SublistTransform
+    var content: _ViewList_Backing { _ViewList_Backing(list: list) }
+
+    init(
+        list: any ViewList,
+        contentSubgraph: AGSubgraph?,
+        transform: _ViewList_SublistTransform = _ViewList_SublistTransform()
+    ) {
+        self.list = list
+        self.contentSubgraph = contentSubgraph
+        self.transform = transform
+    }
 
     /// Build children storage from a `_ViewListOutputs` produced during the body wiring pass.
     fileprivate static func makeChildren(from outputs: _ViewListOutputs) -> Self {
@@ -128,12 +140,41 @@ extension _VariadicView_Children: RandomAccessCollection {
     }
 
     public var startIndex: Int { 0 }
-    public var endIndex: Int { elements.count }
-    public subscript(index: Int) -> Element { elements[index] }
+    public var endIndex: Int {
+        Self.withCollectionUpdate {
+            list.count(style: _ViewList_IteratorStyle())
+        }
+    }
+    public subscript(index: Int) -> Element {
+        Self.withCollectionUpdate {
+            let elements = elements
+            guard elements.indices.contains(index) else {
+                return fallbackElement(at: index)
+            }
+            return elements[index]
+        }
+    }
+
+    private static func withCollectionUpdate<Result>(_ body: () -> Result) -> Result {
+        Update.begin()
+        defer { Update.end() }
+        return body()
+    }
+
+    private func fallbackElement(at index: Int) -> Element {
+        let view = _ViewList_View(
+            elements: _ViewList_SubgraphElements(base: EmptyViewListElements()),
+            id: _ViewList_ID(),
+            index: index,
+            count: 0,
+            contentSubgraph: contentSubgraph
+        )
+        return Element(view: view, traits: ViewTraitCollection())
+    }
 
     private var elements: [Element] {
         var built: [Element] = []
-        _ = _forEachSublist(in: list) { sublist in
+        _ = _forEachSublist(in: list, sublistTransform: transform) { sublist in
             let sharedElements = _ViewList_SubgraphElements(base: sublist.elements)
             let traitsCollection = sublist.traits
             for offset in 0..<sublist.count {

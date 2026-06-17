@@ -241,6 +241,15 @@ class ViewGraph: ViewGraphHost {
         mutating func maxVelocity(_ v: Double) {}  // Scheduling velocity is not modeled yet.
     }
 
+    var nextUpdateInterval: Double {
+        let interval = nextUpdate.views.interval
+        return interval.isFinite ? interval : 0.0
+    }
+
+    var nextUpdateReasons: Set<UInt32> {
+        nextUpdate.views.reasons
+    }
+
     // Backend init that takes a concrete view value to lift into the graph.
     convenience init<V: View>(rootViewType: V.Type, content: V, rendererHost: any ViewRendererHost, requestedOutputs: Outputs = .defaults) {
         self.init(rootViewType: V.self, rendererHost: rendererHost, requestedOutputs: requestedOutputs) { g in
@@ -461,13 +470,19 @@ class ViewGraph: ViewGraphHost {
     override func updateOutputs(at time: Time) {
         beginNextUpdate(at: time)
         super.updateOutputs(at: time)
-        data.withCurrent {
-            timeAttr?.setValue(time)
-        }
     }
 
     func beginNextUpdate(at time: Time) {
-        nextUpdate = (NextUpdate(), NextUpdate())
+        data.withCurrent {
+            guard let timeAttr else {
+                nextUpdate = (NextUpdate(), NextUpdate())
+                return
+            }
+            if !(timeAttr.value == time) {
+                timeAttr.setValue(time)
+                nextUpdate = (NextUpdate(), NextUpdate())
+            }
+        }
     }
 
     // Returns the current display list from the AG graph.

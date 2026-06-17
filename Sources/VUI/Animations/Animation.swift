@@ -2850,7 +2850,7 @@ final class AnimationCompletionObserver: @unchecked Sendable {
 
     private let lock = NSLock()
     private var entries: [Entry] = []
-    private var activeAnimations: [AnimationCompletionCriteria: Int] = [:]
+    private var activeCriteria = Set<AnimationCompletionCriteria>()
     private var bodyFinished = false
     private var registeredAnimation = false
     private var completedCriteria = Set<AnimationCompletionCriteria>()
@@ -2885,16 +2885,18 @@ final class AnimationCompletionObserver: @unchecked Sendable {
         return entries.first { !completedCriteria.contains($0.criteria) }?.criteria
     }
 
-    func animationDidStart(criteria: AnimationCompletionCriteria) -> AnimationCompletionToken? {
+    func canStartAnimation(criteria: AnimationCompletionCriteria) -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        guard entries.contains(where: { $0.criteria == criteria }),
-              !completedCriteria.contains(criteria) else {
-            return nil
-        }
+        return entries.contains(where: { $0.criteria == criteria }) &&
+            !completedCriteria.contains(criteria)
+    }
+
+    func listenerDidStart(criteria: AnimationCompletionCriteria) {
+        lock.lock()
+        defer { lock.unlock() }
         registeredAnimation = true
-        activeAnimations[criteria, default: 0] += 1
-        return AnimationCompletionToken(observer: self, criteria: criteria)
+        activeCriteria.insert(criteria)
     }
 
     func bodyDidFinish() -> [() -> Void] {
@@ -2904,11 +2906,10 @@ final class AnimationCompletionObserver: @unchecked Sendable {
         return completionsIfReady(allowNoRegisteredAnimation: false)
     }
 
-    fileprivate func animationDidFinish(criteria: AnimationCompletionCriteria) -> [() -> Void] {
+    fileprivate func listenerDidFinish(criteria: AnimationCompletionCriteria) -> [() -> Void] {
         lock.lock()
         defer { lock.unlock() }
-        guard activeAnimations[criteria, default: 0] > 0 else { return [] }
-        activeAnimations[criteria, default: 0] -= 1
+        activeCriteria.remove(criteria)
         return completionsIfReady(allowNoRegisteredAnimation: false)
     }
 
@@ -2966,7 +2967,7 @@ final class AnimationCompletionObserver: @unchecked Sendable {
         }
         var completions: [() -> Void] = []
         for criteria in orderedCriteria() where !completedCriteria.contains(criteria) {
-            guard activeAnimations[criteria, default: 0] == 0 else {
+            guard !activeCriteria.contains(criteria) else {
                 continue
             }
             completedCriteria.insert(criteria)
@@ -2992,19 +2993,199 @@ final class AnimationCompletionObserver: @unchecked Sendable {
 }
 
 final class AnimationCompletionToken: @unchecked Sendable {
-    private let observer: AnimationCompletionObserver
+    private let listener: AnimationListener
     let criteria: AnimationCompletionCriteria
+    // Listener records can be copied between active and forked animation state.
+    // The token is the shared single-finish guard for all of those copies.
     private var finished = false
+
+    init(listener: AnimationListener, criteria: AnimationCompletionCriteria) {
+        self.listener = listener
+        self.criteria = criteria
+    }
+
+    func start() {
+        listener.animationWasAdded()
+    }
+
+    func finish() -> [() -> Void] {
+        guard !finished else { return [] }
+        finished = true
+        return listener.animationWasRemoved() +
+            listener.animationDidFinish(criteria: criteria)
+    }
+}
+
+class AnimationListener: @unchecked Sendable {
+    func criteriaForNewAnimation() -> [AnimationCompletionCriteria] {
+        []
+    }
+
+    func animationWasAdded() {
+    }
+
+    func animationDidStart(criteria: AnimationCompletionCriteria) -> AnimationCompletionToken? {
+        nil
+    }
+
+    func animationDidStartTokens(criteria: AnimationCompletionCriteria) -> [AnimationCompletionToken] {
+        animationDidStart(criteria: criteria).map { [$0] } ?? []
+    }
+
+    func animationDidFinish(criteria: AnimationCompletionCriteria) -> [() -> Void] {
+        []
+    }
+
+    func animationWasRemoved() -> [() -> Void] {
+        []
+    }
+
+    func finalizeTransaction() -> [() -> Void] {
+        []
+    }
+}
+
+final class ListenerPair: AnimationListener, @unchecked Sendable {
+    private let first: AnimationListener
+    private let second: AnimationListener
+
+    init(first: AnimationListener, second: AnimationListener) {
+        self.first = first
+        self.second = second
+    }
+
+    override func criteriaForNewAnimation() -> [AnimationCompletionCriteria] {
+        var criteria: [AnimationCompletionCriteria] = []
+        for candidate in first.criteriaForNewAnimation() + second.criteriaForNewAnimation() {
+            if !criteria.contains(candidate) {
+                criteria.append(candidate)
+            }
+        }
+        return criteria
+    }
+
+    override func animationDidStartTokens(criteria: AnimationCompletionCriteria) -> [AnimationCompletionToken] {
+        first.animationDidStartTokens(criteria: criteria) +
+            second.animationDidStartTokens(criteria: criteria)
+    }
+
+    override func animationWasAdded() {
+        first.animationWasAdded()
+        second.animationWasAdded()
+    }
+
+    override func animationDidFinish(criteria: AnimationCompletionCriteria) -> [() -> Void] {
+        first.animationDidFinish(criteria: criteria) +
+            second.animationDidFinish(criteria: criteria)
+    }
+
+    override func animationWasRemoved() -> [() -> Void] {
+        first.animationWasRemoved() +
+            second.animationWasRemoved()
+    }
+}
+
+private final class AtomicBox<Value>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Value
+
+    init(_ value: Value) {
+        self.value = value
+    }
+
+    func withLock<Result>(_ body: (inout Value) -> Result) -> Result {
+        lock.lock()
+        defer { lock.unlock() }
+        return body(&value)
+    }
+}
+
+private struct PendingListeners {
+    final class WeakListener {
+        weak var listener: AnimationListener?
+
+        init(_ listener: AnimationListener) {
+            self.listener = listener
+        }
+    }
+
+    var listeners: [WeakListener] = []
+}
+
+private let pendingListeners = AtomicBox(PendingListeners())
+
+extension Transaction {
+    static func addPendingListener(_ listener: AnimationListener) {
+        pendingListeners.withLock { storage in
+            storage.listeners.append(PendingListeners.WeakListener(listener))
+        }
+    }
+
+    static func dispatchPendingListeners() -> [() -> Void] {
+        let pending = pendingListeners.withLock { storage in
+            let listeners = storage.listeners.compactMap(\.listener)
+            storage.listeners.removeAll()
+            return listeners
+        }
+        return Update.ensure {
+            pending.flatMap { $0.finalizeTransaction() }
+        }
+    }
+}
+
+final class AllFinishedAnimationListener: AnimationListener, @unchecked Sendable {
+    private let observer: AnimationCompletionObserver
+    private let criteria: AnimationCompletionCriteria
+    private let lock = NSLock()
+    private var activeCount = 0
+    private var finalized = false
 
     init(observer: AnimationCompletionObserver, criteria: AnimationCompletionCriteria) {
         self.observer = observer
         self.criteria = criteria
     }
 
-    func finish() -> [() -> Void] {
-        guard !finished else { return [] }
-        finished = true
-        return observer.animationDidFinish(criteria: criteria)
+    override func criteriaForNewAnimation() -> [AnimationCompletionCriteria] {
+        observer.criteriaForNewAnimation().contains(criteria) ? [criteria] : []
+    }
+
+    override func animationDidStart(criteria: AnimationCompletionCriteria) -> AnimationCompletionToken? {
+        guard criteria == self.criteria,
+              observer.canStartAnimation(criteria: criteria) else {
+            return nil
+        }
+        return AnimationCompletionToken(listener: self, criteria: criteria)
+    }
+
+    override func animationWasAdded() {
+        lock.lock()
+        activeCount += 1
+        lock.unlock()
+        observer.listenerDidStart(criteria: criteria)
+    }
+
+    override func animationWasRemoved() -> [() -> Void] {
+        lock.lock()
+        guard activeCount > 0 else {
+            lock.unlock()
+            return []
+        }
+        activeCount -= 1
+        let isComplete = activeCount == 0
+        lock.unlock()
+        guard isComplete else { return [] }
+        return observer.listenerDidFinish(criteria: criteria)
+    }
+
+    override func finalizeTransaction() -> [() -> Void] {
+        lock.lock()
+        guard !finalized else {
+            lock.unlock()
+            return []
+        }
+        finalized = true
+        lock.unlock()
+        return observer.bodyDidFinish()
     }
 }
 
@@ -3020,7 +3201,7 @@ func enqueueAnimationCompletionActions(_ actions: [() -> Void]) {
     if let graph = AttributeGraph.current {
         graph.actionOutbox.append(contentsOf: wrapped)
     } else {
-        wrapped.forEach { $0() }
+        wrapped.forEach { Update.enqueueAction($0) }
     }
 }
 
@@ -3090,6 +3271,45 @@ func finalizeAnimationCompletionObserver(
         return
     }
     enqueueNoRegisteredAnimationFallback(observer, animation: animation)
+}
+
+func finalizeAnimationCompletions(
+    in transaction: Transaction,
+    animation: Animation? = nil,
+    bodyDidMutate: Bool = true,
+    immediateNoMutationCompletion: Bool = false
+) {
+    let actions = Transaction.dispatchPendingListeners()
+    if actions.isEmpty {
+        finalizeAnimationCompletionObserver(
+            transaction.animationCompletionObserver,
+            animation: animation,
+            bodyDidMutate: bodyDidMutate,
+            immediateNoMutationCompletion: immediateNoMutationCompletion
+        )
+        return
+    }
+
+    enqueueAnimationCompletionActions(actions)
+    guard bodyDidMutate else {
+        if immediateNoMutationCompletion {
+            enqueueAnimationCompletionActions(
+                transaction.animationCompletionObserver?.noRegisteredAnimationFallbackDidFire(
+                    usesAnimatedOrdering: false
+                ) ?? []
+            )
+        } else {
+            enqueueNoRegisteredAnimationFallback(
+                transaction.animationCompletionObserver,
+                animation: nil
+            )
+        }
+        return
+    }
+    enqueueNoRegisteredAnimationFallback(
+        transaction.animationCompletionObserver,
+        animation: animation
+    )
 }
 
 extension Animation: CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable {
@@ -3274,8 +3494,9 @@ extension Animation {
     public static func interpolatingSpring(duration: TimeInterval = 0.5,
                                            bounce: Double = 0.0,
                                            initialVelocity: Double = 0.0) -> Animation {
-        let stiffness = pow(2 * .pi / max(duration, 0.0), 2)
-        let damping = 2 * sqrt(stiffness) * springDampingFraction(bounce: bounce)
+        let stiffness = springStiffness(response: duration)
+        let fraction = springDampingFraction(bounce: bounce)
+        let damping = springDamping(fraction: fraction, stiffness: stiffness)
         return interpolatingSpring(
             mass: 1.0,
             stiffness: stiffness,
@@ -3297,11 +3518,28 @@ extension Animation {
         )
     }
 
-    private static func springDampingFraction(bounce: Double) -> Double {
-        if bounce >= 0 {
-            return max(1 - bounce, 0.0)
+    private static func springStiffness(response: Double) -> Double {
+        if response <= 0 {
+            return .infinity
         }
-        return 1 / max(1 + bounce, 0.001)
+        let frequency = (2.0 * Double.pi) / response
+        return frequency * frequency
+    }
+
+    private static func springDamping(fraction: Double, stiffness: Double) -> Double {
+        let criticalDamping = 2 * stiffness.squareRoot()
+        return criticalDamping * fraction
+    }
+
+    private static func springDampingFraction(bounce: Double) -> Double {
+        if bounce <= -1.0 {
+            return .infinity
+        } else if bounce < 0.0 {
+            return 1.0 / (bounce + 1.0)
+        } else if bounce == 0.0 {
+            return 1.0
+        }
+        return 1.0 - min(bounce, 1.0)
     }
 }
 
@@ -3350,6 +3588,24 @@ private struct AnimationCompletionObserverTransactionKey: TransactionKey {
     }
 }
 
+private struct AnimationListenerTransactionKey: TransactionKey {
+    typealias Value = AnimationListener?
+    static var defaultValue: AnimationListener? { nil }
+
+    static func _valuesEqual(_ lhs: AnimationListener?, _ rhs: AnimationListener?) -> Bool {
+        lhs === rhs
+    }
+}
+
+private struct AnimationLogicalListenerTransactionKey: TransactionKey {
+    typealias Value = AnimationListener?
+    static var defaultValue: AnimationListener? { nil }
+
+    static func _valuesEqual(_ lhs: AnimationListener?, _ rhs: AnimationListener?) -> Bool {
+        lhs === rhs
+    }
+}
+
 extension Transaction {
     public init(animation: Animation?) {
         plist = PropertyList()
@@ -3379,17 +3635,74 @@ extension Transaction {
         set { self[AnimationCompletionObserverTransactionKey.self] = newValue }
     }
 
+    var animationListener: AnimationListener? {
+        get { self[AnimationListenerTransactionKey.self] }
+        set { self[AnimationListenerTransactionKey.self] = newValue }
+    }
+
+    var animationLogicalListener: AnimationListener? {
+        get { self[AnimationLogicalListenerTransactionKey.self] }
+        set { self[AnimationLogicalListenerTransactionKey.self] = newValue }
+    }
+
+    var combinedAnimationListener: AnimationListener? {
+        switch (animationListener, animationLogicalListener) {
+        case let (regular?, logical?):
+            return ListenerPair(first: regular, second: logical)
+        case let (regular?, nil):
+            return regular
+        case let (nil, logical?):
+            return logical
+        case (nil, nil):
+            return nil
+        }
+    }
+
+    mutating func addAnimationListener(_ listener: AnimationListener) {
+        Transaction.addPendingListener(listener)
+        if let existing = animationListener {
+            animationListener = ListenerPair(first: existing, second: listener)
+        } else {
+            animationListener = listener
+        }
+    }
+
+    mutating func addAnimationLogicalListener(_ listener: AnimationListener) {
+        Transaction.addPendingListener(listener)
+        if let existing = animationLogicalListener {
+            animationLogicalListener = ListenerPair(first: existing, second: listener)
+        } else {
+            animationLogicalListener = listener
+        }
+    }
+
     public mutating func addAnimationCompletion(
         criteria: AnimationCompletionCriteria = .logicallyComplete,
         _ completion: @escaping () -> Void
     ) {
-        if let observer = animationCompletionObserver {
+        let observer: AnimationCompletionObserver
+        if let existingObserver = animationCompletionObserver {
+            observer = existingObserver
             observer.add(criteria: criteria, completion: completion)
         } else {
-            animationCompletionObserver = AnimationCompletionObserver(
+            observer = AnimationCompletionObserver(
                 criteria: criteria,
                 completion: completion
             )
+            animationCompletionObserver = observer
+        }
+        let listener = AllFinishedAnimationListener(
+            observer: observer,
+            criteria: criteria
+        )
+        if criteria == .removed {
+            if animationListener == nil {
+                addAnimationListener(listener)
+            }
+        } else {
+            if animationLogicalListener == nil {
+                addAnimationLogicalListener(listener)
+            }
         }
     }
 }

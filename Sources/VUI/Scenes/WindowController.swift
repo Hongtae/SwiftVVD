@@ -31,6 +31,7 @@ protocol WindowInputEventHandler {
 class WindowController: WindowInputEventHandler, WindowDelegate,
                         ViewRendererHost, ViewGraphRootValueUpdater,
                         ViewGraphRenderDelegate,
+                        ViewGraphDelegate,
                         EventBindingSource, EventBindingManagerDelegate,
                         @unchecked Sendable {
 
@@ -452,6 +453,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         // renderDelegate: WindowController provides contentsScale, opaqueBackground, and
         //   render thread handling. Implemented below (ViewGraphRenderDelegate).
         self.viewGraph.renderDelegate = self
+        self.viewGraph.viewDelegate = self
         // updateDelegate: WindowController provides root value updates (size, env, etc.).
         //   updateSize() / updateEnvironment() etc. called inline in updateView for now.
         //   Full invalidateProperties(_:mayDeferUpdate:) wiring is a future step.
@@ -478,6 +480,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         self._viewGraph = ViewGraph(replaceableContent: content, rendererHost: self)
         self.crossGraphSourceGraph = nil
         self.viewGraph.renderDelegate = self
+        self.viewGraph.viewDelegate = self
         self.viewGraph.updateDelegate = self
     }
 
@@ -511,6 +514,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         )
         self.crossGraphSourceGraph = sourceGraph
         self.viewGraph.renderDelegate = self
+        self.viewGraph.viewDelegate = self
         self.viewGraph.updateDelegate = self
     }
 
@@ -1388,9 +1392,24 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     }
 
     // Returns how long until the next frame should be rendered.
-    // VVD controls frame pacing. Returning 0.0 means render at the backend frame rate.
+    // Infinity/no scheduled view update is normalized by ViewGraph to 0.0 for
+    // the current backend's continuous frame pacing.
     func renderIntervalForDisplayLink(timestamp: Time) -> Double {
-        return 0.0
+        return viewGraph.nextUpdateInterval
+    }
+
+    // MARK: - ViewGraphDelegate
+
+    func setNeedsUpdate() {
+        viewChangedWhileDrawing = true
+    }
+
+    func requestUpdate(after: Double) {
+        viewChangedWhileDrawing = true
+    }
+
+    func `as`<T>(_ type: T.Type) -> T? {
+        self as? T
     }
 
     // MARK: - ViewGraphRootValueUpdater

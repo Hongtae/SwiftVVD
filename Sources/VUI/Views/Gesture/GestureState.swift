@@ -214,25 +214,44 @@ public struct GestureStateGesture<Base, State>: Gesture where Base: Gesture {
             switch phaseAttr.value {
             case .active(let v):
                 didRunTerminalReset.value = false
-                // Read current state, call body, write back.
-                var current = location?.getValue() ?? stateAttr.value
+                let current = Update.dispatchImmediately {
+                    Self.projectedStateBinding(
+                        location: location,
+                        stateAttribute: stateAttr
+                    ).wrappedValue
+                }
                 var tx = Transaction()
                 tx.tracksVelocity = true
-                gsg.body(v, &current, &tx)
-                stateAttr.setValue(current)
-                location?.setValue(current, transaction: tx)
+                enqueuePhaseAction {
+                    var current = current
+                    var tx = tx
+                    gsg.body(v, &current, &tx)
+                    let projectedState = Self.projectedStateBinding(
+                        location: location,
+                        stateAttribute: stateAttr
+                    ).transaction(tx)
+                    projectedState.wrappedValue = current
+                }
 
             case .ended, .failed:
                 guard !didRunTerminalReset.value else { break }
                 didRunTerminalReset.value = true
-                // Gesture terminated: apply reset and restore initial value.
-                var resetValue = location?.getValue() ?? stateAttr.value
-                var tx = Transaction()
-                tx.tracksVelocity = true
-                gsg.state._reset(resetValue, &tx)
-                resetValue = initialValue
-                stateAttr.setValue(resetValue)
-                location?.setValue(resetValue, transaction: tx)
+                enqueuePhaseAction {
+                    // Gesture terminated: apply reset and restore initial value.
+                    var resetValue = Self.projectedStateBinding(
+                        location: location,
+                        stateAttribute: stateAttr
+                    ).wrappedValue
+                    var tx = Transaction()
+                    tx.tracksVelocity = true
+                    gsg.state._reset(resetValue, &tx)
+                    resetValue = initialValue
+                    let projectedState = Self.projectedStateBinding(
+                        location: location,
+                        stateAttribute: stateAttr
+                    ).transaction(tx)
+                    projectedState.wrappedValue = resetValue
+                }
 
             case .possible:
                 didRunTerminalReset.value = false
@@ -242,6 +261,40 @@ public struct GestureStateGesture<Base, State>: Gesture where Base: Gesture {
         }
 
         return baseOutputs
+    }
+
+    private static func projectedStateBinding(
+        location: AnyLocation<State>?,
+        stateAttribute: Attribute<State>
+    ) -> Binding<State> {
+        Binding<State>(
+            get: {
+                location?.getValue() ?? stateAttribute.value
+            },
+            set: { newValue, transaction in
+                stateAttribute.setValue(newValue, transaction: transaction)
+                location?.setValue(newValue, transaction: transaction)
+            }
+        )
+    }
+
+    private static func enqueuePhaseAction(_ action: @escaping () -> Void) {
+        guard let graphRef = AttributeGraphRef.current else {
+            Update.enqueueAction(action)
+            return
+        }
+
+        let scopedAction = {
+            graphRef.withCurrent {
+                action()
+            }
+        }
+
+        if let gestureGraph = graphRef.context as? GestureGraph {
+            gestureGraph.enqueueAction(scopedAction)
+        } else {
+            Update.enqueueAction(scopedAction)
+        }
     }
 
     public typealias Body = Never

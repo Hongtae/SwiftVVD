@@ -100,8 +100,8 @@ func withTransaction<Result>(
         result = try body()
     } catch {
         Transaction.ThreadStorage.currentBox = previous
-        finalizeAnimationCompletionObserver(
-            scopedTransaction.animationCompletionObserver,
+        finalizeAnimationCompletions(
+            in: scopedTransaction,
             animation: scopedTransaction.effectiveAnimation,
             bodyDidMutate: scopedBox.bodyDidMutate,
             immediateNoMutationCompletion: immediateNoMutationCompletion
@@ -109,8 +109,8 @@ func withTransaction<Result>(
         throw error
     }
     Transaction.ThreadStorage.currentBox = previous
-    finalizeAnimationCompletionObserver(
-        scopedTransaction.animationCompletionObserver,
+    finalizeAnimationCompletions(
+        in: scopedTransaction,
         animation: scopedTransaction.effectiveAnimation,
         bodyDidMutate: scopedBox.bodyDidMutate,
         immediateNoMutationCompletion: immediateNoMutationCompletion
@@ -221,6 +221,18 @@ private struct DisablesContentTransitionsKey: TransactionKey {
     static let defaultValue: Bool = false
 }
 
+private struct ScrollTargetAnchorKey: TransactionKey {
+    static let defaultValue: UnitPoint? = nil
+}
+
+private struct ScrollPositionUpdatePreservesVelocityKey: TransactionKey {
+    static let defaultValue: Bool = false
+}
+
+private struct ScrollContentOffsetAdjustmentBehaviorKey: TransactionKey {
+    static var defaultValue: ScrollContentOffsetAdjustmentBehavior { .automatic }
+}
+
 extension Transaction {
     /// Whether this transaction arose from a continuous (gesture-driven) interaction.
     /// When `true`, the animation system uses velocity data for physics-based animations.
@@ -257,6 +269,21 @@ extension Transaction {
     var disablesContentTransitions: Bool {
         get { self[DisablesContentTransitionsKey.self] }
         set { self[DisablesContentTransitionsKey.self] = newValue }
+    }
+
+    public var scrollTargetAnchor: UnitPoint? {
+        get { self[ScrollTargetAnchorKey.self] }
+        set { self[ScrollTargetAnchorKey.self] = newValue }
+    }
+
+    public var scrollPositionUpdatePreservesVelocity: Bool {
+        get { self[ScrollPositionUpdatePreservesVelocityKey.self] }
+        set { self[ScrollPositionUpdatePreservesVelocityKey.self] = newValue }
+    }
+
+    public var scrollContentOffsetAdjustmentBehavior: ScrollContentOffsetAdjustmentBehavior {
+        get { self[ScrollContentOffsetAdjustmentBehaviorKey.self] }
+        set { self[ScrollContentOffsetAdjustmentBehaviorKey.self] = newValue }
     }
 
     var isAnimated: Bool { animation != nil }
