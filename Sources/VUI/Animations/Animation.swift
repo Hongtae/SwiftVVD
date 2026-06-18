@@ -2995,8 +2995,8 @@ final class AnimationCompletionObserver: @unchecked Sendable {
 final class AnimationCompletionToken: @unchecked Sendable {
     private let listener: AnimationListener
     let criteria: AnimationCompletionCriteria
-    // Listener records can be copied between active and forked animation state.
-    // The token is the shared single-finish guard for all of those copies.
+    // Some completion paths can retain the same token in more than one local
+    // schedule. The token is the shared single-finish guard for those copies.
     private var finished = false
 
     init(listener: AnimationListener, criteria: AnimationCompletionCriteria) {
@@ -3696,13 +3696,9 @@ extension Transaction {
             criteria: criteria
         )
         if criteria == .removed {
-            if animationListener == nil {
-                addAnimationListener(listener)
-            }
+            addAnimationListener(listener)
         } else {
-            if animationLogicalListener == nil {
-                addAnimationLogicalListener(listener)
-            }
+            addAnimationLogicalListener(listener)
         }
     }
 }

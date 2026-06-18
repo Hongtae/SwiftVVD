@@ -200,7 +200,7 @@ extension Animatable {
     }
 }
 
-private struct AnimatorState<AnimatedValue: Animatable> {
+private final class AnimatorState<AnimatedValue: Animatable> {
     enum Phase {
         case pending
         case first
@@ -220,7 +220,7 @@ private struct AnimatorState<AnimatedValue: Animatable> {
         var startTime: Time
         var state: AnimationState<AnimatedValue.AnimatableData>
         var finishingDefinition: (any AnimationFinishingDefinition<AnimatedValue.AnimatableData>.Type)?
-        var listeners: [Listener] = []
+        var listeners: [AnimationListener] = []
         var contextIsLogicallyComplete: Bool = false
         var generation: UInt64
         var isFinished: Bool = false
@@ -251,7 +251,9 @@ private struct AnimatorState<AnimatedValue: Animatable> {
             contextIsLogicallyComplete = context.isLogicallyComplete
             guard let animatedDelta else {
                 isFinished = true
-                let removedListeners = listeners
+                let removedListeners = listeners.map {
+                    Listener(listener: $0, criteria: .logicallyComplete)
+                }
                 listeners.removeAll()
                 return UpdateResult(
                     value: targetValue,
@@ -280,17 +282,36 @@ private struct AnimatorState<AnimatedValue: Animatable> {
     var state = AnimationState<AnimatedValue.AnimatableData>()
     var mergeState = AnimationState<AnimatedValue.AnimatableData>()
     var phase: Phase = .pending
-    var listeners: [Listener] = []
-    var logicalListeners: [Listener] = []
+    var listeners: [AnimationListener] = []
+    var logicalListeners: [AnimationListener] = []
     var isLogicallyComplete = false
     var finishingDefinition: (any AnimationFinishingDefinition<AnimatedValue.AnimatableData>.Type)?
     var updatesMergeStateWithAnimation = true
     var baseLayers: [Fork] = []
     var completedBaseLayerValue: AnimatedValue?
 
+    init() {}
+
+    init(
+        animation: Animation,
+        interval: AnimatedValue.AnimatableData,
+        at time: Time,
+        in transaction: Transaction
+    ) {
+        self.animation = animation
+        self.interval = interval
+        self.beginTime = time
+        self.nextTime = time
+        self.finishingDefinition = Self.defaultFinishingDefinition
+        reason = transaction.animationReason
+        updateFrameInterval(from: transaction)
+    }
+
     struct UpdateResult {
         var value: AnimatedValue.AnimatableData?
         var isLogicallyComplete: Bool
+        var logicalListeners: [Listener] = []
+        var discardedBaseLayerGenerations: Set<UInt64> = []
     }
 
     struct BaseStackSample {
@@ -306,6 +327,7 @@ private struct AnimatorState<AnimatedValue: Animatable> {
     struct CombineResult {
         var merged: Bool
         var layerStackConversion: LayerStackConversion?
+        var forkedLayer: Fork?
     }
 
     struct LayerStackConversion {
@@ -315,26 +337,35 @@ private struct AnimatorState<AnimatedValue: Animatable> {
         var startTime: Time
     }
 
-    struct Listener {
-        var token: AnimationCompletionToken
-        var deadline: Time
+    struct RetargetForkSeed {
+        var startValue: AnimatedValue
+        var targetValue: AnimatedValue
+        var startTime: Time
         var generation: UInt64
-        var orderGeneration: UInt64
+    }
 
-        var criteria: AnimationCompletionCriteria {
-            token.criteria
+    struct Listener {
+        struct Identity: Hashable {
+            var listenerID: ObjectIdentifier
+            var criteria: AnimationCompletionCriteria
         }
 
-        var tokenID: ObjectIdentifier {
-            ObjectIdentifier(token)
+        var listener: AnimationListener
+        var criteria: AnimationCompletionCriteria
+
+        var identity: Identity {
+            Identity(
+                listenerID: ObjectIdentifier(listener),
+                criteria: criteria
+            )
         }
 
         func finish() -> [() -> Void] {
-            token.finish()
+            listener.animationWasRemoved()
         }
     }
 
-    mutating func activate(
+    func activate(
         animation: Animation,
         interval: AnimatedValue.AnimatableData,
         beginTime: Time,
@@ -362,22 +393,23 @@ private struct AnimatorState<AnimatedValue: Animatable> {
         updateFrameInterval(from: transaction)
     }
 
-    mutating func updateInterval(_ interval: AnimatedValue.AnimatableData) {
+    func updateInterval(_ interval: AnimatedValue.AnimatableData) {
         self.interval = interval
     }
 
-    mutating func resetForReplacement() {
+    func resetForReplacement() {
         state = AnimationState()
         mergeState = AnimationState()
         isLogicallyComplete = false
     }
 
-    mutating func combine(
+    func combine(
         newAnimation: Animation,
         newInterval: AnimatedValue.AnimatableData?,
         layerStack: [Fork]? = nil,
         layerStackBase: AnimatedValue? = nil,
         replacementTarget: AnimatedValue? = nil,
+        forkSeed: RetargetForkSeed? = nil,
         at time: Time,
         in transaction: Transaction,
         environment: EnvironmentValues
@@ -385,7 +417,11 @@ private struct AnimatorState<AnimatedValue: Animatable> {
         guard let previousAnimation = animation else {
             resetForReplacement()
             refreshScheduling(at: time, from: transaction)
-            return CombineResult(merged: false, layerStackConversion: nil)
+            return CombineResult(
+                merged: false,
+                layerStackConversion: nil,
+                forkedLayer: nil
+            )
         }
         if phase == .pending {
             animation = newAnimation
@@ -393,7 +429,11 @@ private struct AnimatorState<AnimatedValue: Animatable> {
                 interval = newInterval
             }
             refreshScheduling(at: time, from: transaction)
-            return CombineResult(merged: false, layerStackConversion: nil)
+            return CombineResult(
+                merged: false,
+                layerStackConversion: nil,
+                forkedLayer: nil
+            )
         }
         let elapsed = max(time.seconds - beginTime.seconds, 0)
         var context = makeAnimationContext(
@@ -401,6 +441,10 @@ private struct AnimatorState<AnimatedValue: Animatable> {
             isLogicallyComplete: isLogicallyComplete,
             environment: environment,
             finishingDefinition: finishingDefinition
+        )
+        let forkedLayer = makeRetargetFork(
+            previousAnimation,
+            seed: forkSeed
         )
         let shouldMerge = newAnimation.box.shouldMerge(
             previous: previousAnimation,
@@ -426,8 +470,9 @@ private struct AnimatorState<AnimatedValue: Animatable> {
                 )
             } else if let layerStack,
                       let replacementTarget,
+                      let forkedLayer,
                       let conversion = combineLayerStack(
-                          layerStack,
+                          layerStack + [forkedLayer],
                           base: layerStackBase,
                           appending: newAnimation,
                           target: replacementTarget,
@@ -445,17 +490,22 @@ private struct AnimatorState<AnimatedValue: Animatable> {
                 refreshScheduling(at: time, from: transaction)
                 return CombineResult(
                     merged: false,
-                    layerStackConversion: conversion
+                    layerStackConversion: conversion,
+                    forkedLayer: forkedLayer
                 )
             } else {
                 resetForReplacement()
             }
         }
         refreshScheduling(at: time, from: transaction)
-        return CombineResult(merged: shouldMerge, layerStackConversion: nil)
+        return CombineResult(
+            merged: shouldMerge,
+            layerStackConversion: nil,
+            forkedLayer: forkedLayer
+        )
     }
 
-    mutating func update(
+    func update(
         value: AnimatedValue.AnimatableData,
         at time: Time,
         environment: EnvironmentValues
@@ -504,6 +554,11 @@ private struct AnimatorState<AnimatedValue: Animatable> {
         )
         state = context.state
         isLogicallyComplete = context.isLogicallyComplete
+        let logicalListeners = updateListeners(
+            isLogicallyComplete: context.isLogicallyComplete,
+            time: time,
+            environment: environment
+        )
         if let output {
             recordSampledAnimationValue(output, at: time)
             if updatesMergeStateWithAnimation {
@@ -512,11 +567,12 @@ private struct AnimatorState<AnimatedValue: Animatable> {
         }
         return UpdateResult(
             value: output,
-            isLogicallyComplete: context.isLogicallyComplete
+            isLogicallyComplete: context.isLogicallyComplete,
+            logicalListeners: logicalListeners
         )
     }
 
-    mutating func sampleBaseStackValue(
+    func sampleBaseStackValue(
         at time: Time,
         environment: EnvironmentValues
     ) -> BaseStackSample? {
@@ -546,7 +602,7 @@ private struct AnimatorState<AnimatedValue: Animatable> {
         )
     }
 
-    mutating func recordSampledAnimationValue(
+    func recordSampledAnimationValue(
         _ value: AnimatedValue.AnimatableData,
         at time: Time
     ) {
@@ -580,11 +636,8 @@ private struct AnimatorState<AnimatedValue: Animatable> {
         )
     }
 
-    mutating func addListeners(
-        transaction: Transaction,
-        generation: UInt64,
-        orderGeneration: UInt64,
-        deadline: (AnimationCompletionCriteria) -> Time
+    func addListeners(
+        transaction: Transaction
     ) -> ListenerRegistration {
         guard transaction.animationListener != nil ||
               transaction.animationLogicalListener != nil else {
@@ -596,10 +649,7 @@ private struct AnimatorState<AnimatedValue: Animatable> {
         if let animationListener = transaction.animationListener {
             let registration = addListeners(
                 animationListener,
-                isLogical: false,
-                generation: generation,
-                orderGeneration: orderGeneration,
-                deadline: deadline
+                isLogical: false
             )
             registeredListeners.append(contentsOf: registration.records)
             immediateActions.append(contentsOf: registration.immediateActions)
@@ -607,10 +657,7 @@ private struct AnimatorState<AnimatedValue: Animatable> {
         if let animationLogicalListener = transaction.animationLogicalListener {
             let registration = addListeners(
                 animationLogicalListener,
-                isLogical: true,
-                generation: generation,
-                orderGeneration: orderGeneration,
-                deadline: deadline
+                isLogical: true
             )
             registeredListeners.append(contentsOf: registration.records)
             immediateActions.append(contentsOf: registration.immediateActions)
@@ -626,46 +673,39 @@ private struct AnimatorState<AnimatedValue: Animatable> {
         )
     }
 
-    private mutating func addListeners(
+    private func addListeners(
         _ animationListener: AnimationListener,
-        isLogical: Bool,
-        generation: UInt64,
-        orderGeneration: UInt64,
-        deadline: (AnimationCompletionCriteria) -> Time
+        isLogical: Bool
     ) -> ListenerRegistration {
-        var registeredListeners: [Listener] = []
-        var immediateListeners: [Listener] = []
-        for criteria in animationListener.criteriaForNewAnimation() {
-            for token in animationListener.animationDidStartTokens(criteria: criteria) {
-                token.start()
-                let listener = Listener(
-                    token: token,
-                    deadline: deadline(criteria),
-                    generation: generation,
-                    orderGeneration: orderGeneration
-                )
-                registeredListeners.append(listener)
-                if isLogical {
-                    if !isLogicallyComplete {
-                        logicalListeners.append(listener)
-                    } else {
-                        immediateListeners.append(listener)
-                    }
-                } else {
-                    listeners.append(listener)
-                }
+        let criteria: AnimationCompletionCriteria = isLogical
+            ? .logicallyComplete
+            : .removed
+        guard animationListener.criteriaForNewAnimation().contains(criteria) else {
+            return ListenerRegistration()
+        }
+
+        animationListener.animationWasAdded()
+        let record = Listener(
+            listener: animationListener,
+            criteria: criteria
+        )
+        if isLogical {
+            if !isLogicallyComplete {
+                logicalListeners.append(animationListener)
+                return ListenerRegistration(records: [record])
             }
+            return ListenerRegistration(
+                immediateActions: record.finish()
+            )
         }
-        let records = registeredListeners.filter { listener in
-            !immediateListeners.contains { $0.tokenID == listener.tokenID }
-        }
+
+        listeners.append(animationListener)
         return ListenerRegistration(
-            records: records,
-            immediateActions: immediateListeners.flatMap { $0.finish() }
+            records: [record]
         )
     }
 
-    mutating func updateListeners(
+    func updateListeners(
         isLogicallyComplete: Bool,
         time: Time,
         environment: EnvironmentValues
@@ -675,16 +715,26 @@ private struct AnimatorState<AnimatedValue: Animatable> {
         }
         _ = time
         _ = environment
-        let completed = logicalListeners
+        let completed = logicalListeners.map {
+            Listener(listener: $0, criteria: .logicallyComplete)
+        }
         logicalListeners.removeAll()
         return completed
     }
 
-    mutating func removeListeners() -> [Listener] {
-        var removed = listeners
-        removed.append(contentsOf: logicalListeners)
+    func removeListeners() -> [Listener] {
+        var removed = listeners.map {
+            Listener(listener: $0, criteria: .removed)
+        }
+        removed.append(contentsOf: logicalListeners.map {
+            Listener(listener: $0, criteria: .logicallyComplete)
+        })
         for layer in baseLayers {
-            removed.append(contentsOf: layer.listeners)
+            removed.append(
+                contentsOf: layer.listeners.map {
+                    Listener(listener: $0, criteria: .logicallyComplete)
+                }
+            )
         }
         listeners.removeAll()
         logicalListeners.removeAll()
@@ -694,7 +744,7 @@ private struct AnimatorState<AnimatedValue: Animatable> {
         return removed
     }
 
-    mutating func forkLogicalListeners() -> [Listener] {
+    func forkLogicalListeners() -> [AnimationListener] {
         guard !isLogicallyComplete, !logicalListeners.isEmpty else {
             return []
         }
@@ -703,7 +753,27 @@ private struct AnimatorState<AnimatedValue: Animatable> {
         return forked
     }
 
-    mutating func removeBaseLayers() {
+    private func makeRetargetFork(
+        _ previousAnimation: Animation,
+        seed: RetargetForkSeed?
+    ) -> Fork? {
+        guard let seed else {
+            return nil
+        }
+        return Fork(
+            animation: previousAnimation,
+            startValue: seed.startValue,
+            targetValue: seed.targetValue,
+            startTime: seed.startTime,
+            state: state,
+            finishingDefinition: finishingDefinition,
+            listeners: forkLogicalListeners(),
+            contextIsLogicallyComplete: isLogicallyComplete,
+            generation: seed.generation
+        )
+    }
+
+    func removeBaseLayers() {
         baseLayers.removeAll()
         completedBaseLayerValue = nil
     }
@@ -712,7 +782,7 @@ private struct AnimatorState<AnimatedValue: Animatable> {
         completedBaseLayerValue ?? baseLayers.first?.startValue
     }
 
-    private mutating func pruneFinishedBaseLayerPrefix() {
+    private func pruneFinishedBaseLayerPrefix() {
         var removeCount = 0
         for layer in baseLayers {
             guard layer.isFinished else {
@@ -726,7 +796,7 @@ private struct AnimatorState<AnimatedValue: Animatable> {
         }
     }
 
-    private mutating func updateFrameInterval(from transaction: Transaction) {
+    private func updateFrameInterval(from transaction: Transaction) {
         guard let interval = transaction.animationFrameInterval,
               interval > 0 else {
             quantizedFrameInterval = 0
@@ -735,13 +805,13 @@ private struct AnimatorState<AnimatedValue: Animatable> {
         quantizedFrameInterval = floor((interval * 120.0) + 0.01) / 120.0
     }
 
-    private mutating func refreshScheduling(at time: Time, from transaction: Transaction) {
+    private func refreshScheduling(at time: Time, from transaction: Transaction) {
         nextTime = time
         updateFrameInterval(from: transaction)
         reason = transaction.animationReason
     }
 
-    private mutating func combineCurrentAnimation(
+    private func combineCurrentAnimation(
         _ previousAnimation: Animation,
         newAnimation: Animation,
         newInterval: AnimatedValue.AnimatableData,
@@ -866,13 +936,33 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
     private var contextLogicalCompletionSuppressedGenerations: Set<UInt64> = []
     private var currentGeneration: UInt64?
     private var nextGeneration: UInt64 = 1
-    // Each entry represents one transaction completion token waiting on this
-    // animatable node. Retargeting extends older entries to the replacement
-    // animation deadline while the newest token is inserted first.
+    // Each entry represents one transaction completion listener waiting on
+    // this animatable node. Retargeting extends older entries to the
+    // replacement animation deadline while the newest listener is inserted
+    // first.
     private var completionRecords: [CompletionRecord] = []
 
     private typealias AnimationLayer = AnimatorState<AnimatedValue>.Fork
-    private typealias CompletionRecord = AnimatorState<AnimatedValue>.Listener
+    private typealias StateListener = AnimatorState<AnimatedValue>.Listener
+
+    private struct CompletionRecord {
+        var listener: StateListener
+        var deadline: Time
+        var generation: UInt64
+        var orderGeneration: UInt64
+
+        var criteria: AnimationCompletionCriteria {
+            listener.criteria
+        }
+
+        var identity: StateListener.Identity {
+            listener.identity
+        }
+
+        func finish() -> [() -> Void] {
+            listener.finish()
+        }
+    }
 
     private var animation: Animation? {
         get { helper.animatorState?.animation }
@@ -942,14 +1032,14 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
     }
 
     @discardableResult
-    private mutating func clearAnimatorState() -> [CompletionRecord] {
+    private mutating func clearAnimatorState() -> [StateListener] {
         helper.clearAnimatorState()
     }
 
     @discardableResult
     private mutating func clearAnimationRuntimeState(
         clearingGeneration: Bool = true
-    ) -> [CompletionRecord] {
+    ) -> [StateListener] {
         let removedListeners = clearAnimatorState()
         samplingLayers.removeAll()
         customReplacementCompletionGroup = nil
@@ -965,6 +1055,11 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
 
     private struct SideEffectSamplingLayer {
         var layers: [AnimationLayer]
+    }
+
+    private struct SideEffectSamplingResult {
+        var isComplete: Bool
+        var didFinishCurrentAnimation: Bool
     }
 
     private struct CustomReplacementCompletionGroup {
@@ -1003,7 +1098,13 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             fatalError("AnimatableAttribute.updateValue called outside an active AttributeGraph context.")
         }
 
-        let updateInputs = helper.beginUpdate(source: _source)
+        var updateValue = (value: _source.value, changed: false)
+        let updateInputs = helper.beginUpdate(
+            value: &updateValue,
+            defaultAnimation: nil,
+            source: _source,
+            in: graph
+        )
         if updateInputs.didReset {
             resetAnimationStateForPhaseChange()
         }
@@ -1014,395 +1115,415 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             return
         }
 
-        if updateInputs.targetChanged {
-            let animationSelection = helper.animationSelection(
-                defaultAnimation: nil,
-                source: _source,
-                in: graph
-            )
-            let effectiveTransaction = animationSelection.transaction
-            guard let animation = animationSelection.animation else {
+        if let animationBranch = updateInputs.targetAnimationBranch {
+            switch animationBranch {
+            case .noAnimation:
                 guard continueAnimationAfterNoAnimationRetarget(to: target) else {
                     finishValue(with: target)
                     return
                 }
                 return sampleCurrentAnimationValue()
-            }
-            guard !animation.box.isImmediatelyComplete else {
+
+            case .immediatelyComplete(_, let effectiveTransaction):
                 finishZeroDurationAnimationRetarget(
                     with: target,
                     transaction: effectiveTransaction
                 )
                 return
-            }
-            let now = helper._time.value
-            let start = currentValue ?? target
-            guard start.animatableData != target.animatableData else {
-                finishValue(with: target)
-                return
-            }
-            let previousStart = startValue
-            let previousStartTime = startTime
-            let previousAnimation = self.animation
-            let previousAnimationState = animationState
-            let previousGeneration = currentGeneration
-            let replacementGeneration = nextGeneration
-            nextGeneration += 1
-            let previousLayer: AnimationLayer?
-            let previousSamplingLayers: [AnimationLayer]
-            if let previousAnimation,
-               let previousStart,
-               let previousTarget = targetValue,
-               let previousGeneration {
-                let layer = AnimationLayer(
-                    animation: previousAnimation,
-                    startValue: previousStart,
-                    targetValue: previousTarget,
-                    startTime: previousStartTime,
-                    state: previousAnimationState,
-                    finishingDefinition: finishingDefinition,
-                    listeners: helper.forkLogicalListeners(),
-                    contextIsLogicallyComplete: animationContextIsLogicallyComplete,
-                    generation: previousGeneration
-                )
-                previousLayer = layer
-                previousSamplingLayers = baseLayers + [layer]
-            } else {
-                previousLayer = nil
-                previousSamplingLayers = []
-            }
-            let mergedStart = helper.baseLayerStartValue ?? previousStart ?? start
-            let mergedStartTime = baseLayers.first?.startTime ?? previousStartTime
-            let canCombineInAnimatorState = previousAnimation != nil &&
-                previousStart != nil &&
-                targetValue != nil &&
-                baseLayers.isEmpty &&
-                isSourceCustomReplacementAnimation(animation.box)
-            let animatorStateNewInterval = canCombineInAnimatorState
-                ? targetValue.map { animatableDelta(from: $0, to: target) }
-                : nil
-            let animatorStateLayerStack = !baseLayers.isEmpty &&
-                isSourceCustomReplacementAnimation(animation.box)
-                ? previousSamplingLayers
-                : nil
-            let animatorStateLayerStackBase = helper.baseLayerStartValue
-            let combineResult: AnimatorState<AnimatedValue>.CombineResult
-            if previousAnimation != nil,
-               previousStart != nil,
-               targetValue != nil {
-                combineResult = helper.combine(
-                    newAnimation: animation,
-                    newInterval: animatorStateNewInterval,
-                    layerStack: animatorStateLayerStack,
-                    layerStackBase: animatorStateLayerStackBase,
-                    replacementTarget: target,
-                    at: now,
-                    in: effectiveTransaction,
-                    environment: _environment.value
-                )
-            } else {
-                helper.resetForReplacement()
-                combineResult = AnimatorState<AnimatedValue>.CombineResult(
-                    merged: false,
-                    layerStackConversion: nil
+
+            case let .animated(animation, effectiveTransaction, now):
+                updateAnimatedTargetChange(
+                    target: target,
+                    animation: animation,
+                    transaction: effectiveTransaction,
+                    time: now
                 )
             }
-            let merged = combineResult.merged
-            var activeAnimation = animation
-            var activeStart = merged ? mergedStart : start
-            var activeStartTime = merged ? mergedStartTime : now
-            let usesCombinedAnimation = shouldUseCombinedAnimationForFalseRetarget(
-                merged: merged,
-                previousAnimation: previousAnimation,
-                replacementAnimation: animation
-            )
-            if usesCombinedAnimation,
-               let previousAnimation,
-               let previousStart {
-                if let converted = combineResult.layerStackConversion {
-                    activeAnimation = converted.animation
-                    activeStart = converted.start
-                    activeStartTime = converted.startTime
-                } else {
-                    activeAnimation = self.animation ?? previousAnimation
-                    activeStart = previousStart
-                    activeStartTime = previousStartTime
-                }
-            }
-            if !previousSamplingLayers.isEmpty {
-                samplingLayers.append(SideEffectSamplingLayer(layers: previousSamplingLayers))
-            }
-            if usesCombinedAnimation {
-                helper.removeBaseLayers()
-            } else if !merged,
-               let previousLayer {
-                baseLayers.append(previousLayer)
-            } else {
-                helper.removeBaseLayers()
-            }
-            let activeAnimationState = animationState
-            let activeMergeState = mergeState
-            let activeContextIsLogicallyComplete = animationContextIsLogicallyComplete
-            let activeUpdatesMergeStateWithAnimation = previousAnimation == nil || merged
-            let completionStart = now
-            let deadlineStartValue = merged ? mergedStart : start
-            let presentationDuration = animation.box.presentationDuration(
-                for: animatableDelta(from: deadlineStartValue, to: target)
-            )
-            let deadline = completionStart + animation.box.duration
-            velocityTrackingImmediateCompletionGroup = nil
-            if shouldFinishCombinedCompletionRecordsWithVelocityTrackingReplacement(
-                previousAnimation: previousAnimation,
-                replacementAnimation: animation
-            ), let customReplacementCompletionGroup {
-                let oldGenerations = customReplacementCompletionGroup.oldGenerations
-                    .union([customReplacementCompletionGroup.replacementGeneration])
-                velocityTrackingImmediateCompletionGroup = CustomReplacementCompletionGroup(
-                    replacementGeneration: replacementGeneration,
-                    oldGenerations: oldGenerations
-                )
-                self.customReplacementCompletionGroup = nil
-            } else if shouldGroupCompletionRecordsForCustomToCustomReplacement(
-                previousAnimation: previousAnimation,
-                replacementAnimation: animation
-            ) {
-                customReplacementCompletionGroup = CustomReplacementCompletionGroup(
-                    replacementGeneration: replacementGeneration,
-                    oldGenerations: customReplacementOldGenerations(
-                        from: previousSamplingLayers,
-                        previousGeneration: previousGeneration
-                    )
-                )
-            } else if shouldMoveCombinedCompletionRecordsToResidualReplacementFinalization(
-                previousAnimation: previousAnimation,
-                replacementAnimation: animation,
-                presentationDuration: presentationDuration
-            ), let customReplacementCompletionGroup {
-                let oldGenerations = customReplacementCompletionGroup.oldGenerations
-                    .union([customReplacementCompletionGroup.replacementGeneration])
-                    .sorted()
-                combinedResidualCompletionGroup = CombinedResidualCompletionGroup(
-                    replacementGeneration: replacementGeneration,
-                    oldGenerations: oldGenerations
-                )
-                for index in completionRecords.indices where oldGenerations.contains(completionRecords[index].orderGeneration) {
-                    completionRecords[index].deadline = .infinity
-                }
-            } else if shouldMoveCombinedCompletionRecordsToFiniteReplacementFinalization(
-                previousAnimation: previousAnimation,
-                replacementAnimation: animation
-            ), let customReplacementCompletionGroup {
-                let oldGenerations = customReplacementCompletionGroup.oldGenerations
-                    .union([customReplacementCompletionGroup.replacementGeneration])
-                combinedFiniteCompletionGroup = CombinedFiniteCompletionGroup(
-                    replacementGeneration: replacementGeneration,
-                    oldGenerations: oldGenerations
-                )
-                self.customReplacementCompletionGroup = nil
-            } else if shouldHoldSourceCustomCompletionRecordsUntilDefaultFinalization(
-                previousAnimation: previousAnimation,
-                replacementAnimation: animation
-            ), let previousGeneration {
-                contextLogicalCompletionSuppressedGenerations.insert(previousGeneration)
-                contextLogicalCompletionSuppressedGenerations.insert(replacementGeneration)
-            } else if shouldHoldRemovedCompletionRecordsForInfiniteReplacement(
-                replacementAnimation: animation
-            ) {
-                let holdsPreviousRepeatGroup = shouldHoldFiniteRepeatCompletionRecordsAsGroupForInfiniteReplacement(
-                    previousAnimation: previousAnimation
-                )
-                for index in completionRecords.indices {
-                    let isPreviousGenerationRecord = previousGeneration.map {
-                        completionRecords[index].orderGeneration == $0
-                    } ?? false
-                    if completionRecords[index].criteria == .removed ||
-                       (holdsPreviousRepeatGroup && isPreviousGenerationRecord) {
-                        completionRecords[index].deadline = deadline
-                        completionRecords[index].generation = replacementGeneration
-                    }
-                }
-            } else if shouldMoveResidualWrapperCompletionRecordsToSourceCustomReplacement(
-                previousAnimation: previousAnimation,
-                replacementAnimation: animation
-            ), let previousGeneration {
-                for index in completionRecords.indices where completionRecords[index].orderGeneration == previousGeneration {
-                    if completionRecords[index].criteria == .removed {
-                        completionRecords[index].deadline = deadline
-                    }
-                    completionRecords[index].generation = replacementGeneration
-                }
-            } else if shouldMoveFiniteDelaySpeedCompletionRecordsToSourceCustomReplacement(
-                previousAnimation: previousAnimation,
-                replacementAnimation: animation
-            ), let previousGeneration {
-                for index in completionRecords.indices where completionRecords[index].orderGeneration == previousGeneration {
-                    if completionRecords[index].criteria == .removed {
-                        completionRecords[index].deadline = deadline
-                    }
-                    completionRecords[index].generation = replacementGeneration
-                }
-            } else if shouldMoveDefaultCompletionRecordsToSourceCustomReplacement(
-                previousAnimation: previousAnimation,
-                replacementAnimation: animation
-            ), let previousGeneration {
-                contextLogicalCompletionSuppressedGenerations.insert(replacementGeneration)
-                let previousPresentationDeadline = previousCompletionPresentationDeadline(
-                    previousAnimation: previousAnimation,
-                    previousStart: previousStart,
-                    previousTarget: targetValue,
-                    previousStartTime: previousStartTime,
-                    previousGeneration: previousGeneration
-                )
-                for index in completionRecords.indices where completionRecords[index].orderGeneration == previousGeneration {
-                    if completionRecords[index].criteria == .removed {
-                        completionRecords[index].deadline = deadline
-                    } else if completionRecords[index].deadline.seconds < previousPresentationDeadline.seconds {
-                        completionRecords[index].deadline = previousPresentationDeadline
-                    }
-                    completionRecords[index].generation = replacementGeneration
-                }
-            } else if shouldMoveBuiltInCompletionRecordsToSourceCustomReplacement(
-                previousAnimation: previousAnimation,
-                replacementAnimation: animation
-            ), let previousGeneration {
-                for index in completionRecords.indices where completionRecords[index].orderGeneration == previousGeneration {
-                    completionRecords[index].deadline = deadline
-                    completionRecords[index].generation = replacementGeneration
-                }
-            } else if shouldMoveSourceCustomCompletionRecordsToFiniteReplacement(
-                previousAnimation: previousAnimation,
-                replacementAnimation: animation
-            ), let previousGeneration {
-                let completionDeadline = completionStart + max(animation.box.duration, presentationDuration)
-                for index in completionRecords.indices where completionRecords[index].orderGeneration == previousGeneration {
-                    if completionRecords[index].criteria == .removed {
-                        completionRecords[index].deadline = completionDeadline
-                        completionRecords[index].generation = replacementGeneration
-                    } else if completionRecords[index].deadline.seconds > completionDeadline.seconds {
-                        completionRecords[index].deadline = completionDeadline
-                    }
-                }
-            } else if merged,
-               shouldMoveMergedCompletionRecordsToPresentation(
-                   previousAnimation: previousAnimation,
-                   replacementAnimation: animation,
-                   presentationDuration: presentationDuration
-               ) {
-                let presentationDeadline = completionStart + presentationDuration
-                let movesPreviousRepeatGroup = shouldMoveFiniteRepeatCompletionRecordsAsGroupToPresentation(
-                    previousAnimation: previousAnimation
-                )
-                for index in completionRecords.indices {
-                    let isPreviousGenerationRecord = previousGeneration.map {
-                        completionRecords[index].orderGeneration == $0
-                    } ?? false
-                    if completionRecords[index].criteria == .removed ||
-                       completionRecords[index].deadline.seconds > presentationDeadline.seconds ||
-                       (movesPreviousRepeatGroup &&
-                        isPreviousGenerationRecord) {
-                        completionRecords[index].deadline = presentationDeadline
-                    }
-                }
-            } else if shouldMoveResidualCompletionRecordsToPresentation(
-                previousAnimation: previousAnimation,
-                replacementAnimation: animation,
-                presentationDuration: presentationDuration
-            ) {
-                let presentationDeadline = completionStart + presentationDuration
-                let movesPreviousRepeatGroup = shouldMoveFiniteRepeatCompletionRecordsAsGroupToPresentation(
-                    previousAnimation: previousAnimation
-                )
-                for index in completionRecords.indices {
-                    let isPreviousGenerationRecord = previousGeneration.map {
-                        completionRecords[index].orderGeneration == $0
-                    } ?? false
-                    if completionRecords[index].criteria == .removed ||
-                       completionRecords[index].deadline.seconds > presentationDeadline.seconds ||
-                       (movesPreviousRepeatGroup &&
-                        isPreviousGenerationRecord) {
-                        completionRecords[index].deadline = presentationDeadline
-                    }
-                }
-            } else if shouldMovePlainFiniteCompletionRecordsToReplacementBoundary(
-                previousAnimation: previousAnimation,
-                replacementAnimation: animation
-            ) {
-                let removedOrderGenerations = Set(
-                    completionRecords
-                        .filter { $0.criteria == .removed }
-                        .map(\.orderGeneration)
-                )
-                for index in completionRecords.indices {
-                    if completionRecords[index].criteria == .removed ||
-                       (completionRecords[index].deadline.seconds > deadline.seconds &&
-                        removedOrderGenerations.contains(completionRecords[index].orderGeneration)) {
-                        completionRecords[index].deadline = deadline
-                        completionRecords[index].generation = replacementGeneration
-                    }
-                }
-            } else if shouldMoveCompletionRecordsToReplacementBoundary(
-                merged: merged,
-                previousAnimation: previousAnimation,
-                replacementAnimation: animation
-            ) {
-                // Some merged replacements share one completion group.
-                // Interrupted infinite or FluidSpring boxes also finalize at a
-                // non-residual replacement boundary in the sampled handoff paths.
-                for index in completionRecords.indices {
-                    completionRecords[index].deadline = deadline
-                    completionRecords[index].generation = replacementGeneration
-                }
-            } else if shouldClampCompletionRecordsToEarlierReplacementBoundary(
-                previousAnimation: previousAnimation,
-                replacementAnimation: animation
-            ) {
-                for index in completionRecords.indices where completionRecords[index].deadline.seconds > deadline.seconds {
-                    completionRecords[index].deadline = deadline
-                    completionRecords[index].generation = replacementGeneration
-                }
-            }
-            startValue = activeStart
-            targetValue = target
-            let activeInterval = animatableDelta(from: activeStart, to: target)
-            helper.updatePreviousModelData(target.animatableData)
-            currentValue = start
-            helper.activate(
-                animation: activeAnimation,
-                interval: activeInterval,
-                beginTime: activeStartTime,
-                sampleTime: now,
-                transaction: effectiveTransaction,
-                state: activeAnimationState,
-                mergeState: activeMergeState,
-                isLogicallyComplete: activeContextIsLogicallyComplete,
-                updatesMergeStateWithAnimation: activeUpdatesMergeStateWithAnimation
-            )
-            let presentationDeadline = completionStart + max(animation.box.duration, presentationDuration)
-            let holdsNewLogicalUntilPresentation = shouldHoldDefaultReplacementCompletionUntilPresentation(
-                previousAnimation: previousAnimation,
-                replacementAnimation: animation
-            )
-            let completesWithoutWaitingForSamplingWindow = isVelocityTrackingAnimation(animation.box)
-            let listenerRegistration = helper.addListeners(
-                transaction: effectiveTransaction,
-                generation: replacementGeneration,
-                orderGeneration: replacementGeneration,
-                deadline: { criteria in
-                    let waitsForPresentation = criteria == .removed || holdsNewLogicalUntilPresentation
-                    let registeredDeadline = animation.box.registeredCompletionDelay(for: criteria).map {
-                        completionStart + $0
-                    }
-                    return completesWithoutWaitingForSamplingWindow
-                        ? completionStart
-                        : registeredDeadline ?? (waitsForPresentation ? presentationDeadline : deadline)
-                }
-            )
-            completionRecords.insert(contentsOf: listenerRegistration.records, at: 0)
-            enqueueAnimationCompletionActions(listenerRegistration.immediateActions)
-            currentGeneration = replacementGeneration
         }
 
         sampleCurrentAnimationValue()
+    }
+
+    private mutating func updateAnimatedTargetChange(
+        target: AnimatedValue,
+        animation: Animation,
+        transaction effectiveTransaction: Transaction,
+        time now: Time
+    ) {
+        let start = currentValue ?? target
+        guard start.animatableData != target.animatableData else {
+            finishValue(with: target)
+            return
+        }
+        let previousStart = startValue
+        let previousStartTime = startTime
+        let previousAnimation = self.animation
+        let previousGeneration = currentGeneration
+        let replacementGeneration = nextGeneration
+        nextGeneration += 1
+        let previousForkSeed: AnimatorState<AnimatedValue>.RetargetForkSeed?
+        if previousAnimation != nil,
+           let previousStart,
+           let previousTarget = targetValue,
+           let previousGeneration {
+            previousForkSeed = AnimatorState.RetargetForkSeed(
+                startValue: previousStart,
+                targetValue: previousTarget,
+                startTime: previousStartTime,
+                generation: previousGeneration
+            )
+        } else {
+            previousForkSeed = nil
+        }
+        let mergedStart = helper.baseLayerStartValue ?? previousStart ?? start
+        let mergedStartTime = baseLayers.first?.startTime ?? previousStartTime
+        let canCombineInAnimatorState = previousAnimation != nil &&
+            previousStart != nil &&
+            targetValue != nil &&
+            baseLayers.isEmpty &&
+            isSourceCustomReplacementAnimation(animation.box)
+        let animatorStateNewInterval = canCombineInAnimatorState
+            ? targetValue.map { animatableDelta(from: $0, to: target) }
+            : nil
+        let animatorStateLayerStack = !baseLayers.isEmpty &&
+            previousForkSeed != nil &&
+            isSourceCustomReplacementAnimation(animation.box)
+            ? baseLayers
+            : nil
+        let animatorStateLayerStackBase = helper.baseLayerStartValue
+        let combineResult: AnimatorState<AnimatedValue>.CombineResult
+        if previousAnimation != nil,
+           previousStart != nil,
+           targetValue != nil {
+            combineResult = helper.combine(
+                newAnimation: animation,
+                newInterval: animatorStateNewInterval,
+                layerStack: animatorStateLayerStack,
+                layerStackBase: animatorStateLayerStackBase,
+                replacementTarget: target,
+                forkSeed: previousForkSeed,
+                at: now,
+                in: effectiveTransaction,
+                environment: _environment.value
+            )
+        } else {
+            helper.resetForReplacement()
+            combineResult = AnimatorState<AnimatedValue>.CombineResult(
+                merged: false,
+                layerStackConversion: nil,
+                forkedLayer: nil
+            )
+        }
+        let merged = combineResult.merged
+        let previousLayer = combineResult.forkedLayer
+        let previousSamplingLayers = previousLayer.map { baseLayers + [$0] } ?? []
+        var activeAnimation = animation
+        var activeStart = merged ? mergedStart : start
+        var activeStartTime = merged ? mergedStartTime : now
+        let usesCombinedAnimation = shouldUseCombinedAnimationForFalseRetarget(
+            merged: merged,
+            previousAnimation: previousAnimation,
+            replacementAnimation: animation
+        )
+        if usesCombinedAnimation,
+           let previousAnimation,
+           let previousStart {
+            if let converted = combineResult.layerStackConversion {
+                activeAnimation = converted.animation
+                activeStart = converted.start
+                activeStartTime = converted.startTime
+            } else {
+                activeAnimation = self.animation ?? previousAnimation
+                activeStart = previousStart
+                activeStartTime = previousStartTime
+            }
+        }
+        if !previousSamplingLayers.isEmpty {
+            samplingLayers.append(SideEffectSamplingLayer(layers: previousSamplingLayers))
+        }
+        if usesCombinedAnimation {
+            helper.removeBaseLayers()
+        } else if !merged,
+           let previousLayer {
+            baseLayers.append(previousLayer)
+        } else {
+            helper.removeBaseLayers()
+        }
+        let activeAnimationState = animationState
+        let activeMergeState = mergeState
+        let activeContextIsLogicallyComplete = animationContextIsLogicallyComplete
+        let activeUpdatesMergeStateWithAnimation = previousAnimation == nil || merged
+        let completionStart = now
+        let deadlineStartValue = merged ? mergedStart : start
+        let presentationDuration = animation.box.presentationDuration(
+            for: animatableDelta(from: deadlineStartValue, to: target)
+        )
+        let deadline = completionStart + animation.box.duration
+        velocityTrackingImmediateCompletionGroup = nil
+        if shouldFinishCombinedCompletionRecordsWithVelocityTrackingReplacement(
+            previousAnimation: previousAnimation,
+            replacementAnimation: animation
+        ), let customReplacementCompletionGroup {
+            let oldGenerations = customReplacementCompletionGroup.oldGenerations
+                .union([customReplacementCompletionGroup.replacementGeneration])
+            velocityTrackingImmediateCompletionGroup = CustomReplacementCompletionGroup(
+                replacementGeneration: replacementGeneration,
+                oldGenerations: oldGenerations
+            )
+            self.customReplacementCompletionGroup = nil
+        } else if shouldGroupCompletionRecordsForCustomToCustomReplacement(
+            previousAnimation: previousAnimation,
+            replacementAnimation: animation
+        ) {
+            customReplacementCompletionGroup = CustomReplacementCompletionGroup(
+                replacementGeneration: replacementGeneration,
+                oldGenerations: customReplacementOldGenerations(
+                    from: previousSamplingLayers,
+                    previousGeneration: previousGeneration
+                )
+            )
+        } else if shouldMoveCombinedCompletionRecordsToResidualReplacementFinalization(
+            previousAnimation: previousAnimation,
+            replacementAnimation: animation,
+            presentationDuration: presentationDuration
+        ), let customReplacementCompletionGroup {
+            let oldGenerations = customReplacementCompletionGroup.oldGenerations
+                .union([customReplacementCompletionGroup.replacementGeneration])
+                .sorted()
+            combinedResidualCompletionGroup = CombinedResidualCompletionGroup(
+                replacementGeneration: replacementGeneration,
+                oldGenerations: oldGenerations
+            )
+            for index in completionRecords.indices where oldGenerations.contains(completionRecords[index].orderGeneration) {
+                completionRecords[index].deadline = .infinity
+            }
+        } else if shouldMoveCombinedCompletionRecordsToFiniteReplacementFinalization(
+            previousAnimation: previousAnimation,
+            replacementAnimation: animation
+        ), let customReplacementCompletionGroup {
+            let oldGenerations = customReplacementCompletionGroup.oldGenerations
+                .union([customReplacementCompletionGroup.replacementGeneration])
+            combinedFiniteCompletionGroup = CombinedFiniteCompletionGroup(
+                replacementGeneration: replacementGeneration,
+                oldGenerations: oldGenerations
+            )
+            self.customReplacementCompletionGroup = nil
+        } else if shouldHoldSourceCustomCompletionRecordsUntilDefaultFinalization(
+            previousAnimation: previousAnimation,
+            replacementAnimation: animation
+        ), let previousGeneration {
+            contextLogicalCompletionSuppressedGenerations.insert(previousGeneration)
+            contextLogicalCompletionSuppressedGenerations.insert(replacementGeneration)
+        } else if shouldHoldRemovedCompletionRecordsForInfiniteReplacement(
+            replacementAnimation: animation
+        ) {
+            let holdsPreviousRepeatGroup = shouldHoldFiniteRepeatCompletionRecordsAsGroupForInfiniteReplacement(
+                previousAnimation: previousAnimation
+            )
+            for index in completionRecords.indices {
+                let isPreviousGenerationRecord = previousGeneration.map {
+                    completionRecords[index].orderGeneration == $0
+                } ?? false
+                if completionRecords[index].criteria == .removed ||
+                   (holdsPreviousRepeatGroup && isPreviousGenerationRecord) {
+                    completionRecords[index].deadline = deadline
+                    completionRecords[index].generation = replacementGeneration
+                }
+            }
+        } else if shouldMoveResidualWrapperCompletionRecordsToSourceCustomReplacement(
+            previousAnimation: previousAnimation,
+            replacementAnimation: animation
+        ), let previousGeneration {
+            for index in completionRecords.indices where completionRecords[index].orderGeneration == previousGeneration {
+                if completionRecords[index].criteria == .removed {
+                    completionRecords[index].deadline = deadline
+                }
+                completionRecords[index].generation = replacementGeneration
+            }
+        } else if shouldMoveFiniteDelaySpeedCompletionRecordsToSourceCustomReplacement(
+            previousAnimation: previousAnimation,
+            replacementAnimation: animation
+        ), let previousGeneration {
+            for index in completionRecords.indices where completionRecords[index].orderGeneration == previousGeneration {
+                if completionRecords[index].criteria == .removed {
+                    completionRecords[index].deadline = deadline
+                }
+                completionRecords[index].generation = replacementGeneration
+            }
+        } else if shouldMoveDefaultCompletionRecordsToSourceCustomReplacement(
+            previousAnimation: previousAnimation,
+            replacementAnimation: animation
+        ), let previousGeneration {
+            contextLogicalCompletionSuppressedGenerations.insert(replacementGeneration)
+            let previousPresentationDeadline = previousCompletionPresentationDeadline(
+                previousAnimation: previousAnimation,
+                previousStart: previousStart,
+                previousTarget: targetValue,
+                previousStartTime: previousStartTime,
+                previousGeneration: previousGeneration
+            )
+            for index in completionRecords.indices where completionRecords[index].orderGeneration == previousGeneration {
+                if completionRecords[index].criteria == .removed {
+                    completionRecords[index].deadline = deadline
+                } else if completionRecords[index].deadline.seconds < previousPresentationDeadline.seconds {
+                    completionRecords[index].deadline = previousPresentationDeadline
+                }
+                completionRecords[index].generation = replacementGeneration
+            }
+        } else if shouldMoveBuiltInCompletionRecordsToSourceCustomReplacement(
+            previousAnimation: previousAnimation,
+            replacementAnimation: animation
+        ), let previousGeneration {
+            for index in completionRecords.indices where completionRecords[index].orderGeneration == previousGeneration {
+                completionRecords[index].deadline = deadline
+                completionRecords[index].generation = replacementGeneration
+            }
+        } else if shouldMoveSourceCustomCompletionRecordsToFiniteReplacement(
+            previousAnimation: previousAnimation,
+            replacementAnimation: animation
+        ), let previousGeneration {
+            let completionDeadline = completionStart + max(animation.box.duration, presentationDuration)
+            for index in completionRecords.indices where completionRecords[index].orderGeneration == previousGeneration {
+                if completionRecords[index].criteria == .removed {
+                    completionRecords[index].deadline = completionDeadline
+                    completionRecords[index].generation = replacementGeneration
+                } else if completionRecords[index].deadline.seconds > completionDeadline.seconds {
+                    completionRecords[index].deadline = completionDeadline
+                }
+            }
+        } else if merged,
+           shouldMoveMergedCompletionRecordsToPresentation(
+               previousAnimation: previousAnimation,
+               replacementAnimation: animation,
+               presentationDuration: presentationDuration
+           ) {
+            let presentationDeadline = completionStart + presentationDuration
+            let movesPreviousRepeatGroup = shouldMoveFiniteRepeatCompletionRecordsAsGroupToPresentation(
+                previousAnimation: previousAnimation
+            )
+            for index in completionRecords.indices {
+                let isPreviousGenerationRecord = previousGeneration.map {
+                    completionRecords[index].orderGeneration == $0
+                } ?? false
+                if completionRecords[index].criteria == .removed ||
+                   completionRecords[index].deadline.seconds > presentationDeadline.seconds ||
+                   (movesPreviousRepeatGroup &&
+                    isPreviousGenerationRecord) {
+                    completionRecords[index].deadline = presentationDeadline
+                }
+            }
+        } else if shouldMoveResidualCompletionRecordsToPresentation(
+            previousAnimation: previousAnimation,
+            replacementAnimation: animation,
+            presentationDuration: presentationDuration
+        ) {
+            let presentationDeadline = completionStart + presentationDuration
+            let movesPreviousRepeatGroup = shouldMoveFiniteRepeatCompletionRecordsAsGroupToPresentation(
+                previousAnimation: previousAnimation
+            )
+            for index in completionRecords.indices {
+                let isPreviousGenerationRecord = previousGeneration.map {
+                    completionRecords[index].orderGeneration == $0
+                } ?? false
+                if completionRecords[index].criteria == .removed ||
+                   completionRecords[index].deadline.seconds > presentationDeadline.seconds ||
+                   (movesPreviousRepeatGroup &&
+                    isPreviousGenerationRecord) {
+                    completionRecords[index].deadline = presentationDeadline
+                }
+            }
+        } else if shouldMovePlainFiniteCompletionRecordsToReplacementBoundary(
+            previousAnimation: previousAnimation,
+            replacementAnimation: animation
+        ) {
+            let removedOrderGenerations = Set(
+                completionRecords
+                    .filter { $0.criteria == .removed }
+                    .map(\.orderGeneration)
+            )
+            for index in completionRecords.indices {
+                if completionRecords[index].criteria == .removed ||
+                   (completionRecords[index].deadline.seconds > deadline.seconds &&
+                    removedOrderGenerations.contains(completionRecords[index].orderGeneration)) {
+                    completionRecords[index].deadline = deadline
+                    completionRecords[index].generation = replacementGeneration
+                }
+            }
+        } else if shouldMoveCompletionRecordsToReplacementBoundary(
+            merged: merged,
+            previousAnimation: previousAnimation,
+            replacementAnimation: animation
+        ) {
+            // Some merged replacements share one completion group.
+            // Interrupted infinite or FluidSpring boxes also finalize at a
+            // non-residual replacement boundary in the sampled handoff paths.
+            for index in completionRecords.indices {
+                completionRecords[index].deadline = deadline
+                completionRecords[index].generation = replacementGeneration
+            }
+        } else if shouldClampCompletionRecordsToEarlierReplacementBoundary(
+            previousAnimation: previousAnimation,
+            replacementAnimation: animation
+        ) {
+            for index in completionRecords.indices where completionRecords[index].deadline.seconds > deadline.seconds {
+                completionRecords[index].deadline = deadline
+                completionRecords[index].generation = replacementGeneration
+            }
+        }
+        startValue = activeStart
+        targetValue = target
+        let activeInterval = animatableDelta(from: activeStart, to: target)
+        helper.updatePreviousModelData(target.animatableData)
+        currentValue = start
+        let presentationDeadline = completionStart + max(animation.box.duration, presentationDuration)
+        let holdsNewLogicalUntilPresentation = shouldHoldDefaultReplacementCompletionUntilPresentation(
+            previousAnimation: previousAnimation,
+            replacementAnimation: animation
+        )
+        let completesWithoutWaitingForSamplingWindow = isVelocityTrackingAnimation(animation.box)
+        let listenerRegistration = helper.activateAndAddListeners(
+            animation: activeAnimation,
+            interval: activeInterval,
+            beginTime: activeStartTime,
+            sampleTime: now,
+            transaction: effectiveTransaction,
+            state: activeAnimationState,
+            mergeState: activeMergeState,
+            isLogicallyComplete: activeContextIsLogicallyComplete,
+            updatesMergeStateWithAnimation: activeUpdatesMergeStateWithAnimation
+        )
+        let newCompletionRecords = completionRecords(
+            from: listenerRegistration.records,
+            generation: replacementGeneration,
+            orderGeneration: replacementGeneration
+        ) { criteria in
+            let waitsForPresentation = criteria == .removed || holdsNewLogicalUntilPresentation
+            let registeredDeadline = animation.box.registeredCompletionDelay(for: criteria).map {
+                completionStart + $0
+            }
+            return completesWithoutWaitingForSamplingWindow
+                ? completionStart
+                : registeredDeadline ?? (waitsForPresentation ? presentationDeadline : deadline)
+        }
+        completionRecords.insert(contentsOf: newCompletionRecords, at: 0)
+        enqueueAnimationCompletionActions(listenerRegistration.immediateActions)
+        currentGeneration = replacementGeneration
+    }
+
+    private func completionRecords(
+        from listeners: [StateListener],
+        generation: UInt64,
+        orderGeneration: UInt64,
+        deadline: (AnimationCompletionCriteria) -> Time
+    ) -> [CompletionRecord] {
+        listeners.map { listener in
+            CompletionRecord(
+                listener: listener,
+                deadline: deadline(listener.criteria),
+                generation: generation,
+                orderGeneration: orderGeneration
+            )
+        }
     }
 
     private mutating func sampleCurrentAnimationValue() {
@@ -1415,7 +1536,8 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             return
         }
         let now = helper._time.value
-        let baseValue = sampleBaseStack(at: now) ?? startValue
+        let baseStackSample = sampleBaseStack(at: now)
+        let baseValue = baseStackSample?.value ?? startValue
         let delta = animatableDelta(from: baseValue, to: targetValue)
         var sampledDelta: AnimatedValue.AnimatableData?
         guard let update = helper.update(
@@ -1432,6 +1554,10 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             return
         }
         guard let animatedDelta = sampledDelta else {
+            enqueueBaseStackCompletionActions(from: baseStackSample)
+            // Terminal samples let completion-record ordering own criteria
+            // priority. Drained logical state tokens are still present in the
+            // copied records, so finishing them here would reorder the boundary.
             if isCombinedFiniteCompletionGroupReplacement(currentGeneration) {
                 currentValue = targetValue
                 AttributeGraph.setStatefulOutput(targetValue)
@@ -1450,11 +1576,17 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             }
             let completions = finishDueCompletionRecords(at: now)
             enqueueAnimationCompletionActions(completions)
-            finishAnimation(with: targetValue, at: now)
+            finishAnimation(
+                with: targetValue,
+                at: now,
+                discardedBaseLayerGenerations: update.discardedBaseLayerGenerations
+            )
             return
         }
         let output = applying(delta: animatedDelta, to: baseValue, target: targetValue)
-        sampleSideEffectLayers(at: now)
+        if sampleSideEffectLayers(at: now) {
+            return
+        }
         currentValue = output
         AttributeGraph.setStatefulOutput(output)
         if let velocityTrackingImmediateCompletionGroup {
@@ -1468,11 +1600,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         if update.isLogicallyComplete,
            let currentGeneration,
            !contextLogicalCompletionSuppressedGenerations.contains(currentGeneration) {
-            let logicalListeners = helper.updateListeners(
-                isLogicallyComplete: update.isLogicallyComplete,
-                time: now,
-                environment: _environment.value
-            )
+            let logicalListeners = update.logicalListeners
             let completions = logicalListeners.isEmpty
                 ? finishCompletionRecords(
                     for: currentGeneration,
@@ -1484,6 +1612,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
                 : finishCompletionRecords(matching: logicalListeners)
             enqueueAnimationCompletionActions(completions)
         }
+        enqueueBaseStackCompletionActions(from: baseStackSample)
         let completions = finishDueCompletionRecords(at: now)
         enqueueAnimationCompletionActions(completions)
     }
@@ -1544,12 +1673,15 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
 
         let listenerRegistration = helper.addListeners(
             transaction: transaction,
+            creatingStateIfNeeded: true
+        )
+        let newCompletionRecords = completionRecords(
+            from: listenerRegistration.records,
             generation: replacementGeneration,
             orderGeneration: replacementGeneration,
-            creatingStateIfNeeded: true,
             deadline: { _ in now }
         )
-        completionRecords.insert(contentsOf: listenerRegistration.records, at: 0)
+        completionRecords.insert(contentsOf: newCompletionRecords, at: 0)
         enqueueAnimationCompletionActions(listenerRegistration.immediateActions)
 
         startValue = nil
@@ -1611,13 +1743,15 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
     private mutating func finishAnimation(
         with value: AnimatedValue,
         at now: Time,
-        finishAllRecords: Bool = false
+        finishAllRecords: Bool = false,
+        discardedBaseLayerGenerations: Set<UInt64> = []
     ) {
         startValue = nil
         targetValue = value
         helper.updatePreviousModelData(value.animatableData)
         currentValue = value
         let discardedInfiniteGenerations = discardedInfiniteLayerGenerations()
+            .union(discardedBaseLayerGenerations)
         let combinedResidualGroup = combinedResidualCompletionGroup
         let combinedFiniteGroup = combinedFiniteCompletionGroup
         clearAnimationRuntimeState(clearingGeneration: false)
@@ -1708,10 +1842,20 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         completionRecords = pendingRecords
         oldRemovedRecords.sort { $0.orderGeneration < $1.orderGeneration }
         oldOtherRecords.sort { $0.orderGeneration < $1.orderGeneration }
-        let orderedRecords = replacementOtherRecords +
-            oldRemovedRecords +
-            replacementRemovedRecords +
-            oldOtherRecords
+        let orderedRecords: [CompletionRecord]
+        // If the replacement logical record is still pending at residual
+        // finalization, this boundary owns ordinary same-boundary criteria
+        // priority. Otherwise an earlier sample already drained it.
+        if replacementOtherRecords.isEmpty {
+            orderedRecords = oldRemovedRecords +
+                replacementRemovedRecords +
+                oldOtherRecords
+        } else {
+            orderedRecords = oldRemovedRecords +
+                replacementRemovedRecords +
+                replacementOtherRecords +
+                oldOtherRecords
+        }
         return orderedRecords.flatMap { $0.finish() }
     }
 
@@ -1796,14 +1940,14 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
     }
 
     private mutating func finishCompletionRecords(
-        matching listeners: [CompletionRecord]
+        matching listeners: [StateListener]
     ) -> [() -> Void] {
         guard !listeners.isEmpty else { return [] }
-        let listenerIDs = Set(listeners.map(\.tokenID))
+        let listenerIDs = Set(listeners.map(\.identity))
         var readyRecords: [CompletionRecord] = []
         var pendingRecords: [CompletionRecord] = []
         for record in completionRecords {
-            if listenerIDs.contains(record.tokenID) {
+            if listenerIDs.contains(record.identity) {
                 readyRecords.append(record)
             } else {
                 pendingRecords.append(record)
@@ -1930,25 +2074,33 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         )
     }
 
-    private mutating func sampleSideEffectLayers(at now: Time) {
-        guard !samplingLayers.isEmpty else { return }
+    private mutating func sampleSideEffectLayers(at now: Time) -> Bool {
+        guard !samplingLayers.isEmpty else { return false }
 
         let sampledLayers = samplingLayers
         var remainingLayers: [SideEffectSamplingLayer] = []
         remainingLayers.reserveCapacity(sampledLayers.count)
         for samplingLayer in sampledLayers {
-            if !isSideEffectSamplingLayerComplete(samplingLayer, at: now) {
+            let result = sampleSideEffectSamplingLayer(samplingLayer, at: now)
+            if result.didFinishCurrentAnimation {
+                samplingLayers.removeAll()
+                return true
+            }
+            if !result.isComplete {
                 remainingLayers.append(samplingLayer)
             }
         }
         samplingLayers = remainingLayers
+        return false
     }
 
-    private mutating func isSideEffectSamplingLayerComplete(
+    private mutating func sampleSideEffectSamplingLayer(
         _ samplingLayer: SideEffectSamplingLayer,
         at now: Time
-    ) -> Bool {
-        guard !samplingLayer.layers.isEmpty else { return true }
+    ) -> SideEffectSamplingResult {
+        guard !samplingLayer.layers.isEmpty else {
+            return SideEffectSamplingResult(isComplete: true, didFinishCurrentAnimation: false)
+        }
 
         var baseValue = samplingLayer.layers[0].startValue
         var didReachLastLayer = false
@@ -1984,6 +2136,14 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
                 baseValue = layer.targetValue
                 if index == samplingLayer.layers.indices.last {
                     didReachLastLayer = true
+                    if isCurrentCustomReplacementNilBoundary(layer.generation) {
+                        let completions = finishCustomReplacementCompletionGroup(at: now)
+                        enqueueAnimationCompletionActions(completions)
+                        return SideEffectSamplingResult(
+                            isComplete: true,
+                            didFinishCurrentAnimation: true
+                        )
+                    }
                 }
                 if isDeferredCompletionGroupOldGeneration(layer.generation) {
                     let completions = finishCompletionRecords(for: layer.generation) {
@@ -1996,19 +2156,29 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
                 enqueueAnimationCompletionActions(completions)
             }
         }
-        return didReachLastLayer
+        return SideEffectSamplingResult(
+            isComplete: didReachLastLayer,
+            didFinishCurrentAnimation: false
+        )
     }
 
-    private mutating func sampleBaseStack(at now: Time) -> AnimatedValue? {
-        guard let sample = helper.sampleBaseStackValue(
+    private mutating func sampleBaseStack(
+        at now: Time
+    ) -> AnimatorState<AnimatedValue>.BaseStackSample? {
+        helper.sampleBaseStackValue(
             at: now,
             environment: _environment.value
-        ) else {
-            return nil
-        }
-        let completions = finishCompletionRecords(matching: sample.removedListeners)
+        )
+    }
+
+    private mutating func enqueueBaseStackCompletionActions(
+        from sample: AnimatorState<AnimatedValue>.BaseStackSample?
+    ) {
+        guard let sample else { return }
+        let completions = finishCompletionRecords(
+            matching: sample.removedListeners
+        )
         enqueueAnimationCompletionActions(completions)
-        return sample.value
     }
 
     private func isCustomReplacementCompletionGroupReplacement(_ generation: UInt64?) -> Bool {
@@ -2017,6 +2187,13 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             return false
         }
         return group.replacementGeneration == generation
+    }
+
+    private func isCurrentCustomReplacementNilBoundary(_ generation: UInt64) -> Bool {
+        guard isCustomReplacementCompletionGroupReplacement(generation) else {
+            return false
+        }
+        return isCustomReplacementCompletionGroupReplacement(currentGeneration)
     }
 
     private func isCombinedFiniteCompletionGroupReplacement(_ generation: UInt64?) -> Bool {
@@ -2473,11 +2650,18 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
         var didReset: Bool
         var target: AnimatedValue
         var targetChanged: Bool
+        var targetAnimationBranch: TargetAnimationBranch?
     }
 
     struct AnimationSelection {
         var transaction: Transaction
         var animation: Animation?
+    }
+
+    enum TargetAnimationBranch {
+        case noAnimation(transaction: Transaction)
+        case immediatelyComplete(animation: Animation, transaction: Transaction)
+        case animated(animation: Animation, transaction: Transaction, time: Time)
     }
 
     var _phase: Attribute<Phase>
@@ -2523,7 +2707,14 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
         isLogicallyComplete: Bool,
         updatesMergeStateWithAnimation: Bool
     ) {
-        ensureAnimatorState()
+        if animatorState == nil {
+            animatorState = AnimatorState(
+                animation: animation,
+                interval: interval,
+                at: beginTime,
+                in: transaction
+            )
+        }
         animatorState?.activate(
             animation: animation,
             interval: interval,
@@ -2537,6 +2728,31 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
         )
     }
 
+    mutating func activateAndAddListeners(
+        animation: Animation,
+        interval: AnimatedValue.AnimatableData,
+        beginTime: Time,
+        sampleTime: Time,
+        transaction: Transaction,
+        state: AnimationState<AnimatedValue.AnimatableData>,
+        mergeState: AnimationState<AnimatedValue.AnimatableData>,
+        isLogicallyComplete: Bool,
+        updatesMergeStateWithAnimation: Bool
+    ) -> AnimatorState<AnimatedValue>.ListenerRegistration {
+        activate(
+            animation: animation,
+            interval: interval,
+            beginTime: beginTime,
+            sampleTime: sampleTime,
+            transaction: transaction,
+            state: state,
+            mergeState: mergeState,
+            isLogicallyComplete: isLogicallyComplete,
+            updatesMergeStateWithAnimation: updatesMergeStateWithAnimation
+        )
+        return addListeners(transaction: transaction)
+    }
+
     var baseLayerStartValue: AnimatedValue? {
         animatorState?.baseLayerStartValue
     }
@@ -2547,6 +2763,7 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
         layerStack: [AnimatorState<AnimatedValue>.Fork]?,
         layerStackBase: AnimatedValue?,
         replacementTarget: AnimatedValue?,
+        forkSeed: AnimatorState<AnimatedValue>.RetargetForkSeed?,
         at time: Time,
         in transaction: Transaction,
         environment: EnvironmentValues
@@ -2557,12 +2774,14 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
             layerStack: layerStack,
             layerStackBase: layerStackBase,
             replacementTarget: replacementTarget,
+            forkSeed: forkSeed,
             at: time,
             in: transaction,
             environment: environment
         ) ?? AnimatorState<AnimatedValue>.CombineResult(
             merged: false,
-            layerStackConversion: nil
+            layerStackConversion: nil,
+            forkedLayer: nil
         )
     }
 
@@ -2580,20 +2799,13 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
 
     mutating func addListeners(
         transaction: Transaction,
-        generation: UInt64,
-        orderGeneration: UInt64,
-        creatingStateIfNeeded: Bool = false,
-        deadline: (AnimationCompletionCriteria) -> Time
+        creatingStateIfNeeded: Bool = false
     ) -> AnimatorState<AnimatedValue>.ListenerRegistration {
         if creatingStateIfNeeded {
             ensureAnimatorState()
         }
-        return animatorState?.addListeners(
-            transaction: transaction,
-            generation: generation,
-            orderGeneration: orderGeneration,
-            deadline: deadline
-        ) ?? AnimatorState<AnimatedValue>.ListenerRegistration()
+        return animatorState?.addListeners(transaction: transaction) ??
+            AnimatorState<AnimatedValue>.ListenerRegistration()
     }
 
     mutating func updateListeners(
@@ -2608,10 +2820,6 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
         ) ?? []
     }
 
-    mutating func forkLogicalListeners() -> [AnimatorState<AnimatedValue>.Listener] {
-        animatorState?.forkLogicalListeners() ?? []
-    }
-
     mutating func sampleBaseStackValue(
         at time: Time,
         environment: EnvironmentValues
@@ -2622,14 +2830,29 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
         )
     }
 
-    mutating func beginUpdate(source: Attribute<AnimatedValue>) -> UpdateInputs {
+    mutating func beginUpdate(
+        value: inout (value: AnimatedValue, changed: Bool),
+        defaultAnimation: Animation?,
+        source: Attribute<AnimatedValue>,
+        in graph: AttributeGraph
+    ) -> UpdateInputs {
         let didReset = checkReset()
-        let target = source.value
-        let targetChanged = hasModelDataChanged(target.animatableData)
+        let targetChanged = hasModelDataChanged(value.value.animatableData)
+        if didReset || targetChanged {
+            value.changed = true
+        }
+        let branch = targetChanged
+            ? targetAnimationBranch(
+                defaultAnimation: defaultAnimation,
+                source: source,
+                in: graph
+            )
+            : nil
         return UpdateInputs(
             didReset: didReset,
-            target: target,
-            targetChanged: targetChanged
+            target: value.value,
+            targetChanged: targetChanged,
+            targetAnimationBranch: branch
         )
     }
 
@@ -2639,7 +2862,7 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
         environment: EnvironmentValues,
         sampleCollector: (AnimatedValue.AnimatableData, Time) -> Void
     ) -> AnimatorState<AnimatedValue>.UpdateResult? {
-        guard let update = animatorState?.update(
+        guard var update = animatorState?.update(
             value: value,
             at: time,
             environment: environment
@@ -2649,6 +2872,11 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
         if let sampledValue = update.value {
             animatorState?.nextUpdate()
             sampleCollector(sampledValue, time)
+        } else {
+            update.discardedBaseLayerGenerations = Set(
+                animatorState?.baseLayers.map(\.generation) ?? []
+            )
+            _ = clearAnimatorState()
         }
         return update
     }
@@ -2667,12 +2895,10 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
     }
 
     mutating func removeListeners() -> [AnimatorState<AnimatedValue>.Listener] {
-        guard var animatorState else {
+        guard let animatorState else {
             return []
         }
-        let removedListeners = animatorState.removeListeners()
-        self.animatorState = animatorState
-        return removedListeners
+        return animatorState.removeListeners()
     }
 
     mutating func clearAnimatorState() -> [AnimatorState<AnimatedValue>.Listener] {
@@ -2703,6 +2929,32 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
         return AnimationSelection(
             transaction: transaction,
             animation: transaction.effectiveAnimation ?? defaultAnimation
+        )
+    }
+
+    func targetAnimationBranch(
+        defaultAnimation: Animation?,
+        source: Attribute<AnimatedValue>,
+        in graph: AttributeGraph
+    ) -> TargetAnimationBranch {
+        let selection = animationSelection(
+            defaultAnimation: defaultAnimation,
+            source: source,
+            in: graph
+        )
+        guard let animation = selection.animation else {
+            return .noAnimation(transaction: selection.transaction)
+        }
+        if animation.box.isImmediatelyComplete {
+            return .immediatelyComplete(
+                animation: animation,
+                transaction: selection.transaction
+            )
+        }
+        return .animated(
+            animation: animation,
+            transaction: selection.transaction,
+            time: _time.value
         )
     }
 }
