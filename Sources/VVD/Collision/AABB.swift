@@ -2,7 +2,7 @@
 //  File: AABB.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -38,11 +38,11 @@ public struct AABB: Hashable, Sendable {
 
     public mutating func expand(_ point: Vector3) {
         if self.isNull {
-            min = Vector3.minimum(min, point)
-            max = Vector3.maximum(max, point)
-        } else {
             min = point
             max = point
+        } else {
+            min = Vector3.minimum(min, point)
+            max = Vector3.maximum(max, point)
         }
     }
 
@@ -217,7 +217,7 @@ public struct AABB: Hashable, Sendable {
                 vmax[n] = self.max[n]
             } else {
                 vmin[n] = self.max[n]
-                vmax[n] = self.max[n]
+                vmax[n] = self.min[n]
             }
         }
         if plane.dot(vmax) < .zero { return false } // box is below plane
