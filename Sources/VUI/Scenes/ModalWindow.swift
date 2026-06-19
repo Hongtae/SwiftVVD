@@ -184,17 +184,18 @@ private final class ModalPresentationContext: @unchecked Sendable {
         } else if !registersDefaultCompletion {
             return []
         }
-        return completionTokens(for: transaction.animationListener) +
-            completionTokens(for: transaction.animationLogicalListener)
+        return completionTokens(for: transaction.animationListener, criteria: .removed) +
+            completionTokens(for: transaction.animationLogicalListener, criteria: .logicallyComplete)
     }
 
-    private func completionTokens(for listener: AnimationListener?) -> [AnimationCompletionToken] {
+    private func completionTokens(
+        for listener: AnimationListener?,
+        criteria: AnimationCompletionCriteria
+    ) -> [AnimationCompletionToken] {
         guard let listener else {
             return []
         }
-        return listener.criteriaForNewAnimation().flatMap {
-            listener.animationDidStartTokens(criteria: $0)
-        }
+        return [AnimationCompletionToken(listener: listener, criteria: criteria)]
     }
 
     func onViewLoaded() {

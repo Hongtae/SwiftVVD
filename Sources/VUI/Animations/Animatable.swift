@@ -200,6 +200,30 @@ extension Animatable {
     }
 }
 
+private func isSourceDefinedCustomAnimationBox(_ box: AnimationBoxBase) -> Bool {
+    !box.duration.isFinite && box.preservesRetargetedCompletionDeadlines
+}
+
+private func isVelocityTrackingAnimationBox(_ box: AnimationBoxBase) -> Bool {
+    box is CustomAnimationBox<VelocityTrackingAnimation>
+}
+
+private func isDefaultCombiningAnimationBox(_ box: AnimationBoxBase) -> Bool {
+    box is CustomAnimationBox<DefaultCombiningAnimation>
+}
+
+private func isSourceCustomReplacementAnimationBox(_ box: AnimationBoxBase) -> Bool {
+    isSourceDefinedCustomAnimationBox(box) &&
+        !isDefaultCombiningAnimationBox(box) &&
+        !isVelocityTrackingAnimationBox(box)
+}
+
+private func resolvedAnimationEnvironment(
+    _ environment: Attribute<EnvironmentValues>?
+) -> EnvironmentValues {
+    environment?.value ?? EnvironmentValues()
+}
+
 private final class AnimatorState<AnimatedValue: Animatable> {
     enum Phase {
         case pending
@@ -209,9 +233,36 @@ private final class AnimatorState<AnimatedValue: Animatable> {
     }
 
     struct Fork {
+        var animation: Animation
+        var state: AnimationState<AnimatedValue.AnimatableData>
+        var interval: AnimatedValue.AnimatableData
+        var finishingDefinition: (any AnimationFinishingDefinition<AnimatedValue.AnimatableData>.Type)?
+        var listeners: [AnimationListener] = []
+
+        mutating func update(
+            time: Time,
+            environment: Attribute<EnvironmentValues>?
+        ) -> Bool {
+            var context = makeAnimationContext(
+                state: state,
+                isLogicallyComplete: false,
+                environment: resolvedAnimationEnvironment(environment),
+                finishingDefinition: finishingDefinition
+            )
+            let animatedDelta = animation.box.animate(
+                value: interval,
+                time: time.seconds,
+                context: &context
+            )
+
+            state = context.state
+            return animatedDelta == nil || context.isLogicallyComplete
+        }
+    }
+
+    struct PresentationLayer {
         struct UpdateResult {
             var value: AnimatedValue
-            var removedListeners: [Listener]
         }
 
         var animation: Animation
@@ -220,25 +271,24 @@ private final class AnimatorState<AnimatedValue: Animatable> {
         var startTime: Time
         var state: AnimationState<AnimatedValue.AnimatableData>
         var finishingDefinition: (any AnimationFinishingDefinition<AnimatedValue.AnimatableData>.Type)?
-        var listeners: [AnimationListener] = []
         var contextIsLogicallyComplete: Bool = false
         var generation: UInt64
         var isFinished: Bool = false
 
         mutating func update(
             time: Time,
-            environment: EnvironmentValues,
+            environment: Attribute<EnvironmentValues>?,
             baseValue: AnimatedValue
         ) -> UpdateResult {
             guard !isFinished else {
-                return UpdateResult(value: targetValue, removedListeners: [])
+                return UpdateResult(value: targetValue)
             }
 
             let elapsed = max(time.seconds - startTime.seconds, 0)
             var context = makeAnimationContext(
                 state: state,
                 isLogicallyComplete: contextIsLogicallyComplete,
-                environment: environment,
+                environment: resolvedAnimationEnvironment(environment),
                 finishingDefinition: finishingDefinition
             )
             let animatedDelta = animation.box.animate(
@@ -251,13 +301,8 @@ private final class AnimatorState<AnimatedValue: Animatable> {
             contextIsLogicallyComplete = context.isLogicallyComplete
             guard let animatedDelta else {
                 isFinished = true
-                let removedListeners = listeners.map {
-                    Listener(listener: $0, criteria: .logicallyComplete)
-                }
-                listeners.removeAll()
                 return UpdateResult(
-                    value: targetValue,
-                    removedListeners: removedListeners
+                    value: targetValue
                 )
             }
 
@@ -266,8 +311,7 @@ private final class AnimatorState<AnimatedValue: Animatable> {
                     delta: animatedDelta,
                     to: baseValue,
                     target: targetValue
-                ),
-                removedListeners: []
+                )
             )
         }
     }
@@ -287,7 +331,8 @@ private final class AnimatorState<AnimatedValue: Animatable> {
     var isLogicallyComplete = false
     var finishingDefinition: (any AnimationFinishingDefinition<AnimatedValue.AnimatableData>.Type)?
     var updatesMergeStateWithAnimation = true
-    var baseLayers: [Fork] = []
+    var forks: [Fork] = []
+    var baseLayers: [PresentationLayer] = []
     var completedBaseLayerValue: AnimatedValue?
 
     init() {}
@@ -311,12 +356,12 @@ private final class AnimatorState<AnimatedValue: Animatable> {
         var value: AnimatedValue.AnimatableData?
         var isLogicallyComplete: Bool
         var logicalListeners: [Listener] = []
+        var removedListeners: [Listener] = []
         var discardedBaseLayerGenerations: Set<UInt64> = []
     }
 
     struct BaseStackSample {
         var value: AnimatedValue
-        var removedListeners: [Listener]
     }
 
     struct ListenerRegistration {
@@ -327,7 +372,8 @@ private final class AnimatorState<AnimatedValue: Animatable> {
     struct CombineResult {
         var merged: Bool
         var layerStackConversion: LayerStackConversion?
-        var forkedLayer: Fork?
+        var presentationLayer: PresentationLayer?
+        var finishesRetargetCompletionAtActivation: Bool = false
     }
 
     struct LayerStackConversion {
@@ -337,7 +383,7 @@ private final class AnimatorState<AnimatedValue: Animatable> {
         var startTime: Time
     }
 
-    struct RetargetForkSeed {
+    struct RetargetPresentationSeed {
         var startValue: AnimatedValue
         var targetValue: AnimatedValue
         var startTime: Time
@@ -405,46 +451,52 @@ private final class AnimatorState<AnimatedValue: Animatable> {
 
     func combine(
         newAnimation: Animation,
-        newInterval: AnimatedValue.AnimatableData?,
-        layerStack: [Fork]? = nil,
+        newInterval: AnimatedValue.AnimatableData,
+        layerStack: [PresentationLayer]? = nil,
         layerStackBase: AnimatedValue? = nil,
         replacementTarget: AnimatedValue? = nil,
-        forkSeed: RetargetForkSeed? = nil,
+        presentationSeed: RetargetPresentationSeed? = nil,
         at time: Time,
         in transaction: Transaction,
-        environment: EnvironmentValues
+        environment: Attribute<EnvironmentValues>?
     ) -> CombineResult {
+        let finishesAtActivation = newAnimation.box.finishesRetargetCompletionAtActivation
         guard let previousAnimation = animation else {
             resetForReplacement()
             refreshScheduling(at: time, from: transaction)
             return CombineResult(
                 merged: false,
                 layerStackConversion: nil,
-                forkedLayer: nil
+                presentationLayer: nil
             )
         }
         if phase == .pending {
             animation = newAnimation
-            if let newInterval {
-                interval = newInterval
-            }
+            interval = newInterval
             refreshScheduling(at: time, from: transaction)
             return CombineResult(
                 merged: false,
                 layerStackConversion: nil,
-                forkedLayer: nil
+                presentationLayer: nil,
+                finishesRetargetCompletionAtActivation: finishesAtActivation
             )
         }
         let elapsed = max(time.seconds - beginTime.seconds, 0)
         var context = makeAnimationContext(
             state: mergeState,
             isLogicallyComplete: isLogicallyComplete,
-            environment: environment,
+            environment: resolvedAnimationEnvironment(environment),
             finishingDefinition: finishingDefinition
         )
-        let forkedLayer = makeRetargetFork(
+        forkListeners(
+            animation: previousAnimation,
+            state: state,
+            interval: interval
+        )
+        let presentationLayer = makeRetargetPresentationLayer(
             previousAnimation,
-            seed: forkSeed
+            seed: presentationSeed,
+            replacementAnimation: newAnimation
         )
         let shouldMerge = newAnimation.box.shouldMerge(
             previous: previousAnimation,
@@ -457,27 +509,18 @@ private final class AnimatorState<AnimatedValue: Animatable> {
             mergeState = context.state
             isLogicallyComplete = context.isLogicallyComplete
             animation = newAnimation
-            if let newInterval {
-                interval += newInterval
-            }
+            interval += newInterval
         } else {
-            if let newInterval {
-                combineCurrentAnimation(
-                    previousAnimation,
-                    newAnimation: newAnimation,
-                    newInterval: newInterval,
-                    elapsed: elapsed
-                )
-            } else if let layerStack,
-                      let replacementTarget,
-                      let forkedLayer,
-                      let conversion = combineLayerStack(
-                          layerStack + [forkedLayer],
-                          base: layerStackBase,
-                          appending: newAnimation,
-                          target: replacementTarget,
-                          at: time
-                      ) {
+            if let layerStack,
+               let replacementTarget,
+               let presentationLayer,
+               let conversion = combineLayerStack(
+                   layerStack + [presentationLayer],
+                   base: layerStackBase,
+                   appending: newAnimation,
+                   target: replacementTarget,
+                   at: time
+               ) {
                 animation = conversion.animation
                 state = conversion.state
                 mergeState = AnimationState()
@@ -491,31 +534,55 @@ private final class AnimatorState<AnimatedValue: Animatable> {
                 return CombineResult(
                     merged: false,
                     layerStackConversion: conversion,
-                    forkedLayer: forkedLayer
+                    presentationLayer: presentationLayer,
+                    finishesRetargetCompletionAtActivation: finishesAtActivation
                 )
             } else {
-                resetForReplacement()
+                combineCurrentAnimation(
+                    previousAnimation,
+                    newAnimation: newAnimation,
+                    newInterval: newInterval,
+                    elapsed: elapsed
+                )
             }
         }
         refreshScheduling(at: time, from: transaction)
         return CombineResult(
             merged: shouldMerge,
             layerStackConversion: nil,
-            forkedLayer: forkedLayer
+            presentationLayer: presentationLayer,
+            finishesRetargetCompletionAtActivation: finishesAtActivation
         )
     }
 
     func update(
-        value: AnimatedValue.AnimatableData,
+        _ value: inout AnimatedValue.AnimatableData,
         at time: Time,
-        environment: EnvironmentValues
+        environment: Attribute<EnvironmentValues>?
+    ) -> Bool {
+        guard let update = updateForCompletionRecords(
+            value: &value,
+            at: time,
+            environment: environment
+        ) else {
+            return false
+        }
+        enqueueAnimationCompletionActions(update.logicalListeners.flatMap { $0.finish() })
+        return update.value != nil
+    }
+
+    func updateForCompletionRecords(
+        value: inout AnimatedValue.AnimatableData,
+        at time: Time,
+        environment: Attribute<EnvironmentValues>?
     ) -> UpdateResult? {
         guard let animation else {
             return nil
         }
+        let targetData = value
 
         if shouldUsePreviousAnimationValue(at: time) {
-            return previousAnimationResult()
+            return previousAnimationResult(value: &value)
         }
 
         switch phase {
@@ -527,7 +594,7 @@ private final class AnimatorState<AnimatedValue: Animatable> {
             let elapsedFromPreviousBegin = nextTime.seconds - beginTime.seconds
             nextTime = Time(seconds: time.seconds + elapsedFromPreviousBegin)
             beginTime = time
-            return previousAnimationResult()
+            return previousAnimationResult(value: &value)
         case .second:
             let frameInterval = max(quantizedFrameInterval, 1.0 / 60.0)
             let minimumElapsed = frameInterval * 2.0
@@ -544,23 +611,27 @@ private final class AnimatorState<AnimatedValue: Animatable> {
         var context = makeAnimationContext(
             state: state,
             isLogicallyComplete: isLogicallyComplete,
-            environment: environment,
+            environment: resolvedAnimationEnvironment(environment),
             finishingDefinition: finishingDefinition
         )
         let output = animation.box.animate(
-            value: value,
+            value: interval,
             time: elapsed,
             context: &context
         )
         state = context.state
         isLogicallyComplete = context.isLogicallyComplete
-        let logicalListeners = updateListeners(
+        let logicalListeners = updateListenersForCompletionRecords(
             isLogicallyComplete: context.isLogicallyComplete,
-            time: time,
+            time: Time(seconds: elapsed),
             environment: environment
         )
         if let output {
-            recordSampledAnimationValue(output, at: time)
+            value = resolvedData(
+                targetData: targetData,
+                animationValue: output
+            )
+            recordSampledAnimationValue(value, at: time)
             if updatesMergeStateWithAnimation {
                 mergeState = context.state
             }
@@ -572,16 +643,75 @@ private final class AnimatorState<AnimatedValue: Animatable> {
         )
     }
 
+    func update(
+        value: inout AnimatedValue,
+        at time: Time,
+        environment: Attribute<EnvironmentValues>?
+    ) -> Bool {
+        let targetValue = value
+        var targetData = value.animatableData
+        if let baseStackSample = sampleBaseStackValue(
+            at: time,
+            environment: environment
+        ) {
+            targetData = baseStackSample.value.animatableData
+            targetData += interval
+        }
+
+        let continues = update(
+            &targetData,
+            at: time,
+            environment: environment
+        )
+
+        if continues {
+            value.animatableData = targetData
+        } else {
+            value = targetValue
+        }
+        return continues
+    }
+
+    func updateForCompletionRecords(
+        value: inout AnimatedValue,
+        at time: Time,
+        environment: Attribute<EnvironmentValues>?
+    ) -> UpdateResult? {
+        let targetValue = value
+        var targetData = value.animatableData
+        if let baseStackSample = sampleBaseStackValue(
+            at: time,
+            environment: environment
+        ) {
+            targetData = baseStackSample.value.animatableData
+            targetData += interval
+        }
+
+        guard let update = updateForCompletionRecords(
+            value: &targetData,
+            at: time,
+            environment: environment
+        ) else {
+            return nil
+        }
+
+        if update.value != nil {
+            value.animatableData = targetData
+        } else {
+            value = targetValue
+        }
+        return update
+    }
+
     func sampleBaseStackValue(
         at time: Time,
-        environment: EnvironmentValues
+        environment: Attribute<EnvironmentValues>?
     ) -> BaseStackSample? {
         guard !baseLayers.isEmpty || completedBaseLayerValue != nil else {
             return nil
         }
 
         var baseValue = completedBaseLayerValue ?? baseLayers[0].startValue
-        var removedListeners: [Listener] = []
         for index in baseLayers.indices {
             var layer = baseLayers[index]
             let result = layer.update(
@@ -590,15 +720,13 @@ private final class AnimatorState<AnimatedValue: Animatable> {
                 baseValue: baseValue
             )
             baseValue = result.value
-            removedListeners.append(contentsOf: result.removedListeners)
             baseLayers[index] = layer
         }
 
         pruneFinishedBaseLayerPrefix()
 
         return BaseStackSample(
-            value: baseValue,
-            removedListeners: removedListeners
+            value: baseValue
         )
     }
 
@@ -629,14 +757,38 @@ private final class AnimatorState<AnimatedValue: Animatable> {
         return time.seconds <= nextTime.seconds - (quantizedFrameInterval * 0.5)
     }
 
-    private func previousAnimationResult() -> UpdateResult {
-        UpdateResult(
-            value: previousAnimationValue,
+    private func previousAnimationResult(
+        value: inout AnimatedValue.AnimatableData
+    ) -> UpdateResult {
+        let output = previousAnimationValue
+        value = resolvedData(
+            targetData: value,
+            animationValue: output
+        )
+        return UpdateResult(
+            value: output,
             isLogicallyComplete: isLogicallyComplete
         )
     }
 
+    private func resolvedData(
+        targetData: AnimatedValue.AnimatableData,
+        animationValue: AnimatedValue.AnimatableData
+    ) -> AnimatedValue.AnimatableData {
+        var data = targetData
+        data -= interval
+        data += animationValue
+        return data
+    }
+
     func addListeners(
+        transaction: Transaction
+    ) {
+        let registration = addListenersForCompletionRecords(transaction: transaction)
+        enqueueAnimationCompletionActions(registration.immediateActions)
+    }
+
+    func addListenersForCompletionRecords(
         transaction: Transaction
     ) -> ListenerRegistration {
         guard transaction.animationListener != nil ||
@@ -647,7 +799,7 @@ private final class AnimatorState<AnimatedValue: Animatable> {
         var registeredListeners: [Listener] = []
         var immediateActions: [() -> Void] = []
         if let animationListener = transaction.animationListener {
-            let registration = addListeners(
+            let registration = addListenerForCompletionRecords(
                 animationListener,
                 isLogical: false
             )
@@ -655,7 +807,7 @@ private final class AnimatorState<AnimatedValue: Animatable> {
             immediateActions.append(contentsOf: registration.immediateActions)
         }
         if let animationLogicalListener = transaction.animationLogicalListener {
-            let registration = addListeners(
+            let registration = addListenerForCompletionRecords(
                 animationLogicalListener,
                 isLogical: true
             )
@@ -673,17 +825,13 @@ private final class AnimatorState<AnimatedValue: Animatable> {
         )
     }
 
-    private func addListeners(
+    private func addListenerForCompletionRecords(
         _ animationListener: AnimationListener,
         isLogical: Bool
     ) -> ListenerRegistration {
         let criteria: AnimationCompletionCriteria = isLogical
             ? .logicallyComplete
             : .removed
-        guard animationListener.criteriaForNewAnimation().contains(criteria) else {
-            return ListenerRegistration()
-        }
-
         animationListener.animationWasAdded()
         let record = Listener(
             listener: animationListener,
@@ -708,66 +856,142 @@ private final class AnimatorState<AnimatedValue: Animatable> {
     func updateListeners(
         isLogicallyComplete: Bool,
         time: Time,
-        environment: EnvironmentValues
+        environment: Attribute<EnvironmentValues>?
+    ) {
+        let completed = updateListenersForCompletionRecords(
+            isLogicallyComplete: isLogicallyComplete,
+            time: time,
+            environment: environment
+        )
+        enqueueAnimationCompletionActions(completed.flatMap { $0.finish() })
+    }
+
+    func updateListenersForCompletionRecords(
+        isLogicallyComplete: Bool,
+        time: Time,
+        environment: Attribute<EnvironmentValues>?
     ) -> [Listener] {
+        var completed: [Listener] = []
         guard isLogicallyComplete, !logicalListeners.isEmpty else {
-            return []
+            updateForkListeners(
+                time: time,
+                environment: environment,
+                into: &completed
+            )
+            return completed
         }
-        _ = time
-        _ = environment
-        let completed = logicalListeners.map {
+        completed.append(contentsOf: logicalListeners.map {
             Listener(listener: $0, criteria: .logicallyComplete)
-        }
+        })
         logicalListeners.removeAll()
+        updateForkListeners(
+            time: time,
+            environment: environment,
+            into: &completed
+        )
         return completed
     }
 
-    func removeListeners() -> [Listener] {
+    private func updateForkListeners(
+        time: Time,
+        environment: Attribute<EnvironmentValues>?,
+        into completed: inout [Listener]
+    ) {
+        guard !forks.isEmpty else { return }
+        var retainedForks: [Fork] = []
+        retainedForks.reserveCapacity(forks.count)
+        for var fork in forks {
+            if fork.update(time: time, environment: environment) {
+                completed.append(contentsOf: fork.listeners.map {
+                    Listener(listener: $0, criteria: .logicallyComplete)
+                })
+            } else {
+                retainedForks.append(fork)
+            }
+        }
+        forks = retainedForks
+    }
+
+    func removeListeners() {
+        let actions = finishRemovedListenersBeforeClearingStorage()
+        enqueueAnimationCompletionActions(actions)
+    }
+
+    func removedListenersForCompletionRecords() -> [Listener] {
         var removed = listeners.map {
             Listener(listener: $0, criteria: .removed)
         }
         removed.append(contentsOf: logicalListeners.map {
             Listener(listener: $0, criteria: .logicallyComplete)
         })
-        for layer in baseLayers {
+        for fork in forks {
             removed.append(
-                contentsOf: layer.listeners.map {
+                contentsOf: fork.listeners.map {
                     Listener(listener: $0, criteria: .logicallyComplete)
                 }
             )
         }
         listeners.removeAll()
         logicalListeners.removeAll()
-        for index in baseLayers.indices {
-            baseLayers[index].listeners.removeAll()
-        }
+        forks.removeAll()
         return removed
     }
 
-    func forkLogicalListeners() -> [AnimationListener] {
-        guard !isLogicallyComplete, !logicalListeners.isEmpty else {
-            return []
-        }
-        let forked = logicalListeners
+    private func finishRemovedListenersBeforeClearingStorage() -> [() -> Void] {
+        var actions: [() -> Void] = []
+        actions.append(contentsOf: listeners.flatMap {
+            Listener(listener: $0, criteria: .removed).finish()
+        })
+        listeners.removeAll()
+        actions.append(contentsOf: logicalListeners.flatMap {
+            Listener(listener: $0, criteria: .logicallyComplete).finish()
+        })
         logicalListeners.removeAll()
-        return forked
+        for fork in forks {
+            actions.append(contentsOf: fork.listeners.flatMap {
+                Listener(listener: $0, criteria: .logicallyComplete).finish()
+            })
+        }
+        forks.removeAll()
+        return actions
     }
 
-    private func makeRetargetFork(
+    func forkListeners(
+        animation: Animation,
+        state: AnimationState<AnimatedValue.AnimatableData>,
+        interval: AnimatedValue.AnimatableData
+    ) {
+        guard !isLogicallyComplete, !logicalListeners.isEmpty else {
+            return
+        }
+        forks.append(
+            Fork(
+                animation: animation,
+                state: state,
+                interval: interval,
+                finishingDefinition: finishingDefinition,
+                listeners: logicalListeners
+            )
+        )
+        logicalListeners.removeAll()
+    }
+
+    private func makeRetargetPresentationLayer(
         _ previousAnimation: Animation,
-        seed: RetargetForkSeed?
-    ) -> Fork? {
-        guard let seed else {
+        seed: RetargetPresentationSeed?,
+        replacementAnimation: Animation
+    ) -> PresentationLayer? {
+        guard let seed,
+              !replacementAnimation.box.finishesRetargetCompletionAtActivation else {
             return nil
         }
-        return Fork(
+        return PresentationLayer(
             animation: previousAnimation,
             startValue: seed.startValue,
             targetValue: seed.targetValue,
             startTime: seed.startTime,
             state: state,
             finishingDefinition: finishingDefinition,
-            listeners: forkLogicalListeners(),
             contextIsLogicallyComplete: isLogicallyComplete,
             generation: seed.generation
         )
@@ -835,7 +1059,7 @@ private final class AnimatorState<AnimatedValue: Animatable> {
     }
 
     private func combineLayerStack(
-        _ layers: [Fork],
+        _ layers: [PresentationLayer],
         base baseValue: AnimatedValue?,
         appending replacementAnimation: Animation,
         target replacementTarget: AnimatedValue,
@@ -942,7 +1166,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
     // first.
     private var completionRecords: [CompletionRecord] = []
 
-    private typealias AnimationLayer = AnimatorState<AnimatedValue>.Fork
+    private typealias AnimationLayer = AnimatorState<AnimatedValue>.PresentationLayer
     private typealias StateListener = AnimatorState<AnimatedValue>.Listener
 
     private struct CompletionRecord {
@@ -1099,11 +1323,14 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         }
 
         var updateValue = (value: _source.value, changed: false)
+        let sourceID = _source.identifier
+        let transactionAttribute = helper._transaction
         let updateInputs = helper.beginUpdate(
             value: &updateValue,
             defaultAnimation: nil,
-            source: _source,
-            in: graph
+            transaction: {
+                graph.transaction(for: sourceID) ?? transactionAttribute.value
+            }
         )
         if updateInputs.didReset {
             resetAnimationStateForPhaseChange()
@@ -1122,14 +1349,9 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
                     finishValue(with: target)
                     return
                 }
-                return sampleCurrentAnimationValue()
-
-            case .immediatelyComplete(_, let effectiveTransaction):
-                finishZeroDurationAnimationRetarget(
-                    with: target,
-                    transaction: effectiveTransaction
+                return sampleCurrentAnimationValue(
+                    value: &updateValue
                 )
-                return
 
             case let .animated(animation, effectiveTransaction, now):
                 updateAnimatedTargetChange(
@@ -1141,7 +1363,12 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             }
         }
 
-        sampleCurrentAnimationValue()
+        guard helper.isAnimating else {
+            return
+        }
+        sampleCurrentAnimationValue(
+            value: &updateValue
+        )
     }
 
     private mutating func updateAnimatedTargetChange(
@@ -1161,70 +1388,66 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         let previousGeneration = currentGeneration
         let replacementGeneration = nextGeneration
         nextGeneration += 1
-        let previousForkSeed: AnimatorState<AnimatedValue>.RetargetForkSeed?
+        let previousPresentationSeed: AnimatorState<AnimatedValue>.RetargetPresentationSeed?
         if previousAnimation != nil,
            let previousStart,
            let previousTarget = targetValue,
            let previousGeneration {
-            previousForkSeed = AnimatorState.RetargetForkSeed(
+            previousPresentationSeed = AnimatorState.RetargetPresentationSeed(
                 startValue: previousStart,
                 targetValue: previousTarget,
                 startTime: previousStartTime,
                 generation: previousGeneration
             )
         } else {
-            previousForkSeed = nil
+            previousPresentationSeed = nil
         }
         let mergedStart = helper.baseLayerStartValue ?? previousStart ?? start
         let mergedStartTime = baseLayers.first?.startTime ?? previousStartTime
-        let canCombineInAnimatorState = previousAnimation != nil &&
-            previousStart != nil &&
-            targetValue != nil &&
-            baseLayers.isEmpty &&
-            isSourceCustomReplacementAnimation(animation.box)
-        let animatorStateNewInterval = canCombineInAnimatorState
-            ? targetValue.map { animatableDelta(from: $0, to: target) }
-            : nil
+        let animatorStateNewInterval = targetValue.map {
+            animatableDelta(from: $0, to: target)
+        }
         let animatorStateLayerStack = !baseLayers.isEmpty &&
-            previousForkSeed != nil &&
-            isSourceCustomReplacementAnimation(animation.box)
+            previousPresentationSeed != nil
             ? baseLayers
             : nil
         let animatorStateLayerStackBase = helper.baseLayerStartValue
         let combineResult: AnimatorState<AnimatedValue>.CombineResult
         if previousAnimation != nil,
            previousStart != nil,
-           targetValue != nil {
+           let animatorStateNewInterval {
             combineResult = helper.combine(
                 newAnimation: animation,
                 newInterval: animatorStateNewInterval,
                 layerStack: animatorStateLayerStack,
                 layerStackBase: animatorStateLayerStackBase,
                 replacementTarget: target,
-                forkSeed: previousForkSeed,
+                presentationSeed: previousPresentationSeed,
                 at: now,
                 in: effectiveTransaction,
-                environment: _environment.value
+                environment: _environment
             )
         } else {
             helper.resetForReplacement()
             combineResult = AnimatorState<AnimatedValue>.CombineResult(
                 merged: false,
                 layerStackConversion: nil,
-                forkedLayer: nil
+                presentationLayer: nil
             )
         }
         let merged = combineResult.merged
-        let previousLayer = combineResult.forkedLayer
+        let previousLayer = combineResult.presentationLayer
         let previousSamplingLayers = previousLayer.map { baseLayers + [$0] } ?? []
         var activeAnimation = animation
         var activeStart = merged ? mergedStart : start
         var activeStartTime = merged ? mergedStartTime : now
-        let usesCombinedAnimation = shouldUseCombinedAnimationForFalseRetarget(
-            merged: merged,
-            previousAnimation: previousAnimation,
-            replacementAnimation: animation
-        )
+        let usesCombinedAnimation = previousLayer != nil &&
+            shouldUseCombinedAnimationForFalseRetarget(
+                merged: merged,
+                previousAnimation: previousAnimation,
+                hasBaseLayers: !baseLayers.isEmpty,
+                hasLayerStackConversion: combineResult.layerStackConversion != nil
+            )
         if usesCombinedAnimation,
            let previousAnimation,
            let previousStart {
@@ -1260,7 +1483,8 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         )
         let deadline = completionStart + animation.box.duration
         velocityTrackingImmediateCompletionGroup = nil
-        if shouldFinishCombinedCompletionRecordsWithVelocityTrackingReplacement(
+        if !combineResult.finishesRetargetCompletionAtActivation,
+           shouldFinishCombinedCompletionRecordsWithVelocityTrackingReplacement(
             previousAnimation: previousAnimation,
             replacementAnimation: animation
         ), let customReplacementCompletionGroup {
@@ -1526,9 +1750,10 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         }
     }
 
-    private mutating func sampleCurrentAnimationValue() {
+    private mutating func sampleCurrentAnimationValue(
+        value updateValue: inout (value: AnimatedValue, changed: Bool)
+    ) {
         guard helper.isAnimating,
-              let startValue,
               let targetValue else {
             if let currentValue {
                 finishValue(with: currentValue)
@@ -1536,25 +1761,17 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             return
         }
         let now = helper._time.value
-        let baseStackSample = sampleBaseStack(at: now)
-        let baseValue = baseStackSample?.value ?? startValue
-        let delta = animatableDelta(from: baseValue, to: targetValue)
-        var sampledDelta: AnimatedValue.AnimatableData?
-        guard let update = helper.update(
-            value: delta,
-            at: now,
-            environment: _environment.value,
-            sampleCollector: { value, _ in
-                sampledDelta = value
-            }
+        guard let update = helper.updateForCompletionRecords(
+            value: &updateValue,
+            environment: _environment,
+            sampleCollector: { _, _ in }
         ) else {
             if let currentValue {
                 finishValue(with: currentValue)
             }
             return
         }
-        guard let animatedDelta = sampledDelta else {
-            enqueueBaseStackCompletionActions(from: baseStackSample)
+        guard update.value != nil else {
             // Terminal samples let completion-record ordering own criteria
             // priority. Drained logical state tokens are still present in the
             // copied records, so finishing them here would reorder the boundary.
@@ -1574,6 +1791,10 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
                 enqueueAnimationCompletionActions(completions)
                 return
             }
+            let listenerCompletions = finishCompletionRecords(
+                matching: update.removedListeners + update.logicalListeners
+            )
+            enqueueAnimationCompletionActions(listenerCompletions)
             let completions = finishDueCompletionRecords(at: now)
             enqueueAnimationCompletionActions(completions)
             finishAnimation(
@@ -1583,10 +1804,10 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             )
             return
         }
-        let output = applying(delta: animatedDelta, to: baseValue, target: targetValue)
         if sampleSideEffectLayers(at: now) {
             return
         }
+        let output = updateValue.value
         currentValue = output
         AttributeGraph.setStatefulOutput(output)
         if let velocityTrackingImmediateCompletionGroup {
@@ -1612,7 +1833,6 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
                 : finishCompletionRecords(matching: logicalListeners)
             enqueueAnimationCompletionActions(completions)
         }
-        enqueueBaseStackCompletionActions(from: baseStackSample)
         let completions = finishDueCompletionRecords(at: now)
         enqueueAnimationCompletionActions(completions)
     }
@@ -1653,78 +1873,6 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         }
         helper.updatePreviousModelData(target.animatableData)
         return true
-    }
-
-    private mutating func finishZeroDurationAnimationRetarget(
-        with value: AnimatedValue,
-        transaction: Transaction
-    ) {
-        let now = helper._time.value
-        sampleActiveAnimationBeforeImmediateReplacement(at: now)
-
-        let replacementGeneration = nextGeneration
-        nextGeneration += 1
-        let immediateCompletionGroup = customReplacementCompletionGroup.map {
-            CombinedFiniteCompletionGroup(
-                replacementGeneration: replacementGeneration,
-                oldGenerations: $0.oldGenerations.union([$0.replacementGeneration])
-            )
-        }
-
-        let listenerRegistration = helper.addListeners(
-            transaction: transaction,
-            creatingStateIfNeeded: true
-        )
-        let newCompletionRecords = completionRecords(
-            from: listenerRegistration.records,
-            generation: replacementGeneration,
-            orderGeneration: replacementGeneration,
-            deadline: { _ in now }
-        )
-        completionRecords.insert(contentsOf: newCompletionRecords, at: 0)
-        enqueueAnimationCompletionActions(listenerRegistration.immediateActions)
-
-        startValue = nil
-        targetValue = value
-        helper.updatePreviousModelData(value.animatableData)
-        currentValue = value
-        clearAnimationRuntimeState()
-        AttributeGraph.setStatefulOutput(value)
-        let completions = finishImmediateReplacementCompletionRecords(
-            completionGroup: immediateCompletionGroup
-        )
-        enqueueAnimationCompletionActions(completions)
-    }
-
-    private mutating func finishImmediateReplacementCompletionRecords(
-        completionGroup: CombinedFiniteCompletionGroup?
-    ) -> [() -> Void] {
-        if let completionGroup {
-            return finishCombinedFiniteCompletionRecords(completionGroup) +
-                finishAllCompletionRecords()
-        }
-        return finishAllCompletionRecords()
-    }
-
-    private func sampleActiveAnimationBeforeImmediateReplacement(at now: Time) {
-        guard let animation,
-              let startValue,
-              let targetValue else {
-            return
-        }
-
-        let elapsed = max(now.seconds - startTime.seconds, 0)
-        var context = makeAnimationContext(
-            state: animationState,
-            isLogicallyComplete: animationContextIsLogicallyComplete,
-            environment: _environment.value,
-            finishingDefinition: finishingDefinition
-        )
-        _ = animation.box.animate(
-            value: animatableDelta(from: startValue, to: targetValue),
-            time: elapsed,
-            context: &context
-        )
     }
 
     private mutating func finishValue(with value: AnimatedValue) {
@@ -2162,25 +2310,6 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         )
     }
 
-    private mutating func sampleBaseStack(
-        at now: Time
-    ) -> AnimatorState<AnimatedValue>.BaseStackSample? {
-        helper.sampleBaseStackValue(
-            at: now,
-            environment: _environment.value
-        )
-    }
-
-    private mutating func enqueueBaseStackCompletionActions(
-        from sample: AnimatorState<AnimatedValue>.BaseStackSample?
-    ) {
-        guard let sample else { return }
-        let completions = finishCompletionRecords(
-            matching: sample.removedListeners
-        )
-        enqueueAnimationCompletionActions(completions)
-    }
-
     private func isCustomReplacementCompletionGroupReplacement(_ generation: UInt64?) -> Bool {
         guard let generation,
               let group = customReplacementCompletionGroup else {
@@ -2334,11 +2463,12 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
     private func shouldUseCombinedAnimationForFalseRetarget(
         merged: Bool,
         previousAnimation: Animation?,
-        replacementAnimation: Animation
+        hasBaseLayers: Bool,
+        hasLayerStackConversion: Bool
     ) -> Bool {
         !merged &&
             previousAnimation != nil &&
-            isSourceCustomReplacementAnimation(replacementAnimation.box)
+            (!hasBaseLayers || hasLayerStackConversion)
     }
 
     private func customReplacementOldGenerations(
@@ -2379,7 +2509,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
     }
 
     private func isVelocityTrackingAnimation(_ box: AnimationBoxBase) -> Bool {
-        box is CustomAnimationBox<VelocityTrackingAnimation>
+        isVelocityTrackingAnimationBox(box)
     }
 
     private func shouldMoveBuiltInCompletionRecordsToSourceCustomReplacement(
@@ -2630,17 +2760,15 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
     }
 
     private func isSourceDefinedCustomAnimation(_ box: AnimationBoxBase) -> Bool {
-        !box.duration.isFinite && box.preservesRetargetedCompletionDeadlines
+        isSourceDefinedCustomAnimationBox(box)
     }
 
     private func isSourceCustomReplacementAnimation(_ box: AnimationBoxBase) -> Bool {
-        isSourceDefinedCustomAnimation(box) &&
-            !isDefaultCombiningAnimation(box) &&
-            !isVelocityTrackingAnimation(box)
+        isSourceCustomReplacementAnimationBox(box)
     }
 
     private func isDefaultCombiningAnimation(_ box: AnimationBoxBase) -> Bool {
-        box is CustomAnimationBox<DefaultCombiningAnimation>
+        isDefaultCombiningAnimationBox(box)
     }
 
 }
@@ -2659,8 +2787,7 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
     }
 
     enum TargetAnimationBranch {
-        case noAnimation(transaction: Transaction)
-        case immediatelyComplete(animation: Animation, transaction: Transaction)
+        case noAnimation
         case animated(animation: Animation, transaction: Transaction, time: Time)
     }
 
@@ -2750,7 +2877,7 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
             isLogicallyComplete: isLogicallyComplete,
             updatesMergeStateWithAnimation: updatesMergeStateWithAnimation
         )
-        return addListeners(transaction: transaction)
+        return addListenersForCompletionRecords(transaction: transaction)
     }
 
     var baseLayerStartValue: AnimatedValue? {
@@ -2759,14 +2886,14 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
 
     mutating func combine(
         newAnimation: Animation,
-        newInterval: AnimatedValue.AnimatableData?,
-        layerStack: [AnimatorState<AnimatedValue>.Fork]?,
+        newInterval: AnimatedValue.AnimatableData,
+        layerStack: [AnimatorState<AnimatedValue>.PresentationLayer]?,
         layerStackBase: AnimatedValue?,
         replacementTarget: AnimatedValue?,
-        forkSeed: AnimatorState<AnimatedValue>.RetargetForkSeed?,
+        presentationSeed: AnimatorState<AnimatedValue>.RetargetPresentationSeed?,
         at time: Time,
         in transaction: Transaction,
-        environment: EnvironmentValues
+        environment: Attribute<EnvironmentValues>?
     ) -> AnimatorState<AnimatedValue>.CombineResult {
         animatorState?.combine(
             newAnimation: newAnimation,
@@ -2774,14 +2901,14 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
             layerStack: layerStack,
             layerStackBase: layerStackBase,
             replacementTarget: replacementTarget,
-            forkSeed: forkSeed,
+            presentationSeed: presentationSeed,
             at: time,
             in: transaction,
             environment: environment
         ) ?? AnimatorState<AnimatedValue>.CombineResult(
             merged: false,
             layerStackConversion: nil,
-            forkedLayer: nil
+            presentationLayer: nil
         )
     }
 
@@ -2800,20 +2927,43 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
     mutating func addListeners(
         transaction: Transaction,
         creatingStateIfNeeded: Bool = false
+    ) {
+        let registration = addListenersForCompletionRecords(
+            transaction: transaction,
+            creatingStateIfNeeded: creatingStateIfNeeded
+        )
+        enqueueAnimationCompletionActions(registration.immediateActions)
+    }
+
+    mutating func addListenersForCompletionRecords(
+        transaction: Transaction,
+        creatingStateIfNeeded: Bool = false
     ) -> AnimatorState<AnimatedValue>.ListenerRegistration {
         if creatingStateIfNeeded {
             ensureAnimatorState()
         }
-        return animatorState?.addListeners(transaction: transaction) ??
+        return animatorState?.addListenersForCompletionRecords(transaction: transaction) ??
             AnimatorState<AnimatedValue>.ListenerRegistration()
     }
 
     mutating func updateListeners(
         isLogicallyComplete: Bool,
         time: Time,
-        environment: EnvironmentValues
-    ) -> [AnimatorState<AnimatedValue>.Listener] {
+        environment: Attribute<EnvironmentValues>?
+    ) {
         animatorState?.updateListeners(
+            isLogicallyComplete: isLogicallyComplete,
+            time: time,
+            environment: environment
+        )
+    }
+
+    mutating func updateListenersForCompletionRecords(
+        isLogicallyComplete: Bool,
+        time: Time,
+        environment: Attribute<EnvironmentValues>?
+    ) -> [AnimatorState<AnimatedValue>.Listener] {
+        animatorState?.updateListenersForCompletionRecords(
             isLogicallyComplete: isLogicallyComplete,
             time: time,
             environment: environment
@@ -2822,7 +2972,7 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
 
     mutating func sampleBaseStackValue(
         at time: Time,
-        environment: EnvironmentValues
+        environment: Attribute<EnvironmentValues>?
     ) -> AnimatorState<AnimatedValue>.BaseStackSample? {
         animatorState?.sampleBaseStackValue(
             at: time,
@@ -2833,8 +2983,7 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
     mutating func beginUpdate(
         value: inout (value: AnimatedValue, changed: Bool),
         defaultAnimation: Animation?,
-        source: Attribute<AnimatedValue>,
-        in graph: AttributeGraph
+        transaction: () -> Transaction
     ) -> UpdateInputs {
         let didReset = checkReset()
         let targetChanged = hasModelDataChanged(value.value.animatableData)
@@ -2844,8 +2993,7 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
         let branch = targetChanged
             ? targetAnimationBranch(
                 defaultAnimation: defaultAnimation,
-                source: source,
-                in: graph
+                transaction: transaction
             )
             : nil
         return UpdateInputs(
@@ -2857,75 +3005,109 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
     }
 
     mutating func update(
-        value: AnimatedValue.AnimatableData,
-        at time: Time,
-        environment: EnvironmentValues,
+        value: inout (value: AnimatedValue, changed: Bool),
+        environment: Attribute<EnvironmentValues>,
+        sampleCollector: (AnimatedValue.AnimatableData, Time) -> Void
+    ) {
+        guard let animatorState else {
+            return
+        }
+        let time = _time.value
+        let continues = animatorState.update(
+            value: &value.value,
+            at: time,
+            environment: environment
+        )
+        value.changed = true
+        if continues {
+            animatorState.nextUpdate()
+            sampleCollector(value.value.animatableData, time)
+        } else {
+            animatorState.removeListeners()
+            self.animatorState = nil
+        }
+    }
+
+    mutating func updateForCompletionRecords(
+        value: inout (value: AnimatedValue, changed: Bool),
+        environment: Attribute<EnvironmentValues>,
         sampleCollector: (AnimatedValue.AnimatableData, Time) -> Void
     ) -> AnimatorState<AnimatedValue>.UpdateResult? {
-        guard var update = animatorState?.update(
-            value: value,
+        guard let animatorState else {
+            return nil
+        }
+        let time = _time.value
+        guard var update = animatorState.updateForCompletionRecords(
+            value: &value.value,
             at: time,
             environment: environment
         ) else {
             return nil
         }
-        if let sampledValue = update.value {
-            animatorState?.nextUpdate()
-            sampleCollector(sampledValue, time)
+        if update.value != nil {
+            animatorState.nextUpdate()
+            sampleCollector(value.value.animatableData, time)
+            value.changed = true
         } else {
             update.discardedBaseLayerGenerations = Set(
-                animatorState?.baseLayers.map(\.generation) ?? []
+                animatorState.baseLayers.map(\.generation)
             )
-            _ = clearAnimatorState()
+            value.changed = true
+            update.removedListeners.append(contentsOf: clearAnimatorState())
         }
         return update
     }
 
     mutating func update(
-        value: AnimatedValue.AnimatableData,
-        at time: Time,
-        environment: EnvironmentValues
-    ) -> AnimatorState<AnimatedValue>.UpdateResult? {
+        value: inout (value: AnimatedValue, changed: Bool),
+        environment: Attribute<EnvironmentValues>
+    ) {
         update(
-            value: value,
-            at: time,
+            value: &value,
             environment: environment,
             sampleCollector: { _, _ in }
         )
     }
 
-    mutating func removeListeners() -> [AnimatorState<AnimatedValue>.Listener] {
+    mutating func updateForCompletionRecords(
+        value: inout (value: AnimatedValue, changed: Bool),
+        environment: Attribute<EnvironmentValues>
+    ) -> AnimatorState<AnimatedValue>.UpdateResult? {
+        updateForCompletionRecords(
+            value: &value,
+            environment: environment,
+            sampleCollector: { _, _ in }
+        )
+    }
+
+    mutating func removeListeners() {
+        animatorState?.removeListeners()
+    }
+
+    mutating func removedListenersForCompletionRecords() -> [AnimatorState<AnimatedValue>.Listener] {
         guard let animatorState else {
             return []
         }
-        return animatorState.removeListeners()
+        return animatorState.removedListenersForCompletionRecords()
     }
 
     mutating func clearAnimatorState() -> [AnimatorState<AnimatedValue>.Listener] {
-        let removedListeners = removeListeners()
+        let removedListeners = removedListenersForCompletionRecords()
         animatorState = nil
         return removedListeners
     }
 
     private mutating func reset(to currentResetSeed: UInt32) {
-        _ = clearAnimatorState()
+        removeListeners()
+        animatorState = nil
         previousModelData = nil
         resetSeed = currentResetSeed
     }
 
-    func effectiveTransaction(
-        source: Attribute<AnimatedValue>,
-        in graph: AttributeGraph
-    ) -> Transaction {
-        graph.transaction(for: source.identifier) ?? _transaction.value
-    }
-
     func animationSelection(
         defaultAnimation: Animation?,
-        source: Attribute<AnimatedValue>,
-        in graph: AttributeGraph
+        transaction: Transaction
     ) -> AnimationSelection {
-        let transaction = effectiveTransaction(source: source, in: graph)
         return AnimationSelection(
             transaction: transaction,
             animation: transaction.effectiveAnimation ?? defaultAnimation
@@ -2934,22 +3116,14 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
 
     func targetAnimationBranch(
         defaultAnimation: Animation?,
-        source: Attribute<AnimatedValue>,
-        in graph: AttributeGraph
+        transaction: () -> Transaction
     ) -> TargetAnimationBranch {
         let selection = animationSelection(
             defaultAnimation: defaultAnimation,
-            source: source,
-            in: graph
+            transaction: transaction()
         )
         guard let animation = selection.animation else {
-            return .noAnimation(transaction: selection.transaction)
-        }
-        if animation.box.isImmediatelyComplete {
-            return .immediatelyComplete(
-                animation: animation,
-                transaction: selection.transaction
-            )
+            return .noAnimation
         }
         return .animated(
             animation: animation,

@@ -98,6 +98,11 @@ class AnimationBoxBase: CustomAnimation, CustomStringConvertible, @unchecked Sen
         return delay.isFinite ? delay : nil
     }
 
+    var finishesRetargetCompletionAtActivation: Bool {
+        guard !preservesRetargetedCompletionDeadlines else { return false }
+        return noRegisteredCompletionDelay() == 0
+    }
+
     func noRegisteredCompletionDelay(for criteria: AnimationCompletionCriteria) -> TimeInterval? {
         noRegisteredCompletionDelay()
     }
@@ -3011,29 +3016,12 @@ final class AnimationCompletionToken: @unchecked Sendable {
     func finish() -> [() -> Void] {
         guard !finished else { return [] }
         finished = true
-        return listener.animationWasRemoved() +
-            listener.animationDidFinish(criteria: criteria)
+        return listener.animationWasRemoved()
     }
 }
 
 class AnimationListener: @unchecked Sendable {
-    func criteriaForNewAnimation() -> [AnimationCompletionCriteria] {
-        []
-    }
-
     func animationWasAdded() {
-    }
-
-    func animationDidStart(criteria: AnimationCompletionCriteria) -> AnimationCompletionToken? {
-        nil
-    }
-
-    func animationDidStartTokens(criteria: AnimationCompletionCriteria) -> [AnimationCompletionToken] {
-        animationDidStart(criteria: criteria).map { [$0] } ?? []
-    }
-
-    func animationDidFinish(criteria: AnimationCompletionCriteria) -> [() -> Void] {
-        []
     }
 
     func animationWasRemoved() -> [() -> Void] {
@@ -3054,29 +3042,9 @@ final class ListenerPair: AnimationListener, @unchecked Sendable {
         self.second = second
     }
 
-    override func criteriaForNewAnimation() -> [AnimationCompletionCriteria] {
-        var criteria: [AnimationCompletionCriteria] = []
-        for candidate in first.criteriaForNewAnimation() + second.criteriaForNewAnimation() {
-            if !criteria.contains(candidate) {
-                criteria.append(candidate)
-            }
-        }
-        return criteria
-    }
-
-    override func animationDidStartTokens(criteria: AnimationCompletionCriteria) -> [AnimationCompletionToken] {
-        first.animationDidStartTokens(criteria: criteria) +
-            second.animationDidStartTokens(criteria: criteria)
-    }
-
     override func animationWasAdded() {
         first.animationWasAdded()
         second.animationWasAdded()
-    }
-
-    override func animationDidFinish(criteria: AnimationCompletionCriteria) -> [() -> Void] {
-        first.animationDidFinish(criteria: criteria) +
-            second.animationDidFinish(criteria: criteria)
     }
 
     override func animationWasRemoved() -> [() -> Void] {
@@ -3143,18 +3111,6 @@ final class AllFinishedAnimationListener: AnimationListener, @unchecked Sendable
     init(observer: AnimationCompletionObserver, criteria: AnimationCompletionCriteria) {
         self.observer = observer
         self.criteria = criteria
-    }
-
-    override func criteriaForNewAnimation() -> [AnimationCompletionCriteria] {
-        observer.criteriaForNewAnimation().contains(criteria) ? [criteria] : []
-    }
-
-    override func animationDidStart(criteria: AnimationCompletionCriteria) -> AnimationCompletionToken? {
-        guard criteria == self.criteria,
-              observer.canStartAnimation(criteria: criteria) else {
-            return nil
-        }
-        return AnimationCompletionToken(listener: self, criteria: criteria)
     }
 
     override func animationWasAdded() {
