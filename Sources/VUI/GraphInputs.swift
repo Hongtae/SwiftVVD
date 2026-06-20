@@ -207,6 +207,27 @@ struct CachedEnvironment {
 /// `_makeView` traversal.  All fields are Attribute references (IDs), so
 /// copying this struct is cheap.
 public struct _GraphInputs {
+    struct Options: OptionSet, Sendable {
+        var rawValue: UInt32
+
+        init(rawValue: UInt32) {
+            self.rawValue = rawValue
+        }
+
+        static let animationsDisabled = Options(rawValue: 0x1)
+        static let viewRequestsLayoutComputer = Options(rawValue: 0x2)
+        static let viewStackOrientationIsDefined = Options(rawValue: 0x4)
+        static let viewStackOrientationIsHorizontal = Options(rawValue: 0x8)
+        static let viewDisplayListAccessibility = Options(rawValue: 0x10)
+        static let viewNeedsGeometry = Options(rawValue: 0x20)
+        static let viewNeedsGeometryAccessibility = Options(rawValue: 0x40)
+        static let needsStableDisplayListIDs = Options(rawValue: 0x100)
+        static let supportsVariableFrameDuration = Options(rawValue: 0x400)
+        static let needsDynamicLayout = Options(rawValue: 0x800)
+        static let needsAccessibility = Options(rawValue: 0x1000)
+        static let doNotScrape = Options(rawValue: 0x2000)
+    }
+
     /// Arbitrary typed values threaded through the view tree (styles, options, etc.).
     var customInputs: PropertyList
 
@@ -227,7 +248,7 @@ public struct _GraphInputs {
     var changedDebugProperties: UInt32
 
     /// Bitmask of options controlling view list traversal behavior.
-    var options: UInt32
+    var options: Options
 
     /// Set of AG node IDs whose inputs have been merged into this context.
     var mergedInputs: Set<AGAttribute>
@@ -277,7 +298,7 @@ public struct _GraphInputs {
     //   2. Environment: create MergedEnvironment AG rule if attrs differ
     //   3. Transaction: create MergedTransaction AG rule if attrs differ
     //   4. Phase (skipped when ignoringPhase==true): create MergedPhase AG rule if attrs differ
-    //   5. flags OR, options bit-0 OR, mergedInputs union
+    //   5. flags OR, animations-disabled option OR, mergedInputs union
     //
     // mergedInputs (Set<AGAttribute>) prevents duplicate rule creation for the same attr pair.
     mutating func merge(_ other: _GraphInputs, ignoringPhase: Bool) {
@@ -324,7 +345,9 @@ public struct _GraphInputs {
 
         // Step 5: remaining fields
         changedDebugProperties |= other.changedDebugProperties
-        options |= (other.options & 1)
+        if other.options.contains(.animationsDisabled) {
+            options.insert(.animationsDisabled)
+        }
         mergedInputs.formUnion(other.mergedInputs)
     }
 

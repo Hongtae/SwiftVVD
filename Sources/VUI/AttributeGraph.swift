@@ -934,6 +934,7 @@ class AttributeGraph: @unchecked Sendable {
         }
         if let oldValue = slots[index].node!.value as? Value, oldValue == newValue { return }
         slots[index].node!.value = newValue
+        Transaction.ThreadStorage.markMutation(for: transaction)
         let transactionToPropagate = transaction.isEmpty ? nil : transaction
         slots[index].node!.transaction = transactionToPropagate
         let outputs = slots[index].node!.outputs
@@ -955,6 +956,7 @@ class AttributeGraph: @unchecked Sendable {
             fatalError("setValue called on AGAttribute @\(attribute.identifier.rawValue) that does not exist.")
         }
         slots[index].node!.value = newValue
+        Transaction.ThreadStorage.markMutation(for: transaction)
         let transactionToPropagate = transaction.isEmpty ? nil : transaction
         slots[index].node!.transaction = transactionToPropagate
         let outputs = slots[index].node!.outputs

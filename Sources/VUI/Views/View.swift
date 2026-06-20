@@ -410,6 +410,12 @@ public struct _ViewInputs {
     /// Primitive Divider reads this before resolving its axis.
     var stackOrientation: Axis?
 
+    /// Enables the frame-velocity-dispatching animated frame rule for children
+    /// that install animated layout frame attributes.
+    var supportsVFD: Bool {
+        base.options.contains(.supportsVariableFrameDuration)
+    }
+
     // View-channel subscript. Stores in _ViewInputs.customInputs (ViewInput keys).
     // Used by view-specific inputs that should not be stored in the graph channel.
     subscript<T: ViewInput>(_ key: T.Type) -> T.Value {
@@ -516,7 +522,7 @@ public struct _ViewListCountInputs {
         set { base.customInputs = newValue }
     }
 
-    var baseOptions: UInt32 {
+    var baseOptions: _GraphInputs.Options {
         get { base.options }
         set { base.options = newValue }
     }

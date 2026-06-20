@@ -38,24 +38,6 @@ private struct LayoutChildGeometry: Rule {
     }
 }
 
-private func animatedLayoutPosition(
-    source: Attribute<CGPoint>,
-    inputs: _GraphInputs
-) -> Attribute<CGPoint> {
-    var value = _GraphValue<CGPoint>(_attribute: source)
-    CGPoint._makeAnimatable(value: &value, inputs: inputs)
-    return value._attribute
-}
-
-private func animatedLayoutSize(
-    source: Attribute<ViewSize>,
-    inputs: _GraphInputs
-) -> Attribute<ViewSize> {
-    var value = _GraphValue<ViewSize>(_attribute: source)
-    ViewSize._makeAnimatable(value: &value, inputs: inputs)
-    return value._attribute
-}
-
 /// StatefulRule: produces LayoutComputer wrapping ViewLayoutEngine<L> for a static child list.
 /// Re-fires when layoutAttr changes (e.g. animating spacing). Child LC deps are tracked
 /// downstream by LayoutChildGeometries (which calls childGeometries via ViewLayoutEngine).
@@ -566,22 +548,28 @@ private struct DynamicContainerInfo: StatefulRule {
             // multiple child outputs, not multiple item records.
             for elementOffset in offset..<(offset + viewCount) {
                 let rawPosAttr = graph.makeInput(value: CGPoint.zero)
-                let posAttr = animatedLayoutPosition(source: rawPosAttr, inputs: baseInputs.base)
                 let rawSizeAttr = graph.makeInput(value: ViewSize(.zero))
-                let sizeAttr = animatedLayoutSize(source: rawSizeAttr, inputs: baseInputs.base)
-                let childTransform: Attribute<ViewTransform> = graph.makeRule {
-                    var t = parentTransform.value
-                    // The backend placement bridge writes absolute root/window origins
-                    // into posAttr. Keep parent transform items, but do not translate the
-                    // already-absolute origin through the parent position again.
-                    t.appendPosition(posAttr.value)
-                    return t
-                }
 
                 let childOutputs = sublist.elements.makeOneElement(at: elementOffset, inputs: baseInputs) {
                     elementInputs,
                     makeView in
                     var childInputs = elementInputs
+                    let animatedFrame = makeAnimatableFrameAttributes(
+                        in: &childInputs.base,
+                        position: rawPosAttr,
+                        size: rawSizeAttr,
+                        supportsVFD: childInputs.supportsVFD
+                    )
+                    let posAttr = animatedFrame.position
+                    let sizeAttr = animatedFrame.size
+                    let childTransform: Attribute<ViewTransform> = graph.makeRule {
+                        var t = parentTransform.value
+                        // The backend placement bridge writes absolute root/window origins
+                        // into posAttr. Keep parent transform items, but do not translate the
+                        // already-absolute origin through the parent position again.
+                        t.appendPosition(posAttr.value)
+                        return t
+                    }
                     childInputs.transform = childTransform
                     childInputs.position = posAttr
                     childInputs.containerPosition = capturedInputs.position
@@ -798,10 +786,17 @@ extension Layout {
                 // Replace this bridge once the renderer consumes
                 // LayoutChildGeometries projection directly.
                 let rawPosAttr = graph.makeInput(value: CGPoint.zero)
-                let posAttr = animatedLayoutPosition(source: rawPosAttr, inputs: layoutInputs.base)
                 let rawSizeAttr = graph.makeInput(value: ViewSize.zero)
-                let sizeAttr = animatedLayoutSize(source: rawSizeAttr, inputs: layoutInputs.base)
 
+                var childInputs = elementInputs
+                let animatedFrame = makeAnimatableFrameAttributes(
+                    in: &childInputs.base,
+                    position: rawPosAttr,
+                    size: rawSizeAttr,
+                    supportsVFD: childInputs.supportsVFD
+                )
+                let posAttr = animatedFrame.position
+                let sizeAttr = animatedFrame.size
                 let parentTransformAttr = inputs.transform
                 let childTransformAttr: Attribute<ViewTransform> = graph.makeRule {
                     var t = parentTransformAttr.value
@@ -811,8 +806,6 @@ extension Layout {
                     t.appendPosition(posAttr.value)
                     return t
                 }
-
-                var childInputs = elementInputs
                 childInputs.position = posAttr
                 childInputs.size = sizeAttr
                 childInputs.transform = childTransformAttr

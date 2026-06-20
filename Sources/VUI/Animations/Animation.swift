@@ -1302,7 +1302,7 @@ extension ViewFrame: ExtendedAnimatable {
 }
 
 extension EnvironmentValues {
-    fileprivate var animationPixelLength: CGFloat {
+    var animationPixelLength: CGFloat {
         defaultPixelLength ?? (1 / displayScale)
     }
 }
@@ -2090,6 +2090,32 @@ final class FluidSpringAnimationBox: AnimationBoxBase, @unchecked Sendable {
                 target: value
             )
         )
+    }
+
+    func reachesTargetAtLogicalDuration<Value>(
+        for value: Value
+    ) -> Bool where Value: VectorArithmetic {
+        guard duration > 0 else { return true }
+
+        let stiffness = fluidSpringStiffness(response: response)
+        var state = SpringState<Value>()
+        let output = integratedFluidSpringValue(
+            target: value,
+            dampingFraction: dampingFraction,
+            stiffness: stiffness,
+            time: duration,
+            state: &state
+        )
+        let targetMagnitude = max(sqrt(value.magnitudeSquared), 1)
+        var delta = value
+        delta -= output
+        let deltaMagnitude = sqrt(delta.magnitudeSquared)
+        let velocityMagnitude = sqrt(state.velocity.magnitudeSquared)
+        let accelerationMagnitude = sqrt(state.acceleration.magnitudeSquared)
+
+        return deltaMagnitude <= targetMagnitude * 0.01 &&
+            velocityMagnitude <= targetMagnitude * 0.08 &&
+            accelerationMagnitude <= targetMagnitude * 0.12
     }
 
     override func value(at progress: Double) -> Double {
@@ -3031,6 +3057,10 @@ class AnimationListener: @unchecked Sendable {
     func finalizeTransaction() -> [() -> Void] {
         []
     }
+
+    func finalizeStandalonePendingTransaction() -> [() -> Void] {
+        finalizeTransaction()
+    }
 }
 
 final class ListenerPair: AnimationListener, @unchecked Sendable {
@@ -3078,25 +3108,52 @@ private struct PendingListeners {
     }
 
     var listeners: [WeakListener] = []
+    var retainedUntilDispatch: [AnimationListener] = []
+    var isDispatchScheduled = false
 }
 
 private let pendingListeners = AtomicBox(PendingListeners())
 
 extension Transaction {
     static func addPendingListener(_ listener: AnimationListener) {
-        pendingListeners.withLock { storage in
+        let shouldSchedule = pendingListeners.withLock { storage in
             storage.listeners.append(PendingListeners.WeakListener(listener))
+            storage.retainedUntilDispatch.append(listener)
+            if storage.isDispatchScheduled {
+                return false
+            }
+            storage.isDispatchScheduled = true
+            return true
+        }
+
+        guard shouldSchedule else {
+            return
+        }
+
+        DispatchQueue.main.async {
+            let actions = Transaction.dispatchPendingListeners(
+                finalizingStandalonePending: true
+            )
+            enqueueAnimationCompletionActions(actions)
         }
     }
 
-    static func dispatchPendingListeners() -> [() -> Void] {
+    static func dispatchPendingListeners(
+        finalizingStandalonePending: Bool = false
+    ) -> [() -> Void] {
         let pending = pendingListeners.withLock { storage in
             let listeners = storage.listeners.compactMap(\.listener)
             storage.listeners.removeAll()
+            storage.retainedUntilDispatch.removeAll()
+            storage.isDispatchScheduled = false
             return listeners
         }
         return Update.ensure {
-            pending.flatMap { $0.finalizeTransaction() }
+            pending.flatMap {
+                finalizingStandalonePending
+                    ? $0.finalizeStandalonePendingTransaction()
+                    : $0.finalizeTransaction()
+            }
         }
     }
 }
@@ -3142,6 +3199,11 @@ final class AllFinishedAnimationListener: AnimationListener, @unchecked Sendable
         finalized = true
         lock.unlock()
         return observer.bodyDidFinish()
+    }
+
+    override func finalizeStandalonePendingTransaction() -> [() -> Void] {
+        finalizeTransaction() +
+            observer.noRegisteredAnimationFallbackDidFire(usesAnimatedOrdering: false)
     }
 }
 

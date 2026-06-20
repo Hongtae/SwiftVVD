@@ -226,7 +226,9 @@ class ViewGraph: ViewGraphHost {
     struct NextUpdate {
         var time: Time = .infinity
         var interval: Double = .infinity
+        var hasZeroInterval: Bool = false
         var reasons: Set<UInt32> = []
+        private static let highFrameRateReason: UInt32 = 2_555_904
 
         mutating func at(_ t: Time) {
             if t < time {
@@ -235,10 +237,34 @@ class ViewGraph: ViewGraphHost {
         }
 
         mutating func interval(_ dt: Double, reason: UInt32? = nil) {
-            interval = Swift.min(interval, dt)
+            if dt == 0 {
+                hasZeroInterval = true
+            } else {
+                interval = Swift.min(interval, dt)
+            }
+            normalizeIntervalAfterZeroRequest()
             if let r = reason { reasons.insert(r) }
         }
-        mutating func maxVelocity(_ v: Double) {}  // Scheduling velocity is not modeled yet.
+
+        mutating func maxVelocity(_ velocity: Double) {
+            let interval: Double
+            if velocity >= 320 {
+                interval = 1.0 / 120.0
+            } else if velocity >= 160 {
+                interval = 1.0 / 80.0
+            } else {
+                return
+            }
+            self.interval = Swift.min(self.interval, interval)
+            normalizeIntervalAfterZeroRequest()
+            reasons.insert(Self.highFrameRateReason)
+        }
+
+        private mutating func normalizeIntervalAfterZeroRequest() {
+            if hasZeroInterval && interval > (1.0 / 60.0) {
+                interval = .infinity
+            }
+        }
     }
 
     var nextUpdateInterval: Double {
@@ -316,7 +342,7 @@ class ViewGraph: ViewGraphHost {
                 phase: phaseAttr,
                 transaction: transactionAttr,
                 changedDebugProperties: 0,
-                options: 0,
+                options: [],
                 mergedInputs: []
             )
             var prefKeys = PreferenceKeys()

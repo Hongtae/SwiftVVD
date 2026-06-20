@@ -45,7 +45,7 @@ class AppGraph<A: App>: @unchecked Sendable {
                 phase: phaseAttr,
                 transaction: transactionAttr,
                 changedDebugProperties: 0,
-                options: 0,
+                options: [],
                 mergedInputs: []
             )
 
