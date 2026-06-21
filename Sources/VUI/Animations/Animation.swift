@@ -385,6 +385,13 @@ final class DelayAnimationBox: AnimationBoxBase, @unchecked Sendable {
         return fallbackDelay
     }
 
+    override func registeredCompletionDelay(for criteria: AnimationCompletionCriteria) -> TimeInterval? {
+        guard let baseDelay = base.registeredCompletionDelay(for: criteria) else {
+            return nil
+        }
+        return max(0, baseDelay + delay)
+    }
+
     override func value(at progress: Double) -> Double {
         guard base.duration > 0 else { return base.value(at: 1) }
         let localTime = progress * duration - delay
@@ -470,6 +477,14 @@ final class SpeedAnimationBox: AnimationBoxBase, @unchecked Sendable {
 
     override func noRegisteredCompletionDelay(for criteria: AnimationCompletionCriteria) -> TimeInterval? {
         guard speed > 0, let baseDelay = base.noRegisteredCompletionDelay() else {
+            return nil
+        }
+        return baseDelay / speed
+    }
+
+    override func registeredCompletionDelay(for criteria: AnimationCompletionCriteria) -> TimeInterval? {
+        guard speed > 0,
+              let baseDelay = base.registeredCompletionDelay(for: criteria) else {
             return nil
         }
         return baseDelay / speed
@@ -593,13 +608,29 @@ final class RepeatAnimationBox: AnimationBoxBase, @unchecked Sendable {
 
     override func registeredCompletionDelay(for criteria: AnimationCompletionCriteria) -> TimeInterval? {
         guard criteria == .logicallyComplete,
-              repeatCount == nil,
-              base is DefaultAnimationBox ||
-              base is FluidSpringAnimationBox ||
-              base is SpringAnimationBox else {
+              repeatCount == nil else {
             return nil
         }
+        if let baseDelay = base.registeredCompletionDelay(for: criteria) {
+            return baseDelay
+        }
+        guard usesRepeatForeverRegisteredLogicalDeadline(base) else { return nil }
         return base.isImmediatelyComplete ? 0 : base.duration
+    }
+
+    private func usesRepeatForeverRegisteredLogicalDeadline(_ box: AnimationBoxBase) -> Bool {
+        if box is DefaultAnimationBox ||
+           box is FluidSpringAnimationBox ||
+           box is SpringAnimationBox {
+            return true
+        }
+        if let delay = box as? DelayAnimationBox {
+            return usesRepeatForeverRegisteredLogicalDeadline(delay.base)
+        }
+        if let speed = box as? SpeedAnimationBox {
+            return speed.speed > 0 && usesRepeatForeverRegisteredLogicalDeadline(speed.base)
+        }
+        return false
     }
 
     override func value(at progress: Double) -> Double {
@@ -2883,6 +2914,7 @@ final class AnimationCompletionObserver: @unchecked Sendable {
     private var entries: [Entry] = []
     private var activeCriteria = Set<AnimationCompletionCriteria>()
     private var bodyFinished = false
+    private var observedMutation = false
     private var registeredAnimation = false
     private var completedCriteria = Set<AnimationCompletionCriteria>()
     private var nextEntryOrder = 0
@@ -2893,6 +2925,12 @@ final class AnimationCompletionObserver: @unchecked Sendable {
     init(criteria: AnimationCompletionCriteria, completion: @escaping () -> Void) {
         entries.append(Entry(criteria: criteria, completion: completion, order: nextEntryOrder))
         nextEntryOrder += 1
+    }
+
+    deinit {
+        // Dropped transactions with no observed mutation close their
+        // no-registered fallback at the observer lifetime boundary.
+        runAnimationCompletionActionsImmediately(abandonedTransactionDidFinish())
     }
 
     func add(criteria: AnimationCompletionCriteria, completion: @escaping () -> Void) {
@@ -2928,6 +2966,12 @@ final class AnimationCompletionObserver: @unchecked Sendable {
         defer { lock.unlock() }
         registeredAnimation = true
         activeCriteria.insert(criteria)
+    }
+
+    func transactionDidMutate() {
+        lock.lock()
+        observedMutation = true
+        lock.unlock()
     }
 
     func bodyDidFinish() -> [() -> Void] {
@@ -2969,6 +3013,19 @@ final class AnimationCompletionObserver: @unchecked Sendable {
         return entries
             .filter { $0.criteria == criteria }
             .map(\.completion)
+    }
+
+    private func abandonedTransactionDidFinish() -> [() -> Void] {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !observedMutation else {
+            return []
+        }
+        bodyFinished = true
+        if registeredAnimation {
+            return completionsIfReady(allowNoRegisteredAnimation: false)
+        }
+        return noRegisteredCompletionsIfReady()
     }
 
     private func noRegisteredCompletionsIfReady() -> [() -> Void] {
@@ -3108,7 +3165,6 @@ private struct PendingListeners {
     }
 
     var listeners: [WeakListener] = []
-    var retainedUntilDispatch: [AnimationListener] = []
     var isDispatchScheduled = false
 }
 
@@ -3118,7 +3174,6 @@ extension Transaction {
     static func addPendingListener(_ listener: AnimationListener) {
         let shouldSchedule = pendingListeners.withLock { storage in
             storage.listeners.append(PendingListeners.WeakListener(listener))
-            storage.retainedUntilDispatch.append(listener)
             if storage.isDispatchScheduled {
                 return false
             }
@@ -3144,15 +3199,25 @@ extension Transaction {
         let pending = pendingListeners.withLock { storage in
             let listeners = storage.listeners.compactMap(\.listener)
             storage.listeners.removeAll()
-            storage.retainedUntilDispatch.removeAll()
             storage.isDispatchScheduled = false
             return listeners
         }
-        return Update.ensure {
+        let actions = Update.ensure {
             pending.flatMap {
                 finalizingStandalonePending
                     ? $0.finalizeStandalonePendingTransaction()
                     : $0.finalizeTransaction()
+            }
+        }
+        guard finalizingStandalonePending else {
+            return actions
+        }
+        return actions.map { action in
+            {
+                action()
+                Transaction.dispatchPendingListeners(
+                    finalizingStandalonePending: true
+                ).forEach { $0() }
             }
         }
     }
@@ -3207,6 +3272,13 @@ final class AllFinishedAnimationListener: AnimationListener, @unchecked Sendable
     }
 }
 
+func runAnimationCompletionActionsImmediately(_ actions: [() -> Void]) {
+    guard !actions.isEmpty else { return }
+    actions.forEach { action in
+        AttributeGraph.withoutTracking(action)
+    }
+}
+
 func enqueueAnimationCompletionActions(_ actions: [() -> Void]) {
     guard !actions.isEmpty else { return }
     let wrapped = actions.map { action in
@@ -3229,7 +3301,8 @@ private struct AnimationCompletionObserverBox: @unchecked Sendable {
 
 func enqueueNoRegisteredAnimationFallback(
     _ observer: AnimationCompletionObserver?,
-    animation: Animation? = nil
+    animation: Animation? = nil,
+    retainUntilFire: Bool = true
 ) {
     guard let observer else { return }
     let box = AnimationCompletionObserverBox(observer: observer)
@@ -3258,14 +3331,26 @@ func enqueueNoRegisteredAnimationFallback(
             DispatchQueue.main.asyncAfter(deadline: .now() + fallbackDelay, execute: fire)
         }
     } else {
-        let fire: @Sendable () -> Void = {
-            enqueueAnimationCompletionActions(
-                box.observer.noRegisteredAnimationFallbackDidFire(
-                    usesAnimatedOrdering: false
+        if retainUntilFire {
+            let fire: @Sendable () -> Void = {
+                enqueueAnimationCompletionActions(
+                    box.observer.noRegisteredAnimationFallbackDidFire(
+                        usesAnimatedOrdering: false
+                    )
                 )
-            )
+            }
+            DispatchQueue.main.async(execute: fire)
+        } else {
+            let fire: @Sendable () -> Void = { [weak observer] in
+                guard let observer else { return }
+                enqueueAnimationCompletionActions(
+                    observer.noRegisteredAnimationFallbackDidFire(
+                        usesAnimatedOrdering: false
+                    )
+                )
+            }
+            DispatchQueue.main.async(execute: fire)
         }
-        DispatchQueue.main.async(execute: fire)
     }
 }
 
@@ -3284,7 +3369,11 @@ func finalizeAnimationCompletionObserver(
                 ) ?? []
             )
         } else {
-            enqueueNoRegisteredAnimationFallback(observer, animation: nil)
+            enqueueNoRegisteredAnimationFallback(
+                observer,
+                animation: nil,
+                retainUntilFire: false
+            )
         }
         return
     }
@@ -3319,7 +3408,8 @@ func finalizeAnimationCompletions(
         } else {
             enqueueNoRegisteredAnimationFallback(
                 transaction.animationCompletionObserver,
-                animation: nil
+                animation: nil,
+                retainUntilFire: false
             )
         }
         return
@@ -3651,6 +3741,10 @@ extension Transaction {
     var animationCompletionObserver: AnimationCompletionObserver? {
         get { self[AnimationCompletionObserverTransactionKey.self] }
         set { self[AnimationCompletionObserverTransactionKey.self] = newValue }
+    }
+
+    func markAnimationCompletionMutation() {
+        animationCompletionObserver?.transactionDidMutate()
     }
 
     var animationListener: AnimationListener? {

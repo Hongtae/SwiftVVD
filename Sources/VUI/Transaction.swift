@@ -33,6 +33,26 @@ public struct Transaction {
     }
 }
 
+extension Transaction {
+    struct ID: Hashable {
+        var value: UInt32 = 0
+
+        init() {}
+
+        init(value: UInt32) {
+            self.value = value
+        }
+    }
+
+    static var id: ID {
+        ThreadStorage.currentID
+    }
+
+    static func _core_barrier() {
+        ThreadStorage.advanceID()
+    }
+}
+
 @available(*, unavailable)
 extension Transaction: Sendable {
 }
@@ -91,6 +111,11 @@ func withTransaction<Result>(
     _ body: () throws -> Result
 ) rethrows -> Result {
     let previous = Transaction.ThreadStorage.currentBox
+    if transaction.isEmpty,
+       previous?.transaction.hasLocalAnimationCompletionState != true {
+        return try body()
+    }
+
     let parentTransaction = previous?.transaction ?? Transaction()
     let scopedTransaction = transaction.scopedTransaction(inheritingFrom: parentTransaction)
     let scopedBox = Transaction.ThreadStorageBox(transaction: scopedTransaction)
@@ -136,6 +161,7 @@ extension Transaction {
 
     enum ThreadStorage {
         private static let key = "VUI.Transaction.current"
+        private static let idKey = "VUI.Transaction.currentID"
 
         static var currentBox: ThreadStorageBox? {
             get {
@@ -163,7 +189,18 @@ extension Transaction {
             }
         }
 
+        static var currentID: ID {
+            let value = (Thread.current.threadDictionary[idKey] as? NSNumber)?.uint32Value ?? 0
+            return ID(value: value)
+        }
+
+        static func advanceID() {
+            let next = currentID.value &+ 1
+            Thread.current.threadDictionary[idKey] = NSNumber(value: next)
+        }
+
         static func markMutation(for transaction: Transaction) {
+            transaction.markAnimationCompletionMutation()
             guard let currentBox,
                   currentBox.transaction.animationCompletionObserver === transaction.animationCompletionObserver else {
                 return
@@ -176,23 +213,26 @@ extension Transaction {
         ThreadStorage.current ?? Transaction()
     }
 
+    var hasLocalAnimationCompletionState: Bool {
+        animationCompletionObserver != nil ||
+        animationListener != nil ||
+        animationLogicalListener != nil
+    }
+
     func scopedTransaction(inheritingFrom parent: Transaction) -> Transaction {
+        let localCompletionObserver = animationCompletionObserver
+        let localAnimationListener = animationListener
+        let localAnimationLogicalListener = animationLogicalListener
         var transaction = self
-        if !hasExplicitAnimationValue,
-           parent.hasExplicitAnimationValue {
-            transaction.animation = parent.animation
+        transaction.plist.merge(parent.plist)
+        if transaction.animationCompletionObserver !== localCompletionObserver {
+            transaction.animationCompletionObserver = localCompletionObserver
         }
-        if !hasExplicitDisablesAnimationsValue,
-           parent.hasExplicitDisablesAnimationsValue {
-            transaction.disablesAnimations = parent.disablesAnimations
+        if transaction.animationListener !== localAnimationListener {
+            transaction.animationListener = localAnimationListener
         }
-        if !hasExplicitIsContinuousValue,
-           parent.hasExplicitIsContinuousValue {
-            transaction.isContinuous = parent.isContinuous
-        }
-        if !hasExplicitTracksVelocityValue,
-           parent.hasExplicitTracksVelocityValue {
-            transaction.tracksVelocity = parent.tracksVelocity
+        if transaction.animationLogicalListener !== localAnimationLogicalListener {
+            transaction.animationLogicalListener = localAnimationLogicalListener
         }
         return transaction
     }

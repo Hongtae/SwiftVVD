@@ -40,9 +40,9 @@ func _stateValuesAreKnownEqual<Value>(_ lhs: Value, _ rhs: Value) -> Bool {
     @usableFromInline
     init(wrappedValue thunk: @autoclosure @escaping () -> Value) where Value: AnyObject, Value: Observable {
         _value = thunk()
-        _location = LocationBox(location: ObservableLocation(_value, onValueUpdated: { value in
+        _location = ObservableLocation(_value, onValueUpdated: { value in
             fatalError()
-        }))
+        })
     }
 
     public var wrappedValue: Value {
@@ -125,34 +125,30 @@ extension State {
             // Accessing attr.value from the wrong graph would read against that graph's
             // independent slot table.
             let owningGraph = graph
-            let location = LocationBox(location: FunctionalLocation<Value>(
-                get: {
+            let location = StoredLocation<Value>(
+                initialValue: initialValue,
+                readValue: {
                     // Read the AG node only when executing inside the same graph that
                     // owns this attribute. Any other context (no AG or a different
                     // graph) must fall back to the cache.
                     if AttributeGraph.current === owningGraph {
-                        let v = attr.value
-                        cache.value = v
-                        return v
+                        let value = attr.value
+                        cache.value = value
+                        return value
                     }
                     // Outside AG context, or in a different graph, return cached value
                     // without accessing the node.
                     return cache.value
                 },
-                set: { newValue, transaction in
-                    if _stateValuesAreKnownEqual(cache.value, newValue) {
-                        return
-                    }
+                onCommit: { newValue, transaction in
                     cache.value = newValue
-                    Transaction.ThreadStorage.markMutation(for: transaction)
                     let box = UnsafeBox(newValue)
                     let transactionBox = UnsafeBox(transaction)
                     inbox.enqueue {
                         attr.setValue(box.value, transaction: transactionBox.value)
                     }
-                },
-                marksMutation: false
-            ))
+                }
+            )
             mountedLocation.value = location
             var s = currentState
             s._location = location

@@ -114,7 +114,6 @@ class ViewGraphHost: GraphHost, ViewGraphOwner {
     weak var updateDelegate: (any ViewGraphRootValueUpdater)?
 
     var accessibilityEnabled: Bool = false
-    var mayDeferUpdate: Bool = false
     var parentPhase: Phase?
 
     // ViewGraphOwner
@@ -181,7 +180,12 @@ class ViewGraph: ViewGraphHost {
     weak var viewDelegate: (any ViewGraphDelegate)?
 
     // AG transaction lifecycle callback.
-    weak var graphDelegate: (any GraphDelegate)?
+    private weak var graphDelegateStorage: (any GraphDelegate)?
+
+    override var graphDelegate: (any GraphDelegate)? {
+        get { graphDelegateStorage }
+        set { graphDelegateStorage = newValue }
+    }
 
     // Outputs requested at init time.
     var requestedOutputs: Outputs
@@ -495,7 +499,10 @@ class ViewGraph: ViewGraphHost {
     /// Updates host outputs, then refreshes the time input every frame.
     override func updateOutputs(at time: Time) {
         beginNextUpdate(at: time)
-        super.updateOutputs(at: time)
+        runTransaction {
+            super.updateOutputs(at: time)
+        }
+        updatePreferences()
     }
 
     func beginNextUpdate(at time: Time) {
@@ -508,6 +515,7 @@ class ViewGraph: ViewGraphHost {
                 timeAttr.setValue(time)
                 nextUpdate = (NextUpdate(), NextUpdate())
             }
+            data.incrementUpdateSeed()
         }
     }
 

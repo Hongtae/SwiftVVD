@@ -285,6 +285,102 @@ struct OptionalAttribute<Value> {
     }
 }
 
+// MARK: - Rule Contexts
+
+/// Type-erased identity for the AG rule currently being evaluated.
+struct AnyRuleContext: Equatable {
+    var attribute: AGAttribute
+
+    init(attribute: AGAttribute) {
+        self.attribute = attribute
+    }
+
+    init<Value>(_ context: RuleContext<Value>) {
+        self.attribute = context.attribute.identifier
+    }
+
+    func unsafeCast<Value>(to type: Value.Type) -> RuleContext<Value> {
+        RuleContext(attribute: Attribute<Value>(attribute))
+    }
+
+    func update(body: () -> Void) {
+        AttributeGraph.withRuleContext(attribute) {
+            body()
+        }
+    }
+
+    subscript<Value>(_ attribute: Attribute<Value>) -> Value {
+        attribute.value
+    }
+
+    subscript<Value>(_ attribute: WeakAttribute<Value>) -> Value? {
+        guard let graph = AttributeGraph.current,
+              attribute.isValid(in: graph) else { return nil }
+        return attribute.toStrong().value
+    }
+
+    subscript<Value>(_ attribute: OptionalAttribute<Value>) -> Value? {
+        attribute.attribute?.value
+    }
+}
+
+/// Typed identity and value accessor for the AG rule currently being evaluated.
+struct RuleContext<Value>: Equatable {
+    var attribute: Attribute<Value>
+
+    init(attribute: Attribute<Value>) {
+        self.attribute = attribute
+    }
+
+    static func == (lhs: RuleContext<Value>, rhs: RuleContext<Value>) -> Bool {
+        lhs.attribute.identifier == rhs.attribute.identifier
+    }
+
+    var value: Value {
+        get { attribute.value }
+        nonmutating set { attribute.setValue(newValue) }
+    }
+
+    var hasValue: Bool {
+        guard let graph = AttributeGraph.current else { return false }
+        return graph.hasCachedValue(for: attribute.identifier)
+    }
+
+    func update(body: () -> Void) {
+        AnyRuleContext(self).update(body: body)
+    }
+
+    subscript<OtherValue>(_ attribute: Attribute<OtherValue>) -> OtherValue {
+        attribute.value
+    }
+
+    subscript<OtherValue>(_ attribute: WeakAttribute<OtherValue>) -> OtherValue? {
+        AnyRuleContext(self)[attribute]
+    }
+
+    subscript<OtherValue>(_ attribute: OptionalAttribute<OtherValue>) -> OtherValue? {
+        AnyRuleContext(self)[attribute]
+    }
+}
+
+extension Rule {
+    var context: RuleContext<Value> {
+        guard let id = AttributeGraph.currentRuleContextAttribute else {
+            fatalError("Rule.context accessed outside rule evaluation.")
+        }
+        return RuleContext(attribute: Attribute<Value>(id))
+    }
+}
+
+extension StatefulRule {
+    var context: RuleContext<Value> {
+        guard let id = AttributeGraph.currentRuleContextAttribute else {
+            fatalError("StatefulRule.context accessed outside rule evaluation.")
+        }
+        return RuleContext(attribute: Attribute<Value>(id))
+    }
+}
+
 // MARK: - AGSubgraph
 
 /// A group of AG nodes that are created and destroyed together.
@@ -560,6 +656,7 @@ class AttributeGraph: @unchecked Sendable {
     // Deferred action outbox: closures to be executed OUTSIDE AG evaluation context.
     // Enqueue from within AG evaluation. WindowController drains after all AG work is done.
     var actionOutbox: [() -> Void] = []
+    private var updateCounter: UInt = 0
 
     // MARK: Task Locals
 
@@ -568,8 +665,35 @@ class AttributeGraph: @unchecked Sendable {
     @TaskLocal static var current: AttributeGraph?
     @TaskLocal static var changeSet: ChangeSet?
     @TaskLocal private static var currentlyEvaluatingNode: AGAttribute?
+    @TaskLocal private static var currentlyUpdatingGraphs: Set<ObjectIdentifier>?
 
     init() {}
+
+    func graphCounter(lane: UInt32) -> UInt {
+        switch lane {
+        case 1:
+            return updateCounter
+        default:
+            return 0
+        }
+    }
+
+    fileprivate func hasCachedValue(for id: AGAttribute) -> Bool {
+        id._debugValidate()
+        let index = Int(id.rawValue)
+        guard index < slots.count else { return false }
+        return slots[index].node?.value != nil
+    }
+
+    static var currentRuleContextAttribute: AGAttribute? {
+        currentlyEvaluatingNode
+    }
+
+    fileprivate static func withRuleContext<T>(_ attribute: AGAttribute, body: () -> T) -> T {
+        $currentlyEvaluatingNode.withValue(attribute) {
+            body()
+        }
+    }
 
     // MARK: Node Factory
 
@@ -718,7 +842,7 @@ class AttributeGraph: @unchecked Sendable {
         // Evaluate immediately so the rule body runs once and AG records which input
         // attributes it reads, establishing the dependency edges that will trigger
         // future eager re-evaluations.
-        evaluateNode(AGAttribute(rawValue: index))
+        evaluateNodeForUpdate(AGAttribute(rawValue: index))
         return attr
     }
 
@@ -920,7 +1044,7 @@ class AttributeGraph: @unchecked Sendable {
         // Lazy evaluation
         if shouldEvaluate {
             slots[index].node!.isEvaluating = true
-            evaluateNode(id)
+            evaluateNodeForUpdate(id)
         }
 
         return slots[index].node?.value
@@ -971,7 +1095,41 @@ class AttributeGraph: @unchecked Sendable {
         AttributeGraph.changeSet?.record(attribute.identifier)
     }
 
+    func invalidateAttribute(_ id: AGAttribute) {
+        assert(AttributeGraph.current === self)
+        let index = Int(id.rawValue)
+        guard let node = slots[index].node else { return }
+
+        if case .input = node.kind {
+            for outputIndex in node.outputs {
+                markNeedsEvaluation(AGAttribute(rawValue: outputIndex))
+            }
+            notifyCrossGraphObservers(for: id.rawValue)
+        } else {
+            markNeedsEvaluation(id)
+        }
+    }
+
     // MARK: Dependency Graph
+
+    private func evaluateNodeForUpdate(_ id: AGAttribute) {
+        withGraphUpdateCounterIfNeeded {
+            evaluateNode(id)
+        }
+    }
+
+    private func withGraphUpdateCounterIfNeeded<R>(_ body: () -> R) -> R {
+        let graphID = ObjectIdentifier(self)
+        var activeGraphs = AttributeGraph.currentlyUpdatingGraphs ?? []
+        guard !activeGraphs.contains(graphID) else {
+            return body()
+        }
+        updateCounter &+= 1
+        activeGraphs.insert(graphID)
+        return AttributeGraph.$currentlyUpdatingGraphs.withValue(activeGraphs) {
+            body()
+        }
+    }
 
     private func evaluateNode(_ id: AGAttribute) {
         let index = Int(id.rawValue)
@@ -1101,7 +1259,7 @@ class AttributeGraph: @unchecked Sendable {
             let index = Int(id)
             guard slots[index].node != nil else { continue }  // may have been freed
             guard slots[index].node!.needsEvaluation else { continue }  // already evaluated by cascade
-            evaluateNode(AGAttribute(rawValue: id))
+            evaluateNodeForUpdate(AGAttribute(rawValue: id))
         }
     }
 

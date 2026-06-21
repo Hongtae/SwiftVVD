@@ -42,15 +42,16 @@ struct LayoutProxyAttributes {
 // MARK: - LayoutProxy
 
 /// Proxy for a child view in a Layout.
-/// Dependency tracking uses @TaskLocal reads; context is kept as a local rule identity
-/// derived from the layoutComputer attribute.
+/// Dependency tracking uses @TaskLocal reads.
 struct LayoutProxy {
-    /// Local AG rule context identity derived from layoutComputer.rawValue.
-    var context: UInt32
+    var context: AnyRuleContext
     var attributes: LayoutProxyAttributes
 
     init(attributes: LayoutProxyAttributes) {
-        self.context = attributes.layoutComputer.attribute?.identifier.rawValue ?? 0
+        guard let contextAttribute = AttributeGraph.currentRuleContextAttribute else {
+            fatalError("LayoutProxy initialized outside an active layout rule context.")
+        }
+        self.context = AnyRuleContext(attribute: contextAttribute)
         self.attributes = attributes
     }
 

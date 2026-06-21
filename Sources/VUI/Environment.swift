@@ -41,7 +41,7 @@ struct ObservableObjectKey<T: AnyObject & Observable>: PropertyKey {
     static func valuesEqual(_ a: T?, _ b: T?) -> Bool { a === b }
 }
 
-// PropertyList-backed environment values plus an optional tracker placeholder.
+// PropertyList-backed environment values plus optional per-key read tracking.
 public struct EnvironmentValues: CustomStringConvertible {
     var _plist: PropertyList
     var tracker: _PropertyListTracker?
@@ -52,7 +52,12 @@ public struct EnvironmentValues: CustomStringConvertible {
     }
 
     public subscript<K>(key: K.Type) -> K.Value where K: EnvironmentKey {
-        get { _plist[EnvironmentPropertyKey<K>.self] }
+        get {
+            if let tracker {
+                return tracker.value(_plist, for: EnvironmentPropertyKey<K>.self)
+            }
+            return _plist[EnvironmentPropertyKey<K>.self]
+        }
         set { _plist[EnvironmentPropertyKey<K>.self] = newValue }
     }
 
@@ -60,6 +65,30 @@ public struct EnvironmentValues: CustomStringConvertible {
 }
 
 extension EnvironmentValues {
+    init(_ plist: PropertyList, tracker: _PropertyListTracker) {
+        self._plist = plist
+        self.tracker = tracker
+        tracker.initializeValues(from: plist)
+    }
+
+    subscript<K: DerivedPropertyKey>(_ key: K.Type) -> K.Value {
+        if let tracker {
+            return tracker.derivedValue(_plist, for: key)
+        }
+        return _plist[key]
+    }
+
+    func valueWithSecondaryLookup<K: PropertyKeyLookup>(_ lookup: K.Type) -> K.Primary.Value {
+        if let tracker {
+            return tracker.valueWithSecondaryLookup(_plist, secondaryLookupHandler: lookup)
+        }
+        return _plist.valueWithSecondaryLookup(lookup)
+    }
+
+    func addDependencies(from tracker: _PropertyListTracker) {
+        self.tracker?.formUnion(tracker)
+    }
+
     public subscript<T: AnyObject & Observable>(objectType type: T.Type) -> T? {
         get { _plist[ObservableObjectKey<T>.self] }
         set { _plist[ObservableObjectKey<T>.self] = newValue }

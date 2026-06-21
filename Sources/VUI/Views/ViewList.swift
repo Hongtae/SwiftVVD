@@ -770,12 +770,26 @@ private struct PlaceholderInfo: StatefulRule {
 
 // MARK: - TransactionID
 
-/// A monotonically increasing ID representing an AttributeGraph transaction.
-/// Graph/context initializer value semantics are not modeled.
+/// Comparable token for list edit queries.
 struct TransactionID: Comparable, Hashable {
     var value: UInt = 0
     init() {}
-    static func < (a: TransactionID, b: TransactionID) -> Bool { a.value < b.value }
+    init(graph: AttributeGraph) {
+        value = graph.graphCounter(lane: 1)
+    }
+    init<A>(context: RuleContext<A>) {
+        self.init(context: AnyRuleContext(context))
+    }
+    init(context: AnyRuleContext) {
+        guard let graph = AttributeGraph.current else {
+            fatalError("TransactionID.init(context:) called outside an active AttributeGraph context.")
+        }
+        context.update {}
+        value = graph.graphCounter(lane: 1)
+    }
+    static func < (a: TransactionID, b: TransactionID) -> Bool {
+        Int(bitPattern: a.value) < Int(bitPattern: b.value)
+    }
 }
 
 // MARK: - SExpPrinter

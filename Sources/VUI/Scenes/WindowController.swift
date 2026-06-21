@@ -32,6 +32,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                         ViewRendererHost, ViewGraphRootValueUpdater,
                         ViewGraphRenderDelegate,
                         ViewGraphDelegate,
+                        GraphDelegate,
                         EventBindingSource, EventBindingManagerDelegate,
                         @unchecked Sendable {
 
@@ -454,6 +455,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         //   render thread handling. Implemented below (ViewGraphRenderDelegate).
         self.viewGraph.renderDelegate = self
         self.viewGraph.viewDelegate = self
+        self.viewGraph.graphDelegate = self
         // updateDelegate: WindowController provides root value updates (size, env, etc.).
         //   updateSize() / updateEnvironment() etc. called inline in updateView for now.
         //   Full invalidateProperties(_:mayDeferUpdate:) wiring is a future step.
@@ -481,6 +483,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         self.crossGraphSourceGraph = nil
         self.viewGraph.renderDelegate = self
         self.viewGraph.viewDelegate = self
+        self.viewGraph.graphDelegate = self
         self.viewGraph.updateDelegate = self
     }
 
@@ -515,6 +518,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         self.crossGraphSourceGraph = sourceGraph
         self.viewGraph.renderDelegate = self
         self.viewGraph.viewDelegate = self
+        self.viewGraph.graphDelegate = self
         self.viewGraph.updateDelegate = self
     }
 
@@ -1410,6 +1414,24 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
 
     func `as`<T>(_ type: T.Type) -> T? {
         self as? T
+    }
+
+    // MARK: - GraphDelegate
+
+    func beginTransaction() {
+        setNeedsUpdate()
+    }
+
+    func updateGraph<T>(body: (GraphHost) -> T) -> T {
+        body(viewGraph)
+    }
+
+    func graphDidChange() {
+        setNeedsUpdate()
+    }
+
+    func preferencesDidChange() {
+        setNeedsUpdate()
     }
 
     // MARK: - ViewGraphRootValueUpdater

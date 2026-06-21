@@ -7,6 +7,10 @@
 
 import Observation
 
+protocol TransactionHostProvider {
+    var mutationHost: GraphHost? { get }
+}
+
 protocol _Location {
     associatedtype Value
     func getValue() -> Value
@@ -89,36 +93,248 @@ struct ConstantLocation<Value>: _Location {
     func setValue(_: Value, transaction: Transaction) {}
 }
 
-struct StoredLocation<Value>: _Location {
-    var _value: Value
-    var valueUpdated: (Value)->Void
-    init(_ value: Value, onValueUpdated: @escaping (Value)->Void) {
-        self._value = value
-        self.valueUpdated = onValueUpdated
+class StoredLocationBase<Value>: AnyLocation<Value>, @unchecked Sendable {
+    struct BeginUpdate: GraphMutation {
+        weak var location: StoredLocationBase<Value>?
+        var value: Value
+        var transaction: Transaction
+
+        func apply() {
+            location?.beginUpdate(value, transaction: transaction)
+        }
+
+        mutating func combine<M>(with mutation: M) -> Bool where M: GraphMutation {
+            guard let mutation = mutation as? BeginUpdate,
+                  let location,
+                  let nextLocation = mutation.location,
+                  location === nextLocation else {
+                return false
+            }
+            value = mutation.value
+            transaction = mutation.transaction
+            return true
+        }
     }
-    func getValue() -> Value {
-        _value
+
+    private var value: Value
+    private var readValueHandler: (() -> Value)?
+    private var commitValueHandler: ((Value, Transaction) -> Void)?
+
+    private(set) var wasRead: Bool = false
+
+    var updateValue: Value {
+        value
     }
-    mutating func setValue(_ value: Value, transaction: Transaction) {
+
+    init(
+        initialValue value: Value,
+        readValue: (() -> Value)? = nil,
+        onCommit: ((Value, Transaction) -> Void)? = nil
+    ) {
+        self.value = value
+        self.readValueHandler = readValue
+        self.commitValueHandler = onCommit
+        super.init()
+    }
+
+    override func getValue() -> Value {
+        wasRead = true
+        if let readValueHandler {
+            let value = readValueHandler()
+            self.value = value
+            return value
+        }
+        return value
+    }
+
+    override func setValue(_ value: Value, transaction: Transaction) {
+        guard !_stateValuesAreKnownEqual(self.value, value) else { return }
+        self.value = value
         Transaction.ThreadStorage.markMutation(for: transaction)
-        self._value = value
-        self.valueUpdated(value)
+        commit(
+            transaction: transaction,
+            id: Transaction.id,
+            mutation: BeginUpdate(location: self, value: value, transaction: transaction)
+        )
+        super.setValue(value, transaction: transaction)
+    }
+
+    func update() -> (Value, Bool) {
+        wasRead = true
+        return (updateValue, true)
+    }
+
+    func setCommitValueHandler(_ handler: ((Value, Transaction) -> Void)?) {
+        commitValueHandler = handler
+    }
+
+    func setReadValueHandler(_ handler: (() -> Value)?) {
+        readValueHandler = handler
+    }
+
+    func commit(
+        transaction: Transaction,
+        id: Transaction.ID,
+        mutation: BeginUpdate
+    ) {
+        mutation.apply()
+    }
+
+    func notifyObservers() {
+    }
+
+    private func beginUpdate(_ value: Value, transaction: Transaction) {
+        self.value = value
+        commitValue(value, transaction: transaction)
+        notifyObservers()
+    }
+
+    fileprivate func commitValue(_ value: Value, transaction: Transaction) {
+        commitValueHandler?(value, transaction)
+    }
+
+    fileprivate func setWasRead(_ value: Bool) {
+        wasRead = value
     }
 }
 
-struct ObservableLocation<Value>: _Location {
-    let _value: Value
-    var valueUpdated: (Value)->Void
+final class StoredLocation<Value>: StoredLocationBase<Value>, @unchecked Sendable {
+    private weak var host: GraphHost?
+    private var signal: AGWeakAttribute?
+
+    convenience init(_ value: Value, onValueUpdated: @escaping (Value) -> Void) {
+        self.init(initialValue: value)
+        setCommitValueHandler { value, _ in
+            onValueUpdated(value)
+        }
+    }
+
+    init(
+        initialValue value: Value,
+        host: GraphHost? = nil,
+        signal: AGWeakAttribute? = nil,
+        readValue: (() -> Value)? = nil,
+        onCommit: ((Value, Transaction) -> Void)? = nil
+    ) {
+        self.host = host
+        self.signal = signal
+        super.init(initialValue: value, readValue: readValue, onCommit: onCommit)
+    }
+
+    override func commit(
+        transaction: Transaction,
+        id: Transaction.ID,
+        mutation: BeginUpdate
+    ) {
+        guard let host else {
+            mutation.apply()
+            return
+        }
+        host.asyncTransaction(
+            transaction,
+            id: id,
+            mutation: mutation,
+            style: .deferred,
+            mayDeferUpdate: true
+        )
+    }
+
+    override func update() -> (Value, Bool) {
+        let isValid: Bool
+        if let signal {
+            if let host {
+                isValid = signal.isValid(in: host.data.graph)
+            } else if let graph = AttributeGraph.current {
+                isValid = signal.isValid(in: graph)
+            } else {
+                isValid = false
+            }
+        } else {
+            isValid = true
+        }
+
+        if isValid {
+            setWasRead(true)
+        }
+        return (updateValue, isValid)
+    }
+
+    override func notifyObservers() {
+        guard let signal else { return }
+
+        if let host {
+            guard signal.isValid(in: host.data.graph) else { return }
+            host.continueTransaction(invalidating: signal)
+        } else if let graph = AttributeGraph.current, signal.isValid(in: graph) {
+            graph.invalidateAttribute(signal.toStrong())
+        }
+    }
+}
+
+final class ObservableLocation<Value>: StoredLocationBase<Value>, TransactionHostProvider, @unchecked Sendable {
+    private struct Observer {
+        weak var host: GraphHost?
+        var signal: AGWeakAttribute
+    }
+
+    private var valueUpdated: (Value) -> Void
+    private var observers: [Observer] = []
+
+    var mutationHost: GraphHost? {
+        for observer in observers {
+            if let host = observer.host {
+                return host
+            }
+        }
+        return nil
+    }
+
     init(_ value: Value, onValueUpdated: @escaping (Value)->Void) {
-        self._value = value
         self.valueUpdated = onValueUpdated
+        super.init(initialValue: value)
+        setCommitValueHandler { [weak self] value, _ in
+            self?.valueUpdated(value)
+        }
     }
-    func getValue() -> Value {
-        _value
+
+    convenience init(initialValue value: Value) {
+        self.init(value, onValueUpdated: { _ in })
     }
-    func setValue(_ value: Value, transaction: Transaction) {
-        Transaction.ThreadStorage.markMutation(for: transaction)
-        self.valueUpdated(value)
+
+    override func commit(
+        transaction: Transaction,
+        id: Transaction.ID,
+        mutation: BeginUpdate
+    ) {
+        GraphHost.globalTransaction(
+            transaction,
+            id: id,
+            mutation: mutation,
+            hostProvider: self
+        )
+    }
+
+    func addObserver(host: GraphHost, signal: AGWeakAttribute) {
+        observers.append(Observer(host: host, signal: signal))
+    }
+
+    func removeObserver(signal: AGWeakAttribute) {
+        observers.removeAll { $0.signal == signal }
+    }
+
+    override func notifyObservers() {
+        var liveObservers: [Observer] = []
+        liveObservers.reserveCapacity(observers.count)
+
+        for observer in observers {
+            guard let host = observer.host else { continue }
+            guard observer.signal.isValid(in: host.data.graph) else { continue }
+
+            liveObservers.append(observer)
+            host.continueTransaction(invalidating: observer.signal)
+        }
+
+        observers = liveObservers
     }
 }
 
