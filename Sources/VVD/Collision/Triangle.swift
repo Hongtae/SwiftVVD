@@ -2,14 +2,184 @@
 //  File: Triangle.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
 
+public struct Triangle: Hashable {
+    public let p0: Vector3
+    public let p1: Vector3
+    public let p2: Vector3
+
+    public init(_ p0: Vector3, _ p1: Vector3, _ p2: Vector3) {
+        self.p0 = p0
+        self.p1 = p1
+        self.p2 = p2
+    }
+
+    public var area: Scalar {
+        let ab = p1 - p0
+        let ac = p2 - p0
+        return Vector3.cross(ab, ac).length * Scalar(0.5)
+    }
+
+    public var aabb: AABB {
+        let minimum = Vector3.minimum(p0, Vector3.minimum(p1, p2))
+        let maximum = Vector3.maximum(p0, Vector3.maximum(p1, p2))
+        return AABB(min: minimum, max: maximum)
+    }
+
+    public func barycentric(at p: Vector3) -> Vector3? {
+        let v0 = p1 - p0
+        let v1 = p2 - p0
+        let v2 = p - p0
+        let d00 = Vector3.dot(v0, v0)
+        let d01 = Vector3.dot(v0, v1)
+        let d11 = Vector3.dot(v1, v1)
+        let d20 = Vector3.dot(v2, v0)
+        let d21 = Vector3.dot(v2, v1)
+        let denom = d00 * d11 - d01 * d01
+        guard denom.magnitude > .ulpOfOne else {
+            return nil // triangle is degenerate or nearly degenerate
+        }
+        let invDenom = Scalar(1.0) / denom
+        let v = (d11 * d20 - d01 * d21) * invDenom
+        let w = (d00 * d21 - d01 * d20) * invDenom
+        let u = Scalar(1.0) - v - w
+        return Vector3(u, v, w)
+    }
+
+    /// RayTestResult: ray intersection test result with t,u,v
+    /// t: the distance from ray origin to the triangle plane
+    ///   intersection point P(t) = rayOrigin + rayDir * t
+    /// u,v: barycentric coordinates of intersection point inside the triangle.
+    ///   intersection point T(u,v) = (1-u-v)*p0 + u*p1 + v*p2
+    public typealias RayTestResult = (t: Scalar, u: Scalar, v: Scalar)
+
+    public func rayTestCCW(rayOrigin origin: Vector3, direction dir: Vector3) -> RayTestResult? {
+        // intersection algorithm based on Tomas Akenine-Möller
+        // ray test with front face of triangle.
+        // if intersected, return value t,u,v where t is the distance
+        // to the plane in which the triangle lies, and u,v represents
+        // barycentric coordinates inside the triangle.
+
+        let edge1 = p1 - p0
+        let edge2 = p2 - p0
+        // calculate determinant
+        let p = Vector3.cross(dir, edge2)
+        let det = Vector3.dot(edge1, p)
+
+        // if determinant is near zero, ray lies in plane of triangle
+        if det < .ulpOfOne {
+            return nil
+        }
+
+        // calculate distance from p0 to ray origin
+        let s = origin - p0
+        // calculate U parameter and test bounds
+        let u = Vector3.dot(s, p)
+        if u < .zero || u > det {
+            return nil
+        }
+
+        let q = Vector3.cross(s, edge1)
+        // calculate V parameter and test bounds
+        let v = Vector3.dot(dir, q)
+        if v < .zero || u + v > det {
+            return nil
+        }
+
+        // calculate t, (distance from origin, intersects triangle)
+        let invDet = Scalar(1.0) / det
+        let t = Vector3.dot(edge2, q) * invDet
+        guard t >= .zero else {
+            return nil
+        }
+        return RayTestResult(t: t, u: u * invDet, v: v * invDet)
+    }
+
+    public func rayTest(rayOrigin origin: Vector3, direction dir: Vector3) -> RayTestResult? {
+        // intersection algorithm based on Tomas Akenine-Möller
+        // ray test with both faces (without culling) of triangle.
+        // if intersected, return value with t,u,v where t is the distance
+        // to the plane in which the triangle lies, and u,v represents
+        // barycentric coordinates inside the triangle.
+
+        let edge1 = p1 - p0
+        let edge2 = p2 - p0
+        // calculate determinant
+        let p = Vector3.cross(dir, edge2)
+        let det = Vector3.dot(edge1, p)
+
+        // if determinant is near zero, ray lies in plane of triangle
+        if det > -.ulpOfOne && det < .ulpOfOne {
+            return nil
+        }
+
+        let invDet = Scalar(1.0) / det
+
+        // calculate distance from p0 to ray origin
+        let s = origin - p0
+        // calculate U parameter and test bounds
+        let u = Vector3.dot(s, p) * invDet
+        if u < .zero || u > Scalar(1.0) {
+            return nil
+        }
+
+        let q = Vector3.cross(s, edge1)
+        // calculate V parameter and test bounds
+        let v = Vector3.dot(dir, q) * invDet
+        if v < .zero || u + v > Scalar(1.0) {
+            return nil
+        }
+
+        // calculate t, (distance from origin, intersects triangle)
+        let t = Vector3.dot(edge2, q) * invDet
+        guard t >= .zero else {
+            return nil
+        }
+        return RayTestResult(t: t, u: u, v: v)
+    }
+
+    public enum TriangleOverlap {
+        /// Non-coplanar intersection represented by a line segment.
+        case segment(Vector3, Vector3)
+
+        /// Coplanar overlap; the exact overlap region is not resolved here.
+        case coplanar
+    }
+
+    public func overlapTest(_ other: Triangle) -> TriangleOverlap? {
+        var p0 = Vector3.zero
+        var p1 = Vector3.zero
+        var coplanar = false
+        if _overlapTest.tri_tri_intersect_with_isectline(
+            self.p0, self.p1, self.p2, other.p0, other.p1, other.p2,
+            &coplanar, &p0, &p1) {
+            if coplanar {
+                return .coplanar
+            }
+            return .segment(p0, p1)
+        }
+        return nil
+    }
+
+    public func intersects(_ other: Triangle) -> Bool {
+        _overlapTest.tri_tri_intersect_no_div(
+            self.p0, self.p1, self.p2, other.p0, other.p1, other.p2)
+    }
+}
+
 private enum _overlapTest {
 
-    static var epsilonTest: Bool { false }
+    static var epsilonTest: Bool { true }
+    static let epsilon: Scalar = {
+        if MemoryLayout<Scalar>.size > MemoryLayout<Float32>.size {
+            return Scalar(1.0e-12)
+        }
+        return Scalar(1.0e-6)
+    }()
 
     // algorithm based on Tomas Möller
     // https://cs.lth.se/tomas-akenine-moller/
@@ -25,7 +195,7 @@ private enum _overlapTest {
         let f = ay * bx - ax * by
         let d = by * cx - bx * cy
 
-        if (f > .zero && d >= .zero) || (f < .zero && d <= .zero && d >= f) {
+        if (f > .zero && d >= .zero && d <= f) || (f < .zero && d <= .zero && d >= f) {
             let e = ax * cy - ay * cx
             if f > .zero {
                 if e >= .zero && e <= f { return true }
@@ -160,9 +330,9 @@ private enum _overlapTest {
 
         /* coplanarity robustness check */
         if epsilonTest {
-            if abs(du0) < .ulpOfOne { du0 = .zero }
-            if abs(du1) < .ulpOfOne { du1 = .zero }
-            if abs(du2) < .ulpOfOne { du2 = .zero }
+            if abs(du0) < epsilon { du0 = .zero }
+            if abs(du1) < epsilon { du1 = .zero }
+            if abs(du2) < epsilon { du2 = .zero }
         }
         let du0du1 = du0 * du1
         let du0du2 = du0 * du2
@@ -186,9 +356,9 @@ private enum _overlapTest {
         var dv2 = Vector3.dot(n2, v2) + d2
 
         if epsilonTest {
-            if abs(dv0) < .ulpOfOne { dv0 = .zero }
-            if abs(dv1) < .ulpOfOne { dv1 = .zero }
-            if abs(dv2) < .ulpOfOne { dv2 = .zero }
+            if abs(dv0) < epsilon { dv0 = .zero }
+            if abs(dv1) < epsilon { dv1 = .zero }
+            if abs(dv2) < epsilon { dv2 = .zero }
         }
         let dv0dv1 = dv0 * dv1
         let dv0dv2 = dv0 * dv2
@@ -310,9 +480,9 @@ private enum _overlapTest {
 
         /* coplanarity robustness check */
         if epsilonTest {
-            if fabs(du0) < .ulpOfOne { du0 = .zero }
-            if fabs(du1) < .ulpOfOne { du1 = .zero }
-            if fabs(du2) < .ulpOfOne { du2 = .zero }
+            if abs(du0) < epsilon { du0 = .zero }
+            if abs(du1) < epsilon { du1 = .zero }
+            if abs(du2) < epsilon { du2 = .zero }
         }
         let du0du1 = du0 * du1
         let du0du2 = du0 * du2
@@ -336,9 +506,9 @@ private enum _overlapTest {
         var dv2 = Vector3.dot(n2, v2) + d2
 
         if epsilonTest {
-            if abs(dv0) < .ulpOfOne { dv0 = .zero }
-            if abs(dv1) < .ulpOfOne { dv1 = .zero }
-            if abs(dv2) < .ulpOfOne { dv2 = .zero }
+            if abs(dv0) < epsilon { dv0 = .zero }
+            if abs(dv1) < epsilon { dv1 = .zero }
+            if abs(dv2) < epsilon { dv2 = .zero }
         }
         let dv0dv1 = dv0 * dv1
         let dv0dv2 = dv0 * dv2
@@ -478,9 +648,9 @@ private enum _overlapTest {
 
         /* coplanarity robustness check */
         if epsilonTest {
-            if abs(du0) < .ulpOfOne { du0 = .zero }
-            if abs(du1) < .ulpOfOne { du1 = .zero }
-            if abs(du2) < .ulpOfOne { du2 = .zero }
+            if abs(du0) < epsilon { du0 = .zero }
+            if abs(du1) < epsilon { du1 = .zero }
+            if abs(du2) < epsilon { du2 = .zero }
         }
         let du0du1 = du0 * du1
         let du0du2 = du0 * du2
@@ -504,9 +674,9 @@ private enum _overlapTest {
         var dv2 = Vector3.dot(n2, v2) + d2
 
         if epsilonTest {
-            if abs(dv0) < .ulpOfOne { dv0 = .zero }
-            if abs(dv1) < .ulpOfOne { dv1 = .zero }
-            if abs(dv2) < .ulpOfOne { dv2 = .zero }
+            if abs(dv0) < epsilon { dv0 = .zero }
+            if abs(dv1) < epsilon { dv1 = .zero }
+            if abs(dv2) < epsilon { dv2 = .zero }
         }
         let dv0dv1 = dv0 * dv1
         let dv0dv2 = dv0 * dv2
@@ -589,150 +759,5 @@ private enum _overlapTest {
             }
         }
         return true
-    }
-}
-
-public struct Triangle: Hashable {
-    public let p0: Vector3
-    public let p1: Vector3
-    public let p2: Vector3
-
-    public init(_ p0: Vector3, _ p1: Vector3, _ p2: Vector3) {
-        self.p0 = p0
-        self.p1 = p1
-        self.p2 = p2
-    }
-
-    public var area: Scalar {
-        let ab = p1 - p0
-        let ac = p2 - p0
-        return Vector3.cross(ab, ac).length * Scalar(0.5)
-    }
-
-    public var aabb: AABB {
-        let minimum = Vector3.minimum(p0, Vector3.minimum(p1, p2))
-        let maximum = Vector3.maximum(p0, Vector3.maximum(p1, p2))
-        return AABB(min: minimum, max: maximum)
-    }
-
-    public func barycentric(at p: Vector3) -> Vector3 {
-        let v0 = p1 - p0
-        let v1 = p2 - p0
-        let v2 = p - p0
-        let d00 = Vector3.dot(v0, v0)
-        let d01 = Vector3.dot(v0, v1)
-        let d11 = Vector3.dot(v1, v1)
-        let d20 = Vector3.dot(v2, v0)
-        let d21 = Vector3.dot(v2, v1)
-        let denom = d00 * d11 - d01 * d01
-        let invDenom = Scalar(1.0) / denom
-        let v = (d11 * d20 - d01 * d21) * invDenom
-        let w = (d00 * d21 - d01 * d20) * invDenom
-        let u = Scalar(1.0) - v - w
-        return Vector3(u, v, w)
-    }
-
-    /// RayTestResult: ray intersection test result with t,u,v
-    /// t: the distance from ray origin to the triangle plane
-    ///   intersection point P(t) = rayOrigin + rayDir * t
-    /// u,v: barycentric coordinates of intersection point inside the triangle.
-    ///   intersection point T(u,v) = (1-u-v)*p0 + u*p1 + v*p2
-    public typealias RayTestResult = (t: Scalar, u: Scalar, v: Scalar)
-
-    public func rayTestCCW(rayOrigin origin: Vector3, direction dir: Vector3) -> RayTestResult? {
-        // intersection algorithm based on Tomas Akenine-Möller
-        // ray test with front face of triangle.
-        // if intersected, return value t,u,v where t is the distance
-        // to the plane in which the triangle lies, and u,v represents
-        // barycentric coordinates inside the triangle.
-
-        let edge1 = p1 - p0
-        let edge2 = p2 - p0
-        // calculate determinant
-        let p = Vector3.cross(dir, edge2)
-        let det = Vector3.dot(edge1, p)
-
-        // if determinant is near zero, ray lies in plane of triangle
-        if det < .ulpOfOne {
-            return nil
-        }
-
-        // calculate distance from p0 to ray origin
-        let s = origin - p0
-        // calculate U parameter and test bounds
-        let u = Vector3.dot(s, p)
-        if u < .zero || u > det {
-            return nil
-        }
-
-        let q = Vector3.cross(s, edge1)
-        // calculate V parameter and test bounds
-        let v = Vector3.dot(dir, q)
-        if v < .zero || u + v > det {
-            return nil
-        }
-
-        // calculate t, (distance from origin, intersects triangle)
-        let t = Vector3.dot(edge2, q)
-        let invDet = Scalar(1.0) / det
-        return RayTestResult(t: t * invDet, u: u * invDet, v: v * invDet)
-    }
-
-    public func rayTest(rayOrigin origin: Vector3, direction dir: Vector3) -> RayTestResult? {
-        // intersection algorithm based on Tomas Akenine-Möller
-        // ray test with both faces (without culling) of triangle.
-        // if intersected, return value with t,u,v where t is the distance
-        // to the plane in which the triangle lies, and u,v represents
-        // barycentric coordinates inside the triangle.
-
-        let edge1 = p1 - p0
-        let edge2 = p2 - p0
-        // calculate determinant
-        let p = Vector3.cross(dir, edge2)
-        let det = Vector3.dot(edge1, p)
-
-        // if determinant is near zero, ray lies in plane of triangle
-        if det > -.ulpOfOne && det < .ulpOfOne {
-            return nil
-        }
-
-        let invDet = Scalar(1.0) / det
-
-        // calculate distance from p0 to ray origin
-        let s = origin - p0
-        // calculate U parameter and test bounds
-        let u = Vector3.dot(s, p) * invDet
-        if u < .zero || u > Scalar(1.0) {
-            return nil
-        }
-
-        let q = Vector3.cross(s, edge1)
-        // calculate V parameter and test bounds
-        let v = Vector3.dot(dir, q) * invDet
-        if v < .zero || u + v > Scalar(1.0) {
-            return nil
-        }
-
-        // calculate t, (distance from origin, intersects triangle)
-        let t = Vector3.dot(edge2, q) * invDet
-        return RayTestResult(t: t, u: u, v: v)
-    }
-
-    public typealias LineSegment = (p0: Vector3, p1: Vector3)
-
-    public func overlapTest(_ other: Triangle) -> LineSegment? {
-        var result = LineSegment(p0: .zero, p1: .zero)
-        var coplanar = false
-        if _overlapTest.tri_tri_intersect_with_isectline(
-            self.p0, self.p1, self.p2, other.p0, other.p1, other.p2,
-            &coplanar, &result.p0, &result.p1) {
-            return result
-        }
-        return nil
-    }
-
-    public func intersects(_ other: Triangle) -> Bool {
-        _overlapTest.tri_tri_intersect_no_div(
-            self.p0, self.p1, self.p2, other.p0, other.p1, other.p2)
     }
 }

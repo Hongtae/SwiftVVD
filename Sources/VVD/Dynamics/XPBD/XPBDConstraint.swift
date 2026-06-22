@@ -7,3 +7,12 @@
 
 public protocol XPBDConstraint {
 }
+
+public struct XPBDFixedJointConstraint: XPBDConstraint {
+}
+
+public struct XPBDConfigurableJointConstraint: XPBDConstraint {
+}
+
+public struct XPBDGearJointConstraint: XPBDConstraint {
+}

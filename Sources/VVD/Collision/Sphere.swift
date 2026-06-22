@@ -2,14 +2,17 @@
 //  File: Sphere.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
 
-public struct Sphere: Hashable {
+public struct Sphere: ConvexPrimitive {
     public let center: Vector3
     public let radius: Scalar
+    public var bounds: AABB {
+        isValid ? AABB(center: center, halfExtents: Vector3(radius, radius, radius)) : .null
+    }
 
     public init() {
         self.center = .zero
@@ -51,22 +54,19 @@ public struct Sphere: Hashable {
         return nil
     }
 
-    // smaller sphere, intersection between s1, s2.
-    public static func intersection(_ s1: Self, _ s2: Self) -> Self? {
-        if s1.isValid && s2.isValid {
-            let distance = (s1.center - s2.center).length
-            if distance <= s1.radius + s2.radius {
-                let radius = (s1.radius + s2.radius - distance) * 0.5
-                let center = s1.center + (s1.center - s2.center).normalized() * (s1.radius - radius)
+    public func intersects(_ other: Self) -> Bool {
+        guard self.isValid && other.isValid else { return false }
 
-                return Sphere(center: center, radius: radius)
-            }
-        }
-        return nil
+        let radiusSum = self.radius + other.radius
+        return (self.center - other.center).lengthSquared <= radiusSum * radiusSum
     }
 
     public func isPointInside(_ pos: Vector3) -> Bool {
-        return (pos - center).lengthSquared <= (radius * radius)
+        contains(pos)
+    }
+
+    public func contains(_ point: Vector3) -> Bool {
+        self.isValid && (point - center).lengthSquared <= (radius * radius)
     }
 
     public var volume: Scalar {
@@ -79,6 +79,12 @@ public struct Sphere: Hashable {
 
     public func rayTest(rayOrigin origin: Vector3, direction dir: Vector3) -> Scalar {
         if self.isValid {
+            if self.isPointInside(origin) {
+                return .zero
+            }
+            if dir.lengthSquared <= .ulpOfOne {
+                return -1.0
+            }
             let d = dir.normalized()
             let oc = origin - center
             let b = 2.0 * Vector3.dot(oc, d)
@@ -87,8 +93,19 @@ public struct Sphere: Hashable {
             if discriminant < .zero {
                 return -1.0
             }
-            return (-b - sqrt(discriminant)) * 0.5
+            let t = (-b - sqrt(discriminant)) * 0.5
+            if t >= .zero {
+                return t
+            }
         }
         return -1.0
+    }
+}
+
+public struct SphereShape: ConvexShape {
+    public let primitive: Sphere
+
+    public init(_ primitive: Sphere) {
+        self.primitive = primitive
     }
 }

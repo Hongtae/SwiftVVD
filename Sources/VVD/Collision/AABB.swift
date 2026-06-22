@@ -36,6 +36,13 @@ public struct AABB: Hashable, Sendable {
         self.max = center + halfExtents
     }
 
+    public init(_ vertices: some Collection<Vector3>) {
+        self.init()
+        for vertex in vertices {
+            expand(vertex)
+        }
+    }
+
     public mutating func expand(_ point: Vector3) {
         if self.isNull {
             min = point
@@ -86,11 +93,32 @@ public struct AABB: Hashable, Sendable {
         return aabb
     }
 
+    public func applying(_ transform: Transform) -> AABB {
+        if self.isNull { return .null }
+        var aabb = AABB()
+        let verts: [Vector3] = [
+            Vector3(self.min.x, self.min.y, self.min.z),
+            Vector3(self.max.x, self.min.y, self.min.z),
+            Vector3(self.min.x, self.max.y, self.min.z),
+            Vector3(self.max.x, self.max.y, self.min.z),
+            Vector3(self.min.x, self.min.y, self.max.z),
+            Vector3(self.max.x, self.min.y, self.max.z),
+            Vector3(self.min.x, self.max.y, self.max.z),
+            Vector3(self.max.x, self.max.y, self.max.z),
+        ]
+        verts.forEach { aabb.expand($0.applying(transform)) }
+        return aabb
+    }
+
     public mutating func apply(_ transform: Matrix3) {
         self = self.applying(transform)
     }
 
     public mutating func apply(_ transform: Matrix4) {
+        self = self.applying(transform)
+    }
+
+    public mutating func apply(_ transform: Transform) {
         self = self.applying(transform)
     }
 
