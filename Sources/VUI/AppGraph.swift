@@ -36,7 +36,7 @@ class AppGraph<A: App>: @unchecked Sendable {
             let timeAttr        = graph.makeInput(value: time)
             let phaseAttr       = graph.makeInput(value: Phase())
             let transactionAttr = graph.makeInput(value: Transaction())
-            let envAttr         = graph.makeInput(value: EnvironmentValues())
+            let envAttr         = graph.makeInput(value: EnvironmentValues.tracking())
 
             let graphInputs = _GraphInputs(
                 customInputs: PropertyList(),

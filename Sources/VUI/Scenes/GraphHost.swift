@@ -89,6 +89,8 @@ enum _GraphMutation_Style: UInt8, Hashable {
 // Multiple hosts can share one underlying AttributeGraph while each holds its
 // own data wrapper.
 class GraphHost {
+    private static let maxTransactionUpdatePassCount = 8
+
     struct Data: @unchecked Sendable {
         private var ref: AttributeGraphRef
 
@@ -385,8 +387,7 @@ class GraphHost {
     }
 
     func finishTransactionUpdate(id: UInt32? = nil) {
-        drainGraphMutations()
-        isUpdating = false
+        finishTransactionUpdate(in: nil, postUpdate: { _ in }, id: id)
     }
 
     func finishTransactionUpdate(
@@ -395,12 +396,11 @@ class GraphHost {
         id: UInt32? = nil
     ) {
         // The local AG runtime does not yet expose a separate subgraph update
-        // queue. Preserve the transaction boundary shape and report that no
-        // follow-up pass is pending.
+        // queue. Treat the host-local graph mutation queue as the pending work
+        // source and preserve the bounded pass boundary around it.
         _ = subgraph
         _ = id
-        drainGraphMutations()
-        postUpdate(false)
+        drainGraphMutationPasses(postUpdate: postUpdate)
         isUpdating = false
     }
 
@@ -446,15 +446,31 @@ class GraphHost {
         pendingGraphMutations.append(mutation)
     }
 
-    private func drainGraphMutations() {
-        while !pendingGraphMutations.isEmpty {
-            let mutations = pendingGraphMutations
-            pendingGraphMutations.removeAll(keepingCapacity: true)
-            needsTransaction = false
+    private func drainGraphMutationPasses(postUpdate: (Bool) -> Void) {
+        var passCount = 0
 
-            for mutation in mutations {
-                mutation.apply()
+        repeat {
+            drainGraphMutationPass()
+
+            let needsFollowUp = !pendingGraphMutations.isEmpty
+            postUpdate(needsFollowUp)
+
+            passCount += 1
+            if !needsFollowUp {
+                return
             }
+        } while passCount < Self.maxTransactionUpdatePassCount
+    }
+
+    private func drainGraphMutationPass() {
+        guard !pendingGraphMutations.isEmpty else { return }
+
+        let mutations = pendingGraphMutations
+        pendingGraphMutations.removeAll(keepingCapacity: true)
+        needsTransaction = false
+
+        for mutation in mutations {
+            mutation.apply()
         }
     }
 

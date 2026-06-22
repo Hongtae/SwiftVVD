@@ -372,10 +372,11 @@ struct MergedEnvironment: Rule {
         let graph = AttributeGraph.current!
         let otherAttr = Attribute<EnvironmentValues>(AGAttribute(rawValue: otherRaw))
         let otherEnv = otherAttr.value
-        guard selfWeak.isValid(in: graph) else { return otherEnv }
-        var result = Attribute<EnvironmentValues>(selfWeak.toStrong()).value
-        result._plist.merge(otherEnv._plist)
-        return result
+        guard selfWeak.isValid(in: graph) else { return otherEnv.trackingCopy() }
+        let selfEnv = Attribute<EnvironmentValues>(selfWeak.toStrong()).value
+        var mergedList = selfEnv._plist
+        mergedList.merge(otherEnv._plist)
+        return EnvironmentValues.tracking(mergedList)
     }
 }
 

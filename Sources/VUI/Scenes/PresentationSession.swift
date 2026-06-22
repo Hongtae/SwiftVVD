@@ -85,6 +85,12 @@ public enum Visibility: Hashable, CaseIterable, Sendable {
 // Suppression configuration surface. Suppression UI is not implemented yet.
 public struct DialogSuppressionConfiguration: Hashable, Sendable {}
 
+extension DialogSuppressionConfiguration {
+    struct Key: EnvironmentKey {
+        static let defaultValue: DialogSuppressionConfiguration? = nil
+    }
+}
+
 // MARK: - DialogSeverity
 
 // Dialog severity values used by alert/dialog presentation.
@@ -95,4 +101,80 @@ public struct DialogSeverity: Equatable, Sendable {
     public static let automatic = DialogSeverity(0)
     public static let critical  = DialogSeverity(1)
     public static let standard  = DialogSeverity(2)
+}
+
+private struct DialogSeverityEnvironmentKey: EnvironmentKey {
+    static let defaultValue: DialogSeverity = .automatic
+}
+
+private struct DialogPreventsAppTerminationKey: EnvironmentKey {
+    static let defaultValue: Bool? = nil
+}
+
+private struct DialogIconEnvironmentKey: EnvironmentKey {
+    static let defaultValue: Image? = nil
+}
+
+private struct DialogTintColorEnvironmentKey: EnvironmentKey {
+    static let defaultValue: Color? = nil
+}
+
+private struct DialogColorSchemeEnvironmentKey: EnvironmentKey {
+    static let defaultValue: ColorScheme? = nil
+}
+
+extension EnvironmentValues {
+    var dialogSeverity: DialogSeverity {
+        get { self[DialogSeverityEnvironmentKey.self] }
+        set { self[DialogSeverityEnvironmentKey.self] = newValue }
+    }
+
+    var dialogPreventsAppTermination: Bool? {
+        get { self[DialogPreventsAppTerminationKey.self] }
+        set { self[DialogPreventsAppTerminationKey.self] = newValue }
+    }
+
+    var dialogIcon: Image? {
+        get { self[DialogIconEnvironmentKey.self] }
+        set { self[DialogIconEnvironmentKey.self] = newValue }
+    }
+
+    var dialogTintColor: Color? {
+        get { self[DialogTintColorEnvironmentKey.self] }
+        set { self[DialogTintColorEnvironmentKey.self] = newValue }
+    }
+
+    var dialogColorScheme: ColorScheme? {
+        get { self[DialogColorSchemeEnvironmentKey.self] }
+        set { self[DialogColorSchemeEnvironmentKey.self] = newValue }
+    }
+
+    var dialogSuppression: DialogSuppressionConfiguration? {
+        get { self[DialogSuppressionConfiguration.Key.self] }
+        set { self[DialogSuppressionConfiguration.Key.self] = newValue }
+    }
+}
+
+extension View {
+    nonisolated public func dialogIcon(_ icon: Image?) -> some View {
+        environment(\.dialogIcon, icon)
+    }
+
+    nonisolated public func dialogSeverity(_ severity: DialogSeverity) -> some View {
+        environment(\.dialogSeverity, severity)
+    }
+
+    nonisolated public func dialogPreventsAppTermination(_ prevents: Bool?) -> some View {
+        environment(\.dialogPreventsAppTermination, prevents)
+    }
+}
+
+extension Scene {
+    nonisolated public func dialogIcon(_ icon: Image?) -> some Scene {
+        environment(\.dialogIcon, icon)
+    }
+
+    nonisolated public func dialogSeverity(_ severity: DialogSeverity) -> some Scene {
+        environment(\.dialogSeverity, severity)
+    }
 }

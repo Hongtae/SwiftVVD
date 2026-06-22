@@ -61,6 +61,9 @@ class WindowContext: @unchecked Sendable {
     // Called while the render task is waiting for the next frame. The hook owns
     // its own yield/wait policy; when nil, the render loop yields directly.
     var onIdle: (() async -> Void)?
+    // Returns a host-requested frame interval after view graph update work has
+    // refreshed scheduling state for the current frame.
+    var preferredFrameInterval: (() -> Double?)?
     // Called once when the render task exits, using the latest hook observed
     // while the WindowContext was still retained by the loop.
     var onFinalize: (() -> Void)?
@@ -320,7 +323,13 @@ class WindowContext: @unchecked Sendable {
                     }
                 }
 
-                let frameInterval = state.activated ? config.activeFrameInterval : config.inactiveFrameInterval
+                let configuredFrameInterval = state.activated
+                    ? config.activeFrameInterval
+                    : config.inactiveFrameInterval
+                let frameInterval = Self.resolvedFrameInterval(
+                    configured: configuredFrameInterval,
+                    requested: self.preferredFrameInterval?()
+                )
                 let timeForBusyWait = state.activated ? 0.001 : 0.0
 
                 repeat {
@@ -339,6 +348,18 @@ class WindowContext: @unchecked Sendable {
                 }
             }
         }
+    }
+
+    static func resolvedFrameInterval(
+        configured: Double,
+        requested: Double?
+    ) -> Double {
+        guard let requested,
+              requested.isFinite,
+              requested > 0 else {
+            return configured
+        }
+        return min(configured, requested)
     }
 
     // WindowEvent observer: updates internal OS state only.

@@ -38,7 +38,7 @@ public struct _ForegroundStyleModifier<Style>: ViewModifier where Style: ShapeSt
         let parentEnvAttr = inputs.base.cachedEnvironment.value.environment
         let newEnvAttr: Attribute<EnvironmentValues> = graph.makeRule {
             let m = modifier._attribute.value
-            var env = parentEnvAttr.value
+            var env = parentEnvAttr.value.trackingCopy()
             env.foregroundStyleLevels = _ForegroundStyleLevels(primary: AnyShapeStyle(m.style))
             return env
         }
@@ -67,7 +67,7 @@ public struct _ForegroundStyleModifier2<S1, S2>: ViewModifier where S1: ShapeSty
         let parentEnvAttr = inputs.base.cachedEnvironment.value.environment
         let newEnvAttr: Attribute<EnvironmentValues> = graph.makeRule {
             let m = modifier._attribute.value
-            var env = parentEnvAttr.value
+            var env = parentEnvAttr.value.trackingCopy()
             env.foregroundStyleLevels = _ForegroundStyleLevels(
                 primary: AnyShapeStyle(m.primary),
                 secondary: AnyShapeStyle(m.secondary))
@@ -100,7 +100,7 @@ public struct _ForegroundStyleModifier3<S1, S2, S3>: ViewModifier where S1: Shap
         let parentEnvAttr = inputs.base.cachedEnvironment.value.environment
         let newEnvAttr: Attribute<EnvironmentValues> = graph.makeRule {
             let m = modifier._attribute.value
-            var env = parentEnvAttr.value
+            var env = parentEnvAttr.value.trackingCopy()
             env.foregroundStyleLevels = _ForegroundStyleLevels(
                 primary: AnyShapeStyle(m.primary),
                 secondary: AnyShapeStyle(m.secondary),

@@ -23,7 +23,7 @@ public struct _EnvironmentKeyWritingModifier<Value>: ViewModifier, _GraphInputsM
         let parentEnvAttr = inputs.cachedEnvironment.value.environment
         let newEnvAttr: Attribute<EnvironmentValues> = graph.makeRule {
             let m = modifier._attribute.value   // dep: modifier value changes
-            var env = parentEnvAttr.value       // dep: parent environment changes
+            var env = parentEnvAttr.value.trackingCopy() // dep: parent environment changes
             env[keyPath: m.keyPath] = m.value
             return env
         }

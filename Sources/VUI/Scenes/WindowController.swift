@@ -422,7 +422,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                         scene: WindowKey) {
         self._titleGraph = title
         self._style = style
-        self.environment = EnvironmentValues()
+        self.environment = EnvironmentValues.tracking()
         self.sceneResources = SceneResources()
         self.windowContext = nil
         self.scene = scene
@@ -469,7 +469,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                         scene: WindowKey) {
         self._titleGraph = nil
         self._style = .genericWindow
-        self.environment = EnvironmentValues()
+        self.environment = EnvironmentValues.tracking()
         self.sceneResources = SceneResources()
         self.windowContext = nil
         self.scene = scene
@@ -500,7 +500,7 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
          scene: WindowKey) {
         self._titleGraph = nil
         self._style = .genericWindow
-        self.environment = EnvironmentValues()
+        self.environment = EnvironmentValues.tracking()
         self.sceneResources = SceneResources()
         self.windowContext = nil
         self.scene = scene
@@ -534,6 +534,10 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
                 self?.updateFrame(tick: tick, delta: delta, date: date,
                                   contentSize: size, shouldDrawFrame: drawFrame,
                                   withGC)
+            }
+            ctx.preferredFrameInterval = { [weak self] in
+                guard let self else { return nil }
+                return self.renderIntervalForDisplayLink(timestamp: self.currentTimestamp)
             }
             ctx.onFinalize = { [weak self] in
                 guard let self, self.endSessionOnWindowClosed else { return }

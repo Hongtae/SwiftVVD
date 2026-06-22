@@ -25,7 +25,7 @@ extension _EnvironmentBackgroundStyleModifier: _ViewInputsModifier {
         let parentEnvAttr = inputs.base.cachedEnvironment.value.environment
         let newEnvAttr: Attribute<EnvironmentValues> = graph.makeRule {
             let m = modifier._attribute.value
-            var env = parentEnvAttr.value
+            var env = parentEnvAttr.value.trackingCopy()
             env.backgroundStyle = AnyShapeStyle(m.style)
             return env
         }

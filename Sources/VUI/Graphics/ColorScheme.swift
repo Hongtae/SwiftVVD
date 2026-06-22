@@ -36,6 +36,11 @@ extension EnvironmentValues {
         set { self[ExplicitColorSchemeKey.self] = newValue }
     }
 
+    var explicitPreferredColorScheme: ColorScheme? {
+        get { self[ExplicitColorSchemeKey.self] }
+        set { self[ExplicitColorSchemeKey.self] = newValue }
+    }
+
     // get-only public; wraps _colorSchemeContrast (system-injected via PlatformColorSchemeKey analogue).
     public var colorSchemeContrast: ColorSchemeContrast {
         get { self[ColorSchemeContrastKey.self] }
@@ -71,7 +76,7 @@ public struct PreferredColorSchemeKey: PreferenceKey {
 
 extension View {
     @inlinable nonisolated public func preferredColorScheme(_ colorScheme: ColorScheme?) -> some View {
-        return preference(key: PreferredColorSchemeKey.self, 
+        return preference(key: PreferredColorSchemeKey.self,
                           value: colorScheme)
     }
 }

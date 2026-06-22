@@ -177,7 +177,7 @@ extension _PreferenceWritingModifier where Key == PreferredColorSchemeKey {
         var modifierValueAttr: Attribute<ColorScheme?>
 
         func updateValue() -> EnvironmentValues {
-            var env = parentEnvAttr.value
+            var env = parentEnvAttr.value.trackingCopy()
             if let cs = modifierValueAttr.value {
                 env.colorScheme = cs
             }

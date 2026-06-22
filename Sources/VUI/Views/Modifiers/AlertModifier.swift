@@ -48,6 +48,13 @@ struct ViewIdentity: Hashable {
 // Alert storage for the overlay renderer.
 struct AlertStorage: @unchecked Sendable {
     let preference: AlertPreference
+    let title: String
+    let colorScheme: ColorScheme?
+    let icon: Image?
+    let tintColor: Color.Resolved?
+    let suppressionConfiguration: DialogSuppressionConfiguration?
+    let accessibilityTitle: NSAttributedString?
+    let preventsTermination: Bool?
 
     // Host preference dictionary keyed by ViewIdentity. Reduce merges by identity,
     // with the later value winning on collision.
@@ -91,6 +98,7 @@ struct MakeAlertStorage<Actions: View, Message: View>: StatefulRule {
     let messageItemList: WeakAttribute<PlatformItemList>
     let phase:           Attribute<Phase>
     var identityTracker: ViewIdentity.Tracker
+    var propertyTracker: _PropertyListTracker
 
     // Change-detection cache fields retained for the platform-dialog path.
     // updateValue() does not use them while the overlay renderer is active.
@@ -107,7 +115,7 @@ struct MakeAlertStorage<Actions: View, Message: View>: StatefulRule {
         guard let graph = AttributeGraph.current else {
             fatalError("MakeAlertStorage.updateValue called outside AG context")
         }
-        let environment = environment.value
+        let environment = trackedEnvironment()
         var actionsList: PlatformItemList?
         var messageList: PlatformItemList?
         if actionsItemList.isValid(in: graph) {
@@ -117,6 +125,24 @@ struct MakeAlertStorage<Actions: View, Message: View>: StatefulRule {
             messageList = messageItemList.toStrong().value
         }
         let m = modifier.value
+        let title = m.title._resolveText(in: environment)
+        let dialogColorScheme = environment.dialogColorScheme
+        let explicitPreferredColorScheme = environment.explicitPreferredColorScheme
+        let colorScheme = dialogColorScheme ?? explicitPreferredColorScheme
+        let icon = environment.dialogIcon
+        let tintColor = environment.dialogTintColor?.resolve(in: environment)
+        let severity = environment.dialogSeverity
+        let suppressionConfiguration = environment.dialogSuppression
+        let preventsTermination = environment.dialogPreventsAppTermination
+        let accessibilityTitle = resolvedAccessibilityTitle(for: m.title, in: environment)
+        lastTitle = title
+        lastColorScheme = colorScheme
+        lastIcon = icon
+        lastTintColor = tintColor
+        lastSeverity = severity
+        lastSuppressionConfiguration = suppressionConfiguration
+        lastAccessibilityTitle = accessibilityTitle
+        lastDialogPreventsTermination = preventsTermination
         let identity = identityTracker.update(for: phase.value)
         guard m.isPresented.wrappedValue else {
             let id = identity
@@ -133,15 +159,39 @@ struct MakeAlertStorage<Actions: View, Message: View>: StatefulRule {
             makeMessage: { AnyView(m.message) },
             messageItemList: messageList,
             isPresented: m.isPresented,
-            severity: m.severity,
+            severity: severity,
             onDismiss: nil,
             usesPlatformWindow: environment.modalSessionUsingPlatformWindow
         )
-        let storage = AlertStorage(preference: pref)
+        let storage = AlertStorage(
+            preference: pref,
+            title: title,
+            colorScheme: colorScheme,
+            icon: icon,
+            tintColor: tintColor,
+            suppressionConfiguration: suppressionConfiguration,
+            accessibilityTitle: accessibilityTitle,
+            preventsTermination: preventsTermination
+        )
         let id = identity
         AttributeGraph.setStatefulOutput({ (dict: inout [ViewIdentity: AlertStorage]) in
             dict[id] = storage
         } as Value)
+    }
+
+    private mutating func trackedEnvironment() -> EnvironmentValues {
+        let values = environment.value
+        if propertyTracker.hasDifferentUsedValues(values._plist) {
+            propertyTracker.reset()
+        }
+        return EnvironmentValues(values._plist, tracker: propertyTracker)
+    }
+
+    private func resolvedAccessibilityTitle(for title: Text, in environment: EnvironmentValues) -> NSAttributedString? {
+        guard environment.accessibilityEnabled else { return nil }
+        // Accessibility label storage is not wired yet, so there is no payload to resolve.
+        _ = title
+        return nil
     }
 }
 
@@ -468,6 +518,7 @@ extension AlertModifier {
             messageItemList: messageWeakAttr,
             phase: inputs.base.phase,
             identityTracker: ViewIdentity.Tracker(),
+            propertyTracker: _PropertyListTracker(),
             lastTitle:                    Optional<String>.none,
             lastColorScheme:              Optional<ColorScheme>.none,
             lastIcon:                     Optional<Image>.none,

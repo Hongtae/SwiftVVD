@@ -58,17 +58,25 @@ public struct EnvironmentValues: CustomStringConvertible {
             }
             return _plist[EnvironmentPropertyKey<K>.self]
         }
-        set { _plist[EnvironmentPropertyKey<K>.self] = newValue }
+        set { setTrackedValue(newValue, for: EnvironmentPropertyKey<K>.self) }
     }
 
     public var description: String { _plist.description }
 }
 
 extension EnvironmentValues {
+    static func tracking(_ plist: PropertyList = PropertyList()) -> EnvironmentValues {
+        EnvironmentValues(plist, tracker: _PropertyListTracker())
+    }
+
     init(_ plist: PropertyList, tracker: _PropertyListTracker) {
         self._plist = plist
         self.tracker = tracker
         tracker.initializeValues(from: plist)
+    }
+
+    func trackingCopy() -> EnvironmentValues {
+        EnvironmentValues.tracking(_plist)
     }
 
     subscript<K: DerivedPropertyKey>(_ key: K.Type) -> K.Value {
@@ -89,16 +97,27 @@ extension EnvironmentValues {
         self.tracker?.formUnion(tracker)
     }
 
+    func addDependencies(from values: EnvironmentValues) {
+        guard let tracker = values.tracker else { return }
+        addDependencies(from: tracker)
+    }
+
+    mutating func setTrackedValue<K: PropertyKey>(_ value: K.Value, for key: K.Type) {
+        let oldList = _plist
+        _plist[key] = value
+        tracker?.invalidateValue(for: key, from: oldList, to: _plist)
+    }
+
     public subscript<T: AnyObject & Observable>(objectType type: T.Type) -> T? {
         get { _plist[ObservableObjectKey<T>.self] }
-        set { _plist[ObservableObjectKey<T>.self] = newValue }
+        set { setTrackedValue(newValue, for: ObservableObjectKey<T>.self) }
     }
 
     // Internal subscripts for keypath literal use.
 
     subscript<T: AnyObject & Observable>(_obs id: ObjectIdentifier) -> T? {
         get { _plist[ObservableObjectKey<T>.self] }
-        set { _plist[ObservableObjectKey<T>.self] = newValue }
+        set { setTrackedValue(newValue, for: ObservableObjectKey<T>.self) }
     }
 
     subscript<T: AnyObject & Observable>(_crashingObs id: ObjectIdentifier) -> T {
@@ -119,6 +138,10 @@ public struct IsFocusedKey: EnvironmentKey {
     public static let defaultValue: Bool = false
 }
 
+struct AccessibilityEnabledKey: EnvironmentKey {
+    static let defaultValue: Bool = false
+}
+
 extension EnvironmentValues {
     public var isEnabled: Bool {
         get { self[IsEnabledKey.self] }
@@ -127,6 +150,10 @@ extension EnvironmentValues {
     public var isFocused: Bool {
         get { self[IsFocusedKey.self] }
         set { self[IsFocusedKey.self] = newValue }
+    }
+    var accessibilityEnabled: Bool {
+        get { self[AccessibilityEnabledKey.self] }
+        set { self[AccessibilityEnabledKey.self] = newValue }
     }
 }
 

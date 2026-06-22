@@ -338,7 +338,7 @@ class ViewGraph: ViewGraphHost {
             let timeAttr        = g.makeInput(value: time)
             let phaseAttr       = g.makeInput(value: Phase())
             let transactionAttr = g.makeInput(value: Transaction())
-            let envAttr         = g.makeInput(value: EnvironmentValues())
+            let envAttr         = g.makeInput(value: EnvironmentValues.tracking())
             let graphInputs = _GraphInputs(
                 customInputs: PropertyList(),
                 time: timeAttr,

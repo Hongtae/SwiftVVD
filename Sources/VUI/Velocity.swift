@@ -69,6 +69,10 @@ extension _Velocity: VectorArithmetic where Value: VectorArithmetic {
 }
 
 struct VelocitySampler<Value: VectorArithmetic> {
+    private static var minimumDistinctSampleInterval: TimeInterval {
+        .ulpOfOne
+    }
+
     private var sample1: (value: Value, time: TimeInterval)?
     private var sample2: (value: Value, time: TimeInterval)?
     private var sample3: (value: Value, time: TimeInterval)?
@@ -88,7 +92,7 @@ struct VelocitySampler<Value: VectorArithmetic> {
         }
 
         let sample = (value: value, time: time)
-        if let lastTime, time - lastTime < 1.0e-16 {
+        if let lastTime, time - lastTime < Self.minimumDistinctSampleInterval {
             sample1 = sample
             self.lastTime = time
             return
