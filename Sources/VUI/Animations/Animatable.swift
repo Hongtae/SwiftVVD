@@ -352,15 +352,6 @@ private final class AnimatorState<AnimatedValue: Animatable> {
         updateFrameInterval(from: transaction)
     }
 
-    struct UpdateResult {
-        var continues: Bool
-        var time: Time
-        var isLogicallyComplete: Bool
-        var logicalListeners: [Listener] = []
-        var removedListeners: [Listener] = []
-        var discardedBaseLayerGenerations: Set<UInt64> = []
-    }
-
     struct ListenerRegistration {
         var records: [Listener] = []
         var immediateActions: [() -> Void] = []
@@ -425,6 +416,37 @@ private final class AnimatorState<AnimatedValue: Animatable> {
         func finish() -> [() -> Void] {
             listener.animationWasRemoved()
         }
+    }
+
+    struct ListenerSnapshot {
+        private var listenerIdentities: Set<Listener.Identity> = []
+
+        init() {}
+
+        mutating func insert(_ listener: Listener) {
+            listenerIdentities.insert(listener.identity)
+        }
+
+        mutating func formUnion(_ snapshot: ListenerSnapshot) {
+            listenerIdentities.formUnion(snapshot.listenerIdentities)
+        }
+
+        var isEmpty: Bool {
+            listenerIdentities.isEmpty
+        }
+
+        func contains(_ identity: Listener.Identity) -> Bool {
+            listenerIdentities.contains(identity)
+        }
+    }
+
+    struct UpdateResult {
+        var continues: Bool
+        var time: Time
+        var isLogicallyComplete: Bool
+        var logicalCompletionListeners: ListenerSnapshot = ListenerSnapshot()
+        var terminalCompletionListeners: ListenerSnapshot = ListenerSnapshot()
+        var discardedBaseLayerGenerations: Set<UInt64> = []
     }
 
     func activate(
@@ -649,22 +671,21 @@ private final class AnimatorState<AnimatedValue: Animatable> {
                 time: sample.elapsed,
                 environment: environment
             )
-            : []
-        let removedListeners: [Listener]
+            : ListenerSnapshot()
+        var terminalListeners = logicalListeners
         let discardedBaseLayerGenerations: Set<UInt64>
         if sample.output == nil {
             discardedBaseLayerGenerations = baseLayerGenerations()
-            removedListeners = removedListenersForCompletionRecords()
+            terminalListeners.formUnion(removedListenersForCompletionRecords())
         } else {
             discardedBaseLayerGenerations = []
-            removedListeners = []
         }
         return UpdateResult(
             continues: sample.output != nil,
             time: time,
             isLogicallyComplete: sample.isLogicallyComplete,
-            logicalListeners: logicalListeners,
-            removedListeners: removedListeners,
+            logicalCompletionListeners: logicalListeners,
+            terminalCompletionListeners: terminalListeners,
             discardedBaseLayerGenerations: discardedBaseLayerGenerations
         )
     }
@@ -970,52 +991,72 @@ private final class AnimatorState<AnimatedValue: Animatable> {
         time: Time,
         environment: Attribute<EnvironmentValues>?
     ) {
-        let completed = updateListenersForCompletionRecords(
+        var actions: [() -> Void] = []
+        drainCompletedListeners(
             isLogicallyComplete: isLogicallyComplete,
             time: time,
             environment: environment
-        )
-        enqueueAnimationCompletionActions(completed.flatMap { $0.finish() })
+        ) { listener in
+            actions.append(contentsOf: listener.finish())
+        }
+        enqueueAnimationCompletionActions(actions)
     }
 
     private func updateListenersForCompletionRecords(
         isLogicallyComplete: Bool,
         time: Time,
         environment: Attribute<EnvironmentValues>?
-    ) -> [Listener] {
-        var completed: [Listener] = []
+    ) -> ListenerSnapshot {
+        var completed = ListenerSnapshot()
+        drainCompletedListeners(
+            isLogicallyComplete: isLogicallyComplete,
+            time: time,
+            environment: environment
+        ) { listener in
+            completed.insert(listener)
+        }
+        return completed
+    }
+
+    private func drainCompletedListeners(
+        isLogicallyComplete: Bool,
+        time: Time,
+        environment: Attribute<EnvironmentValues>?,
+        onCompletion: (Listener) -> Void
+    ) {
         guard isLogicallyComplete, !logicalListeners.isEmpty else {
             updateForkListeners(
                 time: time,
                 environment: environment,
-                into: &completed
+                onCompletion: onCompletion
             )
-            return completed
+            return
         }
-        completed.append(contentsOf: logicalListeners.map {
-            Listener(listener: $0, criteria: .logicallyComplete)
-        })
+        logicalListeners.forEach {
+            onCompletion(Listener(listener: $0, criteria: .logicallyComplete))
+        }
         logicalListeners.removeAll()
         updateForkListeners(
             time: time,
             environment: environment,
-            into: &completed
+            onCompletion: onCompletion
         )
-        return completed
     }
 
     private func updateForkListeners(
         time: Time,
         environment: Attribute<EnvironmentValues>?,
-        into completed: inout [Listener]
+        onCompletion: (Listener) -> Void
     ) {
         guard !forks.isEmpty else { return }
         var completedForkOffsets = IndexSet()
         for index in forks.indices {
             if forks[index].update(time: time, environment: environment) {
-                completed.append(contentsOf: forks[index].listeners.map {
-                    Listener(listener: $0, criteria: .logicallyComplete)
-                })
+                forks[index].listeners.forEach {
+                    onCompletion(
+                        Listener(listener: $0, criteria: .logicallyComplete)
+                    )
+                }
                 completedForkOffsets.insert(index)
             }
         }
@@ -1027,19 +1068,18 @@ private final class AnimatorState<AnimatedValue: Animatable> {
         enqueueAnimationCompletionActions(actions)
     }
 
-    private func removedListenersForCompletionRecords() -> [Listener] {
-        var removed = listeners.map {
-            Listener(listener: $0, criteria: .removed)
+    private func removedListenersForCompletionRecords() -> ListenerSnapshot {
+        var removed = ListenerSnapshot()
+        listeners.forEach {
+            removed.insert(Listener(listener: $0, criteria: .removed))
         }
-        removed.append(contentsOf: logicalListeners.map {
-            Listener(listener: $0, criteria: .logicallyComplete)
-        })
+        logicalListeners.forEach {
+            removed.insert(Listener(listener: $0, criteria: .logicallyComplete))
+        }
         for fork in forks {
-            removed.append(
-                contentsOf: fork.listeners.map {
-                    Listener(listener: $0, criteria: .logicallyComplete)
-                }
-            )
+            fork.listeners.forEach {
+                removed.insert(Listener(listener: $0, criteria: .logicallyComplete))
+            }
         }
         listeners.removeAll()
         logicalListeners.removeAll()
@@ -1381,13 +1421,13 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         let target = updateInputs.target
         if updateInputs.didReset {
             resetAnimationStateForPhaseChange()
-            finishValue(with: target)
+            finishValue(with: target, at: updateInputs.time)
             return
         }
         let previousOutput: AnimatedValue? = AttributeGraph.currentStatefulOutput()
 
         guard let previousOutput else {
-            finishValue(with: target)
+            finishValue(with: target, at: updateInputs.time)
             return
         }
 
@@ -1398,12 +1438,13 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
                     to: target,
                     currentOutput: previousOutput
                 ) else {
-                    finishValue(with: target)
+                    finishValue(with: target, at: updateInputs.time)
                     return
                 }
                 return sampleCurrentAnimationValue(
                     value: &updateValue,
-                    fallbackValue: fallbackValue
+                    fallbackValue: fallbackValue,
+                    fallbackTime: updateInputs.time
                 )
 
             case let .animated(animation, effectiveTransaction, now):
@@ -1422,7 +1463,8 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         }
         sampleCurrentAnimationValue(
             value: &updateValue,
-            fallbackValue: previousOutput
+            fallbackValue: previousOutput,
+            fallbackTime: updateInputs.time
         )
     }
 
@@ -1435,7 +1477,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
     ) {
         let start = currentOutput
         guard start.animatableData != target.animatableData else {
-            finishValue(with: target)
+            finishValue(with: target, at: now)
             return
         }
         let retargetState = helper.retargetStateSnapshot()
@@ -1864,12 +1906,13 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
 
     private mutating func sampleCurrentAnimationValue(
         value updateValue: inout (value: AnimatedValue, changed: Bool),
-        fallbackValue: AnimatedValue?
+        fallbackValue: AnimatedValue?,
+        fallbackTime now: Time
     ) {
         guard helper.isAnimating,
               let targetValue else {
             if let fallbackValue {
-                finishValue(with: fallbackValue)
+                finishValue(with: fallbackValue, at: now)
             }
             return
         }
@@ -1879,7 +1922,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
             sampleCollector: { _, _ in }
         ) else {
             if let fallbackValue {
-                finishValue(with: fallbackValue)
+                finishValue(with: fallbackValue, at: now)
             }
             return
         }
@@ -1911,7 +1954,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
                 return
             }
             let listenerCompletions = finishCompletionRecords(
-                matching: update.removedListeners + update.logicalListeners
+                matching: update.terminalCompletionListeners
             )
             enqueueAnimationCompletionActions(listenerCompletions)
             let completions = finishDueCompletionRecords(at: now)
@@ -1955,7 +1998,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
                 prefersCombinedResidualSourceLogicalBeforeReplacementLogical(
                     for: currentGeneration
                 )
-            let logicalListeners = update.logicalListeners
+            let logicalListeners = update.logicalCompletionListeners
             var completions = logicalListeners.isEmpty
                 ? finishCompletionRecords(
                     for: currentGeneration,
@@ -2019,14 +2062,13 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         return fallbackOutput
     }
 
-    private mutating func finishValue(with value: AnimatedValue) {
+    private mutating func finishValue(with value: AnimatedValue, at now: Time) {
         startValue = nil
         targetValue = value
         helper.commitTarget(value)
         clearAnimationRuntimeState()
         AttributeGraph.setStatefulOutput(value)
         guard !completionRecords.isEmpty else { return }
-        let now = helper.currentTime()
         let completions = finishDueCompletionRecords(at: now)
         enqueueAnimationCompletionActions(completions)
     }
@@ -2241,15 +2283,14 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
     }
 
     private mutating func finishCompletionRecords(
-        matching listeners: [StateListener],
+        matching listeners: AnimatorState<AnimatedValue>.ListenerSnapshot,
         preferLogicalBeforeRemoved: Bool = false
     ) -> [() -> Void] {
         guard !listeners.isEmpty else { return [] }
-        let listenerIDs = Set(listeners.map(\.identity))
         var readyRecords: [CompletionRecord] = []
         var pendingRecords: [CompletionRecord] = []
         for record in completionRecords {
-            if listenerIDs.contains(record.identity) {
+            if listeners.contains(record.identity) {
                 readyRecords.append(record)
             } else {
                 pendingRecords.append(record)
@@ -2994,7 +3035,8 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         guard hasResidualWrapperPresentation(box) else {
             return false
         }
-        if isFluidSpringNestedSpeedRepeatResidualWrapper(box) {
+        if isResidualFirstNestedSpeedRepeatWrapper(box) ||
+           isResidualFirstNestedDelaySpeedWrapper(box) {
             return false
         }
         return hasCombinedResidualOldSourceLogicalBeforeRemovedBase(box)
@@ -3015,6 +3057,9 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         }
         if let speed = box as? SpeedAnimationBox {
             guard speed.speed > 0 else { return false }
+            if let spring = speed.base as? SpringAnimationBox {
+                return spring.usesMassStiffnessDampingWrapperOrdering
+            }
             return hasCombinedResidualOldSourceLogicalBeforeRemovedBase(speed.base)
         }
         if let repeatBox = box as? RepeatAnimationBox {
@@ -3035,23 +3080,82 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
         if let fluidSpring = repeatBox.base as? FluidSpringAnimationBox {
             return repeatCount >= 0 && !isInteractiveFluidSpringAlias(fluidSpring)
         }
+        if repeatCount > 0,
+           hasSpringAnimationBaseThroughDelayRepeat(repeatBox.base) {
+            return true
+        }
         return hasCombinedResidualOldSourceLogicalBeforeRemovedBase(repeatBox.base)
     }
 
-    private func isFluidSpringNestedSpeedRepeatResidualWrapper(
+    private func isResidualFirstNestedSpeedRepeatWrapper(
         _ box: AnimationBoxBase
     ) -> Bool {
         if let repeatBox = box as? RepeatAnimationBox,
            repeatBox.repeatCount != nil,
            let speed = repeatBox.base as? SpeedAnimationBox,
            speed.speed > 0 {
-            return isNonInteractiveFluidSpringAlias(speed.base)
+            return isNonInteractiveFluidSpringAlias(speed.base) ||
+                speed.base is SpringAnimationBox
         }
         if let speed = box as? SpeedAnimationBox,
            speed.speed > 0,
            let repeatBox = speed.base as? RepeatAnimationBox,
            repeatBox.repeatCount != nil {
-            return isNonInteractiveFluidSpringAlias(repeatBox.base)
+            return isNonInteractiveFluidSpringAlias(repeatBox.base) ||
+                repeatBox.base is SpringAnimationBox
+        }
+        return false
+    }
+
+    private func isResidualFirstNestedDelaySpeedWrapper(
+        _ box: AnimationBoxBase
+    ) -> Bool {
+        if let delay = box as? DelayAnimationBox,
+           delay.delay >= 0,
+           let speed = delay.base as? SpeedAnimationBox,
+           speed.speed > 0 {
+            return isResidualFirstNestedDelaySpeedBase(speed.base)
+        }
+        if let speed = box as? SpeedAnimationBox,
+           speed.speed > 0,
+           let delay = speed.base as? DelayAnimationBox,
+           delay.delay >= 0 {
+            return isResidualFirstNestedDelaySpeedBase(delay.base)
+        }
+        return false
+    }
+
+    private func isResidualFirstNestedDelaySpeedBase(
+        _ box: AnimationBoxBase
+    ) -> Bool {
+        if box is DefaultAnimationBox {
+            return true
+        }
+        if let fluidSpring = box as? FluidSpringAnimationBox {
+            return !isInteractiveFluidSpringAlias(fluidSpring)
+        }
+        if let spring = box as? SpringAnimationBox {
+            return spring.usesMassStiffnessDampingWrapperOrdering
+        }
+        return false
+    }
+
+    private func hasSpringAnimationBaseThroughDelayRepeat(
+        _ box: AnimationBoxBase
+    ) -> Bool {
+        if let spring = box as? SpringAnimationBox {
+            return spring.usesMassStiffnessDampingWrapperOrdering
+        }
+        if let delay = box as? DelayAnimationBox {
+            guard delay.delay >= 0 else { return false }
+            return hasSpringAnimationBaseThroughDelayRepeat(delay.base)
+        }
+        if let repeatBox = box as? RepeatAnimationBox {
+            guard let repeatCount = repeatBox.repeatCount,
+                  repeatCount > 0 else {
+                return false
+            }
+            return hasSpringAnimationBaseThroughDelayRepeat(repeatBox.base)
         }
         return false
     }
@@ -3728,6 +3832,7 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
         var didReset: Bool
         var target: AnimatedValue
         var targetAnimationBranch: TargetAnimationBranch?
+        var time: Time
     }
 
     enum TargetAnimationBranch {
@@ -3780,10 +3885,6 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
 
     var isAnimating: Bool {
         animatorState != nil
-    }
-
-    func currentTime() -> Time {
-        _time.value
     }
 
     private mutating func ensureAnimatorState() {
@@ -3986,7 +4087,8 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
         return UpdateInputs(
             didReset: didReset,
             target: value.value,
-            targetAnimationBranch: branch
+            targetAnimationBranch: branch,
+            time: _time.value
         )
     }
 
@@ -4009,7 +4111,8 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
         return UpdateInputs(
             didReset: didReset,
             target: value.value,
-            targetAnimationBranch: branch
+            targetAnimationBranch: branch,
+            time: _time.value
         )
     }
 
@@ -4030,13 +4133,12 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
         value.changed = true
         if continues {
             finishContinuingUpdate(
-                animatorState: animatorState,
                 value: value.value,
                 time: time,
                 sampleCollector: sampleCollector
             )
         } else {
-            finishCompletedUpdate(animatorState: animatorState)
+            finishCompletedUpdate()
         }
     }
 
@@ -4058,7 +4160,6 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
         }
         if update.continues {
             finishContinuingUpdate(
-                animatorState: animatorState,
                 value: value.value,
                 time: time,
                 sampleCollector: sampleCollector
@@ -4097,19 +4198,16 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
     }
 
     private mutating func finishContinuingUpdate(
-        animatorState: AnimatorState<AnimatedValue>,
         value: AnimatedValue,
         time: Time,
         sampleCollector: (AnimatedValue.AnimatableData, Time) -> Void
     ) {
-        animatorState.nextUpdate()
+        animatorState?.nextUpdate()
         sampleCollector(value.animatableData, time)
     }
 
-    private mutating func finishCompletedUpdate(
-        animatorState: AnimatorState<AnimatedValue>
-    ) {
-        animatorState.removeListeners()
+    private mutating func finishCompletedUpdate() {
+        animatorState?.removeListeners()
         self.animatorState = nil
     }
 

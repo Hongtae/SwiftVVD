@@ -312,20 +312,19 @@ class GraphHost {
         }
     }
 
-    @discardableResult
     static func globalTransaction<M>(
         _ transaction: Transaction = Transaction(),
         id: Transaction.ID = Transaction.id,
         mutation: M,
         hostProvider: any TransactionHostProvider
-    ) -> UInt32 where M: GraphMutation {
+    ) where M: GraphMutation {
         globalTransactionState.withLock {
             let providerKey = TransactionHostProviderKey(hostProvider)
             if let index = globalTransactionState.pendingTransactions.lastIndex(where: { pending in
                 pending.matches(providerKey: providerKey, id: id, transaction: transaction)
             }) {
                 globalTransactionState.pendingTransactions[index].append(mutation)
-                return globalTransactionState.pendingTransactions[index].traceID
+                return
             }
 
             let traceID = nextAsyncTransactionTrace()
@@ -347,7 +346,6 @@ class GraphHost {
             if wasEmpty {
                 scheduleGlobalTransactionFlush()
             }
-            return traceID
         }
     }
 

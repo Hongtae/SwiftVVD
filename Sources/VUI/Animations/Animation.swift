@@ -2260,12 +2260,20 @@ final class SpringAnimationBox: AnimationBoxBase, @unchecked Sendable {
     let stiffness: Double
     let damping: Double
     let initialVelocity: Double
+    let usesMassStiffnessDampingWrapperOrdering: Bool
 
-    init(mass: Double, stiffness: Double, damping: Double, initialVelocity: Double) {
+    init(
+        mass: Double,
+        stiffness: Double,
+        damping: Double,
+        initialVelocity: Double,
+        usesMassStiffnessDampingWrapperOrdering: Bool = true
+    ) {
         self.mass = mass
         self.stiffness = stiffness
         self.damping = damping
         self.initialVelocity = initialVelocity
+        self.usesMassStiffnessDampingWrapperOrdering = usesMassStiffnessDampingWrapperOrdering
     }
 
     override var duration: TimeInterval {
@@ -3605,11 +3613,14 @@ extension Animation {
         let stiffness = springStiffness(response: duration)
         let fraction = springDampingFraction(bounce: bounce)
         let damping = springDamping(fraction: fraction, stiffness: stiffness)
-        return interpolatingSpring(
-            mass: 1.0,
-            stiffness: stiffness,
-            damping: damping,
-            initialVelocity: initialVelocity
+        return Animation(
+            box: SpringAnimationBox(
+                mass: 1.0,
+                stiffness: stiffness,
+                damping: damping,
+                initialVelocity: initialVelocity,
+                usesMassStiffnessDampingWrapperOrdering: false
+            )
         )
     }
 
@@ -3618,11 +3629,14 @@ extension Animation {
     }
 
     public static func interpolatingSpring(_ spring: Spring, initialVelocity: Double = 0.0) -> Animation {
-        interpolatingSpring(
-            mass: 1.0,
-            stiffness: spring.stiffness / max(spring.mass, 0.001),
-            damping: spring.damping / max(spring.mass, 0.001),
-            initialVelocity: initialVelocity
+        Animation(
+            box: SpringAnimationBox(
+                mass: 1.0,
+                stiffness: spring.stiffness / max(spring.mass, 0.001),
+                damping: spring.damping / max(spring.mass, 0.001),
+                initialVelocity: initialVelocity,
+                usesMassStiffnessDampingWrapperOrdering: false
+            )
         )
     }
 
