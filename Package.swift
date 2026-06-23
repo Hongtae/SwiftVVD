@@ -139,6 +139,12 @@ let package = Package(
             dependencies: [
                 .target(name: "VVD"),
             ]),
+        .testTarget(
+            name: "VUITests",
+            dependencies: [
+                .target(name: "VVD"),
+                .target(name: "VUI"),
+            ]),
         .executableTarget(
             name: "TestApp1",
             dependencies: [
