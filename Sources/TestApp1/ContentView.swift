@@ -1,33 +1,252 @@
 import Foundation
 import VUI
 
-struct BlueButton: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .padding(4)
-            .background {
-                if configuration.isPressed {
-                    RoundedRectangle(cornerRadius: 8).fill(.blue.opacity(0.5))
-                } else {
-                    RoundedRectangle(cornerRadius: 8).fill(.blue.opacity(0.2))
-                }
-                RoundedRectangle(cornerRadius: 8).strokeBorder(.black)
-            }
-    }
+private enum LabCategory: Int, Identifiable {
+    case contextMenus
+    case modalsAndPopups
+    case animation
+    case symbolEffects
+    case keyframeAndPhase
+    case matchedGeometry
+    case contentTransition
+    case timeline
+    case visualAndMesh
+    case customAnimation
+    case images
+    case textVariants
+    case scrollViewReader
+
+    var id: Int { rawValue }
+}
+
+private struct SampleFileItem: Identifiable {
+    let id: Int
+    let name: String
+    let size: String
+}
+
+private struct SampleLocalizedError: LocalizedError {
+    let errorDescription: String?
+    let failureReason: String?
+    let recoverySuggestion: String?
 }
 
 struct ContentView: View {
-    @State var count = 0
-    var body: some View {
-        VStack {
-            Image("Meisje_met_de_parel.jpg")
+    @State private var selectedCategory: LabCategory? =
+        ProcessInfo.processInfo.environment["VUI_ANIMATION_TRACE_SCENARIO"] != nil
+            ? .animation
+            : ProcessInfo.processInfo.environment["VUI_SCROLL_READER_SMOKE"] != nil
+                ? .scrollViewReader
+                : nil
+    // This selects the lab sheet host. Each child presentation keeps its own
+    // policy when the lab has a platform window; overlay labs force descendants
+    // through the overlay fallback.
+    @State private var usesPlatformPresentationWindows = true
 
-            HStack {
-                Button("ContentView.count: \(count) ") {
-                    count += 1
+    // Keep these presentations attached to the top-level view. Moving every
+    // sample into a category sheet would hide top-level presentation regressions.
+    @State private var topLevelSheetPresented = false
+    @State private var showAlert = false
+    @State private var showDataAlert = false
+    @State private var showErrorAlert = false
+    @State private var selectedFile: SampleFileItem?
+    @State private var currentError: SampleLocalizedError?
+    @State private var alertResult = ""
+
+    var body: some View {
+        VStack(spacing: 14) {
+            Text("TestApp1 Labs")
+                .font(.system(size: 24, weight: .semibold))
+
+            Text("Open a focused smoke surface. New parity work can add another category here.")
+                .font(.system(.callout))
+                .foregroundColor(.secondary)
+
+            VStack(spacing: 10) {
+                Toggle(
+                    "Open Labs in Platform Windows",
+                    isOn: $usesPlatformPresentationWindows
+                )
+
+                Text("Animation Comparison")
+                    .font(.system(.headline))
+
+                HStack(spacing: 10) {
+                    categoryButton("Animation Lab", category: .animation, width: 145)
+                    categoryButton("Symbol Effects", category: .symbolEffects, width: 145)
+                    categoryButton("Keyframe & Phase", category: .keyframeAndPhase, width: 145)
+                    categoryButton("Matched Geometry", category: .matchedGeometry, width: 145)
                 }
-                .buttonStyle(BlueButton())
+                HStack(spacing: 10) {
+                    categoryButton("Content Transition", category: .contentTransition, width: 145)
+                    categoryButton("Timeline", category: .timeline, width: 145)
+                    categoryButton("Visual Effect & Mesh", category: .visualAndMesh, width: 145)
+                    categoryButton("Custom Animation", category: .customAnimation, width: 145)
+                }
+
+                Text("Other Labs")
+                    .font(.system(.headline))
+
+                HStack(spacing: 10) {
+                    categoryButton("Context Menus", category: .contextMenus, width: 145)
+                    categoryButton("Modals & Popups", category: .modalsAndPopups, width: 145)
+                    categoryButton("Images", category: .images, width: 145)
+                    categoryButton("Text Variants", category: .textVariants, width: 145)
+                }
+                categoryButton("ScrollView Reader", category: .scrollViewReader, width: 145)
+            }
+
+            Divider()
+
+            Text("Top-Level Presentation Tests")
+                .font(.system(.headline))
+
+            Button("Open Top-Level Sheet") {
+                topLevelSheetPresented = true
+            }
+
+            HStack(spacing: 10) {
+                Button("Top-Level Alert") {
+                    showAlert = true
+                }
+                Button("Top-Level Data Alert") {
+                    selectedFile = SampleFileItem(
+                        id: 1,
+                        name: "document.pdf",
+                        size: "2.4 MB"
+                    )
+                    showDataAlert = true
+                }
+                Button("Top-Level Error Alert") {
+                    currentError = SampleLocalizedError(
+                        errorDescription: "Connection Failed",
+                        failureReason: "The server is unreachable.",
+                        recoverySuggestion: "Check your network and try again."
+                    )
+                    showErrorAlert = true
+                }
+            }
+
+            Text("Result: \(alertResult.isEmpty ? "none" : alertResult)")
+                .font(.system(.caption))
+                .foregroundColor(.secondary)
+        }
+        .padding(24)
+        .frame(width: 680, height: 650)
+        .sheet(item: $selectedCategory) { category in
+            categoryContent(category)
+        }
+        .environment(
+            \.modalSessionUsingPlatformWindow,
+            usesPlatformPresentationWindows
+        )
+        .sheet(isPresented: $topLevelSheetPresented) {
+            VStack(spacing: 12) {
+                Text("Top-Level Sheet")
+                    .font(.system(.headline))
+                Text("This presentation stays attached to ContentView.")
+                    .foregroundColor(.secondary)
+                Button("Close") {
+                    topLevelSheetPresented = false
+                }
+            }
+            .padding(24)
+            .frame(width: 360, height: 180)
+        }
+        .environment(\.modalSessionUsingPlatformWindow, false)
+        .alert("Delete Item?", isPresented: $showAlert) {
+            Button("Delete", role: .destructive) { alertResult = "deleted" }
+            Button("Cancel", role: .cancel) { alertResult = "cancelled" }
+        } message: {
+            Text("This action cannot be undone.")
+        }
+        .environment(\.modalSessionUsingPlatformWindow, false)
+        .alert("Delete File?", isPresented: $showDataAlert, presenting: selectedFile) { file in
+            Button("Delete \(file.name)", role: .destructive) {
+                alertResult = "deleted: \(file.name)"
+                selectedFile = nil
+            }
+            Button("Cancel", role: .cancel) {
+                alertResult = "cancelled"
+                selectedFile = nil
+            }
+        } message: { file in
+            Text("\(file.name) (\(file.size)) will be permanently removed.")
+        }
+        .environment(\.modalSessionUsingPlatformWindow, true)
+        .alert(isPresented: $showErrorAlert, error: currentError) {
+            Button("Retry") { alertResult = "retried" }
+            Button("Cancel", role: .cancel) { alertResult = "error cancelled" }
+        }
+        .environment(\.modalSessionUsingPlatformWindow, false)
+    }
+
+    @ViewBuilder
+    private func categoryContent(_ category: LabCategory) -> some View {
+        switch category {
+        case .contextMenus:
+            ContextMenuLabSheet {
+                selectedCategory = nil
+            }
+        case .modalsAndPopups:
+            ModalPopupLabSheet {
+                selectedCategory = nil
+            }
+        case .animation:
+            AnimationLabSheet {
+                selectedCategory = nil
+            }
+        case .symbolEffects:
+            SymbolEffectsLabSheet {
+                selectedCategory = nil
+            }
+        case .keyframeAndPhase:
+            KeyframePhaseLabSheet {
+                selectedCategory = nil
+            }
+        case .matchedGeometry:
+            MatchedGeometryLabSheet {
+                selectedCategory = nil
+            }
+        case .contentTransition:
+            ContentTransitionLabSheet {
+                selectedCategory = nil
+            }
+        case .timeline:
+            TimelineLabSheet {
+                selectedCategory = nil
+            }
+        case .visualAndMesh:
+            VisualMeshLabSheet {
+                selectedCategory = nil
+            }
+        case .customAnimation:
+            CustomAnimationLabSheet {
+                selectedCategory = nil
+            }
+        case .images:
+            ImageLabSheet {
+                selectedCategory = nil
+            }
+        case .textVariants:
+            TextVariantLabSheet {
+                selectedCategory = nil
+            }
+        case .scrollViewReader:
+            ScrollViewReaderLabSheet {
+                selectedCategory = nil
             }
         }
+    }
+
+    private func categoryButton(
+        _ title: String,
+        category: LabCategory,
+        width: CGFloat = 210
+    ) -> some View {
+        Button(title) {
+            selectedCategory = category
+        }
+        .frame(width: width)
     }
 }

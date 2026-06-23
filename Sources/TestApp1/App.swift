@@ -6,7 +6,8 @@ struct TestApp1: App {
         WindowGroup("TestApp1") {
             ContentView()
                 .environment(\.resourceBundle, .module)
-                //.environment(\._viewContextDebugDraw, true)
+                //.environment(\._debugLayout, true)
         }
+        .drawDebugInfo(.all)
     }
 }
