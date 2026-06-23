@@ -258,7 +258,7 @@ struct SpatialEvent: EventType, SpatialEventType, Equatable {
     }
 
     // EventType requirement
-    var location: CGPoint?          // always non-nil for spatial events in VUI
+    var location: CGPoint?          // always non-nil for spatial events
     // SpatialEventType requirements
     var globalLocation: CGPoint
     var radius: CGFloat
@@ -419,7 +419,7 @@ public struct GestureMask: OptionSet, Sendable {
 
 // PlatformGestureInputs
 
-/// Platform-specific gesture inputs. Empty for VUI (no UIKit/AppKit gesture recognizer pipeline).
+/// Platform-specific gesture inputs, reserved for recognizer bridge state.
 struct PlatformGestureInputs {}
 
 // PubliclyPrimitiveGesture / TappableEventType
@@ -736,7 +736,7 @@ public struct _GestureInputs {
     /// Traversal / dispatch option flags.
     var options: Options
 
-    /// Platform-specific inputs (empty on VUI).
+    /// Platform-specific inputs.
     var platformInputs: PlatformGestureInputs
 
     // Computed Properties

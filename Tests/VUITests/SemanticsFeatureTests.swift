@@ -3,12 +3,12 @@ import XCTest
 
 final class SemanticsFeatureTests: XCTestCase {
     override func tearDown() {
-        Semantics.forced = Semantics.Forced()
+        Semantics.overrides = Semantics.Overrides()
         super.tearDown()
     }
 
     func testCurrentBaselineEnablesKnownSemanticMarkers() {
-        Semantics.forced = Semantics.Forced()
+        Semantics.overrides = Semantics.Overrides()
 
         XCTAssertTrue(_SemanticFeature<Semantics_v4>.isEnabled)
         XCTAssertTrue(_SemanticFeature<Semantics_v5>.isEnabled)
@@ -17,36 +17,44 @@ final class SemanticsFeatureTests: XCTestCase {
         XCTAssertFalse(DisabledFeature.isEnabled)
     }
 
-    func testForcedSDKLaneControlsDefaultSemanticFeatureRequirement() {
-        Semantics.forced = Semantics.Forced(sdk: .v4, deploymentTarget: nil)
+    func testSemanticMarkerTokensUseProjectLocalOrdering() {
+        XCTAssertEqual(Semantics_v4.semantic.rawValue, 400)
+        XCTAssertEqual(Semantics_v5.semantic.rawValue, 500)
+        XCTAssertEqual(Semantics_v6.semantic.rawValue, 600)
+        XCTAssertLessThan(Semantics_v4.semantic, Semantics_v5.semantic)
+        XCTAssertLessThan(Semantics_v5.semantic, Semantics_v6.semantic)
+    }
+
+    func testBuildOverrideControlsDefaultSemanticFeatureRequirement() {
+        Semantics.overrides = Semantics.Overrides(build: .v4, runtime: nil)
 
         XCTAssertTrue(_SemanticFeature<Semantics_v4>.isEnabled)
         XCTAssertFalse(_SemanticFeature<Semantics_v5>.isEnabled)
         XCTAssertFalse(_SemanticFeature<Semantics_v6>.isEnabled)
-        XCTAssertTrue(DeploymentV6SemanticFeature.isEnabled)
+        XCTAssertTrue(RuntimeV6SemanticFeature.isEnabled)
     }
 
-    func testForcedDeploymentLaneControlsDeploymentRequirementOnly() {
-        Semantics.forced = Semantics.Forced(sdk: nil, deploymentTarget: .v4)
+    func testRuntimeOverrideControlsRuntimeRequirementOnly() {
+        Semantics.overrides = Semantics.Overrides(build: nil, runtime: .v4)
 
         XCTAssertTrue(_SemanticFeature<Semantics_v6>.isEnabled)
-        XCTAssertFalse(DeploymentV6SemanticFeature.isEnabled)
+        XCTAssertFalse(RuntimeV6SemanticFeature.isEnabled)
     }
 
     func testSemanticsTestTemporarilyOverridesSelectedLaneAndRestores() {
-        Semantics.forced = Semantics.Forced(sdk: .v4, deploymentTarget: nil)
+        Semantics.overrides = Semantics.Overrides(build: .v4, runtime: nil)
 
-        Semantics.test(as: \.sdk) {
+        Semantics.test(as: \.build) {
             XCTAssertTrue(_SemanticFeature<Semantics_v6>.isEnabled)
-            XCTAssertEqual(Semantics.forced.sdk, .v6)
+            XCTAssertEqual(Semantics.overrides.build, .v6)
         }
 
-        XCTAssertEqual(Semantics.forced.sdk, .v4)
+        XCTAssertEqual(Semantics.overrides.build, .v4)
         XCTAssertFalse(_SemanticFeature<Semantics_v6>.isEnabled)
     }
 }
 
-private struct DeploymentV6SemanticFeature: SemanticFeature {
+private struct RuntimeV6SemanticFeature: SemanticFeature {
     static var introduced: Semantics { .v6 }
-    static var requirement: SemanticRequirement { .deploymentTarget }
+    static var requirement: SemanticRequirement { .runtime }
 }

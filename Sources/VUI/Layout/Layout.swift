@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import Synchronization
 
 // MARK: - Layout AG rules
 
@@ -57,12 +58,15 @@ private struct StaticLayoutComputer<L: Layout>: StatefulRule {
 /// Dynamic container storage used by DynamicContainerInfo.
 private enum DynamicContainer {
     final class TransitionRemovalListener: @unchecked Sendable {
-        private let lock = NSLock()
+        private struct State {
+            var seedValue: UInt32 = 0
+            var completionInstalled = false
+            var completed = false
+        }
+
         private let seed: Attribute<UInt32>
         private let inbox: AGInbox
-        private var seedValue: UInt32 = 0
-        private var completionInstalled = false
-        private var completed = false
+        private let state = Mutex(State())
 
         init(seed: Attribute<UInt32>, inbox: AGInbox) {
             self.seed = seed
@@ -70,9 +74,7 @@ private enum DynamicContainer {
         }
 
         var isComplete: Bool {
-            lock.lock()
-            defer { lock.unlock() }
-            return completed
+            state.withLock { $0.completed }
         }
 
         func readSeed() {
@@ -80,13 +82,16 @@ private enum DynamicContainer {
         }
 
         func installCompletion(into transaction: inout Transaction) -> AnimationCompletionObserver? {
-            lock.lock()
-            if completionInstalled {
-                lock.unlock()
+            let shouldInstall = state.withLock { state in
+                guard !state.completionInstalled else {
+                    return false
+                }
+                state.completionInstalled = true
+                return true
+            }
+            guard shouldInstall else {
                 return transaction.animationCompletionObserver
             }
-            completionInstalled = true
-            lock.unlock()
 
             transaction.addAnimationCompletion(criteria: .removed) { [weak self] in
                 self?.complete()
@@ -95,16 +100,16 @@ private enum DynamicContainer {
         }
 
         private func complete() {
-            let nextSeed: UInt32
-            lock.lock()
-            guard !completed else {
-                lock.unlock()
+            guard let nextSeed = state.withLock({ state -> UInt32? in
+                guard !state.completed else {
+                    return nil
+                }
+                state.completed = true
+                state.seedValue &+= 1
+                return state.seedValue
+            }) else {
                 return
             }
-            completed = true
-            seedValue &+= 1
-            nextSeed = seedValue
-            lock.unlock()
 
             let seed = self.seed
             inbox.enqueue {

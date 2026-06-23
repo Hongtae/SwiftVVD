@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import Synchronization
 #if canImport(CoreFoundation)
 import CoreFoundation
 #endif
@@ -158,7 +159,6 @@ class GraphHost {
     private(set) var mayDeferUpdate: Bool = true
     private var pendingTransactions: [AsyncTransaction] = []
     private var pendingGraphMutations: [any GraphMutation] = []
-    private static let asyncTransactionTraceState = AsyncTransactionTraceState()
 
     static var currentHost: GraphHost {
         guard let ref = AttributeGraphRef.current,
@@ -323,6 +323,10 @@ class GraphHost {
             if let index = globalTransactionState.pendingTransactions.lastIndex(where: { pending in
                 pending.matches(providerKey: providerKey, id: id, transaction: transaction)
             }) {
+                // Same provider identity, transaction id, and transaction plist
+                // share one queued global transaction; only the mutation payload
+                // grows. This keeps later equivalent commits in the same flush
+                // lane instead of starting a second transaction update.
                 globalTransactionState.pendingTransactions[index].append(mutation)
                 return
             }
@@ -420,7 +424,7 @@ class GraphHost {
     }
 
     private static func nextAsyncTransactionTrace() -> UInt32 {
-        asyncTransactionTraceState.nextTrace()
+        AsyncTransactionTraceState.nextTrace()
     }
 
     private var updatingMutationHost: GraphHost? {
@@ -566,17 +570,12 @@ class GraphHost {
         #endif
     }
 
-    private final class AsyncTransactionTraceState: @unchecked Sendable {
-        private let lock = NSLock()
-        private var nextTraceID: UInt32 = 0
+    private enum AsyncTransactionTraceState {
+        private static let nextTraceID = Atomic<UInt32>(0)
 
-        func nextTrace() -> UInt32 {
-            lock.lock()
-            defer { lock.unlock() }
-
-            let traceID = (nextTraceID &>> 1) &+ 1
-            nextTraceID &+= 2
-            return traceID
+        static func nextTrace() -> UInt32 {
+            let rawID = nextTraceID.wrappingAdd(2, ordering: .relaxed).oldValue
+            return (rawID &>> 1) &+ 1
         }
     }
 
@@ -655,11 +654,17 @@ class GraphHost {
 
         func apply() {
             if let host = hostProvider.mutationHost {
+                // A live host owns graph context, transaction seed mutation, and
+                // delegate notification for this global transaction.
                 host.runTransaction(asyncTransaction.transaction, id: asyncTransaction.id.value) {
                     asyncTransaction.apply()
                 }
                 host.graphDelegate?.graphDidChange()
             } else {
+                // Nil-host fallback still needs Transaction.current to reflect
+                // the queued transaction while the mutation runs. It scopes a
+                // thread transaction exactly like direct withTransaction, then
+                // restores the caller's thread-local box.
                 let previous = Transaction.ThreadStorage.currentBox
                 let parentTransaction = previous?.transaction ?? Transaction()
                 let scopedTransaction = asyncTransaction.transaction.scopedTransaction(
@@ -668,8 +673,10 @@ class GraphHost {
                 Transaction.ThreadStorage.currentBox = Transaction.ThreadStorageBox(
                     transaction: scopedTransaction
                 )
+                defer {
+                    Transaction.ThreadStorage.currentBox = previous
+                }
                 asyncTransaction.apply()
-                Transaction.ThreadStorage.currentBox = previous
             }
         }
     }

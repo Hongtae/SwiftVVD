@@ -67,7 +67,7 @@ class EventBindingManager {
     var focusedResponder: ResponderNode?
     private(set) var lastDirectConsumedEventIDs: Set<EventID> = []
     private var hoverUpdatePending = false
-    private let lock = NSLock()
+    private let lock = Mutex(())
 
     init() {}
 
@@ -125,13 +125,13 @@ class EventBindingManager {
     }
 
     private func withDispatchScope<Result>(_ body: () -> Result) -> Result {
-        lock.lock()
-        Update.begin()
-        defer {
-            Update.end()
-            lock.unlock()
+        lock.withLock { _ in
+            Update.begin()
+            defer {
+                Update.end()
+            }
+            return body()
         }
-        return body()
     }
 
     private func sendDownstreamBody(

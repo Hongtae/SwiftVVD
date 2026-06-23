@@ -4,7 +4,7 @@ import XCTest
 final class GraphHostGlobalTransactionTests: XCTestCase {
     override func tearDown() {
         GraphHost.flushGlobalTransactions()
-        Semantics.forced = Semantics.Forced()
+        Semantics.overrides = Semantics.Overrides()
         super.tearDown()
     }
 
@@ -60,6 +60,37 @@ final class GraphHostGlobalTransactionTests: XCTestCase {
 
         XCTAssertEqual(events, ["first", "second"])
         XCTAssertEqual(host.data.transactionSeed, 1)
+    }
+
+    func testGlobalTransactionsWithSameProviderIDAndTransactionCombineLastMutation() {
+        let host = GraphHost()
+        let provider = GlobalTransactionHostProvider(host: host)
+        let id = Transaction.ID(value: 110)
+        let transaction = Transaction()
+        let storage = GlobalCombineStorage()
+
+        GraphHost.globalTransaction(
+            transaction,
+            id: id,
+            mutation: CombiningGlobalMutation(name: "first", storage: storage),
+            hostProvider: provider
+        )
+        GraphHost.globalTransaction(
+            transaction,
+            id: id,
+            mutation: CombiningGlobalMutation(name: "second", storage: storage),
+            hostProvider: provider
+        )
+
+        XCTAssertEqual(storage.events, ["combine:first+second"])
+        XCTAssertTrue(GraphHost.hasPendingGlobalTransactions)
+        XCTAssertEqual(host.data.transactionSeed, 0)
+
+        GraphHost.flushGlobalTransactions()
+
+        XCTAssertEqual(storage.events, ["combine:first+second", "apply:first+second"])
+        XCTAssertEqual(host.data.transactionSeed, 1)
+        XCTAssertFalse(GraphHost.hasPendingGlobalTransactions)
     }
 
     func testGlobalTransactionsWithDifferentProviderObjectsRemainSeparate() {
@@ -237,8 +268,8 @@ final class GraphHostGlobalTransactionTests: XCTestCase {
         XCTAssertFalse(GraphHost.hasPendingGlobalTransactions)
     }
 
-    func testForcedPreV5NilHostGlobalTransactionDirectInstallsChildWithoutFlushParentMerge() {
-        Semantics.forced = Semantics.Forced(sdk: nil, deploymentTarget: .v4)
+    func testRuntimeOverridePreV5NilHostGlobalTransactionDirectInstallsChildWithoutFlushParentMerge() {
+        Semantics.overrides = Semantics.Overrides(build: nil, runtime: .v4)
         let provider = GlobalTransactionHostProvider(host: nil)
         var child = Transaction()
         child.isContinuous = true
@@ -376,6 +407,28 @@ private struct GlobalRecordingGraphMutation: GraphMutation {
 
     func apply() {
         body()
+    }
+}
+
+private final class GlobalCombineStorage {
+    var events: [String] = []
+}
+
+private struct CombiningGlobalMutation: GraphMutation {
+    var name: String
+    var storage: GlobalCombineStorage
+
+    func apply() {
+        storage.events.append("apply:\(name)")
+    }
+
+    mutating func combine<M>(with mutation: M) -> Bool where M: GraphMutation {
+        guard let mutation = mutation as? CombiningGlobalMutation else {
+            return false
+        }
+        storage.events.append("combine:\(name)+\(mutation.name)")
+        name += "+\(mutation.name)"
+        return true
     }
 }
 

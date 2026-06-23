@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import Synchronization
 
 public protocol AlignmentID {
     static func defaultValue(in context: ViewDimensions) -> CGFloat
@@ -75,25 +76,27 @@ extension AlignmentID {
 }
 
 private enum AlignmentKeyTypeCache {
-    private static let lock = NSLock()
-    nonisolated(unsafe) private static var indexes: [ObjectIdentifier: UInt] = [:]
-    nonisolated(unsafe) private static var ids: [AlignmentID.Type] = []
+    private struct State: @unchecked Sendable {
+        var indexes: [ObjectIdentifier: UInt] = [:]
+        var ids: [AlignmentID.Type] = []
+    }
+
+    private static let state = Mutex(State())
 
     static func bits(for id: AlignmentID.Type, axis: Axis) -> UInt {
-        lock.lock()
-        defer { lock.unlock() }
+        state.withLock { state in
+            let key = ObjectIdentifier(id)
+            let index: UInt
+            if let existing = state.indexes[key] {
+                index = existing
+            } else {
+                index = UInt(state.ids.count)
+                state.ids.append(id)
+                state.indexes[key] = index
+            }
 
-        let key = ObjectIdentifier(id)
-        let index: UInt
-        if let existing = indexes[key] {
-            index = existing
-        } else {
-            index = UInt(ids.count)
-            ids.append(id)
-            indexes[key] = index
+            return ((index << 1) + 2) | UInt(axis.rawValue)
         }
-
-        return ((index << 1) + 2) | UInt(axis.rawValue)
     }
 
     static func id(for key: AlignmentKey) -> AlignmentID.Type {
@@ -102,13 +105,12 @@ private enum AlignmentKeyTypeCache {
         }
         let index = Int((key.bits - 2) >> 1)
 
-        lock.lock()
-        defer { lock.unlock() }
-
-        guard ids.indices.contains(index) else {
-            fatalError("Unknown AlignmentKey bits: \(key.bits)")
+        return state.withLock { state in
+            guard state.ids.indices.contains(index) else {
+                fatalError("Unknown AlignmentKey bits: \(key.bits)")
+            }
+            return state.ids[index]
         }
-        return ids[index]
     }
 }
 

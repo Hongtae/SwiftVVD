@@ -7,7 +7,7 @@ final class TransactionThreadStorageTests: XCTestCase {
     override func tearDown() {
         Transaction.ThreadStorage.currentBox = nil
         Transaction.ThreadStorage.resetCurrentIDForTesting()
-        Semantics.forced = Semantics.Forced()
+        Semantics.overrides = Semantics.Overrides()
         super.tearDown()
     }
 
@@ -165,8 +165,37 @@ final class TransactionThreadStorageTests: XCTestCase {
         XCTAssertNil(Transaction.ThreadStorage.currentBox)
     }
 
-    func testForcedPreV5NestedTransactionDirectInstallsChildWithoutParentMerge() {
-        Semantics.forced = Semantics.Forced(sdk: nil, deploymentTarget: .v4)
+    func testCurrentSemanticsNestedTransactionMergesParentKeysWithChildPriority() {
+        var parent = Transaction(animation: .linear(duration: 1))
+        parent.disablesAnimations = true
+        parent[ThreadStorageParentOnlyKey.self] = 1
+        parent[ThreadStorageThrowingKey.self] = 10
+
+        var child = Transaction()
+        child.isContinuous = true
+        child[ThreadStorageThrowingKey.self] = 2
+
+        withTransaction(parent) {
+            XCTAssertTrue(Transaction.current.disablesAnimations)
+            XCTAssertEqual(Transaction.current[ThreadStorageParentOnlyKey.self], 1)
+            XCTAssertEqual(Transaction.current[ThreadStorageThrowingKey.self], 10)
+
+            withTransaction(child) {
+                XCTAssertNotNil(Transaction.current.animation)
+                XCTAssertTrue(Transaction.current.disablesAnimations)
+                XCTAssertTrue(Transaction.current.isContinuous)
+                XCTAssertEqual(Transaction.current[ThreadStorageParentOnlyKey.self], 1)
+                XCTAssertEqual(Transaction.current[ThreadStorageThrowingKey.self], 2)
+            }
+
+            XCTAssertTrue(Transaction.current.disablesAnimations)
+            XCTAssertEqual(Transaction.current[ThreadStorageParentOnlyKey.self], 1)
+            XCTAssertEqual(Transaction.current[ThreadStorageThrowingKey.self], 10)
+        }
+    }
+
+    func testRuntimeOverridePreV5NestedTransactionDirectInstallsChildWithoutParentMerge() {
+        Semantics.overrides = Semantics.Overrides(build: nil, runtime: .v4)
         var parent = Transaction(animation: .linear(duration: 1))
         parent.disablesAnimations = true
         parent[ThreadStorageParentOnlyKey.self] = 1

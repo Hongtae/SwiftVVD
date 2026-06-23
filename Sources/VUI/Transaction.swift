@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import Synchronization
 
 public struct Transaction {
     @usableFromInline
@@ -35,6 +36,8 @@ public struct Transaction {
 
 extension Transaction {
     struct ID: Hashable {
+        // Zero is the unallocated sentinel. Ordinary reads allocate a nonzero
+        // thread id lazily through ThreadStorage.currentID.
         var value: UInt32 = 0
 
         init() {}
@@ -45,10 +48,14 @@ extension Transaction {
     }
 
     static var id: ID {
+        // Reading the id is observable state: it must return a stable nonzero
+        // value for the current thread after the first access.
         ThreadStorage.currentID
     }
 
     static func _core_barrier() {
+        // A barrier advances identity without installing or mutating
+        // Transaction.current.
         ThreadStorage.advanceID()
     }
 }
@@ -111,6 +118,9 @@ func withTransaction<Result>(
     _ body: () throws -> Result
 ) rethrows -> Result {
     let previous = Transaction.ThreadStorage.currentBox
+    // Empty transactions normally do not need a scoped thread-local box. Keep
+    // the scope when completion state is active so no-mutation completion rules
+    // can still observe whether the body wrote through the transaction.
     if transaction.isEmpty,
        previous?.transaction.hasLocalAnimationCompletionState != true {
         return try body()
@@ -124,6 +134,8 @@ func withTransaction<Result>(
     do {
         result = try body()
     } catch {
+        // Restore the parent scope before completion callbacks run so callbacks
+        // observe the transaction environment outside the failed body.
         Transaction.ThreadStorage.currentBox = previous
         finalizeAnimationCompletions(
             in: scopedTransaction,
@@ -133,6 +145,8 @@ func withTransaction<Result>(
         )
         throw error
     }
+    // Completion callbacks are deliberately outside the scoped body but still
+    // receive the transaction that scheduled them.
     Transaction.ThreadStorage.currentBox = previous
     finalizeAnimationCompletions(
         in: scopedTransaction,
@@ -152,6 +166,9 @@ public func withTransaction<R, V>(_ keyPath: WritableKeyPath<Transaction, V>, _ 
 extension Transaction {
     final class ThreadStorageBox {
         let transaction: Transaction
+        // Tracks mutation through the active scoped transaction. Completion
+        // finalization uses this to distinguish real writes from a transaction
+        // scope that merely installed completion listeners.
         var bodyDidMutate = false
 
         init(transaction: Transaction) {
@@ -162,7 +179,6 @@ extension Transaction {
     enum ThreadStorage {
         private static let key = "VUI.Transaction.current"
         private static let idKey = "VUI.Transaction.currentID"
-
         static var currentBox: ThreadStorageBox? {
             get {
                 Thread.current.threadDictionary[key] as? ThreadStorageBox
@@ -190,22 +206,48 @@ extension Transaction {
         }
 
         static var currentID: ID {
-            let value = (Thread.current.threadDictionary[idKey] as? NSNumber)?.uint32Value ?? 0
+            // Reading the current transaction id lazily creates a thread id; the
+            // explicit barrier path below always advances to a fresh one.
+            if let value = (Thread.current.threadDictionary[idKey] as? NSNumber)?.uint32Value,
+               value != 0 {
+                return ID(value: value)
+            }
+            let value = ThreadIDState.next()
+            Thread.current.threadDictionary[idKey] = NSNumber(value: value)
             return ID(value: value)
         }
 
         static func advanceID() {
-            let next = currentID.value &+ 1
+            let next = ThreadIDState.next()
             Thread.current.threadDictionary[idKey] = NSNumber(value: next)
         }
 
+        #if DEBUG
+        static func resetCurrentIDForTesting() {
+            Thread.current.threadDictionary.removeObject(forKey: idKey)
+        }
+        #endif
+
         static func markMutation(for transaction: Transaction) {
             transaction.markAnimationCompletionMutation()
+            // Only the active box with the same completion observer owns the
+            // scoped mutation flag; inherited or copied transactions still keep
+            // their observer state, but must not mark this body as mutating.
             guard let currentBox,
                   currentBox.transaction.animationCompletionObserver === transaction.animationCompletionObserver else {
                 return
             }
             currentBox.bodyDidMutate = true
+        }
+
+        private enum ThreadIDState {
+            private static let nextID = Atomic<UInt32>(1)
+
+            static func next() -> UInt32 {
+                // Transaction ids are per-thread once assigned, but allocation
+                // comes from one process-wide monotonically advancing counter.
+                return nextID.wrappingAdd(1, ordering: .relaxed).oldValue
+            }
         }
     }
 
@@ -220,10 +262,20 @@ extension Transaction {
     }
 
     func scopedTransaction(inheritingFrom parent: Transaction) -> Transaction {
+        // Older runtime baselines install the child transaction
+        // storage as-is. Current semantics merge parent keys first, while
+        // keeping completion listener identity local to the child scope.
+        guard isRuntimeBaselineOnOrAfter(.v5) else {
+            return self
+        }
+
         let localCompletionObserver = animationCompletionObserver
         let localAnimationListener = animationListener
         let localAnimationLogicalListener = animationLogicalListener
         var transaction = self
+        // Merge parent values for ordinary transaction keys, then restore local
+        // completion/listener identity. Completion ownership is scoped to the
+        // transaction that installed it, not to the inherited parent box.
         transaction.plist.merge(parent.plist)
         if transaction.animationCompletionObserver !== localCompletionObserver {
             transaction.animationCompletionObserver = localCompletionObserver

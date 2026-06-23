@@ -5,6 +5,8 @@
 //  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
+import Foundation
+
 // ViewInputPredicate: protocol for predicates that can be evaluated
 // from _GraphInputs (the common base of _ViewInputs and _ViewListInputs).
 // Internal type used for construction-time branch selection.
@@ -140,8 +142,8 @@ struct StyleContextAcceptsPredicate<T>: ViewInputPredicate {
 }
 
 // StyleContextAcceptsAnyPredicate<T>: parameter-pack version.
-// In VUI, T is treated the same as StyleContextAcceptsPredicate<T>
-// (single type or tuple with OR logic).
+// Treats T the same as StyleContextAcceptsPredicate<T>: a single type or a
+// tuple of accepted types with OR logic.
 struct StyleContextAcceptsAnyPredicate<T>: ViewInputPredicate {
     static func evaluate(inputs: _GraphInputs) -> Bool {
         StyleContextAcceptsPredicate<T>.evaluate(inputs: inputs)
@@ -188,7 +190,7 @@ func _staticIf<P: ViewInputPredicate, T: View, F: View>(
 
 // MultiViewLabel: ViewInputPredicate that is true when the label is embedded in
 // a variadic multi-view container context (e.g. List, Grid rows).
-// On macOS, this is always false in practice.
+// The default remains false unless a container writes MultiViewLabelKey.
 struct MultiViewLabel: ViewInputPredicate {
     static func evaluate(inputs: _GraphInputs) -> Bool {
         inputs.customInputs.value(forKey: MultiViewLabelKey.self)
@@ -201,27 +203,26 @@ private struct MultiViewLabelKey: PropertyKey {
     var description: String { "MultiViewLabelKey" }
 }
 
-// InterfaceIdiomPredicate<Idiom>: ViewInputPredicate that checks the current
-// interface idiom. On macOS, VisionInterfaceIdiom is always false.
-struct InterfaceIdiomPredicate<Idiom>: ViewInputPredicate {
-    static func evaluate(inputs: _GraphInputs) -> Bool {
-        // VisionOS idiom is never active on macOS.
-        return false
-    }
-}
-
-// VisionInterfaceIdiom: marker type for visionOS interface idiom.
-// Used as InterfaceIdiomPredicate<VisionInterfaceIdiom>.
-struct VisionInterfaceIdiom {}
-
-// Semantic version marker types used with _SemanticFeature<T>.
-struct Semantics_v4 {}
-struct Semantics_v6 {}
-
 // _SemanticFeature<T>: ViewInputPredicate that gates behavior on semantic version.
-// VUI targets the current semantics baseline, so all known feature markers are active.
-struct _SemanticFeature<T>: ViewInputPredicate {
+struct _SemanticFeature<T: SemanticProtocol>: SemanticFeature, ViewInputBoolFlag, _GraphInputsModifier {
+    typealias Value = Bool
+    typealias Body = Never
+
+    static var defaultValue: Bool { false }
+
+    var description: String {
+        "_SemanticFeature<\(T.self)>"
+    }
+
+    static var introduced: Semantics {
+        T.semantic
+    }
+
     static func evaluate(inputs: _GraphInputs) -> Bool {
-        return true
+        isEnabled
+    }
+
+    static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GraphInputs) {
+        inputs.customInputs.setValue(isEnabled, forKey: Self.self)
     }
 }

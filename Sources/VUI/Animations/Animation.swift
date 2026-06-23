@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import Synchronization
 
 @usableFromInline
 class AnimationBoxBase: CustomAnimation, CustomStringConvertible, @unchecked Sendable {
@@ -2912,27 +2913,166 @@ public struct AnimationCompletionCriteria: Hashable, Sendable {
 }
 
 final class AnimationCompletionObserver: @unchecked Sendable {
-    private struct Entry {
+    private struct Entry: @unchecked Sendable {
         var criteria: AnimationCompletionCriteria
         var completion: () -> Void
         var order: Int
     }
 
-    private let lock = NSLock()
-    private var entries: [Entry] = []
-    private var activeCriteria = Set<AnimationCompletionCriteria>()
-    private var bodyFinished = false
-    private var observedMutation = false
-    private var registeredAnimation = false
-    private var completedCriteria = Set<AnimationCompletionCriteria>()
-    private var nextEntryOrder = 0
+    // Completion thunks are returned to callers instead of run while this state
+    // is locked. Completion callbacks may register nested transactions.
+    private struct State: @unchecked Sendable {
+        var entries: [Entry] = []
+        var activeCriteria = Set<AnimationCompletionCriteria>()
+        var bodyFinished = false
+        var observedMutation = false
+        var registeredAnimation = false
+        var completedCriteria = Set<AnimationCompletionCriteria>()
+        var nextEntryOrder = 0
+
+        init(criteria: AnimationCompletionCriteria, completion: @escaping () -> Void) {
+            entries.append(Entry(criteria: criteria, completion: completion, order: nextEntryOrder))
+            nextEntryOrder += 1
+        }
+
+        mutating func add(criteria: AnimationCompletionCriteria, completion: @escaping () -> Void) {
+            guard !completedCriteria.contains(criteria) else { return }
+            entries.append(Entry(criteria: criteria, completion: completion, order: nextEntryOrder))
+            nextEntryOrder += 1
+        }
+
+        func criteriaForNewAnimation() -> [AnimationCompletionCriteria] {
+            orderedCriteria()
+                .filter { !completedCriteria.contains($0) }
+        }
+
+        func firstCriteriaForNewAnimation() -> AnimationCompletionCriteria? {
+            entries.first { !completedCriteria.contains($0.criteria) }?.criteria
+        }
+
+        func canStartAnimation(criteria: AnimationCompletionCriteria) -> Bool {
+            entries.contains(where: { $0.criteria == criteria }) &&
+                !completedCriteria.contains(criteria)
+        }
+
+        mutating func listenerDidStart(criteria: AnimationCompletionCriteria) {
+            registeredAnimation = true
+            activeCriteria.insert(criteria)
+        }
+
+        mutating func transactionDidMutate() {
+            observedMutation = true
+        }
+
+        mutating func bodyDidFinish() -> [() -> Void] {
+            bodyFinished = true
+            return completionsIfReady(allowNoRegisteredAnimation: false)
+        }
+
+        mutating func listenerDidFinish(criteria: AnimationCompletionCriteria) -> [() -> Void] {
+            activeCriteria.remove(criteria)
+            return completionsIfReady(allowNoRegisteredAnimation: false)
+        }
+
+        mutating func noRegisteredAnimationFallbackDidFire(
+            usesAnimatedOrdering: Bool
+        ) -> [() -> Void] {
+            guard !registeredAnimation else {
+                return completionsIfReady(allowNoRegisteredAnimation: false)
+            }
+            if usesAnimatedOrdering {
+                return completionsIfReady(allowNoRegisteredAnimation: true)
+            }
+            return noRegisteredCompletionsIfReady()
+        }
+
+        mutating func noRegisteredAnimationFallbackDidFire(
+            criteria: AnimationCompletionCriteria
+        ) -> [() -> Void] {
+            guard bodyFinished,
+                  !registeredAnimation,
+                  !completedCriteria.contains(criteria),
+                  entries.contains(where: { $0.criteria == criteria }) else {
+                return []
+            }
+            completedCriteria.insert(criteria)
+            return entries
+                .filter { $0.criteria == criteria }
+                .map(\.completion)
+        }
+
+        mutating func abandonedTransactionDidFinish() -> [() -> Void] {
+            guard !observedMutation else {
+                return []
+            }
+            bodyFinished = true
+            if registeredAnimation {
+                return completionsIfReady(allowNoRegisteredAnimation: false)
+            }
+            return noRegisteredCompletionsIfReady()
+        }
+
+        private mutating func noRegisteredCompletionsIfReady() -> [() -> Void] {
+            guard bodyFinished else { return [] }
+            let pendingEntries = entries.filter { !completedCriteria.contains($0.criteria) }
+            guard let firstCriteria = pendingEntries.first?.criteria else { return [] }
+            let hasMultipleCriteria = pendingEntries.contains { $0.criteria != firstCriteria }
+            let primary = pendingEntries
+                .filter { $0.criteria == firstCriteria }
+                .sorted {
+                    hasMultipleCriteria ? $0.order > $1.order : $0.order < $1.order
+                }
+            let remaining = pendingEntries
+                .filter { $0.criteria != firstCriteria }
+                .sorted { $0.order < $1.order }
+            for entry in pendingEntries {
+                completedCriteria.insert(entry.criteria)
+            }
+            return (primary + remaining).map(\.completion)
+        }
+
+        private mutating func completionsIfReady(
+            allowNoRegisteredAnimation: Bool
+        ) -> [() -> Void] {
+            guard bodyFinished,
+                  (registeredAnimation || allowNoRegisteredAnimation),
+                  !orderedCriteria().isEmpty else {
+                return []
+            }
+            var completions: [() -> Void] = []
+            for criteria in orderedCriteria() where !completedCriteria.contains(criteria) {
+                guard !activeCriteria.contains(criteria) else {
+                    continue
+                }
+                completedCriteria.insert(criteria)
+                completions.append(
+                    contentsOf: entries
+                        .filter { $0.criteria == criteria }
+                        .map(\.completion)
+                )
+            }
+            return completions
+        }
+
+        private func orderedCriteria() -> [AnimationCompletionCriteria] {
+            var criteria: [AnimationCompletionCriteria] = []
+            if entries.contains(where: { $0.criteria == .removed }) {
+                criteria.append(.removed)
+            }
+            for entry in entries where entry.criteria != .removed && !criteria.contains(entry.criteria) {
+                criteria.append(entry.criteria)
+            }
+            return criteria
+        }
+    }
+
+    private let state: Mutex<State>
 
     // Completion observers are shared by every animatable node touched by one
     // transaction. Criteria have separate token counts so logical completion can
     // finish before removal/presentation completion.
     init(criteria: AnimationCompletionCriteria, completion: @escaping () -> Void) {
-        entries.append(Entry(criteria: criteria, completion: completion, order: nextEntryOrder))
-        nextEntryOrder += 1
+        state = Mutex(State(criteria: criteria, completion: completion))
     }
 
     deinit {
@@ -2942,149 +3082,69 @@ final class AnimationCompletionObserver: @unchecked Sendable {
     }
 
     func add(criteria: AnimationCompletionCriteria, completion: @escaping () -> Void) {
-        lock.lock()
-        defer { lock.unlock() }
-        guard !completedCriteria.contains(criteria) else { return }
-        entries.append(Entry(criteria: criteria, completion: completion, order: nextEntryOrder))
-        nextEntryOrder += 1
+        state.withLock { state in
+            state.add(criteria: criteria, completion: completion)
+        }
     }
 
     func criteriaForNewAnimation() -> [AnimationCompletionCriteria] {
-        lock.lock()
-        defer { lock.unlock() }
-        return orderedCriteria()
-            .filter { !completedCriteria.contains($0) }
+        state.withLock { state in
+            state.criteriaForNewAnimation()
+        }
     }
 
     func firstCriteriaForNewAnimation() -> AnimationCompletionCriteria? {
-        lock.lock()
-        defer { lock.unlock() }
-        return entries.first { !completedCriteria.contains($0.criteria) }?.criteria
+        state.withLock { state in
+            state.firstCriteriaForNewAnimation()
+        }
     }
 
     func canStartAnimation(criteria: AnimationCompletionCriteria) -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return entries.contains(where: { $0.criteria == criteria }) &&
-            !completedCriteria.contains(criteria)
+        state.withLock { state in
+            state.canStartAnimation(criteria: criteria)
+        }
     }
 
     func listenerDidStart(criteria: AnimationCompletionCriteria) {
-        lock.lock()
-        defer { lock.unlock() }
-        registeredAnimation = true
-        activeCriteria.insert(criteria)
+        state.withLock { state in
+            state.listenerDidStart(criteria: criteria)
+        }
     }
 
     func transactionDidMutate() {
-        lock.lock()
-        observedMutation = true
-        lock.unlock()
+        state.withLock { state in
+            state.transactionDidMutate()
+        }
     }
 
     func bodyDidFinish() -> [() -> Void] {
-        lock.lock()
-        defer { lock.unlock() }
-        bodyFinished = true
-        return completionsIfReady(allowNoRegisteredAnimation: false)
+        state.withLock { state in
+            state.bodyDidFinish()
+        }
     }
 
     fileprivate func listenerDidFinish(criteria: AnimationCompletionCriteria) -> [() -> Void] {
-        lock.lock()
-        defer { lock.unlock() }
-        activeCriteria.remove(criteria)
-        return completionsIfReady(allowNoRegisteredAnimation: false)
+        state.withLock { state in
+            state.listenerDidFinish(criteria: criteria)
+        }
     }
 
     func noRegisteredAnimationFallbackDidFire(usesAnimatedOrdering: Bool) -> [() -> Void] {
-        lock.lock()
-        defer { lock.unlock() }
-        guard !registeredAnimation else {
-            return completionsIfReady(allowNoRegisteredAnimation: false)
+        state.withLock { state in
+            state.noRegisteredAnimationFallbackDidFire(usesAnimatedOrdering: usesAnimatedOrdering)
         }
-        if usesAnimatedOrdering {
-            return completionsIfReady(allowNoRegisteredAnimation: true)
-        }
-        return noRegisteredCompletionsIfReady()
     }
 
     func noRegisteredAnimationFallbackDidFire(criteria: AnimationCompletionCriteria) -> [() -> Void] {
-        lock.lock()
-        defer { lock.unlock() }
-        guard bodyFinished,
-              !registeredAnimation,
-              !completedCriteria.contains(criteria),
-              entries.contains(where: { $0.criteria == criteria }) else {
-            return []
+        state.withLock { state in
+            state.noRegisteredAnimationFallbackDidFire(criteria: criteria)
         }
-        completedCriteria.insert(criteria)
-        return entries
-            .filter { $0.criteria == criteria }
-            .map(\.completion)
     }
 
     private func abandonedTransactionDidFinish() -> [() -> Void] {
-        lock.lock()
-        defer { lock.unlock() }
-        guard !observedMutation else {
-            return []
+        state.withLock { state in
+            state.abandonedTransactionDidFinish()
         }
-        bodyFinished = true
-        if registeredAnimation {
-            return completionsIfReady(allowNoRegisteredAnimation: false)
-        }
-        return noRegisteredCompletionsIfReady()
-    }
-
-    private func noRegisteredCompletionsIfReady() -> [() -> Void] {
-        guard bodyFinished else { return [] }
-        let pendingEntries = entries.filter { !completedCriteria.contains($0.criteria) }
-        guard let firstCriteria = pendingEntries.first?.criteria else { return [] }
-        let hasMultipleCriteria = pendingEntries.contains { $0.criteria != firstCriteria }
-        let primary = pendingEntries
-            .filter { $0.criteria == firstCriteria }
-            .sorted {
-                hasMultipleCriteria ? $0.order > $1.order : $0.order < $1.order
-            }
-        let remaining = pendingEntries
-            .filter { $0.criteria != firstCriteria }
-            .sorted { $0.order < $1.order }
-        for entry in pendingEntries {
-            completedCriteria.insert(entry.criteria)
-        }
-        return (primary + remaining).map(\.completion)
-    }
-
-    private func completionsIfReady(allowNoRegisteredAnimation: Bool) -> [() -> Void] {
-        guard bodyFinished,
-              (registeredAnimation || allowNoRegisteredAnimation),
-              !orderedCriteria().isEmpty else {
-            return []
-        }
-        var completions: [() -> Void] = []
-        for criteria in orderedCriteria() where !completedCriteria.contains(criteria) {
-            guard !activeCriteria.contains(criteria) else {
-                continue
-            }
-            completedCriteria.insert(criteria)
-            completions.append(
-                contentsOf: entries
-                    .filter { $0.criteria == criteria }
-                    .map(\.completion)
-            )
-        }
-        return completions
-    }
-
-    private func orderedCriteria() -> [AnimationCompletionCriteria] {
-        var criteria: [AnimationCompletionCriteria] = []
-        if entries.contains(where: { $0.criteria == .removed }) {
-            criteria.append(.removed)
-        }
-        for entry in entries where entry.criteria != .removed && !criteria.contains(entry.criteria) {
-            criteria.append(entry.criteria)
-        }
-        return criteria
     }
 }
 
@@ -3148,20 +3208,7 @@ final class ListenerPair: AnimationListener, @unchecked Sendable {
     }
 }
 
-private final class AtomicBox<Value>: @unchecked Sendable {
-    private let lock = NSLock()
-    private var value: Value
-
-    init(_ value: Value) {
-        self.value = value
-    }
-
-    func withLock<Result>(_ body: (inout Value) -> Result) -> Result {
-        lock.lock()
-        defer { lock.unlock() }
-        return body(&value)
-    }
-}
+private typealias AtomicBox<Value> = Mutex<Value>
 
 private struct PendingListeners {
     final class WeakListener {
@@ -3232,11 +3279,14 @@ extension Transaction {
 }
 
 final class AllFinishedAnimationListener: AnimationListener, @unchecked Sendable {
+    private struct State {
+        var activeCount = 0
+        var finalized = false
+    }
+
     private let observer: AnimationCompletionObserver
     private let criteria: AnimationCompletionCriteria
-    private let lock = NSLock()
-    private var activeCount = 0
-    private var finalized = false
+    private let state = Mutex(State())
 
     init(observer: AnimationCompletionObserver, criteria: AnimationCompletionCriteria) {
         self.observer = observer
@@ -3244,33 +3294,33 @@ final class AllFinishedAnimationListener: AnimationListener, @unchecked Sendable
     }
 
     override func animationWasAdded() {
-        lock.lock()
-        activeCount += 1
-        lock.unlock()
+        state.withLock { state in
+            state.activeCount += 1
+        }
         observer.listenerDidStart(criteria: criteria)
     }
 
     override func animationWasRemoved() -> [() -> Void] {
-        lock.lock()
-        guard activeCount > 0 else {
-            lock.unlock()
-            return []
+        let isComplete = state.withLock { state in
+            guard state.activeCount > 0 else {
+                return false
+            }
+            state.activeCount -= 1
+            return state.activeCount == 0
         }
-        activeCount -= 1
-        let isComplete = activeCount == 0
-        lock.unlock()
         guard isComplete else { return [] }
         return observer.listenerDidFinish(criteria: criteria)
     }
 
     override func finalizeTransaction() -> [() -> Void] {
-        lock.lock()
-        guard !finalized else {
-            lock.unlock()
-            return []
+        let shouldFinalize = state.withLock { state in
+            guard !state.finalized else {
+                return false
+            }
+            state.finalized = true
+            return true
         }
-        finalized = true
-        lock.unlock()
+        guard shouldFinalize else { return [] }
         return observer.bodyDidFinish()
     }
 

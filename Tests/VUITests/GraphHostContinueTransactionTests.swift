@@ -82,6 +82,34 @@ final class GraphHostContinueTransactionTests: XCTestCase {
         XCTAssertEqual(host.data.transactionSeed, 0)
     }
 
+    func testContinueTransactionWithoutUpdatingHostFallbackQueuesExpectedReason() {
+        let host = GraphHost()
+        var events: [String] = []
+
+        Update.begin()
+        defer {
+            if Update.isActive {
+                Update.end()
+            }
+        }
+
+        host.continueTransaction(
+            ContinueRecordingGraphMutation {
+                events.append(Update.isActive ? "active" : "inactive")
+            }
+        )
+
+        XCTAssertEqual(Update.queuedActionReasons, [0x11])
+        XCTAssertEqual(events, [])
+
+        Update.end()
+
+        XCTAssertEqual(events, ["active"])
+        XCTAssertFalse(host.hasPendingGraphMutations)
+        XCTAssertFalse(host.needsTransaction)
+        XCTAssertEqual(host.data.transactionSeed, 0)
+    }
+
     func testContinueTransactionWithoutUpdatingHostFallbackAppliesInHostGraphContext() {
         let host = GraphHost()
         var attribute: Attribute<Int>!

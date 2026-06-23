@@ -164,6 +164,47 @@ final class AnimatableAttributeGraphSmokeTests: XCTestCase {
         XCTAssertEqual(harness.currentPosition().x, 100, accuracy: 0.000_001)
         XCTAssertEqual(harness.currentSize().width, 50, accuracy: 0.000_001)
     }
+
+    func testAnimatableFrameAttributeNoChangeAnimatedTransactionSkipsListenerRegistration() {
+        let listener = CountingAnimationListener()
+        let harness = AnimatableFrameAttributeHarness(
+            initialPosition: .zero,
+            initialSize: ViewSize(width: 10, height: 20)
+        )
+        _ = harness.currentFrame()
+        harness.setFrame(
+            position: CGPoint(x: 100, y: 40),
+            size: ViewSize(width: 50, height: 60),
+            transaction: Transaction(animation: .linear(duration: 1))
+        )
+        _ = harness.currentFrame()
+        harness.setTime(0.5)
+        _ = harness.currentFrame()
+        harness.setTime(0.6)
+        let runningFrame = harness.currentFrame()
+        XCTAssertGreaterThan(runningFrame.origin.x, 0)
+        XCTAssertLessThan(runningFrame.origin.x, 100)
+
+        var sameTargetTransaction = Transaction(animation: .linear(duration: 1))
+        sameTargetTransaction.animationListener = listener
+        harness.setFrame(
+            position: CGPoint(x: 100, y: 40),
+            size: ViewSize(width: 50, height: 60),
+            transaction: sameTargetTransaction
+        )
+        _ = harness.currentFrame()
+        XCTAssertEqual(listener.addedCount, 0)
+        XCTAssertEqual(listener.removedCount, 0)
+
+        harness.setTime(2.0)
+        let finalFrame = harness.currentFrame()
+        XCTAssertEqual(finalFrame.origin.x, 100, accuracy: 0.000_001)
+        XCTAssertEqual(finalFrame.size.width, 50, accuracy: 0.000_001)
+        harness.flushCompletionActions()
+        XCTAssertEqual(listener.addedCount, 0)
+        XCTAssertEqual(listener.removedCount, 0)
+    }
+
     func testAnimatableFrameAttributeSplitRawListenersDrainLogicalBeforeRemoved() {
         let recorder = AnimationCompletionRecorder()
         let removedListener = RecordingAnimationListener(
@@ -938,6 +979,79 @@ final class AnimatableAttributeGraphSmokeTests: XCTestCase {
             ]
         )
     }
+    func testAnimatableAttributeSplitRawListenersDrainLogicalBeforeRemoved() {
+        let recorder = AnimationCompletionRecorder()
+        let removedListener = RecordingAnimationListener(
+            label: "removed",
+            recorder: recorder
+        )
+        let logicalListener = RecordingAnimationListener(
+            label: "logical",
+            recorder: recorder
+        )
+        let harness = AnimatableAttributeHarness(
+            initialValue: _OpacityEffect(opacity: 0)
+        )
+        let sampleRecorder = CustomRetargetSampleRecorder()
+        var transaction = Transaction(
+            animation: Animation(
+                RetargetBoundaryRecordingAnimation(
+                    label: "generic",
+                    logicalAt: 0.05,
+                    nilAt: 1,
+                    recorder: sampleRecorder
+                )
+            )
+        )
+        transaction.animationListener = removedListener
+        transaction.animationLogicalListener = logicalListener
+
+        XCTAssertEqual(harness.currentValue().opacity, 0, accuracy: 0.000_001)
+        harness.setSource(
+            _OpacityEffect(opacity: 1),
+            transaction: transaction
+        )
+        harness.finalizeTransactionBody()
+        XCTAssertEqual(harness.currentValue().opacity, 0, accuracy: 0.000_001)
+        XCTAssertEqual(
+            recorder.events,
+            [
+                "removed added",
+                "logical added",
+            ]
+        )
+
+        recorder.removeAll()
+        harness.setTime(0.5)
+        _ = harness.currentValue()
+        harness.setTime(0.7)
+        _ = harness.currentValue()
+        XCTAssertEqual(recorder.events, [])
+        harness.setTime(0.8)
+        _ = harness.currentValue()
+        harness.flushCompletionActions()
+        XCTAssertEqual(recorder.events, ["logical removed"])
+
+        harness.setTime(2.0)
+        _ = harness.currentValue()
+        harness.flushCompletionActions()
+        XCTAssertEqual(
+            recorder.events,
+            [
+                "logical removed",
+                "removed removed",
+            ]
+        )
+
+        harness.flushCompletionActions()
+        XCTAssertEqual(
+            recorder.events,
+            [
+                "logical removed",
+                "removed removed",
+            ]
+        )
+    }
     func testFiniteRetargetRemovesRawMixedListenersInGenerationOrder() {
         let recorder = AnimationCompletionRecorder()
         let oldRemovedListener = RecordingAnimationListener(
@@ -1017,6 +1131,121 @@ final class AnimatableAttributeGraphSmokeTests: XCTestCase {
             ]
         )
     }
+
+    func testFiniteWrapperRetargetMovesMixedCriteriaToReplacementBoundary() {
+        let cases: [(
+            label: String,
+            oldAnimation: Animation,
+            replacementAnimation: Animation,
+            retargetTime: Double,
+            beforeBoundary: Double,
+            finalTime: Double
+        )] = [
+            (
+                "delayToSpeed",
+                .linear(duration: 0.50).delay(0.30),
+                .linear(duration: 0.30).speed(2.0),
+                0.20,
+                0.30,
+                0.70
+            ),
+            (
+                "speedToRepeat",
+                .linear(duration: 0.80).speed(0.5),
+                .linear(duration: 0.20).repeatCount(2, autoreverses: false),
+                0.25,
+                0.50,
+                1.00
+            ),
+            (
+                "repeatToDelay",
+                .linear(duration: 0.25).repeatCount(3, autoreverses: false),
+                .linear(duration: 0.20).delay(0.20),
+                0.20,
+                0.45,
+                1.00
+            ),
+            (
+                "linearToDelay",
+                .linear(duration: 0.90),
+                .linear(duration: 0.20).delay(0.20),
+                0.20,
+                0.45,
+                1.00
+            ),
+        ]
+
+        for testCase in cases {
+            let recorder = AnimationCompletionRecorder()
+            let harness = AnimatableAttributeHarness(
+                initialValue: _OpacityEffect(opacity: 0)
+            )
+            XCTAssertEqual(harness.currentValue().opacity, 0, testCase.label)
+
+            harness.setSource(
+                _OpacityEffect(opacity: 1),
+                transaction: completionTransaction(
+                    animation: testCase.oldAnimation,
+                    label: "old",
+                    recorder: recorder
+                )
+            )
+            harness.finalizeTransactionBody()
+            XCTAssertEqual(harness.currentValue().opacity, 0, testCase.label)
+            harness.flushCompletionActions()
+            XCTAssertEqual(recorder.events, [], testCase.label)
+
+            harness.setTime(testCase.retargetTime)
+            _ = harness.currentValue()
+            harness.flushCompletionActions()
+            XCTAssertEqual(recorder.events, [], testCase.label)
+
+            harness.setSource(
+                _OpacityEffect(opacity: 2),
+                transaction: completionTransaction(
+                    animation: testCase.replacementAnimation,
+                    label: "replacement",
+                    recorder: recorder
+                )
+            )
+            harness.finalizeTransactionBody()
+            _ = harness.currentValue()
+            harness.flushCompletionActions()
+            XCTAssertEqual(recorder.events, [], testCase.label)
+
+            harness.setTime(testCase.beforeBoundary)
+            _ = harness.currentValue()
+            harness.flushCompletionActions()
+            XCTAssertEqual(recorder.events, [], testCase.label)
+
+            harness.setTime(testCase.finalTime)
+            _ = harness.currentValue()
+            harness.flushCompletionActions()
+            XCTAssertEqual(
+                recorder.events,
+                [
+                    "old removed",
+                    "replacement removed",
+                    "replacement logical",
+                    "old logical",
+                ],
+                testCase.label
+            )
+
+            harness.flushCompletionActions()
+            XCTAssertEqual(
+                recorder.events,
+                [
+                    "old removed",
+                    "replacement removed",
+                    "replacement logical",
+                    "old logical",
+                ],
+                testCase.label
+            )
+        }
+    }
+
     func testPhaseResetAfterFiniteRetargetRemovesRawMixedListenersOnce() {
         let recorder = AnimationCompletionRecorder()
         let oldRemovedListener = RecordingAnimationListener(
@@ -3177,6 +3406,145 @@ final class AnimatableAttributeGraphSmokeTests: XCTestCase {
             XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" }, testCase.label)
             XCTAssertEqual(completionRecorder.events, [], testCase.label)
             harness.setTime(2.8)
+            _ = harness.currentValue()
+            harness.flushCompletionActions()
+            XCTAssertEqual(
+                completionRecorder.events,
+                [
+                    "\(testCase.label) logical",
+                    "old removed",
+                    "second removed",
+                    "\(testCase.label) removed",
+                    "old logical",
+                    "second logical",
+                ],
+                testCase.label
+            )
+        }
+    }
+
+    func testCombinedCustomFluidSpringNoArgAliasFiniteWrappersKeepResidualOwnership() {
+        let variableSourceNilCases: [(label: String, animation: Animation)] = [
+            ("springPropertyDelay", Animation.spring.delay(0.20)),
+        ]
+
+        for testCase in variableSourceNilCases {
+            let setup = makeCombinedTwoChildHarness(
+                oldDuration: 3.2,
+                secondDuration: 3.2
+            )
+            let completionRecorder = setup.completionRecorder
+            let sampleRecorder = setup.sampleRecorder
+            let harness = setup.harness
+            harness.setSource(
+                _OpacityEffect(opacity: 0.75),
+                transaction: completionTransaction(
+                    animation: testCase.animation,
+                    label: testCase.label,
+                    recorder: completionRecorder
+                )
+            )
+            harness.finalizeTransactionBody()
+            harness.setTime(2.8)
+            _ = harness.currentValue()
+            harness.flushCompletionActions()
+            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" }, testCase.label)
+            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" }, testCase.label)
+            XCTAssertFalse(completionRecorder.events.contains { $0.contains("removed") }, testCase.label)
+            harness.setTime(8.0)
+            _ = harness.currentValue()
+            harness.flushCompletionActions()
+            let oldSourceNilBeforeRemovedOrder = [
+                "\(testCase.label) logical",
+                "old logical",
+                "second logical",
+                "old removed",
+                "second removed",
+                "\(testCase.label) removed",
+            ]
+            let sameBoundaryOrder = [
+                "old removed",
+                "second removed",
+                "\(testCase.label) removed",
+                "\(testCase.label) logical",
+                "old logical",
+                "second logical",
+            ]
+            XCTAssertTrue(
+                [oldSourceNilBeforeRemovedOrder, sameBoundaryOrder].contains(completionRecorder.events),
+                "\(testCase.label) events \(completionRecorder.events)"
+            )
+        }
+
+        let sourceNilCases: [(label: String, animation: Animation)] = [
+            ("springNoArgSpeed", Animation.spring().speed(0.5)),
+        ]
+
+        for testCase in sourceNilCases {
+            let setup = makeCombinedTwoChildHarness(
+                oldDuration: 3.2,
+                secondDuration: 3.2
+            )
+            let completionRecorder = setup.completionRecorder
+            let sampleRecorder = setup.sampleRecorder
+            let harness = setup.harness
+            harness.setSource(
+                _OpacityEffect(opacity: 0.75),
+                transaction: completionTransaction(
+                    animation: testCase.animation,
+                    label: testCase.label,
+                    recorder: completionRecorder
+                )
+            )
+            harness.finalizeTransactionBody()
+            harness.setTime(2.8)
+            _ = harness.currentValue()
+            harness.flushCompletionActions()
+            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" }, testCase.label)
+            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" }, testCase.label)
+            XCTAssertFalse(completionRecorder.events.contains { $0.contains("removed") }, testCase.label)
+            harness.setTime(8.0)
+            _ = harness.currentValue()
+            harness.flushCompletionActions()
+            XCTAssertEqual(
+                completionRecorder.events,
+                [
+                    "\(testCase.label) logical",
+                    "old logical",
+                    "second logical",
+                    "old removed",
+                    "second removed",
+                    "\(testCase.label) removed",
+                ],
+                testCase.label
+            )
+        }
+
+        let residualFirstCases: [(label: String, animation: Animation)] = [
+            ("interactiveNoArgDelay", Animation.interactiveSpring().delay(0.20)),
+        ]
+
+        for testCase in residualFirstCases {
+            let setup = makeCombinedTwoChildHarness()
+            let completionRecorder = setup.completionRecorder
+            let sampleRecorder = setup.sampleRecorder
+            let harness = setup.harness
+            harness.setSource(
+                _OpacityEffect(opacity: 0.75),
+                transaction: completionTransaction(
+                    animation: testCase.animation,
+                    label: testCase.label,
+                    recorder: completionRecorder
+                )
+            )
+            harness.finalizeTransactionBody()
+            harness.setTime(1.2)
+            _ = harness.currentValue()
+            harness.flushCompletionActions()
+            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" }, testCase.label)
+            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" }, testCase.label)
+            XCTAssertFalse(completionRecorder.events.contains { $0.contains("removed") }, testCase.label)
+            harness.setTime(8.0)
             _ = harness.currentValue()
             harness.flushCompletionActions()
             XCTAssertEqual(
@@ -5688,6 +6056,230 @@ final class AnimatableAttributeGraphSmokeTests: XCTestCase {
                 "old logical",
             ]
         )
+    }
+
+    func testCombinedCustomFluidSpringAliasSecondNilCompletionOrdering() {
+        let secondNilRows: [(label: String, animation: Animation, finalTime: TimeInterval)] = [
+            ("springDuration", .spring(duration: 0.50, bounce: 0.20), 3.0),
+            ("springNoArg", .spring(), 3.0),
+        ]
+
+        for row in secondNilRows {
+            let setup = makeCombinedTwoChildHarness(secondDuration: 0.45)
+            let harness = setup.harness
+            let completionRecorder = setup.completionRecorder
+            let sampleRecorder = setup.sampleRecorder
+
+            harness.setSource(
+                _OpacityEffect(opacity: 0.75),
+                transaction: completionTransaction(
+                    animation: row.animation,
+                    label: row.label,
+                    recorder: completionRecorder
+                )
+            )
+            harness.finalizeTransactionBody()
+            harness.setTime(1.3)
+            _ = harness.currentValue()
+            harness.flushCompletionActions()
+            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" }, row.label)
+            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" }, row.label)
+            XCTAssertFalse(completionRecorder.events.contains { $0.contains("removed") }, row.label)
+            XCTAssertEqual(completionRecorder.events, [], row.label)
+
+            harness.setTime(1.5)
+            _ = harness.currentValue()
+            harness.flushCompletionActions()
+            XCTAssertEqual(completionRecorder.events, ["second logical"], row.label)
+
+            harness.setTime(row.finalTime)
+            _ = harness.currentValue()
+            harness.flushCompletionActions()
+            let residualBeforeRemovedOrder = [
+                "second logical",
+                "\(row.label) logical",
+                "old removed",
+                "second removed",
+                "\(row.label) removed",
+                "old logical",
+            ]
+            let residualSameBoundaryOrder = [
+                "second logical",
+                "old removed",
+                "second removed",
+                "\(row.label) removed",
+                "\(row.label) logical",
+                "old logical",
+            ]
+            XCTAssertTrue(
+                [residualBeforeRemovedOrder, residualSameBoundaryOrder].contains(completionRecorder.events),
+                "\(row.label) events \(completionRecorder.events)"
+            )
+        }
+
+        let residualFirstRows: [(label: String, animation: Animation)] = [
+            (
+                "interactiveDuration",
+                .interactiveSpring(duration: 0.50, extraBounce: 0.20, blendDuration: 0)
+            ),
+            ("interactiveNoArg", .interactiveSpring()),
+        ]
+
+        for row in residualFirstRows {
+            let setup = makeCombinedTwoChildHarness()
+            let harness = setup.harness
+            let completionRecorder = setup.completionRecorder
+            let sampleRecorder = setup.sampleRecorder
+
+            harness.setSource(
+                _OpacityEffect(opacity: 0.75),
+                transaction: completionTransaction(
+                    animation: row.animation,
+                    label: row.label,
+                    recorder: completionRecorder
+                )
+            )
+            harness.finalizeTransactionBody()
+            harness.setTime(1.3)
+            _ = harness.currentValue()
+            harness.flushCompletionActions()
+            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" }, row.label)
+            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" }, row.label)
+            XCTAssertEqual(completionRecorder.events, ["\(row.label) logical"], row.label)
+            XCTAssertFalse(completionRecorder.events.contains { $0.contains("removed") }, row.label)
+            XCTAssertFalse(completionRecorder.events.contains("second logical"), row.label)
+
+            harness.setTime(3.0)
+            _ = harness.currentValue()
+            harness.flushCompletionActions()
+            XCTAssertEqual(
+                completionRecorder.events,
+                [
+                    "\(row.label) logical",
+                    "old removed",
+                    "second removed",
+                    "\(row.label) removed",
+                    "old logical",
+                    "second logical",
+                ],
+                row.label
+            )
+        }
+    }
+
+    func testCombinedCustomFluidSpringAliasMiddleNilCompletionOrdering() {
+        let sourceNilRows: [(label: String, animation: Animation)] = [
+            ("springDuration", .spring(duration: 0.50, bounce: 0.20)),
+            ("springNoArg", .spring()),
+        ]
+
+        for row in sourceNilRows {
+            let setup = makeCombinedMiddleNilHarness(
+                oldDuration: 3.2,
+                secondDuration: 0.75,
+                thirdDuration: 3.2
+            )
+            let harness = setup.harness
+            let completionRecorder = setup.completionRecorder
+            let sampleRecorder = setup.sampleRecorder
+
+            harness.setSource(
+                _OpacityEffect(opacity: 0.75),
+                transaction: completionTransaction(
+                    animation: row.animation,
+                    label: row.label,
+                    recorder: completionRecorder
+                )
+            )
+            harness.finalizeTransactionBody()
+            harness.setTime(1.3)
+            _ = harness.currentValue()
+            harness.flushCompletionActions()
+            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" }, row.label)
+            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" }, row.label)
+            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "third" }, row.label)
+            XCTAssertFalse(completionRecorder.events.contains { $0.contains("removed") }, row.label)
+
+            harness.setTime(1.8)
+            _ = harness.currentValue()
+            harness.flushCompletionActions()
+
+            harness.setTime(3.0)
+            _ = harness.currentValue()
+            harness.flushCompletionActions()
+            XCTAssertEqual(
+                completionRecorder.events,
+                [
+                    "second logical",
+                    "\(row.label) logical",
+                    "old removed",
+                    "second removed",
+                    "third removed",
+                    "\(row.label) removed",
+                    "old logical",
+                    "third logical",
+                ],
+                row.label
+            )
+        }
+
+        let residualFirstRows: [(label: String, animation: Animation)] = [
+            (
+                "interactiveDuration",
+                .interactiveSpring(duration: 0.50, extraBounce: 0.20, blendDuration: 0)
+            ),
+            ("interactiveNoArg", .interactiveSpring()),
+        ]
+
+        for row in residualFirstRows {
+            let setup = makeCombinedMiddleNilHarness(
+                oldDuration: 3.2,
+                secondDuration: 0.75,
+                thirdDuration: 3.2
+            )
+            let harness = setup.harness
+            let completionRecorder = setup.completionRecorder
+            let sampleRecorder = setup.sampleRecorder
+
+            harness.setSource(
+                _OpacityEffect(opacity: 0.75),
+                transaction: completionTransaction(
+                    animation: row.animation,
+                    label: row.label,
+                    recorder: completionRecorder
+                )
+            )
+            harness.finalizeTransactionBody()
+            harness.setTime(1.3)
+            _ = harness.currentValue()
+            harness.flushCompletionActions()
+            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "old" }, row.label)
+            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "second" }, row.label)
+            XCTAssertTrue(sampleRecorder.samples.contains { $0.label == "third" }, row.label)
+            XCTAssertFalse(completionRecorder.events.contains { $0.contains("removed") }, row.label)
+
+            harness.setTime(1.5)
+            _ = harness.currentValue()
+            harness.flushCompletionActions()
+
+            harness.setTime(3.0)
+            _ = harness.currentValue()
+            harness.flushCompletionActions()
+            XCTAssertEqual(
+                completionRecorder.events,
+                [
+                    "\(row.label) logical",
+                    "old removed",
+                    "second removed",
+                    "third removed",
+                    "\(row.label) removed",
+                    "old logical",
+                    "second logical",
+                    "third logical",
+                ],
+                row.label
+            )
+        }
     }
 
     func testCombinedCustomFluidSpringMiddleNilKeepsRemovedRecordsUntilFinalization() {

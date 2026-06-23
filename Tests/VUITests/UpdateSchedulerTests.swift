@@ -39,6 +39,32 @@ final class UpdateSchedulerTests: XCTestCase {
         XCTAssertFalse(Update.threadIsUpdating)
     }
 
+    func testQueuedActionReasonsReflectDeferredQueueOrder() {
+        var events: [String] = []
+
+        Update.begin()
+        defer {
+            if Update.isActive {
+                Update.end()
+            }
+        }
+
+        Update.enqueueAction(reason: 7) {
+            events.append("first")
+        }
+        Update.enqueueAction {
+            events.append("second")
+        }
+
+        XCTAssertEqual(Update.queuedActionReasons, [7, nil])
+        XCTAssertEqual(events, [])
+
+        Update.end()
+
+        XCTAssertEqual(events, ["first", "second"])
+        XCTAssertFalse(Update.isActive)
+    }
+
     func testDispatchActionsSnapshotsAndLoopsForReentrantEnqueues() {
         var events: [String] = []
 

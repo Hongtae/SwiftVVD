@@ -63,6 +63,12 @@ enum Update {
         isOwner && state.depth == 1 && !state.actions.isEmpty
     }
 
+    static var queuedActionReasons: [UInt32?] {
+        lock()
+        defer { unlock() }
+        return state.actions.map(\.reason)
+    }
+
     static func begin() {
         lock()
         state.depth += 1

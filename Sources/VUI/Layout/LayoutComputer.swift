@@ -8,7 +8,7 @@
 import Foundation
 
 /// Protocol satisfied by types that provide a static default value.
-/// Only the `defaultValue` surface is currently used by VUI.
+/// Only the `defaultValue` surface is currently used.
 protocol Defaultable {
     static var defaultValue: Self { get }
 }
