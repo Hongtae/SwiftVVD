@@ -76,10 +76,17 @@ final class GraphHostContinueTransactionTests: XCTestCase {
             }
         )
 
-        XCTAssertEqual(events, ["active"])
+        XCTAssertEqual(events, [])
         XCTAssertFalse(host.hasPendingGraphMutations)
         XCTAssertFalse(host.needsTransaction)
         XCTAssertEqual(host.data.transactionSeed, 0)
+        XCTAssertTrue(host.hasPendingTransactions)
+
+        host.flushTransactions()
+
+        XCTAssertEqual(events, ["active"])
+        XCTAssertFalse(host.hasPendingTransactions)
+        XCTAssertEqual(host.data.transactionSeed, 1)
     }
 
     func testContinueTransactionWithoutUpdatingHostFallbackQueuesExpectedReason() {
@@ -104,10 +111,17 @@ final class GraphHostContinueTransactionTests: XCTestCase {
 
         Update.end()
 
-        XCTAssertEqual(events, ["active"])
+        XCTAssertEqual(events, [])
         XCTAssertFalse(host.hasPendingGraphMutations)
         XCTAssertFalse(host.needsTransaction)
         XCTAssertEqual(host.data.transactionSeed, 0)
+        XCTAssertTrue(host.hasPendingTransactions)
+
+        host.flushTransactions()
+
+        XCTAssertEqual(events, ["active"])
+        XCTAssertFalse(host.hasPendingTransactions)
+        XCTAssertEqual(host.data.transactionSeed, 1)
     }
 
     func testContinueTransactionWithoutUpdatingHostFallbackAppliesInHostGraphContext() {
@@ -122,11 +136,46 @@ final class GraphHostContinueTransactionTests: XCTestCase {
         host.continueTransaction(setting: weakAttribute, to: 2)
 
         host.data.withCurrent {
+            XCTAssertEqual(attribute.value, 1)
+        }
+        XCTAssertTrue(host.hasPendingTransactions)
+
+        host.flushTransactions()
+
+        host.data.withCurrent {
             XCTAssertEqual(attribute.value, 2)
         }
         XCTAssertFalse(host.hasPendingGraphMutations)
         XCTAssertFalse(host.needsTransaction)
-        XCTAssertEqual(host.data.transactionSeed, 0)
+        XCTAssertFalse(host.hasPendingTransactions)
+        XCTAssertEqual(host.data.transactionSeed, 1)
+    }
+
+    func testContinueTransactionWithoutUpdatingHostFallbackBatchesThroughAsyncTransaction() {
+        let host = GraphHost()
+        var events: [String] = []
+
+        host.continueTransaction(
+            ContinueRecordingGraphMutation {
+                XCTAssertTrue(host.isUpdating)
+                events.append("first")
+            }
+        )
+        host.continueTransaction(
+            ContinueRecordingGraphMutation {
+                XCTAssertTrue(host.isUpdating)
+                events.append("second")
+            }
+        )
+
+        XCTAssertTrue(host.hasPendingTransactions)
+        XCTAssertEqual(events, [])
+
+        host.flushTransactions()
+
+        XCTAssertEqual(events, ["first", "second"])
+        XCTAssertFalse(host.hasPendingTransactions)
+        XCTAssertEqual(host.data.transactionSeed, 1)
     }
 
     func testContinueTransactionSettingWeakAttributeAppliesWhenTransactionFinishes() {

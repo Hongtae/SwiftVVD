@@ -289,11 +289,14 @@ class GraphHost {
 
     func continueTransaction<M>(_ mutation: M) where M: GraphMutation {
         guard let host = updatingMutationHost else {
-            Update.enqueueAction(reason: 0x11) { [weak self] in
-                guard let self else { return }
-                self.data.withCurrent {
-                    mutation.apply()
-                }
+            Update.enqueueAction(reason: 0x11) { [self] in
+                asyncTransaction(
+                    Transaction(),
+                    id: Transaction.id,
+                    mutation: mutation,
+                    style: .deferred,
+                    mayDeferUpdate: true
+                )
             }
             return
         }
@@ -397,12 +400,10 @@ class GraphHost {
         postUpdate: (Bool) -> Void = { _ in },
         id: UInt32? = nil
     ) {
-        // The local AG runtime does not yet expose a separate subgraph update
-        // queue. Treat the host-local graph mutation queue as the pending work
-        // source and preserve the bounded pass boundary around it.
-        _ = subgraph
-        _ = id
-        drainGraphMutationPasses(postUpdate: postUpdate)
+        data.withCurrent {
+            _ = id
+            drainGraphMutationPasses(in: subgraph ?? data.rootSubgraph, postUpdate: postUpdate)
+        }
         isUpdating = false
     }
 
@@ -448,11 +449,12 @@ class GraphHost {
         pendingGraphMutations.append(mutation)
     }
 
-    private func drainGraphMutationPasses(postUpdate: (Bool) -> Void) {
+    private func drainGraphMutationPasses(in subgraph: AGSubgraph, postUpdate: (Bool) -> Void) {
         var passCount = 0
 
         repeat {
             drainGraphMutationPass()
+            subgraph.update(flags: 1)
 
             let needsFollowUp = !pendingGraphMutations.isEmpty
             postUpdate(needsFollowUp)
@@ -468,7 +470,7 @@ class GraphHost {
         guard !pendingGraphMutations.isEmpty else { return }
 
         let mutations = pendingGraphMutations
-        pendingGraphMutations.removeAll(keepingCapacity: true)
+        pendingGraphMutations = []
         needsTransaction = false
 
         for mutation in mutations {

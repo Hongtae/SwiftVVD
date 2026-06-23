@@ -194,6 +194,35 @@ final class TransactionThreadStorageTests: XCTestCase {
         }
     }
 
+    func testCurrentSemanticsAlreadyInheritedChildKeepsChildPropertyStorage() {
+        var parent = Transaction()
+        parent[ThreadStorageParentOnlyKey.self] = 1
+
+        var child = parent
+        child[ThreadStorageThrowingKey.self] = 2
+
+        let scoped = child.scopedTransaction(inheritingFrom: parent)
+
+        XCTAssertTrue(scoped.plist.isIdentical(to: child.plist))
+        XCTAssertEqual(scoped[ThreadStorageParentOnlyKey.self], 1)
+        XCTAssertEqual(scoped[ThreadStorageThrowingKey.self], 2)
+    }
+
+    func testCurrentSemanticsDisjointChildAllocatesMergedPropertyStorage() {
+        var parent = Transaction()
+        parent[ThreadStorageParentOnlyKey.self] = 1
+
+        var child = Transaction()
+        child[ThreadStorageThrowingKey.self] = 2
+
+        let scoped = child.scopedTransaction(inheritingFrom: parent)
+
+        XCTAssertFalse(scoped.plist.isIdentical(to: child.plist))
+        XCTAssertFalse(scoped.plist.isIdentical(to: parent.plist))
+        XCTAssertEqual(scoped[ThreadStorageParentOnlyKey.self], 1)
+        XCTAssertEqual(scoped[ThreadStorageThrowingKey.self], 2)
+    }
+
     func testRuntimeOverridePreV5NestedTransactionDirectInstallsChildWithoutParentMerge() {
         Semantics.overrides = Semantics.Overrides(build: nil, runtime: .v4)
         var parent = Transaction(animation: .linear(duration: 1))

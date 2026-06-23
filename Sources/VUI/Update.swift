@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import Synchronization
 
 enum Update {
     private struct Action {
@@ -13,8 +14,21 @@ enum Update {
         let thunk: () -> Void
         let id: UInt32
 
+        init(reason: UInt32?, thunk: @escaping () -> Void) {
+            self.reason = reason
+            self.thunk = thunk
+            self.id = Self.nextID()
+        }
+
         func callAsFunction() {
             thunk()
+        }
+
+        private static let nextActionID = Atomic<UInt32>(0)
+
+        static func nextID() -> UInt32 {
+            let rawID = nextActionID.wrappingAdd(2, ordering: .relaxed).oldValue
+            return (rawID &>> 1) &+ 1
         }
     }
 
@@ -25,7 +39,6 @@ enum Update {
         var depth = 0
         var dispatchDepth = 0
         var actions: [Action] = []
-        var nextActionID: UInt32 = 0
     }
 
     private static let state = State()
@@ -93,7 +106,7 @@ enum Update {
     static func enqueueAction(reason: UInt32? = nil, _ action: @escaping () -> Void) -> UInt32 {
         begin()
         defer { end() }
-        let queuedAction = Action(reason: reason, thunk: action, id: nextActionID())
+        let queuedAction = Action(reason: reason, thunk: action)
         state.actions.append(queuedAction)
         return queuedAction.id
     }
@@ -105,6 +118,7 @@ enum Update {
         begin()
         let previousDispatchDepth = state.dispatchDepth
         state.dispatchDepth = state.depth
+        _ = Action.nextID()
         defer {
             state.dispatchDepth = previousDispatchDepth
             end()
@@ -129,9 +143,4 @@ enum Update {
         }
     }
 
-    private static func nextActionID() -> UInt32 {
-        let currentID = state.nextActionID &>> 1
-        state.nextActionID &+= 2
-        return currentID &+ 1
-    }
 }

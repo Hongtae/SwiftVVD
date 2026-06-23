@@ -72,11 +72,40 @@ final class GraphHostSeedMutationLifecycleTests: XCTestCase {
         }
     }
 
+    func testFinishTransactionUpdateRunsRootSubgraphUpdateBeforePostUpdate() {
+        let host = GraphHost()
+        var source: Attribute<Int>!
+        var derived: Attribute<Int>!
+        var observedDuringPostUpdate: Int?
+
+        host.data.withCurrent {
+            AGSubgraph.$current.withValue(host.data.rootSubgraph) {
+                source = host.data.graph.makeInput(value: 1)
+                derived = host.data.graph.makeRule {
+                    source.value * 2
+                }
+            }
+            XCTAssertEqual(derived.value, 2)
+        }
+
+        host.startTransactionUpdate()
+        host.continueTransaction(CustomGraphMutation {
+            source.setValue(3)
+        })
+        host.finishTransactionUpdate(in: nil, postUpdate: { _ in
+            observedDuringPostUpdate = derived.value
+        })
+
+        XCTAssertEqual(observedDuringPostUpdate, 6)
+        XCTAssertFalse(host.isUpdating)
+    }
+
     func testFinishTransactionUpdateRepeatsWhenDrainEnqueuesMorePendingWork() {
         let host = GraphHost()
         let recorder = FinishTransactionUpdateRecorder()
         var postUpdateNeedsFollowUp: [Bool] = []
         var wasUpdatingDuringPostUpdate: [Bool] = []
+        var needsTransactionDuringPostUpdate: [Bool] = []
 
         host.startTransactionUpdate()
         host.continueTransaction(
@@ -84,6 +113,7 @@ final class GraphHostSeedMutationLifecycleTests: XCTestCase {
         )
         host.finishTransactionUpdate(in: nil, postUpdate: { needsFollowUp in
             wasUpdatingDuringPostUpdate.append(host.isUpdating)
+            needsTransactionDuringPostUpdate.append(host.needsTransaction)
             postUpdateNeedsFollowUp.append(needsFollowUp)
             recorder.events.append("post:\(needsFollowUp)")
         })
@@ -91,6 +121,7 @@ final class GraphHostSeedMutationLifecycleTests: XCTestCase {
         XCTAssertEqual(recorder.events, ["first", "post:true", "second", "post:false"])
         XCTAssertEqual(postUpdateNeedsFollowUp, [true, false])
         XCTAssertEqual(wasUpdatingDuringPostUpdate, [true, true])
+        XCTAssertEqual(needsTransactionDuringPostUpdate, [true, false])
         XCTAssertFalse(host.hasPendingGraphMutations)
         XCTAssertFalse(host.needsTransaction)
         XCTAssertFalse(host.isUpdating)

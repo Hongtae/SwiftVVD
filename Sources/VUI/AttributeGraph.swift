@@ -458,6 +458,16 @@ final class AGSubgraph: @unchecked Sendable {
         parent?.children.removeAll { $0 === self }
         parent = nil
     }
+
+    func update(flags: UInt32 = 1) {
+        guard let graph = AttributeGraph.current else {
+            fatalError("AGSubgraph.update() called outside an active AttributeGraph context.")
+        }
+        guard graph === self.graph else {
+            fatalError("AGSubgraph.update() called from a different AttributeGraph than the one that owns this subgraph.")
+        }
+        graph.updateSubgraph(self, flags: flags)
+    }
 }
 
 // MARK: - AttributeGraphRef
@@ -598,6 +608,7 @@ class AttributeGraph: @unchecked Sendable {
         var transaction: Transaction? = nil
         var kind: NodeKind
         var needsEvaluation: Bool = true
+        var inputsChanged: Bool = true
         var isEvaluating: Bool = false  // for cycle detection
 
         // Dependency graph edges (stored as raw slot indices)
@@ -763,6 +774,14 @@ class AttributeGraph: @unchecked Sendable {
         guard let graph = AttributeGraph.current,
               let nodeID = AttributeGraph.currentlyEvaluatingNode else { return nil }
         return graph.slots[Int(nodeID.rawValue)].node?.value as? V
+    }
+
+    /// Reports whether the current StatefulRule evaluation was caused by an
+    /// upstream input/dependency change.
+    static func currentStatefulInputsChanged() -> Bool {
+        guard let graph = AttributeGraph.current,
+              let nodeID = AttributeGraph.currentlyEvaluatingNode else { return true }
+        return graph.slots[Int(nodeID.rawValue)].node?.inputsChanged ?? true
     }
 
     /// Called from within `StatefulRule.updateValue()` to publish the node's output value.
@@ -1118,6 +1137,21 @@ class AttributeGraph: @unchecked Sendable {
         }
     }
 
+    fileprivate func updateSubgraph(_ subgraph: AGSubgraph, flags: UInt32) {
+        assert(AttributeGraph.current === self)
+        _ = flags
+        inbox.drain()
+        for node in subgraph.nodes {
+            guard let liveNode = weakAttributeIfValid(for: node)?.toStrong() else {
+                continue
+            }
+            _ = value(for: liveNode)
+        }
+        for child in subgraph.children {
+            updateSubgraph(child, flags: flags)
+        }
+    }
+
     private func withGraphUpdateCounterIfNeeded<R>(_ body: () -> R) -> R {
         let graphID = ObjectIdentifier(self)
         var activeGraphs = AttributeGraph.currentlyUpdatingGraphs ?? []
@@ -1151,6 +1185,7 @@ class AttributeGraph: @unchecked Sendable {
                 box.callUpdate()
             }
             slots[index].node!.needsEvaluation = false
+            slots[index].node!.inputsChanged = false
             slots[index].node!.isEvaluating = false
 
         case .keyPath(let parent, let kp):
@@ -1213,7 +1248,8 @@ class AttributeGraph: @unchecked Sendable {
         _ startID: AGAttribute,
         evaluateSideEffects: Bool = true,
         transaction: Transaction? = nil,
-        propagateTransaction: Bool = false
+        propagateTransaction: Bool = false,
+        inputsChanged: Bool = true
     ) {
         assert(AttributeGraph.current === self)
         // Iterative BFS to avoid stack overflow on deep dependency graphs.
@@ -1233,10 +1269,13 @@ class AttributeGraph: @unchecked Sendable {
             if propagateTransaction {
                 node.transaction = transaction
             }
+            if inputsChanged {
+                node.inputsChanged = true
+            }
             if !node.needsEvaluation {
                 node.needsEvaluation = true
                 slots[index].node = node
-            } else if propagateTransaction {
+            } else if propagateTransaction || inputsChanged {
                 slots[index].node = node
             }
             if node.kind.isSideEffect {

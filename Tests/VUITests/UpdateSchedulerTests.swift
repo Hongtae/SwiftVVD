@@ -101,4 +101,14 @@ final class UpdateSchedulerTests: XCTestCase {
         XCTAssertFalse(Update.isActive)
         XCTAssertFalse(Update.threadIsUpdating)
     }
+
+    func testDispatchImmediatelyConsumesActionIDLane() {
+        let firstID = Update.enqueueAction {}
+
+        Update.dispatchImmediately {}
+
+        let secondID = Update.enqueueAction {}
+
+        XCTAssertEqual(secondID, firstID + 2)
+    }
 }

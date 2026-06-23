@@ -111,11 +111,79 @@ struct MakeAlertStorage<Actions: View, Message: View>: StatefulRule {
     var lastAccessibilityTitle:       Optional<NSAttributedString>
     var lastDialogPreventsTermination: Optional<Bool>
 
+    init(
+        environment: Attribute<EnvironmentValues>,
+        modifier: Attribute<AlertModifier<Actions, Message>>,
+        actionsItemList: WeakAttribute<PlatformItemList>,
+        messageItemList: WeakAttribute<PlatformItemList>,
+        phase: Attribute<Phase>,
+        identityTracker: ViewIdentity.Tracker,
+        lastTitle: Optional<String>,
+        lastColorScheme: Optional<ColorScheme>,
+        lastIcon: Optional<Image>,
+        lastTintColor: Optional<Color.Resolved>,
+        lastSeverity: DialogSeverity,
+        lastSuppressionConfiguration: Optional<DialogSuppressionConfiguration>,
+        lastAccessibilityTitle: Optional<NSAttributedString>,
+        lastDialogPreventsTermination: Optional<Bool>
+    ) {
+        self.init(
+            environment: environment,
+            modifier: modifier,
+            actionsItemList: actionsItemList,
+            messageItemList: messageItemList,
+            phase: phase,
+            identityTracker: identityTracker,
+            propertyTracker: _PropertyListTracker(),
+            lastTitle: lastTitle,
+            lastColorScheme: lastColorScheme,
+            lastIcon: lastIcon,
+            lastTintColor: lastTintColor,
+            lastSeverity: lastSeverity,
+            lastSuppressionConfiguration: lastSuppressionConfiguration,
+            lastAccessibilityTitle: lastAccessibilityTitle,
+            lastDialogPreventsTermination: lastDialogPreventsTermination
+        )
+    }
+
+    init(
+        environment: Attribute<EnvironmentValues>,
+        modifier: Attribute<AlertModifier<Actions, Message>>,
+        actionsItemList: WeakAttribute<PlatformItemList>,
+        messageItemList: WeakAttribute<PlatformItemList>,
+        phase: Attribute<Phase>,
+        identityTracker: ViewIdentity.Tracker,
+        propertyTracker: _PropertyListTracker,
+        lastTitle: Optional<String>,
+        lastColorScheme: Optional<ColorScheme>,
+        lastIcon: Optional<Image>,
+        lastTintColor: Optional<Color.Resolved>,
+        lastSeverity: DialogSeverity,
+        lastSuppressionConfiguration: Optional<DialogSuppressionConfiguration>,
+        lastAccessibilityTitle: Optional<NSAttributedString>,
+        lastDialogPreventsTermination: Optional<Bool>
+    ) {
+        self.environment = environment
+        self.modifier = modifier
+        self.actionsItemList = actionsItemList
+        self.messageItemList = messageItemList
+        self.phase = phase
+        self.identityTracker = identityTracker
+        self.propertyTracker = propertyTracker
+        self.lastTitle = lastTitle
+        self.lastColorScheme = lastColorScheme
+        self.lastIcon = lastIcon
+        self.lastTintColor = lastTintColor
+        self.lastSeverity = lastSeverity
+        self.lastSuppressionConfiguration = lastSuppressionConfiguration
+        self.lastAccessibilityTitle = lastAccessibilityTitle
+        self.lastDialogPreventsTermination = lastDialogPreventsTermination
+    }
+
     mutating func updateValue() {
         guard let graph = AttributeGraph.current else {
             fatalError("MakeAlertStorage.updateValue called outside AG context")
         }
-        let environment = trackedEnvironment()
         var actionsList: PlatformItemList?
         var messageList: PlatformItemList?
         if actionsItemList.isValid(in: graph) {
@@ -125,6 +193,9 @@ struct MakeAlertStorage<Actions: View, Message: View>: StatefulRule {
             messageList = messageItemList.toStrong().value
         }
         let m = modifier.value
+        let phaseValue = phase.value
+        let values = environment.value
+        guard let environment = trackedEnvironment(from: values) else { return }
         let title = m.title._resolveText(in: environment)
         let dialogColorScheme = environment.dialogColorScheme
         let explicitPreferredColorScheme = environment.explicitPreferredColorScheme
@@ -143,7 +214,7 @@ struct MakeAlertStorage<Actions: View, Message: View>: StatefulRule {
         lastSuppressionConfiguration = suppressionConfiguration
         lastAccessibilityTitle = accessibilityTitle
         lastDialogPreventsTermination = preventsTermination
-        let identity = identityTracker.update(for: phase.value)
+        let identity = identityTracker.update(for: phaseValue)
         guard m.isPresented.wrappedValue else {
             let id = identity
             AttributeGraph.setStatefulOutput({ (dict: inout [ViewIdentity: AlertStorage]) in
@@ -179,11 +250,13 @@ struct MakeAlertStorage<Actions: View, Message: View>: StatefulRule {
         } as Value)
     }
 
-    private mutating func trackedEnvironment() -> EnvironmentValues {
-        let values = environment.value
-        if propertyTracker.hasDifferentUsedValues(values._plist) {
-            propertyTracker.reset()
+    private mutating func trackedEnvironment(from values: EnvironmentValues) -> EnvironmentValues? {
+        if AttributeGraph.currentStatefulOutput(Value.self) != nil,
+           !AttributeGraph.currentStatefulInputsChanged(),
+           !propertyTracker.hasDifferentUsedValues(values._plist) {
+            return nil
         }
+        propertyTracker.reset()
         return EnvironmentValues(values._plist, tracker: propertyTracker)
     }
 
@@ -518,7 +591,6 @@ extension AlertModifier {
             messageItemList: messageWeakAttr,
             phase: inputs.base.phase,
             identityTracker: ViewIdentity.Tracker(),
-            propertyTracker: _PropertyListTracker(),
             lastTitle:                    Optional<String>.none,
             lastColorScheme:              Optional<ColorScheme>.none,
             lastIcon:                     Optional<Image>.none,

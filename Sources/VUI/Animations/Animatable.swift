@@ -1510,7 +1510,7 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>: StatefulRule {
     private mutating func clearAnimationRuntimeState(
         clearingGeneration: Bool = true
     ) {
-        helper.clearAnimatorStateForCompletionRecords()
+        helper.clearAnimatorStateStorageForCompletionRecords()
         clearCompletionRecordSideState(clearingGeneration: clearingGeneration)
     }
 
@@ -3942,7 +3942,7 @@ private struct AnimatableFrameAttribute: StatefulRule {
     }
 
     mutating func destroy() {
-        helper.clearAnimatorState()
+        helper.finishAndClearAnimatorState()
     }
 
     private func roundedFrame(
@@ -3958,7 +3958,7 @@ private struct AnimatableFrameAttribute: StatefulRule {
     }
 
     private mutating func finishValue(_ value: ViewFrame) {
-        helper.clearAnimatorState()
+        helper.finishAndClearAnimatorState()
         helper.commitTarget(value)
         AttributeGraph.setStatefulOutput(value)
     }
@@ -4061,7 +4061,7 @@ private struct AnimatableFrameAttributeVFD: StatefulRule {
     }
 
     mutating func destroy() {
-        helper.clearAnimatorState()
+        helper.finishAndClearAnimatorState()
     }
 
     private func roundedFrame(
@@ -4077,7 +4077,7 @@ private struct AnimatableFrameAttributeVFD: StatefulRule {
     }
 
     private mutating func finishValue(_ value: ViewFrame) {
-        helper.clearAnimatorState()
+        helper.finishAndClearAnimatorState()
         helper.commitTarget(value)
         velocityFilter.reset()
         AttributeGraph.setStatefulOutput(value)
@@ -4521,7 +4521,7 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
             // Listener identities needed for completion ordering are already in
             // `update`; removing listeners here would be too late and would risk
             // changing callback order. Drop only the live animator container.
-            clearCompletedAnimatorStateForCompletionRecords()
+            dropCompletedAnimatorStateForCompletionRecords()
         }
         return update
     }
@@ -4541,14 +4541,14 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
         animatorState?.removeListeners()
     }
 
-    mutating func clearAnimatorState() {
+    mutating func finishAndClearAnimatorState() {
         // Immediate teardown path: live AnimatorState still owns listener
         // callbacks, so clearing it must finish them before dropping storage.
         removeListeners()
         animatorState = nil
     }
 
-    mutating func clearAnimatorStateForCompletionRecords() {
+    mutating func clearAnimatorStateStorageForCompletionRecords() {
         // Copied-record path: the outer attribute owns callback ordering. Clear
         // live listener arrays without firing callbacks from the helper.
         animatorState?.clearListenersForCompletionRecords()
@@ -4565,18 +4565,18 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
     }
 
     private mutating func finishCompletedUpdate() {
-        clearAnimatorState()
+        finishAndClearAnimatorState()
     }
 
     // Completion-record samples have already drained state-owned listener
     // identities into the returned snapshot. The helper tail only drops the
     // optional state; the outer copied-record sorter owns callback ordering.
-    private mutating func clearCompletedAnimatorStateForCompletionRecords() {
+    private mutating func dropCompletedAnimatorStateForCompletionRecords() {
         self.animatorState = nil
     }
 
     private mutating func reset(to currentResetSeed: UInt32) {
-        clearAnimatorState()
+        finishAndClearAnimatorState()
         previousModelData = nil
         resetSeed = currentResetSeed
     }
@@ -4584,7 +4584,7 @@ private struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
     private mutating func resetForCompletionRecords(to currentResetSeed: UInt32) {
         // Completion records are copied by the outer rule, so reset only the
         // helper-owned live state and model cache.
-        clearAnimatorStateForCompletionRecords()
+        clearAnimatorStateStorageForCompletionRecords()
         previousModelData = nil
         resetSeed = currentResetSeed
     }

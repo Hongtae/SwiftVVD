@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import Synchronization
 
 // Stack<Element> is a LIFO linked list used as the Value type for PropertyKey
 // conformers such as StyleInput, SourceInput, and BodyInput.
@@ -241,119 +242,206 @@ private struct SecondaryLookupTrackedValue<K: PropertyKeyLookup>: _AnyTrackedVal
     }
 }
 
+private final class AtomicBuffer<Value> {
+    private let storage: Mutex<UnsafeBox<Value>>
+
+    init(_ value: Value) {
+        self.storage = Mutex(UnsafeBox(value))
+    }
+
+    func read<Result>(_ body: (Value) throws -> Result) rethrows -> Result {
+        let snapshot = storage.withLock { box in
+            box.value
+        }
+        return try body(snapshot)
+    }
+
+    func update<Result>(_ body: (inout Value) throws -> Result) rethrows -> Result {
+        try storage.withLock { box in
+            var value = box.value
+            defer { box = UnsafeBox(value) }
+            return try body(&value)
+        }
+    }
+
+    func updateWithLockedSource<Result>(
+        _ source: AtomicBuffer<Value>,
+        _ body: (Value, inout Value) throws -> Result
+    ) rethrows -> Result {
+        if source === self {
+            return try update { value in
+                let snapshot = value
+                return try body(snapshot, &value)
+            }
+        }
+
+        return try source.storage.withLock { sourceBox in
+            return try storage.withLock { box in
+                var value = box.value
+                defer { box = UnsafeBox(value) }
+                return try body(sourceBox.value, &value)
+            }
+        }
+    }
+}
+
 final class _PropertyListTracker {
-    private var trackedID: UniqueID?
-    private var trackedValues: [ObjectIdentifier: any _AnyTrackedValue] = [:]
-    private var derivedValues: [ObjectIdentifier: any _AnyTrackedValue] = [:]
-    private var pendingValues: [any _AnyTrackedValue] = []
-    private var dirty = false
+    private struct TrackerData {
+        var trackedID: UniqueID?
+        var trackedValues: [ObjectIdentifier: any _AnyTrackedValue] = [:]
+        var derivedValues: [ObjectIdentifier: any _AnyTrackedValue] = [:]
+        var pendingValues: [any _AnyTrackedValue] = []
+        var dirty = false
+
+        mutating func reset() {
+            trackedID = nil
+            trackedValues.removeAll()
+            derivedValues.removeAll()
+            pendingValues.removeAll()
+            dirty = false
+        }
+
+        mutating func initializeValues(from plist: PropertyList) {
+            trackedID = plist.id
+        }
+
+        mutating func value<K: PropertyKey>(_ plist: PropertyList, for key: K.Type) -> K.Value {
+            guard trackedID == plist.id else {
+                dirty = true
+                return plist[key]
+            }
+            let id = ObjectIdentifier(key)
+            if let value = trackedValues[id]?.value(as: K.Value.self) {
+                return value
+            }
+            let value = plist[key]
+            trackedValues[id] = TrackedValue<K>(value: value)
+            return value
+        }
+
+        mutating func derivedValue<K: DerivedPropertyKey>(
+            _ plist: PropertyList,
+            for key: K.Type
+        ) -> K.Value {
+            guard trackedID == plist.id else {
+                dirty = true
+                return plist[key]
+            }
+            let id = ObjectIdentifier(key)
+            if let value = derivedValues[id]?.value(as: K.Value.self) {
+                return value
+            }
+            let value = plist[key]
+            derivedValues[id] = DerivedValue<K>(value: value)
+            return value
+        }
+
+        mutating func valueWithSecondaryLookup<K: PropertyKeyLookup>(
+            _ plist: PropertyList,
+            secondaryLookupHandler lookup: K.Type
+        ) -> K.Primary.Value {
+            guard trackedID == plist.id else {
+                dirty = true
+                return plist.valueWithSecondaryLookup(lookup)
+            }
+            let id = ObjectIdentifier(K.Primary.self)
+            if let value = trackedValues[id]?.value(as: K.Primary.Value.self) {
+                return value
+            }
+            let value = plist.valueWithSecondaryLookup(lookup)
+            trackedValues[id] = SecondaryLookupTrackedValue<K>(value: value)
+            return value
+        }
+
+        func hasDifferentUsedValues(_ plist: PropertyList) -> Bool {
+            if dirty { return true }
+            if trackedID != plist.id {
+                if trackedValues.values.contains(where: { !$0.hasMatchingValue(in: plist) }) {
+                    return true
+                }
+                if derivedValues.values.contains(where: { !$0.hasMatchingValue(in: plist) }) {
+                    return true
+                }
+            }
+            return pendingValues.contains { !$0.hasMatchingValue(in: plist) }
+        }
+
+        mutating func invalidateAllValues(from: PropertyList, to: PropertyList) {
+            guard trackedID == from.id, trackedID != to.id else { return }
+            pendingValues.append(contentsOf: trackedValues.values)
+            pendingValues.append(contentsOf: derivedValues.values)
+            trackedValues.removeAll()
+            derivedValues.removeAll()
+            trackedID = to.id
+        }
+
+        mutating func invalidateValue<K: PropertyKey>(for key: K.Type, from: PropertyList, to: PropertyList) {
+            guard trackedID == from.id, trackedID != to.id else { return }
+            if let removed = trackedValues.removeValue(forKey: ObjectIdentifier(key)) {
+                pendingValues.append(removed)
+            }
+            pendingValues.append(contentsOf: derivedValues.values)
+            derivedValues.removeAll()
+            trackedID = to.id
+        }
+
+        mutating func formUnion(_ other: TrackerData) {
+            guard let otherID = other.trackedID, trackedID != otherID else {
+                return
+            }
+            if trackedID == nil {
+                self = other
+                return
+            }
+            trackedID = otherID
+            trackedValues.merge(other.trackedValues) { current, _ in current }
+            derivedValues.merge(other.derivedValues) { current, _ in current }
+            pendingValues.append(contentsOf: other.pendingValues)
+            dirty = dirty || other.dirty
+        }
+    }
+
+    private let data = AtomicBuffer(TrackerData())
 
     func reset() {
-        trackedID = nil
-        trackedValues.removeAll()
-        derivedValues.removeAll()
-        pendingValues.removeAll()
-        dirty = false
+        data.update { $0.reset() }
     }
 
     func initializeValues(from plist: PropertyList) {
-        trackedID = plist.id
+        data.update { $0.initializeValues(from: plist) }
     }
 
     func value<K: PropertyKey>(_ plist: PropertyList, for key: K.Type) -> K.Value {
-        guard trackedID == plist.id else {
-            dirty = true
-            return plist[key]
-        }
-        let id = ObjectIdentifier(key)
-        if let value = trackedValues[id]?.value(as: K.Value.self) {
-            return value
-        }
-        let value = plist[key]
-        trackedValues[id] = TrackedValue<K>(value: value)
-        return value
+        data.update { $0.value(plist, for: key) }
     }
 
     func derivedValue<K: DerivedPropertyKey>(_ plist: PropertyList, for key: K.Type) -> K.Value {
-        guard trackedID == plist.id else {
-            dirty = true
-            return plist[key]
-        }
-        let id = ObjectIdentifier(key)
-        if let value = derivedValues[id]?.value(as: K.Value.self) {
-            return value
-        }
-        let value = plist[key]
-        derivedValues[id] = DerivedValue<K>(value: value)
-        return value
+        data.update { $0.derivedValue(plist, for: key) }
     }
 
     func valueWithSecondaryLookup<K: PropertyKeyLookup>(
         _ plist: PropertyList,
         secondaryLookupHandler lookup: K.Type
     ) -> K.Primary.Value {
-        guard trackedID == plist.id else {
-            dirty = true
-            return plist.valueWithSecondaryLookup(lookup)
-        }
-        let id = ObjectIdentifier(K.Primary.self)
-        if let value = trackedValues[id]?.value(as: K.Primary.Value.self) {
-            return value
-        }
-        let value = plist.valueWithSecondaryLookup(lookup)
-        trackedValues[id] = SecondaryLookupTrackedValue<K>(value: value)
-        return value
+        data.update { $0.valueWithSecondaryLookup(plist, secondaryLookupHandler: lookup) }
     }
 
     func hasDifferentUsedValues(_ plist: PropertyList) -> Bool {
-        if dirty { return true }
-        if trackedID != plist.id {
-            if trackedValues.values.contains(where: { !$0.hasMatchingValue(in: plist) }) {
-                return true
-            }
-            if derivedValues.values.contains(where: { !$0.hasMatchingValue(in: plist) }) {
-                return true
-            }
-        }
-        return pendingValues.contains { !$0.hasMatchingValue(in: plist) }
+        data.read { $0.hasDifferentUsedValues(plist) }
     }
 
     func invalidateAllValues(from: PropertyList, to: PropertyList) {
-        guard trackedID == from.id, trackedID != to.id else { return }
-        pendingValues.append(contentsOf: trackedValues.values)
-        pendingValues.append(contentsOf: derivedValues.values)
-        trackedValues.removeAll()
-        derivedValues.removeAll()
-        trackedID = to.id
+        data.update { $0.invalidateAllValues(from: from, to: to) }
     }
 
     func invalidateValue<K: PropertyKey>(for key: K.Type, from: PropertyList, to: PropertyList) {
-        guard trackedID == from.id, trackedID != to.id else { return }
-        if let removed = trackedValues.removeValue(forKey: ObjectIdentifier(key)) {
-            pendingValues.append(removed)
-        }
-        pendingValues.append(contentsOf: derivedValues.values)
-        derivedValues.removeAll()
-        trackedID = to.id
+        data.update { $0.invalidateValue(for: key, from: from, to: to) }
     }
 
     func formUnion(_ other: _PropertyListTracker) {
-        guard let otherID = other.trackedID, trackedID != otherID else {
-            return
+        data.updateWithLockedSource(other.data) { otherData, data in
+            data.formUnion(otherData)
         }
-        if trackedID == nil {
-            trackedID = otherID
-            trackedValues = other.trackedValues
-            derivedValues = other.derivedValues
-            pendingValues = other.pendingValues
-            dirty = other.dirty
-            return
-        }
-        trackedID = otherID
-        trackedValues.merge(other.trackedValues) { current, _ in current }
-        derivedValues.merge(other.derivedValues) { current, _ in current }
-        pendingValues.append(contentsOf: other.pendingValues)
-        dirty = dirty || other.dirty
     }
 }
 
@@ -489,6 +577,18 @@ extension PropertyList {
                                _ body: (any PropertyKey.Type, Value) -> Bool) -> Bool {
             false
         }
+
+        func containsIdenticalTail(_ tail: Element?) -> Bool {
+            guard let tail else { return true }
+            var element: Element? = self
+            while let current = element {
+                if current === tail {
+                    return true
+                }
+                element = current.after
+            }
+            return false
+        }
     }
 
     // Typed subclass — value is stored with the concrete Value type rather than Any.
@@ -528,6 +628,9 @@ extension PropertyList {
     mutating func merge(_ other: PropertyList) {
         guard !other.isEmpty else { return }
         guard !self.isEmpty else { self = other; return }
+        if elements!.containsIdenticalTail(other.elements) {
+            return
+        }
         elements = elements!.rebuilt(appending: other.elements)
     }
 

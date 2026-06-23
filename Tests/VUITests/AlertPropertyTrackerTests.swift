@@ -220,6 +220,40 @@ final class AlertPropertyTrackerTests: XCTestCase {
         }
     }
 
+    func testMakeAlertStorageKeepsOutputForNonInputRefreshWhenTrackedEnvironmentIsUnchanged() {
+        let graph = AttributeGraph()
+        let presentation = BoolBox(true)
+
+        AttributeGraph.$current.withValue(graph) {
+            let environment = EnvironmentValues.tracking()
+            let environmentAttr = graph.makeInput(value: environment)
+            let modifierAttr = graph.makeInput(
+                value: alertModifier(isPresented: binding(to: presentation))
+            )
+            let itemListAttr = graph.makeInput(value: PlatformItemList())
+            let phaseAttr = graph.makeInput(value: Phase())
+            let tracker = _PropertyListTracker()
+            let storageAttr = alertStorageAttribute(
+                graph: graph,
+                environment: environmentAttr,
+                modifier: modifierAttr,
+                itemList: itemListAttr,
+                phase: phaseAttr,
+                tracker: tracker
+            )
+
+            XCTAssertNotNil(alertStorage(from: storageAttr))
+            XCTAssertFalse(tracker.hasDifferentUsedValues(environment._plist))
+
+            presentation.value = false
+            graph.markNeedsEvaluation(storageAttr.identifier, inputsChanged: false)
+            XCTAssertNotNil(alertStorage(from: storageAttr))
+
+            modifierAttr.setValue(alertModifier(isPresented: binding(to: presentation)))
+            XCTAssertNil(alertStorage(from: storageAttr))
+        }
+    }
+
     private func alertModifier(isPresented: Binding<Bool>) -> AlertModifier<EmptyView, EmptyView> {
         AlertModifier(
             presentedValue: isPresented.wrappedValue,
