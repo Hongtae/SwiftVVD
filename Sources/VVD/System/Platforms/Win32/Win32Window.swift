@@ -650,6 +650,8 @@ final class Win32Window: Window {
             let virtualKey: VirtualKey = .from(win32VK: key)
             if virtualKey == .none { continue }
 
+            let isDown = keyStates[key] & 0x80 != 0
+
             if keyStates[key] & 0x80 != self.keyboardStates[key] & 0x80 {
                 if keyStates[key] & 0x80 != 0 {
                     // Post key-down event.
@@ -1503,11 +1505,15 @@ final class Win32Window: Window {
                 default:
                     break
                 }
-            case UINT(WM_SYSKEYDOWN),
-                 UINT(WM_SYSKEYUP):
-                return 0    // block ALT-key
-            case UINT(WM_KEYDOWN),
-                 UINT(WM_KEYUP):
+            case UINT(WM_SYSKEYDOWN), UINT(WM_KEYDOWN):
+                if (lParam & LPARAM(1 << 30)) != 0 {
+                    window.pendingKeyRepeat = Int(wParam)
+                } else {
+                    window.pendingKeyRepeat = nil
+                }
+                return 0
+            case UINT(WM_SYSKEYUP), UINT(WM_KEYUP):
+                window.pendingKeyRepeat = nil
                 return 0
             case UINT(WM_VVDWINDOW_SHOWCURSOR):
                 // Mouse-position control from another thread would need
