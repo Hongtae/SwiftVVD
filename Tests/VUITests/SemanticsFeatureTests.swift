@@ -52,9 +52,45 @@ final class SemanticsFeatureTests: XCTestCase {
         XCTAssertEqual(Semantics.overrides.build, .v4)
         XCTAssertFalse(_SemanticFeature<Semantics_v6>.isEnabled)
     }
+
+    func testSemanticsTestOnlyOverridesSelectedLane() {
+        Semantics.overrides = Semantics.Overrides(build: .v4, runtime: .v4)
+
+        Semantics.test(as: \.runtime) {
+            XCTAssertFalse(_SemanticFeature<Semantics_v6>.isEnabled)
+            XCTAssertTrue(RuntimeV6SemanticFeature.isEnabled)
+            XCTAssertEqual(Semantics.overrides.build, .v4)
+            XCTAssertEqual(Semantics.overrides.runtime, .v6)
+        }
+
+        XCTAssertEqual(Semantics.overrides.build, .v4)
+        XCTAssertEqual(Semantics.overrides.runtime, .v4)
+    }
+
+    func testSemanticsTestRestoresSelectedLaneAfterThrow() {
+        Semantics.overrides = Semantics.Overrides(build: .v4, runtime: .v5)
+
+        do {
+            try Semantics.test(as: \.runtime) {
+                XCTAssertEqual(Semantics.overrides.build, .v4)
+                XCTAssertEqual(Semantics.overrides.runtime, .v6)
+                throw SemanticsFeatureProbeError.expected
+            }
+            XCTFail("Semantics.test returned normally")
+        } catch SemanticsFeatureProbeError.expected {
+            XCTAssertEqual(Semantics.overrides.build, .v4)
+            XCTAssertEqual(Semantics.overrides.runtime, .v5)
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+    }
 }
 
 private struct RuntimeV6SemanticFeature: SemanticFeature {
     static var introduced: Semantics { .v6 }
     static var requirement: SemanticRequirement { .runtime }
+}
+
+private enum SemanticsFeatureProbeError: Error {
+    case expected
 }

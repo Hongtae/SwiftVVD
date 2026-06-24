@@ -156,7 +156,7 @@ class GraphHost {
     var data: Data
     private(set) var isUpdating: Bool = false
     private(set) var needsTransaction: Bool = false
-    private(set) var mayDeferUpdate: Bool = true
+    private var mayDeferUpdateLatch: Bool = true
     private var pendingTransactions: [AsyncTransaction] = []
     private var pendingGraphMutations: [any GraphMutation] = []
 
@@ -190,6 +190,10 @@ class GraphHost {
         !pendingGraphMutations.isEmpty
     }
 
+    var mayDeferUpdate: Bool {
+        mayDeferUpdateLatch
+    }
+
     var parentHost: GraphHost? {
         nil
     }
@@ -199,7 +203,7 @@ class GraphHost {
     }
 
     func setNeedsUpdate(mayDeferUpdate: Bool, values: ViewGraphRootValues) {
-        self.mayDeferUpdate = self.mayDeferUpdate && mayDeferUpdate
+        narrowMayDeferUpdate(mayDeferUpdate)
         _ = values
 
         if let viewGraph = self as? ViewGraph {
@@ -216,7 +220,7 @@ class GraphHost {
         mayDeferUpdate: Bool = true
     ) -> UInt32 where M: GraphMutation {
         let canDeferAsyncTransaction = style == .deferred || isUpdating
-        self.mayDeferUpdate = self.mayDeferUpdate && mayDeferUpdate
+        narrowMayDeferUpdate(mayDeferUpdate)
 
         if let index = pendingTransactions.lastIndex(where: { pending in
             pending.id == id && pending.transaction.plist.isEqual(to: transaction.plist)
@@ -379,11 +383,13 @@ class GraphHost {
         pendingTransactions.removeAll()
         for transaction in transactions {
             runTransaction(transaction.transaction, id: transaction.id.value) {
-                transaction.apply()
+                Transaction.withScopedThreadTransaction(transaction.transaction) {
+                    transaction.apply()
+                }
             }
         }
         graphDelegate?.graphDidChange()
-        mayDeferUpdate = true
+        resetMayDeferUpdate()
     }
 
     func startTransactionUpdate(id: UInt32? = nil) {
@@ -426,6 +432,14 @@ class GraphHost {
 
     private static func nextAsyncTransactionTrace() -> UInt32 {
         AsyncTransactionTraceState.nextTrace()
+    }
+
+    private func narrowMayDeferUpdate(_ value: Bool) {
+        mayDeferUpdateLatch = mayDeferUpdateLatch && value
+    }
+
+    private func resetMayDeferUpdate() {
+        mayDeferUpdateLatch = true
     }
 
     private var updatingMutationHost: GraphHost? {
@@ -664,21 +678,11 @@ class GraphHost {
                 host.graphDelegate?.graphDidChange()
             } else {
                 // Nil-host fallback still needs Transaction.current to reflect
-                // the queued transaction while the mutation runs. It scopes a
-                // thread transaction exactly like direct withTransaction, then
-                // restores the caller's thread-local box.
-                let previous = Transaction.ThreadStorage.currentBox
-                let parentTransaction = previous?.transaction ?? Transaction()
-                let scopedTransaction = asyncTransaction.transaction.scopedTransaction(
-                    inheritingFrom: parentTransaction
-                )
-                Transaction.ThreadStorage.currentBox = Transaction.ThreadStorageBox(
-                    transaction: scopedTransaction
-                )
-                defer {
-                    Transaction.ThreadStorage.currentBox = previous
+                // the queued transaction while the mutation runs, then restore
+                // the caller's thread-local box after the stored mutations drain.
+                Transaction.withScopedThreadTransaction(asyncTransaction.transaction) {
+                    asyncTransaction.apply()
                 }
-                asyncTransaction.apply()
             }
         }
     }

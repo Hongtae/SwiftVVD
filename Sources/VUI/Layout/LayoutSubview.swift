@@ -44,14 +44,11 @@ struct LayoutProxyAttributes {
 /// Proxy for a child view in a Layout.
 /// Dependency tracking uses @TaskLocal reads.
 struct LayoutProxy {
-    var context: AnyRuleContext
+    var context: AnyRuleContext?
     var attributes: LayoutProxyAttributes
 
     init(attributes: LayoutProxyAttributes) {
-        guard let contextAttribute = AttributeGraph.currentRuleContextAttribute else {
-            fatalError("LayoutProxy initialized outside an active layout rule context.")
-        }
-        self.context = AnyRuleContext(attribute: contextAttribute)
+        self.context = AttributeGraph.currentRuleContextAttribute.map(AnyRuleContext.init(attribute:))
         self.attributes = attributes
     }
 

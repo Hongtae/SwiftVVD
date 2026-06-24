@@ -8,6 +8,8 @@
 import Foundation
 import Synchronization
 
+// Global update scheduler used to batch graph/event side effects and drain them
+// after the outermost update pass.
 enum Update {
     private struct Action {
         let reason: UInt32?
@@ -62,6 +64,12 @@ enum Update {
             state.owner = nil
         }
         state.lock.unlock()
+    }
+
+    static func withLock<Result>(_ body: () throws -> Result) rethrows -> Result {
+        lock()
+        defer { unlock() }
+        return try body()
     }
 
     static var threadIsUpdating: Bool {

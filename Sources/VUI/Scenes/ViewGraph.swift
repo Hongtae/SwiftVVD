@@ -8,21 +8,19 @@
 import Foundation
 
 // ViewGraphRootValues - dirty bitmask for which root values need updating.
-// Member names are part of the host contract. Raw values use the current
-// local bit mapping until the root-value mask is verified.
+// Member names and raw bit order are part of the host contract.
 struct ViewGraphRootValues: OptionSet {
     let rawValue: UInt16
 
-    // Raw values are provisional; keep bit order isolated here.
     static let rootView      = ViewGraphRootValues(rawValue: 1 << 0)
     static let environment   = ViewGraphRootValues(rawValue: 1 << 1)
-    static let size          = ViewGraphRootValues(rawValue: 1 << 2)
-    static let safeArea      = ViewGraphRootValues(rawValue: 1 << 3)
-    static let transform     = ViewGraphRootValues(rawValue: 1 << 4)
-    static let focusStore    = ViewGraphRootValues(rawValue: 1 << 5)
-    static let focusedItem   = ViewGraphRootValues(rawValue: 1 << 6)
-    static let focusedValues = ViewGraphRootValues(rawValue: 1 << 7)
-    static let containerSize = ViewGraphRootValues(rawValue: 1 << 8)
+    static let transform     = ViewGraphRootValues(rawValue: 1 << 2)
+    static let size          = ViewGraphRootValues(rawValue: 1 << 3)
+    static let safeArea      = ViewGraphRootValues(rawValue: 1 << 4)
+    static let containerSize = ViewGraphRootValues(rawValue: 1 << 5)
+    static let focusStore    = ViewGraphRootValues(rawValue: 1 << 6)
+    static let focusedItem   = ViewGraphRootValues(rawValue: 1 << 7)
+    static let focusedValues = ViewGraphRootValues(rawValue: 1 << 8)
     static let all           = ViewGraphRootValues(rawValue: 0x01FF)
 }
 
@@ -104,6 +102,35 @@ protocol ViewGraphRootValueUpdater: AnyObject {
     func updateAccessibilityEnvironment()
 }
 
+extension ViewGraphRootValueUpdater {
+    func updateTransform() {}
+    func updateFocusStore() {}
+    func updateFocusedItem() {}
+    func updateFocusedValues() {}
+    func updateAccessibilityEnvironment() {}
+
+    func invalidateProperties(_ values: ViewGraphRootValues, mayDeferUpdate: Bool) {
+        guard !values.isEmpty,
+              let owner = self as? any ViewGraphOwner else {
+            return
+        }
+
+        Update.withLock {
+            let currentValues = owner.valuesNeedingUpdate
+            guard !values.subtracting(currentValues).isEmpty else {
+                return
+            }
+
+            let updatedValues = currentValues.union(values)
+            owner.valuesNeedingUpdate = updatedValues
+            owner.viewGraph.setNeedsUpdate(
+                mayDeferUpdate: mayDeferUpdate,
+                values: updatedValues
+            )
+        }
+    }
+}
+
 // ViewGraphHost - intermediate base class between GraphHost and ViewGraph.
 // The backend currently drives updateOutputs from the render loop. The class
 // keeps the shared host lifecycle surface so scheduling can be tightened later.
@@ -123,12 +150,83 @@ class ViewGraphHost: GraphHost, ViewGraphOwner {
     var externalUpdateCount: Int = 0
     var viewGraph: ViewGraph { self as! ViewGraph }
 
-    // Pending parity: display/update timers are simplified.
-    // The current backend calls updateOutputs directly from WindowController.
-    func startDisplayLink() {}
-    func clearDisplayLink() {}
-    func startUpdateTimer(delay: Double) {}
-    func clearUpdateTimer() {}
+    private static let updateTimerDelayFloor: Double = 0.1
+
+    private var displayLink: ViewGraphDisplayLink?
+    private var updateTimerDelay: Double?
+    private var updateTimerNextUpdate: Time = .infinity
+    private var canStartUpdateTimer: Bool = true
+
+    var scheduledDisplayLinkTime: Time {
+        displayLink?.scheduledNextUpdate ?? .infinity
+    }
+
+    var hasScheduledUpdateTimer: Bool {
+        updateTimerDelay != nil
+    }
+
+    var scheduledUpdateTimerTime: Time {
+        updateTimerNextUpdate
+    }
+
+    var isUpdateTimerGateOpen: Bool {
+        canStartUpdateTimer
+    }
+
+    var scheduledUpdateTimerDelay: Double? {
+        updateTimerDelay
+    }
+
+    override var mayDeferUpdate: Bool {
+        guard super.mayDeferUpdate,
+              let displayLink else {
+            return false
+        }
+        return displayLink.hasScheduledNextUpdate
+    }
+
+    // Pending parity: the current backend does not own an AppKit/CoreDisplayLink
+    // object, but the host still keeps the same scheduling state boundary used
+    // by the may-defer gate.
+    func startDisplayLink(delay: Double = 0) {
+        let link = displayLink ?? ViewGraphDisplayLink()
+        displayLink = link
+        link.setNextUpdate(
+            delay: delay,
+            interval: (self as? ViewGraph)?.nextUpdateInterval ?? .infinity,
+            reasons: (self as? ViewGraph)?.nextUpdateReasons ?? []
+        )
+        clearUpdateTimer()
+    }
+
+    func clearDisplayLink() {
+        displayLink?.invalidate()
+        displayLink = nil
+    }
+
+    func startUpdateTimer(delay: Double) {
+        displayLink?.setNextThread(.main)
+
+        let effectiveDelay = delay < Self.updateTimerDelayFloor
+            ? Self.updateTimerDelayFloor
+            : delay
+        let scheduledTime = currentTimestamp + effectiveDelay
+        guard scheduledTime.seconds.isFinite else {
+            return
+        }
+
+        if canStartUpdateTimer || scheduledTime < updateTimerNextUpdate {
+            updateTimerDelay = effectiveDelay
+            updateTimerNextUpdate = scheduledTime
+            canStartUpdateTimer = false
+        }
+    }
+
+    func clearUpdateTimer() {
+        updateTimerDelay = nil
+        updateTimerNextUpdate = .infinity
+        canStartUpdateTimer = true
+    }
 
     /// Central AG evaluation entry point for host-driven output updates.
     ///
@@ -166,6 +264,58 @@ class ViewGraphHost: GraphHost, ViewGraphOwner {
     override init() { super.init() }
 
     override init(graph: AttributeGraph) { super.init(graph: graph) }
+}
+
+private final class ViewGraphDisplayLink {
+    private static let immediateDelayThreshold: Double = 0.001
+
+    enum ThreadName: UInt8 {
+        case main = 0
+        case async = 1
+    }
+
+    private(set) var nextUpdate: Time = .infinity
+    private var currentUpdate: Time?
+    private var interval: Double = .infinity
+    private var reasons: Set<UInt32> = []
+    private var currentThread: ThreadName = .main
+    private var nextThread: ThreadName = .main
+
+    var scheduledNextUpdate: Time {
+        nextUpdate
+    }
+
+    var hasScheduledNextUpdate: Bool {
+        !(nextUpdate == .infinity)
+    }
+
+    func setNextUpdate(
+        delay: Double,
+        interval: Double,
+        reasons: Set<UInt32>
+    ) {
+        let candidate = delay < Self.immediateDelayThreshold
+            ? .zero
+            : (currentUpdate ?? .zero) + delay
+        if candidate < nextUpdate {
+            nextUpdate = candidate
+            self.interval = interval
+            self.reasons = reasons
+        }
+    }
+
+    func setNextThread(_ thread: ThreadName) {
+        nextThread = thread
+    }
+
+    func invalidate() {
+        nextUpdate = .infinity
+        currentUpdate = nil
+        interval = .infinity
+        reasons = []
+        currentThread = .main
+        nextThread = .main
+    }
 }
 
 // ViewGraph - view-level AG host.

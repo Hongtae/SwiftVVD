@@ -54,6 +54,10 @@ public struct _AnimationView<Content>: View where Content: Equatable, Content: V
         return Content._makeViewList(view: _GraphValue(_attribute: contentAttr), inputs: modifiedInputs)
     }
 
+    public static func _viewListCount(inputs: _ViewListCountInputs) -> Int? {
+        Content._viewListCount(inputs: inputs)
+    }
+
     public typealias Body = Never
 }
 

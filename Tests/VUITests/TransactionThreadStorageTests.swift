@@ -65,6 +65,73 @@ final class TransactionThreadStorageTests: XCTestCase {
         XCTAssertEqual(mainFirst, Transaction.id)
     }
 
+    func testTransactionCurrentIsThreadLocal() {
+        var mainTransaction = Transaction()
+        mainTransaction[ThreadStorageParentOnlyKey.self] = 11
+
+        let workerReady = DispatchSemaphore(value: 0)
+        let releaseWorker = DispatchSemaphore(value: 0)
+        let workerDone = DispatchSemaphore(value: 0)
+        let workerInitialValue = Atomic<Int>(-1)
+        let workerScopedValue = Atomic<Int>(-1)
+        let workerWaitSucceeded = Atomic<Int>(0)
+        let workerStillScopedValue = Atomic<Int>(-1)
+        let workerStillParentValue = Atomic<Int>(-1)
+        let workerAfterScopeValue = Atomic<Int>(-1)
+
+        withTransaction(mainTransaction) {
+            let worker = Thread {
+                workerInitialValue.store(
+                    Transaction.current[ThreadStorageParentOnlyKey.self],
+                    ordering: .relaxed
+                )
+
+                var workerTransaction = Transaction()
+                workerTransaction[ThreadStorageThrowingKey.self] = 22
+                withTransaction(workerTransaction) {
+                    workerScopedValue.store(
+                        Transaction.current[ThreadStorageThrowingKey.self],
+                        ordering: .relaxed
+                    )
+                    workerReady.signal()
+                    let waitResult = releaseWorker.wait(timeout: .now() + 2)
+                    workerWaitSucceeded.store(waitResult == .success ? 1 : -1, ordering: .relaxed)
+                    workerStillScopedValue.store(
+                        Transaction.current[ThreadStorageThrowingKey.self],
+                        ordering: .relaxed
+                    )
+                    workerStillParentValue.store(
+                        Transaction.current[ThreadStorageParentOnlyKey.self],
+                        ordering: .relaxed
+                    )
+                }
+
+                workerAfterScopeValue.store(
+                    Transaction.current[ThreadStorageThrowingKey.self],
+                    ordering: .relaxed
+                )
+                workerDone.signal()
+            }
+            worker.start()
+
+            XCTAssertEqual(workerReady.wait(timeout: .now() + 2), .success)
+            XCTAssertEqual(workerInitialValue.load(ordering: .relaxed), 0)
+            XCTAssertEqual(workerScopedValue.load(ordering: .relaxed), 22)
+            XCTAssertEqual(Transaction.current[ThreadStorageParentOnlyKey.self], 11)
+            XCTAssertEqual(Transaction.current[ThreadStorageThrowingKey.self], 0)
+
+            releaseWorker.signal()
+            XCTAssertEqual(workerDone.wait(timeout: .now() + 2), .success)
+            XCTAssertEqual(workerWaitSucceeded.load(ordering: .relaxed), 1)
+            XCTAssertEqual(workerStillScopedValue.load(ordering: .relaxed), 22)
+            XCTAssertEqual(workerStillParentValue.load(ordering: .relaxed), 0)
+            XCTAssertEqual(workerAfterScopeValue.load(ordering: .relaxed), 0)
+            XCTAssertEqual(Transaction.current[ThreadStorageParentOnlyKey.self], 11)
+        }
+
+        XCTAssertEqual(Transaction.current[ThreadStorageParentOnlyKey.self], 0)
+    }
+
     func testEmptyStandaloneWithTransactionDoesNotInstallThreadStorageBox() {
         XCTAssertNil(Transaction.ThreadStorage.currentBox)
 
@@ -219,8 +286,26 @@ final class TransactionThreadStorageTests: XCTestCase {
 
         XCTAssertFalse(scoped.plist.isIdentical(to: child.plist))
         XCTAssertFalse(scoped.plist.isIdentical(to: parent.plist))
+        XCTAssertTrue(scoped.plist.elements?.before === child.plist.elements)
+        XCTAssertNil(scoped.plist.elements?.after)
         XCTAssertEqual(scoped[ThreadStorageParentOnlyKey.self], 1)
         XCTAssertEqual(scoped[ThreadStorageThrowingKey.self], 2)
+    }
+
+    func testCurrentSemanticsSameKeyChildAllocatesMergedPropertyStorage() {
+        var parent = Transaction()
+        parent[ThreadStorageParentOnlyKey.self] = 1
+
+        var child = Transaction()
+        child[ThreadStorageParentOnlyKey.self] = 2
+
+        let scoped = child.scopedTransaction(inheritingFrom: parent)
+
+        XCTAssertFalse(scoped.plist.isIdentical(to: child.plist))
+        XCTAssertFalse(scoped.plist.isIdentical(to: parent.plist))
+        XCTAssertTrue(scoped.plist.elements?.before === child.plist.elements)
+        XCTAssertNil(scoped.plist.elements?.after)
+        XCTAssertEqual(scoped[ThreadStorageParentOnlyKey.self], 2)
     }
 
     func testRuntimeOverridePreV5NestedTransactionDirectInstallsChildWithoutParentMerge() {

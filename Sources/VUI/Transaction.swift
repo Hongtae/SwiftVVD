@@ -255,6 +255,44 @@ extension Transaction {
         ThreadStorage.current ?? Transaction()
     }
 
+    static func withScopedThreadTransaction<Result>(
+        _ transaction: Transaction,
+        finalizesCompletions: Bool = false,
+        immediateNoMutationCompletion: Bool = false,
+        _ body: () throws -> Result
+    ) rethrows -> Result {
+        let previous = ThreadStorage.currentBox
+        let parentTransaction = previous?.transaction ?? Transaction()
+        let scopedTransaction = transaction.scopedTransaction(inheritingFrom: parentTransaction)
+        let scopedBox = ThreadStorageBox(transaction: scopedTransaction)
+        ThreadStorage.currentBox = scopedBox
+        let result: Result
+        do {
+            result = try body()
+        } catch {
+            ThreadStorage.currentBox = previous
+            if finalizesCompletions {
+                finalizeAnimationCompletions(
+                    in: scopedTransaction,
+                    animation: scopedTransaction.effectiveAnimation,
+                    bodyDidMutate: scopedBox.bodyDidMutate,
+                    immediateNoMutationCompletion: immediateNoMutationCompletion
+                )
+            }
+            throw error
+        }
+        ThreadStorage.currentBox = previous
+        if finalizesCompletions {
+            finalizeAnimationCompletions(
+                in: scopedTransaction,
+                animation: scopedTransaction.effectiveAnimation,
+                bodyDidMutate: scopedBox.bodyDidMutate,
+                immediateNoMutationCompletion: immediateNoMutationCompletion
+            )
+        }
+        return result
+    }
+
     var hasLocalAnimationCompletionState: Bool {
         animationCompletionObserver != nil ||
         animationListener != nil ||

@@ -457,8 +457,6 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
         self.viewGraph.viewDelegate = self
         self.viewGraph.graphDelegate = self
         // updateDelegate: WindowController provides root value updates (size, env, etc.).
-        //   updateSize() / updateEnvironment() etc. called inline in updateView for now.
-        //   Full invalidateProperties(_:mayDeferUpdate:) wiring is a future step.
         self.viewGraph.updateDelegate = self
         // delegate (ViewGraphHostDelegate): not wired yet. Root input attributes
         // are updated directly through ViewGraphRootValueUpdater for now.
@@ -575,6 +573,8 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     private var hasDeliveredViewLayoutUpdate = false
     private(set) var cachedRootFittedSize: CGSize?
     private(set) var cachedContentSize: CGSize = .zero
+
+    private static let displayLinkRequestDelayLimit: Double = 0.25
 
     var observesRootFittedSizeForLayoutUpdates: Bool { false }
 
@@ -1409,11 +1409,17 @@ class WindowController: WindowInputEventHandler, WindowDelegate,
     // MARK: - ViewGraphDelegate
 
     func setNeedsUpdate() {
-        viewChangedWhileDrawing = true
+        requestUpdate(after: 0)
     }
 
     func requestUpdate(after: Double) {
-        viewChangedWhileDrawing = true
+        if after == 0 {
+            viewChangedWhileDrawing = true
+        } else if after < Self.displayLinkRequestDelayLimit {
+            viewGraph.startDisplayLink(delay: after)
+        } else {
+            viewGraph.startUpdateTimer(delay: after)
+        }
     }
 
     func `as`<T>(_ type: T.Type) -> T? {

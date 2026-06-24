@@ -41,6 +41,13 @@ struct ConfirmationDialogPreference: @unchecked Sendable {
 // Dictionary<ViewIdentity, ConfirmationDialog> is the preference value.
 struct ConfirmationDialog: @unchecked Sendable {
     let preference: ConfirmationDialogPreference
+    let title: String
+    let colorScheme: ColorScheme?
+    let icon: Image?
+    let tintColor: Color.Resolved?
+    let suppressionConfiguration: DialogSuppressionConfiguration?
+    let accessibilityTitle: NSAttributedString?
+    let preventsTermination: Bool?
 
     // Regular PreferenceKey, not HostPreferenceKey.
     struct PreferenceKey: _PreferenceKeyProto {
@@ -75,12 +82,103 @@ struct MakeConfirmationDialog<Actions: View, Message: View>: StatefulRule {
     let size: Attribute<CGSize>
     let transform: Attribute<ViewTransform>
     var identityTracker: ViewIdentity.Tracker
+    var propertyTracker: _PropertyListTracker
+
+    // Change-detection cache fields retained for platform-dialog update decisions.
+    var lastTitle: Optional<String>
+    var lastColorScheme: Optional<ColorScheme>
+    var lastIcon: Optional<Image>
+    var lastTintColor: Optional<Color.Resolved>
+    var lastSeverity: DialogSeverity
+    var lastSuppressionConfiguration: Optional<DialogSuppressionConfiguration>
+    var lastAccessibilityTitle: Optional<NSAttributedString>
+    var lastDialogPreventsTermination: Optional<Bool>
+
+    init(
+        environment: Attribute<EnvironmentValues>,
+        modifier: Attribute<ConfirmationDialogModifier<Actions, Message>>,
+        actionsItemList: WeakAttribute<PlatformItemList>,
+        messageItemList: WeakAttribute<PlatformItemList>,
+        phase: Attribute<Phase>,
+        position: Attribute<CGPoint>,
+        size: Attribute<CGSize>,
+        transform: Attribute<ViewTransform>,
+        identityTracker: ViewIdentity.Tracker,
+        lastTitle: Optional<String>,
+        lastColorScheme: Optional<ColorScheme>,
+        lastIcon: Optional<Image>,
+        lastTintColor: Optional<Color.Resolved>,
+        lastSeverity: DialogSeverity,
+        lastSuppressionConfiguration: Optional<DialogSuppressionConfiguration>,
+        lastAccessibilityTitle: Optional<NSAttributedString>,
+        lastDialogPreventsTermination: Optional<Bool>
+    ) {
+        self.init(
+            environment: environment,
+            modifier: modifier,
+            actionsItemList: actionsItemList,
+            messageItemList: messageItemList,
+            phase: phase,
+            position: position,
+            size: size,
+            transform: transform,
+            identityTracker: identityTracker,
+            propertyTracker: _PropertyListTracker(),
+            lastTitle: lastTitle,
+            lastColorScheme: lastColorScheme,
+            lastIcon: lastIcon,
+            lastTintColor: lastTintColor,
+            lastSeverity: lastSeverity,
+            lastSuppressionConfiguration: lastSuppressionConfiguration,
+            lastAccessibilityTitle: lastAccessibilityTitle,
+            lastDialogPreventsTermination: lastDialogPreventsTermination
+        )
+    }
+
+    init(
+        environment: Attribute<EnvironmentValues>,
+        modifier: Attribute<ConfirmationDialogModifier<Actions, Message>>,
+        actionsItemList: WeakAttribute<PlatformItemList>,
+        messageItemList: WeakAttribute<PlatformItemList>,
+        phase: Attribute<Phase>,
+        position: Attribute<CGPoint>,
+        size: Attribute<CGSize>,
+        transform: Attribute<ViewTransform>,
+        identityTracker: ViewIdentity.Tracker,
+        propertyTracker: _PropertyListTracker,
+        lastTitle: Optional<String>,
+        lastColorScheme: Optional<ColorScheme>,
+        lastIcon: Optional<Image>,
+        lastTintColor: Optional<Color.Resolved>,
+        lastSeverity: DialogSeverity,
+        lastSuppressionConfiguration: Optional<DialogSuppressionConfiguration>,
+        lastAccessibilityTitle: Optional<NSAttributedString>,
+        lastDialogPreventsTermination: Optional<Bool>
+    ) {
+        self.environment = environment
+        self.modifier = modifier
+        self.actionsItemList = actionsItemList
+        self.messageItemList = messageItemList
+        self.phase = phase
+        self.position = position
+        self.size = size
+        self.transform = transform
+        self.identityTracker = identityTracker
+        self.propertyTracker = propertyTracker
+        self.lastTitle = lastTitle
+        self.lastColorScheme = lastColorScheme
+        self.lastIcon = lastIcon
+        self.lastTintColor = lastTintColor
+        self.lastSeverity = lastSeverity
+        self.lastSuppressionConfiguration = lastSuppressionConfiguration
+        self.lastAccessibilityTitle = lastAccessibilityTitle
+        self.lastDialogPreventsTermination = lastDialogPreventsTermination
+    }
 
     mutating func updateValue() {
         guard let graph = AttributeGraph.current else {
             fatalError("MakeConfirmationDialog.updateValue called outside AG context")
         }
-        let environment = environment.value
         var actionsList: PlatformItemList?
         var messageList: PlatformItemList?
         if actionsItemList.isValid(in: graph) {
@@ -90,7 +188,28 @@ struct MakeConfirmationDialog<Actions: View, Message: View>: StatefulRule {
             messageList = messageItemList.toStrong().value
         }
         let m = modifier.value
-        let identity = identityTracker.update(for: phase.value)
+        let phaseValue = phase.value
+        let values = environment.value
+        guard let environment = trackedEnvironment(from: values) else { return }
+        let title = m.title._resolveText(in: environment)
+        let dialogColorScheme = environment.dialogColorScheme
+        let explicitPreferredColorScheme = environment.explicitPreferredColorScheme
+        let colorScheme = dialogColorScheme ?? explicitPreferredColorScheme
+        let icon = environment.dialogIcon
+        let tintColor = environment.dialogTintColor?.resolve(in: environment)
+        let severity = environment.dialogSeverity
+        let suppressionConfiguration = environment.dialogSuppression
+        let preventsTermination = environment.dialogPreventsAppTermination
+        let accessibilityTitle = resolvedAccessibilityTitle(for: m.title, in: environment)
+        lastTitle = title
+        lastColorScheme = colorScheme
+        lastIcon = icon
+        lastTintColor = tintColor
+        lastSeverity = severity
+        lastSuppressionConfiguration = suppressionConfiguration
+        lastAccessibilityTitle = accessibilityTitle
+        lastDialogPreventsTermination = preventsTermination
+        let identity = identityTracker.update(for: phaseValue)
         guard m.isPresented.wrappedValue else {
             let id = identity
             AttributeGraph.setStatefulOutput({ (dict: inout [ViewIdentity: ConfirmationDialog]) in
@@ -109,11 +228,37 @@ struct MakeConfirmationDialog<Actions: View, Message: View>: StatefulRule {
             onDismiss: nil,
             usesPlatformWindow: environment.modalSessionUsingPlatformWindow
         )
-        let storage = ConfirmationDialog(preference: pref)
+        let storage = ConfirmationDialog(
+            preference: pref,
+            title: title,
+            colorScheme: colorScheme,
+            icon: icon,
+            tintColor: tintColor,
+            suppressionConfiguration: suppressionConfiguration,
+            accessibilityTitle: accessibilityTitle,
+            preventsTermination: preventsTermination
+        )
         let id = identity
         AttributeGraph.setStatefulOutput({ (dict: inout [ViewIdentity: ConfirmationDialog]) in
             dict[id] = storage
         } as Value)
+    }
+
+    private mutating func trackedEnvironment(from values: EnvironmentValues) -> EnvironmentValues? {
+        if AttributeGraph.currentStatefulOutput(Value.self) != nil,
+           !AttributeGraph.currentStatefulInputsChanged(),
+           !propertyTracker.hasDifferentUsedValues(values._plist) {
+            return nil
+        }
+        propertyTracker.reset()
+        return EnvironmentValues(values._plist, tracker: propertyTracker)
+    }
+
+    private func resolvedAccessibilityTitle(for title: Text, in environment: EnvironmentValues) -> NSAttributedString? {
+        guard environment.accessibilityEnabled else { return nil }
+        // Accessibility label storage is not wired yet, so there is no payload to resolve.
+        _ = title
+        return nil
     }
 }
 
@@ -167,7 +312,15 @@ extension ConfirmationDialogModifier {
             position: inputs.position,
             size: sizeAttr,
             transform: inputs.transform,
-            identityTracker: ViewIdentity.Tracker()
+            identityTracker: ViewIdentity.Tracker(),
+            lastTitle: nil,
+            lastColorScheme: nil,
+            lastIcon: nil,
+            lastTintColor: nil,
+            lastSeverity: .standard,
+            lastSuppressionConfiguration: nil,
+            lastAccessibilityTitle: nil,
+            lastDialogPreventsTermination: nil
         )
         let storageAttr: Attribute<MakeConfirmationDialog<Actions, Message>.Value> =
             graph.makeStatefulRule(storageRule)

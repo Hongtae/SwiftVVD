@@ -139,6 +139,9 @@ extension PropertyList {
     func nonDefaultValue<T: PropertyKey>(forKey key: T.Type) -> T.Value? {
         var element = self.elements
         while let current = element {
+            if let value: T.Value = current.before?.nonDefaultValue(forKey: key) {
+                return value
+            }
             if current.keyType == key {
                 return (current as! TypedElement<T>).value
             }
@@ -159,20 +162,7 @@ extension PropertyList {
     func forEachValue<Value>(ofType valueType: Value.Type,
                              _ body: (any PropertyKey.Type, Value) -> Bool) -> Bool {
         var seenKeys = Set<ObjectIdentifier>()
-        var element = self.elements
-        while let current = element {
-            // PropertyList keeps older nodes for the same key as shadowed tail
-            // entries. Typed iteration must visit only the first live value per
-            // key, otherwise a popped stack can still look non-empty through an
-            // obsolete tail node.
-            let keyID = ObjectIdentifier(current.keyType)
-            if seenKeys.insert(keyID).inserted,
-               current.visitValue(ofType: valueType, body) {
-                return true
-            }
-            element = current.after
-        }
-        return false
+        return elements?.forEachValue(ofType: valueType, seenKeys: &seenKeys, body) ?? false
     }
 }
 
@@ -461,6 +451,9 @@ extension PropertyList {
     private func findValueWithSecondaryLookup<K: PropertyKeyLookup>(_ lookup: K.Type) -> K.Primary.Value? {
         var element = self.elements
         while let current = element {
+            if let value = current.before?.findValueWithSecondaryLookup(lookup) {
+                return value
+            }
             if current.keyType == K.Primary.self {
                 return (current as! TypedElement<K.Primary>).value
             }
@@ -518,8 +511,8 @@ extension PropertyList {
 
         var valueDescription: String { fatalError("TypedElement must override valueDescription") }
 
-        // Rebuild this node with `tail` at the end of the chain (subclass must override).
-        func rebuilt(appending tail: Element?) -> Element { fatalError("TypedElement must override rebuilt(appending:)") }
+        // Rebuild this node as a merge head with a higher-priority before chain.
+        func rebuilt(before: Element?) -> Element { fatalError("TypedElement must override rebuilt(before:)") }
 
         func isValueEqual(to other: Element) -> Bool { false }
 
@@ -578,6 +571,70 @@ extension PropertyList {
             false
         }
 
+        func forEachValue<Value>(
+            ofType valueType: Value.Type,
+            seenKeys: inout Set<ObjectIdentifier>,
+            _ body: (any PropertyKey.Type, Value) -> Bool
+        ) -> Bool {
+            var element: Element? = self
+            while let current = element {
+                // The before chain has higher lookup priority than the current
+                // node. Visit it first so shadowed fallback values stay hidden.
+                if current.before?.forEachValue(
+                    ofType: valueType,
+                    seenKeys: &seenKeys,
+                    body
+                ) == true {
+                    return true
+                }
+
+                let keyID = ObjectIdentifier(current.keyType)
+                if seenKeys.insert(keyID).inserted,
+                   current.visitValue(ofType: valueType, body) {
+                    return true
+                }
+                element = current.after
+            }
+            return false
+        }
+
+        func nonDefaultValue<T: PropertyKey>(forKey key: T.Type) -> T.Value? {
+            var element: Element? = self
+            while let current = element {
+                if let value: T.Value = current.before?.nonDefaultValue(forKey: key) {
+                    return value
+                }
+                if current.keyType == key {
+                    return (current as! TypedElement<T>).value
+                }
+                if !current.skipFilter.mightContain(key) { return nil }
+                element = current.after
+            }
+            return nil
+        }
+
+        func findValueWithSecondaryLookup<K: PropertyKeyLookup>(_ lookup: K.Type) -> K.Primary.Value? {
+            var element: Element? = self
+            while let current = element {
+                if let value = current.before?.findValueWithSecondaryLookup(lookup) {
+                    return value
+                }
+                if current.keyType == K.Primary.self {
+                    return (current as! TypedElement<K.Primary>).value
+                }
+                if current.keyType == K.Secondary.self,
+                   let value = K.lookup(in: (current as! TypedElement<K.Secondary>).value) {
+                    return value
+                }
+                if !current.skipFilter.mightContain(K.Primary.self),
+                   !current.skipFilter.mightContain(K.Secondary.self) {
+                    return nil
+                }
+                element = current.after
+            }
+            return nil
+        }
+
         func containsIdenticalTail(_ tail: Element?) -> Bool {
             guard let tail else { return true }
             var element: Element? = self
@@ -595,19 +652,15 @@ extension PropertyList {
     final class TypedElement<T: PropertyKey>: Element {
         var value: T.Value
 
-        init(key: T.Type, value: T.Value, after: Element? = nil) {
+        init(key: T.Type, value: T.Value, before: Element? = nil, after: Element? = nil) {
             self.value = value
-            super.init(keyType: key, after: after)
+            super.init(keyType: key, before: before, after: after)
         }
 
         override var valueDescription: String { "\(value)" }
 
-        // Rebuild this node with `tail` appended at the end of the chain.
-        // Used by PropertyList.merge to create a new chain where self's entries have
-        // higher priority (appear first) and `tail` (other's chain) fills in the rest.
-        override func rebuilt(appending tail: Element?) -> Element {
-            TypedElement<T>(key: T.self, value: value,
-                            after: after?.rebuilt(appending: tail) ?? tail)
+        override func rebuilt(before: Element?) -> Element {
+            TypedElement<T>(key: T.self, value: value, before: before, after: after)
         }
 
         override func isValueEqual(to other: Element) -> Bool {
@@ -631,7 +684,7 @@ extension PropertyList {
         if elements!.containsIdenticalTail(other.elements) {
             return
         }
-        elements = elements!.rebuilt(appending: other.elements)
+        elements = other.elements!.rebuilt(before: elements)
     }
 
     init<Key: PropertyKey>(_ key: Key.Type, value: Key.Value) {

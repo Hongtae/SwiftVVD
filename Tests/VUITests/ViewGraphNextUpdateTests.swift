@@ -2,30 +2,51 @@ import XCTest
 @testable import VUI
 
 final class ViewGraphNextUpdateTests: XCTestCase {
-    func testMaxVelocitySchedulesHighFrameRateIntervals() {
-        var update = ViewGraph.NextUpdate()
-        update.maxVelocity(159.9)
-        XCTAssertTrue(update.interval.isInfinite)
-        XCTAssertTrue(update.reasons.isEmpty)
+    func testNextUpdateIntervalNormalizesUnscheduledViewsIntervalToZero() {
+        let rendererHost = TestViewRendererHost()
+        let viewGraph = ViewGraph(rootViewType: EmptyView.self, content: EmptyView(), rendererHost: rendererHost)
+        rendererHost.storage = viewGraph
 
-        update.maxVelocity(160)
-        XCTAssertEqual(update.interval, 1.0 / 80.0, accuracy: 0.000_000_001)
-        XCTAssertEqual(update.reasons, [2_555_904])
+        XCTAssertEqual(viewGraph.nextUpdateInterval, 0)
 
-        update.maxVelocity(320)
-        XCTAssertEqual(update.interval, 1.0 / 120.0, accuracy: 0.000_000_001)
-        XCTAssertEqual(update.reasons, [2_555_904])
+        viewGraph.nextUpdate.gestures.interval(0.2, reason: 11)
+        XCTAssertEqual(viewGraph.nextUpdateInterval, 0)
+        XCTAssertTrue(viewGraph.nextUpdateReasons.isEmpty)
+
+        viewGraph.nextUpdate.views.interval(0.25, reason: 12)
+        XCTAssertEqual(viewGraph.nextUpdateInterval, 0.25)
+        XCTAssertEqual(viewGraph.nextUpdateReasons, [12])
     }
 
-    func testZeroIntervalRequestIgnoresSlowerFollowUpIntervals() {
-        var update = ViewGraph.NextUpdate()
-        update.interval(0)
-        update.interval(0.5, reason: 9)
-        XCTAssertTrue(update.interval.isInfinite)
-        XCTAssertEqual(update.reasons, [9])
+    func testZeroIntervalSuppressesLaterSlowIntervals() {
+        var nextUpdate = ViewGraph.NextUpdate()
 
-        update.maxVelocity(160)
-        XCTAssertEqual(update.interval, 1.0 / 80.0, accuracy: 0.000_000_001)
-        XCTAssertEqual(update.reasons, [9, 2_555_904])
+        nextUpdate.interval(0, reason: 10)
+        XCTAssertTrue(nextUpdate.interval.isInfinite)
+        XCTAssertEqual(nextUpdate.reasons, [10])
+
+        nextUpdate.interval(0.25, reason: 11)
+        XCTAssertTrue(nextUpdate.interval.isInfinite)
+        XCTAssertEqual(nextUpdate.reasons, [10, 11])
+
+        nextUpdate.interval(1.0 / 120.0, reason: 12)
+        XCTAssertEqual(nextUpdate.interval, 1.0 / 120.0, accuracy: 0.000_001)
+        XCTAssertEqual(nextUpdate.reasons, [10, 11, 12])
+    }
+
+    func testMaxVelocityMapsThresholdsToHighFrameRateIntervals() {
+        var nextUpdate = ViewGraph.NextUpdate()
+
+        nextUpdate.maxVelocity(159.99)
+        XCTAssertTrue(nextUpdate.interval.isInfinite)
+        XCTAssertTrue(nextUpdate.reasons.isEmpty)
+
+        nextUpdate.maxVelocity(160)
+        XCTAssertEqual(nextUpdate.interval, 1.0 / 80.0, accuracy: 0.000_001)
+        XCTAssertEqual(nextUpdate.reasons, [2_555_904])
+
+        nextUpdate.maxVelocity(320)
+        XCTAssertEqual(nextUpdate.interval, 1.0 / 120.0, accuracy: 0.000_001)
+        XCTAssertEqual(nextUpdate.reasons, [2_555_904])
     }
 }

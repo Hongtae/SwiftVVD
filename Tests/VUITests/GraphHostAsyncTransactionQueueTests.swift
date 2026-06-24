@@ -28,7 +28,7 @@ final class GraphHostAsyncTransactionQueueTests: XCTestCase {
         XCTAssertEqual(host.data.transactionSeed, 1)
     }
 
-    func testDeferredAsyncTransactionFlushKeepsAmbientCurrentTransaction() {
+    func testDeferredAsyncTransactionFlushInstallsScopedCurrentTransactionAndRestoresAmbient() {
         Transaction.ThreadStorage.currentBox = nil
         let host = GraphHost()
         var child = Transaction()
@@ -53,7 +53,7 @@ final class GraphHostAsyncTransactionQueueTests: XCTestCase {
         }
 
         XCTAssertEqual(observed?.0, true)
-        XCTAssertEqual(observed?.1, false)
+        XCTAssertEqual(observed?.1, true)
         XCTAssertFalse(host.hasPendingTransactions)
         XCTAssertEqual(host.data.transactionSeed, 1)
     }
