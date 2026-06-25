@@ -242,9 +242,9 @@ extension PhaseAnimator.StateTransitioningContainer {
         }
 
         enum EndlessLoopState: Equatable {
-            case empty
-            case pending(Int)
-            case active(Int)
+            case monitoring(firstNonAnimatedPhaseIndex: Int)
+            case animating
+            case paused
         }
 
         var _view: Attribute<PhaseAnimator<Phase, Content>.StateTransitioningContainer>
@@ -256,7 +256,7 @@ extension PhaseAnimator.StateTransitioningContainer {
         var currentIndex = 0
         var completionSeed = 0
         var resetSeed = UInt32(0)
-        var endlessLoopState = EndlessLoopState.empty
+        var endlessLoopState = EndlessLoopState.animating
         var lastBehavior: PhaseAnimator<Phase, Content>.Behavior?
         var phaseChangeTransaction = Transaction()
         var phaseChangeTransactionSeed: UInt32?
@@ -281,11 +281,7 @@ extension PhaseAnimator.StateTransitioningContainer {
             let graphPhase = _phase.value
             if resetSeed != graphPhase.resetSeed {
                 resetSeed = graphPhase.resetSeed
-                currentIndex = 0
-                completionSeed &+= 1
-                endlessLoopState = .empty
-                lastBehavior = nil
-                phaseChangeTransactionSeed = nil
+                resetAnimationState()
             }
 
             let container = _view.value
@@ -303,21 +299,25 @@ extension PhaseAnimator.StateTransitioningContainer {
             } else {
                 animationCompletion = nil
             }
-            let isVisible: Bool
+            let isVisible: Bool?
             if let graph,
                _isVisible.isValid(in: graph) {
                 isVisible = _isVisible.toStrong().value
             } else {
-                isVisible = false
+                isVisible = nil
             }
 
-            if isVisible,
+            if isVisible == false {
+                resetAnimationState()
+            }
+
+            if isVisible == true,
                scheduleVisibleStartIfNeeded(behavior: container.behavior) {
-            } else if isVisible,
+            } else if isVisible == true,
                let animationCompletion,
                animationCompletion.seed == completionSeed {
                 if animationCompletion.didAnimate {
-                    endlessLoopState = .empty
+                    endlessLoopState = .animating
                     switch container.behavior {
                     case .repeating:
                         advance(from: currentIndex)
@@ -330,7 +330,7 @@ extension PhaseAnimator.StateTransitioningContainer {
                     consumeNonAnimatedCompletion(behavior: container.behavior)
                 }
             }
-            if isVisible {
+            if isVisible == true {
                 lastBehavior = container.behavior
             }
 
@@ -349,12 +349,17 @@ extension PhaseAnimator.StateTransitioningContainer {
         }
 
         var clampedIndex: Int {
-            if case .active = endlessLoopState {
-                return 0
-            }
+            guard case .animating = endlessLoopState else { return 0 }
             let container = _view.value
             guard !container.phases.isEmpty else { return 0 }
             return min(currentIndex, container.phases.count - 1)
+        }
+
+        mutating func resetAnimationState() {
+            currentIndex = 0
+            completionSeed &+= 1
+            endlessLoopState = .animating
+            lastBehavior = nil
         }
 
         mutating func consumeNonAnimatedCompletion(behavior: PhaseAnimator<Phase, Content>.Behavior) {
@@ -366,17 +371,21 @@ extension PhaseAnimator.StateTransitioningContainer {
             }
 
             let sourceIndex = currentIndex
-            if case .empty = endlessLoopState {
-                endlessLoopState = .active(sourceIndex)
+            if case .animating = endlessLoopState {
+                endlessLoopState = .monitoring(firstNonAnimatedPhaseIndex: sourceIndex)
             }
             advance(from: sourceIndex)
         }
 
         mutating func scheduleVisibleStartIfNeeded(behavior: PhaseAnimator<Phase, Content>.Behavior) -> Bool {
-            guard let lastBehavior else {
-                guard case .repeating = behavior else { return false }
+            if case .repeating = behavior,
+               lastBehavior == nil || lastBehavior == behavior {
                 advance(from: currentIndex)
                 return true
+            }
+
+            guard let lastBehavior else {
+                return false
             }
 
             guard lastBehavior != behavior else { return false }
@@ -408,11 +417,15 @@ extension PhaseAnimator.StateTransitioningContainer {
         }
 
         mutating func advance(to targetIndex: Int) {
-            if case let .active(loopIndex) = endlessLoopState,
-               loopIndex == targetIndex {
-                endlessLoopState = .empty
+            switch endlessLoopState {
+            case .paused:
+                return
+            case let .monitoring(firstNonAnimatedPhaseIndex) where firstNonAnimatedPhaseIndex == targetIndex:
+                endlessLoopState = .paused
                 currentIndex = 0
                 return
+            case .monitoring, .animating:
+                break
             }
 
             let container = _view.value

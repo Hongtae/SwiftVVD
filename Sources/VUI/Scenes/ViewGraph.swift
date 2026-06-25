@@ -131,6 +131,53 @@ extension ViewGraphRootValueUpdater {
     }
 }
 
+// ViewGraphFeature - optional per-graph hooks for auxiliary graph behavior.
+// Features can adjust inputs/outputs, join lifecycle transitions, and request
+// update participation without becoming part of the core ViewGraph state.
+protocol ViewGraphFeature {
+    func modifyViewInputs(inputs: inout _ViewInputs, graph: ViewGraph)
+    func modifyViewOutputs(outputs: inout _ViewOutputs, inputs: _ViewInputs, graph: ViewGraph)
+    func uninstantiate(graph: ViewGraph)
+    func isHiddenForReuseDidChange(graph: ViewGraph)
+    func allowsAsyncUpdate(graph: ViewGraph) -> Bool?
+    func needsUpdate(graph: ViewGraph) -> Bool
+    func outputsDidChange(graph: ViewGraph)
+    func update(graph: ViewGraph)
+}
+
+// Default feature hooks are intentionally inert. Individual features only
+// override the lifecycle points they need.
+extension ViewGraphFeature {
+    func modifyViewInputs(inputs: inout _ViewInputs, graph: ViewGraph) {}
+    func modifyViewOutputs(outputs: inout _ViewOutputs, inputs: _ViewInputs, graph: ViewGraph) {}
+    func uninstantiate(graph: ViewGraph) {}
+    func isHiddenForReuseDidChange(graph: ViewGraph) {}
+    func allowsAsyncUpdate(graph: ViewGraph) -> Bool? { true }
+    func needsUpdate(graph: ViewGraph) -> Bool { false }
+    func outputsDidChange(graph: ViewGraph) {}
+    func update(graph: ViewGraph) {}
+}
+
+// Small ordered feature list owned by ViewGraph. Keeping dispatch centralized
+// makes host lifecycle fan-out explicit at the call site.
+struct ViewGraphFeatureBuffer {
+    private var features: [any ViewGraphFeature] = []
+
+    var count: Int {
+        features.count
+    }
+
+    mutating func append(_ feature: any ViewGraphFeature) {
+        features.append(feature)
+    }
+
+    func isHiddenForReuseDidChange(graph: ViewGraph) {
+        for feature in features {
+            feature.isHiddenForReuseDidChange(graph: graph)
+        }
+    }
+}
+
 // ViewGraphHost - intermediate base class between GraphHost and ViewGraph.
 // The backend currently drives updateOutputs from the render loop. The class
 // keeps the shared host lifecycle surface so scheduling can be tightened later.
@@ -355,6 +402,11 @@ class ViewGraph: ViewGraphHost {
 
     // Outputs requested at init time.
     var requestedOutputs: Outputs
+    private var featureBuffer = ViewGraphFeatureBuffer()
+    var preferenceBridge: PreferenceBridge?
+    private(set) var preferenceValueOutlets: [(key: any PreferenceKey.Type, value: AGAttribute)] = []
+    private(set) var hostPreferenceKeys: Attribute<PreferenceKeys>?
+    private var hostPreferenceOutletKeys: Attribute<PreferenceKeys>?
 
     var nextUpdate: (views: NextUpdate, gestures: NextUpdate) = (NextUpdate(), NextUpdate())
 
@@ -446,6 +498,171 @@ class ViewGraph: ViewGraphHost {
         nextUpdate.views.reasons
     }
 
+    var viewGraphFeatureCount: Int {
+        featureBuffer.count
+    }
+
+    func addFeature(_ feature: any ViewGraphFeature) {
+        featureBuffer.append(feature)
+    }
+
+    override func isHiddenForReuseDidChange() {
+        updatePreferenceOutletsForHiddenReuse()
+        featureBuffer.isHiddenForReuseDidChange(graph: self)
+    }
+
+    func updatePreferenceBridge(environment: EnvironmentValues, deferredUpdate: @escaping () -> Void) {
+        guard let bridge = environment.preferenceBridge else {
+            return
+        }
+        guard bridge !== preferenceBridge else {
+            return
+        }
+
+        if shouldDeferPreferenceBridgeUpdate {
+            Update.enqueueAction(reason: 0x11, deferredUpdate)
+        } else {
+            setPreferenceBridge(to: bridge, isInvalidating: false)
+        }
+    }
+
+    func invalidatePreferenceBridge() {
+        setPreferenceBridge(to: nil, isInvalidating: true)
+    }
+
+    func setPreferenceBridge(to bridge: PreferenceBridge?, isInvalidating: Bool) {
+        guard bridge !== preferenceBridge else {
+            return
+        }
+
+        data.withCurrent {
+            removePreferenceOutlets(isInvalidating: isInvalidating)
+            preferenceBridge = bridge
+            bridge?.viewGraph = self
+            bridge?.addChild(self)
+            updateRemovedState()
+        }
+    }
+
+    func makePreferenceOutlets(outputs: _ViewOutputs) {
+        guard let bridge = preferenceBridge else {
+            return
+        }
+
+        for key in bridge.requestedPreferences.keys {
+            guard key != HostPreferencesKey.self,
+                  let value = outputs.preferences.value(for: key) else {
+                continue
+            }
+            preferenceValueOutlets.append((key: key, value: value))
+            if !isHiddenForReuse {
+                bridge.addValue(value, for: key)
+            }
+        }
+
+        guard let hostValues = outputs.preferences.value(for: HostPreferencesKey.self),
+              let graph = AttributeGraph.current,
+              let weakHostValues = graph.weakAttributeIfValid(for: hostValues) else {
+            return
+        }
+
+        let outletKeys = resolvedHostPreferenceKeys(for: bridge, in: graph)
+        let hostWeak = WeakAttribute<PreferenceValues>(weakHostValues)
+        hostPreferenceOutletKeys = outletKeys
+        hostPreferenceValues = hostWeak
+        if let outletKeys, !isHiddenForReuse {
+            bridge.addHostValues(hostWeak, for: outletKeys)
+        }
+    }
+
+    func removePreferenceOutlets(isInvalidating: Bool) {
+        guard let bridge = preferenceBridge else {
+            preferenceValueOutlets.removeAll()
+            hostPreferenceValues = nil
+            hostPreferenceOutletKeys = nil
+            return
+        }
+
+        for outlet in preferenceValueOutlets {
+            bridge.removeValue(
+                outlet.value,
+                for: outlet.key,
+                isInvalidating: isInvalidating
+            )
+        }
+        preferenceValueOutlets.removeAll()
+
+        if let hostPreferenceOutletKeys {
+            bridge.removeHostValues(
+                for: hostPreferenceOutletKeys,
+                isInvalidating: isInvalidating
+            )
+        }
+        hostPreferenceValues = nil
+        hostPreferenceOutletKeys = nil
+        bridge.removeChild(self)
+    }
+
+    private func updatePreferenceOutletsForHiddenReuse() {
+        guard let bridge = preferenceBridge else {
+            return
+        }
+
+        data.withCurrent {
+            if isHiddenForReuse {
+                for outlet in preferenceValueOutlets {
+                    bridge.removeValue(
+                        outlet.value,
+                        for: outlet.key,
+                        isInvalidating: true
+                    )
+                }
+                if let hostPreferenceOutletKeys {
+                    bridge.removeHostValues(
+                        for: hostPreferenceOutletKeys,
+                        isInvalidating: true
+                    )
+                }
+            } else {
+                for outlet in preferenceValueOutlets {
+                    bridge.addValue(outlet.value, for: outlet.key)
+                }
+                if let hostPreferenceOutletKeys,
+                   let hostPreferenceValues,
+                   hostPreferenceValues.isValid(in: data.graph) {
+                    bridge.addHostValues(hostPreferenceValues, for: hostPreferenceOutletKeys)
+                }
+            }
+        }
+    }
+
+    private func resolvedHostPreferenceKeys(
+        for bridge: PreferenceBridge,
+        in graph: AttributeGraph
+    ) -> Attribute<PreferenceKeys>? {
+        if let hostPreferenceKeys,
+           containsRequestedPreference(in: hostPreferenceKeys.value, bridge: bridge) {
+            return hostPreferenceKeys
+        }
+        guard bridge._hostPreferenceKeys.isValid(in: graph) else {
+            return hostPreferenceKeys
+        }
+        return bridge._hostPreferenceKeys.toStrong()
+    }
+
+    private func containsRequestedPreference(
+        in keys: PreferenceKeys,
+        bridge: PreferenceBridge
+    ) -> Bool {
+        bridge.requestedPreferences.keys.contains { requestedKey in
+            requestedKey != HostPreferencesKey.self && keys.contains(requestedKey)
+        }
+    }
+
+    private var shouldDeferPreferenceBridgeUpdate: Bool {
+        isUpdating
+    }
+
     // Backend init that takes a concrete view value to lift into the graph.
     convenience init<V: View>(rootViewType: V.Type, content: V, rendererHost: any ViewRendererHost, requestedOutputs: Outputs = .defaults) {
         self.init(rootViewType: V.self, rendererHost: rendererHost, requestedOutputs: requestedOutputs) { g in
@@ -525,6 +742,7 @@ class ViewGraph: ViewGraphHost {
 
             let hostKeysAttr = g.makeInput(value: prefKeys)
             let prefsInputs  = PreferencesInputs(keys: prefKeys, hostKeys: hostKeysAttr)
+            hostPreferenceKeys = hostKeysAttr
 
             let transformAttr    = g.makeInput(value: ViewTransform.identity)
             let positionAttr     = g.makeInput(value: CGPoint.zero)
@@ -545,6 +763,7 @@ class ViewGraph: ViewGraphHost {
 
             // GestureResponder.init reads the shared gesture graph from ViewGraph.
             let outputs: _ViewOutputs = V._makeView(view: contentGV, inputs: viewInputs)
+            makePreferenceOutlets(outputs: outputs)
 
             let resourceNodes = outputs.preferences.values(for: ResourceList.Key.self)
             let displayNodes  = outputs.preferences.values(for: DisplayList.Key.self)

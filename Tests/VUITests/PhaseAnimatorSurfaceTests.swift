@@ -277,7 +277,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
         }
     }
 
-    func testChildAdvanceToMatchingActiveLoopTargetClearsLoopState() {
+    func testChildAdvanceToMatchingMonitoringLoopTargetPausesLoopState() {
         withPhaseAnimatorHost { viewGraph, graph in
             let container = PhaseAnimator<Int, PhaseSizedView>.StateTransitioningContainer(
                 phases: [0, 1, 2],
@@ -292,17 +292,17 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             )
             child.currentIndex = 2
             child.completionSeed = 4
-            child.endlessLoopState = .active(1)
+            child.endlessLoopState = .monitoring(firstNonAnimatedPhaseIndex: 1)
 
             child.advance(to: 1)
 
             XCTAssertEqual(child.currentIndex, 0)
             XCTAssertEqual(child.completionSeed, 4)
-            XCTAssertEqual(child.endlessLoopState, .empty)
+            XCTAssertEqual(child.endlessLoopState, .paused)
         }
     }
 
-    func testChildAdvanceToDifferentActiveLoopTargetContinuesAdvancePath() {
+    func testChildAdvanceToDifferentMonitoringLoopTargetContinuesAdvancePath() {
         withPhaseAnimatorHost { viewGraph, graph in
             let container = PhaseAnimator<Int, PhaseSizedView>.StateTransitioningContainer(
                 phases: [0, 1, 2],
@@ -317,13 +317,38 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             )
             child.currentIndex = 0
             child.completionSeed = 4
-            child.endlessLoopState = .active(2)
+            child.endlessLoopState = .monitoring(firstNonAnimatedPhaseIndex: 2)
 
             child.advance(to: 1)
 
             XCTAssertEqual(child.currentIndex, 1)
             XCTAssertEqual(child.completionSeed, 5)
-            XCTAssertEqual(child.endlessLoopState, .active(2))
+            XCTAssertEqual(child.endlessLoopState, .monitoring(firstNonAnimatedPhaseIndex: 2))
+        }
+    }
+
+    func testChildAdvanceToPausedLoopStateReturnsWithoutMutation() {
+        withPhaseAnimatorHost { viewGraph, graph in
+            let container = PhaseAnimator<Int, PhaseSizedView>.StateTransitioningContainer(
+                phases: [0, 1, 2],
+                content: { PhaseSizedView(width: CGFloat($0)) },
+                animation: { _ in nil },
+                behavior: .repeating
+            )
+            var child = makeChild(
+                in: graph,
+                viewGraph: viewGraph,
+                container: container
+            )
+            child.currentIndex = 2
+            child.completionSeed = 4
+            child.endlessLoopState = .paused
+
+            child.advance(to: 1)
+
+            XCTAssertEqual(child.currentIndex, 2)
+            XCTAssertEqual(child.completionSeed, 4)
+            XCTAssertEqual(child.endlessLoopState, .paused)
         }
     }
 
@@ -433,10 +458,32 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 container: container
             )
             child.currentIndex = 2
-            child.endlessLoopState = .active(2)
+            child.endlessLoopState = .monitoring(firstNonAnimatedPhaseIndex: 2)
             let childValue = graph.makeStatefulRule(child)
 
             XCTAssertEqual(childValue.value.content.width, 0)
+        }
+    }
+
+    func testChildUpdateClampsOutOfRangeAnimatingIndexToLastPhase() {
+        withPhaseAnimatorHost { viewGraph, graph in
+            let container = PhaseAnimator<Int, PhaseSizedView>.StateTransitioningContainer(
+                phases: [0, 1, 2],
+                content: { PhaseSizedView(width: CGFloat($0)) },
+                animation: { _ in nil },
+                behavior: .eventDriven(trigger: AnyEquatable(1))
+            )
+            var child = makeChild(
+                in: graph,
+                viewGraph: viewGraph,
+                container: container
+            )
+            child.currentIndex = 99
+            child.lastBehavior = container.behavior
+
+            let childValue = graph.makeStatefulRule(child)
+
+            XCTAssertEqual(childValue.value.content.width, 2)
         }
     }
 
@@ -447,7 +494,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 phases: [0, 1],
                 content: { PhaseSizedView(width: CGFloat($0)) },
                 animation: { _ in nil },
-                behavior: .repeating
+                behavior: .eventDriven(trigger: AnyEquatable(1))
             )
             let source = graph.makeInput(value: container)
             let transaction = graph.makeInput(value: Transaction())
@@ -475,11 +522,83 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
         }
     }
 
-    func testChildUpdateConsumesNonAnimatedCompletionThroughEndlessLoopBranch() {
+    func testChildUpdatePublishesBaseTransactionBeforePhaseChangeTransactionExists() {
         withPhaseAnimatorHost { viewGraph, graph in
             typealias Container = PhaseAnimator<Int, PhaseSizedView>.StateTransitioningContainer
             let container = Container(
                 phases: [0, 1],
+                content: { PhaseSizedView(width: CGFloat($0)) },
+                animation: { _ in nil },
+                behavior: .eventDriven(trigger: AnyEquatable(1))
+            )
+            var baseTransaction = Transaction()
+            baseTransaction[PhaseAnimatorTransactionWidthKey.self] = 377
+            let source = graph.makeInput(value: container)
+            let transaction = graph.makeInput(value: baseTransaction)
+            let phase = graph.makeInput(value: Phase())
+            let completion = graph.makeInput(
+                value: Optional<Container.AnimationCompletion>.none
+            )
+            let isVisible = graph.makeInput(value: true)
+            var child = Container.Child(
+                view: source,
+                transaction: transaction,
+                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                phase: phase,
+                animationCompletion: completion.asWeak(),
+                isVisible: isVisible.asWeak()
+            )
+            child.lastBehavior = container.behavior
+
+            let childValue = graph.makeStatefulRule(child)
+
+            XCTAssertEqual(childValue.value.content.width, 0)
+            XCTAssertEqual(childValue.value.phaseChangeTransaction[PhaseAnimatorTransactionWidthKey.self], 377)
+            XCTAssertNil(childValue.value.phaseChangeTransactionSeed)
+        }
+    }
+
+    func testChildUpdateSinglePhaseRepeatingDoesNotCreateCompletionTransaction() {
+        withPhaseAnimatorHost { viewGraph, graph in
+            typealias Container = PhaseAnimator<Int, PhaseSizedView>.StateTransitioningContainer
+            let container = Container(
+                phases: [0],
+                content: { PhaseSizedView(width: CGFloat($0)) },
+                animation: { _ in .linear(duration: 0.1) },
+                behavior: .repeating
+            )
+            let source = graph.makeInput(value: container)
+            let transaction = graph.makeInput(value: Transaction())
+            let phase = graph.makeInput(value: Phase())
+            let completion = graph.makeInput(
+                value: Optional<Container.AnimationCompletion>.none
+            )
+            let isVisible = graph.makeInput(value: true)
+            var child = Container.Child(
+                view: source,
+                transaction: transaction,
+                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                phase: phase,
+                animationCompletion: completion.asWeak(),
+                isVisible: isVisible.asWeak()
+            )
+            child.lastBehavior = container.behavior
+            let childValue = graph.makeStatefulRule(
+                child
+            )
+
+            XCTAssertEqual(childValue.value.content.width, 0)
+            XCTAssertNil(childValue.value.phaseChangeTransactionSeed)
+            XCTAssertNil(completion.value)
+            XCTAssertFalse(viewGraph.hasPendingTransactions)
+        }
+    }
+
+    func testChildUpdateRepeatingVisibleUpdateRunsBeforeNonAnimatedCompletion() {
+        withPhaseAnimatorHost { viewGraph, graph in
+            typealias Container = PhaseAnimator<Int, PhaseSizedView>.StateTransitioningContainer
+            let container = Container(
+                phases: [0, 1, 2],
                 content: { PhaseSizedView(width: CGFloat($0)) },
                 animation: { _ in nil },
                 behavior: .repeating
@@ -505,19 +624,23 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 child
             )
 
-            XCTAssertEqual(childValue.value.content.width, 0)
+            let started = childValue.value
 
-            completion.setValue(.some(Container.AnimationCompletion(seed: 0, didAnimate: false)))
+            XCTAssertEqual(started.content.width, 1)
+            XCTAssertEqual(started.phaseChangeTransactionSeed, 23)
+            XCTAssertNil(started.phaseChangeTransaction.animation)
+
+            completion.setValue(.some(Container.AnimationCompletion(seed: 1, didAnimate: false)))
             let advanced = childValue.value
 
-            XCTAssertEqual(advanced.content.width, 0)
+            XCTAssertEqual(advanced.content.width, 2)
             XCTAssertEqual(advanced.phaseChangeTransactionSeed, 23)
             XCTAssertNil(advanced.phaseChangeTransaction.animation)
             XCTAssertTrue(viewGraph.hasPendingTransactions)
 
             viewGraph.flushTransactions()
 
-            XCTAssertEqual(completion.value?.seed, 1)
+            XCTAssertEqual(completion.value?.seed, 2)
             XCTAssertEqual(completion.value?.didAnimate, false)
         }
     }
@@ -560,7 +683,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
         }
     }
 
-    func testChildUpdateConsumesAnimatedCompletionByAdvancingRepeatingPhase() {
+    func testChildUpdateRepeatingVisibleUpdateRunsBeforeAnimatedCompletion() {
         withPhaseAnimatorHost { viewGraph, graph in
             typealias Container = PhaseAnimator<Int, PhaseSizedView>.StateTransitioningContainer
             let container = Container(
@@ -590,12 +713,16 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                 child
             )
 
-            XCTAssertEqual(childValue.value.content.width, 0)
+            let started = childValue.value
 
-            completion.setValue(.some(Container.AnimationCompletion(seed: 0, didAnimate: true)))
+            XCTAssertEqual(started.content.width, 1)
+            XCTAssertEqual(started.phaseChangeTransactionSeed, 17)
+            XCTAssertNotNil(started.phaseChangeTransaction.animation)
+
+            completion.setValue(.some(Container.AnimationCompletion(seed: 1, didAnimate: true)))
             let advanced = childValue.value
 
-            XCTAssertEqual(advanced.content.width, 1)
+            XCTAssertEqual(advanced.content.width, 2)
             XCTAssertEqual(advanced.phaseChangeTransactionSeed, 17)
             XCTAssertNotNil(advanced.phaseChangeTransaction.animation)
         }
@@ -966,6 +1093,176 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
         }
     }
 
+    func testChildUpdateWithInvalidVisibilityWeakAttributePublishesCurrentPhaseOnly() {
+        withPhaseAnimatorHost { viewGraph, graph in
+            typealias Container = PhaseAnimator<Int, PhaseSizedView>.StateTransitioningContainer
+            let container = Container(
+                phases: [0, 1, 2],
+                content: { PhaseSizedView(width: CGFloat($0)) },
+                animation: { _ in .linear(duration: 0.25) },
+                behavior: .repeating
+            )
+            let source = graph.makeInput(value: container)
+            let transaction = graph.makeInput(value: Transaction())
+            let phase = graph.makeInput(value: Phase())
+            let completion = graph.makeInput(
+                value: Optional<Container.AnimationCompletion>.some(
+                    Container.AnimationCompletion(seed: 3, didAnimate: true)
+                )
+            )
+            let isVisible = graph.makeInput(value: true)
+            let weakVisibility = isVisible.asWeak()
+            graph.removeNode(isVisible.identifier)
+
+            var child = Container.Child(
+                view: source,
+                transaction: transaction,
+                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                phase: phase,
+                animationCompletion: completion.asWeak(),
+                isVisible: weakVisibility
+            )
+            child.currentIndex = 1
+            child.completionSeed = 3
+            child.lastBehavior = container.behavior
+            let childValue = graph.makeStatefulRule(child)
+
+            let value = childValue.value
+
+            XCTAssertEqual(value.content.width, 1)
+            XCTAssertNil(value.phaseChangeTransactionSeed)
+            XCTAssertNil(value.phaseChangeTransaction.animation)
+            XCTAssertFalse(viewGraph.hasPendingTransactions)
+        }
+    }
+
+    func testChildUpdateWithInvalidCompletionWeakAttributeDoesNotConsumeCompletion() {
+        withPhaseAnimatorHost { viewGraph, graph in
+            typealias Container = PhaseAnimator<Int, PhaseSizedView>.StateTransitioningContainer
+            let behavior = PhaseAnimator<Int, PhaseSizedView>.Behavior.eventDriven(
+                trigger: AnyEquatable(7)
+            )
+            let container = Container(
+                phases: [0, 1, 2],
+                content: { PhaseSizedView(width: CGFloat($0)) },
+                animation: { _ in .linear(duration: 0.25) },
+                behavior: behavior
+            )
+            let source = graph.makeInput(value: container)
+            let transaction = graph.makeInput(value: Transaction())
+            let phase = graph.makeInput(value: Phase())
+            let completion = graph.makeInput(
+                value: Optional<Container.AnimationCompletion>.some(
+                    Container.AnimationCompletion(seed: 3, didAnimate: true)
+                )
+            )
+            let weakCompletion = completion.asWeak()
+            graph.removeNode(completion.identifier)
+            let isVisible = graph.makeInput(value: true)
+
+            var child = Container.Child(
+                view: source,
+                transaction: transaction,
+                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                phase: phase,
+                animationCompletion: weakCompletion,
+                isVisible: isVisible.asWeak()
+            )
+            child.currentIndex = 1
+            child.completionSeed = 3
+            child.lastBehavior = behavior
+            let childValue = graph.makeStatefulRule(child)
+
+            let value = childValue.value
+
+            XCTAssertEqual(value.content.width, 1)
+            XCTAssertNil(value.phaseChangeTransactionSeed)
+            XCTAssertNil(value.phaseChangeTransaction.animation)
+            XCTAssertFalse(viewGraph.hasPendingTransactions)
+        }
+    }
+
+    func testChildUpdateGraphPhaseResetKeepsPhaseChangeTransactionSeed() {
+        withPhaseAnimatorHost { viewGraph, graph in
+            typealias Container = PhaseAnimator<Int, PhaseSizedView>.StateTransitioningContainer
+            let container = Container(
+                phases: [0, 1, 2],
+                content: { PhaseSizedView(width: CGFloat($0)) },
+                animation: { _ in nil },
+                behavior: .eventDriven(trigger: AnyEquatable(1))
+            )
+            var graphPhase = Phase()
+            graphPhase.resetSeed = 1
+            let source = graph.makeInput(value: container)
+            let transaction = graph.makeInput(value: Transaction())
+            let phase = graph.makeInput(value: graphPhase)
+            let completion = graph.makeInput(
+                value: Optional<Container.AnimationCompletion>.none
+            )
+            let isVisible = graph.makeInput(value: true)
+            var child = Container.Child(
+                view: source,
+                transaction: transaction,
+                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                phase: phase,
+                animationCompletion: completion.asWeak(),
+                isVisible: isVisible.asWeak()
+            )
+            child.currentIndex = 2
+            child.completionSeed = 9
+            child.endlessLoopState = .monitoring(firstNonAnimatedPhaseIndex: 2)
+            child.lastBehavior = .eventDriven(trigger: AnyEquatable(1))
+            child.phaseChangeTransactionSeed = 77
+            let childValue = graph.makeStatefulRule(child)
+
+            let resetValue = childValue.value
+
+            XCTAssertEqual(resetValue.content.width, 0)
+            XCTAssertEqual(resetValue.phaseChangeTransactionSeed, 77)
+        }
+    }
+
+    func testChildUpdateInvisibleResetReturnsInitialPhaseWithoutClearingPhaseTransactionSeed() {
+        withPhaseAnimatorHost { viewGraph, graph in
+            typealias Container = PhaseAnimator<Int, PhaseSizedView>.StateTransitioningContainer
+            let container = Container(
+                phases: [0, 1, 2],
+                content: { PhaseSizedView(width: CGFloat($0)) },
+                animation: { _ in nil },
+                behavior: .repeating
+            )
+            let source = graph.makeInput(value: container)
+            let transaction = graph.makeInput(value: Transaction())
+            let phase = graph.makeInput(value: Phase())
+            let completion = graph.makeInput(
+                value: Optional<Container.AnimationCompletion>.some(
+                    Container.AnimationCompletion(seed: 4, didAnimate: true)
+                )
+            )
+            let isVisible = graph.makeInput(value: false)
+            var child = Container.Child(
+                view: source,
+                transaction: transaction,
+                transactionSeed: viewGraph.data.transactionSeedAttribute,
+                phase: phase,
+                animationCompletion: completion.asWeak(),
+                isVisible: isVisible.asWeak()
+            )
+            child.currentIndex = 1
+            child.completionSeed = 4
+            child.endlessLoopState = .animating
+            child.lastBehavior = container.behavior
+            child.phaseChangeTransactionSeed = 83
+            let childValue = graph.makeStatefulRule(child)
+
+            let resetValue = childValue.value
+
+            XCTAssertEqual(resetValue.content.width, 0)
+            XCTAssertEqual(resetValue.phaseChangeTransactionSeed, 83)
+            XCTAssertFalse(viewGraph.hasPendingTransactions)
+        }
+    }
+
     func testAppearanceHandlerQueuesVisibleAssignmentThroughAsyncTransaction() {
         withPhaseAnimatorHost { viewGraph, graph in
             typealias Container = PhaseAnimator<Int, PhaseSizedView>.StateTransitioningContainer
@@ -1030,6 +1327,58 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
             phaseChangeTransactionSeed.setValue(8)
 
             XCTAssertEqual(selected.value[PhaseAnimatorTransactionWidthKey.self], 13)
+        }
+    }
+
+    func testTransactionRuleFallsBackWhenPhaseChangeSeedIsNil() {
+        let graph = AttributeGraph()
+        let ref = AttributeGraphRef(graph: graph)
+
+        ref.withCurrent {
+            var baseTransaction = Transaction()
+            baseTransaction[PhaseAnimatorTransactionWidthKey.self] = 21
+            var phaseTransaction = Transaction()
+            phaseTransaction[PhaseAnimatorTransactionWidthKey.self] = 144
+
+            let selected = graph.makeStatefulRule(
+                PhaseAnimator<Int, PhaseSizedView>.StateTransitioningContainer.TransactionRule(
+                    transaction: graph.makeInput(value: baseTransaction),
+                    transactionSeed: graph.makeInput(value: UInt32(9)),
+                    phaseChangeTransaction: graph.makeInput(value: phaseTransaction),
+                    phaseChangeTransactionSeed: graph.makeInput(value: Optional<UInt32>.none)
+                )
+            )
+
+            XCTAssertEqual(selected.value[PhaseAnimatorTransactionWidthKey.self], 21)
+        }
+    }
+
+    func testTransactionRuleRechecksCurrentTransactionSeed() {
+        let graph = AttributeGraph()
+        let ref = AttributeGraphRef(graph: graph)
+
+        ref.withCurrent {
+            var baseTransaction = Transaction()
+            baseTransaction[PhaseAnimatorTransactionWidthKey.self] = 34
+            var phaseTransaction = Transaction()
+            phaseTransaction[PhaseAnimatorTransactionWidthKey.self] = 233
+
+            let transactionSeed = graph.makeInput(value: UInt32(2))
+            let phaseChangeTransactionSeed = graph.makeInput(value: Optional<UInt32>.some(3))
+            let selected = graph.makeStatefulRule(
+                PhaseAnimator<Int, PhaseSizedView>.StateTransitioningContainer.TransactionRule(
+                    transaction: graph.makeInput(value: baseTransaction),
+                    transactionSeed: transactionSeed,
+                    phaseChangeTransaction: graph.makeInput(value: phaseTransaction),
+                    phaseChangeTransactionSeed: phaseChangeTransactionSeed
+                )
+            )
+
+            XCTAssertEqual(selected.value[PhaseAnimatorTransactionWidthKey.self], 34)
+
+            transactionSeed.setValue(3)
+
+            XCTAssertEqual(selected.value[PhaseAnimatorTransactionWidthKey.self], 233)
         }
     }
 

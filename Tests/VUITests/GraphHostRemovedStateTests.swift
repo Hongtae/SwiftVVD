@@ -33,14 +33,14 @@ final class GraphHostRemovedStateTests: XCTestCase {
         XCTAssertEqual(recorder.events, ["update", "willRemove"])
         XCTAssertTrue(host.isRemoved)
         XCTAssertTrue(host.isHiddenForReuse)
-        XCTAssertEqual(host.removedStateDidChangeCount, 1)
+        XCTAssertEqual(host.isHiddenForReuseDidChangeCount, 1)
 
         host.removedState = .unattached
 
         XCTAssertEqual(recorder.events, ["update", "willRemove"])
         XCTAssertTrue(host.isRemoved)
         XCTAssertFalse(host.isHiddenForReuse)
-        XCTAssertEqual(host.removedStateDidChangeCount, 2)
+        XCTAssertEqual(host.isHiddenForReuseDidChangeCount, 2)
     }
 
     func testChildHostInheritsParentHiddenForReuseRemoval() {
@@ -84,6 +84,56 @@ final class GraphHostRemovedStateTests: XCTestCase {
         XCTAssertFalse(host.isHiddenForReuse)
     }
 
+    func testViewGraphHiddenForReuseDispatchesFeatureBufferHook() {
+        let rendererHost = TestViewRendererHost()
+        let viewGraph = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost,
+            requestedOutputs: []
+        )
+        rendererHost.storage = viewGraph
+        let feature = RecordingViewGraphFeature()
+        viewGraph.addFeature(feature)
+
+        XCTAssertEqual(viewGraph.viewGraphFeatureCount, 1)
+
+        viewGraph.updateRemovedState(isUnattached: false, isHiddenForReuse: true)
+
+        XCTAssertEqual(feature.hiddenReuseChangeGraphs.count, 1)
+        XCTAssertTrue(feature.hiddenReuseChangeGraphs[0] === viewGraph)
+
+        viewGraph.updateRemovedState(isUnattached: false, isHiddenForReuse: true)
+        XCTAssertEqual(feature.hiddenReuseChangeGraphs.count, 1)
+
+        viewGraph.updateRemovedState(isUnattached: false, isHiddenForReuse: false)
+        XCTAssertEqual(feature.hiddenReuseChangeGraphs.count, 2)
+        XCTAssertTrue(feature.hiddenReuseChangeGraphs[1] === viewGraph)
+    }
+
+    func testViewGraphFeatureDefaultsAreNoopAndAllowAsyncUpdate() {
+        let rendererHost = TestViewRendererHost()
+        let viewGraph = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost,
+            requestedOutputs: []
+        )
+        rendererHost.storage = viewGraph
+        let feature = DefaultOnlyViewGraphFeature()
+
+        XCTAssertEqual(feature.allowsAsyncUpdate(graph: viewGraph), true)
+        XCTAssertFalse(feature.needsUpdate(graph: viewGraph))
+
+        feature.uninstantiate(graph: viewGraph)
+        feature.outputsDidChange(graph: viewGraph)
+        feature.update(graph: viewGraph)
+
+        viewGraph.addFeature(feature)
+        viewGraph.updateRemovedState(isUnattached: false, isHiddenForReuse: true)
+        XCTAssertEqual(viewGraph.viewGraphFeatureCount, 1)
+    }
+
     private func installRemovableRule(in host: GraphHost, recorder: RemovedStateRecorder) {
         host.data.withCurrent {
             AGSubgraph.$current.withValue(host.data.rootSubgraph) {
@@ -122,10 +172,10 @@ private struct RemovableRecorderRule: StatefulRule, RemovableAttribute {
 }
 
 private final class RecordingRemovedStateGraphHost: GraphHost {
-    var removedStateDidChangeCount = 0
+    var isHiddenForReuseDidChangeCount = 0
 
-    override func removedStateDidChange() {
-        removedStateDidChangeCount += 1
+    override func isHiddenForReuseDidChange() {
+        isHiddenForReuseDidChangeCount += 1
     }
 }
 
@@ -141,3 +191,13 @@ private final class ChildRemovedStateGraphHost: GraphHost {
         parent
     }
 }
+
+private final class RecordingViewGraphFeature: ViewGraphFeature {
+    var hiddenReuseChangeGraphs: [ViewGraph] = []
+
+    func isHiddenForReuseDidChange(graph: ViewGraph) {
+        hiddenReuseChangeGraphs.append(graph)
+    }
+}
+
+private struct DefaultOnlyViewGraphFeature: ViewGraphFeature {}

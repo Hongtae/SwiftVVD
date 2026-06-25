@@ -170,6 +170,7 @@ class GraphHost {
             updateRemovedState()
         }
     }
+    var hostPreferenceValues: WeakAttribute<PreferenceValues>?
     private var mayDeferUpdateLatch: Bool = true
     private var pendingTransactions: [AsyncTransaction] = []
     private var pendingGraphMutations: [any GraphMutation] = []
@@ -216,7 +217,31 @@ class GraphHost {
         nil
     }
 
-    func removedStateDidChange() {}
+    func preferenceValues() -> PreferenceValues {
+        data.withCurrent {
+            guard let hostPreferenceValues,
+                  hostPreferenceValues.isValid(in: data.graph) else {
+                return PreferenceValues()
+            }
+            return hostPreferenceValues.toStrong().value
+        }
+    }
+
+    func isHiddenForReuseDidChange() {}
+
+    func graphInvalidation(from attribute: AGAttribute?) {
+        guard let attribute else {
+            graphDelegate?.graphDidChange()
+            return
+        }
+
+        data.withCurrent {
+            guard let weakAttribute = data.graph.weakAttributeIfValid(for: attribute) else {
+                return
+            }
+            continueTransaction(invalidating: weakAttribute)
+        }
+    }
 
     func updateRemovedState() {
         let sourceState: RemovedState
@@ -247,7 +272,7 @@ class GraphHost {
         let nextHiddenForReuse = sourceState.contains(.hiddenForReuse)
         if nextHiddenForReuse != isHiddenForReuse {
             isHiddenForReuse = nextHiddenForReuse
-            removedStateDidChange()
+            isHiddenForReuseDidChange()
         }
     }
 
