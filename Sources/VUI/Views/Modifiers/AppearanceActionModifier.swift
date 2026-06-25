@@ -57,7 +57,7 @@ public struct _AppearanceActionModifier: ViewModifier {
 @available(*, unavailable)
 extension _AppearanceActionModifier: Sendable {}
 
-struct AppearanceEffect: StatefulRule {
+struct AppearanceEffect: StatefulRule, RemovableAttribute {
     typealias Value = Void
 
     var modifier: Attribute<_AppearanceActionModifier>
@@ -66,6 +66,23 @@ struct AppearanceEffect: StatefulRule {
     var appear: (() -> Void)?
     var disappear: (() -> Void)?
     var isAppeared = false
+    private var isRemoved = false
+
+    init(
+        modifier: Attribute<_AppearanceActionModifier>,
+        phase: Attribute<Phase>,
+        lastPhase: Phase? = nil,
+        appear: (() -> Void)? = nil,
+        disappear: (() -> Void)? = nil,
+        isAppeared: Bool = false
+    ) {
+        self.modifier = modifier
+        self.phase = phase
+        self.lastPhase = lastPhase
+        self.appear = appear
+        self.disappear = disappear
+        self.isAppeared = isAppeared
+    }
 
     mutating func updateValue() {
         let currentPhase = phase.value
@@ -78,7 +95,9 @@ struct AppearanceEffect: StatefulRule {
         let modifierValue = modifier.value
         appear = modifierValue.appear
         disappear = modifierValue.disappear
-        appeared()
+        if !isRemoved {
+            appeared()
+        }
         AttributeGraph.setStatefulOutput(())
     }
 
@@ -96,6 +115,27 @@ struct AppearanceEffect: StatefulRule {
             Update.enqueueAction(disappear)
         }
         isAppeared = false
+    }
+
+    private mutating func remove() {
+        guard isAppeared else { return }
+        if let disappear {
+            Update.enqueueAction(reason: 0x02, disappear)
+        }
+        isAppeared = false
+        isRemoved = true
+    }
+
+    static func willRemove(attribute: AGAttribute) {
+        AttributeGraph.current?.mutateStatefulRule(attribute, as: Self.self) { effect in
+            effect.remove()
+        }
+    }
+
+    static func didReinsert(attribute: AGAttribute) {
+        AttributeGraph.current?.mutateStatefulRule(attribute, as: Self.self, invalidating: true) { effect in
+            effect.isRemoved = false
+        }
     }
 }
 

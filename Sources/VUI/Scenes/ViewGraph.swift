@@ -185,6 +185,22 @@ class ViewGraphHost: GraphHost, ViewGraphOwner {
         return displayLink.hasScheduledNextUpdate
     }
 
+    func updateRemovedState(isUnattached: Bool, isHiddenForReuse: Bool) {
+        var state: RemovedState = []
+        if isUnattached {
+            state.insert(.unattached)
+        }
+        if isHiddenForReuse {
+            state.insert(.hiddenForReuse)
+        }
+
+        Update.withLock {
+            Update.begin()
+            defer { Update.end() }
+            removedState = state
+        }
+    }
+
     // Pending parity: the current backend does not own an AppKit/CoreDisplayLink
     // object, but the host still keeps the same scheduling state boundary used
     // by the may-defer gate.

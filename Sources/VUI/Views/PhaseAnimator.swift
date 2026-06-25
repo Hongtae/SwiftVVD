@@ -96,8 +96,8 @@ extension PhaseAnimator {
             inputs.base.transaction = attrs.transaction
             let appearanceModifier = graph.makeInput(
                 value: _AppearanceActionModifier(
-                    appear: appearanceHandler(isVisible: attrs.isVisible, value: true),
-                    disappear: appearanceHandler(isVisible: attrs.isVisible, value: false)
+                    appear: appearanceHandler(isVisible: attrs.isVisible.asWeak(), value: true),
+                    disappear: appearanceHandler(isVisible: attrs.isVisible.asWeak(), value: false)
                 )
             )
             return _AppearanceActionModifier._makeView(
@@ -134,8 +134,8 @@ extension PhaseAnimator {
                     transaction: baseInputs.transaction,
                     transactionSeed: transactionSeedAttr,
                     phase: baseInputs.phase,
-                    animationCompletion: animationCompletionAttr,
-                    isVisible: isVisibleAttr
+                    animationCompletion: animationCompletionAttr.asWeak(),
+                    isVisible: isVisibleAttr.asWeak()
                 )
             )
             let contentAttr: Attribute<Content> = graph.makeRule {
@@ -166,14 +166,13 @@ extension PhaseAnimator {
             return graph.makeInput(value: UInt32.zero)
         }
 
-        static func appearanceHandler(isVisible: Attribute<Bool>, value: Bool) -> () -> Void {
+        static func appearanceHandler(isVisible: WeakAttribute<Bool>, value: Bool) -> () -> Void {
             let host = GraphHost.currentHost
-            let weakAttribute = isVisible.asWeak()
             return {
                 host.asyncTransaction(
                     Transaction.current,
                     id: Transaction.id,
-                    mutation: AssignmentGraphMutation(attribute: weakAttribute, value: value),
+                    mutation: AssignmentGraphMutation(attribute: isVisible, value: value),
                     style: .deferred,
                     mayDeferUpdate: true
                 )
@@ -252,8 +251,8 @@ extension PhaseAnimator.StateTransitioningContainer {
         var _transaction: Attribute<Transaction>
         var _transactionSeed: Attribute<UInt32>
         var _phase: Attribute<GraphInputsPhase>
-        var _animationCompletion: Attribute<AnimationCompletion?>
-        var _isVisible: Attribute<Bool>
+        var _animationCompletion: WeakAttribute<AnimationCompletion?>
+        var _isVisible: WeakAttribute<Bool>
         var currentIndex = 0
         var completionSeed = 0
         var resetSeed = UInt32(0)
@@ -267,8 +266,8 @@ extension PhaseAnimator.StateTransitioningContainer {
             transaction: Attribute<Transaction>,
             transactionSeed: Attribute<UInt32>,
             phase: Attribute<GraphInputsPhase>,
-            animationCompletion: Attribute<AnimationCompletion?>,
-            isVisible: Attribute<Bool>
+            animationCompletion: WeakAttribute<AnimationCompletion?>,
+            isVisible: WeakAttribute<Bool>
         ) {
             self._view = view
             self._transaction = transaction
@@ -296,8 +295,25 @@ extension PhaseAnimator.StateTransitioningContainer {
                 currentIndex = container.phases.count - 1
             }
 
-            let animationCompletion = _animationCompletion.value
-            if _isVisible.value,
+            let graph = AttributeGraph.current
+            let animationCompletion: AnimationCompletion?
+            if let graph,
+               _animationCompletion.isValid(in: graph) {
+                animationCompletion = _animationCompletion.toStrong().value
+            } else {
+                animationCompletion = nil
+            }
+            let isVisible: Bool
+            if let graph,
+               _isVisible.isValid(in: graph) {
+                isVisible = _isVisible.toStrong().value
+            } else {
+                isVisible = false
+            }
+
+            if isVisible,
+               scheduleVisibleStartIfNeeded(behavior: container.behavior) {
+            } else if isVisible,
                let animationCompletion,
                animationCompletion.seed == completionSeed {
                 if animationCompletion.didAnimate {
@@ -306,7 +322,7 @@ extension PhaseAnimator.StateTransitioningContainer {
                     case .repeating:
                         advance(from: currentIndex)
                     case .eventDriven:
-                        if currentIndex < container.phases.count - 1 {
+                        if currentIndex != 0 {
                             advance(from: currentIndex)
                         }
                     }
@@ -314,7 +330,9 @@ extension PhaseAnimator.StateTransitioningContainer {
                     consumeNonAnimatedCompletion(behavior: container.behavior)
                 }
             }
-            lastBehavior = container.behavior
+            if isVisible {
+                lastBehavior = container.behavior
+            }
 
             if phaseChangeTransactionSeed == nil {
                 phaseChangeTransaction = _transaction.value
@@ -354,6 +372,31 @@ extension PhaseAnimator.StateTransitioningContainer {
             advance(from: sourceIndex)
         }
 
+        mutating func scheduleVisibleStartIfNeeded(behavior: PhaseAnimator<Phase, Content>.Behavior) -> Bool {
+            guard let lastBehavior else {
+                guard case .repeating = behavior else { return false }
+                advance(from: currentIndex)
+                return true
+            }
+
+            guard lastBehavior != behavior else { return false }
+
+            switch (lastBehavior, behavior) {
+            case (.repeating, .eventDriven):
+                advance(to: 0)
+                return true
+            case (.eventDriven, .repeating):
+                advance(from: currentIndex)
+                return true
+            case let (.eventDriven(previous), .eventDriven(current)):
+                guard previous != current else { return false }
+                advance(from: 0)
+                return true
+            case (.repeating, .repeating):
+                return false
+            }
+        }
+
         mutating func advance(from sourceIndex: Int) {
             let container = _view.value
             guard container.phases.count >= 2 else { return }
@@ -387,7 +430,7 @@ extension PhaseAnimator.StateTransitioningContainer {
             let animation = container.animation(phase)
             if let animation {
                 let host = GraphHost.currentHost
-                let completion = _animationCompletion.asWeak()
+                let completion = _animationCompletion
                 let seed = completionSeed
                 let listener = PhaseAnimator<Phase, Content>
                     .StateTransitioningContainer
@@ -421,7 +464,7 @@ extension PhaseAnimator.StateTransitioningContainer {
             } else {
                 transaction.animation = nil
                 GraphHost.currentHost.continueTransaction(
-                    setting: _animationCompletion.asWeak(),
+                    setting: _animationCompletion,
                     to: Optional.some(AnimationCompletion(seed: completionSeed, didAnimate: false))
                 )
             }

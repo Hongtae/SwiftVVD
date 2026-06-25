@@ -55,9 +55,21 @@ extension StatefulRule {
     mutating func destroy() {}
 }
 
+protocol RemovableAttribute: _AttributeBody {
+    static func willRemove(attribute: AGAttribute)
+    static func didReinsert(attribute: AGAttribute)
+}
+
+extension RemovableAttribute {
+    static func willRemove(attribute: AGAttribute) {}
+    static func didReinsert(attribute: AGAttribute) {}
+}
+
 private protocol _AnyStatefulBox: AnyObject {
     func callUpdate()
     func callDestroy()
+    func callWillRemove(attribute: AGAttribute)
+    func callDidReinsert(attribute: AGAttribute)
 }
 
 private class _StatefulBox<R: StatefulRule>: _AnyStatefulBox {
@@ -65,6 +77,14 @@ private class _StatefulBox<R: StatefulRule>: _AnyStatefulBox {
     init(_ rule: R) { self.rule = rule }
     func callUpdate() { rule.updateValue() }
     func callDestroy() { rule.destroy() }
+    func callWillRemove(attribute: AGAttribute) {
+        guard let type = R.self as? any RemovableAttribute.Type else { return }
+        type.willRemove(attribute: attribute)
+    }
+    func callDidReinsert(attribute: AGAttribute) {
+        guard let type = R.self as? any RemovableAttribute.Type else { return }
+        type.didReinsert(attribute: attribute)
+    }
 }
 
 // MARK: - Core Node Types
@@ -468,6 +488,26 @@ final class AGSubgraph: @unchecked Sendable {
         }
         graph.updateSubgraph(self, flags: flags)
     }
+
+    func willRemove() {
+        guard let graph = AttributeGraph.current else {
+            fatalError("AGSubgraph.willRemove() called outside an active AttributeGraph context.")
+        }
+        guard graph === self.graph else {
+            fatalError("AGSubgraph.willRemove() called from a different AttributeGraph than the one that owns this subgraph.")
+        }
+        graph.willRemoveSubgraph(self)
+    }
+
+    func didReinsert() {
+        guard let graph = AttributeGraph.current else {
+            fatalError("AGSubgraph.didReinsert() called outside an active AttributeGraph context.")
+        }
+        guard graph === self.graph else {
+            fatalError("AGSubgraph.didReinsert() called from a different AttributeGraph than the one that owns this subgraph.")
+        }
+        graph.didReinsertSubgraph(self)
+    }
 }
 
 // MARK: - AttributeGraphRef
@@ -837,6 +877,28 @@ class AttributeGraph: @unchecked Sendable {
         return attr
     }
 
+    func mutateStatefulRule<R: StatefulRule>(
+        _ id: AGAttribute,
+        as type: R.Type = R.self,
+        invalidating: Bool = false,
+        _ body: (inout R) -> Void
+    ) {
+        assert(AttributeGraph.current === self)
+        let index = Int(id.rawValue)
+        guard index < slots.count,
+              let node = slots[index].node else {
+            return
+        }
+        guard case .stateful(let box) = node.kind,
+              let typedBox = box as? _StatefulBox<R> else {
+            return
+        }
+        body(&typedBox.rule)
+        if invalidating {
+            markNeedsEvaluation(id)
+        }
+    }
+
     /// Creates a side-effect rule that is evaluated eagerly whenever any of its inputs change.
     ///
     /// Use this instead of `makeRule` when:
@@ -1149,6 +1211,36 @@ class AttributeGraph: @unchecked Sendable {
         }
         for child in subgraph.children {
             updateSubgraph(child, flags: flags)
+        }
+    }
+
+    fileprivate func willRemoveSubgraph(_ subgraph: AGSubgraph) {
+        assert(AttributeGraph.current === self)
+        for node in subgraph.nodes {
+            guard let liveNode = weakAttributeIfValid(for: node)?.toStrong() else {
+                continue
+            }
+            if case .stateful(let box) = slots[Int(liveNode.rawValue)].node?.kind {
+                box.callWillRemove(attribute: liveNode)
+            }
+        }
+        for child in subgraph.children {
+            willRemoveSubgraph(child)
+        }
+    }
+
+    fileprivate func didReinsertSubgraph(_ subgraph: AGSubgraph) {
+        assert(AttributeGraph.current === self)
+        for node in subgraph.nodes {
+            guard let liveNode = weakAttributeIfValid(for: node)?.toStrong() else {
+                continue
+            }
+            if case .stateful(let box) = slots[Int(liveNode.rawValue)].node?.kind {
+                box.callDidReinsert(attribute: liveNode)
+            }
+        }
+        for child in subgraph.children {
+            didReinsertSubgraph(child)
         }
     }
 

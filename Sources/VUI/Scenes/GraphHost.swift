@@ -92,6 +92,13 @@ enum _GraphMutation_Style: UInt8, Hashable {
 class GraphHost {
     private static let maxTransactionUpdatePassCount = 8
 
+    struct RemovedState: OptionSet, Hashable {
+        let rawValue: UInt8
+
+        static let unattached = RemovedState(rawValue: 1 << 0)
+        static let hiddenForReuse = RemovedState(rawValue: 1 << 1)
+    }
+
     struct Data: @unchecked Sendable {
         private var ref: AttributeGraphRef
 
@@ -156,6 +163,13 @@ class GraphHost {
     var data: Data
     private(set) var isUpdating: Bool = false
     private(set) var needsTransaction: Bool = false
+    private(set) var isRemoved: Bool = false
+    private(set) var isHiddenForReuse: Bool = false
+    var removedState: RemovedState = [] {
+        didSet {
+            updateRemovedState()
+        }
+    }
     private var mayDeferUpdateLatch: Bool = true
     private var pendingTransactions: [AsyncTransaction] = []
     private var pendingGraphMutations: [any GraphMutation] = []
@@ -200,6 +214,41 @@ class GraphHost {
 
     var graphDelegate: (any GraphDelegate)? {
         nil
+    }
+
+    func removedStateDidChange() {}
+
+    func updateRemovedState() {
+        let sourceState: RemovedState
+        let nextRemoved: Bool
+
+        if !removedState.isEmpty {
+            sourceState = removedState
+            nextRemoved = true
+        } else if let parentHost {
+            sourceState = parentHost.removedState
+            nextRemoved = sourceState.contains(.hiddenForReuse)
+        } else {
+            sourceState = []
+            nextRemoved = false
+        }
+
+        if nextRemoved != isRemoved {
+            data.withCurrent {
+                if nextRemoved {
+                    data.rootSubgraph.willRemove()
+                } else {
+                    data.rootSubgraph.didReinsert()
+                }
+            }
+            isRemoved = nextRemoved
+        }
+
+        let nextHiddenForReuse = sourceState.contains(.hiddenForReuse)
+        if nextHiddenForReuse != isHiddenForReuse {
+            isHiddenForReuse = nextHiddenForReuse
+            removedStateDidChange()
+        }
     }
 
     func setNeedsUpdate(mayDeferUpdate: Bool, values: ViewGraphRootValues) {
