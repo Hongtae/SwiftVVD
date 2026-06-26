@@ -67,6 +67,7 @@ struct AppearanceEffect: StatefulRule, RemovableAttribute {
     var disappear: (() -> Void)?
     var isAppeared = false
     private var isRemoved = false
+    var attribute = AGAttribute.invalid
 
     init(
         modifier: Attribute<_AppearanceActionModifier>,
@@ -74,7 +75,8 @@ struct AppearanceEffect: StatefulRule, RemovableAttribute {
         lastPhase: Phase? = nil,
         appear: (() -> Void)? = nil,
         disappear: (() -> Void)? = nil,
-        isAppeared: Bool = false
+        isAppeared: Bool = false,
+        attribute: AGAttribute = .invalid
     ) {
         self.modifier = modifier
         self.phase = phase
@@ -82,9 +84,15 @@ struct AppearanceEffect: StatefulRule, RemovableAttribute {
         self.appear = appear
         self.disappear = disappear
         self.isAppeared = isAppeared
+        self.attribute = attribute
     }
 
     mutating func updateValue() {
+        if attribute.isInvalid,
+           let currentAttribute = AttributeGraph.currentRuleContextAttribute {
+            attribute = currentAttribute
+        }
+
         let currentPhase = phase.value
         if let lastPhase,
            lastPhase.rawValue != currentPhase.rawValue {
@@ -107,7 +115,8 @@ struct AppearanceEffect: StatefulRule, RemovableAttribute {
             Update.enqueueAction(appear)
         }
         isAppeared = true
-        queueTrackedRemovalIfNeeded(attribute: context.attribute.identifier)
+        let currentAttribute = AttributeGraph.currentRuleContextAttribute ?? attribute
+        queueTrackedRemovalIfNeeded(attribute: currentAttribute)
     }
 
     mutating func disappeared() {
@@ -128,26 +137,24 @@ struct AppearanceEffect: StatefulRule, RemovableAttribute {
     }
 
     private func queueTrackedRemovalIfNeeded(attribute: AGAttribute) {
+        guard !attribute.isInvalid else { return }
         guard isRuntimeBaselineOnOrAfter(.v6) else { return }
         guard let graphRef = AttributeGraphRef.current,
               let host = graphRef.context as? GraphHost,
               host.removedState.contains(.unattached) else { return }
 
+        let context = AnyRuleContext(attribute: attribute)
         let action = {
             graphRef.withCurrent {
-                guard let host = graphRef.context as? GraphHost,
-                      host.removedState.contains(.unattached) else { return }
-                Self.willRemove(attribute: attribute)
+                context.update {
+                    guard let currentAttribute = AttributeGraph.currentRuleContextAttribute,
+                          !currentAttribute.isInvalid else { return }
+                    Self.willRemove(attribute: currentAttribute)
+                }
             }
         }
 
-        if let graph = AttributeGraph.current {
-            graph.actionOutbox.append {
-                Update.enqueueAction(reason: 0x11, action)
-            }
-        } else {
-            Update.enqueueAction(reason: 0x11, action)
-        }
+        Update.enqueueAction(reason: 0x11, action)
     }
 
     static func willRemove(attribute: AGAttribute) {
@@ -157,14 +164,16 @@ struct AppearanceEffect: StatefulRule, RemovableAttribute {
     }
 
     static func didReinsert(attribute: AGAttribute) {
-        var didInvalidate = false
-        AttributeGraph.current?.mutateStatefulRule(attribute, as: Self.self, invalidating: true) { effect in
+        guard let graph = AttributeGraph.current else { return }
+        var invalidatedAttribute: AGAttribute?
+        graph.mutateStatefulRule(attribute, as: Self.self) { effect in
             effect.isRemoved = false
-            didInvalidate = true
+            guard !effect.attribute.isInvalid else { return }
+            invalidatedAttribute = effect.attribute
         }
-        if didInvalidate {
-            GraphHost.currentHost.graphDelegate?.graphDidChange()
-        }
+        guard let invalidatedAttribute else { return }
+        graph.invalidateAttribute(invalidatedAttribute)
+        GraphHost.currentHost.graphDelegate?.graphDidChange()
     }
 }
 

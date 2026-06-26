@@ -174,7 +174,7 @@ extension PhaseAnimator {
                     id: Transaction.id,
                     mutation: AssignmentGraphMutation(attribute: isVisible, value: value),
                     style: .deferred,
-                    mayDeferUpdate: true
+                    mayDeferUpdate: false
                 )
             }
         }
@@ -199,15 +199,13 @@ extension PhaseAnimator {
             }
 
             override func animationWasRemoved() -> [() -> Void] {
-                guard count > 0 else { return [] }
                 count -= 1
                 guard count == 0 else { return [] }
                 return fireActions(didAnimate: didAnimate)
             }
 
             func fireNoAnimationFallback() {
-                guard !didAnimate,
-                      !didFireAction else {
+                guard !didAnimate else {
                     return
                 }
                 action(false)
@@ -216,13 +214,9 @@ extension PhaseAnimator {
 
             private func fireActions(didAnimate: Bool) -> [() -> Void] {
                 guard !didFireAction else { return [] }
+                action(didAnimate)
                 didFireAction = true
-                let action = action
-                return [
-                    {
-                        action(didAnimate)
-                    }
-                ]
+                return []
             }
         }
     }
@@ -284,22 +278,11 @@ extension PhaseAnimator.StateTransitioningContainer {
                 resetAnimationState()
             }
 
+            let viewChanged = AttributeGraph.currentStatefulInputChanged(_view.identifier)
             let container = _view.value
-            guard !container.phases.isEmpty else { return }
 
-            if currentIndex >= container.phases.count {
-                currentIndex = container.phases.count - 1
-            }
-
-            let graph = AttributeGraph.current
-            let animationCompletion: AnimationCompletion?
-            if let graph,
-               _animationCompletion.isValid(in: graph) {
-                animationCompletion = _animationCompletion.toStrong().value
-            } else {
-                animationCompletion = nil
-            }
             let isVisible: Bool?
+            let graph = AttributeGraph.current
             if let graph,
                _isVisible.isValid(in: graph) {
                 isVisible = _isVisible.toStrong().value
@@ -311,31 +294,47 @@ extension PhaseAnimator.StateTransitioningContainer {
                 resetAnimationState()
             }
 
-            if isVisible == true,
-               scheduleVisibleStartIfNeeded(behavior: container.behavior) {
-            } else if isVisible == true,
-               let animationCompletion,
-               animationCompletion.seed == completionSeed {
-                if animationCompletion.didAnimate {
-                    endlessLoopState = .animating
-                    switch container.behavior {
-                    case .repeating:
-                        advance(from: currentIndex)
-                    case .eventDriven:
-                        if currentIndex != 0 {
-                            advance(from: currentIndex)
-                        }
-                    }
-                } else {
-                    consumeNonAnimatedCompletion(behavior: container.behavior)
+            if isVisible != nil {
+                if isVisible == true {
+                    scheduleVisibleRepeatingStartIfNeeded(
+                        behavior: container.behavior,
+                        viewChanged: viewChanged,
+                        previousBehavior: lastBehavior
+                    )
                 }
-            }
-            if isVisible == true {
+                if viewChanged {
+                    resetEndlessLoopAfterViewChange(behavior: container.behavior)
+                }
+                if let lastBehavior,
+                   lastBehavior != container.behavior {
+                    scheduleBehaviorMismatch(from: lastBehavior, to: container.behavior)
+                }
                 lastBehavior = container.behavior
-            }
 
-            if phaseChangeTransactionSeed == nil {
-                phaseChangeTransaction = _transaction.value
+                let animationCompletion: AnimationCompletion?
+                if let graph,
+                   _animationCompletion.isValid(in: graph) {
+                    animationCompletion = _animationCompletion.toStrong().value
+                } else {
+                    animationCompletion = nil
+                }
+
+                if let animationCompletion,
+                   animationCompletion.seed == completionSeed {
+                    if animationCompletion.didAnimate {
+                        endlessLoopState = .animating
+                        switch container.behavior {
+                        case .repeating:
+                            advance(from: currentIndex)
+                        case .eventDriven:
+                            if currentIndex != 0 {
+                                advance(from: currentIndex)
+                            }
+                        }
+                    } else {
+                        consumeNonAnimatedCompletion(behavior: container.behavior)
+                    }
+                }
             }
 
             let currentPhase = container.phases[clampedIndex]
@@ -349,10 +348,10 @@ extension PhaseAnimator.StateTransitioningContainer {
         }
 
         var clampedIndex: Int {
-            guard case .animating = endlessLoopState else { return 0 }
+            guard endlessLoopState != .paused else { return 0 }
             let container = _view.value
-            guard !container.phases.isEmpty else { return 0 }
-            return min(currentIndex, container.phases.count - 1)
+            let lastPhaseIndex = container.phases.count - 1
+            return min(currentIndex, lastPhaseIndex)
         }
 
         mutating func resetAnimationState() {
@@ -360,6 +359,20 @@ extension PhaseAnimator.StateTransitioningContainer {
             completionSeed &+= 1
             endlessLoopState = .animating
             lastBehavior = nil
+        }
+
+        mutating func resetEndlessLoopAfterViewChange(behavior: PhaseAnimator<Phase, Content>.Behavior) {
+            let shouldRestartRepeating: Bool
+            if case .paused = endlessLoopState {
+                shouldRestartRepeating = true
+            } else {
+                shouldRestartRepeating = false
+            }
+            endlessLoopState = .animating
+
+            guard shouldRestartRepeating else { return }
+            guard case .repeating = behavior else { return }
+            advance(from: currentIndex)
         }
 
         mutating func consumeNonAnimatedCompletion(behavior: PhaseAnimator<Phase, Content>.Behavior) {
@@ -377,32 +390,34 @@ extension PhaseAnimator.StateTransitioningContainer {
             advance(from: sourceIndex)
         }
 
-        mutating func scheduleVisibleStartIfNeeded(behavior: PhaseAnimator<Phase, Content>.Behavior) -> Bool {
-            if case .repeating = behavior,
-               lastBehavior == nil || lastBehavior == behavior {
+        mutating func scheduleVisibleRepeatingStartIfNeeded(
+            behavior: PhaseAnimator<Phase, Content>.Behavior,
+            viewChanged: Bool,
+            previousBehavior: PhaseAnimator<Phase, Content>.Behavior?
+        ) {
+            if case .repeating = behavior {
+                if viewChanged,
+                   previousBehavior == behavior {
+                    return
+                }
                 advance(from: currentIndex)
-                return true
             }
+        }
 
-            guard let lastBehavior else {
-                return false
-            }
-
-            guard lastBehavior != behavior else { return false }
-
-            switch (lastBehavior, behavior) {
+        mutating func scheduleBehaviorMismatch(
+            from previousBehavior: PhaseAnimator<Phase, Content>.Behavior,
+            to behavior: PhaseAnimator<Phase, Content>.Behavior
+        ) {
+            switch (previousBehavior, behavior) {
             case (.repeating, .eventDriven):
                 advance(to: 0)
-                return true
             case (.eventDriven, .repeating):
                 advance(from: currentIndex)
-                return true
             case let (.eventDriven(previous), .eventDriven(current)):
-                guard previous != current else { return false }
+                guard previous != current else { return }
                 advance(from: 0)
-                return true
             case (.repeating, .repeating):
-                return false
+                return
             }
         }
 
@@ -429,17 +444,16 @@ extension PhaseAnimator.StateTransitioningContainer {
             }
 
             let container = _view.value
-            guard !container.phases.isEmpty else { return }
             guard targetIndex < container.phases.count else {
                 advance(from: targetIndex)
                 return
             }
 
+            let phase = container.phases[targetIndex]
             currentIndex = targetIndex
             completionSeed &+= 1
 
             var transaction = _transaction.value
-            let phase = container.phases[targetIndex]
             let animation = container.animation(phase)
             if let animation {
                 let host = GraphHost.currentHost
@@ -456,7 +470,7 @@ extension PhaseAnimator.StateTransitioningContainer {
                             didAnimate: didAnimate
                         ))
                         host.asyncTransaction(
-                            Transaction.current,
+                            Transaction(),
                             id: Transaction.id,
                             mutation: CustomGraphMutation {
                                 guard let graph = AttributeGraph.current,
@@ -471,7 +485,7 @@ extension PhaseAnimator.StateTransitioningContainer {
                     }
                 transaction.animation = animation
                 transaction.addAnimationLogicalListener(listener)
-                Update.enqueueAction {
+                Update.enqueueAction(reason: 0x11) {
                     listener.fireNoAnimationFallback()
                 }
             } else {

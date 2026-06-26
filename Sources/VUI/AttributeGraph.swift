@@ -89,9 +89,18 @@ private class _StatefulBox<R: StatefulRule>: _AnyStatefulBox {
 
 // MARK: - Core Node Types
 
+#if DEBUG
+private final class AGAttributeInvalidOwner {}
+#endif
+
 /// The raw identifier for an AG node: an index into the graph's slot array.
 struct AGAttribute: Hashable, CustomDebugStringConvertible, Sendable {
+    private static let invalidRawValue = UInt32.max
+    static let invalid = AGAttribute(uncheckedRawValue: invalidRawValue)
+
     let rawValue: UInt32
+    var isInvalid: Bool { rawValue == Self.invalidRawValue }
+
 #if DEBUG
     /// The ObjectIdentifier of the AttributeGraph that owns this attribute.
     /// Set at creation time (makeInput/makeRule). Used to detect cross-graph access.
@@ -101,6 +110,9 @@ struct AGAttribute: Hashable, CustomDebugStringConvertible, Sendable {
     private let _seedAtCreation: UInt32
     fileprivate var _debugSeedAtCreation: UInt32 { _seedAtCreation }
     fileprivate func _debugValidate() {
+        guard !isInvalid else {
+            fatalError("Invalid AGAttribute sentinel cannot be used as a graph node.")
+        }
         guard let graph = AttributeGraph.current else {
             fatalError("AGAttribute(\(rawValue)) accessed outside an active AttributeGraph context.")
         }
@@ -125,10 +137,19 @@ struct AGAttribute: Hashable, CustomDebugStringConvertible, Sendable {
         self._seedAtCreation = seed
     }
 
+    private init(uncheckedRawValue: UInt32) {
+        self.rawValue = uncheckedRawValue
+        self._owningGraphID = ObjectIdentifier(AGAttributeInvalidOwner.self)
+        self._seedAtCreation = 0
+    }
+
     // AGAttribute.== is a same-graph comparison by contract. Cross-graph collections
     // (e.g. AGChangeSet) partition by AttributeGraph so this operator never runs across
     // graphs. The assert below is a tripwire if that invariant is ever broken.
     static func == (lhs: Self, rhs: Self) -> Bool {
+        if lhs.isInvalid || rhs.isInvalid {
+            return lhs.rawValue == rhs.rawValue
+        }
         assert(lhs._owningGraphID == rhs._owningGraphID,
                "Comparing AGAttributes from different graphs.")
         return lhs.rawValue == rhs.rawValue
@@ -139,6 +160,10 @@ struct AGAttribute: Hashable, CustomDebugStringConvertible, Sendable {
     }
 #else
     fileprivate func _debugValidate() {}
+
+    private init(uncheckedRawValue: UInt32) {
+        self.rawValue = uncheckedRawValue
+    }
 #endif
 
     init(rawValue: UInt32) {
@@ -156,6 +181,9 @@ struct AGAttribute: Hashable, CustomDebugStringConvertible, Sendable {
     }
 
     var debugDescription: String {
+        if isInvalid {
+            return "@invalid"
+        }
         if let graph = AttributeGraph.current {
             return graph.debugDescription(for: self)
         }
@@ -649,6 +677,7 @@ class AttributeGraph: @unchecked Sendable {
         var kind: NodeKind
         var needsEvaluation: Bool = true
         var inputsChanged: Bool = true
+        var changedInputs: Set<UInt32> = []
         var isEvaluating: Bool = false  // for cycle detection
 
         // Dependency graph edges (stored as raw slot indices)
@@ -822,6 +851,12 @@ class AttributeGraph: @unchecked Sendable {
         guard let graph = AttributeGraph.current,
               let nodeID = AttributeGraph.currentlyEvaluatingNode else { return true }
         return graph.slots[Int(nodeID.rawValue)].node?.inputsChanged ?? true
+    }
+
+    static func currentStatefulInputChanged(_ attribute: AGAttribute) -> Bool {
+        guard let graph = AttributeGraph.current,
+              let nodeID = AttributeGraph.currentlyEvaluatingNode else { return true }
+        return graph.slots[Int(nodeID.rawValue)].node?.changedInputs.contains(attribute.rawValue) ?? true
     }
 
     /// Called from within `StatefulRule.updateValue()` to publish the node's output value.
@@ -1147,7 +1182,8 @@ class AttributeGraph: @unchecked Sendable {
             markNeedsEvaluation(
                 AGAttribute(rawValue: outputIndex),
                 transaction: transactionToPropagate,
-                propagateTransaction: true
+                propagateTransaction: true,
+                changedInput: attribute.identifier.rawValue
             )
         }
         notifyCrossGraphObservers(for: attribute.identifier.rawValue)
@@ -1169,7 +1205,8 @@ class AttributeGraph: @unchecked Sendable {
             markNeedsEvaluation(
                 AGAttribute(rawValue: outputIndex),
                 transaction: transactionToPropagate,
-                propagateTransaction: true
+                propagateTransaction: true,
+                changedInput: attribute.identifier.rawValue
             )
         }
         notifyCrossGraphObservers(for: attribute.identifier.rawValue)
@@ -1183,11 +1220,14 @@ class AttributeGraph: @unchecked Sendable {
 
         if case .input = node.kind {
             for outputIndex in node.outputs {
-                markNeedsEvaluation(AGAttribute(rawValue: outputIndex))
+                markNeedsEvaluation(
+                    AGAttribute(rawValue: outputIndex),
+                    changedInput: id.rawValue
+                )
             }
             notifyCrossGraphObservers(for: id.rawValue)
         } else {
-            markNeedsEvaluation(id)
+            markNeedsEvaluation(id, changedInput: id.rawValue)
         }
     }
 
@@ -1273,12 +1313,15 @@ class AttributeGraph: @unchecked Sendable {
             // Output is written only when updateValue() calls setStatefulOutput(_:).
             // If it doesn't, the previous cached value is retained unchanged.
             clearInputs(for: id)
+            Update.begin()
             AttributeGraph.$currentlyEvaluatingNode.withValue(id) {
                 box.callUpdate()
             }
             slots[index].node!.needsEvaluation = false
             slots[index].node!.inputsChanged = false
+            slots[index].node!.changedInputs.removeAll()
             slots[index].node!.isEvaluating = false
+            Update.end()
 
         case .keyPath(let parent, let kp):
             // KeyPath node: project value from parent via the stored key path.
@@ -1291,6 +1334,8 @@ class AttributeGraph: @unchecked Sendable {
             let parentValue = value(for: parent)
             slots[index].node!.value = parentValue[keyPath: kp]
             slots[index].node!.needsEvaluation = false
+            slots[index].node!.inputsChanged = false
+            slots[index].node!.changedInputs.removeAll()
             slots[index].node!.isEvaluating = false
 
         case .crossGraphRef(let sourceAttr, let sourceGraphRef):
@@ -1302,6 +1347,8 @@ class AttributeGraph: @unchecked Sendable {
             }
             // else: source graph gone, keep last cached value silently.
             slots[index].node!.needsEvaluation = false
+            slots[index].node!.inputsChanged = false
+            slots[index].node!.changedInputs.removeAll()
             slots[index].node!.isEvaluating = false
 
         case .rule(let rule, _):
@@ -1312,6 +1359,8 @@ class AttributeGraph: @unchecked Sendable {
             }
             slots[index].node!.value = newValue
             slots[index].node!.needsEvaluation = false
+            slots[index].node!.inputsChanged = false
+            slots[index].node!.changedInputs.removeAll()
             slots[index].node!.isEvaluating = false
 
         case .indirect(let target):
@@ -1325,6 +1374,8 @@ class AttributeGraph: @unchecked Sendable {
                 slots[index].node!.value = targetValue
             }
             slots[index].node!.needsEvaluation = false
+            slots[index].node!.inputsChanged = false
+            slots[index].node!.changedInputs.removeAll()
             slots[index].node!.isEvaluating = false
         }
     }
@@ -1341,7 +1392,8 @@ class AttributeGraph: @unchecked Sendable {
         evaluateSideEffects: Bool = true,
         transaction: Transaction? = nil,
         propagateTransaction: Bool = false,
-        inputsChanged: Bool = true
+        inputsChanged: Bool = true,
+        changedInput: UInt32? = nil
     ) {
         assert(AttributeGraph.current === self)
         // Iterative BFS to avoid stack overflow on deep dependency graphs.
@@ -1363,6 +1415,9 @@ class AttributeGraph: @unchecked Sendable {
             }
             if inputsChanged {
                 node.inputsChanged = true
+                if let changedInput {
+                    node.changedInputs.insert(changedInput)
+                }
             }
             if !node.needsEvaluation {
                 node.needsEvaluation = true

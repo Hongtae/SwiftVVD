@@ -7,6 +7,52 @@ final class AppearanceActionModifierTests: XCTestCase {
         super.tearDown()
     }
 
+    func testAppearanceEffectStorageLabelsMatchTrackedAttributeShape() {
+        let graph = AttributeGraph()
+        let ref = AttributeGraphRef(graph: graph)
+
+        ref.withCurrent {
+            let modifier = graph.makeInput(value: _AppearanceActionModifier())
+            let phase = graph.makeInput(value: Phase())
+            let effect = AppearanceEffect(modifier: modifier, phase: phase)
+
+            XCTAssertEqual(
+                Mirror(reflecting: effect).children.map(\.label),
+                [
+                    "modifier",
+                    "phase",
+                    "lastPhase",
+                    "appear",
+                    "disappear",
+                    "isAppeared",
+                    "isRemoved",
+                    "attribute",
+                ]
+            )
+        }
+    }
+
+    func testAppearanceEffectStoresCurrentAttributeDuringUpdate() {
+        let graph = AttributeGraph()
+        let ref = AttributeGraphRef(graph: graph)
+
+        ref.withCurrent {
+            let modifier = graph.makeInput(value: _AppearanceActionModifier())
+            let phase = graph.makeInput(value: Phase())
+            let effect = graph.makeStatefulRule(
+                AppearanceEffect(modifier: modifier, phase: phase)
+            )
+
+            _ = effect.value
+
+            var storedAttribute = AGAttribute.invalid
+            graph.mutateStatefulRule(effect.identifier, as: AppearanceEffect.self) { effect in
+                storedAttribute = effect.attribute
+            }
+            XCTAssertEqual(storedAttribute, effect.identifier)
+        }
+    }
+
     func testAppearanceEffectQueuesAppearOnceUntilPhaseChanges() {
         let graph = AttributeGraph()
         let ref = AttributeGraphRef(graph: graph)
@@ -163,17 +209,15 @@ final class AppearanceActionModifierTests: XCTestCase {
                 )
 
                 _ = effect.value
-                drainActionOutbox(for: host)
                 XCTAssertEqual(events, ["appear", "disappear"])
 
                 _ = effect.value
-                drainActionOutbox(for: host)
                 XCTAssertEqual(events, ["appear", "disappear"])
             }
         }
     }
 
-    func testAppearanceEffectTrackedRemovalIsQueuedThroughActionOutbox() {
+    func testAppearanceEffectTrackedRemovalIsQueuedThroughUpdateAction() {
         let host = GraphHost()
         host.removedState = .unattached
 
@@ -191,19 +235,11 @@ final class AppearanceActionModifierTests: XCTestCase {
                     AppearanceEffect(modifier: modifier, phase: phase)
                 )
 
+                Update.begin()
                 _ = effect.value
 
-                XCTAssertEqual(events, ["appear"])
-                XCTAssertEqual(Update.queuedActionReasons, [])
-                XCTAssertEqual(host.data.graph.actionOutbox.count, 1)
-
-                Update.begin()
-                let actions = host.data.graph.actionOutbox
-                host.data.graph.actionOutbox.removeAll()
-                actions.forEach { $0() }
-
-                XCTAssertEqual(Update.queuedActionReasons, [0x11])
-                XCTAssertEqual(events, ["appear"])
+                XCTAssertEqual(Update.queuedActionReasons, [nil, 0x11])
+                XCTAssertEqual(events, [])
 
                 Update.end()
 
@@ -234,9 +270,40 @@ final class AppearanceActionModifierTests: XCTestCase {
                 )
 
                 _ = effect.value
-                drainActionOutbox(for: host)
 
                 XCTAssertEqual(events, ["appear"])
+            }
+        }
+    }
+
+    func testAppearanceEffectTrackedRemovalDoesNotRecheckHostStateWhenActionDrains() {
+        let host = GraphHost()
+        host.removedState = .unattached
+
+        host.data.withCurrent {
+            AGSubgraph.$current.withValue(host.data.rootSubgraph) {
+                var events: [String] = []
+                let modifier = host.data.graph.makeInput(
+                    value: _AppearanceActionModifier(
+                        appear: { events.append("appear") },
+                        disappear: { events.append("disappear") }
+                    )
+                )
+                let phase = host.data.graph.makeInput(value: Phase())
+                let effect = host.data.graph.makeStatefulRule(
+                    AppearanceEffect(modifier: modifier, phase: phase)
+                )
+
+                Update.begin()
+                _ = effect.value
+
+                XCTAssertEqual(events, [])
+                XCTAssertEqual(Update.queuedActionReasons, [nil, 0x11])
+
+                host.removedState = []
+                Update.end()
+
+                XCTAssertEqual(events, ["appear", "disappear"])
             }
         }
     }
@@ -295,6 +362,25 @@ final class AppearanceActionModifierTests: XCTestCase {
 
                 XCTAssertEqual(delegate.events, ["change"])
                 XCTAssertEqual(events, ["appear", "disappear"])
+            }
+        }
+    }
+
+    func testAppearanceEffectReinsertSkipsDelegateWhenStoredAttributeIsInvalid() {
+        let delegate = AppearanceGraphDelegateRecorder()
+        let host = AppearanceDelegateGraphHost(delegate: delegate)
+
+        host.data.withCurrent {
+            AGSubgraph.$current.withValue(host.data.rootSubgraph) {
+                let modifier = host.data.graph.makeInput(value: _AppearanceActionModifier())
+                let phase = host.data.graph.makeInput(value: Phase())
+                let effect = host.data.graph.makeStatefulRule(
+                    AppearanceEffect(modifier: modifier, phase: phase)
+                )
+
+                AppearanceEffect.didReinsert(attribute: effect.identifier)
+
+                XCTAssertTrue(delegate.events.isEmpty)
             }
         }
     }
